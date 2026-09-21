@@ -8,6 +8,7 @@ mod storage;
 pub use context_map::ContextMapCoverage;
 pub use context_map::ContextMapEntry;
 pub use context_map::ContextMapEntryId;
+pub use context_map::ContextMapEntryUpdate;
 pub use context_map::ContextMapError;
 pub use context_map::ContextMapFreshness;
 pub use context_map::ContextMapHit;

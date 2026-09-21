@@ -139,6 +139,15 @@ pub struct ContextMapHit {
     pub freshness: ContextMapFreshness,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextMapEntryUpdate {
+    pub expected_revision: u64,
+    pub source_fingerprint: SourceFingerprint,
+    pub description: String,
+    pub routing_terms: Vec<String>,
+    pub coverage: ContextMapCoverage,
+}
+
 impl ContextMapEntry {
     pub fn freshness_against(
         &self,

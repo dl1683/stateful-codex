@@ -195,3 +195,90 @@ async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
         }]
     );
 }
+
+#[tokio::test]
+async fn guarded_reindex_replaces_the_search_document_for_the_current_source() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    let file = create_file(&hierarchy).await;
+    let entry_id = ContextMapEntryId::parse("map-readme").expect("valid entry ID");
+    let created = context_map
+        .create_entry(entry_id.clone(), new_entry("sha256:abc"))
+        .await
+        .expect("context-map entry should insert");
+    let current_file = hierarchy
+        .update_source_state(
+            "project-1",
+            &file.id,
+            HierarchySourceUpdate {
+                expected_revision: file.revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:def")),
+            },
+        )
+        .await
+        .expect("source fingerprint should update");
+    let updated = context_map
+        .update_entry(
+            "project-1",
+            &entry_id,
+            ContextMapEntryUpdate {
+                expected_revision: created.revision,
+                source_fingerprint: fingerprint("sha256:def"),
+                description: "Installation and deployment entry points.".to_string(),
+                routing_terms: vec!["deploy".to_string(), "install".to_string()],
+                coverage: ContextMapCoverage::Partial,
+            },
+        )
+        .await
+        .expect("current revision should update");
+    assert_eq!(updated.revision, created.revision + 1);
+    assert_eq!(
+        updated.freshness_against(&current_file),
+        Ok(ContextMapFreshness::Current)
+    );
+    assert!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "purpose".to_string(),
+                max_results: 5,
+            })
+            .await
+            .expect("old search should succeed")
+            .is_empty()
+    );
+    assert_eq!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "deployment".to_string(),
+                max_results: 5,
+            })
+            .await
+            .expect("new search should succeed"),
+        vec![ContextMapHit {
+            entry: updated,
+            freshness: ContextMapFreshness::Current,
+        }]
+    );
+
+    let error = context_map
+        .update_entry(
+            "project-1",
+            &entry_id,
+            ContextMapEntryUpdate {
+                expected_revision: created.revision,
+                source_fingerprint: fingerprint("sha256:def"),
+                description: "Stale writer".to_string(),
+                routing_terms: Vec::new(),
+                coverage: ContextMapCoverage::Partial,
+            },
+        )
+        .await
+        .expect_err("stale revision should be rejected");
+    assert_eq!(
+        error.to_string(),
+        "context-map revision conflict: expected 1, found 2"
+    );
+}

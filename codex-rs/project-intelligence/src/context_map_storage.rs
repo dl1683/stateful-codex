@@ -8,6 +8,7 @@ use thiserror::Error;
 use crate::ContextMapCoverage;
 use crate::ContextMapEntry;
 use crate::ContextMapEntryId;
+use crate::ContextMapEntryUpdate;
 use crate::ContextMapError;
 use crate::ContextMapFreshness;
 use crate::ContextMapHit;
@@ -73,31 +74,8 @@ impl ContextMapStore {
         .bind(now)
         .execute(&mut *transaction)
         .await?;
-        for (position, term) in value.routing_terms.iter().enumerate() {
-            let position = i64::try_from(position)
-                .map_err(|_| ContextMapStoreError::RoutingTermPositionOverflow)?;
-            sqlx::query(
-                "INSERT INTO context_map_routing_terms (entry_id, position, term)
-                 VALUES (?, ?, ?)",
-            )
-            .bind(id.as_str())
-            .bind(position)
-            .bind(term)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        sqlx::query(
-            "INSERT INTO context_map_search (
-                rowid, entry_id, project_id, description, routing_terms
-             ) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(insert.last_insert_rowid())
-        .bind(id.as_str())
-        .bind(&value.project_id)
-        .bind(&value.description)
-        .bind(value.routing_terms.join(" "))
-        .execute(&mut *transaction)
-        .await?;
+        write_routing_terms(&mut transaction, &id, &value.routing_terms).await?;
+        write_search_row(&mut transaction, insert.last_insert_rowid(), &id, &value).await?;
         let entry = load_entry(&mut transaction, &value.project_id, &id)
             .await?
             .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
@@ -151,6 +129,80 @@ impl ContextMapStore {
             hits.push(ContextMapHit { entry, freshness });
         }
         Ok(hits)
+    }
+
+    pub async fn update_entry(
+        &self,
+        project_id: &str,
+        id: &ContextMapEntryId,
+        update: ContextMapEntryUpdate,
+    ) -> Result<ContextMapEntry, ContextMapStoreError> {
+        let expected_revision = i64::try_from(update.expected_revision)
+            .map_err(|_| ContextMapStoreError::RevisionOverflow)?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current = load_entry(&mut transaction, project_id, id)
+            .await?
+            .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
+        if current.revision != update.expected_revision {
+            return Err(ContextMapStoreError::RevisionConflict {
+                expected: update.expected_revision,
+                actual: current.revision,
+            });
+        }
+        let value = NewContextMapEntry {
+            project_id: current.value.project_id,
+            node_id: current.value.node_id,
+            source_fingerprint: update.source_fingerprint,
+            description: update.description,
+            routing_terms: update.routing_terms,
+            coverage: update.coverage,
+        };
+        value.validate()?;
+        let node = load_node(&mut transaction, project_id, &value.node_id)
+            .await?
+            .ok_or_else(|| ContextMapStoreError::NodeNotFound(value.node_id.to_string()))?;
+        validate_current_source(&value, &node)?;
+        let rowid: i64 = sqlx::query_scalar(
+            "SELECT rowid FROM context_map_entries WHERE project_id = ? AND id = ?",
+        )
+        .bind(project_id)
+        .bind(id.as_str())
+        .fetch_one(&mut *transaction)
+        .await?;
+        let updated = sqlx::query(
+            "UPDATE context_map_entries
+             SET source_fingerprint = ?, description = ?, coverage = ?,
+                 revision = revision + 1, updated_at_ms = ?
+             WHERE project_id = ? AND id = ? AND revision = ?",
+        )
+        .bind(value.source_fingerprint.as_str())
+        .bind(&value.description)
+        .bind(coverage_name(value.coverage))
+        .bind(unix_timestamp_millis()?)
+        .bind(project_id)
+        .bind(id.as_str())
+        .bind(expected_revision)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if updated != 1 {
+            return Err(ContextMapStoreError::ConcurrentMutation);
+        }
+        sqlx::query("DELETE FROM context_map_routing_terms WHERE entry_id = ?")
+            .bind(id.as_str())
+            .execute(&mut *transaction)
+            .await?;
+        write_routing_terms(&mut transaction, id, &value.routing_terms).await?;
+        sqlx::query("DELETE FROM context_map_search WHERE rowid = ?")
+            .bind(rowid)
+            .execute(&mut *transaction)
+            .await?;
+        write_search_row(&mut transaction, rowid, id, &value).await?;
+        let entry = load_entry(&mut transaction, project_id, id)
+            .await?
+            .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
+        transaction.commit().await?;
+        Ok(entry)
     }
 }
 
@@ -271,6 +323,48 @@ fn search_expression(text: &str) -> Result<String, ContextMapStoreError> {
     Ok(terms.join(" OR "))
 }
 
+async fn write_routing_terms(
+    connection: &mut SqliteConnection,
+    entry_id: &ContextMapEntryId,
+    routing_terms: &[String],
+) -> Result<(), ContextMapStoreError> {
+    for (position, term) in routing_terms.iter().enumerate() {
+        let position = i64::try_from(position)
+            .map_err(|_| ContextMapStoreError::RoutingTermPositionOverflow)?;
+        sqlx::query(
+            "INSERT INTO context_map_routing_terms (entry_id, position, term)
+             VALUES (?, ?, ?)",
+        )
+        .bind(entry_id.as_str())
+        .bind(position)
+        .bind(term)
+        .execute(&mut *connection)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn write_search_row(
+    connection: &mut SqliteConnection,
+    rowid: i64,
+    entry_id: &ContextMapEntryId,
+    value: &NewContextMapEntry,
+) -> Result<(), ContextMapStoreError> {
+    sqlx::query(
+        "INSERT INTO context_map_search (
+            rowid, entry_id, project_id, description, routing_terms
+         ) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(rowid)
+    .bind(entry_id.as_str())
+    .bind(&value.project_id)
+    .bind(&value.description)
+    .bind(value.routing_terms.join(" "))
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum ContextMapStoreError {
     #[error(transparent)]
@@ -291,6 +385,12 @@ pub enum ContextMapStoreError {
     EntryNotFound(String),
     #[error("context-map routing-term position overflow")]
     RoutingTermPositionOverflow,
+    #[error("context-map revision conflict: expected {expected}, found {actual}")]
+    RevisionConflict { expected: u64, actual: u64 },
+    #[error("context-map revision does not fit the storage representation")]
+    RevisionOverflow,
+    #[error("context-map entry changed during a guarded mutation")]
+    ConcurrentMutation,
     #[error("stored context-map entry is corrupt: {0}")]
     CorruptEntry(String),
     #[error("stored context-map enum value is unknown: {0}")]
