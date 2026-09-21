@@ -10587,6 +10587,126 @@
         "title": "ContextCompactedNotification",
         "type": "object"
       },
+      "ContextMapCoverage": {
+        "enum": [
+          "complete",
+          "partial"
+        ],
+        "type": "string"
+      },
+      "ContextMapFreshness": {
+        "enum": [
+          "current",
+          "stale",
+          "sourceUnavailable"
+        ],
+        "type": "string"
+      },
+      "ContextMapQueryHit": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/definitions/v2/ContextMapCoverage"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "entryId": {
+            "type": "string"
+          },
+          "freshness": {
+            "$ref": "#/definitions/v2/ContextMapFreshness"
+          },
+          "lastVerifiedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "routingTerms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/definitions/v2/ContextMapSource"
+          },
+          "sourceFingerprint": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "coverage",
+          "createdAt",
+          "description",
+          "entryId",
+          "freshness",
+          "nodeId",
+          "revision",
+          "routingTerms",
+          "source",
+          "sourceFingerprint",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ContextMapRegionAnchor": {
+        "properties": {
+          "locator": {
+            "type": "string"
+          },
+          "scheme": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "locator",
+          "scheme"
+        ],
+        "type": "object"
+      },
+      "ContextMapSource": {
+        "properties": {
+          "projectRoot": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          },
+          "regionAnchor": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/ContextMapRegionAnchor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relativePath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectRoot",
+          "relativePath"
+        ],
+        "type": "object"
+      },
       "ConversationTextRole": {
         "enum": [
           "user",

@@ -813,6 +813,12 @@ client_request_definitions! {
         serialization: global("projects"),
         response: v2::ProjectDeleteResponse,
     },
+    #[experimental("contextMap/query")]
+    ContextMapQuery => "contextMap/query" {
+        params: v2::ContextMapQueryParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::ContextMapQueryResponse,
+    },
     ThreadSectionList => "threadSection/list" {
         params: v2::ThreadSectionListParams,
         serialization: global_shared_read("thread-sections"),

@@ -1145,6 +1145,34 @@ class ContextCompactedNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class ContextMapCoverage(Enum):
+    complete = "complete"
+    partial = "partial"
+
+
+class ContextMapFreshness(Enum):
+    current = "current"
+    stale = "stale"
+    source_unavailable = "sourceUnavailable"
+
+
+class ContextMapRegionAnchor(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    locator: str
+    scheme: str
+
+
+class ContextMapSource(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    project_root: Annotated[AbsolutePathBuf, Field(alias="projectRoot")]
+    region_anchor: Annotated[ContextMapRegionAnchor | None, Field(alias="regionAnchor")] = None
+    relative_path: Annotated[str, Field(alias="relativePath")]
+
+
 class ConversationTextRole(Enum):
     user = "user"
     developer = "developer"
@@ -7870,6 +7898,24 @@ class ContentItem(
         | InputAudioContentItem
         | OutputTextContentItem
     )
+
+
+class ContextMapQueryHit(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    coverage: ContextMapCoverage
+    created_at: Annotated[int, Field(alias="createdAt")]
+    description: str
+    entry_id: Annotated[str, Field(alias="entryId")]
+    freshness: ContextMapFreshness
+    last_verified_at: Annotated[int | None, Field(alias="lastVerifiedAt")] = None
+    node_id: Annotated[str, Field(alias="nodeId")]
+    revision: Annotated[int, Field(ge=0)]
+    routing_terms: Annotated[list[str], Field(alias="routingTerms")]
+    source: ContextMapSource
+    source_fingerprint: Annotated[str, Field(alias="sourceFingerprint")]
+    updated_at: Annotated[int, Field(alias="updatedAt")]
 
 
 class ExperimentalFeature(BaseModel):

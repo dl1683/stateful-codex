@@ -82,6 +82,7 @@ codex-model-provider-info = { workspace = true }
 codex-models-manager = { workspace = true }
 codex-prompts = { workspace = true }
 codex-protocol = { workspace = true }
+codex-project-intelligence = { workspace = true }
 codex-queue-extension = { workspace = true }
 codex-app-server-protocol = { workspace = true }
 codex-app-server-transport = { workspace = true }

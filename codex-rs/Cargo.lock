@@ -2250,6 +2250,7 @@ dependencies = [
  "codex-network-proxy",
  "codex-otel",
  "codex-plugin",
+ "codex-project-intelligence",
  "codex-prompts",
  "codex-protocol",
  "codex-queue-extension",

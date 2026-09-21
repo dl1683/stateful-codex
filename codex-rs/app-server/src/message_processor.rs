@@ -28,6 +28,7 @@ use crate::request_processors::AppsRequestProcessor;
 use crate::request_processors::CatalogRequestProcessor;
 use crate::request_processors::CommandExecRequestProcessor;
 use crate::request_processors::ConfigRequestProcessor;
+use crate::request_processors::ContextMapRequestProcessor;
 use crate::request_processors::EnvironmentRequestProcessor;
 use crate::request_processors::FeedbackRequestProcessor;
 use crate::request_processors::FsRequestProcessor;
@@ -150,6 +151,7 @@ pub(crate) struct MessageProcessor {
     command_exec_processor: CommandExecRequestProcessor,
     process_exec_processor: ProcessExecRequestProcessor,
     config_processor: ConfigRequestProcessor,
+    context_map_processor: ContextMapRequestProcessor,
     environment_processor: EnvironmentRequestProcessor,
     external_agent_config_processor: ExternalAgentConfigRequestProcessor,
     feedback_processor: FeedbackRequestProcessor,
@@ -501,6 +503,10 @@ impl MessageProcessor {
             outgoing.clone(),
             Arc::clone(&thread_list_state_permit),
         );
+        let context_map_processor = ContextMapRequestProcessor::new(
+            Arc::clone(&thread_store),
+            state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
+        );
         let thread_processor = ThreadRequestProcessor::new(
             auth_manager.clone(),
             Arc::clone(&thread_manager),
@@ -590,6 +596,7 @@ impl MessageProcessor {
             command_exec_processor,
             process_exec_processor,
             config_processor,
+            context_map_processor,
             environment_processor,
             external_agent_config_processor,
             feedback_processor,
@@ -1481,6 +1488,9 @@ impl MessageProcessor {
             }
             ClientRequest::ProjectDelete { params, .. } => {
                 self.project_processor.project_delete(params).await
+            }
+            ClientRequest::ContextMapQuery { params, .. } => {
+                self.context_map_processor.context_map_query(params).await
             }
             ClientRequest::ThreadSearch { params, .. } => {
                 self.thread_processor.thread_search(params).await
