@@ -12,7 +12,14 @@ use codex_app_server_protocol::ThreadGoalUpdatedNotification;
 use codex_app_server_protocol::ThreadQueueChangedNotification;
 use codex_app_server_protocol::WarningNotification;
 use codex_core::ThreadManager;
+use codex_core::TurnInput;
+use codex_core::TurnInputRequest;
+use codex_core::TurnInputSubmission;
+use codex_core::TurnStartOptions;
 use codex_core::config::Config;
+use codex_core::context::ContextualUserFragment;
+use codex_core::context::InternalContextSource;
+use codex_core::context::InternalModelContextFragment;
 use codex_exec_server::EnvironmentManager;
 use codex_extension_api::ExtensionEventSink;
 use codex_extension_api::ExtensionRegistry;
@@ -28,6 +35,10 @@ use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_queue_extension::QueuedItemService;
 use codex_rollout::state_db::StateDbHandle;
+use codex_stateful_extension::AutonomousContinuation;
+use codex_stateful_extension::AutonomousContinuationFuture;
+use codex_stateful_extension::AutonomousContinuationRequest;
+use codex_stateful_extension::AutonomousContinuationSink;
 use codex_stateful_extension::StatefulEvent;
 use codex_stateful_extension::StatefulEventSink;
 use codex_thread_store::ThreadStore;
@@ -103,7 +114,7 @@ pub(crate) fn thread_extensions(
         git_attribution_base_url,
         http_client_factory,
     );
-    codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);
+    codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager.clone());
     codex_memories_extension::install(&mut builder, codex_otel::global());
     codex_mcp_extension::install(&mut builder);
     codex_mcp_extension::install_plugins(&mut builder, environment_manager);
@@ -112,6 +123,10 @@ pub(crate) fn thread_extensions(
         thread_store,
         stateful_sqlite,
         stateful_event_sink,
+        Some(AutonomousContinuation::new(
+            format!("app-server-{}", ThreadId::new()),
+            Arc::new(AppServerAutonomousContinuationSink { thread_manager }),
+        )),
     );
     codex_web_search_extension::install(&mut builder, auth_manager.clone());
     codex_image_generation_extension::install(&mut builder, auth_manager, |config: &Config| {
@@ -148,6 +163,56 @@ pub(crate) fn app_server_extension_event_sink(
         outgoing,
         thread_state_manager,
     })
+}
+
+struct AppServerAutonomousContinuationSink {
+    thread_manager: Weak<ThreadManager>,
+}
+
+impl AutonomousContinuationSink for AppServerAutonomousContinuationSink {
+    fn continue_run<'a>(
+        &'a self,
+        request: AutonomousContinuationRequest,
+    ) -> AutonomousContinuationFuture<'a> {
+        Box::pin(async move {
+            let manager = self
+                .thread_manager
+                .upgrade()
+                .ok_or_else(|| "thread manager is no longer available".to_string())?;
+            let thread_id =
+                ThreadId::from_string(&request.thread_id).map_err(|error| error.to_string())?;
+            let thread = manager
+                .get_thread(thread_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            let continuation = ContextualUserFragment::into(InternalModelContextFragment::new(
+                InternalContextSource::from_static("stateful_autonomous"),
+                format!(
+                    "Continue Autonomous Stateful run {} toward its explicit goal. Use the current World State and verify current source state before acting so completed work is not repeated. Continue useful authorized work without routine checkpoints. Record a semantic obligation update when learning, strategy, uncertainty, or readiness materially changes. Mark the run completed with an evidence-grounded result when the goal is satisfied, or blocked only for a genuine authorization or external-state boundary.",
+                    request.run_id
+                ),
+            ));
+            let turn_request = TurnInputRequest::new(TurnInput::ResponseItem(continuation))
+                .on_start(TurnStartOptions {
+                    turn_trigger: Some("stateful_autonomous".to_string()),
+                    ..Default::default()
+                });
+            match thread
+                .continue_turn_if_idle(turn_request, request.previous_turn_id)
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                TurnInputSubmission::Started { .. } => Ok(()),
+                TurnInputSubmission::NotSubmitted { reason } => {
+                    tracing::debug!(%thread_id, ?reason, "Autonomous continuation was superseded");
+                    Ok(())
+                }
+                TurnInputSubmission::Steered { .. } => {
+                    unreachable!("Autonomous continuation cannot steer")
+                }
+            }
+        })
+    }
 }
 
 pub(crate) fn app_server_stateful_event_sink(

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::ExtensionData;
 use crate::ExtensionMetrics;
 use codex_mcp::McpResourceClient;
+use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 
@@ -67,6 +68,10 @@ pub enum ThreadIdleCause {
 
 /// Input supplied when the host has no immediately pending thread work.
 pub struct ThreadIdleInput<'a> {
+    /// Canonical identity of the idle thread.
+    pub thread_id: ThreadId,
+    /// Most recently started turn, when durable history contains one.
+    pub previous_turn_id: Option<&'a str>,
     /// Why the thread became idle.
     pub cause: ThreadIdleCause,
     /// Store scoped to the host session runtime.

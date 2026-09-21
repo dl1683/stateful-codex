@@ -67,10 +67,17 @@ impl Session {
         if self.input_queue.has_trigger_turn_mailbox_items().await {
             return;
         }
+        let previous_turn_id = if cause == ThreadIdleCause::Completed {
+            self.last_started_turn_id().await
+        } else {
+            None
+        };
 
         for contributor in self.services.extensions.thread_lifecycle_contributors() {
             contributor
                 .on_thread_idle(codex_extension_api::ThreadIdleInput {
+                    thread_id: self.thread_id,
+                    previous_turn_id: previous_turn_id.as_deref(),
                     cause,
                     session_store: &self.services.session_extension_data,
                     thread_store: &self.services.thread_extension_data,

@@ -237,6 +237,8 @@ async fn emit_idle_with_cause(
     <QueuedItemService as ThreadLifecycleContributor<()>>::on_thread_idle(
         service,
         ThreadIdleInput {
+            thread_id,
+            previous_turn_id: None,
             cause,
             session_store: &session_store,
             thread_store: &thread_store,

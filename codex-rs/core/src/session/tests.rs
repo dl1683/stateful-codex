@@ -11618,6 +11618,7 @@ async fn task_finish_emits_thread_idle_lifecycle_after_active_turn_clears() {
         calls: Arc<std::sync::atomic::AtomicUsize>,
         idle_tx: async_channel::Sender<()>,
         expected_thread_id: ThreadId,
+        expected_previous_turn_id: String,
     }
 
     impl codex_extension_api::ThreadLifecycleContributor<crate::config::Config> for ThreadIdleRecorder {
@@ -11629,6 +11630,11 @@ async fn task_finish_emits_thread_idle_lifecycle_after_active_turn_clears() {
                 assert_eq!(
                     self.expected_thread_id.to_string(),
                     input.thread_store.level_id()
+                );
+                assert_eq!(input.thread_id, self.expected_thread_id);
+                assert_eq!(
+                    input.previous_turn_id,
+                    Some(self.expected_previous_turn_id.as_str())
                 );
                 self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 self.idle_tx.send(()).await.expect("idle receiver open");
@@ -11644,6 +11650,7 @@ async fn task_finish_emits_thread_idle_lifecycle_after_active_turn_clears() {
         calls: Arc::clone(&calls),
         idle_tx,
         expected_thread_id: session.thread_id,
+        expected_previous_turn_id: turn_context.sub_id.clone(),
     }));
     session.services.extensions = Arc::new(builder.build());
 

@@ -1,5 +1,6 @@
 //! Project-scoped Stateful Codex integration.
 
+mod autonomy;
 mod events;
 mod root_blackboard;
 mod run_world_state;
@@ -29,6 +30,10 @@ use crate::services::ProjectIntelligenceServices;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
+pub use autonomy::AutonomousContinuation;
+pub use autonomy::AutonomousContinuationFuture;
+pub use autonomy::AutonomousContinuationRequest;
+pub use autonomy::AutonomousContinuationSink;
 pub use events::StatefulEvent;
 pub use events::StatefulEventSink;
 
@@ -57,6 +62,7 @@ struct StatefulExtension {
     projects: Arc<dyn ThreadStore>,
     services: Option<ProjectIntelligenceServices>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
+    autonomous: Option<AutonomousContinuation>,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -234,12 +240,15 @@ pub fn install<C: Sync>(
     projects: Arc<dyn ThreadStore>,
     sqlite: Option<SqliteConfig>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
+    autonomous: Option<AutonomousContinuation>,
 ) {
     let extension = Arc::new(StatefulExtension {
         projects,
         services: sqlite.map(ProjectIntelligenceServices::new),
         event_sink,
+        autonomous,
     });
     registry.prompt_contributor(extension.clone());
-    registry.tool_contributor(extension);
+    registry.tool_contributor(extension.clone());
+    registry.thread_lifecycle_contributor(extension);
 }
