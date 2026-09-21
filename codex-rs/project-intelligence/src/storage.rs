@@ -106,6 +106,21 @@ impl HierarchyStore {
         load_node(&mut connection, project_id, id).await
     }
 
+    pub async fn project_node(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<HierarchyNode>, HierarchyStoreError> {
+        let stored = sqlx::query_as::<_, StoredHierarchyNode>(
+            "SELECT * FROM hierarchy_nodes
+             WHERE project_id = ? AND kind = 'project'
+             ORDER BY id LIMIT 1",
+        )
+        .bind(project_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        stored.map(TryInto::try_into).transpose()
+    }
+
     pub async fn list_children(
         &self,
         project_id: &str,

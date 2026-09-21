@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_extension_api::FunctionCallError;
@@ -10,6 +11,8 @@ use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapQuery;
+use codex_project_intelligence::ProjectIndexRequest;
+use codex_project_intelligence::ProjectIndexer;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
@@ -21,6 +24,7 @@ use super::fits_response;
 use super::parse_arguments;
 
 const TOOL_NAME: &str = "context_map_query";
+const REFRESH_TOOL_NAME: &str = "context_map_refresh";
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 20;
 
@@ -30,6 +34,10 @@ struct QueryArguments {
     text: String,
     limit: Option<u32>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RefreshArguments {}
 
 pub(super) struct ContextMapQueryTool {
     project_id: String,
@@ -172,4 +180,97 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     {
         Box::pin(self.handle_call(call))
     }
+}
+
+pub(super) struct ContextMapRefreshTool {
+    project_id: String,
+    services: ProjectIntelligenceServices,
+    projects: Arc<dyn ThreadStore>,
+}
+
+impl ContextMapRefreshTool {
+    pub(super) fn new(
+        project_id: String,
+        services: ProjectIntelligenceServices,
+        projects: Arc<dyn ThreadStore>,
+    ) -> Self {
+        Self {
+            project_id,
+            services,
+            projects,
+        }
+    }
+
+    async fn handle_call(
+        &self,
+        call: ToolCall<'_>,
+    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        let _arguments: RefreshArguments = parse_arguments(&call)?;
+        let project = self
+            .projects
+            .read_project(self.project_id.clone())
+            .await
+            .map_err(respond)?
+            .ok_or_else(|| {
+                FunctionCallError::RespondToModel("selected project no longer exists".to_string())
+            })?;
+        let report = ProjectIndexer::new(
+            self.services.hierarchy().await.map_err(respond)?.clone(),
+            self.services.context_map().await.map_err(respond)?.clone(),
+        )
+        .refresh(ProjectIndexRequest {
+            project_id: self.project_id.clone(),
+            roots: project
+                .roots
+                .into_iter()
+                .map(|root| PathBuf::from(root.path))
+                .collect(),
+        })
+        .await
+        .map_err(respond)?;
+        Ok(Box::new(JsonToolOutput::new(json!({
+            "projectId": self.project_id,
+            "filesIndexed": report.files_indexed,
+            "filesSkipped": report.files_skipped,
+            "missingFiles": report.missing_files,
+            "truncated": report.truncated,
+        }))))
+    }
+}
+
+impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain(REFRESH_TOOL_NAME)
+    }
+
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::Function(ResponsesApiTool {
+            name: REFRESH_TOOL_NAME.to_string(),
+            description: "Refresh the selected project's filesystem hierarchy and source-routing index. Use when the context map is empty or project files changed.".to_string(),
+            strict: false,
+            defer_loading: None,
+            parameters: parse_tool_input_schema(&json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }))
+            .unwrap_or_else(|error| unreachable!("invalid static context-map refresh schema: {error}")),
+            output_schema: None,
+        })
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        false
+    }
+
+    fn handle<'a>(&'a self, call: ToolCall<'call>) -> codex_extension_api::ToolExecutorFuture<'a>
+    where
+        'call: 'a,
+    {
+        Box::pin(self.handle_call(call))
+    }
+}
+
+fn respond(error: impl std::fmt::Display) -> FunctionCallError {
+    FunctionCallError::RespondToModel(error.to_string())
 }

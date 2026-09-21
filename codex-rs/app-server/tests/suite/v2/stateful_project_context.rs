@@ -207,6 +207,95 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     Ok(())
 }
 
+#[tokio::test]
+async fn model_can_record_and_retrieve_project_learning() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Learning Project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-model-learning-project".to_string(),
+            },
+        })
+        .await?;
+    seed_root_blackboard(codex_home.path(), &created.project.id).await?;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "record-call",
+                    "blackboard_record",
+                    &json!({
+                        "idempotencyKey": "strategy-learned",
+                        "kind": "strategy",
+                        "content": "Use the durable project state before rereading source files.",
+                        "confidenceBasisPoints": 8000,
+                        "verification": "unverified",
+                        "importance": "high",
+                        "rootPromotion": "promoted"
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("record-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "query-call",
+                    "blackboard_query",
+                    &json!({"text": "durable project state"}).to_string(),
+                ),
+                responses::ev_completed("query-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done-message", "Done"),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].body_contains_text("blackboard_relate"));
+    assert!(requests[0].body_contains_text("context_map_refresh"));
+    assert!(
+        requests[1]
+            .function_call_output("record-call")
+            .to_string()
+            .contains("recorded")
+    );
+    assert!(
+        requests[2]
+            .function_call_output("query-call")
+            .to_string()
+            .contains("Use the durable project state before rereading source files.")
+    );
+    Ok(())
+}
+
 async fn run_turn(server: &mut TestAppServer, thread_id: &str) -> Result<()> {
     server
         .start_turn_and_wait_for_completion(TurnStartParams {
