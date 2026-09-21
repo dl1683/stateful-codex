@@ -67,6 +67,7 @@ pub(crate) fn thread_extensions(
         turn_start_admission,
         thread_store,
     } = dependencies;
+    let stateful_sqlite = state_db.as_ref().map(|state_db| state_db.sqlite().clone());
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
     if let Some(admission) = turn_start_admission {
         builder.turn_start_admission(admission);
@@ -99,7 +100,7 @@ pub(crate) fn thread_extensions(
     codex_memories_extension::install(&mut builder, codex_otel::global());
     codex_mcp_extension::install(&mut builder);
     codex_mcp_extension::install_plugins(&mut builder, environment_manager);
-    codex_stateful_extension::install(&mut builder, thread_store);
+    codex_stateful_extension::install(&mut builder, thread_store, stateful_sqlite);
     codex_web_search_extension::install(&mut builder, auth_manager.clone());
     codex_image_generation_extension::install(&mut builder, auth_manager, |config: &Config| {
         Some(config.codex_home.clone())

@@ -4704,10 +4704,14 @@ name = "codex-stateful-extension"
 version = "0.0.0"
 dependencies = [
  "codex-extension-api",
+ "codex-project-intelligence",
+ "codex-state",
  "codex-thread-store",
+ "codex-utils-string",
  "pretty_assertions",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
  "tracing",
 ]
 

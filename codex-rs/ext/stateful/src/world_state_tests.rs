@@ -1,11 +1,14 @@
 use codex_extension_api::PreviousWorldStateSection;
+use codex_project_intelligence::RootBlackboardProjection;
 use codex_thread_store::StoredProject;
 use codex_thread_store::StoredProjectRoot;
 use pretty_assertions::assert_eq;
 
 use super::MAX_BODY_BYTES;
+use super::MAX_ESTIMATED_TOKENS;
 use super::ProjectIntelligenceStatus;
 use super::project_world_state_section;
+use crate::root_blackboard::RootBlackboardStatus;
 
 fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
     StoredProject {
@@ -20,9 +23,22 @@ fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
     }
 }
 
+fn available(project: StoredProject) -> ProjectIntelligenceStatus {
+    let project_id = project.id.clone();
+    ProjectIntelligenceStatus::Available {
+        project,
+        root_blackboard: RootBlackboardStatus::Available(RootBlackboardProjection {
+            project_id,
+            revision: 0,
+            data: Vec::new(),
+            omitted_entries: 0,
+        }),
+    }
+}
+
 #[test]
 fn renders_selected_project_as_bounded_typed_world_state() {
-    let section = project_world_state_section(ProjectIntelligenceStatus::Available(project(
+    let section = project_world_state_section(available(project(
         "Research\nProject",
         vec![StoredProjectRoot {
             path: "C:\\work\\research".to_string(),
@@ -41,15 +57,18 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(rendered.body().contains("Project ID: project-1"));
     assert!(rendered.body().contains("Project name: Research Project"));
     assert!(rendered.body().contains("C:\\work\\research"));
+    assert!(rendered.body().contains("Project intelligence revision: 0"));
+    assert!(
+        rendered
+            .body()
+            .contains("No knowledge has been promoted to the root blackboard yet")
+    );
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
 }
 
 #[test]
 fn unchanged_snapshot_does_not_repeat_project_context() {
-    let section = project_world_state_section(ProjectIntelligenceStatus::Available(project(
-        "Research",
-        Vec::new(),
-    )));
+    let section = project_world_state_section(available(project("Research", Vec::new())));
     let snapshot = section.snapshot().clone();
 
     assert!(
@@ -61,7 +80,7 @@ fn unchanged_snapshot_does_not_repeat_project_context() {
 
 #[test]
 fn long_project_metadata_is_truncated_on_utf8_boundaries() {
-    let section = project_world_state_section(ProjectIntelligenceStatus::Available(project(
+    let section = project_world_state_section(available(project(
         &"🙂".repeat(500),
         vec![StoredProjectRoot {
             path: "x".repeat(4_000),
@@ -72,5 +91,6 @@ fn long_project_metadata_is_truncated_on_utf8_boundaries() {
         .expect("new project state should render");
 
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
+    assert!(codex_utils_string::approx_token_count(rendered.body()) <= MAX_ESTIMATED_TOKENS);
     assert!(std::str::from_utf8(rendered.body().as_bytes()).is_ok());
 }

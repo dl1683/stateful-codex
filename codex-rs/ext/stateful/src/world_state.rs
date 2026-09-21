@@ -6,21 +6,33 @@ use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::root_blackboard::RootBlackboardStatus;
+use crate::root_blackboard::render_root_blackboard;
+
 const WORLD_STATE_ID: &str = "stateful_project";
 const START_MARKER: &str = "<stateful_project>";
 const END_MARKER: &str = "</stateful_project>";
-const MAX_BODY_BYTES: usize = 1024;
+pub(super) const MAX_BODY_BYTES: usize = 24 * 1024;
+pub(super) const MAX_ESTIMATED_TOKENS: usize = 8 * 1024;
+const MAX_PROJECT_ROOT_BYTES: usize = 4 * 1024;
 
 pub(super) enum ProjectIntelligenceStatus {
-    Available(StoredProject),
-    Missing { project_id: String },
-    Unavailable { project_id: String },
+    Available {
+        project: StoredProject,
+        root_blackboard: RootBlackboardStatus,
+    },
+    Missing {
+        project_id: String,
+    },
+    Unavailable {
+        project_id: String,
+    },
 }
 
 impl ProjectIntelligenceStatus {
     fn project_id(&self) -> &str {
         match self {
-            Self::Available(project) => &project.id,
+            Self::Available { project, .. } => &project.id,
             Self::Missing { project_id } | Self::Unavailable { project_id } => project_id,
         }
     }
@@ -29,7 +41,10 @@ impl ProjectIntelligenceStatus {
         let mut hasher = Sha256::new();
         hasher.update(b"codex-stateful-project-v1\0");
         match self {
-            Self::Available(project) => {
+            Self::Available {
+                project,
+                root_blackboard,
+            } => {
                 hasher.update(b"available\0");
                 hash_component(&mut hasher, &project.id);
                 hash_component(&mut hasher, &project.name);
@@ -37,6 +52,7 @@ impl ProjectIntelligenceStatus {
                     hash_component(&mut hasher, &root.path);
                 }
                 hasher.update(project.updated_at_ms.to_be_bytes());
+                root_blackboard.update_fingerprint(&mut hasher);
             }
             Self::Missing { project_id } => {
                 hasher.update(b"missing\0");
@@ -58,14 +74,23 @@ impl ProjectIntelligenceStatus {
         );
         append_field(&mut body, "Project ID", self.project_id());
         match self {
-            Self::Available(project) => {
+            Self::Available {
+                project,
+                root_blackboard,
+            } => {
                 append_field(&mut body, "Project name", &project.name);
                 append_line(&mut body, "Project roots:");
+                let roots_start = body.len();
                 let mut included = 0;
                 for root in &project.roots {
-                    let before = body.len();
-                    append_field(&mut body, "-", &root.path);
-                    if body.len() == before {
+                    let line = format!("- {}", single_line(&root.path));
+                    if body
+                        .len()
+                        .saturating_add(line.len())
+                        .saturating_sub(roots_start)
+                        > MAX_PROJECT_ROOT_BYTES
+                        || !try_append_line(&mut body, &line, /*reserved_bytes*/ 0)
+                    {
                         break;
                     }
                     included += 1;
@@ -77,10 +102,7 @@ impl ProjectIntelligenceStatus {
                         &format!("... {omitted} additional roots omitted"),
                     );
                 }
-                append_line(
-                    &mut body,
-                    "The project-intelligence store is not populated yet. Use source files as ground truth until blackboard and context-map state is available.",
-                );
+                render_root_blackboard(&mut body, root_blackboard);
             }
             Self::Missing { .. } => append_line(
                 &mut body,
@@ -121,7 +143,7 @@ pub(super) fn project_world_state_section(
     .with_retained_fragment_matcher(move |role, text| is_project_fragment(role, text, &project_id))
 }
 
-fn hash_component(hasher: &mut Sha256, value: &str) {
+pub(super) fn hash_component(hasher: &mut Sha256, value: &str) {
     hasher.update((value.len() as u64).to_be_bytes());
     hasher.update(value.as_bytes());
 }
@@ -130,7 +152,7 @@ fn append_field(output: &mut String, label: &str, value: &str) {
     append_line(output, &format!("{label}: {}", single_line(value)));
 }
 
-fn append_line(output: &mut String, line: &str) {
+pub(super) fn append_line(output: &mut String, line: &str) {
     if output.len() >= MAX_BODY_BYTES {
         return;
     }
@@ -144,6 +166,24 @@ fn append_line(output: &mut String, line: &str) {
     }
     let take = floor_char_boundary(line, available);
     output.push_str(&line[..take]);
+}
+
+pub(super) fn try_append_line(output: &mut String, line: &str, reserved_bytes: usize) -> bool {
+    let prefix = usize::from(!output.is_empty());
+    let next_len = output
+        .len()
+        .saturating_add(prefix)
+        .saturating_add(line.len());
+    if next_len.saturating_add(reserved_bytes) > MAX_BODY_BYTES
+        || codex_utils_string::approx_tokens_from_byte_count(next_len) > MAX_ESTIMATED_TOKENS as u64
+    {
+        return false;
+    }
+    if prefix == 1 {
+        output.push('\n');
+    }
+    output.push_str(line);
+    true
 }
 
 fn single_line(value: &str) -> String {

@@ -14,9 +14,13 @@ workspace = true
 
 [dependencies]
 codex-extension-api = { workspace = true }
+codex-project-intelligence = { workspace = true }
+codex-state = { workspace = true }
 codex-thread-store = { workspace = true }
+codex-utils-string = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 
 [dev-dependencies]

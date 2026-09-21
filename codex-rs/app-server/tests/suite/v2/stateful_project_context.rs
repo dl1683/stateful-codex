@@ -16,7 +16,24 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardImportance;
+use codex_project_intelligence::BlackboardKind;
+use codex_project_intelligence::BlackboardProvenance;
+use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardStore;
+use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::HierarchyStore;
+use codex_project_intelligence::NewBlackboardEntry;
+use codex_project_intelligence::NewHierarchyNode;
+use codex_project_intelligence::NodeKind;
+use codex_project_intelligence::ProjectRelativePath;
+use codex_project_intelligence::RootPromotion;
+use codex_state::SqliteConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_absolute_path::test_support::PathExt;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -45,6 +62,7 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
             },
         })
         .await?;
+    seed_root_blackboard(codex_home.path(), &created.project.id).await?;
     let started = server
         .start_thread(ThreadStartParams {
             project_id: Some(created.project.id.clone()),
@@ -126,5 +144,50 @@ async fn assert_latest_request_has_project(
     assert!(body.contains("<stateful_project>"));
     assert!(body.contains(&format!("Project ID: {project_id}")));
     assert!(body.contains("Decisive Evidence Project"));
+    assert!(body.contains("A decisive project fact survives every thread view."));
+    assert!(body.contains("verification=unverified"));
+    Ok(())
+}
+
+async fn seed_root_blackboard(codex_home: &std::path::Path, project_id: &str) -> Result<()> {
+    let sqlite = SqliteConfig::new_for_testing(codex_home.abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await?;
+    let project_node_id = HierarchyNodeId::parse(format!("project-node-{project_id}"))?;
+    hierarchy
+        .create_node(
+            project_node_id.clone(),
+            NewHierarchyNode {
+                project_id: project_id.to_string(),
+                parent_id: None,
+                kind: NodeKind::Project,
+                project_root: None,
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
+    BlackboardStore::open(&sqlite)
+        .await?
+        .create_entry(
+            BlackboardEntryId::parse(format!("project-fact-{project_id}"))?,
+            NewBlackboardEntry {
+                project_id: project_id.to_string(),
+                node_id: project_node_id,
+                kind: BlackboardKind::Fact,
+                content: "A decisive project fact survives every thread view.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(8_500)?,
+                verification: BlackboardVerification::Unverified,
+                importance: BlackboardImportance::Critical,
+                root_promotion: RootPromotion::Promoted,
+                evidence: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "integration-fixture".to_string(),
+                },
+            },
+        )
+        .await?;
     Ok(())
 }
