@@ -819,6 +819,12 @@ client_request_definitions! {
         serialization: global_shared_read("project-intelligence"),
         response: v2::ContextMapQueryResponse,
     },
+    #[experimental("blackboard/query")]
+    BlackboardQuery => "blackboard/query" {
+        params: v2::BlackboardQueryParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::BlackboardQueryResponse,
+    },
     #[experimental("contextMap/refresh")]
     ContextMapRefresh => "contextMap/refresh" {
         params: v2::ContextMapRefreshParams,

@@ -435,6 +435,85 @@ class AutoReviewRequirements(BaseModel):
     required_on_models: Annotated[list[str] | None, Field(alias="requiredOnModels")] = None
 
 
+class BlackboardEntryState(Enum):
+    active = "active"
+    superseded = "superseded"
+    tombstoned = "tombstoned"
+
+
+class BlackboardEvidenceFreshness(Enum):
+    not_applicable = "notApplicable"
+    current = "current"
+    stale = "stale"
+    source_unavailable = "sourceUnavailable"
+
+
+class BlackboardEvidenceLink(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    context_map_entry_id: Annotated[str, Field(alias="contextMapEntryId")]
+    source_fingerprint: Annotated[str, Field(alias="sourceFingerprint")]
+
+
+class BlackboardImportance(Enum):
+    critical = "critical"
+    high = "high"
+    normal = "normal"
+    low = "low"
+
+
+class BlackboardKind(Enum):
+    instruction = "instruction"
+    fact = "fact"
+    claim = "claim"
+    number = "number"
+    decision = "decision"
+    strategy = "strategy"
+    question = "question"
+    contradiction = "contradiction"
+    failure = "failure"
+    rejected_approach = "rejectedApproach"
+    signal = "signal"
+    note = "note"
+
+
+class BlackboardProvenanceKind(Enum):
+    user = "user"
+    agent = "agent"
+    maintenance = "maintenance"
+    import_ = "import"
+
+
+class BlackboardRelationKind(Enum):
+    supports = "supports"
+    contradicts = "contradicts"
+    depends_on = "dependsOn"
+    related_to = "relatedTo"
+
+
+class BlackboardRootPromotion(Enum):
+    not_promoted = "notPromoted"
+    candidate = "candidate"
+    promoted = "promoted"
+
+
+class BlackboardStructuredValue(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    unit: str | None = None
+    value: str
+
+
+class BlackboardVerification(Enum):
+    unverified = "unverified"
+    source_verified = "sourceVerified"
+    user_confirmed = "userConfirmed"
+    disputed = "disputed"
+    stale = "stale"
+
+
 class BrowserUseAccessApprovalLifetime(Enum):
     turn = "turn"
     thread = "thread"
@@ -6809,6 +6888,31 @@ class AppsReadResponse(BaseModel):
     missing_app_ids: Annotated[list[str], Field(alias="missingAppIds")]
 
 
+class BlackboardProvenance(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: BlackboardProvenanceKind
+    source_id: Annotated[str, Field(alias="sourceId")]
+
+
+class BlackboardRelation(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    confidence_basis_points: Annotated[int, Field(alias="confidenceBasisPoints", ge=0)]
+    created_at: Annotated[int, Field(alias="createdAt")]
+    from_entry_id: Annotated[str, Field(alias="fromEntryId")]
+    id: str
+    kind: BlackboardRelationKind
+    note: str | None = None
+    project_id: Annotated[str, Field(alias="projectId")]
+    provenance: BlackboardProvenance
+    revision: Annotated[int, Field(ge=0)]
+    to_entry_id: Annotated[str, Field(alias="toEntryId")]
+    updated_at: Annotated[int, Field(alias="updatedAt")]
+
+
 class BrowserUseConfig(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10491,6 +10595,41 @@ class AppsListResponse(BaseModel):
             description="Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
         ),
     ] = None
+
+
+class BlackboardEntry(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    confidence_basis_points: Annotated[int, Field(alias="confidenceBasisPoints", ge=0)]
+    content: str
+    created_at: Annotated[int, Field(alias="createdAt")]
+    evidence: list[BlackboardEvidenceLink]
+    id: str
+    importance: BlackboardImportance
+    kind: BlackboardKind
+    node_id: Annotated[str, Field(alias="nodeId")]
+    project_id: Annotated[str, Field(alias="projectId")]
+    provenance: BlackboardProvenance
+    revision: Annotated[int, Field(ge=0)]
+    root_promotion: Annotated[BlackboardRootPromotion, Field(alias="rootPromotion")]
+    state: BlackboardEntryState
+    structured_value: Annotated[
+        BlackboardStructuredValue | None, Field(alias="structuredValue")
+    ] = None
+    superseded_by: Annotated[str | None, Field(alias="supersededBy")] = None
+    updated_at: Annotated[int, Field(alias="updatedAt")]
+    verification: BlackboardVerification
+
+
+class BlackboardQueryHit(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    effective_verification: Annotated[BlackboardVerification, Field(alias="effectiveVerification")]
+    entry: BlackboardEntry
+    evidence_freshness: Annotated[BlackboardEvidenceFreshness, Field(alias="evidenceFreshness")]
+    relations: list[BlackboardRelation]
 
 
 class ThreadStartRequest(BaseModel):

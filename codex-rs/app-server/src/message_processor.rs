@@ -26,6 +26,7 @@ use crate::plugin_config_reload;
 use crate::plugin_config_reload::PluginStartupConfig;
 use crate::request_processors::AccountRequestProcessor;
 use crate::request_processors::AppsRequestProcessor;
+use crate::request_processors::BlackboardRequestProcessor;
 use crate::request_processors::CatalogRequestProcessor;
 use crate::request_processors::CommandExecRequestProcessor;
 use crate::request_processors::ConfigRequestProcessor;
@@ -149,6 +150,7 @@ pub(crate) struct MessageProcessor {
     skills_watcher: Arc<SkillsWatcher>,
     account_processor: Arc<AccountRequestProcessor>,
     apps_processor: AppsRequestProcessor,
+    blackboard_processor: BlackboardRequestProcessor,
     catalog_processor: CatalogRequestProcessor,
     command_exec_processor: CommandExecRequestProcessor,
     process_exec_processor: ProcessExecRequestProcessor,
@@ -512,6 +514,10 @@ impl MessageProcessor {
             Arc::clone(&thread_store),
             state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
         );
+        let blackboard_processor = BlackboardRequestProcessor::new(
+            Arc::clone(&thread_store),
+            state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
+        );
         let stateful_processor = StatefulRequestProcessor::new(
             Arc::clone(&thread_store),
             state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
@@ -607,6 +613,7 @@ impl MessageProcessor {
             process_exec_processor,
             config_processor,
             context_map_processor,
+            blackboard_processor,
             environment_processor,
             external_agent_config_processor,
             feedback_processor,
@@ -1505,6 +1512,9 @@ impl MessageProcessor {
             }
             ClientRequest::ContextMapRefresh { params, .. } => {
                 self.context_map_processor.context_map_refresh(params).await
+            }
+            ClientRequest::BlackboardQuery { params, .. } => {
+                self.blackboard_processor.query(params).await
             }
             ClientRequest::StatefulRunStart { params, .. } => {
                 self.stateful_processor.run_start(params).await

@@ -8078,6 +8078,309 @@
         },
         "type": "object"
       },
+      "BlackboardEntry": {
+        "properties": {
+          "confidenceBasisPoints": {
+            "format": "uint16",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/definitions/v2/BlackboardEvidenceLink"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "importance": {
+            "$ref": "#/definitions/v2/BlackboardImportance"
+          },
+          "kind": {
+            "$ref": "#/definitions/v2/BlackboardKind"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/definitions/v2/BlackboardProvenance"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootPromotion": {
+            "$ref": "#/definitions/v2/BlackboardRootPromotion"
+          },
+          "state": {
+            "$ref": "#/definitions/v2/BlackboardEntryState"
+          },
+          "structuredValue": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/BlackboardStructuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supersededBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "verification": {
+            "$ref": "#/definitions/v2/BlackboardVerification"
+          }
+        },
+        "required": [
+          "confidenceBasisPoints",
+          "content",
+          "createdAt",
+          "evidence",
+          "id",
+          "importance",
+          "kind",
+          "nodeId",
+          "projectId",
+          "provenance",
+          "revision",
+          "rootPromotion",
+          "state",
+          "updatedAt",
+          "verification"
+        ],
+        "type": "object"
+      },
+      "BlackboardEntryState": {
+        "enum": [
+          "active",
+          "superseded",
+          "tombstoned"
+        ],
+        "type": "string"
+      },
+      "BlackboardEvidenceFreshness": {
+        "enum": [
+          "notApplicable",
+          "current",
+          "stale",
+          "sourceUnavailable"
+        ],
+        "type": "string"
+      },
+      "BlackboardEvidenceLink": {
+        "properties": {
+          "contextMapEntryId": {
+            "type": "string"
+          },
+          "sourceFingerprint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "contextMapEntryId",
+          "sourceFingerprint"
+        ],
+        "type": "object"
+      },
+      "BlackboardImportance": {
+        "enum": [
+          "critical",
+          "high",
+          "normal",
+          "low"
+        ],
+        "type": "string"
+      },
+      "BlackboardKind": {
+        "enum": [
+          "instruction",
+          "fact",
+          "claim",
+          "number",
+          "decision",
+          "strategy",
+          "question",
+          "contradiction",
+          "failure",
+          "rejectedApproach",
+          "signal",
+          "note"
+        ],
+        "type": "string"
+      },
+      "BlackboardProvenance": {
+        "properties": {
+          "kind": {
+            "$ref": "#/definitions/v2/BlackboardProvenanceKind"
+          },
+          "sourceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "sourceId"
+        ],
+        "type": "object"
+      },
+      "BlackboardProvenanceKind": {
+        "enum": [
+          "user",
+          "agent",
+          "maintenance",
+          "import"
+        ],
+        "type": "string"
+      },
+      "BlackboardQueryHit": {
+        "properties": {
+          "effectiveVerification": {
+            "$ref": "#/definitions/v2/BlackboardVerification"
+          },
+          "entry": {
+            "$ref": "#/definitions/v2/BlackboardEntry"
+          },
+          "evidenceFreshness": {
+            "$ref": "#/definitions/v2/BlackboardEvidenceFreshness"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/definitions/v2/BlackboardRelation"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "effectiveVerification",
+          "entry",
+          "evidenceFreshness",
+          "relations"
+        ],
+        "type": "object"
+      },
+      "BlackboardRelation": {
+        "properties": {
+          "confidenceBasisPoints": {
+            "format": "uint16",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fromEntryId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/definitions/v2/BlackboardRelationKind"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/definitions/v2/BlackboardProvenance"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "toEntryId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "confidenceBasisPoints",
+          "createdAt",
+          "fromEntryId",
+          "id",
+          "kind",
+          "projectId",
+          "provenance",
+          "revision",
+          "toEntryId",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "BlackboardRelationKind": {
+        "enum": [
+          "supports",
+          "contradicts",
+          "dependsOn",
+          "relatedTo"
+        ],
+        "type": "string"
+      },
+      "BlackboardRootPromotion": {
+        "enum": [
+          "notPromoted",
+          "candidate",
+          "promoted"
+        ],
+        "type": "string"
+      },
+      "BlackboardStructuredValue": {
+        "properties": {
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "BlackboardVerification": {
+        "enum": [
+          "unverified",
+          "sourceVerified",
+          "userConfirmed",
+          "disputed",
+          "stale"
+        ],
+        "type": "string"
+      },
       "BrowserUseAccessApprovalLifetime": {
         "enum": [
           "turn",
