@@ -4104,6 +4104,25 @@
       ],
       "type": "string"
     },
+    "StatefulRunBudget": {
+      "properties": {
+        "maxContinuations": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "maxElapsedSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxContinuations",
+        "maxElapsedSeconds"
+      ],
+      "type": "object"
+    },
     "StatefulWorkflowMode": {
       "enum": [
         "autonomous",

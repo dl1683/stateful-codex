@@ -92,6 +92,18 @@ impl RunWorldStateStatus {
                 field(&mut output, "Mode", mode_name(run.value.mode));
                 field(&mut output, "Status", status_name(run.status));
                 field(&mut output, "Goal", &run.value.goal);
+                if run.value.mode == WorkflowMode::Autonomous {
+                    field(
+                        &mut output,
+                        "Autonomous continuation budget",
+                        &format!(
+                            "{} of {} used; up to {} seconds elapsed",
+                            run.continuations_used,
+                            run.value.budget.max_continuations,
+                            run.value.budget.max_elapsed_seconds
+                        ),
+                    );
+                }
                 match run.value.mode {
                     WorkflowMode::Autonomous => line(
                         &mut output,

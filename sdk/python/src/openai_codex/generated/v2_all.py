@@ -5000,6 +5000,14 @@ class StatefulObligationPacket(BaseModel):
     uncertainty: list[str] | None = []
 
 
+class StatefulRunBudget(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    max_continuations: Annotated[int, Field(alias="maxContinuations", ge=0)]
+    max_elapsed_seconds: Annotated[int, Field(alias="maxElapsedSeconds", ge=0)]
+
+
 class StatefulRunStatus(Enum):
     pending = "pending"
     running = "running"
@@ -9676,6 +9684,8 @@ class StatefulRun(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    budget: StatefulRunBudget
+    continuations_used: Annotated[int, Field(alias="continuationsUsed", ge=0)]
     created_at: Annotated[int, Field(alias="createdAt")]
     goal: str
     id: str

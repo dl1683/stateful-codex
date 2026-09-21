@@ -8,6 +8,7 @@ use codex_app_server_protocol::ObligationListResponse;
 use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunPauseParams;
 use codex_app_server_protocol::StatefulRunPauseResponse;
 use codex_app_server_protocol::StatefulRunReadParams;
@@ -71,11 +72,16 @@ async fn stateful_run_preserves_explicit_mode_and_reconciles_live_controls() -> 
                 thread_id: thread.thread.id.clone(),
                 goal: "Find the decisive constraint and produce a verified result.".to_string(),
                 mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
                 idempotency_key: "first-run".to_string(),
             },
         })
         .await?;
     assert_eq!(started.run.mode, StatefulWorkflowMode::Collaborative);
+    assert_eq!(started.run.continuations_used, 0);
     assert_eq!(started.run.status, StatefulRunStatus::Running);
     let started_notification: StatefulRunUpdatedNotification =
         server.read_notification("statefulRun/updated").await?;
@@ -177,6 +183,10 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                 thread_id: thread.thread.id.clone(),
                 goal: "Find and verify the decisive source connection.".to_string(),
                 mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
                 idempotency_key: "model-run".to_string(),
             },
         })

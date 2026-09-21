@@ -2,6 +2,7 @@ use codex_extension_api::PreviousWorldStateSection;
 use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::ObligationPacket;
+use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulObligation;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
@@ -22,11 +23,16 @@ fn run_world_state_is_semantic_bounded_and_stable() {
                 thread_ids: vec!["thread-1".to_string()],
                 goal: "Find the decisive source constraint.".to_string(),
                 mode: WorkflowMode::Socratic,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
             },
             status: StatefulRunStatus::Pending,
             strategy: Some("Resolve the material assumptions first.".to_string()),
             strategy_revision: 1,
             result: None,
+            continuations_used: 0,
             revision: 2,
             created_at_ms: 1,
             updated_at_ms: 2,

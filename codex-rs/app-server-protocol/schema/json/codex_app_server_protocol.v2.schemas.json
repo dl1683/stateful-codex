@@ -18331,6 +18331,14 @@
     },
     "StatefulRun": {
       "properties": {
+        "budget": {
+          "$ref": "#/definitions/StatefulRunBudget"
+        },
+        "continuationsUsed": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "createdAt": {
           "format": "int64",
           "type": "integer"
@@ -18384,6 +18392,8 @@
         }
       },
       "required": [
+        "budget",
+        "continuationsUsed",
         "createdAt",
         "goal",
         "id",
@@ -18394,6 +18404,25 @@
         "strategyRevision",
         "threadIds",
         "updatedAt"
+      ],
+      "type": "object"
+    },
+    "StatefulRunBudget": {
+      "properties": {
+        "maxContinuations": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "maxElapsedSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxContinuations",
+        "maxElapsedSeconds"
       ],
       "type": "object"
     },

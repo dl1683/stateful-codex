@@ -1,6 +1,7 @@
 use codex_app_server_protocol::StatefulObligation as ApiObligation;
 use codex_app_server_protocol::StatefulObligationPacket as ApiObligationPacket;
 use codex_app_server_protocol::StatefulRun as ApiRun;
+use codex_app_server_protocol::StatefulRunBudget as ApiRunBudget;
 use codex_app_server_protocol::StatefulRunStatus as ApiRunStatus;
 use codex_app_server_protocol::StatefulSteering as ApiSteering;
 use codex_app_server_protocol::StatefulSteeringStatus as ApiSteeringStatus;
@@ -31,6 +32,11 @@ pub(super) fn api_run(value: StatefulRun) -> ApiRun {
             WorkflowMode::Collaborative => ApiWorkflowMode::Collaborative,
             WorkflowMode::Socratic => ApiWorkflowMode::Socratic,
         },
+        budget: ApiRunBudget {
+            max_continuations: value.value.budget.max_continuations,
+            max_elapsed_seconds: value.value.budget.max_elapsed_seconds,
+        },
+        continuations_used: value.continuations_used,
         status: match value.status {
             StatefulRunStatus::Pending => ApiRunStatus::Pending,
             StatefulRunStatus::Running => ApiRunStatus::Running,

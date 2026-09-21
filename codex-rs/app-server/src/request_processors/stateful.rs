@@ -31,6 +31,7 @@ use codex_protocol::ThreadId;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::NewSteeringInstruction;
+use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStatus;
@@ -104,6 +105,10 @@ impl StatefulRequestProcessor {
                     thread_ids: vec![params.thread_id],
                     goal: params.goal,
                     mode: workflow_mode(params.mode),
+                    budget: RunBudget {
+                        max_continuations: params.budget.max_continuations,
+                        max_elapsed_seconds: params.budget.max_elapsed_seconds,
+                    },
                 },
             )
             .await

@@ -468,6 +468,7 @@ export type { SpendControlLimitSnapshot } from "./SpendControlLimitSnapshot";
 export type { StatefulObligation } from "./StatefulObligation";
 export type { StatefulObligationPacket } from "./StatefulObligationPacket";
 export type { StatefulRun } from "./StatefulRun";
+export type { StatefulRunBudget } from "./StatefulRunBudget";
 export type { StatefulRunStatus } from "./StatefulRunStatus";
 export type { StatefulRunUpdatedNotification } from "./StatefulRunUpdatedNotification";
 export type { StatefulSteering } from "./StatefulSteering";

@@ -26,6 +26,14 @@ pub enum StatefulRunStatus {
     Failed,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulRunBudget {
+    pub max_continuations: u32,
+    pub max_elapsed_seconds: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -35,6 +43,8 @@ pub struct StatefulRun {
     pub thread_ids: Vec<String>,
     pub goal: String,
     pub mode: StatefulWorkflowMode,
+    pub budget: StatefulRunBudget,
+    pub continuations_used: u32,
     pub status: StatefulRunStatus,
     pub strategy: Option<String>,
     #[ts(type = "number")]
@@ -56,6 +66,7 @@ pub struct StatefulRunStartParams {
     pub thread_id: String,
     pub goal: String,
     pub mode: StatefulWorkflowMode,
+    pub budget: StatefulRunBudget,
     pub idempotency_key: String,
 }
 
