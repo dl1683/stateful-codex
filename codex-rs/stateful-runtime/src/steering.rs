@@ -92,6 +92,13 @@ pub struct SteeringUpdate {
     pub reason: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SteeringApplication {
+    pub expected_steering_revision: u64,
+    pub expected_run_revision: u64,
+    pub strategy: String,
+}
+
 impl SteeringUpdate {
     pub fn validate(&self) -> Result<(), SteeringError> {
         if self

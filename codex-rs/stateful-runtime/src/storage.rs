@@ -447,7 +447,7 @@ struct StoredObligation {
     created_at_ms: i64,
 }
 
-async fn load_run(
+pub(crate) async fn load_run(
     connection: &mut SqliteConnection,
     id: &StatefulRunId,
 ) -> Result<Option<StatefulRun>, StatefulRunStoreError> {
@@ -655,6 +655,10 @@ pub enum StatefulRunStoreError {
     },
     #[error("applied steering strategy revision does not match the run")]
     StrategyRevisionMismatch,
+    #[error("applied steering must change the current run strategy")]
+    SteeringStrategyUnchanged,
+    #[error("steering cannot be applied while the run is {0:?}")]
+    SteeringRunNotExecutable(StatefulRunStatus),
     #[error("list limit must be between 1 and 101")]
     InvalidListLimit,
     #[error("autonomous lease duration must be between 1 and 600000 milliseconds")]

@@ -2,14 +2,17 @@ use sqlx::FromRow;
 use sqlx::SqliteConnection;
 
 use crate::NewSteeringInstruction;
+use crate::StatefulRun;
 use crate::StatefulRunId;
 use crate::StatefulRunStore;
 use crate::StatefulRunStoreError;
 use crate::StatefulSteering;
+use crate::SteeringApplication;
 use crate::SteeringId;
 use crate::SteeringStatus;
 use crate::SteeringUpdate;
 use crate::steering::SteeringError;
+use crate::storage::load_run;
 use crate::storage::unix_timestamp_millis;
 use crate::storage::validate_list_limit;
 
@@ -185,6 +188,110 @@ impl StatefulRunStore {
             .ok_or_else(|| StatefulRunStoreError::SteeringNotFound(id.to_string()))?;
         transaction.commit().await?;
         Ok(steering)
+    }
+
+    pub async fn apply_steering(
+        &self,
+        id: &SteeringId,
+        application: SteeringApplication,
+    ) -> Result<(StatefulRun, StatefulSteering), StatefulRunStoreError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current_steering = load_steering(&mut transaction, id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::SteeringNotFound(id.to_string()))?;
+        if current_steering.revision != application.expected_steering_revision {
+            return Err(StatefulRunStoreError::RevisionConflict {
+                expected: application.expected_steering_revision,
+                actual: current_steering.revision,
+            });
+        }
+        if current_steering.status != SteeringStatus::Acknowledged {
+            return Err(StatefulRunStoreError::InvalidSteeringTransition {
+                from: current_steering.status,
+                to: SteeringStatus::Applied,
+            });
+        }
+        let current_run = load_run(&mut transaction, &current_steering.value.run_id)
+            .await?
+            .ok_or_else(|| {
+                StatefulRunStoreError::RunNotFound(current_steering.value.run_id.to_string())
+            })?;
+        if current_run.revision != application.expected_run_revision {
+            return Err(StatefulRunStoreError::RevisionConflict {
+                expected: application.expected_run_revision,
+                actual: current_run.revision,
+            });
+        }
+        if current_run.value.project_id != current_steering.value.project_id {
+            return Err(StatefulRunStoreError::ProjectMismatch);
+        }
+        if current_run.status == crate::StatefulRunStatus::Pending
+            || current_run.status.is_terminal()
+        {
+            return Err(StatefulRunStoreError::SteeringRunNotExecutable(
+                current_run.status,
+            ));
+        }
+        crate::StatefulRunUpdate {
+            expected_revision: application.expected_run_revision,
+            status: current_run.status,
+            strategy: Some(application.strategy.clone()),
+            result: current_run.result.clone(),
+        }
+        .validate()?;
+        if current_run.strategy.as_deref() == Some(&application.strategy) {
+            return Err(StatefulRunStoreError::SteeringStrategyUnchanged);
+        }
+        let now = unix_timestamp_millis()?;
+        let run_rows = sqlx::query(
+            "UPDATE stateful_runs
+             SET strategy = ?, strategy_revision = strategy_revision + 1,
+                 revision = revision + 1, updated_at_ms = ?
+             WHERE id = ? AND revision = ?",
+        )
+        .bind(&application.strategy)
+        .bind(now)
+        .bind(current_run.id.as_str())
+        .bind(
+            i64::try_from(application.expected_run_revision)
+                .map_err(|_| StatefulRunStoreError::CountOverflow)?,
+        )
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if run_rows != 1 {
+            return Err(StatefulRunStoreError::ConcurrentMutation);
+        }
+        let run = load_run(&mut transaction, &current_run.id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::RunNotFound(current_run.id.to_string()))?;
+        let steering_rows = sqlx::query(
+            "UPDATE stateful_steering
+             SET status = 'applied', resulting_strategy_revision = ?, reason = NULL,
+                 revision = revision + 1, updated_at_ms = ?
+             WHERE id = ? AND revision = ?",
+        )
+        .bind(
+            i64::try_from(run.strategy_revision)
+                .map_err(|_| StatefulRunStoreError::CountOverflow)?,
+        )
+        .bind(now)
+        .bind(id.as_str())
+        .bind(
+            i64::try_from(application.expected_steering_revision)
+                .map_err(|_| StatefulRunStoreError::CountOverflow)?,
+        )
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if steering_rows != 1 {
+            return Err(StatefulRunStoreError::ConcurrentMutation);
+        }
+        let steering = load_steering(&mut transaction, id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::SteeringNotFound(id.to_string()))?;
+        transaction.commit().await?;
+        Ok((run, steering))
     }
 }
 

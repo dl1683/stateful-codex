@@ -132,30 +132,21 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
             .expect("steering loads"),
         Some(acknowledged.clone())
     );
-    let resumed = reopened
-        .update_run(
-            &id,
-            StatefulRunUpdate {
-                expected_revision: paused.revision,
-                status: StatefulRunStatus::Running,
-                strategy: Some("Connect the constraint to the deployment finding.".to_string()),
-                result: None,
-            },
-        )
-        .await
-        .expect("steering changes strategy");
-    let applied = reopened
-        .update_steering(
+    let (resumed, applied) = reopened
+        .apply_steering(
             &steering_id,
-            SteeringUpdate {
-                expected_revision: acknowledged.revision,
-                status: SteeringStatus::Applied,
-                resulting_strategy_revision: Some(resumed.strategy_revision),
-                reason: None,
+            crate::SteeringApplication {
+                expected_steering_revision: acknowledged.revision,
+                expected_run_revision: paused.revision,
+                strategy: "Connect the constraint to the deployment finding.".to_string(),
             },
         )
         .await
         .expect("steering applies");
+    assert_eq!(
+        applied.resulting_strategy_revision,
+        Some(resumed.strategy_revision)
+    );
     assert_eq!(
         reopened
             .list_obligations(&id, /*after_sequence*/ None, /*max_results*/ 10)

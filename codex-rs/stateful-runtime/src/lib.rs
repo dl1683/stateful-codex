@@ -17,6 +17,7 @@ pub use run::StatefulRunUpdate;
 pub use run::WorkflowMode;
 pub use steering::NewSteeringInstruction;
 pub use steering::StatefulSteering;
+pub use steering::SteeringApplication;
 pub use steering::SteeringId;
 pub use steering::SteeringStatus;
 pub use steering::SteeringUpdate;

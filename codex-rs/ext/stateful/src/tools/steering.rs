@@ -7,8 +7,8 @@ use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_stateful_runtime::StatefulRunStatus;
-use codex_stateful_runtime::StatefulRunUpdate;
 use codex_stateful_runtime::StatefulSteering;
+use codex_stateful_runtime::SteeringApplication;
 use codex_stateful_runtime::SteeringId;
 use codex_stateful_runtime::SteeringStatus;
 use codex_stateful_runtime::SteeringUpdate;
@@ -200,73 +200,81 @@ impl SteeringReconcileTool {
                 "steering instruction does not belong to the selected project".to_string(),
             ));
         }
-        let (status, resulting_strategy_revision, reason, run_revision) = match arguments.action {
-            ReconcileAction::Acknowledge => {
-                if arguments.expected_run_revision.is_some()
-                    || arguments.strategy.is_some()
-                    || arguments.reason.is_some()
-                {
-                    return Err(FunctionCallError::RespondToModel(
-                        "acknowledge accepts only steeringId, expectedRevision, and action"
-                            .to_string(),
-                    ));
+        let (status, resulting_strategy_revision, reason, run_revision): (_, _, _, Option<u64>) =
+            match arguments.action {
+                ReconcileAction::Acknowledge => {
+                    if arguments.expected_run_revision.is_some()
+                        || arguments.strategy.is_some()
+                        || arguments.reason.is_some()
+                    {
+                        return Err(FunctionCallError::RespondToModel(
+                            "acknowledge accepts only steeringId, expectedRevision, and action"
+                                .to_string(),
+                        ));
+                    }
+                    (SteeringStatus::Acknowledged, None, None, None)
                 }
-                (SteeringStatus::Acknowledged, None, None, None)
-            }
-            ReconcileAction::Reject => (SteeringStatus::Rejected, None, arguments.reason, None),
-            ReconcileAction::Apply => {
-                let expected_run_revision = arguments.expected_run_revision.ok_or_else(|| {
-                    FunctionCallError::RespondToModel(
-                        "apply requires expectedRunRevision".to_string(),
+                ReconcileAction::Reject => (SteeringStatus::Rejected, None, arguments.reason, None),
+                ReconcileAction::Apply => {
+                    let expected_run_revision =
+                        arguments.expected_run_revision.ok_or_else(|| {
+                            FunctionCallError::RespondToModel(
+                                "apply requires expectedRunRevision".to_string(),
+                            )
+                        })?;
+                    let strategy = arguments.strategy.ok_or_else(|| {
+                        FunctionCallError::RespondToModel("apply requires strategy".to_string())
+                    })?;
+                    let run = scoped_run(
+                        &self.project_id,
+                        current.value.run_id.to_string(),
+                        &self.services,
                     )
-                })?;
-                let strategy = arguments.strategy.ok_or_else(|| {
-                    FunctionCallError::RespondToModel("apply requires strategy".to_string())
-                })?;
-                let run = scoped_run(
-                    &self.project_id,
-                    current.value.run_id.to_string(),
-                    &self.services,
-                )
-                .await?;
-                if run.status == StatefulRunStatus::Pending {
-                    return Err(FunctionCallError::RespondToModel(
+                    .await?;
+                    if run.status == StatefulRunStatus::Pending {
+                        return Err(FunctionCallError::RespondToModel(
                         "a pending Socratic run must be resumed by the user before steering can be applied to execution"
                             .to_string(),
                     ));
+                    }
+                    if run.status.is_terminal() {
+                        return Err(FunctionCallError::RespondToModel(
+                            "cannot apply steering to a terminal run".to_string(),
+                        ));
+                    }
+                    let (updated, applied) = store
+                        .apply_steering(
+                            &steering_id,
+                            SteeringApplication {
+                                expected_steering_revision: arguments.expected_revision,
+                                expected_run_revision,
+                                strategy,
+                            },
+                        )
+                        .await
+                        .map_err(respond)?;
+                    if let Some(event_sink) = &self.event_sink {
+                        event_sink.emit(StatefulEvent::RunUpdated {
+                            project_id: updated.value.project_id.clone(),
+                            run_id: updated.id.to_string(),
+                            revision: updated.revision,
+                        });
+                        event_sink.emit(StatefulEvent::SteeringUpdated {
+                            project_id: applied.value.project_id.clone(),
+                            run_id: applied.value.run_id.to_string(),
+                            steering_id: applied.id.to_string(),
+                            revision: applied.revision,
+                        });
+                    }
+                    return Ok(Box::new(JsonToolOutput::new(json!({
+                        "steeringId": applied.id.to_string(),
+                        "status": steering_status_name(applied.status),
+                        "revision": applied.revision,
+                        "resultingStrategyRevision": applied.resulting_strategy_revision,
+                        "runRevision": updated.revision,
+                    }))));
                 }
-                if run.status.is_terminal() {
-                    return Err(FunctionCallError::RespondToModel(
-                        "cannot apply steering to a terminal run".to_string(),
-                    ));
-                }
-                let updated = store
-                    .update_run(
-                        &run.id,
-                        StatefulRunUpdate {
-                            expected_revision: expected_run_revision,
-                            status: run.status,
-                            strategy: Some(strategy),
-                            result: run.result,
-                        },
-                    )
-                    .await
-                    .map_err(respond)?;
-                if let Some(event_sink) = &self.event_sink {
-                    event_sink.emit(StatefulEvent::RunUpdated {
-                        project_id: updated.value.project_id.clone(),
-                        run_id: updated.id.to_string(),
-                        revision: updated.revision,
-                    });
-                }
-                (
-                    SteeringStatus::Applied,
-                    Some(updated.strategy_revision),
-                    None,
-                    Some(updated.revision),
-                )
-            }
-        };
+            };
         let updated = store
             .update_steering(
                 &steering_id,
