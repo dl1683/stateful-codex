@@ -70,25 +70,53 @@ source routing, and useful discovery.
 
 ## Live implementation checkpoint
 
-As of 2026-09-21, the clean branch has completed the project bridge and the
-read-only hierarchy/context-map slice:
+As of 2026-09-21, the clean branch contains the complete first product slice
+through the native CLI and local browser client:
 
 - canonical project identity follows new, resumed, and forked thread views and
   enters model context through a bounded typed World State contribution;
-- `codex-project-intelligence` persists the filesystem-shaped hierarchy and a
-  semantically separate context map with stable IDs, source fingerprints,
-  guarded revisions, freshness, bounded search, and exact source routes; and
-- experimental app-server v2 `contextMap/query` validates the canonical project,
-  refuses routes outside its selected roots, reports current/stale/unavailable
-  source state, and remains explicitly unavailable when persistent state is not
-  configured.
+- `codex-project-intelligence` persists the filesystem-shaped hierarchy,
+  semantically separate context map, structured blackboard, evidence links,
+  relationships, promotion state, revisions, freshness, and exact-source reads;
+- the Stateful extension exposes bounded retrieval and mutation tools, semantic
+  obligation publication, steering consumption, workflow-mode policy, and an
+  autonomous idle supervisor with lease-based continuation recovery;
+- experimental app-server v2 APIs own project intelligence, runs, obligations,
+  steering, evidence, mode changes, pause/resume/cancel, and revisioned events;
+- `codex --stateful <mode> <goal>` uses the selected working directory, cached
+  ChatGPT login, durable project intelligence, and native obligation/run cards;
+  and
+- `clients/stateful-codex` provides explicit project, thread, and mode selection
+  plus hierarchy, findings, source routing, exact evidence, semantic progress,
+  steering, controls, recovery, and final-result views against the real API.
 
-The public read path is covered by generated protocol contracts and app-server
-integration tests. The focused protocol suite and context-map API tests pass;
-the repository-wide suite remains a separate approval-gated validation step.
-This checkpoint is substrate, not a product-completion claim. Blackboard
-retrieval, semantic maintenance, runs, obligations, steering, workflow modes,
-autonomous continuation, and the first-class UI remain to be built and proven.
+Focused native validation passes: the branch CLI builds, five Stateful TUI
+tests and snapshots pass, and two real cached-login CLI runs completed against
+`clients/stateful-codex/public` without source edits. The runs reused accumulated
+project intelligence across threads and produced durable semantic obligations;
+their thread IDs are `01a0c5d8-d37a-71c3-9904-8561c286afe8` and
+`01a0c5e2-1a12-7603-85fa-08f138dcc93c`.
+
+Focused browser validation also passes against the real gateway, app-server,
+branch CLI, and cached ChatGPT login. A rendered Edge/CDP run demonstrated
+continue, fork, the Socratic execution gate, exact evidence inspection,
+autonomous pause/resume, and reload recovery. Its final machine-readable result
+and screenshots are under
+`%LOCALAPPDATA%/Temp/stateful-client-live-1790028346984`. The live exercise found
+and fixed three client defects: an invalid context-search limit, stale
+thread-scoped session keys that reopened the wrong run, and an unsupported fresh
+history call surfacing as a user-visible error. The client test suite passes
+4/4 after those fixes.
+
+These results establish a usable end-to-end product slice, not the Stage 8
+release claim. The remaining release gate is comparative evaluation against
+normal Codex for lifetime tokens, repeated reads, knowledge precision/recall,
+decisive-detail discovery, steering latency, autonomous recovery, and evidence
+correctness. The repository-wide Rust suite also remains an explicit
+approval-gated validation step. On this Windows installation, some model-issued
+shell commands fail before execution because the configured Windows Store
+`pwsh.exe` returns access denied; Stateful recovery and non-shell tools continue,
+but that host-shell problem must not be reported as successful command execution.
 
 ## System boundaries
 
