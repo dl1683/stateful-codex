@@ -1,0 +1,318 @@
+# Stateful Codex clean-build plan
+
+Status: implementation contract for `feature/stateful-codex`, based on
+`origin/main` at `48f897e4ce94152818ce0563b3a8aac3a70ce9b8`.
+
+Read `STATEFUL_CODEX_PRODUCT_INTENT.md` first. Product behavior in that document
+outranks an implementation shortcut in this plan.
+
+## Decisions
+
+1. `Project` is the durable user-selected scope. Current Codex already persists
+   project IDs, ordered filesystem roots, thread membership, and v2 project APIs.
+   Stateful Codex extends that identity; it does not create a competing workspace
+   identity or infer a project from a prompt, thread, or recent activity.
+2. Project intelligence is keyed by project ID. Threads are views. Starting,
+   resuming, and forking a thread must attach the same project intelligence when
+   the user selects the same project.
+3. Blackboard and context map are separate stores and separate APIs. A blackboard
+   record contains understanding. A context-map entry contains source location,
+   revision, and a retrieval description. Neither substitutes for exact source.
+4. Model-visible project state enters through typed World State contributions.
+   It is incrementally diffed, persisted with rollout state, bounded, and stable
+   across compaction. Do not append an opaque prompt packet each turn.
+5. The root blackboard is always loaded for a selected project. Deeper state is
+   retrieved by query and relevance, followed by context-map lookup and exact
+   source verification when needed.
+6. Autonomous, Collaborative, and Socratic are explicit Stateful workflow modes.
+   They are not inferred from text. They configure lower-level Codex facilities
+   but retain their own durable identity and behavior.
+7. Obligation updates are typed semantic records and server notifications. The
+   UI does not reconstruct progress, evidence, readiness, or steering state by
+   parsing assistant prose or tool-call text.
+8. The app-server v2 API is the product boundary. New API is experimental until
+   the end-to-end contract stabilizes. No v1 surface is added.
+9. The web client consumes the same API as other clients. It contains no private
+   truth and must distinguish observed, inferred, stale, failed, and verified
+   state.
+10. Prototype code is not merged wholesale. A prototype component may be
+    transplanted only after an isolated audit against this plan and current main.
+
+## System boundaries
+
+### Existing Codex primitives to reuse
+
+- `codex-thread-store`: canonical projects, roots, thread membership, and thread
+  history.
+- `codex-state`: host state only where shared state-runtime ownership is required.
+- `codex-extension-api`: lifecycle, native tools, typed World State, and extension
+  event delivery.
+- `codex-core`: inference and execution harness. Stateful logic should not live
+  here unless a generic harness capability is genuinely missing.
+- `codex-app-server-protocol` v2: client contract and generated SDK types.
+- `codex-app-server`: host composition, project selection, notifications, and
+  request processors.
+
+### New subsystems
+
+`codex-project-intelligence` owns project-scoped knowledge and its persistence:
+
+- hierarchical nodes mirroring project/directory/file/optional anchored region;
+- typed blackboard entries and relationships;
+- context-map entries and source revisions;
+- provenance and verification state;
+- queries, bounded projections, revision checks, and maintenance operations.
+
+`codex-stateful-extension` owns inference-time behavior:
+
+- selected-project attachment;
+- root-blackboard World State contribution;
+- deeper-state and context-map query tools;
+- evidence capture proposals;
+- obligation and steering lifecycle integration;
+- autonomous continuation policy and Socratic transition policy.
+
+The app server owns product orchestration:
+
+- validates and attaches project selection to new/resumed/forked threads;
+- exposes project-intelligence, run, obligation, steering, and readiness APIs;
+- emits ordered revisioned notifications;
+- installs the extension with shared project-intelligence services.
+
+The client owns presentation and explicit choices, never semantic inference.
+
+## Canonical data model
+
+All durable mutable records have a stable ID, project ID, revision, created time,
+updated time, and provenance. Updates use compare-and-swap or an idempotency key.
+
+### Hierarchy node
+
+- `id`
+- `project_id`
+- `parent_id` (null only for the project root)
+- `kind`: `project | directory | file | region`
+- normalized project-relative path
+- optional generic region anchor
+- current source revision/fingerprint
+- lifecycle: `active | missing | replaced`
+
+The hierarchy must enforce one root, acyclic parentage, containment under a
+selected project root, and uniqueness of active path/anchor identity.
+
+### Blackboard entry
+
+- node ID and semantic kind: instruction, fact, claim, number, decision,
+  strategy, question, contradiction, failure, rejected approach, signal, note;
+- concise content plus optional structured value/unit;
+- confidence and verification state;
+- importance and root-promotion state;
+- evidence links and related-entry links;
+- supersession/tombstone metadata.
+
+The root projection is a curated view, not a second source of truth. Promotion
+must preserve provenance and cannot silently convert a hypothesis into a fact.
+
+### Context-map entry
+
+- node ID and source revision;
+- bounded description of contents;
+- locator/anchor and byte or line bounds when available;
+- symbols/headings/keywords useful for routing;
+- extraction status and last verification time.
+
+Source movement or content changes mark affected entries stale. Stale entries may
+route discovery but cannot support a consequential verified claim.
+
+### Run, obligation, and steering records
+
+A run belongs to a project and references one or more thread views. It stores the
+user goal, explicit workflow mode, status, current strategy revision, and result.
+
+An obligation update contains structured fields for examined material, rationale,
+learning, implication, strategy, changed assumptions, next work, uncertainty,
+blockers, and requested user judgment. Rendering targets roughly 500 useful words
+but storage remains structured.
+
+A steering instruction records the user's exact input, affected run/obligations,
+acknowledgement, application status, resulting strategy revision, and any stated
+reason it could not be applied.
+
+## Context contract
+
+Every model-visible Stateful fragment must:
+
+- implement the typed contextual-fragment path through World State;
+- have a stable content classification and markers;
+- declare and test a hard byte/token cap below 10K tokens;
+- avoid unstable ordering and timestamps that cause cache misses;
+- include project identity and knowledge revision;
+- distinguish verified evidence, derived understanding, hypotheses, and stale
+  material;
+- render only a semantic diff when the prior snapshot is known;
+- survive compaction without rewriting prior history.
+
+Initial cap targets, to be evaluated rather than treated as permanent product
+limits:
+
+- project identity and retrieval instructions: 1 KiB;
+- always-loaded root blackboard: 24 KiB and below 8K tokens;
+- one deeper-state tool response: 16 KiB;
+- one context-map response: 16 KiB;
+- one obligation update: 8 KiB.
+
+Truncation is deterministic, importance-aware, and disclosed. The model must be
+able to query what was omitted.
+
+## Workflow modes
+
+### Autonomous
+
+- Continues useful in-scope work after a turn becomes idle.
+- Does not request approval for ordinary authorized execution.
+- Stops only for completion, user pause/cancel, exhausted explicit budget, a
+  genuine authorization boundary, or a blocker requiring user/external state.
+- Writes meaningful obligation updates and bounded heartbeat/lease state so a
+  crash or restart can recover ownership safely.
+
+### Collaborative
+
+- Executes normally while emitting semantic updates at meaningful changes.
+- Accepts steering at any time and visibly reconciles it into the strategy.
+- Does not turn transparency into an approval checkpoint for routine work.
+
+### Socratic
+
+- Begins with deliberate questions and synthesis rather than execution.
+- Persists answered questions, unresolved assumptions, and the proposed strategy.
+- Executes only after the user explicitly transitions the run or submits an
+  execution instruction consistent with the UI contract.
+
+Mode changes are explicit, durable, revisioned, and visible to both model and UI.
+
+## API and event contract
+
+Resource names are singular and v2-only. Planned families:
+
+- `projectIntelligence/status`
+- `blackboard/query`, `blackboard/upsert`, `blackboard/relate`
+- `contextMap/query`, `contextMap/refresh`
+- `statefulRun/start`, `statefulRun/read`, `statefulRun/pause`,
+  `statefulRun/resume`, `statefulRun/cancel`
+- `obligation/list`
+- `steering/submit`
+- `evidence/read`
+
+Lists use cursor pagination. Request optionals use nullable TypeScript fields.
+Mutations accept idempotency keys or expected revisions. Notifications include
+project ID, run ID where applicable, entity revision, and an ordering cursor.
+Clients recover gaps by reading current state; notification text is never the
+only copy of a consequential fact.
+
+## UI contract
+
+The first screen makes three explicit choices:
+
+1. project directory/project;
+2. create, continue, or fork thread;
+3. Autonomous, Collaborative, or Socratic mode.
+
+The active workspace shows:
+
+- the current semantic obligation packet and its revision;
+- strategy changes and why they changed;
+- important findings, uncertainties, contradictions, and blockers;
+- steering input with acknowledgement/application state;
+- grouped supporting activity beneath each semantic update;
+- blackboard hierarchy with provenance and verification badges;
+- context-map navigation to exact source regions;
+- run controls, autonomous status, recovery state, and explicit mode;
+- evidence-grounded final result and remaining uncertainty.
+
+The UI must never label a run ready, complete, verified, or evidence-backed from
+the mere presence of rows, tool success, assistant prose, or a process exit code.
+
+## Delivery sequence and gates
+
+### 1. Project bridge and empty-state World State
+
+Attach canonical project ID and roots to new/resumed/forked thread runtimes.
+Install a no-op-unless-selected Stateful extension that contributes a bounded,
+typed project-intelligence World State section.
+
+Gate: integration tests prove two threads in one project resolve the same project
+identity; compaction preserves the section; an unselected thread receives none;
+fork/resume cannot silently lose or change the project.
+
+### 2. Hierarchy and context-map substrate
+
+Land the project-intelligence crate, migrations, revision model, filesystem-safe
+path rules, and read APIs before model-authored knowledge.
+
+Gate: cross-platform tests cover hierarchy invariants, stale source revisions,
+bounded queries, idempotency, and concurrent updates.
+
+### 3. Blackboard substrate and retrieval
+
+Add typed entries, evidence, relationships, promotion, supersession, query tools,
+and root projection. Do not add autonomous writes until reads and provenance are
+trustworthy.
+
+Gate: an integration scenario answers from shared state in a fresh thread, opens
+the exact source for a consequential claim, and rejects stale evidence.
+
+### 4. Semantic observation and maintenance
+
+Capture candidate learning from completed work, validate it, commit structured
+state, and run maintenance that connects sources, exposes contradictions, and
+surfaces open questions. Failed extraction remains observable and retryable.
+
+Gate: curated benchmark cases demonstrate reduced rereading and successful
+recovery of decisive cross-source details without unsupported promotion.
+
+### 5. Runs, obligations, and steering
+
+Add durable run state, structured obligation updates, ordered notifications, and
+steering reconciliation.
+
+Gate: UI/API tests prove updates explain learning and implications rather than
+tool narration; steering is acknowledged and visibly changes later strategy.
+
+### 6. Workflow modes and autonomous supervisor
+
+Implement mode state machines, ownership leases, continuation scheduling,
+budgets, pause/cancel/recovery, and Socratic transitions.
+
+Gate: Autonomous completes a multi-turn task unattended; Collaborative accepts
+mid-run steering without a routine approval gate; Socratic does no execution
+before transition; restart does not duplicate work.
+
+### 7. First-class web UI
+
+Build the explicit selection flow and live workspace against the real APIs.
+Use snapshot/visual tests and end-to-end runs; do not ship a transcript-derived
+mock as evidence of backend behavior.
+
+Gate: fresh, resume, fork, steer, pause, recover, inspect evidence, and final
+result flows work against a real app-server with no hidden manual repair.
+
+### 8. Evaluation and release hardening
+
+Measure lifetime tokens, repeated source reads, state precision/recall, decisive
+detail discovery, steering latency/application, autonomous completion, recovery,
+and final evidence correctness against normal Codex baselines.
+
+Gate: publish claims only for demonstrated improvements. Record regressions and
+negative results; passing component tests alone is not product completion.
+
+## Change discipline
+
+- Land each numbered stage as reviewable vertical slices under the repository's
+  change-size guidance.
+- Every agent-logic change includes a Core or app-server integration test.
+- Every user-visible UI change includes snapshot coverage.
+- Schema changes regenerate fixtures; dependency changes refresh Bazel locks;
+  build-time files are declared in Bazel data.
+- Do not hide fail-open behavior. A missing or corrupt intelligence store is
+  visible, prevents evidence-backed readiness, and leaves ordinary Codex usable.
+- Keep a clean worktree at stage boundaries and record exact validation results.
