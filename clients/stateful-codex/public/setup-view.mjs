@@ -47,8 +47,8 @@ export function renderSetup(state) {
           </section>
         </div>
         <div class="actions">
-          <p class="status ${state.error ? "error" : ""}">${escapeHtml(state.error ?? "Uses the cached ChatGPT sign-in from Codex CLI. No API key is requested or stored here.")}</p>
-          <button class="primary" type="submit" ${state.busy ? "disabled" : ""}>${state.busy ? "Opening…" : "Open workspace"}</button>
+          <p class="status ${state.error ? "error" : ""}">${escapeHtml(state.error ?? (state.account ? "Uses the cached ChatGPT sign-in from Codex CLI. No API key is requested or stored here." : "Run codex login in a terminal, then restart this client."))}</p>
+          <button class="primary" type="submit" ${state.busy || !state.account ? "disabled" : ""}>${state.busy ? "Opening…" : "Open workspace"}</button>
         </div>
       </form>
     </main>`;

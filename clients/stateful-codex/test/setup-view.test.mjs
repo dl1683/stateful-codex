@@ -39,3 +39,25 @@ test("setup screen matches the reviewed snapshot", async () => {
   );
   assert.equal(`${actual.trim()}\n`, expected);
 });
+
+test("setup requires the cached Codex ChatGPT login", () => {
+  const actual = renderSetup({
+    busy: false,
+    error: null,
+    account: null,
+    projects: [],
+    threads: [],
+    projectId: "new",
+    projectName: "",
+    rootPath: "",
+    threadAction: "create",
+    threadId: "",
+    mode: "collaborative",
+    goal: "",
+    maxContinuations: 24,
+    maxElapsedSeconds: 14400,
+  });
+
+  assert.match(actual, /Run codex login in a terminal/);
+  assert.match(actual, /<button class="primary" type="submit" disabled>/);
+});
