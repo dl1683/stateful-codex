@@ -96,3 +96,15 @@ fn freshness_rejects_a_different_hierarchy_binding() {
         Err(ContextMapError::HierarchyBindingMismatch)
     );
 }
+
+#[test]
+fn queries_enforce_the_result_bound() {
+    let mut query = ContextMapQuery {
+        project_id: "project-1".to_string(),
+        text: "hierarchy".to_string(),
+        max_results: MAX_QUERY_RESULTS,
+    };
+    assert_eq!(query.validate(), Ok(()));
+    query.max_results += 1;
+    assert_eq!(query.validate(), Err(ContextMapError::InvalidQuery));
+}

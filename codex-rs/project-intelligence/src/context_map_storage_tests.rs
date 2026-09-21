@@ -4,6 +4,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::*;
+use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;
 use crate::NewHierarchyNode;
 use crate::ProjectRelativePath;
@@ -84,6 +85,20 @@ fn new_entry(source_fingerprint: &str) -> NewContextMapEntry {
     }
 }
 
+#[test]
+fn search_input_is_lowered_to_literal_prefix_terms() {
+    assert_eq!(
+        search_expression("setup OR \"secret\"").expect("searchable terms"),
+        "\"setup\"* OR \"OR\"* OR \"secret\"*"
+    );
+    assert!(matches!(
+        search_expression("!!!"),
+        Err(ContextMapStoreError::InvalidEntry(
+            ContextMapError::NoSearchTerms
+        ))
+    ));
+}
+
 #[tokio::test]
 async fn context_map_entry_survives_reopen_with_routing_term_order() {
     let temp_dir = TempDir::new().expect("tempdir should be created");
@@ -127,4 +142,56 @@ async fn context_map_rejects_a_stale_source_fingerprint() {
         error,
         ContextMapStoreError::SourceNotCurrent(ContextMapFreshness::Stale)
     ));
+}
+
+#[tokio::test]
+async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    let file = create_file(&hierarchy).await;
+    let entry = context_map
+        .create_entry(
+            ContextMapEntryId::parse("map-readme").expect("valid entry ID"),
+            new_entry("sha256:abc"),
+        )
+        .await
+        .expect("context-map entry should insert");
+    let query = ContextMapQuery {
+        project_id: "project-1".to_string(),
+        text: "operator setup".to_string(),
+        max_results: 5,
+    };
+    assert_eq!(
+        context_map
+            .query(query.clone())
+            .await
+            .expect("query should succeed"),
+        vec![ContextMapHit {
+            entry: entry.clone(),
+            freshness: ContextMapFreshness::Current,
+        }]
+    );
+
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &file.id,
+            HierarchySourceUpdate {
+                expected_revision: file.revision,
+                lifecycle: NodeLifecycle::Replaced,
+                source_fingerprint: Some(fingerprint("sha256:def")),
+            },
+        )
+        .await
+        .expect("source state should update");
+    assert_eq!(
+        context_map
+            .query(query)
+            .await
+            .expect("stale map should remain discoverable"),
+        vec![ContextMapHit {
+            entry,
+            freshness: ContextMapFreshness::Stale,
+        }]
+    );
 }

@@ -10,6 +10,8 @@ pub use context_map::ContextMapEntry;
 pub use context_map::ContextMapEntryId;
 pub use context_map::ContextMapError;
 pub use context_map::ContextMapFreshness;
+pub use context_map::ContextMapHit;
+pub use context_map::ContextMapQuery;
 pub use context_map::NewContextMapEntry;
 pub use context_map_storage::ContextMapStore;
 pub use context_map_storage::ContextMapStoreError;

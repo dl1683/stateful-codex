@@ -10,6 +10,8 @@ use crate::ContextMapEntry;
 use crate::ContextMapEntryId;
 use crate::ContextMapError;
 use crate::ContextMapFreshness;
+use crate::ContextMapHit;
+use crate::ContextMapQuery;
 use crate::HierarchyNode;
 use crate::HierarchyNodeId;
 use crate::NewContextMapEntry;
@@ -54,7 +56,7 @@ impl ContextMapStore {
             .await?
             .ok_or_else(|| ContextMapStoreError::NodeNotFound(value.node_id.to_string()))?;
         validate_current_source(&value, &node)?;
-        sqlx::query(
+        let insert = sqlx::query(
             "INSERT INTO context_map_entries (
                 id, project_id, node_id, source_fingerprint, description, coverage,
                 revision, created_at_ms, updated_at_ms, last_verified_at_ms
@@ -84,6 +86,18 @@ impl ContextMapStore {
             .execute(&mut *transaction)
             .await?;
         }
+        sqlx::query(
+            "INSERT INTO context_map_search (
+                rowid, entry_id, project_id, description, routing_terms
+             ) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(insert.last_insert_rowid())
+        .bind(id.as_str())
+        .bind(&value.project_id)
+        .bind(&value.description)
+        .bind(value.routing_terms.join(" "))
+        .execute(&mut *transaction)
+        .await?;
         let entry = load_entry(&mut transaction, &value.project_id, &id)
             .await?
             .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
@@ -98,6 +112,45 @@ impl ContextMapStore {
     ) -> Result<Option<ContextMapEntry>, ContextMapStoreError> {
         let mut connection = self.pool.acquire().await?;
         load_entry(&mut connection, project_id, id).await
+    }
+
+    pub async fn query(
+        &self,
+        query: ContextMapQuery,
+    ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
+        query.validate()?;
+        let expression = search_expression(&query.text)?;
+        let limit = i64::from(query.max_results);
+        let mut connection = self.pool.acquire().await?;
+        let entry_ids = sqlx::query_scalar::<_, String>(
+            "SELECT entry.id
+             FROM context_map_search AS search
+             JOIN context_map_entries AS entry ON entry.rowid = search.rowid
+             WHERE context_map_search MATCH ? AND entry.project_id = ?
+             ORDER BY bm25(context_map_search), entry.id
+             LIMIT ?",
+        )
+        .bind(expression)
+        .bind(&query.project_id)
+        .bind(limit)
+        .fetch_all(&mut *connection)
+        .await?;
+        let mut hits = Vec::with_capacity(entry_ids.len());
+        for raw_id in entry_ids {
+            let id = ContextMapEntryId::parse(&raw_id)
+                .map_err(|_| ContextMapStoreError::CorruptEntry(raw_id))?;
+            let entry = load_entry(&mut connection, &query.project_id, &id)
+                .await?
+                .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
+            let node = load_node(&mut connection, &query.project_id, &entry.value.node_id)
+                .await?
+                .ok_or_else(|| {
+                    ContextMapStoreError::NodeNotFound(entry.value.node_id.to_string())
+                })?;
+            let freshness = entry.freshness_against(&node)?;
+            hits.push(ContextMapHit { entry, freshness });
+        }
+        Ok(hits)
     }
 }
 
@@ -203,6 +256,19 @@ fn parse_coverage(value: &str) -> Result<ContextMapCoverage, ContextMapStoreErro
         "partial" => Ok(ContextMapCoverage::Partial),
         _ => Err(ContextMapStoreError::CorruptEnum(value.to_string())),
     }
+}
+
+fn search_expression(text: &str) -> Result<String, ContextMapStoreError> {
+    let terms = text
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .filter(|term| !term.is_empty())
+        .take(32)
+        .map(|term| format!("\"{term}\"*"))
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return Err(ContextMapError::NoSearchTerms.into());
+    }
+    Ok(terms.join(" OR "))
 }
 
 #[derive(Debug, Error)]

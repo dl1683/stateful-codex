@@ -17,6 +17,8 @@ const MAX_DESCRIPTION_BYTES: usize = 4_096;
 const MAX_ROUTING_TERMS: usize = 64;
 const MAX_ROUTING_TERM_BYTES: usize = 256;
 const MAX_ROUTING_TERM_TOTAL_BYTES: usize = 4_096;
+const MAX_QUERY_BYTES: usize = 1_024;
+const MAX_QUERY_RESULTS: u32 = 20;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -108,6 +110,35 @@ pub struct ContextMapEntry {
     pub last_verified_at_ms: Option<i64>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextMapQuery {
+    pub project_id: String,
+    pub text: String,
+    pub max_results: u32,
+}
+
+impl ContextMapQuery {
+    pub fn validate(&self) -> Result<(), ContextMapError> {
+        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
+            .map_err(|()| ContextMapError::InvalidProjectId)?;
+        if self.text.is_empty()
+            || self.text.len() > MAX_QUERY_BYTES
+            || self.text.trim() != self.text
+            || self.max_results == 0
+            || self.max_results > MAX_QUERY_RESULTS
+        {
+            return Err(ContextMapError::InvalidQuery);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextMapHit {
+    pub entry: ContextMapEntry,
+    pub freshness: ContextMapFreshness,
+}
+
 impl ContextMapEntry {
     pub fn freshness_against(
         &self,
@@ -151,6 +182,10 @@ pub enum ContextMapError {
     HierarchyBindingMismatch,
     #[error("context-map entries require a file or region node, found {0:?}")]
     UnsupportedNodeKind(NodeKind),
+    #[error("context-map query must be non-empty, bounded, trimmed, and request 1-20 results")]
+    InvalidQuery,
+    #[error("context-map query contains no searchable terms")]
+    NoSearchTerms,
 }
 
 fn validate_identity(value: &str, maximum_bytes: usize) -> Result<(), ()> {
