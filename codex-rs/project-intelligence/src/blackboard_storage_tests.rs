@@ -4,6 +4,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::*;
+use crate::BlackboardEntryUpdate;
 use crate::ContextMapCoverage;
 use crate::ContextMapStore;
 use crate::HierarchyNodeId;
@@ -174,5 +175,71 @@ async fn blackboard_persistence_is_idempotent_and_rejects_stale_evidence() {
             )
             .await,
         Err(BlackboardStoreError::EvidenceNotCurrent)
+    ));
+}
+
+#[tokio::test]
+async fn guarded_updates_supersede_entries_without_rewriting_identity() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, created, _file_revision) = fixture(&temp_dir).await;
+    let successor_id = BlackboardEntryId::parse("fact-purpose-v2").expect("valid entry ID");
+    let mut successor_value = created.value.clone();
+    successor_value.content = "The project purpose has a newer interpretation.".to_string();
+    successor_value.verification = BlackboardVerification::Unverified;
+    successor_value.evidence.clear();
+    successor_value.provenance.source_id = "turn-2".to_string();
+    blackboard
+        .create_entry(successor_id.clone(), successor_value)
+        .await
+        .expect("successor inserts");
+    let update = BlackboardEntryUpdate {
+        expected_revision: created.revision,
+        kind: created.value.kind,
+        content: created.value.content.clone(),
+        structured_value: created.value.structured_value.clone(),
+        confidence: created.value.confidence,
+        verification: created.value.verification,
+        importance: created.value.importance,
+        root_promotion: RootPromotion::NotPromoted,
+        evidence: created.value.evidence.clone(),
+        state: BlackboardEntryState::Superseded,
+        superseded_by: Some(successor_id.clone()),
+        provenance: BlackboardProvenance {
+            kind: BlackboardProvenanceKind::Agent,
+            source_id: "turn-2".to_string(),
+        },
+    };
+    let superseded = blackboard
+        .update_entry("project-1", &created.id, update.clone())
+        .await
+        .expect("entry supersedes");
+    assert_eq!(
+        (
+            superseded.revision,
+            superseded.state,
+            superseded.superseded_by
+        ),
+        (
+            created.revision + 1,
+            BlackboardEntryState::Superseded,
+            Some(successor_id)
+        )
+    );
+    assert!(matches!(
+        blackboard
+            .update_entry("project-1", &created.id, update.clone())
+            .await,
+        Err(BlackboardStoreError::RevisionConflict { expected, actual })
+            if expected == created.revision && actual == created.revision + 1
+    ));
+    let current_revision_update = BlackboardEntryUpdate {
+        expected_revision: superseded.revision,
+        ..update
+    };
+    assert!(matches!(
+        blackboard
+            .update_entry("project-1", &created.id, current_revision_update)
+            .await,
+        Err(BlackboardStoreError::EntryNotActive(id)) if id == created.id.as_str()
     ));
 }

@@ -26,6 +26,8 @@ use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
+mod update;
+
 const INITIAL_REVISION: i64 = 1;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -82,7 +84,16 @@ impl BlackboardStore {
         .bind(now)
         .execute(&mut *transaction)
         .await?;
-        write_revision(&mut transaction, &id, INITIAL_REVISION, &value, now).await?;
+        write_revision(
+            &mut transaction,
+            &id,
+            INITIAL_REVISION,
+            &value,
+            BlackboardEntryState::Active,
+            None,
+            now,
+        )
+        .await?;
         let entry = load_entry(&mut transaction, &value.project_id, &id)
             .await?
             .ok_or_else(|| BlackboardStoreError::EntryNotFound(id.to_string()))?;
@@ -284,6 +295,8 @@ async fn write_revision(
     id: &BlackboardEntryId,
     revision: i64,
     value: &NewBlackboardEntry,
+    state: BlackboardEntryState,
+    superseded_by: Option<&BlackboardEntryId>,
     now: i64,
 ) -> Result<(), BlackboardStoreError> {
     sqlx::query(
@@ -291,7 +304,7 @@ async fn write_revision(
             entry_id, revision, kind, content, structured_value, structured_unit,
             confidence_basis_points, verification, importance, root_promotion,
             state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, ?)",
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id.as_str())
     .bind(revision)
@@ -308,6 +321,8 @@ async fn write_revision(
     .bind(verification_name(value.verification))
     .bind(importance_name(value.importance))
     .bind(promotion_name(value.root_promotion))
+    .bind(state_name(state))
+    .bind(superseded_by.map(BlackboardEntryId::as_str))
     .bind(provenance_name(value.provenance.kind))
     .bind(&value.provenance.source_id)
     .bind(now)
@@ -369,20 +384,15 @@ enum_codec!(promotion_name, parse_promotion, RootPromotion, {
     RootPromotion::NotPromoted => "not_promoted", RootPromotion::Candidate => "candidate",
     RootPromotion::Promoted => "promoted",
 });
+enum_codec!(state_name, parse_state, BlackboardEntryState, {
+    BlackboardEntryState::Active => "active", BlackboardEntryState::Superseded => "superseded",
+    BlackboardEntryState::Tombstoned => "tombstoned",
+});
 enum_codec!(provenance_name, parse_provenance, BlackboardProvenanceKind, {
     BlackboardProvenanceKind::User => "user", BlackboardProvenanceKind::Agent => "agent",
     BlackboardProvenanceKind::Maintenance => "maintenance",
     BlackboardProvenanceKind::Import => "import",
 });
-
-fn parse_state(value: &str) -> Result<BlackboardEntryState, BlackboardStoreError> {
-    match value {
-        "active" => Ok(BlackboardEntryState::Active),
-        "superseded" => Ok(BlackboardEntryState::Superseded),
-        "tombstoned" => Ok(BlackboardEntryState::Tombstoned),
-        _ => Err(BlackboardStoreError::CorruptEnum(value.to_string())),
-    }
-}
 
 #[derive(Debug, Error)]
 pub enum BlackboardStoreError {
@@ -402,6 +412,14 @@ pub enum BlackboardStoreError {
     EntryNotFound(String),
     #[error("blackboard entry ID was already used for different content: {0}")]
     EntryIdentityConflict(String),
+    #[error("blackboard revision conflict: expected {expected}, found {actual}")]
+    RevisionConflict { expected: u64, actual: u64 },
+    #[error("blackboard entry is no longer active: {0}")]
+    EntryNotActive(String),
+    #[error("blackboard successor entry was not found in this project: {0}")]
+    SuccessorNotFound(String),
+    #[error("blackboard successor entry is no longer active: {0}")]
+    SuccessorNotActive(String),
     #[error("blackboard evidence context-map entry not found: {0}")]
     EvidenceNotFound(String),
     #[error("blackboard evidence belongs to a different project")]
@@ -412,6 +430,10 @@ pub enum BlackboardStoreError {
     EvidenceNotCurrent,
     #[error("blackboard evidence position overflow")]
     PositionOverflow,
+    #[error("blackboard revision overflow")]
+    RevisionOverflow,
+    #[error("blackboard entry changed during a guarded update")]
+    ConcurrentMutation,
     #[error("stored blackboard entry is corrupt: {0}")]
     CorruptEntry(String),
     #[error("stored blackboard enum value is unknown: {0}")]
