@@ -450,3 +450,7 @@ pub enum StatefulRunStoreError {
     #[error("runtime timestamp overflow")]
     TimestampOverflow,
 }
+
+#[cfg(test)]
+#[path = "storage_tests.rs"]
+mod tests;
