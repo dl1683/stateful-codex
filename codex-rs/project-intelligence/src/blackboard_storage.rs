@@ -26,6 +26,7 @@ use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
+mod query;
 mod update;
 
 const INITIAL_REVISION: i64 = 1;
@@ -434,6 +435,8 @@ pub enum BlackboardStoreError {
     RevisionOverflow,
     #[error("blackboard entry changed during a guarded update")]
     ConcurrentMutation,
+    #[error("blackboard result count overflow")]
+    CountOverflow,
     #[error("stored blackboard entry is corrupt: {0}")]
     CorruptEntry(String),
     #[error("stored blackboard enum value is unknown: {0}")]

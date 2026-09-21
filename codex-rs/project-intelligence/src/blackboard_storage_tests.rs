@@ -5,6 +5,10 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::BlackboardEntryUpdate;
+use crate::BlackboardEvidenceFreshness;
+use crate::BlackboardHit;
+use crate::BlackboardQuery;
+use crate::BlackboardQueryResult;
 use crate::ContextMapCoverage;
 use crate::ContextMapStore;
 use crate::HierarchyNodeId;
@@ -15,6 +19,7 @@ use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
+use crate::RootBlackboardQuery;
 
 fn fingerprint(value: &str) -> SourceFingerprint {
     SourceFingerprint::parse(value).expect("valid fingerprint")
@@ -242,4 +247,99 @@ async fn guarded_updates_supersede_entries_without_rewriting_identity() {
             .await,
         Err(BlackboardStoreError::EntryNotActive(id)) if id == created.id.as_str()
     ));
+}
+
+#[tokio::test]
+async fn root_projection_and_deeper_query_derive_live_evidence_state() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (hierarchy, blackboard, created, file_revision) = fixture(&temp_dir).await;
+    let initial = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 10,
+        })
+        .await
+        .expect("root projection loads");
+    assert_eq!(
+        initial.data,
+        vec![BlackboardHit::new(
+            created.clone(),
+            BlackboardEvidenceFreshness::Current,
+        )]
+    );
+    assert_eq!(initial.omitted_entries, 0);
+
+    let mut deeper_value = created.value.clone();
+    deeper_value.node_id = HierarchyNodeId::parse("node-file").expect("valid node ID");
+    deeper_value.content = "A hidden deployment constraint affects the strategy.".to_string();
+    deeper_value.verification = BlackboardVerification::Unverified;
+    deeper_value.root_promotion = RootPromotion::NotPromoted;
+    deeper_value.evidence.clear();
+    deeper_value.provenance.source_id = "turn-3".to_string();
+    let deeper = blackboard
+        .create_entry(
+            BlackboardEntryId::parse("note-deployment").expect("valid entry ID"),
+            deeper_value,
+        )
+        .await
+        .expect("deeper entry inserts");
+    assert_eq!(
+        blackboard
+            .query(BlackboardQuery {
+                project_id: "project-1".to_string(),
+                text: Some("deployment constraint".to_string()),
+                within_node: Some(HierarchyNodeId::parse("node-file").expect("valid node ID"),),
+                max_results: 10,
+            })
+            .await
+            .expect("deeper query succeeds"),
+        BlackboardQueryResult {
+            data: vec![BlackboardHit::new(
+                deeper,
+                BlackboardEvidenceFreshness::NotApplicable,
+            )],
+            truncated: false,
+        }
+    );
+    let before_source_change = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 10,
+        })
+        .await
+        .expect("root projection reloads");
+    assert_eq!(before_source_change.data, initial.data);
+    assert!(before_source_change.revision > initial.revision);
+
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &HierarchyNodeId::parse("node-file").expect("valid node ID"),
+            HierarchySourceUpdate {
+                expected_revision: file_revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:def")),
+            },
+        )
+        .await
+        .expect("source changes");
+    let stale = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 10,
+        })
+        .await
+        .expect("stale projection loads");
+    assert_eq!(stale.data.len(), 1);
+    assert_eq!(
+        (
+            stale.data[0].evidence_freshness,
+            stale.data[0].effective_verification,
+        ),
+        (
+            BlackboardEvidenceFreshness::Stale,
+            BlackboardVerification::Stale,
+        )
+    );
+    assert!(stale.revision > before_source_change.revision);
 }
