@@ -239,7 +239,7 @@ async function serveStatic(pathname, response) {
     throw new HttpError(404, "not found");
   }
   let body = await readFile(path);
-  if (path.endsWith("index.html")) {
+  if (extname(path) === ".html") {
     body = Buffer.from(
       body
         .toString("utf8")
