@@ -140,3 +140,65 @@ async fn storage_rejects_non_filesystem_parent_relationships() {
         .expect_err("a file cannot be parented directly by the project");
     assert!(matches!(error, HierarchyStoreError::InvalidParent { .. }));
 }
+
+#[tokio::test]
+async fn source_state_updates_are_revision_guarded() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let store = open_store(&temp_dir).await;
+    let project_id = HierarchyNodeId::parse("node-project").expect("valid ID");
+    let root_id = HierarchyNodeId::parse("node-root").expect("valid ID");
+    store
+        .create_node(project_id.clone(), project_node())
+        .await
+        .expect("project node should insert");
+    let created = store
+        .create_node(
+            root_id.clone(),
+            child_node(&project_id, NodeKind::Directory, ""),
+        )
+        .await
+        .expect("root directory should insert");
+
+    let replaced = store
+        .update_source_state(
+            "project-1",
+            &root_id,
+            HierarchySourceUpdate {
+                expected_revision: created.revision,
+                lifecycle: NodeLifecycle::Replaced,
+                source_fingerprint: Some("sha256:def".to_string()),
+            },
+        )
+        .await
+        .expect("current revision should update");
+    assert_eq!(
+        replaced,
+        HierarchyNode {
+            lifecycle: NodeLifecycle::Replaced,
+            revision: created.revision + 1,
+            updated_at_ms: replaced.updated_at_ms,
+            value: NewHierarchyNode {
+                source_fingerprint: Some("sha256:def".to_string()),
+                ..created.value.clone()
+            },
+            ..created.clone()
+        }
+    );
+
+    let error = store
+        .update_source_state(
+            "project-1",
+            &root_id,
+            HierarchySourceUpdate {
+                expected_revision: created.revision,
+                lifecycle: NodeLifecycle::Missing,
+                source_fingerprint: replaced.value.source_fingerprint.clone(),
+            },
+        )
+        .await
+        .expect_err("stale revision should be rejected");
+    assert_eq!(
+        error.to_string(),
+        "hierarchy revision conflict: expected 1, found 2"
+    );
+}

@@ -26,6 +26,13 @@ pub struct HierarchyStore {
     pool: SqlitePool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HierarchySourceUpdate {
+    pub expected_revision: u64,
+    pub lifecycle: NodeLifecycle,
+    pub source_fingerprint: Option<String>,
+}
+
 impl HierarchyStore {
     pub async fn open(sqlite: &SqliteConfig) -> Result<Self, HierarchyStoreError> {
         tokio::fs::create_dir_all(sqlite.home()).await?;
@@ -101,6 +108,52 @@ impl HierarchyStore {
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    pub async fn update_source_state(
+        &self,
+        project_id: &str,
+        id: &HierarchyNodeId,
+        update: HierarchySourceUpdate,
+    ) -> Result<HierarchyNode, HierarchyStoreError> {
+        let expected_revision = i64::try_from(update.expected_revision)
+            .map_err(|_| HierarchyStoreError::RevisionOverflow)?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current = load_node(&mut transaction, project_id, id)
+            .await?
+            .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))?;
+        if current.revision != update.expected_revision {
+            return Err(HierarchyStoreError::RevisionConflict {
+                expected: update.expected_revision,
+                actual: current.revision,
+            });
+        }
+        let mut proposed_value = current.value;
+        proposed_value.source_fingerprint = update.source_fingerprint;
+        proposed_value.validate()?;
+        let updated = sqlx::query(
+            "UPDATE hierarchy_nodes
+             SET source_fingerprint = ?, lifecycle = ?, revision = revision + 1,
+                 updated_at_ms = ?
+             WHERE project_id = ? AND id = ? AND revision = ?",
+        )
+        .bind(&proposed_value.source_fingerprint)
+        .bind(lifecycle_name(update.lifecycle))
+        .bind(unix_timestamp_millis()?)
+        .bind(project_id)
+        .bind(id.as_str())
+        .bind(expected_revision)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if updated != 1 {
+            return Err(HierarchyStoreError::ConcurrentMutation);
+        }
+        let node = load_node(&mut transaction, project_id, id)
+            .await?
+            .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))?;
+        transaction.commit().await?;
+        Ok(node)
     }
 }
 
@@ -281,6 +334,12 @@ pub enum HierarchyStoreError {
     InvalidParent { parent: String, kind: NodeKind },
     #[error("hierarchy node not found: {0}")]
     NodeNotFound(String),
+    #[error("hierarchy revision conflict: expected {expected}, found {actual}")]
+    RevisionConflict { expected: u64, actual: u64 },
+    #[error("hierarchy revision does not fit the storage representation")]
+    RevisionOverflow,
+    #[error("hierarchy node changed during a guarded mutation")]
+    ConcurrentMutation,
     #[error("stored hierarchy node is corrupt: {0}")]
     CorruptNode(String),
     #[error("stored hierarchy enum value is unknown: {0}")]
