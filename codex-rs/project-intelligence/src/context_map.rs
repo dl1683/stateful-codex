@@ -9,6 +9,8 @@ use crate::HierarchyNode;
 use crate::HierarchyNodeId;
 use crate::NodeKind;
 use crate::NodeLifecycle;
+use crate::ProjectRelativePath;
+use crate::RegionAnchor;
 use crate::SourceFingerprint;
 
 const MAX_ID_BYTES: usize = 512;
@@ -136,7 +138,15 @@ impl ContextMapQuery {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextMapHit {
     pub entry: ContextMapEntry,
+    pub source: ContextMapSource,
     pub freshness: ContextMapFreshness,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextMapSource {
+    pub project_root: String,
+    pub relative_path: ProjectRelativePath,
+    pub region_anchor: Option<RegionAnchor>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -171,6 +181,19 @@ impl ContextMapEntry {
             }
         }
     }
+
+    pub fn source_route(&self, node: &HierarchyNode) -> Result<ContextMapSource, ContextMapError> {
+        self.freshness_against(node)?;
+        Ok(ContextMapSource {
+            project_root: node
+                .value
+                .project_root
+                .clone()
+                .ok_or(ContextMapError::MissingSourceRoute)?,
+            relative_path: node.value.relative_path.clone(),
+            region_anchor: node.value.region_anchor.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -195,6 +218,8 @@ pub enum ContextMapError {
     InvalidQuery,
     #[error("context-map query contains no searchable terms")]
     NoSearchTerms,
+    #[error("context-map hierarchy node is missing its exact source route")]
+    MissingSourceRoute,
 }
 
 fn validate_identity(value: &str, maximum_bytes: usize) -> Result<(), ()> {

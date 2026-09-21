@@ -133,7 +133,12 @@ impl ContextMapStore {
                     ContextMapStoreError::NodeNotFound(entry.value.node_id.to_string())
                 })?;
             let freshness = entry.freshness_against(&node)?;
-            hits.push(ContextMapHit { entry, freshness });
+            let source = entry.source_route(&node)?;
+            hits.push(ContextMapHit {
+                entry,
+                source,
+                freshness,
+            });
         }
         Ok(hits)
     }

@@ -13,6 +13,7 @@ pub use context_map::ContextMapError;
 pub use context_map::ContextMapFreshness;
 pub use context_map::ContextMapHit;
 pub use context_map::ContextMapQuery;
+pub use context_map::ContextMapSource;
 pub use context_map::NewContextMapEntry;
 pub use context_map_storage::ContextMapStore;
 pub use context_map_storage::ContextMapStoreError;

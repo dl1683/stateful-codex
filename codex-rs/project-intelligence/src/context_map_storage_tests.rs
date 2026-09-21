@@ -4,6 +4,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::*;
+use crate::ContextMapSource;
 use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;
 use crate::NewHierarchyNode;
@@ -82,6 +83,14 @@ fn new_entry(source_fingerprint: &str) -> NewContextMapEntry {
         description: "Project purpose, setup, and operator instructions.".to_string(),
         routing_terms: vec!["purpose".to_string(), "setup".to_string()],
         coverage: ContextMapCoverage::Complete,
+    }
+}
+
+fn readme_source() -> ContextMapSource {
+    ContextMapSource {
+        project_root: "C:\\workspace".to_string(),
+        relative_path: ProjectRelativePath::parse("README.md").expect("valid path"),
+        region_anchor: None,
     }
 }
 
@@ -183,6 +192,7 @@ async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
             .expect("query should succeed"),
         vec![ContextMapHit {
             entry: entry.clone(),
+            source: readme_source(),
             freshness: ContextMapFreshness::Current,
         }]
     );
@@ -206,6 +216,7 @@ async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
             .expect("stale map should remain discoverable"),
         vec![ContextMapHit {
             entry,
+            source: readme_source(),
             freshness: ContextMapFreshness::Stale,
         }]
     );
@@ -274,6 +285,7 @@ async fn guarded_reindex_replaces_the_search_document_for_the_current_source() {
             .expect("new search should succeed"),
         vec![ContextMapHit {
             entry: updated,
+            source: readme_source(),
             freshness: ContextMapFreshness::Current,
         }]
     );
