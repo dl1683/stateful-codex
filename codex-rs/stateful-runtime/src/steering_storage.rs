@@ -11,6 +11,7 @@ use crate::SteeringStatus;
 use crate::SteeringUpdate;
 use crate::steering::SteeringError;
 use crate::storage::unix_timestamp_millis;
+use crate::storage::validate_list_limit;
 
 impl StatefulRunStore {
     pub async fn submit_steering(
@@ -64,16 +65,36 @@ impl StatefulRunStore {
     pub async fn list_steering(
         &self,
         run_id: &StatefulRunId,
+        after: Option<&SteeringId>,
         max_results: u32,
     ) -> Result<Vec<StatefulSteering>, StatefulRunStoreError> {
-        if max_results == 0 || max_results > 100 {
-            return Err(StatefulRunStoreError::InvalidListLimit);
-        }
+        validate_list_limit(max_results)?;
+        let cursor = match after {
+            Some(id) => {
+                let mut connection = self.pool.acquire().await?;
+                let steering = load_steering(&mut connection, id)
+                    .await?
+                    .ok_or_else(|| StatefulRunStoreError::SteeringNotFound(id.to_string()))?;
+                if &steering.value.run_id != run_id {
+                    return Err(StatefulRunStoreError::InvalidListCursor);
+                }
+                Some((steering.created_at_ms, steering.id.to_string()))
+            }
+            None => None,
+        };
+        let (after_created_at_ms, after_id) = cursor
+            .map(|(created_at_ms, id)| (Some(created_at_ms), Some(id)))
+            .unwrap_or((None, None));
         let ids = sqlx::query_scalar::<_, String>(
             "SELECT id FROM stateful_steering WHERE run_id = ?
+               AND (? IS NULL OR created_at_ms > ? OR (created_at_ms = ? AND id > ?))
              ORDER BY created_at_ms, id LIMIT ?",
         )
         .bind(run_id.as_str())
+        .bind(after_created_at_ms)
+        .bind(after_created_at_ms)
+        .bind(after_created_at_ms)
+        .bind(after_id)
         .bind(i64::from(max_results))
         .fetch_all(&self.pool)
         .await?;

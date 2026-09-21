@@ -81,7 +81,7 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
             .latest_obligation(&id)
             .await
             .expect("obligation loads"),
-        Some(obligation)
+        Some(obligation.clone())
     );
     assert_eq!(
         reopened
@@ -143,7 +143,14 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
         .expect("steering applies");
     assert_eq!(
         reopened
-            .list_steering(&id, 10)
+            .list_obligations(&id, /*after_sequence*/ None, /*max_results*/ 10)
+            .await
+            .expect("obligations list"),
+        vec![obligation]
+    );
+    assert_eq!(
+        reopened
+            .list_steering(&id, /*after*/ None, /*max_results*/ 10)
             .await
             .expect("steering lists"),
         vec![applied]

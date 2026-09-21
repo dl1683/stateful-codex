@@ -235,6 +235,39 @@ impl StatefulRunStore {
         let mut connection = self.pool.acquire().await?;
         load_obligation_by_sequence(&mut connection, sequence).await
     }
+
+    pub async fn list_obligations(
+        &self,
+        run_id: &StatefulRunId,
+        after_sequence: Option<u64>,
+        max_results: u32,
+    ) -> Result<Vec<StatefulObligation>, StatefulRunStoreError> {
+        validate_list_limit(max_results)?;
+        let after_sequence = after_sequence
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| StatefulRunStoreError::CountOverflow)?
+            .unwrap_or_default();
+        let sequences = sqlx::query_scalar::<_, i64>(
+            "SELECT sequence FROM stateful_obligations
+             WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?",
+        )
+        .bind(run_id.as_str())
+        .bind(after_sequence)
+        .bind(i64::from(max_results))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut connection = self.pool.acquire().await?;
+        let mut data = Vec::with_capacity(sequences.len());
+        for sequence in sequences {
+            data.push(
+                load_obligation_by_sequence(&mut connection, sequence)
+                    .await?
+                    .ok_or(StatefulRunStoreError::CorruptObligationSequence(sequence))?,
+            );
+        }
+        Ok(data)
+    }
 }
 
 #[derive(FromRow)]
@@ -401,6 +434,13 @@ fn validate_record_id(value: &str) -> Result<(), StatefulRunStoreError> {
     Ok(())
 }
 
+pub(crate) fn validate_list_limit(max_results: u32) -> Result<(), StatefulRunStoreError> {
+    if max_results == 0 || max_results > 100 {
+        return Err(StatefulRunStoreError::InvalidListLimit);
+    }
+    Ok(())
+}
+
 pub(crate) fn unix_timestamp_millis() -> Result<i64, StatefulRunStoreError> {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
     i64::try_from(duration.as_millis()).map_err(|_| StatefulRunStoreError::TimestampOverflow)
@@ -441,6 +481,8 @@ pub enum StatefulRunStoreError {
     ObligationIdentityConflict(String),
     #[error("obligation not found: {0}")]
     ObligationNotFound(String),
+    #[error("stored obligation sequence has no record: {0}")]
+    CorruptObligationSequence(i64),
     #[error("obligation project does not match its run")]
     ProjectMismatch,
     #[error("steering ID was already used for different content: {0}")]
@@ -456,6 +498,8 @@ pub enum StatefulRunStoreError {
     StrategyRevisionMismatch,
     #[error("list limit must be between 1 and 100")]
     InvalidListLimit,
+    #[error("list cursor does not belong to the requested run")]
+    InvalidListCursor,
     #[error("stored runtime enum value is unknown: {0}")]
     CorruptEnum(String),
     #[error("stored runtime count is invalid")]
