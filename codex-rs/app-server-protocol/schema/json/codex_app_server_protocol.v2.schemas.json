@@ -7204,6 +7204,13 @@
       "title": "ErrorNotification",
       "type": "object"
     },
+    "EvidenceEncoding": {
+      "enum": [
+        "utf8",
+        "base64"
+      ],
+      "type": "string"
+    },
     "ExperimentalFeature": {
       "properties": {
         "announcement": {

@@ -1414,6 +1414,11 @@ class EnvironmentConnectionNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class EvidenceEncoding(Enum):
+    utf8 = "utf8"
+    base64 = "base64"
+
+
 class ExperimentalFeatureEnablementSetParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,

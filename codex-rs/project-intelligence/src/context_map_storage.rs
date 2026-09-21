@@ -100,6 +100,27 @@ impl ContextMapStore {
         load_entry(&mut connection, project_id, id).await
     }
 
+    pub async fn get_hit(
+        &self,
+        project_id: &str,
+        id: &ContextMapEntryId,
+    ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
+        let mut connection = self.pool.acquire().await?;
+        let Some(entry) = load_entry(&mut connection, project_id, id).await? else {
+            return Ok(None);
+        };
+        let node = load_node(&mut connection, project_id, &entry.value.node_id)
+            .await?
+            .ok_or_else(|| ContextMapStoreError::NodeNotFound(entry.value.node_id.to_string()))?;
+        let freshness = entry.freshness_against(&node)?;
+        let source = entry.source_route(&node)?;
+        Ok(Some(ContextMapHit {
+            entry,
+            source,
+            freshness,
+        }))
+    }
+
     pub async fn query(
         &self,
         query: ContextMapQuery,

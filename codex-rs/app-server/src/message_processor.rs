@@ -42,6 +42,7 @@ use crate::request_processors::McpEventStreams;
 use crate::request_processors::McpRequestProcessor;
 use crate::request_processors::PluginRequestProcessor;
 use crate::request_processors::ProcessExecRequestProcessor;
+use crate::request_processors::ProjectIntelligenceRequestProcessor;
 use crate::request_processors::ProjectRequestProcessor;
 use crate::request_processors::RemoteControlRequestProcessor;
 use crate::request_processors::SearchRequestProcessor;
@@ -154,6 +155,7 @@ pub(crate) struct MessageProcessor {
     catalog_processor: CatalogRequestProcessor,
     command_exec_processor: CommandExecRequestProcessor,
     process_exec_processor: ProcessExecRequestProcessor,
+    project_intelligence_processor: ProjectIntelligenceRequestProcessor,
     config_processor: ConfigRequestProcessor,
     context_map_processor: ContextMapRequestProcessor,
     environment_processor: EnvironmentRequestProcessor,
@@ -519,6 +521,10 @@ impl MessageProcessor {
             state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
             Arc::clone(&stateful_event_sink),
         );
+        let project_intelligence_processor = ProjectIntelligenceRequestProcessor::new(
+            Arc::clone(&thread_store),
+            state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
+        );
         let stateful_processor = StatefulRequestProcessor::new(
             Arc::clone(&thread_store),
             state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
@@ -612,6 +618,7 @@ impl MessageProcessor {
             catalog_processor,
             command_exec_processor,
             process_exec_processor,
+            project_intelligence_processor,
             config_processor,
             context_map_processor,
             blackboard_processor,
@@ -1513,6 +1520,14 @@ impl MessageProcessor {
             }
             ClientRequest::ContextMapRefresh { params, .. } => {
                 self.context_map_processor.context_map_refresh(params).await
+            }
+            ClientRequest::ProjectIntelligenceStatus { params, .. } => {
+                self.project_intelligence_processor.status(params).await
+            }
+            ClientRequest::EvidenceRead { params, .. } => {
+                self.project_intelligence_processor
+                    .evidence_read(params)
+                    .await
             }
             ClientRequest::BlackboardQuery { params, .. } => {
                 self.blackboard_processor.query(params).await

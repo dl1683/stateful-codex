@@ -153,6 +153,7 @@ export type { DynamicToolNamespaceTool } from "./DynamicToolNamespaceTool";
 export type { DynamicToolSpec } from "./DynamicToolSpec";
 export type { EnvironmentConnectionNotification } from "./EnvironmentConnectionNotification";
 export type { ErrorNotification } from "./ErrorNotification";
+export type { EvidenceEncoding } from "./EvidenceEncoding";
 export type { ExecPolicyAmendment } from "./ExecPolicyAmendment";
 export type { ExperimentalFeature } from "./ExperimentalFeature";
 export type { ExperimentalFeatureEnablementSetParams } from "./ExperimentalFeatureEnablementSetParams";

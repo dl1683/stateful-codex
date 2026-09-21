@@ -843,6 +843,18 @@ client_request_definitions! {
         serialization: global("project-intelligence"),
         response: v2::ContextMapRefreshResponse,
     },
+    #[experimental("projectIntelligence/status")]
+    ProjectIntelligenceStatus => "projectIntelligence/status" {
+        params: v2::ProjectIntelligenceStatusParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::ProjectIntelligenceStatusResponse,
+    },
+    #[experimental("evidence/read")]
+    EvidenceRead => "evidence/read" {
+        params: v2::EvidenceReadParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::EvidenceReadResponse,
+    },
     #[experimental("statefulRun/start")]
     StatefulRunStart => "statefulRun/start" {
         params: v2::StatefulRunStartParams,

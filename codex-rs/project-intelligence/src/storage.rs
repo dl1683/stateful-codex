@@ -24,7 +24,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
 pub struct HierarchyStore {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -394,6 +394,8 @@ pub enum HierarchyStoreError {
     CorruptNode(String),
     #[error("stored hierarchy enum value is unknown: {0}")]
     CorruptEnum(String),
+    #[error("stored project-intelligence count is invalid")]
+    CorruptCount,
     #[error("system time cannot be represented as Unix milliseconds")]
     InvalidSystemTime,
 }
