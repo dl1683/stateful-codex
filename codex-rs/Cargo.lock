@@ -2262,6 +2262,7 @@ dependencies = [
  "codex-skills-extension",
  "codex-state",
  "codex-stateful-extension",
+ "codex-stateful-runtime",
  "codex-thread-store",
  "codex-tools",
  "codex-uds",

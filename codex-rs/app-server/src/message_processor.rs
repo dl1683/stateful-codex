@@ -43,6 +43,7 @@ use crate::request_processors::ProcessExecRequestProcessor;
 use crate::request_processors::ProjectRequestProcessor;
 use crate::request_processors::RemoteControlRequestProcessor;
 use crate::request_processors::SearchRequestProcessor;
+use crate::request_processors::StatefulRequestProcessor;
 use crate::request_processors::ThreadGoalRequestProcessor;
 use crate::request_processors::ThreadQueueRequestProcessor;
 use crate::request_processors::ThreadRequestProcessor;
@@ -164,6 +165,7 @@ pub(crate) struct MessageProcessor {
     project_processor: ProjectRequestProcessor,
     remote_control_processor: RemoteControlRequestProcessor,
     search_processor: SearchRequestProcessor,
+    stateful_processor: StatefulRequestProcessor,
     thread_goal_processor: ThreadGoalRequestProcessor,
     thread_queue_processor: ThreadQueueRequestProcessor,
     thread_processor: ThreadRequestProcessor,
@@ -507,6 +509,11 @@ impl MessageProcessor {
             Arc::clone(&thread_store),
             state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
         );
+        let stateful_processor = StatefulRequestProcessor::new(
+            Arc::clone(&thread_store),
+            state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
+            outgoing.clone(),
+        );
         let thread_processor = ThreadRequestProcessor::new(
             auth_manager.clone(),
             Arc::clone(&thread_manager),
@@ -609,6 +616,7 @@ impl MessageProcessor {
             project_processor,
             remote_control_processor,
             search_processor,
+            stateful_processor,
             thread_goal_processor,
             thread_queue_processor,
             thread_processor,
@@ -1494,6 +1502,30 @@ impl MessageProcessor {
             }
             ClientRequest::ContextMapRefresh { params, .. } => {
                 self.context_map_processor.context_map_refresh(params).await
+            }
+            ClientRequest::StatefulRunStart { params, .. } => {
+                self.stateful_processor.run_start(params).await
+            }
+            ClientRequest::StatefulRunRead { params, .. } => {
+                self.stateful_processor.run_read(params).await
+            }
+            ClientRequest::StatefulRunPause { params, .. } => {
+                self.stateful_processor.run_pause(params).await
+            }
+            ClientRequest::StatefulRunResume { params, .. } => {
+                self.stateful_processor.run_resume(params).await
+            }
+            ClientRequest::StatefulRunCancel { params, .. } => {
+                self.stateful_processor.run_cancel(params).await
+            }
+            ClientRequest::ObligationList { params, .. } => {
+                self.stateful_processor.obligation_list(params).await
+            }
+            ClientRequest::SteeringSubmit { params, .. } => {
+                self.stateful_processor.steering_submit(params).await
+            }
+            ClientRequest::SteeringList { params, .. } => {
+                self.stateful_processor.steering_list(params).await
             }
             ClientRequest::ThreadSearch { params, .. } => {
                 self.thread_processor.thread_search(params).await

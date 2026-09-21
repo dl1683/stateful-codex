@@ -435,7 +435,7 @@ fn validate_record_id(value: &str) -> Result<(), StatefulRunStoreError> {
 }
 
 pub(crate) fn validate_list_limit(max_results: u32) -> Result<(), StatefulRunStoreError> {
-    if max_results == 0 || max_results > 100 {
+    if max_results == 0 || max_results > 101 {
         return Err(StatefulRunStoreError::InvalidListLimit);
     }
     Ok(())
@@ -496,7 +496,7 @@ pub enum StatefulRunStoreError {
     },
     #[error("applied steering strategy revision does not match the run")]
     StrategyRevisionMismatch,
-    #[error("list limit must be between 1 and 100")]
+    #[error("list limit must be between 1 and 101")]
     InvalidListLimit,
     #[error("list cursor does not belong to the requested run")]
     InvalidListCursor,

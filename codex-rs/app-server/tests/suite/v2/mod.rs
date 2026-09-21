@@ -120,6 +120,7 @@ mod session_end;
 mod skills_list;
 mod sleep;
 mod stateful_project_context;
+mod stateful_run;
 mod thread_archive;
 mod thread_attachments;
 mod thread_delete;
