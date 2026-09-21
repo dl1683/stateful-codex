@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+import { renderWorkspace } from "../public/workspace-view.mjs";
+import { workspaceFixture } from "./workspace-fixture.mjs";
+
+test("workspace presents semantic progress and evidence before raw activity", async () => {
+  const actual = renderWorkspace(workspaceFixture());
+  const expected = await readFile(
+    new URL("snapshots/workspace.html", import.meta.url),
+    "utf8",
+  );
+  assert.equal(`${actual.trim()}\n`, expected);
+  assert.ok(
+    actual.indexOf("Current obligation") <
+      actual.indexOf("Supporting activity"),
+  );
+  assert.match(actual, /A result is not automatically verified/);
+});

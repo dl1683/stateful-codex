@@ -151,6 +151,15 @@ async function openWorkspace() {
   sessionStorage.setItem("stateful-thread", thread.id);
   sessionStorage.setItem("stateful-mode", state.mode);
   sessionStorage.setItem("stateful-goal", state.goal);
+  sessionStorage.setItem("stateful-thread-action", state.threadAction);
+  sessionStorage.setItem(
+    "stateful-max-continuations",
+    String(state.maxContinuations),
+  );
+  sessionStorage.setItem(
+    "stateful-max-elapsed-seconds",
+    String(state.maxElapsedSeconds),
+  );
   window.location.assign("/workspace.html");
 }
 

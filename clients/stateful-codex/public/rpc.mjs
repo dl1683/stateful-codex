@@ -33,3 +33,18 @@ export function subscribe(onMessage) {
     });
   return () => source.close();
 }
+
+export async function reply(message) {
+  const response = await fetch("/reply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Stateful-Session": sessionToken,
+    },
+    body: JSON.stringify(message),
+  });
+  if (!response.ok) {
+    const body = await response.json();
+    throw new Error(body.error?.message ?? "Codex reply failed");
+  }
+}
