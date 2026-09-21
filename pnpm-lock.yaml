@@ -30,6 +30,8 @@ importers:
         specifier: ^3.5.3
         version: 3.5.3
 
+  clients/stateful-codex: {}
+
   codex-cli: {}
 
   codex-rs/responses-api-proxy/npm: {}
