@@ -849,6 +849,12 @@ client_request_definitions! {
         serialization: global_shared_read("project-intelligence"),
         response: v2::ProjectIntelligenceStatusResponse,
     },
+    #[experimental("projectIntelligence/tree")]
+    ProjectIntelligenceTree => "projectIntelligence/tree" {
+        params: v2::ProjectIntelligenceTreeParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::ProjectIntelligenceTreeResponse,
+    },
     #[experimental("evidence/read")]
     EvidenceRead => "evidence/read" {
         params: v2::EvidenceReadParams,

@@ -138,6 +138,34 @@ impl HierarchyStore {
         rows.into_iter().map(TryInto::try_into).collect()
     }
 
+    pub async fn list_project_nodes(
+        &self,
+        project_id: &str,
+        offset: u32,
+        max_results: u32,
+    ) -> Result<Vec<HierarchyNode>, HierarchyStoreError> {
+        let rows = sqlx::query_as::<_, StoredHierarchyNode>(
+            "SELECT * FROM hierarchy_nodes
+             WHERE project_id = ?
+             ORDER BY CASE kind WHEN 'project' THEN 0 ELSE 1 END,
+                      project_root, relative_path,
+                      CASE kind
+                        WHEN 'directory' THEN 0
+                        WHEN 'file' THEN 1
+                        WHEN 'region' THEN 2
+                        ELSE 3
+                      END,
+                      anchor_scheme, anchor_locator, id
+             LIMIT ? OFFSET ?",
+        )
+        .bind(project_id)
+        .bind(i64::from(max_results))
+        .bind(i64::from(offset))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
     pub async fn update_source_state(
         &self,
         project_id: &str,

@@ -5,6 +5,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::ContextMapRegionAnchor;
 use super::ContextMapSource;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
@@ -37,6 +38,62 @@ pub struct ProjectIntelligenceStatusResponse {
     pub promoted_entry_count: u64,
     #[ts(type = "number | null")]
     pub updated_at: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ProjectIntelligenceTreeParams {
+    pub project_id: String,
+    #[ts(optional = nullable)]
+    pub cursor: Option<String>,
+    #[ts(optional = nullable)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ProjectIntelligenceTreeResponse {
+    pub data: Vec<ProjectIntelligenceNode>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ProjectIntelligenceNode {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub kind: ProjectIntelligenceNodeKind,
+    pub project_root: Option<AbsolutePathBuf>,
+    pub relative_path: String,
+    pub region_anchor: Option<ContextMapRegionAnchor>,
+    pub source_fingerprint: Option<String>,
+    pub lifecycle: ProjectIntelligenceNodeLifecycle,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum ProjectIntelligenceNodeKind {
+    Project,
+    Directory,
+    File,
+    Region,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum ProjectIntelligenceNodeLifecycle {
+    Active,
+    Missing,
+    Replaced,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]

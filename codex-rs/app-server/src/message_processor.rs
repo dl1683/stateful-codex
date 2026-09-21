@@ -1524,6 +1524,9 @@ impl MessageProcessor {
             ClientRequest::ProjectIntelligenceStatus { params, .. } => {
                 self.project_intelligence_processor.status(params).await
             }
+            ClientRequest::ProjectIntelligenceTree { params, .. } => {
+                self.project_intelligence_processor.tree(params).await
+            }
             ClientRequest::EvidenceRead { params, .. } => {
                 self.project_intelligence_processor
                     .evidence_read(params)

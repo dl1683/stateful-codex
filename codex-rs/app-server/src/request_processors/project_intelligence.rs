@@ -9,13 +9,21 @@ use codex_app_server_protocol::EvidenceEncoding;
 use codex_app_server_protocol::EvidenceReadParams;
 use codex_app_server_protocol::EvidenceReadResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::ProjectIntelligenceNode;
+use codex_app_server_protocol::ProjectIntelligenceNodeKind;
+use codex_app_server_protocol::ProjectIntelligenceNodeLifecycle;
 use codex_app_server_protocol::ProjectIntelligenceStatusParams;
 use codex_app_server_protocol::ProjectIntelligenceStatusResponse;
+use codex_app_server_protocol::ProjectIntelligenceTreeParams;
+use codex_app_server_protocol::ProjectIntelligenceTreeResponse;
 use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::ContextMapStoreError;
+use codex_project_intelligence::HierarchyNode;
 use codex_project_intelligence::HierarchyStore;
+use codex_project_intelligence::NodeKind;
+use codex_project_intelligence::NodeLifecycle;
 use codex_state::SqliteConfig;
 use codex_thread_store::StoredProject;
 use codex_thread_store::ThreadStore;
@@ -32,6 +40,8 @@ use crate::error_code::method_not_found;
 
 const DEFAULT_EVIDENCE_BYTES: u32 = 32 * 1024;
 const MAX_EVIDENCE_BYTES: u32 = 64 * 1024;
+const DEFAULT_TREE_PAGE_SIZE: u32 = 200;
+const MAX_TREE_PAGE_SIZE: u32 = 500;
 
 #[derive(Clone)]
 pub(crate) struct ProjectIntelligenceRequestProcessor {
@@ -178,6 +188,42 @@ impl ProjectIntelligenceRequestProcessor {
         ))
     }
 
+    pub(crate) async fn tree(
+        &self,
+        params: ProjectIntelligenceTreeParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        self.project(&params.project_id).await?;
+        let offset = params
+            .cursor
+            .as_deref()
+            .map(str::parse::<u32>)
+            .transpose()
+            .map_err(|_| invalid_params("invalid project-intelligence tree cursor"))?
+            .unwrap_or_default();
+        let limit = params.limit.unwrap_or(DEFAULT_TREE_PAGE_SIZE);
+        if limit == 0 || limit > MAX_TREE_PAGE_SIZE {
+            return Err(invalid_params("limit must be between 1 and 500"));
+        }
+        let mut nodes = self
+            .hierarchy()
+            .await?
+            .list_project_nodes(&params.project_id, offset, limit.saturating_add(1))
+            .await
+            .map_err(|error| {
+                internal_error(format!("failed to read project hierarchy: {error}"))
+            })?;
+        let has_more = nodes.len() > limit as usize;
+        nodes.truncate(limit as usize);
+        let next_cursor = has_more.then(|| offset.saturating_add(limit).to_string());
+        let data = nodes
+            .into_iter()
+            .map(api_node)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(
+            ProjectIntelligenceTreeResponse { data, next_cursor }.into(),
+        ))
+    }
+
     async fn project(&self, project_id: &str) -> Result<StoredProject, JSONRPCErrorError> {
         self.thread_store
             .read_project(project_id.to_string())
@@ -206,6 +252,46 @@ impl ProjectIntelligenceRequestProcessor {
             .await
             .map_err(context_map_error)
     }
+}
+
+fn api_node(node: HierarchyNode) -> Result<ProjectIntelligenceNode, JSONRPCErrorError> {
+    Ok(ProjectIntelligenceNode {
+        id: node.id.to_string(),
+        parent_id: node.value.parent_id.map(|parent| parent.to_string()),
+        kind: match node.value.kind {
+            NodeKind::Project => ProjectIntelligenceNodeKind::Project,
+            NodeKind::Directory => ProjectIntelligenceNodeKind::Directory,
+            NodeKind::File => ProjectIntelligenceNodeKind::File,
+            NodeKind::Region => ProjectIntelligenceNodeKind::Region,
+        },
+        project_root: node
+            .value
+            .project_root
+            .map(|root| {
+                AbsolutePathBuf::from_absolute_path(PathBuf::from(root)).map_err(|error| {
+                    internal_error(format!("stored hierarchy root is not absolute: {error}"))
+                })
+            })
+            .transpose()?,
+        relative_path: node.value.relative_path.to_string(),
+        region_anchor: node.value.region_anchor.map(|anchor| {
+            codex_app_server_protocol::ContextMapRegionAnchor {
+                scheme: anchor.scheme,
+                locator: anchor.locator,
+            }
+        }),
+        source_fingerprint: node
+            .value
+            .source_fingerprint
+            .map(|fingerprint| fingerprint.to_string()),
+        lifecycle: match node.lifecycle {
+            NodeLifecycle::Active => ProjectIntelligenceNodeLifecycle::Active,
+            NodeLifecycle::Missing => ProjectIntelligenceNodeLifecycle::Missing,
+            NodeLifecycle::Replaced => ProjectIntelligenceNodeLifecycle::Replaced,
+        },
+        revision: node.revision,
+        updated_at: node.updated_at_ms.div_euclid(/*rhs*/ 1000),
+    })
 }
 
 async fn read_and_fingerprint(

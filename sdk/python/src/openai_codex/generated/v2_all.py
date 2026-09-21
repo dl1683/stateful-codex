@@ -3718,6 +3718,19 @@ class ProjectChangedNotification(BaseModel):
     project_id: Annotated[str, Field(alias="projectId")]
 
 
+class ProjectIntelligenceNodeKind(Enum):
+    project = "project"
+    directory = "directory"
+    file = "file"
+    region = "region"
+
+
+class ProjectIntelligenceNodeLifecycle(Enum):
+    active = "active"
+    missing = "missing"
+    replaced = "replaced"
+
+
 class ProjectRoot(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8958,6 +8971,22 @@ class Project(BaseModel):
         ),
     ] = None
     roots: list[ProjectRoot]
+    updated_at: Annotated[int, Field(alias="updatedAt")]
+
+
+class ProjectIntelligenceNode(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    kind: ProjectIntelligenceNodeKind
+    lifecycle: ProjectIntelligenceNodeLifecycle
+    parent_id: Annotated[str | None, Field(alias="parentId")] = None
+    project_root: Annotated[AbsolutePathBuf | None, Field(alias="projectRoot")] = None
+    region_anchor: Annotated[ContextMapRegionAnchor | None, Field(alias="regionAnchor")] = None
+    relative_path: Annotated[str, Field(alias="relativePath")]
+    revision: Annotated[int, Field(ge=0)]
+    source_fingerprint: Annotated[str | None, Field(alias="sourceFingerprint")] = None
     updated_at: Annotated[int, Field(alias="updatedAt")]
 
 

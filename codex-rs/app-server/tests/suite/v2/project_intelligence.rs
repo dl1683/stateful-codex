@@ -15,8 +15,11 @@ use codex_app_server_protocol::EvidenceReadParams;
 use codex_app_server_protocol::EvidenceReadResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::ProjectIntelligenceNodeKind;
 use codex_app_server_protocol::ProjectIntelligenceStatusParams;
 use codex_app_server_protocol::ProjectIntelligenceStatusResponse;
+use codex_app_server_protocol::ProjectIntelligenceTreeParams;
+use codex_app_server_protocol::ProjectIntelligenceTreeResponse;
 use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::RequestId;
 use codex_features::Feature;
@@ -82,6 +85,42 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
     assert_eq!(status.blackboard_entry_count, 0);
     assert_eq!(status.promoted_entry_count, 0);
     assert!(status.updated_at.is_some());
+
+    let first_tree_page: ProjectIntelligenceTreeResponse = server
+        .request(|request_id| ClientRequest::ProjectIntelligenceTree {
+            request_id,
+            params: ProjectIntelligenceTreeParams {
+                project_id: status.project_id.clone(),
+                cursor: None,
+                limit: Some(2),
+            },
+        })
+        .await?;
+    let second_tree_page: ProjectIntelligenceTreeResponse = server
+        .request(|request_id| ClientRequest::ProjectIntelligenceTree {
+            request_id,
+            params: ProjectIntelligenceTreeParams {
+                project_id: status.project_id.clone(),
+                cursor: first_tree_page.next_cursor.clone(),
+                limit: Some(2),
+            },
+        })
+        .await?;
+    assert_eq!(first_tree_page.next_cursor, Some("2".to_string()));
+    assert_eq!(second_tree_page.next_cursor, None);
+    assert_eq!(
+        first_tree_page
+            .data
+            .iter()
+            .chain(&second_tree_page.data)
+            .map(|node| (node.kind, node.relative_path.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (ProjectIntelligenceNodeKind::Project, ""),
+            (ProjectIntelligenceNodeKind::Directory, ""),
+            (ProjectIntelligenceNodeKind::File, "EVIDENCE.txt"),
+        ]
+    );
 
     let routes: ContextMapQueryResponse = server
         .request(|request_id| ClientRequest::ContextMapQuery {
