@@ -13,8 +13,14 @@ doctest = false
 workspace = true
 
 [dependencies]
+codex-state = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+sqlx = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
 
 [dev-dependencies]
+codex-utils-absolute-path = { workspace = true }
 pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

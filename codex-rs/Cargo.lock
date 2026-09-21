@@ -4300,9 +4300,14 @@ dependencies = [
 name = "codex-project-intelligence"
 version = "0.0.0"
 dependencies = [
+ "codex-state",
+ "codex-utils-absolute-path",
  "pretty_assertions",
  "serde",
+ "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

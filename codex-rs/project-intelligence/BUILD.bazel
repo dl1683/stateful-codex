@@ -2,5 +2,6 @@ load("//:defs.bzl", "codex_rust_crate")
 
 codex_rust_crate(
     name = "project-intelligence",
+    compile_data = glob(["migrations/**"]),
     crate_name = "codex_project_intelligence",
 )
