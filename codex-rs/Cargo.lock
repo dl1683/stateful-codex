@@ -2260,6 +2260,7 @@ dependencies = [
  "codex-skills",
  "codex-skills-extension",
  "codex-state",
+ "codex-stateful-extension",
  "codex-thread-store",
  "codex-tools",
  "codex-uds",
@@ -4681,6 +4682,18 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "codex-stateful-extension"
+version = "0.0.0"
+dependencies = [
+ "codex-extension-api",
+ "codex-thread-store",
+ "pretty_assertions",
+ "serde_json",
+ "sha2 0.10.9",
+ "tracing",
 ]
 
 [[package]]

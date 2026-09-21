@@ -29,6 +29,7 @@ use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::ThreadHistoryMode;
+use codex_stateful_extension::SelectedProject;
 use codex_thread_store::PersistContext;
 use std::ops::ControlFlow;
 
@@ -1465,6 +1466,9 @@ impl ThreadRequestProcessor {
         if !selected_capability_roots.is_empty() {
             thread_extension_init.insert(selected_capability_roots);
         }
+        if let Some(project_id) = project_id.as_ref() {
+            thread_extension_init.insert(SelectedProject::new(project_id.clone()));
+        }
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
             None
@@ -2036,6 +2040,20 @@ impl ThreadRequestProcessor {
             &self.config.cwd,
         );
         if let Ok(loaded_thread) = self.thread_manager.get_thread(thread_uuid).await {
+            if let Some(project_id) = project_update.as_ref() {
+                match project_id {
+                    Some(project_id) => {
+                        loaded_thread
+                            .thread_extension_data()
+                            .insert(SelectedProject::new(project_id.clone()));
+                    }
+                    None => {
+                        loaded_thread
+                            .thread_extension_data()
+                            .remove::<SelectedProject>();
+                    }
+                }
+            }
             thread.session_id = loaded_thread.startup_metadata().session_id.to_string();
             let config_snapshot = loaded_thread.config_snapshot().await;
             apply_live_thread_settings(&mut thread, &config_snapshot);
@@ -2248,6 +2266,7 @@ impl ThreadRequestProcessor {
         let (thread_history, resume_source_thread) = self
             .load_resume_initial_history_from_stored_thread(stored_thread)
             .await?;
+        let selected_project_id = resume_source_thread.project_id.clone();
         let response_history = thread_history.clone();
         let NewThread {
             thread_id: resumed_thread_id,
@@ -2269,6 +2288,11 @@ impl ThreadRequestProcessor {
             return Err(internal_error(format!(
                 "thread {thread_id} reloaded as {resumed_thread_id} after revert"
             )));
+        }
+        if let Some(project_id) = selected_project_id {
+            codex_thread
+                .thread_extension_data()
+                .insert(SelectedProject::new(project_id));
         }
         codex_thread
             .restore_thread_settings(settings)
@@ -3697,6 +3721,9 @@ impl ThreadRequestProcessor {
             }
         };
         let (thread_history, resume_source_thread) = resume_result?;
+        let selected_project_id = resume_source_thread
+            .as_ref()
+            .and_then(|thread| thread.project_id.clone());
         if let InitialHistory::Resumed(resumed) = &thread_history
             && self
                 .pending_thread_unloads
@@ -3939,6 +3966,11 @@ impl ThreadRequestProcessor {
                 session_configured,
                 ..
             }) => {
+                if let Some(project_id) = selected_project_id.as_ref() {
+                    codex_thread
+                        .thread_extension_data()
+                        .insert(SelectedProject::new(project_id.clone()));
+                }
                 let ThreadResumeTarget::Client(request_id) = target else {
                     // Observe lifecycle events without attaching a client subscription.
                     self.thread_watch_manager
@@ -5122,11 +5154,16 @@ impl ThreadRequestProcessor {
             .await?
         };
 
+        let mut thread_extension_init = ExtensionDataInit::new();
+        if let Some(project_id) = inherited_project_id.as_ref() {
+            thread_extension_init.insert(SelectedProject::new(project_id.clone()));
+        }
         let fork_options = StartThreadOptions {
             thread_source,
             parent_trace,
             client_mcp_extensions,
             reserved_thread_id,
+            thread_extension_init,
             ..StartThreadOptions::new(config)
         };
         let new_thread = if let Some(prepared_fork) = prepared_fork {

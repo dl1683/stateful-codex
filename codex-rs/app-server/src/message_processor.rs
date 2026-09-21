@@ -347,6 +347,7 @@ impl MessageProcessor {
                     http_client_factory: config.http_client_factory(),
                     queue_service: queue_service.clone(),
                     turn_start_admission: Some(Arc::clone(&turn_start_admission)),
+                    thread_store: Arc::clone(&thread_store),
                 }),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     config.codex_home.clone(),

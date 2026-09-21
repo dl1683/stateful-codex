@@ -341,6 +341,7 @@ enabled = false
                     http_client_factory: good_config.http_client_factory(),
                     queue_service: None,
                     turn_start_admission: None,
+                    thread_store: Arc::clone(&thread_store),
                 }),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     good_config.codex_home.clone(),

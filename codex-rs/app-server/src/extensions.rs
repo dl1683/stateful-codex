@@ -25,6 +25,7 @@ use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_queue_extension::QueuedItemService;
 use codex_rollout::state_db::StateDbHandle;
+use codex_thread_store::ThreadStore;
 
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
@@ -45,6 +46,7 @@ pub(crate) struct ThreadExtensionDependencies {
     /// Process-scoped queue shared by idle dispatch and app-server requests.
     pub(crate) queue_service: Option<Arc<QueuedItemService>>,
     pub(crate) turn_start_admission: Option<Arc<dyn TurnStartAdmission>>,
+    pub(crate) thread_store: Arc<dyn ThreadStore>,
 }
 
 pub(crate) fn thread_extensions(
@@ -63,6 +65,7 @@ pub(crate) fn thread_extensions(
         http_client_factory,
         queue_service,
         turn_start_admission,
+        thread_store,
     } = dependencies;
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
     if let Some(admission) = turn_start_admission {
@@ -96,6 +99,7 @@ pub(crate) fn thread_extensions(
     codex_memories_extension::install(&mut builder, codex_otel::global());
     codex_mcp_extension::install(&mut builder);
     codex_mcp_extension::install_plugins(&mut builder, environment_manager);
+    codex_stateful_extension::install(&mut builder, thread_store);
     codex_web_search_extension::install(&mut builder, auth_manager.clone());
     codex_image_generation_extension::install(&mut builder, auth_manager, |config: &Config| {
         Some(config.codex_home.clone())
