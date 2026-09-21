@@ -7,6 +7,8 @@ use codex_project_intelligence::ContextMapStoreError;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::HierarchyStoreError;
 use codex_state::SqliteConfig;
+use codex_stateful_runtime::StatefulRunStore;
+use codex_stateful_runtime::StatefulRunStoreError;
 use tokio::sync::OnceCell;
 
 #[derive(Clone)]
@@ -15,6 +17,7 @@ pub(super) struct ProjectIntelligenceServices {
     blackboard: Arc<OnceCell<BlackboardStore>>,
     context_map: Arc<OnceCell<ContextMapStore>>,
     hierarchy: Arc<OnceCell<HierarchyStore>>,
+    runtime: Arc<OnceCell<StatefulRunStore>>,
 }
 
 impl ProjectIntelligenceServices {
@@ -24,6 +27,7 @@ impl ProjectIntelligenceServices {
             blackboard: Arc::new(OnceCell::new()),
             context_map: Arc::new(OnceCell::new()),
             hierarchy: Arc::new(OnceCell::new()),
+            runtime: Arc::new(OnceCell::new()),
         }
     }
 
@@ -42,6 +46,12 @@ impl ProjectIntelligenceServices {
     pub(super) async fn hierarchy(&self) -> Result<&HierarchyStore, HierarchyStoreError> {
         self.hierarchy
             .get_or_try_init(|| HierarchyStore::open(&self.sqlite))
+            .await
+    }
+
+    pub(super) async fn runtime(&self) -> Result<&StatefulRunStore, StatefulRunStoreError> {
+        self.runtime
+            .get_or_try_init(|| StatefulRunStore::open(&self.sqlite))
             .await
     }
 }

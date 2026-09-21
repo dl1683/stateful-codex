@@ -16,6 +16,7 @@ workspace = true
 codex-extension-api = { workspace = true }
 codex-project-intelligence = { workspace = true }
 codex-state = { workspace = true }
+codex-stateful-runtime = { workspace = true }
 codex-thread-store = { workspace = true }
 codex-utils-string = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

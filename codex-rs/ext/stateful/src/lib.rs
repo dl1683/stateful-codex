@@ -1,6 +1,7 @@
 //! Project-scoped Stateful Codex integration.
 
 mod root_blackboard;
+mod run_world_state;
 mod services;
 mod tools;
 mod world_state;
@@ -21,6 +22,8 @@ use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
 
 use crate::root_blackboard::RootBlackboardStatus;
+use crate::run_world_state::RunWorldStateStatus;
+use crate::run_world_state::run_world_state_section;
 use crate::services::ProjectIntelligenceServices;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
@@ -86,7 +89,14 @@ impl ContextContributor for StatefulExtension {
                     }
                 }
             };
-            vec![project_world_state_section(status)]
+            let mut sections = vec![project_world_state_section(status)];
+            if let Some(run_status) = self
+                .run_world_state(selected.project_id(), &input.thread_id.to_string())
+                .await
+            {
+                sections.push(run_world_state_section(run_status));
+            }
+            sections
         })
     }
 }
@@ -116,6 +126,79 @@ impl StatefulExtension {
                 RootBlackboardStatus::Unavailable
             }
         }
+    }
+
+    async fn run_world_state(
+        &self,
+        project_id: &str,
+        thread_id: &str,
+    ) -> Option<RunWorldStateStatus> {
+        let services = self.services.as_ref()?;
+        let store = match services.runtime().await {
+            Ok(store) => store,
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to open Stateful run store");
+                return Some(RunWorldStateStatus::Unavailable {
+                    project_id: project_id.to_string(),
+                });
+            }
+        };
+        let run = match store.run_for_thread(thread_id).await {
+            Ok(Some(run)) => run,
+            Ok(None) => return None,
+            Err(error) => {
+                tracing::warn!(%project_id, %thread_id, %error, "failed to load Stateful run");
+                return Some(RunWorldStateStatus::Unavailable {
+                    project_id: project_id.to_string(),
+                });
+            }
+        };
+        if run.value.project_id != project_id {
+            tracing::warn!(
+                selected_project_id = project_id,
+                run_project_id = run.value.project_id,
+                run_id = %run.id,
+                "active Stateful run does not belong to selected project"
+            );
+            return Some(RunWorldStateStatus::Unavailable {
+                project_id: project_id.to_string(),
+            });
+        }
+        let obligation = match store.latest_obligation(&run.id).await {
+            Ok(obligation) => obligation,
+            Err(error) => {
+                tracing::warn!(run_id = %run.id, %error, "failed to load current obligation");
+                return Some(RunWorldStateStatus::Unavailable {
+                    project_id: project_id.to_string(),
+                });
+            }
+        };
+        let steering = match store
+            .list_steering(&run.id, /*after*/ None, /*max_results*/ 100)
+            .await
+        {
+            Ok(steering) => steering
+                .into_iter()
+                .filter(|instruction| {
+                    matches!(
+                        instruction.status,
+                        codex_stateful_runtime::SteeringStatus::Submitted
+                            | codex_stateful_runtime::SteeringStatus::Acknowledged
+                    )
+                })
+                .collect(),
+            Err(error) => {
+                tracing::warn!(run_id = %run.id, %error, "failed to load pending steering");
+                return Some(RunWorldStateStatus::Unavailable {
+                    project_id: project_id.to_string(),
+                });
+            }
+        };
+        Some(RunWorldStateStatus::Available {
+            run,
+            obligation: obligation.map(Box::new),
+            steering,
+        })
     }
 }
 

@@ -4709,6 +4709,7 @@ dependencies = [
  "codex-extension-api",
  "codex-project-intelligence",
  "codex-state",
+ "codex-stateful-runtime",
  "codex-thread-store",
  "codex-utils-string",
  "pretty_assertions",

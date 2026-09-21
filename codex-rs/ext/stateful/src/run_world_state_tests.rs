@@ -1,0 +1,68 @@
+use codex_extension_api::PreviousWorldStateSection;
+use codex_stateful_runtime::NewObligation;
+use codex_stateful_runtime::NewStatefulRun;
+use codex_stateful_runtime::ObligationPacket;
+use codex_stateful_runtime::StatefulObligation;
+use codex_stateful_runtime::StatefulRun;
+use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStatus;
+use codex_stateful_runtime::WorkflowMode;
+
+use super::RunWorldStateStatus;
+use super::run_world_state_section;
+
+#[test]
+fn run_world_state_is_semantic_bounded_and_stable() {
+    let run_id = StatefulRunId::parse("run-1").expect("valid run id");
+    let section = run_world_state_section(RunWorldStateStatus::Available {
+        run: StatefulRun {
+            id: run_id.clone(),
+            value: NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "Find the decisive source constraint.".to_string(),
+                mode: WorkflowMode::Socratic,
+            },
+            status: StatefulRunStatus::Pending,
+            strategy: Some("Resolve the material assumptions first.".to_string()),
+            strategy_revision: 1,
+            result: None,
+            revision: 2,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        },
+        obligation: Some(Box::new(StatefulObligation {
+            id: "obligation-1".to_string(),
+            value: NewObligation {
+                project_id: "project-1".to_string(),
+                run_id,
+                packet: ObligationPacket {
+                    learning: vec!["One unresolved assumption controls execution.".to_string()],
+                    next: vec!["Ask the user to resolve it.".to_string()],
+                    ..Default::default()
+                },
+                provenance_source_id: "turn-1".to_string(),
+            },
+            sequence: 1,
+            revision: 1,
+            created_at_ms: 2,
+        })),
+        steering: Vec::new(),
+    });
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("first contribution renders");
+    assert!(rendered.body().contains("Mode: Socratic"));
+    assert!(rendered.body().contains("Do not invoke execution tools"));
+    assert!(
+        rendered
+            .body()
+            .contains("Learned: One unresolved assumption")
+    );
+    assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
+    assert!(
+        section
+            .render_diff(PreviousWorldStateSection::Known(section.snapshot()))
+            .is_none()
+    );
+}
