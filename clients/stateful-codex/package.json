@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "eval": "node eval/compare-rollouts.mjs",
     "start": "node server.mjs",
     "test": "node --test"
   },

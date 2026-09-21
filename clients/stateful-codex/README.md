@@ -18,3 +18,22 @@ different location. Both executables must be installed beside each other, as
 they are in a normal Codex package. The gateway removes `OPENAI_API_KEY` and
 `CODEX_API_KEY` from its child environment and forces the Codex ChatGPT login
 method.
+
+## Rollout comparison
+
+Compare an ordinary Codex rollout with a Stateful rollout only after running the
+same prompt through the same entry point, model, working directory, and
+permissions. The scorer verifies the model, reasoning effort, originator,
+source, approval and sandbox policy, permission profile, workspace roots,
+directory, and normalized prompt before treating the pair as comparable:
+
+```powershell
+npm run eval -- --baseline <baseline.jsonl> --stateful <stateful.jsonl> `
+  --expect "8 regular files" --expect "styles.css"
+```
+
+The report keeps full lifetime tokens separate from uncached tokens, checks the
+expected answer terms, and reports read-bearing tool calls plus Stateful
+retrieval and persistence calls. A read-bearing call is a rollout-level proxy,
+not an exact count of operating-system reads. A comparison that fails parity
+exits with status 2; a run that misses an expected term exits with status 3.

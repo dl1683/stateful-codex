@@ -109,14 +109,20 @@ history call surfacing as a user-visible error. The client test suite passes
 4/4 after those fixes.
 
 These results establish a usable end-to-end product slice, not the Stage 8
-release claim. The remaining release gate is comparative evaluation against
-normal Codex for lifetime tokens, repeated reads, knowledge precision/recall,
-decisive-detail discovery, steering latency, autonomous recovery, and evidence
-correctness. The repository-wide Rust suite also remains an explicit
-approval-gated validation step. On this Windows installation, some model-issued
-shell commands fail before execution because the configured Windows Store
-`pwsh.exe` returns access denied; Stateful recovery and non-shell tools continue,
-but that host-shell problem must not be reported as successful command execution.
+release claim. A rollout comparison tool and the first matched ordinary versus
+Stateful CLI benchmark now exist; `STATEFUL_CODEX_EVALUATION.md` records the
+method and result. Both runs were correct and Stateful reduced read-bearing tool
+calls from two to one, but it increased full lifetime tokens by 22.28% and
+uncached input plus output by 45.26% on the trivial inventory task. That negative
+result is preserved rather than presented as a product win. Representative
+evaluation of knowledge precision/recall, mature-workspace rereading, decisive
+detail discovery, steering latency, autonomous recovery, and evidence
+correctness remains open. The repository-wide Rust suite also remains an
+explicit approval-gated validation step. On this Windows installation, some
+model-issued shell commands fail before execution because the configured
+Windows Store `pwsh.exe` returns access denied; Stateful recovery and non-shell
+tools continue, but that host-shell problem must not be reported as successful
+command execution.
 
 ## System boundaries
 
