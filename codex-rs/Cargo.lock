@@ -4719,6 +4719,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-stateful-runtime"
+version = "0.0.0"
+dependencies = [
+ "codex-state",
+ "codex-utils-absolute-path",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "codex-stdio-to-uds"
 version = "0.0.0"
 dependencies = [

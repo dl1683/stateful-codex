@@ -92,6 +92,7 @@ members = [
     "ollama",
     "process-hardening",
     "project-intelligence",
+    "stateful-runtime",
     "realtime-webrtc",
     "voice-host",
     "protocol",
@@ -261,6 +262,7 @@ codex-protocol = { path = "protocol" }
 codex-prompts = { path = "prompts" }
 codex-queue-extension = { path = "ext/queue" }
 codex-stateful-extension = { path = "ext/stateful" }
+codex-stateful-runtime = { path = "stateful-runtime" }
 codex-responses-api-proxy = { path = "responses-api-proxy" }
 codex-response-debug-context = { path = "response-debug-context" }
 codex-rmcp-client = { path = "rmcp-client" }
