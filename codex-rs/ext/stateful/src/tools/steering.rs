@@ -16,6 +16,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
 
+use crate::StatefulEvent;
+use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
@@ -161,13 +163,19 @@ struct ReconcileArguments {
 pub(super) struct SteeringReconcileTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
 impl SteeringReconcileTool {
-    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        services: ProjectIntelligenceServices,
+        event_sink: Option<Arc<dyn StatefulEventSink>>,
+    ) -> Self {
         Self {
             project_id,
             services,
+            event_sink,
         }
     }
 
@@ -244,6 +252,13 @@ impl SteeringReconcileTool {
                     )
                     .await
                     .map_err(respond)?;
+                if let Some(event_sink) = &self.event_sink {
+                    event_sink.emit(StatefulEvent::RunUpdated {
+                        project_id: updated.value.project_id.clone(),
+                        run_id: updated.id.to_string(),
+                        revision: updated.revision,
+                    });
+                }
                 (
                     SteeringStatus::Applied,
                     Some(updated.strategy_revision),
@@ -264,6 +279,14 @@ impl SteeringReconcileTool {
             )
             .await
             .map_err(respond)?;
+        if let Some(event_sink) = &self.event_sink {
+            event_sink.emit(StatefulEvent::SteeringUpdated {
+                project_id: updated.value.project_id.clone(),
+                run_id: updated.value.run_id.to_string(),
+                steering_id: updated.id.to_string(),
+                revision: updated.revision,
+            });
+        }
         Ok(Box::new(JsonToolOutput::new(json!({
             "steeringId": updated.id.to_string(),
             "status": steering_status_name(updated.status),
@@ -348,3 +371,4 @@ fn steering_status_name(status: SteeringStatus) -> &'static str {
         SteeringStatus::Rejected => "rejected",
     }
 }
+use std::sync::Arc;

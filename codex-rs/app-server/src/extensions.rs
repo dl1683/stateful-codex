@@ -3,7 +3,10 @@ use std::sync::Weak;
 use std::time::Duration;
 
 use codex_analytics::AnalyticsEventsClient;
+use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::StatefulRunUpdatedNotification;
+use codex_app_server_protocol::SteeringUpdatedNotification;
 use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadGoalUpdatedNotification;
 use codex_app_server_protocol::ThreadQueueChangedNotification;
@@ -25,6 +28,8 @@ use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_queue_extension::QueuedItemService;
 use codex_rollout::state_db::StateDbHandle;
+use codex_stateful_extension::StatefulEvent;
+use codex_stateful_extension::StatefulEventSink;
 use codex_thread_store::ThreadStore;
 
 use crate::outgoing_message::OutgoingMessageSender;
@@ -34,6 +39,7 @@ use crate::thread_state::ThreadStateManager;
 
 pub(crate) struct ThreadExtensionDependencies {
     pub(crate) event_sink: Arc<dyn ExtensionEventSink>,
+    pub(crate) stateful_event_sink: Option<Arc<dyn StatefulEventSink>>,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) state_db: Option<StateDbHandle>,
     pub(crate) analytics_events_client: AnalyticsEventsClient,
@@ -54,6 +60,7 @@ pub(crate) fn thread_extensions(
 ) -> Arc<ExtensionRegistry<Config>> {
     let ThreadExtensionDependencies {
         event_sink,
+        stateful_event_sink,
         auth_manager,
         state_db,
         analytics_events_client,
@@ -100,7 +107,12 @@ pub(crate) fn thread_extensions(
     codex_memories_extension::install(&mut builder, codex_otel::global());
     codex_mcp_extension::install(&mut builder);
     codex_mcp_extension::install_plugins(&mut builder, environment_manager);
-    codex_stateful_extension::install(&mut builder, thread_store, stateful_sqlite);
+    codex_stateful_extension::install(
+        &mut builder,
+        thread_store,
+        stateful_sqlite,
+        stateful_event_sink,
+    );
     codex_web_search_extension::install(&mut builder, auth_manager.clone());
     codex_image_generation_extension::install(&mut builder, auth_manager, |config: &Config| {
         Some(config.codex_home.clone())
@@ -136,6 +148,61 @@ pub(crate) fn app_server_extension_event_sink(
         outgoing,
         thread_state_manager,
     })
+}
+
+pub(crate) fn app_server_stateful_event_sink(
+    outgoing: Arc<OutgoingMessageSender>,
+) -> Arc<dyn StatefulEventSink> {
+    Arc::new(AppServerStatefulEventSink { outgoing })
+}
+
+struct AppServerStatefulEventSink {
+    outgoing: Arc<OutgoingMessageSender>,
+}
+
+impl StatefulEventSink for AppServerStatefulEventSink {
+    fn emit(&self, event: StatefulEvent) {
+        let notification = match event {
+            StatefulEvent::RunUpdated {
+                project_id,
+                run_id,
+                revision,
+            } => ServerNotification::StatefulRunUpdated(StatefulRunUpdatedNotification {
+                project_id,
+                cursor: format!("run:{run_id}:{revision}"),
+                run_id,
+                revision,
+            }),
+            StatefulEvent::ObligationUpdated {
+                project_id,
+                run_id,
+                obligation_id,
+                revision,
+            } => ServerNotification::ObligationUpdated(ObligationUpdatedNotification {
+                project_id,
+                cursor: format!("obligation:{obligation_id}:{revision}"),
+                run_id,
+                obligation_id,
+                revision,
+            }),
+            StatefulEvent::SteeringUpdated {
+                project_id,
+                run_id,
+                steering_id,
+                revision,
+            } => ServerNotification::SteeringUpdated(SteeringUpdatedNotification {
+                project_id,
+                cursor: format!("steering:{steering_id}:{revision}"),
+                run_id,
+                steering_id,
+                revision,
+            }),
+        };
+        let outgoing = Arc::clone(&self.outgoing);
+        tokio::spawn(async move {
+            outgoing.send_server_notification(notification).await;
+        });
+    }
 }
 
 pub(crate) async fn send_thread_warning(

@@ -16,6 +16,7 @@ use codex_thread_store::ThreadStore;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
 const MAX_RESPONSE_BYTES: usize = 16 * 1024;
@@ -24,6 +25,7 @@ pub(super) fn project_intelligence_tools(
     project_id: String,
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
         Arc::new(blackboard::BlackboardQueryTool::new(
@@ -53,16 +55,20 @@ pub(super) fn project_intelligence_tools(
         Arc::new(obligation::ObligationUpdateTool::new(
             project_id.clone(),
             services.clone(),
+            event_sink.clone(),
         )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>,
         Arc::new(run::StatefulRunUpdateTool::new(
             project_id.clone(),
             services.clone(),
+            event_sink.clone(),
         )),
         Arc::new(steering::SteeringQueryTool::new(
             project_id.clone(),
             services.clone(),
         )),
-        Arc::new(steering::SteeringReconcileTool::new(project_id, services)),
+        Arc::new(steering::SteeringReconcileTool::new(
+            project_id, services, event_sink,
+        )),
     ]);
     tools
 }

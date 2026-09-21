@@ -13,6 +13,7 @@ use crate::error_code::invalid_params;
 use crate::error_code::invalid_request;
 use crate::extensions::ThreadExtensionDependencies;
 use crate::extensions::app_server_extension_event_sink;
+use crate::extensions::app_server_stateful_event_sink;
 use crate::extensions::thread_extensions;
 use crate::external_agent_migration::ExternalAgentConfigRequestProcessor;
 use crate::external_agent_migration::ExternalAgentConfigRequestProcessorArgs;
@@ -322,6 +323,7 @@ impl MessageProcessor {
         let turn_start_admission: Arc<dyn TurnStartAdmission> = Arc::new(turn_admission.clone());
         let extension_event_sink =
             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
+        let stateful_event_sink = app_server_stateful_event_sink(outgoing.clone());
         let mut queue_service = None;
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             queue_service = queue_store.map(|queue| {
@@ -340,6 +342,7 @@ impl MessageProcessor {
                 environment_manager,
                 thread_extensions(ThreadExtensionDependencies {
                     event_sink: Arc::clone(&extension_event_sink),
+                    stateful_event_sink: Some(Arc::clone(&stateful_event_sink)),
                     auth_manager: auth_manager.clone(),
                     state_db: state_db.clone(),
                     analytics_events_client: analytics_events_client.clone(),

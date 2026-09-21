@@ -11,6 +11,8 @@ use codex_stateful_runtime::ObligationPacket;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::StatefulEvent;
+use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
 use super::parse_arguments;
@@ -31,13 +33,19 @@ struct Arguments {
 pub(super) struct ObligationUpdateTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
 impl ObligationUpdateTool {
-    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        services: ProjectIntelligenceServices,
+        event_sink: Option<Arc<dyn StatefulEventSink>>,
+    ) -> Self {
         Self {
             project_id,
             services,
+            event_sink,
         }
     }
 
@@ -68,6 +76,14 @@ impl ObligationUpdateTool {
             )
             .await
             .map_err(respond)?;
+        if let Some(event_sink) = &self.event_sink {
+            event_sink.emit(StatefulEvent::ObligationUpdated {
+                project_id: obligation.value.project_id.clone(),
+                run_id: obligation.value.run_id.to_string(),
+                obligation_id: obligation.id.clone(),
+                revision: obligation.revision,
+            });
+        }
         Ok(Box::new(JsonToolOutput::new(json!({
             "obligationId": obligation.id,
             "sequence": obligation.sequence,
@@ -133,3 +149,4 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
 fn string_list() -> serde_json::Value {
     json!({"type": "array", "items": {"type": "string"}, "maxItems": 32})
 }
+use std::sync::Arc;

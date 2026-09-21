@@ -11,6 +11,8 @@ use codex_stateful_runtime::StatefulRunUpdate;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::StatefulEvent;
+use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
 use super::parse_arguments;
@@ -32,13 +34,19 @@ struct Arguments {
 pub(super) struct StatefulRunUpdateTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
 impl StatefulRunUpdateTool {
-    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        services: ProjectIntelligenceServices,
+        event_sink: Option<Arc<dyn StatefulEventSink>>,
+    ) -> Self {
         Self {
             project_id,
             services,
+            event_sink,
         }
     }
 
@@ -82,6 +90,13 @@ impl StatefulRunUpdateTool {
             )
             .await
             .map_err(respond)?;
+        if let Some(event_sink) = &self.event_sink {
+            event_sink.emit(StatefulEvent::RunUpdated {
+                project_id: run.value.project_id.clone(),
+                run_id: run.id.to_string(),
+                revision: run.revision,
+            });
+        }
         Ok(Box::new(JsonToolOutput::new(json!({
             "runId": run.id.to_string(),
             "status": status_name(run.status),
@@ -142,3 +157,4 @@ fn status_name(status: StatefulRunStatus) -> &'static str {
         StatefulRunStatus::Failed => "failed",
     }
 }
+use std::sync::Arc;

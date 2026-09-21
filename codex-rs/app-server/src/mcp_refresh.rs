@@ -330,6 +330,7 @@ enabled = false
                 Arc::clone(&environment_manager),
                 thread_extensions(ThreadExtensionDependencies {
                     event_sink: Arc::new(NoopExtensionEventSink),
+                    stateful_event_sink: None,
                     auth_manager: auth_manager.clone(),
                     state_db: Some(state_db.clone()),
                     analytics_events_client: codex_analytics::AnalyticsEventsClient::disabled(),

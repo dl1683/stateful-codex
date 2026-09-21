@@ -1,5 +1,6 @@
 //! Project-scoped Stateful Codex integration.
 
+mod events;
 mod root_blackboard;
 mod run_world_state;
 mod services;
@@ -28,6 +29,9 @@ use crate::services::ProjectIntelligenceServices;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
+pub use events::StatefulEvent;
+pub use events::StatefulEventSink;
+
 /// Canonical project selected by the user for a thread view.
 ///
 /// The attachment stores only the durable project ID. Current project metadata
@@ -52,6 +56,7 @@ impl SelectedProject {
 struct StatefulExtension {
     projects: Arc<dyn ThreadStore>,
     services: Option<ProjectIntelligenceServices>,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -218,6 +223,7 @@ impl ToolContributor for StatefulExtension {
             selected.project_id().to_string(),
             services.clone(),
             self.projects.clone(),
+            self.event_sink.clone(),
         )
     }
 }
@@ -227,10 +233,12 @@ pub fn install<C: Sync>(
     registry: &mut ExtensionRegistryBuilder<C>,
     projects: Arc<dyn ThreadStore>,
     sqlite: Option<SqliteConfig>,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 ) {
     let extension = Arc::new(StatefulExtension {
         projects,
         services: sqlite.map(ProjectIntelligenceServices::new),
+        event_sink,
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension);

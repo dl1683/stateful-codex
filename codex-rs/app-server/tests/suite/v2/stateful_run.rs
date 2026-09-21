@@ -5,6 +5,7 @@ use app_test_support::create_mock_responses_server_repeating_assistant;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ObligationListParams;
 use codex_app_server_protocol::ObligationListResponse;
+use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::StatefulRunPauseParams;
@@ -281,6 +282,34 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             ..Default::default()
         })
         .await?;
+
+    let obligation_event: ObligationUpdatedNotification =
+        server.read_notification("obligation/updated").await?;
+    assert_eq!(obligation_event.run_id, started.run.id);
+    assert_eq!(obligation_event.revision, 1);
+    let mut last_steering_event = None;
+    for _ in 0..3 {
+        last_steering_event = Some(
+            server
+                .read_notification::<SteeringUpdatedNotification>("steering/updated")
+                .await?,
+        );
+    }
+    assert_eq!(
+        last_steering_event
+            .expect("applied steering event")
+            .revision,
+        3
+    );
+    let mut last_run_event = None;
+    for _ in 0..3 {
+        last_run_event = Some(
+            server
+                .read_notification::<StatefulRunUpdatedNotification>("statefulRun/updated")
+                .await?,
+        );
+    }
+    assert_eq!(last_run_event.expect("completed run event").revision, 3);
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 6);
