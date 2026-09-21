@@ -1,6 +1,7 @@
 //! Project-scoped structured knowledge for Stateful Codex.
 
 mod blackboard;
+mod blackboard_storage;
 mod context_map;
 mod context_map_storage;
 mod hierarchy;
@@ -21,6 +22,8 @@ pub use blackboard::BlackboardVerification;
 pub use blackboard::ConfidenceScore;
 pub use blackboard::NewBlackboardEntry;
 pub use blackboard::RootPromotion;
+pub use blackboard_storage::BlackboardStore;
+pub use blackboard_storage::BlackboardStoreError;
 pub use context_map::ContextMapCoverage;
 pub use context_map::ContextMapEntry;
 pub use context_map::ContextMapEntryId;
