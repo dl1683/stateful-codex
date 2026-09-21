@@ -152,6 +152,9 @@ async function openWorkspace() {
   sessionStorage.setItem("stateful-mode", state.mode);
   sessionStorage.setItem("stateful-goal", state.goal);
   sessionStorage.setItem("stateful-thread-action", state.threadAction);
+  sessionStorage.removeItem("stateful-created-run-id");
+  sessionStorage.removeItem("stateful-initial-turn-sent");
+  sessionStorage.removeItem("stateful-run-key");
   sessionStorage.setItem(
     "stateful-max-continuations",
     String(state.maxContinuations),
