@@ -1,8 +1,15 @@
 //! Project-scoped structured knowledge for Stateful Codex.
 
+mod context_map;
 mod hierarchy;
 mod storage;
 
+pub use context_map::ContextMapCoverage;
+pub use context_map::ContextMapEntry;
+pub use context_map::ContextMapEntryId;
+pub use context_map::ContextMapError;
+pub use context_map::ContextMapFreshness;
+pub use context_map::NewContextMapEntry;
 pub use hierarchy::HierarchyError;
 pub use hierarchy::HierarchyNode;
 pub use hierarchy::HierarchyNodeId;
