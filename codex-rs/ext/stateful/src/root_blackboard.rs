@@ -3,6 +3,7 @@ use codex_project_intelligence::BlackboardHit;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::RootBlackboardProjection;
 use sha2::Digest;
@@ -109,8 +110,21 @@ fn render_hit(hit: &BlackboardHit) -> String {
                     .unwrap_or_default()
             )
         });
+    let relations = hit
+        .relations
+        .iter()
+        .map(|relation| {
+            format!(
+                "{}:{}->{}",
+                relation_kind_name(relation.value.kind),
+                relation.value.from_entry_id,
+                relation.value.to_entry_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let mut line = format!(
-        "- id={} node={} revision={} kind={} verification={} declared={} evidenceFreshness={} importance={} confidence={} provenance={}:{}{} evidence=[{}] content={}",
+        "- id={} node={} revision={} kind={} verification={} declared={} evidenceFreshness={} importance={} confidence={} provenance={}:{}{} evidence=[{}] relations=[{}] content={}",
         entry.id,
         value.node_id,
         entry.revision,
@@ -124,6 +138,7 @@ fn render_hit(hit: &BlackboardHit) -> String {
         single_line(&value.provenance.source_id),
         structured,
         evidence,
+        relations,
         single_line(&value.content),
     );
     if line.len() > MAX_ENTRY_BYTES {
@@ -190,5 +205,11 @@ enum_names! {
         BlackboardProvenanceKind::User => "user", BlackboardProvenanceKind::Agent => "agent",
         BlackboardProvenanceKind::Maintenance => "maintenance",
         BlackboardProvenanceKind::Import => "import"
+    }
+    relation_kind_name(BlackboardRelationKind) {
+        BlackboardRelationKind::Supports => "supports",
+        BlackboardRelationKind::Contradicts => "contradicts",
+        BlackboardRelationKind::DependsOn => "dependsOn",
+        BlackboardRelationKind::RelatedTo => "relatedTo"
     }
 }

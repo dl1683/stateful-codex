@@ -27,6 +27,7 @@ use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
 mod query;
+mod relation;
 mod update;
 
 const INITIAL_REVISION: i64 = 1;
@@ -437,6 +438,10 @@ pub enum BlackboardStoreError {
     ConcurrentMutation,
     #[error("blackboard result count overflow")]
     CountOverflow,
+    #[error("blackboard relation endpoint was not found in this project: {0}")]
+    RelationEndpointNotFound(String),
+    #[error("blackboard relation ID was already used for different content: {0}")]
+    RelationIdentityConflict(String),
     #[error("stored blackboard entry is corrupt: {0}")]
     CorruptEntry(String),
     #[error("stored blackboard enum value is unknown: {0}")]

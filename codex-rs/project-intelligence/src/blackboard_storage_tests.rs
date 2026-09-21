@@ -9,11 +9,14 @@ use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
 use crate::BlackboardQuery;
 use crate::BlackboardQueryResult;
+use crate::BlackboardRelationId;
+use crate::BlackboardRelationKind;
 use crate::ContextMapCoverage;
 use crate::ContextMapStore;
 use crate::HierarchyNodeId;
 use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;
+use crate::NewBlackboardRelation;
 use crate::NewContextMapEntry;
 use crate::NewHierarchyNode;
 use crate::NodeKind;
@@ -342,4 +345,66 @@ async fn root_projection_and_deeper_query_derive_live_evidence_state() {
         )
     );
     assert!(stale.revision > before_source_change.revision);
+}
+
+#[tokio::test]
+async fn blackboard_relations_are_project_scoped_idempotent_and_queryable() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _file_revision) = fixture(&temp_dir).await;
+    let mut target_value = source.value.clone();
+    target_value.content =
+        "A deployment constraint changes the implementation strategy.".to_string();
+    target_value.verification = BlackboardVerification::Unverified;
+    target_value.evidence.clear();
+    target_value.provenance.source_id = "turn-2".to_string();
+    let target = blackboard
+        .create_entry(
+            BlackboardEntryId::parse("strategy-constraint").expect("valid entry ID"),
+            target_value,
+        )
+        .await
+        .expect("target entry inserts");
+    let relation = NewBlackboardRelation {
+        project_id: "project-1".to_string(),
+        from_entry_id: source.id.clone(),
+        to_entry_id: target.id.clone(),
+        kind: BlackboardRelationKind::Supports,
+        note: Some("The documented purpose makes this strategy necessary.".to_string()),
+        confidence: ConfidenceScore::from_basis_points(8_500).expect("valid confidence"),
+        provenance: BlackboardProvenance {
+            kind: BlackboardProvenanceKind::Maintenance,
+            source_id: "maintenance-1".to_string(),
+        },
+    };
+    let created = blackboard
+        .create_relation(
+            BlackboardRelationId::parse("purpose-supports-strategy").expect("valid relation ID"),
+            relation.clone(),
+        )
+        .await
+        .expect("relation inserts");
+    assert_eq!(
+        blackboard
+            .create_relation(created.id.clone(), relation)
+            .await
+            .expect("identical relation is idempotent"),
+        created
+    );
+    assert_eq!(
+        blackboard
+            .list_relations("project-1", &source.id, 10)
+            .await
+            .expect("relations load"),
+        vec![created.clone()]
+    );
+    let hit = blackboard
+        .query(BlackboardQuery {
+            project_id: "project-1".to_string(),
+            text: Some("implementation strategy".to_string()),
+            within_node: None,
+            max_results: 10,
+        })
+        .await
+        .expect("related entry query succeeds");
+    assert_eq!(hit.data[0].relations, vec![created]);
 }

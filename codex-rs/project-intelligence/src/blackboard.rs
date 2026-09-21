@@ -20,6 +20,7 @@ const MAX_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
 const MAX_QUERY_BYTES: usize = 1_024;
 const MAX_QUERY_RESULTS: u32 = 50;
 const MAX_ROOT_ENTRIES: u32 = 256;
+const MAX_RELATION_NOTE_BYTES: usize = 2_048;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -34,6 +35,28 @@ impl BlackboardEntryId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct BlackboardRelationId(String);
+
+impl BlackboardRelationId {
+    pub fn parse(value: impl Into<String>) -> Result<Self, BlackboardError> {
+        let value = value.into();
+        validate_identity(&value, MAX_ID_BYTES).map_err(|()| BlackboardError::InvalidRelationId)?;
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for BlackboardRelationId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
     }
 }
 
@@ -105,6 +128,15 @@ pub enum BlackboardProvenanceKind {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BlackboardRelationKind {
+    Supports,
+    Contradicts,
+    DependsOn,
+    RelatedTo,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct ConfidenceScore(u16);
 
@@ -141,6 +173,46 @@ pub struct BlackboardProvenance {
     pub kind: BlackboardProvenanceKind,
     /// Stable turn, maintenance operation, or import identity that produced this revision.
     pub source_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewBlackboardRelation {
+    pub project_id: String,
+    pub from_entry_id: BlackboardEntryId,
+    pub to_entry_id: BlackboardEntryId,
+    pub kind: BlackboardRelationKind,
+    pub note: Option<String>,
+    pub confidence: ConfidenceScore,
+    pub provenance: BlackboardProvenance,
+}
+
+impl NewBlackboardRelation {
+    pub fn validate(&self) -> Result<(), BlackboardError> {
+        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
+            .map_err(|()| BlackboardError::InvalidProjectId)?;
+        if self.from_entry_id == self.to_entry_id {
+            return Err(BlackboardError::SelfRelation);
+        }
+        if self.note.as_ref().is_some_and(|note| {
+            note.is_empty()
+                || note.len() > MAX_RELATION_NOTE_BYTES
+                || note.trim() != note
+                || note.contains('\0')
+        }) {
+            return Err(BlackboardError::InvalidRelationNote);
+        }
+        validate_confidence(self.confidence)?;
+        validate_provenance(&self.provenance)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlackboardRelation {
+    pub id: BlackboardRelationId,
+    pub value: NewBlackboardRelation,
+    pub revision: u64,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -224,6 +296,7 @@ pub enum BlackboardEvidenceFreshness {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlackboardHit {
     pub entry: BlackboardEntry,
+    pub relations: Vec<BlackboardRelation>,
     pub evidence_freshness: BlackboardEvidenceFreshness,
     pub effective_verification: BlackboardVerification,
 }
@@ -239,9 +312,15 @@ impl BlackboardHit {
         };
         Self {
             entry,
+            relations: Vec::new(),
             evidence_freshness,
             effective_verification,
         }
+    }
+
+    pub(crate) fn with_relations(mut self, relations: Vec<BlackboardRelation>) -> Self {
+        self.relations = relations;
+        self
     }
 }
 
@@ -384,6 +463,8 @@ fn validate_identity(value: &str, maximum_bytes: usize) -> Result<(), ()> {
 pub enum BlackboardError {
     #[error("blackboard entry ID must be non-empty, bounded, and contain no controls")]
     InvalidEntryId,
+    #[error("blackboard relation ID must be non-empty, bounded, and contain no controls")]
+    InvalidRelationId,
     #[error("project ID must be non-empty, bounded, and contain no controls")]
     InvalidProjectId,
     #[error("blackboard content must be non-empty, bounded, trimmed, and contain no NUL")]
@@ -402,6 +483,12 @@ pub enum BlackboardError {
     VerifiedWithoutEvidence,
     #[error("blackboard provenance must identify one bounded source without controls")]
     InvalidProvenance,
+    #[error("blackboard relations must connect two different entries")]
+    SelfRelation,
+    #[error("blackboard relation note must be bounded, trimmed, and contain no NUL")]
+    InvalidRelationNote,
+    #[error("blackboard relation query must request 1-256 results")]
+    InvalidRelationQuery,
     #[error("superseded entries require a different successor; other states cannot name one")]
     InvalidSupersession,
     #[error("blackboard query must be bounded, trimmed, and request 1-50 results")]

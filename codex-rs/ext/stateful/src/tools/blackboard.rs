@@ -87,6 +87,16 @@ impl BlackboardQueryTool {
                     "sourceFingerprint": link.source_fingerprint.to_string(),
                 })).collect::<Vec<_>>(),
                 "provenance": hit.entry.value.provenance,
+                "relations": hit.relations.into_iter().map(|relation| json!({
+                    "relationId": relation.id.to_string(),
+                    "revision": relation.revision,
+                    "fromEntryId": relation.value.from_entry_id.to_string(),
+                    "toEntryId": relation.value.to_entry_id.to_string(),
+                    "kind": relation.value.kind,
+                    "note": relation.value.note,
+                    "confidenceBasisPoints": relation.value.confidence.basis_points(),
+                    "provenance": relation.value.provenance,
+                })).collect::<Vec<_>>(),
             });
             data.push(item);
             if !fits_response(

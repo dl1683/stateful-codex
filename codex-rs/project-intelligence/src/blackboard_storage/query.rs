@@ -15,6 +15,7 @@ use crate::storage::load_node;
 use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::load_entry;
+use super::relation::load_relations_for_entry;
 
 impl BlackboardStore {
     pub async fn query(
@@ -205,7 +206,8 @@ async fn load_hit(
         .await?
         .ok_or_else(|| BlackboardStoreError::EntryNotFound(raw_id))?;
     let freshness = load_evidence_freshness(connection, &entry).await?;
-    Ok(BlackboardHit::new(entry, freshness))
+    let relations = load_relations_for_entry(connection, project_id, &entry.id, 256).await?;
+    Ok(BlackboardHit::new(entry, freshness).with_relations(relations))
 }
 
 #[derive(FromRow)]
