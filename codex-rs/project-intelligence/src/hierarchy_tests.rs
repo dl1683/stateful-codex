@@ -10,7 +10,9 @@ fn node(kind: NodeKind) -> NewHierarchyNode {
         project_root: Some("C:\\workspace".to_string()),
         relative_path: ProjectRelativePath::parse("src/lib.rs").expect("valid path"),
         region_anchor: None,
-        source_fingerprint: Some("sha256:abc".to_string()),
+        source_fingerprint: Some(
+            SourceFingerprint::parse("sha256:abc").expect("valid fingerprint"),
+        ),
     }
 }
 
@@ -68,6 +70,18 @@ fn region_anchor_is_generic_but_bounded() {
     );
     assert!(RegionAnchor::new("LegalClause", "4.2").is_err());
     assert!(RegionAnchor::new("symbol", "").is_err());
+}
+
+#[test]
+fn source_fingerprints_are_opaque_but_bounded() {
+    assert_eq!(
+        SourceFingerprint::parse("sha256:abc")
+            .expect("valid fingerprint")
+            .as_str(),
+        "sha256:abc"
+    );
+    assert!(SourceFingerprint::parse("").is_err());
+    assert!(SourceFingerprint::parse("sha256:abc\nforged").is_err());
 }
 
 #[test]

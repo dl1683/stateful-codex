@@ -11,6 +11,7 @@ pub use hierarchy::NodeKind;
 pub use hierarchy::NodeLifecycle;
 pub use hierarchy::ProjectRelativePath;
 pub use hierarchy::RegionAnchor;
+pub use hierarchy::SourceFingerprint;
 pub use storage::HierarchySourceUpdate;
 pub use storage::HierarchyStore;
 pub use storage::HierarchyStoreError;

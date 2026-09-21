@@ -16,6 +16,7 @@ use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
 use crate::RegionAnchor;
+use crate::SourceFingerprint;
 
 const DATABASE_NAME: &str = "project_intelligence_1.sqlite";
 const INITIAL_REVISION: i64 = 1;
@@ -30,7 +31,7 @@ pub struct HierarchyStore {
 pub struct HierarchySourceUpdate {
     pub expected_revision: u64,
     pub lifecycle: NodeLifecycle,
-    pub source_fingerprint: Option<String>,
+    pub source_fingerprint: Option<SourceFingerprint>,
 }
 
 impl HierarchyStore {
@@ -70,7 +71,12 @@ impl HierarchyStore {
         .bind(value.relative_path.as_str())
         .bind(value.region_anchor.as_ref().map(|anchor| &anchor.scheme))
         .bind(value.region_anchor.as_ref().map(|anchor| &anchor.locator))
-        .bind(&value.source_fingerprint)
+        .bind(
+            value
+                .source_fingerprint
+                .as_ref()
+                .map(SourceFingerprint::as_str),
+        )
         .bind(lifecycle_name(NodeLifecycle::Active))
         .bind(INITIAL_REVISION)
         .bind(now)
@@ -137,7 +143,12 @@ impl HierarchyStore {
                  updated_at_ms = ?
              WHERE project_id = ? AND id = ? AND revision = ?",
         )
-        .bind(&proposed_value.source_fingerprint)
+        .bind(
+            proposed_value
+                .source_fingerprint
+                .as_ref()
+                .map(SourceFingerprint::as_str),
+        )
         .bind(lifecycle_name(update.lifecycle))
         .bind(unix_timestamp_millis()?)
         .bind(project_id)
@@ -194,7 +205,10 @@ impl TryFrom<StoredHierarchyNode> for HierarchyNode {
                 project_root: stored.project_root,
                 relative_path: ProjectRelativePath::parse(stored.relative_path)?,
                 region_anchor,
-                source_fingerprint: stored.source_fingerprint,
+                source_fingerprint: stored
+                    .source_fingerprint
+                    .map(SourceFingerprint::parse)
+                    .transpose()?,
             },
             lifecycle: parse_lifecycle(&stored.lifecycle)?,
             revision,

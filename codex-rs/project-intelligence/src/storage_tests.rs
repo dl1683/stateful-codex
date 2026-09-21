@@ -29,7 +29,9 @@ fn child_node(
         project_root: Some("C:\\workspace".to_string()),
         relative_path: ProjectRelativePath::parse(relative_path).expect("valid path"),
         region_anchor: None,
-        source_fingerprint: Some("sha256:abc".to_string()),
+        source_fingerprint: Some(
+            SourceFingerprint::parse("sha256:abc").expect("valid fingerprint"),
+        ),
     }
 }
 
@@ -166,7 +168,9 @@ async fn source_state_updates_are_revision_guarded() {
             HierarchySourceUpdate {
                 expected_revision: created.revision,
                 lifecycle: NodeLifecycle::Replaced,
-                source_fingerprint: Some("sha256:def".to_string()),
+                source_fingerprint: Some(
+                    SourceFingerprint::parse("sha256:def").expect("valid fingerprint"),
+                ),
             },
         )
         .await
@@ -178,7 +182,9 @@ async fn source_state_updates_are_revision_guarded() {
             revision: created.revision + 1,
             updated_at_ms: replaced.updated_at_ms,
             value: NewHierarchyNode {
-                source_fingerprint: Some("sha256:def".to_string()),
+                source_fingerprint: Some(
+                    SourceFingerprint::parse("sha256:def").expect("valid fingerprint"),
+                ),
                 ..created.value.clone()
             },
             ..created.clone()

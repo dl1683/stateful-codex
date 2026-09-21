@@ -11,6 +11,7 @@ const MAX_PATH_SEGMENT_BYTES: usize = 255;
 const MAX_ROOT_BYTES: usize = 32_768;
 const MAX_ANCHOR_SCHEME_BYTES: usize = 64;
 const MAX_ANCHOR_LOCATOR_BYTES: usize = 4_096;
+const MAX_SOURCE_FINGERPRINT_BYTES: usize = 512;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -85,6 +86,34 @@ impl fmt::Display for ProjectRelativePath {
     }
 }
 
+/// Opaque, bounded identity for the exact source bytes represented by a node.
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct SourceFingerprint(String);
+
+impl SourceFingerprint {
+    pub fn parse(value: impl Into<String>) -> Result<Self, HierarchyError> {
+        let value = value.into();
+        if value.is_empty()
+            || value.len() > MAX_SOURCE_FINGERPRINT_BYTES
+            || value.chars().any(char::is_control)
+        {
+            return Err(HierarchyError::InvalidSourceFingerprint);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SourceFingerprint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NodeKind {
@@ -145,7 +174,7 @@ pub struct NewHierarchyNode {
     pub project_root: Option<String>,
     pub relative_path: ProjectRelativePath,
     pub region_anchor: Option<RegionAnchor>,
-    pub source_fingerprint: Option<String>,
+    pub source_fingerprint: Option<SourceFingerprint>,
 }
 
 impl NewHierarchyNode {
@@ -155,13 +184,6 @@ impl NewHierarchyNode {
             root.is_empty() || root.len() > MAX_ROOT_BYTES || root.contains('\0')
         }) {
             return Err(HierarchyError::InvalidProjectRoot);
-        }
-        if self
-            .source_fingerprint
-            .as_ref()
-            .is_some_and(|fingerprint| fingerprint.is_empty() || fingerprint.len() > 512)
-        {
-            return Err(HierarchyError::InvalidSourceFingerprint);
         }
         match self.kind {
             NodeKind::Project => {
@@ -229,7 +251,7 @@ pub enum HierarchyError {
     InvalidAnchorLocator,
     #[error("project root must be non-empty, bounded, and contain no NUL")]
     InvalidProjectRoot,
-    #[error("source fingerprint must be non-empty and at most 512 bytes")]
+    #[error("source fingerprint must be non-empty, bounded, and contain no control characters")]
     InvalidSourceFingerprint,
     #[error("project nodes cannot have a parent, root, path, anchor, or source fingerprint")]
     InvalidProjectNode,
