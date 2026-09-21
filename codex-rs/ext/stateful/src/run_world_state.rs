@@ -89,6 +89,12 @@ impl RunWorldStateStatus {
                 steering,
             } => {
                 field(&mut output, "Run ID", run.id.as_str());
+                field(&mut output, "Run revision", &run.revision.to_string());
+                field(
+                    &mut output,
+                    "Strategy revision",
+                    &run.strategy_revision.to_string(),
+                );
                 field(&mut output, "Mode", mode_name(run.value.mode));
                 field(&mut output, "Status", status_name(run.status));
                 field(&mut output, "Goal", &run.value.goal);

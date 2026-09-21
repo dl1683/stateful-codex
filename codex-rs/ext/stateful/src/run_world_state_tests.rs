@@ -59,6 +59,8 @@ fn run_world_state_is_semantic_bounded_and_stable() {
         .render_diff(PreviousWorldStateSection::Absent)
         .expect("first contribution renders");
     assert!(rendered.body().contains("Mode: Socratic"));
+    assert!(rendered.body().contains("Run revision: 2"));
+    assert!(rendered.body().contains("Strategy revision: 1"));
     assert!(rendered.body().contains("Do not invoke execution tools"));
     assert!(
         rendered
