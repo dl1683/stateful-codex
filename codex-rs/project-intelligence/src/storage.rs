@@ -18,7 +18,7 @@ use crate::ProjectRelativePath;
 use crate::RegionAnchor;
 use crate::SourceFingerprint;
 
-const DATABASE_NAME: &str = "project_intelligence_1.sqlite";
+pub(crate) const DATABASE_NAME: &str = "project_intelligence_1.sqlite";
 const INITIAL_REVISION: i64 = 1;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -220,7 +220,7 @@ impl TryFrom<StoredHierarchyNode> for HierarchyNode {
     }
 }
 
-async fn load_node(
+pub(crate) async fn load_node(
     connection: &mut SqliteConnection,
     project_id: &str,
     id: &HierarchyNodeId,
@@ -324,7 +324,7 @@ fn parse_lifecycle(value: &str) -> Result<NodeLifecycle, HierarchyStoreError> {
     }
 }
 
-fn unix_timestamp_millis() -> Result<i64, HierarchyStoreError> {
+pub(crate) fn unix_timestamp_millis() -> Result<i64, HierarchyStoreError> {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| HierarchyStoreError::InvalidSystemTime)?
