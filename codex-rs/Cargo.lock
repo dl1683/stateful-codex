@@ -4297,6 +4297,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-project-intelligence"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "codex-prompts"
 version = "0.0.0"
 dependencies = [
