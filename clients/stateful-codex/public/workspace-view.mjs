@@ -14,7 +14,7 @@ const packetSections = [
 export function renderWorkspace(state) {
   if (state.loading && !state.project) return renderLoading(state);
   const latestObligation = state.obligations.at(-1);
-  return `
+  const html = `
     <main class="workspace-shell">
       ${renderHeader(state)}
       ${state.error ? `<p class="banner error">${escapeHtml(state.error)}</p>` : ""}
@@ -42,6 +42,7 @@ export function renderWorkspace(state) {
       </div>
       ${renderRequests(state.pendingRequests)}
     </main>`;
+  return html.replace(/[ \t]+\n/g, "\n");
 }
 
 function renderLoading(state) {
