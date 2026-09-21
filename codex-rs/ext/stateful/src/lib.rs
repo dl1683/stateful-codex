@@ -35,6 +35,7 @@ pub use autonomy::AutonomousContinuation;
 pub use autonomy::AutonomousContinuationFuture;
 pub use autonomy::AutonomousContinuationRequest;
 pub use autonomy::AutonomousContinuationSink;
+pub use events::BlackboardEntityKind;
 pub use events::StatefulEvent;
 pub use events::StatefulEventSink;
 

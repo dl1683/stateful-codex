@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BlackboardEntityKind": {
+      "enum": [
+        "entry",
+        "relation"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "cursor": {
+      "type": "string"
+    },
+    "entityId": {
+      "type": "string"
+    },
+    "entityKind": {
+      "$ref": "#/definitions/BlackboardEntityKind"
+    },
+    "projectId": {
+      "type": "string"
+    },
+    "revision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "cursor",
+    "entityId",
+    "entityKind",
+    "projectId",
+    "revision"
+  ],
+  "title": "BlackboardUpdatedNotification",
+  "type": "object"
+}

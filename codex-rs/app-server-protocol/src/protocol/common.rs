@@ -825,6 +825,18 @@ client_request_definitions! {
         serialization: global_shared_read("project-intelligence"),
         response: v2::BlackboardQueryResponse,
     },
+    #[experimental("blackboard/upsert")]
+    BlackboardUpsert => "blackboard/upsert" {
+        params: v2::BlackboardUpsertParams,
+        serialization: global("project-intelligence"),
+        response: v2::BlackboardUpsertResponse,
+    },
+    #[experimental("blackboard/relate")]
+    BlackboardRelate => "blackboard/relate" {
+        params: v2::BlackboardRelateParams,
+        serialization: global("project-intelligence"),
+        response: v2::BlackboardRelateResponse,
+    },
     #[experimental("contextMap/refresh")]
     ContextMapRefresh => "contextMap/refresh" {
         params: v2::ContextMapRefreshParams,
@@ -1997,6 +2009,8 @@ server_notification_definitions! {
     ObligationUpdated => "obligation/updated" (v2::ObligationUpdatedNotification),
     #[experimental("steering/updated")]
     SteeringUpdated => "steering/updated" (v2::SteeringUpdatedNotification),
+    #[experimental("blackboard/updated")]
+    BlackboardUpdated => "blackboard/updated" (v2::BlackboardUpdatedNotification),
     #[experimental("thread/project/updated")]
     ThreadProjectUpdated => "thread/project/updated" (v2::ThreadProjectUpdatedNotification),
     #[experimental("thread/environment/connected")]

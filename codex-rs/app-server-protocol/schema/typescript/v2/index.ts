@@ -50,6 +50,7 @@ export type { AttestationGenerateResponse } from "./AttestationGenerateResponse"
 export type { AuthRecoveryNotification } from "./AuthRecoveryNotification";
 export type { AutoReviewDecisionSource } from "./AutoReviewDecisionSource";
 export type { AutoReviewRequirements } from "./AutoReviewRequirements";
+export type { BlackboardEntityKind } from "./BlackboardEntityKind";
 export type { BlackboardEntry } from "./BlackboardEntry";
 export type { BlackboardEntryState } from "./BlackboardEntryState";
 export type { BlackboardEvidenceFreshness } from "./BlackboardEvidenceFreshness";
@@ -63,6 +64,7 @@ export type { BlackboardRelation } from "./BlackboardRelation";
 export type { BlackboardRelationKind } from "./BlackboardRelationKind";
 export type { BlackboardRootPromotion } from "./BlackboardRootPromotion";
 export type { BlackboardStructuredValue } from "./BlackboardStructuredValue";
+export type { BlackboardUpdatedNotification } from "./BlackboardUpdatedNotification";
 export type { BlackboardVerification } from "./BlackboardVerification";
 export type { BrowserUseAccessApprovalLifetime } from "./BrowserUseAccessApprovalLifetime";
 export type { BrowserUseConfig } from "./BrowserUseConfig";

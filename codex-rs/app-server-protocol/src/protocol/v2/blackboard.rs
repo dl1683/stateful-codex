@@ -25,6 +25,61 @@ pub struct BlackboardQueryResponse {
     pub truncated: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct BlackboardUpsertParams {
+    pub project_id: String,
+    pub entry_id: String,
+    #[ts(optional = nullable)]
+    pub expected_revision: Option<u64>,
+    #[ts(optional = nullable)]
+    pub node_id: Option<String>,
+    pub kind: BlackboardKind,
+    pub content: String,
+    #[ts(optional = nullable)]
+    pub structured_value: Option<BlackboardStructuredValue>,
+    pub confidence_basis_points: u16,
+    pub verification: BlackboardVerification,
+    pub importance: BlackboardImportance,
+    pub root_promotion: BlackboardRootPromotion,
+    pub evidence: Vec<BlackboardEvidenceLink>,
+    pub provenance: BlackboardProvenance,
+    #[ts(optional = nullable)]
+    pub state: Option<BlackboardEntryState>,
+    #[ts(optional = nullable)]
+    pub superseded_by: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct BlackboardUpsertResponse {
+    pub entry: BlackboardEntry,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct BlackboardRelateParams {
+    pub project_id: String,
+    pub relation_id: String,
+    pub from_entry_id: String,
+    pub to_entry_id: String,
+    pub kind: BlackboardRelationKind,
+    #[ts(optional = nullable)]
+    pub note: Option<String>,
+    pub confidence_basis_points: u16,
+    pub provenance: BlackboardProvenance,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct BlackboardRelateResponse {
+    pub relation: BlackboardRelation,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -171,3 +226,16 @@ string_enum!(BlackboardEvidenceFreshness {
     Stale,
     SourceUnavailable,
 });
+string_enum!(BlackboardEntityKind { Entry, Relation });
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct BlackboardUpdatedNotification {
+    pub project_id: String,
+    pub entity_kind: BlackboardEntityKind,
+    pub entity_id: String,
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub cursor: String,
+}

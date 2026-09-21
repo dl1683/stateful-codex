@@ -4,50 +4,41 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_repeating_assistant;
-use codex_app_server_protocol::BlackboardEntry as ApiEntry;
-use codex_app_server_protocol::BlackboardEntryState as ApiEntryState;
-use codex_app_server_protocol::BlackboardEvidenceFreshness as ApiEvidenceFreshness;
-use codex_app_server_protocol::BlackboardImportance as ApiImportance;
-use codex_app_server_protocol::BlackboardKind as ApiKind;
-use codex_app_server_protocol::BlackboardProvenance as ApiProvenance;
-use codex_app_server_protocol::BlackboardProvenanceKind as ApiProvenanceKind;
-use codex_app_server_protocol::BlackboardQueryHit as ApiHit;
+use codex_app_server_protocol::BlackboardEntityKind;
+use codex_app_server_protocol::BlackboardEntryState;
+use codex_app_server_protocol::BlackboardEvidenceFreshness;
+use codex_app_server_protocol::BlackboardImportance;
+use codex_app_server_protocol::BlackboardKind;
+use codex_app_server_protocol::BlackboardProvenance;
+use codex_app_server_protocol::BlackboardProvenanceKind;
+use codex_app_server_protocol::BlackboardQueryHit;
 use codex_app_server_protocol::BlackboardQueryParams;
 use codex_app_server_protocol::BlackboardQueryResponse;
-use codex_app_server_protocol::BlackboardRelation as ApiRelation;
-use codex_app_server_protocol::BlackboardRelationKind as ApiRelationKind;
-use codex_app_server_protocol::BlackboardRootPromotion as ApiRootPromotion;
-use codex_app_server_protocol::BlackboardVerification as ApiVerification;
+use codex_app_server_protocol::BlackboardRelateParams;
+use codex_app_server_protocol::BlackboardRelateResponse;
+use codex_app_server_protocol::BlackboardRelationKind;
+use codex_app_server_protocol::BlackboardRootPromotion;
+use codex_app_server_protocol::BlackboardUpdatedNotification;
+use codex_app_server_protocol::BlackboardUpsertParams;
+use codex_app_server_protocol::BlackboardUpsertResponse;
+use codex_app_server_protocol::BlackboardVerification;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
 use codex_features::Feature;
-use codex_project_intelligence::BlackboardEntryId;
-use codex_project_intelligence::BlackboardImportance;
-use codex_project_intelligence::BlackboardKind;
-use codex_project_intelligence::BlackboardProvenance;
-use codex_project_intelligence::BlackboardProvenanceKind;
-use codex_project_intelligence::BlackboardRelationId;
-use codex_project_intelligence::BlackboardRelationKind;
-use codex_project_intelligence::BlackboardStore;
-use codex_project_intelligence::BlackboardVerification;
-use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::HierarchyStore;
-use codex_project_intelligence::NewBlackboardEntry;
-use codex_project_intelligence::NewBlackboardRelation;
 use codex_project_intelligence::NewHierarchyNode;
 use codex_project_intelligence::NodeKind;
 use codex_project_intelligence::ProjectRelativePath;
-use codex_project_intelligence::RootPromotion;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 #[tokio::test]
-async fn blackboard_query_returns_semantic_state_with_relationships_and_provenance() -> Result<()> {
+async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() -> Result<()> {
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -91,65 +82,89 @@ async fn blackboard_query_returns_semantic_state_with_relationships_and_provenan
             },
         )
         .await?;
-    let blackboard = BlackboardStore::open(&sqlite).await?;
-    let instruction = blackboard
-        .create_entry(
-            BlackboardEntryId::parse("instruction-1")?,
-            NewBlackboardEntry {
+
+    let instruction: BlackboardUpsertResponse = server
+        .request(|request_id| ClientRequest::BlackboardUpsert {
+            request_id,
+            params: BlackboardUpsertParams {
                 project_id: created.project.id.clone(),
-                node_id: node_id.clone(),
+                entry_id: "instruction-1".to_string(),
+                expected_revision: None,
+                node_id: Some(node_id.to_string()),
                 kind: BlackboardKind::Instruction,
                 content: "Preserve the explicit project boundary.".to_string(),
                 structured_value: None,
-                confidence: ConfidenceScore::from_basis_points(10_000)?,
+                confidence_basis_points: 10_000,
                 verification: BlackboardVerification::UserConfirmed,
                 importance: BlackboardImportance::Critical,
-                root_promotion: RootPromotion::Promoted,
+                root_promotion: BlackboardRootPromotion::Promoted,
                 evidence: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::User,
                     source_id: "turn-user-1".to_string(),
                 },
+                state: None,
+                superseded_by: None,
             },
-        )
+        })
         .await?;
-    let decision = blackboard
-        .create_entry(
-            BlackboardEntryId::parse("decision-1")?,
-            NewBlackboardEntry {
-                project_id: created.project.id.clone(),
-                node_id,
-                kind: BlackboardKind::Decision,
+    let decision_params = BlackboardUpsertParams {
+        project_id: created.project.id.clone(),
+        entry_id: "decision-1".to_string(),
+        expected_revision: None,
+        node_id: Some(node_id.to_string()),
+        kind: BlackboardKind::Decision,
+        content: "Threads are isolated memory containers.".to_string(),
+        structured_value: None,
+        confidence_basis_points: 7_500,
+        verification: BlackboardVerification::Unverified,
+        importance: BlackboardImportance::High,
+        root_promotion: BlackboardRootPromotion::Candidate,
+        evidence: Vec::new(),
+        provenance: BlackboardProvenance {
+            kind: BlackboardProvenanceKind::Agent,
+            source_id: "turn-agent-1".to_string(),
+        },
+        state: None,
+        superseded_by: None,
+    };
+    let decision: BlackboardUpsertResponse = server
+        .request(|request_id| ClientRequest::BlackboardUpsert {
+            request_id,
+            params: decision_params.clone(),
+        })
+        .await?;
+    let updated: BlackboardUpsertResponse = server
+        .request(|request_id| ClientRequest::BlackboardUpsert {
+            request_id,
+            params: BlackboardUpsertParams {
+                expected_revision: Some(decision.entry.revision),
+                node_id: None,
                 content: "Threads remain views over shared project intelligence.".to_string(),
-                structured_value: None,
-                confidence: ConfidenceScore::from_basis_points(9_500)?,
-                verification: BlackboardVerification::Unverified,
-                importance: BlackboardImportance::High,
-                root_promotion: RootPromotion::Promoted,
-                evidence: Vec::new(),
-                provenance: BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::Agent,
-                    source_id: "turn-agent-1".to_string(),
-                },
+                confidence_basis_points: 9_500,
+                root_promotion: BlackboardRootPromotion::Promoted,
+                state: Some(BlackboardEntryState::Active),
+                ..decision_params
             },
-        )
+        })
         .await?;
-    let relation = blackboard
-        .create_relation(
-            BlackboardRelationId::parse("relation-1")?,
-            NewBlackboardRelation {
+    let related: BlackboardRelateResponse = server
+        .request(|request_id| ClientRequest::BlackboardRelate {
+            request_id,
+            params: BlackboardRelateParams {
                 project_id: created.project.id.clone(),
-                from_entry_id: instruction.id.clone(),
-                to_entry_id: decision.id.clone(),
+                relation_id: "relation-1".to_string(),
+                from_entry_id: instruction.entry.id.clone(),
+                to_entry_id: updated.entry.id.clone(),
                 kind: BlackboardRelationKind::Supports,
                 note: Some("The user instruction determines the memory boundary.".to_string()),
-                confidence: ConfidenceScore::from_basis_points(9_800)?,
+                confidence_basis_points: 9_800,
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
                     source_id: "turn-agent-1".to_string(),
                 },
             },
-        )
+        })
         .await?;
 
     let response: BlackboardQueryResponse = server
@@ -166,50 +181,67 @@ async fn blackboard_query_returns_semantic_state_with_relationships_and_provenan
     assert_eq!(
         response,
         BlackboardQueryResponse {
-            data: vec![ApiHit {
-                entry: ApiEntry {
-                    id: decision.id.to_string(),
-                    project_id: created.project.id.clone(),
-                    node_id: decision.value.node_id.to_string(),
-                    kind: ApiKind::Decision,
-                    content: decision.value.content,
-                    structured_value: None,
-                    confidence_basis_points: 9_500,
-                    verification: ApiVerification::Unverified,
-                    importance: ApiImportance::High,
-                    root_promotion: ApiRootPromotion::Promoted,
-                    evidence: Vec::new(),
-                    provenance: ApiProvenance {
-                        kind: ApiProvenanceKind::Agent,
-                        source_id: "turn-agent-1".to_string(),
-                    },
-                    state: ApiEntryState::Active,
-                    superseded_by: None,
-                    revision: decision.revision,
-                    created_at: decision.created_at_ms.div_euclid(/*rhs*/ 1000),
-                    updated_at: decision.updated_at_ms.div_euclid(/*rhs*/ 1000),
-                },
-                relations: vec![ApiRelation {
-                    id: relation.id.to_string(),
-                    project_id: created.project.id,
-                    from_entry_id: relation.value.from_entry_id.to_string(),
-                    to_entry_id: relation.value.to_entry_id.to_string(),
-                    kind: ApiRelationKind::Supports,
-                    note: relation.value.note,
-                    confidence_basis_points: 9_800,
-                    provenance: ApiProvenance {
-                        kind: ApiProvenanceKind::Agent,
-                        source_id: "turn-agent-1".to_string(),
-                    },
-                    revision: relation.revision,
-                    created_at: relation.created_at_ms.div_euclid(/*rhs*/ 1000),
-                    updated_at: relation.updated_at_ms.div_euclid(/*rhs*/ 1000),
-                }],
-                evidence_freshness: ApiEvidenceFreshness::NotApplicable,
-                effective_verification: ApiVerification::Unverified,
+            data: vec![BlackboardQueryHit {
+                entry: updated.entry.clone(),
+                relations: vec![related.relation.clone()],
+                evidence_freshness: BlackboardEvidenceFreshness::NotApplicable,
+                effective_verification: BlackboardVerification::Unverified,
             }],
             truncated: false,
         }
     );
+
+    let mut notifications = Vec::new();
+    for _ in 0..4 {
+        notifications.push(
+            server
+                .read_notification::<BlackboardUpdatedNotification>("blackboard/updated")
+                .await?,
+        );
+    }
+    assert_eq!(
+        notifications,
+        vec![
+            notification(
+                &created.project.id,
+                BlackboardEntityKind::Entry,
+                "instruction-1",
+                1
+            ),
+            notification(
+                &created.project.id,
+                BlackboardEntityKind::Entry,
+                "decision-1",
+                1
+            ),
+            notification(
+                &created.project.id,
+                BlackboardEntityKind::Entry,
+                "decision-1",
+                2
+            ),
+            notification(
+                &created.project.id,
+                BlackboardEntityKind::Relation,
+                "relation-1",
+                1
+            ),
+        ]
+    );
     Ok(())
+}
+
+fn notification(
+    project_id: &str,
+    entity_kind: BlackboardEntityKind,
+    entity_id: &str,
+    revision: u64,
+) -> BlackboardUpdatedNotification {
+    BlackboardUpdatedNotification {
+        project_id: project_id.to_string(),
+        entity_kind,
+        entity_id: entity_id.to_string(),
+        revision,
+        cursor: format!("blackboard:{entity_id}:{revision}"),
+    }
 }

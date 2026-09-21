@@ -35,10 +35,12 @@ pub(super) fn project_intelligence_tools(
         Arc::new(blackboard_write::BlackboardRecordTool::new(
             project_id.clone(),
             services.clone(),
+            event_sink.clone(),
         )),
         Arc::new(blackboard_write::BlackboardRelateTool::new(
             project_id.clone(),
             services.clone(),
+            event_sink.clone(),
         )),
         Arc::new(context_map::ContextMapQueryTool::new(
             project_id.clone(),

@@ -634,6 +634,42 @@
       ],
       "type": "string"
     },
+    "BlackboardEntityKind": {
+      "enum": [
+        "entry",
+        "relation"
+      ],
+      "type": "string"
+    },
+    "BlackboardUpdatedNotification": {
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "entityKind": {
+          "$ref": "#/definitions/BlackboardEntityKind"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cursor",
+        "entityId",
+        "entityKind",
+        "projectId",
+        "revision"
+      ],
+      "type": "object"
+    },
     "ByteRange": {
       "properties": {
         "end": {
@@ -7307,6 +7343,26 @@
         "params"
       ],
       "title": "Steering/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "blackboard/updated"
+          ],
+          "title": "Blackboard/updatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/BlackboardUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Blackboard/updatedNotification",
       "type": "object"
     },
     {

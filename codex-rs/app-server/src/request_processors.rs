@@ -538,6 +538,7 @@ mod account_processor;
 mod apps_processor;
 mod bedrock_auth;
 mod blackboard;
+mod blackboard_api;
 mod catalog_processor;
 mod command_exec_processor;
 mod config_processor;

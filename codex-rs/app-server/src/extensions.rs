@@ -3,6 +3,7 @@ use std::sync::Weak;
 use std::time::Duration;
 
 use codex_analytics::AnalyticsEventsClient;
+use codex_app_server_protocol::BlackboardUpdatedNotification;
 use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::StatefulRunUpdatedNotification;
@@ -39,6 +40,7 @@ use codex_stateful_extension::AutonomousContinuation;
 use codex_stateful_extension::AutonomousContinuationFuture;
 use codex_stateful_extension::AutonomousContinuationRequest;
 use codex_stateful_extension::AutonomousContinuationSink;
+use codex_stateful_extension::BlackboardEntityKind;
 use codex_stateful_extension::StatefulEvent;
 use codex_stateful_extension::StatefulEventSink;
 use codex_thread_store::ThreadStore;
@@ -228,6 +230,25 @@ struct AppServerStatefulEventSink {
 impl StatefulEventSink for AppServerStatefulEventSink {
     fn emit(&self, event: StatefulEvent) {
         let notification = match event {
+            StatefulEvent::BlackboardUpdated {
+                project_id,
+                entity_kind,
+                entity_id,
+                revision,
+            } => ServerNotification::BlackboardUpdated(BlackboardUpdatedNotification {
+                project_id,
+                entity_kind: match entity_kind {
+                    BlackboardEntityKind::Entry => {
+                        codex_app_server_protocol::BlackboardEntityKind::Entry
+                    }
+                    BlackboardEntityKind::Relation => {
+                        codex_app_server_protocol::BlackboardEntityKind::Relation
+                    }
+                },
+                cursor: format!("blackboard:{entity_id}:{revision}"),
+                entity_id,
+                revision,
+            }),
             StatefulEvent::RunUpdated {
                 project_id,
                 run_id,

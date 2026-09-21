@@ -1434,6 +1434,13 @@
       },
       "type": "object"
     },
+    "BlackboardEntityKind": {
+      "enum": [
+        "entry",
+        "relation"
+      ],
+      "type": "string"
+    },
     "BlackboardEntry": {
       "properties": {
         "confidenceBasisPoints": {
@@ -1725,6 +1732,37 @@
       "required": [
         "value"
       ],
+      "type": "object"
+    },
+    "BlackboardUpdatedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "entityKind": {
+          "$ref": "#/definitions/BlackboardEntityKind"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cursor",
+        "entityId",
+        "entityKind",
+        "projectId",
+        "revision"
+      ],
+      "title": "BlackboardUpdatedNotification",
       "type": "object"
     },
     "BlackboardVerification": {
@@ -16629,6 +16667,26 @@
             "params"
           ],
           "title": "Steering/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "blackboard/updated"
+              ],
+              "title": "Blackboard/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/BlackboardUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Blackboard/updatedNotification",
           "type": "object"
         },
         {

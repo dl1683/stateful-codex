@@ -435,6 +435,11 @@ class AutoReviewRequirements(BaseModel):
     required_on_models: Annotated[list[str] | None, Field(alias="requiredOnModels")] = None
 
 
+class BlackboardEntityKind(Enum):
+    entry = "entry"
+    relation = "relation"
+
+
 class BlackboardEntryState(Enum):
     active = "active"
     superseded = "superseded"
@@ -504,6 +509,17 @@ class BlackboardStructuredValue(BaseModel):
     )
     unit: str | None = None
     value: str
+
+
+class BlackboardUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cursor: str
+    entity_id: Annotated[str, Field(alias="entityId")]
+    entity_kind: Annotated[BlackboardEntityKind, Field(alias="entityKind")]
+    project_id: Annotated[str, Field(alias="projectId")]
+    revision: Annotated[int, Field(ge=0)]
 
 
 class BlackboardVerification(Enum):
@@ -4435,6 +4451,23 @@ class ObligationUpdatedServerNotification(BaseModel):
         Literal["obligation/updated"], Field(title="Obligation/updatedNotificationMethod")
     ]
     params: ObligationUpdatedNotification
+
+
+class BlackboardUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["blackboard/updated"], Field(title="Blackboard/updatedNotificationMethod")
+    ]
+    params: BlackboardUpdatedNotification
 
 
 class ThreadEnvironmentConnectedServerNotification(BaseModel):
@@ -13020,6 +13053,7 @@ class ServerNotification(
         | StatefulRunUpdatedServerNotification
         | ObligationUpdatedServerNotification
         | SteeringUpdatedServerNotification
+        | BlackboardUpdatedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
@@ -13111,6 +13145,7 @@ class ServerNotification(
         | StatefulRunUpdatedServerNotification
         | ObligationUpdatedServerNotification
         | SteeringUpdatedServerNotification
+        | BlackboardUpdatedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification

@@ -1,6 +1,12 @@
 /// Durable Stateful mutation that clients should reread from the app-server API.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StatefulEvent {
+    BlackboardUpdated {
+        project_id: String,
+        entity_kind: BlackboardEntityKind,
+        entity_id: String,
+        revision: u64,
+    },
     RunUpdated {
         project_id: String,
         run_id: String,
@@ -18,6 +24,12 @@ pub enum StatefulEvent {
         steering_id: String,
         revision: u64,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlackboardEntityKind {
+    Entry,
+    Relation,
 }
 
 /// Receives committed Stateful mutations and forwards revision hints to product clients.

@@ -517,6 +517,7 @@ impl MessageProcessor {
         let blackboard_processor = BlackboardRequestProcessor::new(
             Arc::clone(&thread_store),
             state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
+            Arc::clone(&stateful_event_sink),
         );
         let stateful_processor = StatefulRequestProcessor::new(
             Arc::clone(&thread_store),
@@ -1515,6 +1516,12 @@ impl MessageProcessor {
             }
             ClientRequest::BlackboardQuery { params, .. } => {
                 self.blackboard_processor.query(params).await
+            }
+            ClientRequest::BlackboardUpsert { params, .. } => {
+                self.blackboard_processor.upsert(params).await
+            }
+            ClientRequest::BlackboardRelate { params, .. } => {
+                self.blackboard_processor.relate(params).await
             }
             ClientRequest::StatefulRunStart { params, .. } => {
                 self.stateful_processor.run_start(params).await

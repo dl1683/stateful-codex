@@ -24,6 +24,9 @@ use codex_project_intelligence::RootPromotion;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::BlackboardEntityKind;
+use crate::StatefulEvent;
+use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
 use super::parse_arguments;
@@ -51,13 +54,19 @@ struct RecordArguments {
 pub(super) struct BlackboardRecordTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
 impl BlackboardRecordTool {
-    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        services: ProjectIntelligenceServices,
+        event_sink: Option<Arc<dyn StatefulEventSink>>,
+    ) -> Self {
         Self {
             project_id,
             services,
+            event_sink,
         }
     }
 
@@ -119,6 +128,14 @@ impl BlackboardRecordTool {
             )
             .await
             .map_err(respond)?;
+        if let Some(event_sink) = &self.event_sink {
+            event_sink.emit(StatefulEvent::BlackboardUpdated {
+                project_id: entry.value.project_id.clone(),
+                entity_kind: BlackboardEntityKind::Entry,
+                entity_id: entry.id.to_string(),
+                revision: entry.revision,
+            });
+        }
         Ok(Box::new(JsonToolOutput::new(json!({
             "entryId": entry.id.to_string(),
             "revision": entry.revision,
@@ -186,13 +203,19 @@ struct RelateArguments {
 pub(super) struct BlackboardRelateTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
 impl BlackboardRelateTool {
-    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        services: ProjectIntelligenceServices,
+        event_sink: Option<Arc<dyn StatefulEventSink>>,
+    ) -> Self {
         Self {
             project_id,
             services,
+            event_sink,
         }
     }
 
@@ -234,6 +257,14 @@ impl BlackboardRelateTool {
             )
             .await
             .map_err(respond)?;
+        if let Some(event_sink) = &self.event_sink {
+            event_sink.emit(StatefulEvent::BlackboardUpdated {
+                project_id: relation.value.project_id.clone(),
+                entity_kind: BlackboardEntityKind::Relation,
+                entity_id: relation.id.to_string(),
+                revision: relation.revision,
+            });
+        }
         Ok(Box::new(JsonToolOutput::new(json!({
             "relationId": relation.id.to_string(),
             "revision": relation.revision,
@@ -286,3 +317,4 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRelateTool {
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
 }
+use std::sync::Arc;

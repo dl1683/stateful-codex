@@ -213,6 +213,123 @@
         }
       ]
     },
+    "BlackboardEntryState": {
+      "enum": [
+        "active",
+        "superseded",
+        "tombstoned"
+      ],
+      "type": "string"
+    },
+    "BlackboardEvidenceLink": {
+      "properties": {
+        "contextMapEntryId": {
+          "type": "string"
+        },
+        "sourceFingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "contextMapEntryId",
+        "sourceFingerprint"
+      ],
+      "type": "object"
+    },
+    "BlackboardImportance": {
+      "enum": [
+        "critical",
+        "high",
+        "normal",
+        "low"
+      ],
+      "type": "string"
+    },
+    "BlackboardKind": {
+      "enum": [
+        "instruction",
+        "fact",
+        "claim",
+        "number",
+        "decision",
+        "strategy",
+        "question",
+        "contradiction",
+        "failure",
+        "rejectedApproach",
+        "signal",
+        "note"
+      ],
+      "type": "string"
+    },
+    "BlackboardProvenance": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/BlackboardProvenanceKind"
+        },
+        "sourceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sourceId"
+      ],
+      "type": "object"
+    },
+    "BlackboardProvenanceKind": {
+      "enum": [
+        "user",
+        "agent",
+        "maintenance",
+        "import"
+      ],
+      "type": "string"
+    },
+    "BlackboardRelationKind": {
+      "enum": [
+        "supports",
+        "contradicts",
+        "dependsOn",
+        "relatedTo"
+      ],
+      "type": "string"
+    },
+    "BlackboardRootPromotion": {
+      "enum": [
+        "notPromoted",
+        "candidate",
+        "promoted"
+      ],
+      "type": "string"
+    },
+    "BlackboardStructuredValue": {
+      "properties": {
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "BlackboardVerification": {
+      "enum": [
+        "unverified",
+        "sourceVerified",
+        "userConfirmed",
+        "disputed",
+        "stale"
+      ],
+      "type": "string"
+    },
     "ByteRange": {
       "properties": {
         "end": {
