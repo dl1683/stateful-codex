@@ -825,6 +825,54 @@ client_request_definitions! {
         serialization: global("project-intelligence"),
         response: v2::ContextMapRefreshResponse,
     },
+    #[experimental("statefulRun/start")]
+    StatefulRunStart => "statefulRun/start" {
+        params: v2::StatefulRunStartParams,
+        serialization: global("stateful-runtime"),
+        response: v2::StatefulRunStartResponse,
+    },
+    #[experimental("statefulRun/read")]
+    StatefulRunRead => "statefulRun/read" {
+        params: v2::StatefulRunReadParams,
+        serialization: global_shared_read("stateful-runtime"),
+        response: v2::StatefulRunReadResponse,
+    },
+    #[experimental("statefulRun/pause")]
+    StatefulRunPause => "statefulRun/pause" {
+        params: v2::StatefulRunPauseParams,
+        serialization: global("stateful-runtime"),
+        response: v2::StatefulRunPauseResponse,
+    },
+    #[experimental("statefulRun/resume")]
+    StatefulRunResume => "statefulRun/resume" {
+        params: v2::StatefulRunResumeParams,
+        serialization: global("stateful-runtime"),
+        response: v2::StatefulRunResumeResponse,
+    },
+    #[experimental("statefulRun/cancel")]
+    StatefulRunCancel => "statefulRun/cancel" {
+        params: v2::StatefulRunCancelParams,
+        serialization: global("stateful-runtime"),
+        response: v2::StatefulRunCancelResponse,
+    },
+    #[experimental("obligation/list")]
+    ObligationList => "obligation/list" {
+        params: v2::ObligationListParams,
+        serialization: global_shared_read("stateful-runtime"),
+        response: v2::ObligationListResponse,
+    },
+    #[experimental("steering/submit")]
+    SteeringSubmit => "steering/submit" {
+        params: v2::SteeringSubmitParams,
+        serialization: global("stateful-runtime"),
+        response: v2::SteeringSubmitResponse,
+    },
+    #[experimental("steering/list")]
+    SteeringList => "steering/list" {
+        params: v2::SteeringListParams,
+        serialization: global_shared_read("stateful-runtime"),
+        response: v2::SteeringListResponse,
+    },
     ThreadSectionList => "threadSection/list" {
         params: v2::ThreadSectionListParams,
         serialization: global_shared_read("thread-sections"),
@@ -1937,6 +1985,12 @@ server_notification_definitions! {
     ThreadQueueChanged => "thread/queue/changed" (v2::ThreadQueueChangedNotification),
     #[experimental("project/changed")]
     ProjectChanged => "project/changed" (v2::ProjectChangedNotification),
+    #[experimental("statefulRun/updated")]
+    StatefulRunUpdated => "statefulRun/updated" (v2::StatefulRunUpdatedNotification),
+    #[experimental("obligation/updated")]
+    ObligationUpdated => "obligation/updated" (v2::ObligationUpdatedNotification),
+    #[experimental("steering/updated")]
+    SteeringUpdated => "steering/updated" (v2::SteeringUpdatedNotification),
     #[experimental("thread/project/updated")]
     ThreadProjectUpdated => "thread/project/updated" (v2::ThreadProjectUpdatedNotification),
     #[experimental("thread/environment/connected")]

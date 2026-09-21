@@ -3182,6 +3182,35 @@
       ],
       "type": "string"
     },
+    "ObligationUpdatedNotification": {
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "obligationId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "obligationId",
+        "projectId",
+        "revision",
+        "runId"
+      ],
+      "type": "object"
+    },
     "PatchApplyStatus": {
       "enum": [
         "inProgress",
@@ -3937,6 +3966,60 @@
         "remainingPercent",
         "resetsAt",
         "used"
+      ],
+      "type": "object"
+    },
+    "StatefulRunUpdatedNotification": {
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "projectId",
+        "revision",
+        "runId"
+      ],
+      "type": "object"
+    },
+    "SteeringUpdatedNotification": {
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "steeringId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor",
+        "projectId",
+        "revision",
+        "runId",
+        "steeringId"
       ],
       "type": "object"
     },
@@ -7164,6 +7247,66 @@
         "params"
       ],
       "title": "Project/changedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "statefulRun/updated"
+          ],
+          "title": "StatefulRun/updatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/StatefulRunUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "StatefulRun/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "obligation/updated"
+          ],
+          "title": "Obligation/updatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ObligationUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Obligation/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "steering/updated"
+          ],
+          "title": "Steering/updatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/SteeringUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Steering/updatedNotification",
       "type": "object"
     },
     {

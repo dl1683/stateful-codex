@@ -41,6 +41,7 @@ from .v2_all import McpToolCallProgressNotification
 from .v2_all import ModelReroutedNotification
 from .v2_all import ModelSafetyBufferingUpdatedNotification
 from .v2_all import ModelVerificationNotification
+from .v2_all import ObligationUpdatedNotification
 from .v2_all import PlanDeltaNotification
 from .v2_all import ProcessExitedNotification
 from .v2_all import ProcessOutputDeltaNotification
@@ -51,6 +52,8 @@ from .v2_all import ReasoningTextDeltaNotification
 from .v2_all import RemoteControlStatusChangedNotification
 from .v2_all import ServerRequestResolvedNotification
 from .v2_all import SkillsChangedNotification
+from .v2_all import StatefulRunUpdatedNotification
+from .v2_all import SteeringUpdatedNotification
 from .v2_all import StrictReviewRequiredNotification
 from .v2_all import TerminalInteractionNotification
 from .v2_all import ThreadArchivedNotification
@@ -123,6 +126,7 @@ KnownNotificationPayload: TypeAlias = (
     | ModelReroutedNotification
     | ModelSafetyBufferingUpdatedNotification
     | ModelVerificationNotification
+    | ObligationUpdatedNotification
     | PlanDeltaNotification
     | ProcessExitedNotification
     | ProcessOutputDeltaNotification
@@ -133,6 +137,8 @@ KnownNotificationPayload: TypeAlias = (
     | RemoteControlStatusChangedNotification
     | ServerRequestResolvedNotification
     | SkillsChangedNotification
+    | StatefulRunUpdatedNotification
+    | SteeringUpdatedNotification
     | StrictReviewRequiredNotification
     | TerminalInteractionNotification
     | ThreadArchivedNotification
@@ -211,12 +217,15 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "model/verification": ModelVerificationNotification,
     "modelProvider/authRecoveryCompleted": AuthRecoveryNotification,
     "modelProvider/authRecoveryStarted": AuthRecoveryNotification,
+    "obligation/updated": ObligationUpdatedNotification,
     "process/exited": ProcessExitedNotification,
     "process/outputDelta": ProcessOutputDeltaNotification,
     "project/changed": ProjectChangedNotification,
     "remoteControl/status/changed": RemoteControlStatusChangedNotification,
     "serverRequest/resolved": ServerRequestResolvedNotification,
     "skills/changed": SkillsChangedNotification,
+    "statefulRun/updated": StatefulRunUpdatedNotification,
+    "steering/updated": SteeringUpdatedNotification,
     "thread/archived": ThreadArchivedNotification,
     "thread/attachment/updated": ThreadAttachmentUpdatedNotification,
     "thread/closed": ThreadClosedNotification,

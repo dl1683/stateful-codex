@@ -4830,6 +4830,66 @@
           "properties": {
             "method": {
               "enum": [
+                "statefulRun/updated"
+              ],
+              "title": "StatefulRun/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/StatefulRunUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "StatefulRun/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "obligation/updated"
+              ],
+              "title": "Obligation/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ObligationUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Obligation/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "steering/updated"
+              ],
+              "title": "Steering/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/SteeringUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Steering/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/project/updated"
               ],
               "title": "Thread/project/updatedNotificationMethod",
@@ -15929,6 +15989,37 @@
         ],
         "title": "Nullable_GetAccountTokenUsageParams"
       },
+      "ObligationUpdatedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "obligationId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "obligationId",
+          "projectId",
+          "revision",
+          "runId"
+        ],
+        "title": "ObligationUpdatedNotification",
+        "type": "object"
+      },
       "OverriddenMetadata": {
         "properties": {
           "effectiveValue": true,
@@ -20403,6 +20494,344 @@
           "resetsAt",
           "used"
         ],
+        "type": "object"
+      },
+      "StatefulObligation": {
+        "properties": {
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "packet": {
+            "$ref": "#/definitions/v2/StatefulObligationPacket"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provenanceSourceId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "sequence": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "createdAt",
+          "id",
+          "packet",
+          "projectId",
+          "provenanceSourceId",
+          "revision",
+          "runId",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "StatefulObligationPacket": {
+        "properties": {
+          "blockers": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "changed": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "examined": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "implication": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "learning": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "next": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rationale": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requestedJudgment": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "strategy": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "uncertainty": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "StatefulRun": {
+        "properties": {
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/definitions/v2/StatefulWorkflowMode"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/definitions/v2/StatefulRunStatus"
+          },
+          "strategy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strategyRevision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "threadIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "createdAt",
+          "goal",
+          "id",
+          "mode",
+          "projectId",
+          "revision",
+          "status",
+          "strategyRevision",
+          "threadIds",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "StatefulRunStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "paused",
+          "completed",
+          "cancelled",
+          "blocked",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "StatefulRunUpdatedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "projectId",
+          "revision",
+          "runId"
+        ],
+        "title": "StatefulRunUpdatedNotification",
+        "type": "object"
+      },
+      "StatefulSteering": {
+        "properties": {
+          "affectedObligationIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resultingStrategyRevision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/definitions/v2/StatefulSteeringStatus"
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "affectedObligationIds",
+          "createdAt",
+          "id",
+          "input",
+          "projectId",
+          "revision",
+          "runId",
+          "status",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "StatefulSteeringStatus": {
+        "enum": [
+          "submitted",
+          "acknowledged",
+          "applied",
+          "rejected"
+        ],
+        "type": "string"
+      },
+      "StatefulWorkflowMode": {
+        "enum": [
+          "autonomous",
+          "collaborative",
+          "socratic"
+        ],
+        "type": "string"
+      },
+      "SteeringUpdatedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "steeringId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "projectId",
+          "revision",
+          "runId",
+          "steeringId"
+        ],
+        "title": "SteeringUpdatedNotification",
         "type": "object"
       },
       "StrictReviewRequiredNotification": {

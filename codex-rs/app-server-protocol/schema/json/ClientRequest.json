@@ -4104,6 +4104,14 @@
       ],
       "type": "string"
     },
+    "StatefulWorkflowMode": {
+      "enum": [
+        "autonomous",
+        "collaborative",
+        "socratic"
+      ],
+      "type": "string"
+    },
     "SubagentMigration": {
       "properties": {
         "name": {

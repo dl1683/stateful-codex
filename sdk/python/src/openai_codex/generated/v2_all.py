@@ -3002,6 +3002,17 @@ class NullableGetAccountTokenUsageParams(RootModel[GetAccountTokenUsageParams | 
     ]
 
 
+class ObligationUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cursor: str
+    obligation_id: Annotated[str, Field(alias="obligationId")]
+    project_id: Annotated[str, Field(alias="projectId")]
+    revision: Annotated[int, Field(ge=0)]
+    run_id: Annotated[str, Field(alias="runId")]
+
+
 class PatchApplyStatus(Enum):
     in_progress = "inProgress"
     completed = "completed"
@@ -4330,6 +4341,23 @@ class ProjectChangedServerNotification(BaseModel):
     params: ProjectChangedNotification
 
 
+class ObligationUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["obligation/updated"], Field(title="Obligation/updatedNotificationMethod")
+    ]
+    params: ObligationUpdatedNotification
+
+
 class ThreadEnvironmentConnectedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -4954,6 +4982,66 @@ class SpendControlLimitSnapshot(BaseModel):
     remaining_percent: Annotated[int, Field(alias="remainingPercent")]
     resets_at: Annotated[int, Field(alias="resetsAt")]
     used: str
+
+
+class StatefulObligationPacket(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    blockers: list[str] | None = []
+    changed: list[str] | None = []
+    examined: list[str] | None = []
+    implication: list[str] | None = []
+    learning: list[str] | None = []
+    next: list[str] | None = []
+    rationale: list[str] | None = []
+    requested_judgment: Annotated[list[str] | None, Field(alias="requestedJudgment")] = []
+    strategy: list[str] | None = []
+    uncertainty: list[str] | None = []
+
+
+class StatefulRunStatus(Enum):
+    pending = "pending"
+    running = "running"
+    paused = "paused"
+    completed = "completed"
+    cancelled = "cancelled"
+    blocked = "blocked"
+    failed = "failed"
+
+
+class StatefulRunUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cursor: str
+    project_id: Annotated[str, Field(alias="projectId")]
+    revision: Annotated[int, Field(ge=0)]
+    run_id: Annotated[str, Field(alias="runId")]
+
+
+class StatefulSteeringStatus(Enum):
+    submitted = "submitted"
+    acknowledged = "acknowledged"
+    applied = "applied"
+    rejected = "rejected"
+
+
+class StatefulWorkflowMode(Enum):
+    autonomous = "autonomous"
+    collaborative = "collaborative"
+    socratic = "socratic"
+
+
+class SteeringUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cursor: str
+    project_id: Annotated[str, Field(alias="projectId")]
+    revision: Annotated[int, Field(ge=0)]
+    run_id: Annotated[str, Field(alias="runId")]
+    steering_id: Annotated[str, Field(alias="steeringId")]
 
 
 class StrictReviewRequiredNotification(BaseModel):
@@ -9094,6 +9182,40 @@ class ThreadQueueChangedServerNotification(BaseModel):
     params: ThreadQueueChangedNotification
 
 
+class StatefulRunUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["statefulRun/updated"], Field(title="StatefulRun/updatedNotificationMethod")
+    ]
+    params: StatefulRunUpdatedNotification
+
+
+class SteeringUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["steering/updated"], Field(title="Steering/updatedNotificationMethod")
+    ]
+    params: SteeringUpdatedNotification
+
+
 class ThreadProjectUpdatedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9534,6 +9656,57 @@ class SkillsListResponse(BaseModel):
         populate_by_name=True,
     )
     data: list[SkillsListEntry]
+
+
+class StatefulObligation(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    created_at: Annotated[int, Field(alias="createdAt")]
+    id: str
+    packet: StatefulObligationPacket
+    project_id: Annotated[str, Field(alias="projectId")]
+    provenance_source_id: Annotated[str, Field(alias="provenanceSourceId")]
+    revision: Annotated[int, Field(ge=0)]
+    run_id: Annotated[str, Field(alias="runId")]
+    sequence: Annotated[int, Field(ge=0)]
+
+
+class StatefulRun(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    created_at: Annotated[int, Field(alias="createdAt")]
+    goal: str
+    id: str
+    mode: StatefulWorkflowMode
+    project_id: Annotated[str, Field(alias="projectId")]
+    result: str | None = None
+    revision: Annotated[int, Field(ge=0)]
+    status: StatefulRunStatus
+    strategy: str | None = None
+    strategy_revision: Annotated[int, Field(alias="strategyRevision", ge=0)]
+    thread_ids: Annotated[list[str], Field(alias="threadIds")]
+    updated_at: Annotated[int, Field(alias="updatedAt")]
+
+
+class StatefulSteering(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    affected_obligation_ids: Annotated[list[str], Field(alias="affectedObligationIds")]
+    created_at: Annotated[int, Field(alias="createdAt")]
+    id: str
+    input: str
+    project_id: Annotated[str, Field(alias="projectId")]
+    reason: str | None = None
+    resulting_strategy_revision: Annotated[
+        int | None, Field(alias="resultingStrategyRevision", ge=0)
+    ] = None
+    revision: Annotated[int, Field(ge=0)]
+    run_id: Annotated[str, Field(alias="runId")]
+    status: StatefulSteeringStatus
+    updated_at: Annotated[int, Field(alias="updatedAt")]
 
 
 class ThreadSpawn(BaseModel):
@@ -12695,6 +12868,9 @@ class ServerNotification(
         | ThreadGoalClearedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification
+        | StatefulRunUpdatedServerNotification
+        | ObligationUpdatedServerNotification
+        | SteeringUpdatedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
@@ -12783,6 +12959,9 @@ class ServerNotification(
         | ThreadGoalClearedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification
+        | StatefulRunUpdatedServerNotification
+        | ObligationUpdatedServerNotification
+        | SteeringUpdatedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
