@@ -68,6 +68,28 @@ the new entry model, promotion policy, maintenance process, or UI. Those must be
 introduced in minimal vertical slices that prove reduced rereading, continuity,
 source routing, and useful discovery.
 
+## Live implementation checkpoint
+
+As of 2026-09-21, the clean branch has completed the project bridge and the
+read-only hierarchy/context-map slice:
+
+- canonical project identity follows new, resumed, and forked thread views and
+  enters model context through a bounded typed World State contribution;
+- `codex-project-intelligence` persists the filesystem-shaped hierarchy and a
+  semantically separate context map with stable IDs, source fingerprints,
+  guarded revisions, freshness, bounded search, and exact source routes; and
+- experimental app-server v2 `contextMap/query` validates the canonical project,
+  refuses routes outside its selected roots, reports current/stale/unavailable
+  source state, and remains explicitly unavailable when persistent state is not
+  configured.
+
+The public read path is covered by generated protocol contracts and app-server
+integration tests. The focused protocol suite and context-map API tests pass;
+the repository-wide suite remains a separate approval-gated validation step.
+This checkpoint is substrate, not a product-completion claim. Blackboard
+retrieval, semantic maintenance, runs, obligations, steering, workflow modes,
+autonomous continuation, and the first-class UI remain to be built and proven.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
