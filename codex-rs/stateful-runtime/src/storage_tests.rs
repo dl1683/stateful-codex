@@ -15,8 +15,6 @@ use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunUpdate;
 use crate::SteeringId;
-use crate::SteeringStatus;
-use crate::SteeringUpdate;
 use crate::WorkflowMode;
 
 use super::StatefulRunStore;
@@ -113,36 +111,17 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
         )
         .await
         .expect("steering submits");
-    let acknowledged = reopened
-        .update_steering(
-            &steering_id,
-            SteeringUpdate {
-                expected_revision: submitted.revision,
-                status: SteeringStatus::Acknowledged,
-                resulting_strategy_revision: None,
-                reason: None,
-            },
-        )
-        .await
-        .expect("steering acknowledges");
-    assert_eq!(
-        reopened
-            .get_steering(&steering_id)
-            .await
-            .expect("steering loads"),
-        Some(acknowledged.clone())
-    );
     let (resumed, applied) = reopened
         .apply_steering(
             &steering_id,
             crate::SteeringApplication {
-                expected_steering_revision: acknowledged.revision,
+                expected_steering_revision: submitted.revision,
                 expected_run_revision: paused.revision,
                 strategy: "Connect the constraint to the deployment finding.".to_string(),
             },
         )
         .await
-        .expect("steering applies");
+        .expect("submitted steering applies atomically");
     assert_eq!(
         applied.resulting_strategy_revision,
         Some(resumed.strategy_revision)

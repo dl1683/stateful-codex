@@ -313,7 +313,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringReconcileTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECONCILE_TOOL_NAME.to_string(),
-            description: "Acknowledge exact user steering, visibly apply it through a guarded strategy revision, or reject it with a reason. Never silently drop steering.".to_string(),
+            description: "Acknowledge exact user steering, atomically acknowledge and apply submitted steering through a guarded strategy revision, or reject it with a reason. Apply directly when the instruction can change strategy now; use acknowledge only when application must wait. Never silently drop steering.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

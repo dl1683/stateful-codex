@@ -205,7 +205,13 @@ impl StatefulRunStore {
                 actual: current_steering.revision,
             });
         }
-        if current_steering.status != SteeringStatus::Acknowledged {
+        // Applying is itself an explicit acknowledgement. Accepting a freshly submitted
+        // instruction here keeps reconciliation atomic and avoids a brittle two-call race while
+        // preserving the optional acknowledged-only state for work that cannot be applied yet.
+        if !matches!(
+            current_steering.status,
+            SteeringStatus::Submitted | SteeringStatus::Acknowledged
+        ) {
             return Err(StatefulRunStoreError::InvalidSteeringTransition {
                 from: current_steering.status,
                 to: SteeringStatus::Applied,
