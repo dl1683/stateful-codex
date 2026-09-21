@@ -81,6 +81,20 @@ async fn hierarchy_survives_reopen_and_lists_direct_children_in_stable_order() {
         )
         .await
         .expect("file should insert");
+    assert_eq!(
+        store
+            .create_node(file_id.clone(), file.value.clone())
+            .await
+            .expect("identical retry should return the existing file"),
+        file
+    );
+    let mut conflicting_file = file.value.clone();
+    conflicting_file.source_fingerprint =
+        Some(SourceFingerprint::parse("sha256:different").expect("valid fingerprint"));
+    assert!(matches!(
+        store.create_node(file_id.clone(), conflicting_file).await,
+        Err(HierarchyStoreError::NodeIdentityConflict(id)) if id == file_id.as_str()
+    ));
     let mut region_value = child_node(&file_id, NodeKind::Region, "src/lib.rs");
     region_value.region_anchor =
         Some(RegionAnchor::new("symbol", "crate::open").expect("valid anchor"));

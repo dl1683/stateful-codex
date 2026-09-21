@@ -55,6 +55,13 @@ impl HierarchyStore {
         value.validate()?;
         let now = unix_timestamp_millis()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if let Some(existing) = load_node_by_id(&mut transaction, &id).await? {
+            if existing.value != value {
+                return Err(HierarchyStoreError::NodeIdentityConflict(id.to_string()));
+            }
+            transaction.commit().await?;
+            return Ok(existing);
+        }
         validate_parent(&mut transaction, &value).await?;
         sqlx::query(
             "INSERT INTO hierarchy_nodes (
@@ -236,6 +243,18 @@ pub(crate) async fn load_node(
     .transpose()
 }
 
+async fn load_node_by_id(
+    connection: &mut SqliteConnection,
+    id: &HierarchyNodeId,
+) -> Result<Option<HierarchyNode>, HierarchyStoreError> {
+    sqlx::query_as::<_, StoredHierarchyNode>("SELECT * FROM hierarchy_nodes WHERE id = ?")
+        .bind(id.as_str())
+        .fetch_optional(connection)
+        .await?
+        .map(TryInto::try_into)
+        .transpose()
+}
+
 async fn validate_parent(
     connection: &mut SqliteConnection,
     child: &NewHierarchyNode,
@@ -348,6 +367,8 @@ pub enum HierarchyStoreError {
     InvalidParent { parent: String, kind: NodeKind },
     #[error("hierarchy node not found: {0}")]
     NodeNotFound(String),
+    #[error("hierarchy node ID was already used for different content: {0}")]
+    NodeIdentityConflict(String),
     #[error("hierarchy revision conflict: expected {expected}, found {actual}")]
     RevisionConflict { expected: u64, actual: u64 },
     #[error("hierarchy revision does not fit the storage representation")]

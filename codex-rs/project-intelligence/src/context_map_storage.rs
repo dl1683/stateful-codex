@@ -53,6 +53,13 @@ impl ContextMapStore {
         value.validate()?;
         let now = unix_timestamp_millis()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
+            if existing.value != value {
+                return Err(ContextMapStoreError::EntryIdentityConflict(id.to_string()));
+            }
+            transaction.commit().await?;
+            return Ok(existing);
+        }
         let node = load_node(&mut transaction, &value.project_id, &value.node_id)
             .await?
             .ok_or_else(|| ContextMapStoreError::NodeNotFound(value.node_id.to_string()))?;
@@ -272,6 +279,21 @@ async fn load_entry(
     Ok(Some(entry))
 }
 
+async fn load_entry_by_id(
+    connection: &mut SqliteConnection,
+    id: &ContextMapEntryId,
+) -> Result<Option<ContextMapEntry>, ContextMapStoreError> {
+    let project_id: Option<String> =
+        sqlx::query_scalar("SELECT project_id FROM context_map_entries WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&mut *connection)
+            .await?;
+    match project_id {
+        Some(project_id) => load_entry(connection, &project_id, id).await,
+        None => Ok(None),
+    }
+}
+
 fn validate_current_source(
     value: &NewContextMapEntry,
     node: &HierarchyNode,
@@ -383,6 +405,8 @@ pub enum ContextMapStoreError {
     SourceNotCurrent(ContextMapFreshness),
     #[error("context-map entry not found: {0}")]
     EntryNotFound(String),
+    #[error("context-map entry ID was already used for different content: {0}")]
+    EntryIdentityConflict(String),
     #[error("context-map routing-term position overflow")]
     RoutingTermPositionOverflow,
     #[error("context-map revision conflict: expected {expected}, found {actual}")]

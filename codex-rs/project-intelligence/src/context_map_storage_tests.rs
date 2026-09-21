@@ -109,6 +109,21 @@ async fn context_map_entry_survives_reopen_with_routing_term_order() {
         .create_entry(entry_id.clone(), new_entry("sha256:abc"))
         .await
         .expect("context-map entry should insert");
+    assert_eq!(
+        context_map
+            .create_entry(entry_id.clone(), created.value.clone())
+            .await
+            .expect("identical retry should return the existing entry"),
+        created
+    );
+    let mut conflicting_entry = created.value.clone();
+    conflicting_entry.description = "Different content for the same ID.".to_string();
+    assert!(matches!(
+        context_map
+            .create_entry(entry_id.clone(), conflicting_entry)
+            .await,
+        Err(ContextMapStoreError::EntryIdentityConflict(id)) if id == entry_id.as_str()
+    ));
     drop(context_map);
     drop(hierarchy);
 
