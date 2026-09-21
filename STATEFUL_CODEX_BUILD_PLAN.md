@@ -15,8 +15,10 @@ outranks an implementation shortcut in this plan.
 2. Project intelligence is keyed by project ID. Threads are views. Starting,
    resuming, and forking a thread must attach the same project intelligence when
    the user selects the same project.
-3. Blackboard and context map are separate stores and separate APIs. A blackboard
-   record contains understanding. A context-map entry contains source location,
+3. Blackboard and context map are separate record types and query paths. They may
+   share a physical database when that keeps transactions and operations simple,
+   but they must not collapse into one semantic object. A blackboard record
+   contains understanding. A context-map entry contains source location,
    revision, and a retrieval description. Neither substitutes for exact source.
 4. Model-visible project state enters through typed World State contributions.
    It is incrementally diffed, persisted with rollout state, bounded, and stable
@@ -35,8 +37,36 @@ outranks an implementation shortcut in this plan.
 9. The web client consumes the same API as other clients. It contains no private
    truth and must distinguish observed, inferred, stale, failed, and verified
    state.
-10. Prototype code is not merged wholesale. A prototype component may be
-    transplanted only after an isolated audit against this plan and current main.
+10. The frozen prototype is not an implementation source or compatibility
+    target. Its code, schemas, APIs, terminology, and UI data are not
+    transplanted. They may be consulted only as non-authoritative evidence about
+    failed approaches, useful scenarios, or product questions; any resulting
+    design is re-derived from the product intent and current main.
+
+## Clean-rebuild boundary
+
+The sources of authority, in order, are:
+
+1. `STATEFUL_CODEX_PRODUCT_INTENT.md` for the user problem and intended product;
+2. current Codex behavior and abstractions on the clean `origin/main` base;
+3. repository engineering rules and verified live behavior; and
+4. this plan as a revisable implementation contract.
+
+The old charter, handoff, master review, `workspace-state` crate,
+`stateful-workspace` extension, workspace APIs, migrations, client, and demo data
+remain on the frozen prototype branch only. They do not establish requirements
+for this branch. There is no promise to read or migrate prototype databases.
+
+Prior work may contribute a test scenario, observed failure, benchmark method,
+or interaction idea only when the new implementation records why it serves the
+product intent and validates it against real current APIs. Similarity by itself
+is not reuse justification.
+
+This rule applies especially to the blackboard. Previous blackboard schemas and
+projection machinery may reveal questions worth testing, but they do not define
+the new entry model, promotion policy, maintenance process, or UI. Those must be
+introduced in minimal vertical slices that prove reduced rereading, continuity,
+source routing, and useful discovery.
 
 ## System boundaries
 
@@ -83,8 +113,11 @@ The client owns presentation and explicit choices, never semantic inference.
 
 ## Canonical data model
 
-All durable mutable records have a stable ID, project ID, revision, created time,
-updated time, and provenance. Updates use compare-and-swap or an idempotency key.
+All durable mutable semantic records have a stable ID, project ID, revision,
+created time, updated time, and provenance. Derived filesystem-topology records
+also have stable identity and revisions; their configured root, relative path,
+region anchor, and source fingerprint establish their origin. Updates use
+compare-and-swap or an idempotency key.
 
 ### Hierarchy node
 
@@ -97,8 +130,9 @@ updated time, and provenance. Updates use compare-and-swap or an idempotency key
 - current source revision/fingerprint
 - lifecycle: `active | missing | replaced`
 
-The hierarchy must enforce one root, acyclic parentage, containment under a
-selected project root, and uniqueness of active path/anchor identity.
+The hierarchy must enforce one project node, one directory node for each
+configured filesystem root, acyclic parentage, containment under those roots,
+and uniqueness of active path/anchor identity.
 
 ### Blackboard entry
 
