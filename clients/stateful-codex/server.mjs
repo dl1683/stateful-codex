@@ -30,20 +30,14 @@ class AppServerBridge {
 
   async start() {
     const executable = resolveCodexExecutable();
+    const args = appServerArgs(executable);
     const environment = { ...process.env };
     delete environment.OPENAI_API_KEY;
     delete environment.CODEX_API_KEY;
-    this.child = spawn(
-      executable,
-      [
-        "-c",
-        'forced_login_method="chatgpt"',
-        "app-server",
-        "--listen",
-        "stdio://",
-      ],
-      { env: environment, stdio: ["pipe", "pipe", "inherit"] },
-    );
+    this.child = spawn(executable, args, {
+      env: environment,
+      stdio: ["pipe", "pipe", "inherit"],
+    });
     this.child.once("error", (error) => this.fail(error));
     this.child.once("exit", (code, signal) => {
       this.fail(
@@ -153,7 +147,24 @@ function resolveCodexExecutable() {
   return existsSync(local) ? local : "codex";
 }
 
+function appServerArgs(executable) {
+  const args = ["-c", 'forced_login_method="chatgpt"'];
+  if (existsSync(executable) && !existsSync(codeModeHostBeside(executable))) {
+    throw new Error(
+      "codex-code-mode-host is missing beside the selected Codex executable. Build or install the complete Codex package before starting Stateful Codex.",
+    );
+  }
+  args.push("app-server", "--listen", "stdio://");
+  return args;
+}
+
+function codeModeHostBeside(executable) {
+  const name = process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host";
+  return resolve(dirname(executable), name);
+}
+
 const bridge = new AppServerBridge();
+await bridge.ready;
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
@@ -181,7 +192,10 @@ const server = createServer(async (request, response) => {
       bridge.reply(message);
       return json(response, 202, { accepted: true });
     }
-    if (request.method === "GET") return serveStatic(url.pathname, response);
+    if (request.method === "GET") {
+      await serveStatic(url.pathname, response);
+      return;
+    }
     throw new HttpError(404, "not found");
   } catch (error) {
     const statusCode = error instanceof HttpError ? error.statusCode : 500;

@@ -3,7 +3,7 @@ import { renderWorkspace } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
 const threadId = sessionStorage.getItem("stateful-thread");
-const selectedMode = sessionStorage.getItem("stateful-mode");
+let selectedMode = sessionStorage.getItem("stateful-mode");
 const initialGoal = sessionStorage.getItem("stateful-goal");
 const app = document.querySelector("#app");
 
@@ -50,7 +50,7 @@ async function boot() {
 async function ensureRun() {
   const [projectResponse, runResponse, status] = await Promise.all([
     rpc("project/read", { projectId }),
-    rpc("statefulRun/read", { threadId }),
+    rpc("statefulRun/read", runReadParams()),
     rpc("projectIntelligence/status", { projectId }),
   ]);
   state.project = projectResponse.project;
@@ -58,7 +58,10 @@ async function ensureRun() {
   state.recovery = runResponse.recovery;
   if (runResponse.run) {
     state.run = runResponse.run;
-    if (state.run.mode !== selectedMode) {
+    if (
+      state.run.mode !== selectedMode &&
+      !["completed", "cancelled", "failed"].includes(state.run.status)
+    ) {
       const changed = await rpc("statefulRun/setMode", {
         runId: state.run.id,
         expectedRevision: state.run.revision,
@@ -66,6 +69,9 @@ async function ensureRun() {
       });
       state.run = changed.run;
       state.notice = `Mode changed to ${selectedMode} from your setup choice.`;
+    } else if (state.run.mode !== selectedMode) {
+      selectedMode = state.run.mode;
+      sessionStorage.setItem("stateful-mode", selectedMode);
     }
     if (
       sessionStorage.getItem("stateful-created-run-id") === state.run.id &&
@@ -131,10 +137,10 @@ async function refreshWorkspace() {
     activity,
   ] = await Promise.all([
     rpc("project/read", { projectId }),
-    rpc("statefulRun/read", { threadId }),
+    rpc("statefulRun/read", runReadParams()),
     rpc("projectIntelligence/status", { projectId }),
     readHierarchy(),
-    rpc("blackboard/query", { projectId, text: null, limit: 100 }),
+    rpc("blackboard/query", { projectId, text: null, limit: 50 }),
     state.run
       ? rpc("obligation/list", {
           runId: state.run.id,
@@ -168,6 +174,12 @@ async function refreshWorkspace() {
   state.loading = false;
   state.busyAction = null;
   render();
+}
+
+function runReadParams() {
+  const runId =
+    state.run?.id ?? sessionStorage.getItem("stateful-created-run-id");
+  return runId ? { runId } : { threadId };
 }
 
 async function readHierarchy() {
@@ -250,6 +262,8 @@ app.addEventListener("submit", async (event) => {
         }),
       );
       state.run = response.run;
+      selectedMode = state.run.mode;
+      sessionStorage.setItem("stateful-mode", selectedMode);
       state.notice = `Mode changed to ${mode}.`;
       await refresh();
     } else if (form.dataset.requestId) {
