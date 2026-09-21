@@ -92,6 +92,16 @@ pub struct StatefulRunReadParams {
 #[ts(export_to = "v2/")]
 pub struct StatefulRunReadResponse {
     pub run: Option<StatefulRun>,
+    pub recovery: Option<StatefulRunRecovery>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulRunRecovery {
+    pub lease_expires_at: Option<i64>,
+    pub previous_turn_id: Option<String>,
+    pub last_continuation_claimed_at: Option<i64>,
 }
 
 macro_rules! run_control_params {

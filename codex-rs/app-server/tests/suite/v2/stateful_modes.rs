@@ -87,9 +87,16 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
         );
     }
     assert_eq!(revisions, vec![1, 2, 3]);
-    let completed = read_run(&mut server, started.run.id).await?;
+    let read = read_run(&mut server, started.run.id).await?;
+    let completed = read.run.expect("run remains readable");
     assert_eq!(completed.status, StatefulRunStatus::Completed);
     assert_eq!(completed.continuations_used, 1);
+    assert!(
+        read.recovery
+            .expect("autonomous recovery state is visible")
+            .previous_turn_id
+            .is_some()
+    );
     let _: TurnCompletedNotification = server.read_notification("turn/completed").await?;
     let requests = response_log.requests();
     assert_eq!(requests.len(), 3);
@@ -249,10 +256,7 @@ async fn start_turn(server: &mut TestAppServer, thread_id: String, text: &str) -
     Ok(())
 }
 
-async fn read_run(
-    server: &mut TestAppServer,
-    run_id: String,
-) -> Result<codex_app_server_protocol::StatefulRun> {
+async fn read_run(server: &mut TestAppServer, run_id: String) -> Result<StatefulRunReadResponse> {
     let response: StatefulRunReadResponse = server
         .request(|request_id| ClientRequest::StatefulRunRead {
             request_id,
@@ -262,5 +266,5 @@ async fn read_run(
             },
         })
         .await?;
-    Ok(response.run.expect("run remains readable"))
+    Ok(response)
 }

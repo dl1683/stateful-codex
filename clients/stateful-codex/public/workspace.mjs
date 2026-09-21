@@ -16,6 +16,7 @@ const state = {
   threadId,
   project: null,
   run: null,
+  recovery: null,
   status: null,
   hierarchy: [],
   blackboard: [],
@@ -54,6 +55,7 @@ async function ensureRun() {
   ]);
   state.project = projectResponse.project;
   state.status = status;
+  state.recovery = runResponse.recovery;
   if (runResponse.run) {
     state.run = runResponse.run;
     if (state.run.mode !== selectedMode) {
@@ -156,6 +158,7 @@ async function refreshWorkspace() {
   ]);
   state.project = project.project;
   state.run = run.run;
+  state.recovery = run.recovery;
   state.status = status;
   state.hierarchy = hierarchy;
   state.blackboard = blackboard.data;

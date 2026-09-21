@@ -452,6 +452,13 @@ textarea {
   line-height: 1.6;
   white-space: pre-wrap;
 }
+.recovery {
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
 .timeline {
   margin: 14px 0 0;
   padding-left: 20px;

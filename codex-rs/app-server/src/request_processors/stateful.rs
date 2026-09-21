@@ -17,6 +17,7 @@ use codex_app_server_protocol::StatefulRunPauseParams;
 use codex_app_server_protocol::StatefulRunPauseResponse;
 use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
+use codex_app_server_protocol::StatefulRunRecovery;
 use codex_app_server_protocol::StatefulRunResumeParams;
 use codex_app_server_protocol::StatefulRunResumeResponse;
 use codex_app_server_protocol::StatefulRunSetModeParams;
@@ -136,9 +137,25 @@ impl StatefulRequestProcessor {
                 .map_err(runtime_error)?,
             _ => return Err(invalid_params("provide exactly one of runId or threadId")),
         };
+        let recovery = match run.as_ref() {
+            Some(run) => Some(
+                store
+                    .autonomous_recovery_state(&run.id)
+                    .await
+                    .map_err(runtime_error)?,
+            ),
+            None => None,
+        };
         Ok(Some(
             StatefulRunReadResponse {
                 run: run.map(api_run),
+                recovery: recovery.map(|state| StatefulRunRecovery {
+                    lease_expires_at: state.lease_expires_at_ms.map(|value| value / 1_000),
+                    previous_turn_id: state.previous_turn_id,
+                    last_continuation_claimed_at: state
+                        .last_claimed_at_ms
+                        .map(|value| value / 1_000),
+                }),
             }
             .into(),
         ))

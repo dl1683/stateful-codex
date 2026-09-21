@@ -5138,6 +5138,17 @@ class StatefulRunBudget(BaseModel):
     max_elapsed_seconds: Annotated[int, Field(alias="maxElapsedSeconds", ge=0)]
 
 
+class StatefulRunRecovery(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    last_continuation_claimed_at: Annotated[
+        int | None, Field(alias="lastContinuationClaimedAt")
+    ] = None
+    lease_expires_at: Annotated[int | None, Field(alias="leaseExpiresAt")] = None
+    previous_turn_id: Annotated[str | None, Field(alias="previousTurnId")] = None
+
+
 class StatefulRunStatus(Enum):
     pending = "pending"
     running = "running"

@@ -17,6 +17,11 @@ export function workspaceFixture() {
       revision: 8,
       result: "The current working conclusion depends on the amended clause.",
     },
+    recovery: {
+      leaseExpiresAt: 1,
+      previousTurnId: "turn-3",
+      lastContinuationClaimedAt: 1,
+    },
     status: {
       revision: 12,
       blackboardEntryCount: 7,

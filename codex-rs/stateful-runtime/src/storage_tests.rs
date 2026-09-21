@@ -223,4 +223,64 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
             ..
         })
     ));
+
+    let recovery_id = StatefulRunId::parse("run-recovery").expect("valid recovery ID");
+    reopened
+        .create_run(
+            recovery_id.clone(),
+            NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-recovery".to_string()],
+                goal: "Recover work claimed immediately before a crash.".to_string(),
+                mode: WorkflowMode::Autonomous,
+                budget: RunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+        )
+        .await
+        .expect("recovery run inserts");
+    reopened
+        .claim_autonomous_continuation(
+            &recovery_id,
+            AutonomousClaimRequest {
+                owner_id: "crashed-process".to_string(),
+                previous_turn_id: "turn-before-crash".to_string(),
+                lease_duration_ms: 1,
+            },
+        )
+        .await
+        .expect("short recovery lease claims");
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let recovered = reopened
+        .claim_autonomous_continuation(
+            &recovery_id,
+            AutonomousClaimRequest {
+                owner_id: "replacement-process".to_string(),
+                previous_turn_id: "turn-before-crash".to_string(),
+                lease_duration_ms: 120_000,
+            },
+        )
+        .await
+        .expect("expired unstarted continuation reclaims");
+    assert!(matches!(
+        recovered,
+        AutonomousClaimOutcome::Claimed {
+            run: StatefulRun {
+                continuations_used: 1,
+                ..
+            },
+            ..
+        }
+    ));
+    assert_eq!(
+        reopened
+            .autonomous_recovery_state(&recovery_id)
+            .await
+            .expect("recovery state reads")
+            .previous_turn_id
+            .as_deref(),
+        Some("turn-before-crash")
+    );
 }

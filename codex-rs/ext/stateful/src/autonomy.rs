@@ -8,6 +8,7 @@ use codex_extension_api::ThreadIdleInput;
 use codex_extension_api::ThreadLifecycleContributor;
 use codex_stateful_runtime::AutonomousClaimOutcome;
 use codex_stateful_runtime::AutonomousClaimRequest;
+use codex_stateful_runtime::StatefulRunId;
 
 use crate::SelectedProject;
 use crate::StatefulEvent;
@@ -79,45 +80,108 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
                     return;
                 }
             };
-            let outcome = store
-                .claim_autonomous_continuation(
-                    &run.id,
-                    AutonomousClaimRequest {
-                        owner_id: autonomous.owner_id.clone(),
-                        previous_turn_id: previous_turn_id.to_string(),
-                        lease_duration_ms: 120_000,
-                    },
-                )
-                .await;
-            match outcome {
-                Ok(AutonomousClaimOutcome::Claimed { run, .. }) => {
-                    emit_run_updated(self.event_sink.as_deref(), &run);
-                    if let Err(error) = autonomous
-                        .sink
-                        .continue_run(AutonomousContinuationRequest {
-                            thread_id: input.thread_id.to_string(),
-                            run_id: run.id.to_string(),
-                            previous_turn_id: previous_turn_id.to_string(),
-                        })
-                        .await
-                    {
-                        tracing::warn!(run_id = %run.id, %error, "failed to submit Autonomous continuation");
-                    }
-                }
-                Ok(AutonomousClaimOutcome::BudgetExhausted(run)) => {
-                    emit_run_updated(self.event_sink.as_deref(), &run);
-                }
-                Ok(
-                    AutonomousClaimOutcome::AlreadyClaimed
-                    | AutonomousClaimOutcome::Leased
-                    | AutonomousClaimOutcome::NotEligible,
-                ) => {}
-                Err(error) => {
-                    tracing::warn!(run_id = %run.id, %error, "failed to claim Autonomous continuation");
-                }
+            let request = PendingContinuation {
+                thread_id: input.thread_id.to_string(),
+                run_id: run.id,
+                previous_turn_id: previous_turn_id.to_string(),
+            };
+            if let Some(lease_expires_at_ms) =
+                attempt_continuation(services, autonomous, self.event_sink.as_deref(), &request)
+                    .await
+            {
+                let services = services.clone();
+                let autonomous = autonomous.clone();
+                let event_sink = self.event_sink.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(recovery_delay(lease_expires_at_ms)).await;
+                    let _ = attempt_continuation(
+                        &services,
+                        &autonomous,
+                        event_sink.as_deref(),
+                        &request,
+                    )
+                    .await;
+                });
             }
         })
     }
+}
+
+struct PendingContinuation {
+    thread_id: String,
+    run_id: StatefulRunId,
+    previous_turn_id: String,
+}
+
+async fn attempt_continuation(
+    services: &crate::services::ProjectIntelligenceServices,
+    autonomous: &AutonomousContinuation,
+    event_sink: Option<&dyn StatefulEventSink>,
+    request: &PendingContinuation,
+) -> Option<i64> {
+    let store = match services.runtime().await {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(%error, "failed to open Autonomous run store");
+            return None;
+        }
+    };
+    match store
+        .claim_autonomous_continuation(
+            &request.run_id,
+            AutonomousClaimRequest {
+                owner_id: autonomous.owner_id.clone(),
+                previous_turn_id: request.previous_turn_id.clone(),
+                lease_duration_ms: 120_000,
+            },
+        )
+        .await
+    {
+        Ok(AutonomousClaimOutcome::Claimed {
+            run,
+            lease_expires_at_ms,
+        }) => {
+            emit_run_updated(event_sink, &run);
+            if let Err(error) = autonomous
+                .sink
+                .continue_run(AutonomousContinuationRequest {
+                    thread_id: request.thread_id.clone(),
+                    run_id: run.id.to_string(),
+                    previous_turn_id: request.previous_turn_id.clone(),
+                })
+                .await
+            {
+                tracing::warn!(run_id = %run.id, %error, "failed to submit Autonomous continuation");
+                return Some(lease_expires_at_ms);
+            }
+            None
+        }
+        Ok(AutonomousClaimOutcome::BudgetExhausted(run)) => {
+            emit_run_updated(event_sink, &run);
+            None
+        }
+        Ok(AutonomousClaimOutcome::Leased {
+            lease_expires_at_ms,
+        }) => Some(lease_expires_at_ms),
+        Ok(AutonomousClaimOutcome::AlreadyClaimed | AutonomousClaimOutcome::NotEligible) => None,
+        Err(error) => {
+            tracing::warn!(run_id = %request.run_id, %error, "failed to claim Autonomous continuation");
+            None
+        }
+    }
+}
+
+fn recovery_delay(lease_expires_at_ms: i64) -> std::time::Duration {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let remaining = u128::try_from(lease_expires_at_ms)
+        .unwrap_or_default()
+        .saturating_sub(now_ms)
+        .saturating_add(50)
+        .min(u128::from(u64::MAX));
+    std::time::Duration::from_millis(remaining as u64)
 }
 
 fn emit_run_updated(

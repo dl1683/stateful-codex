@@ -24,5 +24,6 @@ pub use steering::SteeringStatus;
 pub use steering::SteeringUpdate;
 pub use storage::AutonomousClaimOutcome;
 pub use storage::AutonomousClaimRequest;
+pub use storage::AutonomousRecoveryState;
 pub use storage::StatefulRunStore;
 pub use storage::StatefulRunStoreError;

@@ -40,9 +40,18 @@ pub enum AutonomousClaimOutcome {
         lease_expires_at_ms: i64,
     },
     AlreadyClaimed,
-    Leased,
+    Leased {
+        lease_expires_at_ms: i64,
+    },
     NotEligible,
     BudgetExhausted(StatefulRun),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AutonomousRecoveryState {
+    pub lease_expires_at_ms: Option<i64>,
+    pub previous_turn_id: Option<String>,
+    pub last_claimed_at_ms: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -263,7 +272,7 @@ impl StatefulRunStore {
         }
 
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current = load_run(&mut transaction, id)
+        let mut current = load_run(&mut transaction, id)
             .await?
             .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
         if current.value.mode != WorkflowMode::Autonomous
@@ -273,18 +282,63 @@ impl StatefulRunStore {
         }
 
         let now = unix_timestamp_millis()?;
-        let already_claimed = sqlx::query_scalar::<_, i64>(
-            "SELECT 1 FROM stateful_run_continuations
+        let existing_claim = sqlx::query_scalar::<_, i64>(
+            "SELECT claimed_at_ms FROM stateful_run_continuations
              WHERE run_id = ? AND previous_turn_id = ?",
         )
         .bind(id.as_str())
         .bind(&request.previous_turn_id)
         .fetch_optional(&mut *transaction)
-        .await?
-        .is_some();
-        if already_claimed {
-            transaction.commit().await?;
-            return Ok(AutonomousClaimOutcome::AlreadyClaimed);
+        .await?;
+
+        let lease = sqlx::query_as::<_, StoredLease>(
+            "SELECT owner_id, lease_expires_at_ms, previous_turn_id
+             FROM stateful_run_leases WHERE run_id = ?",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if existing_claim.is_some() {
+            match lease.as_ref() {
+                Some(lease)
+                    if lease.previous_turn_id == request.previous_turn_id
+                        && lease.lease_expires_at_ms > now =>
+                {
+                    transaction.commit().await?;
+                    return if lease.owner_id == request.owner_id {
+                        Ok(AutonomousClaimOutcome::AlreadyClaimed)
+                    } else {
+                        Ok(AutonomousClaimOutcome::Leased {
+                            lease_expires_at_ms: lease.lease_expires_at_ms,
+                        })
+                    };
+                }
+                Some(lease) if lease.previous_turn_id != request.previous_turn_id => {
+                    transaction.commit().await?;
+                    return Ok(AutonomousClaimOutcome::AlreadyClaimed);
+                }
+                _ => {
+                    sqlx::query(
+                        "DELETE FROM stateful_run_continuations
+                         WHERE run_id = ? AND previous_turn_id = ?",
+                    )
+                    .bind(id.as_str())
+                    .bind(&request.previous_turn_id)
+                    .execute(&mut *transaction)
+                    .await?;
+                    sqlx::query(
+                        "UPDATE stateful_runs
+                         SET continuations_used = MAX(continuations_used - 1, 0)
+                         WHERE id = ?",
+                    )
+                    .bind(id.as_str())
+                    .execute(&mut *transaction)
+                    .await?;
+                    current = load_run(&mut transaction, id)
+                        .await?
+                        .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+                }
+            }
         }
 
         let elapsed_ms = now.saturating_sub(current.created_at_ms);
@@ -308,17 +362,13 @@ impl StatefulRunStore {
             return Ok(AutonomousClaimOutcome::BudgetExhausted(blocked));
         }
 
-        let lease = sqlx::query_as::<_, StoredLease>(
-            "SELECT owner_id, lease_expires_at_ms FROM stateful_run_leases WHERE run_id = ?",
-        )
-        .bind(id.as_str())
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if lease.is_some_and(|lease| {
-            lease.owner_id != request.owner_id && lease.lease_expires_at_ms > now
-        }) {
+        if let Some(lease) = lease
+            .filter(|lease| lease.owner_id != request.owner_id && lease.lease_expires_at_ms > now)
+        {
             transaction.commit().await?;
-            return Ok(AutonomousClaimOutcome::Leased);
+            return Ok(AutonomousClaimOutcome::Leased {
+                lease_expires_at_ms: lease.lease_expires_at_ms,
+            });
         }
 
         let lease_expires_at_ms = now
@@ -365,6 +415,36 @@ impl StatefulRunStore {
         Ok(AutonomousClaimOutcome::Claimed {
             run,
             lease_expires_at_ms,
+        })
+    }
+
+    pub async fn autonomous_recovery_state(
+        &self,
+        id: &StatefulRunId,
+    ) -> Result<AutonomousRecoveryState, StatefulRunStoreError> {
+        let lease = sqlx::query_as::<_, StoredLease>(
+            "SELECT owner_id, lease_expires_at_ms, previous_turn_id
+             FROM stateful_run_leases WHERE run_id = ?",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+        let last_claim = sqlx::query_as::<_, StoredContinuation>(
+            "SELECT previous_turn_id, claimed_at_ms
+             FROM stateful_run_continuations
+             WHERE run_id = ? ORDER BY claimed_at_ms DESC LIMIT 1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(AutonomousRecoveryState {
+            lease_expires_at_ms: lease.as_ref().map(|item| item.lease_expires_at_ms),
+            previous_turn_id: lease.map(|item| item.previous_turn_id).or_else(|| {
+                last_claim
+                    .as_ref()
+                    .map(|item| item.previous_turn_id.clone())
+            }),
+            last_claimed_at_ms: last_claim.map(|item| item.claimed_at_ms),
         })
     }
 
@@ -486,6 +566,13 @@ struct StoredRun {
 struct StoredLease {
     owner_id: String,
     lease_expires_at_ms: i64,
+    previous_turn_id: String,
+}
+
+#[derive(FromRow)]
+struct StoredContinuation {
+    previous_turn_id: String,
+    claimed_at_ms: i64,
 }
 
 #[derive(FromRow)]

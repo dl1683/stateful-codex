@@ -181,7 +181,7 @@ function renderControls(state) {
   }
   return panel(
     "Run controls",
-    `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div><form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(run.mode)}</select></label><button class="secondary">Change</button></form><dl><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl><button class="secondary full" data-action="maintain">Maintain project intelligence</button>`,
+    `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div><form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(run.mode)}</select></label><button class="secondary">Change</button></form><dl><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl>${renderRecovery(run, state.recovery)}<button class="secondary full" data-action="maintain">Maintain project intelligence</button>`,
   );
 }
 
@@ -291,6 +291,19 @@ function modeOptions(selected) {
         `<option value="${mode}" ${mode === selected ? "selected" : ""}>${mode[0].toUpperCase()}${mode.slice(1)}</option>`,
     )
     .join("");
+}
+
+function renderRecovery(run, recovery) {
+  if (run.mode !== "autonomous") return "";
+  if (!recovery?.previousTurnId) {
+    return `<p class="recovery">Autonomous recovery is armed. No continuation has been claimed yet.</p>`;
+  }
+  const active =
+    recovery.leaseExpiresAt && recovery.leaseExpiresAt > Date.now() / 1000;
+  const lease = active
+    ? ` Lease active until ${new Date(recovery.leaseExpiresAt * 1000).toLocaleTimeString()}.`
+    : " The last lease is recoverable.";
+  return `<p class="recovery">Recovery checkpoint: ${escapeHtml(recovery.previousTurnId)}.${lease}</p>`;
 }
 
 function empty(message) {

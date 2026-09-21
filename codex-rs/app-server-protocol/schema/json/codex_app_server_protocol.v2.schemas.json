@@ -18877,6 +18877,31 @@
       ],
       "type": "object"
     },
+    "StatefulRunRecovery": {
+      "properties": {
+        "lastContinuationClaimedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "leaseExpiresAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "previousTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "StatefulRunStatus": {
       "enum": [
         "pending",
