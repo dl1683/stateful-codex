@@ -5,10 +5,14 @@ use tempfile::TempDir;
 
 use crate::NewObligation;
 use crate::NewStatefulRun;
+use crate::NewSteeringInstruction;
 use crate::ObligationPacket;
 use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunUpdate;
+use crate::SteeringId;
+use crate::SteeringStatus;
+use crate::SteeringUpdate;
 use crate::WorkflowMode;
 
 use super::StatefulRunStore;
@@ -70,7 +74,7 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
         .expect("store reopens");
     assert_eq!(
         reopened.get_run(&id).await.expect("run loads"),
-        Some(paused)
+        Some(paused.clone())
     );
     assert_eq!(
         reopened
@@ -85,6 +89,63 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
             .await
             .expect("thread run loads")
             .map(|run| run.id),
-        Some(id)
+        Some(id.clone())
+    );
+
+    let steering_id = SteeringId::parse("steering-1").expect("valid steering ID");
+    let submitted = reopened
+        .submit_steering(
+            steering_id.clone(),
+            NewSteeringInstruction {
+                project_id: "project-1".to_string(),
+                run_id: id.clone(),
+                input: "Connect this constraint to the deployment finding.".to_string(),
+                affected_obligation_ids: vec!["obligation-1".to_string()],
+            },
+        )
+        .await
+        .expect("steering submits");
+    let acknowledged = reopened
+        .update_steering(
+            &steering_id,
+            SteeringUpdate {
+                expected_revision: submitted.revision,
+                status: SteeringStatus::Acknowledged,
+                resulting_strategy_revision: None,
+                reason: None,
+            },
+        )
+        .await
+        .expect("steering acknowledges");
+    let resumed = reopened
+        .update_run(
+            &id,
+            StatefulRunUpdate {
+                expected_revision: paused.revision,
+                status: StatefulRunStatus::Running,
+                strategy: Some("Connect the constraint to the deployment finding.".to_string()),
+                result: None,
+            },
+        )
+        .await
+        .expect("steering changes strategy");
+    let applied = reopened
+        .update_steering(
+            &steering_id,
+            SteeringUpdate {
+                expected_revision: acknowledged.revision,
+                status: SteeringStatus::Applied,
+                resulting_strategy_revision: Some(resumed.strategy_revision),
+                reason: None,
+            },
+        )
+        .await
+        .expect("steering applies");
+    assert_eq!(
+        reopened
+            .list_steering(&id, 10)
+            .await
+            .expect("steering lists"),
+        vec![applied]
     );
 }

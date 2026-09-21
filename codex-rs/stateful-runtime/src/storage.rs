@@ -25,7 +25,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
 pub struct StatefulRunStore {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl StatefulRunStore {
@@ -401,7 +401,7 @@ fn validate_record_id(value: &str) -> Result<(), StatefulRunStoreError> {
     Ok(())
 }
 
-fn unix_timestamp_millis() -> Result<i64, StatefulRunStoreError> {
+pub(crate) fn unix_timestamp_millis() -> Result<i64, StatefulRunStoreError> {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
     i64::try_from(duration.as_millis()).map_err(|_| StatefulRunStoreError::TimestampOverflow)
 }
@@ -410,6 +410,8 @@ fn unix_timestamp_millis() -> Result<i64, StatefulRunStoreError> {
 pub enum StatefulRunStoreError {
     #[error(transparent)]
     InvalidRun(#[from] StatefulRunError),
+    #[error(transparent)]
+    InvalidSteering(crate::steering::SteeringError),
     #[error(transparent)]
     Storage(#[from] sqlx::Error),
     #[error(transparent)]
@@ -441,6 +443,19 @@ pub enum StatefulRunStoreError {
     ObligationNotFound(String),
     #[error("obligation project does not match its run")]
     ProjectMismatch,
+    #[error("steering ID was already used for different content: {0}")]
+    SteeringIdentityConflict(String),
+    #[error("steering instruction not found: {0}")]
+    SteeringNotFound(String),
+    #[error("invalid steering transition from {from:?} to {to:?}")]
+    InvalidSteeringTransition {
+        from: crate::SteeringStatus,
+        to: crate::SteeringStatus,
+    },
+    #[error("applied steering strategy revision does not match the run")]
+    StrategyRevisionMismatch,
+    #[error("list limit must be between 1 and 100")]
+    InvalidListLimit,
     #[error("stored runtime enum value is unknown: {0}")]
     CorruptEnum(String),
     #[error("stored runtime count is invalid")]
