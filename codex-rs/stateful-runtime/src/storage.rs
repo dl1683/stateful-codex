@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::NewObligation;
 use crate::NewStatefulRun;
 use crate::ObligationPacket;
+use crate::RunBudget;
 use crate::StatefulObligation;
 use crate::StatefulRun;
 use crate::StatefulRunId;
@@ -21,7 +22,27 @@ use crate::run::StatefulRunError;
 
 const DATABASE_NAME: &str = "stateful_runtime_1.sqlite";
 const INITIAL_REVISION: i64 = 1;
+const MAX_LEASE_DURATION_MS: u32 = 10 * 60 * 1_000;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AutonomousClaimRequest {
+    pub owner_id: String,
+    pub previous_turn_id: String,
+    pub lease_duration_ms: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AutonomousClaimOutcome {
+    Claimed {
+        run: StatefulRun,
+        lease_expires_at_ms: i64,
+    },
+    AlreadyClaimed,
+    Leased,
+    NotEligible,
+    BudgetExhausted(StatefulRun),
+}
 
 #[derive(Clone)]
 pub struct StatefulRunStore {
@@ -63,8 +84,9 @@ impl StatefulRunStore {
         sqlx::query(
             "INSERT INTO stateful_runs (
                 id, project_id, goal, mode, status, strategy, strategy_revision,
-                result, revision, created_at_ms, updated_at_ms
-             ) VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?, ?)",
+                result, revision, created_at_ms, updated_at_ms, max_continuations,
+                max_elapsed_seconds, continuations_used
+             ) VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?, ?, ?, ?, 0)",
         )
         .bind(id.as_str())
         .bind(&value.project_id)
@@ -74,6 +96,8 @@ impl StatefulRunStore {
         .bind(INITIAL_REVISION)
         .bind(now)
         .bind(now)
+        .bind(i64::from(value.budget.max_continuations))
+        .bind(i64::from(value.budget.max_elapsed_seconds))
         .execute(&mut *transaction)
         .await?;
         for (position, thread_id) in value.thread_ids.iter().enumerate() {
@@ -172,6 +196,123 @@ impl StatefulRunStore {
             .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
         transaction.commit().await?;
         Ok(run)
+    }
+
+    pub async fn claim_autonomous_continuation(
+        &self,
+        id: &StatefulRunId,
+        request: AutonomousClaimRequest,
+    ) -> Result<AutonomousClaimOutcome, StatefulRunStoreError> {
+        validate_record_id(&request.owner_id)?;
+        validate_record_id(&request.previous_turn_id)?;
+        if request.lease_duration_ms == 0 || request.lease_duration_ms > MAX_LEASE_DURATION_MS {
+            return Err(StatefulRunStoreError::InvalidLeaseDuration);
+        }
+
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current = load_run(&mut transaction, id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+        if current.value.mode != WorkflowMode::Autonomous
+            || current.status != StatefulRunStatus::Running
+        {
+            return Ok(AutonomousClaimOutcome::NotEligible);
+        }
+
+        let now = unix_timestamp_millis()?;
+        let already_claimed = sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM stateful_run_continuations
+             WHERE run_id = ? AND previous_turn_id = ?",
+        )
+        .bind(id.as_str())
+        .bind(&request.previous_turn_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .is_some();
+        if already_claimed {
+            transaction.commit().await?;
+            return Ok(AutonomousClaimOutcome::AlreadyClaimed);
+        }
+
+        let elapsed_ms = now.saturating_sub(current.created_at_ms);
+        let maximum_elapsed_ms = i64::from(current.value.budget.max_elapsed_seconds) * 1_000;
+        if current.continuations_used >= current.value.budget.max_continuations
+            || elapsed_ms >= maximum_elapsed_ms
+        {
+            sqlx::query(
+                "UPDATE stateful_runs
+                 SET status = 'blocked', revision = revision + 1, updated_at_ms = ?
+                 WHERE id = ?",
+            )
+            .bind(now)
+            .bind(id.as_str())
+            .execute(&mut *transaction)
+            .await?;
+            let blocked = load_run(&mut transaction, id)
+                .await?
+                .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+            transaction.commit().await?;
+            return Ok(AutonomousClaimOutcome::BudgetExhausted(blocked));
+        }
+
+        let lease = sqlx::query_as::<_, StoredLease>(
+            "SELECT owner_id, lease_expires_at_ms FROM stateful_run_leases WHERE run_id = ?",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if lease.is_some_and(|lease| {
+            lease.owner_id != request.owner_id && lease.lease_expires_at_ms > now
+        }) {
+            transaction.commit().await?;
+            return Ok(AutonomousClaimOutcome::Leased);
+        }
+
+        let lease_expires_at_ms = now
+            .checked_add(i64::from(request.lease_duration_ms))
+            .ok_or(StatefulRunStoreError::TimestampOverflow)?;
+        sqlx::query(
+            "INSERT INTO stateful_run_continuations (run_id, previous_turn_id, claimed_at_ms)
+             VALUES (?, ?, ?)",
+        )
+        .bind(id.as_str())
+        .bind(&request.previous_turn_id)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO stateful_run_leases (
+                run_id, owner_id, lease_expires_at_ms, previous_turn_id
+             ) VALUES (?, ?, ?, ?)
+             ON CONFLICT(run_id) DO UPDATE SET
+                owner_id = excluded.owner_id,
+                lease_expires_at_ms = excluded.lease_expires_at_ms,
+                previous_turn_id = excluded.previous_turn_id",
+        )
+        .bind(id.as_str())
+        .bind(&request.owner_id)
+        .bind(lease_expires_at_ms)
+        .bind(&request.previous_turn_id)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE stateful_runs
+             SET continuations_used = continuations_used + 1,
+                 revision = revision + 1, updated_at_ms = ?
+             WHERE id = ?",
+        )
+        .bind(now)
+        .bind(id.as_str())
+        .execute(&mut *transaction)
+        .await?;
+        let run = load_run(&mut transaction, id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+        transaction.commit().await?;
+        Ok(AutonomousClaimOutcome::Claimed {
+            run,
+            lease_expires_at_ms,
+        })
     }
 
     pub async fn append_obligation(
@@ -283,6 +424,15 @@ struct StoredRun {
     revision: i64,
     created_at_ms: i64,
     updated_at_ms: i64,
+    max_continuations: i64,
+    max_elapsed_seconds: i64,
+    continuations_used: i64,
+}
+
+#[derive(FromRow)]
+struct StoredLease {
+    owner_id: String,
+    lease_expires_at_ms: i64,
 }
 
 #[derive(FromRow)]
@@ -319,6 +469,10 @@ async fn load_run(
         thread_ids,
         goal: stored.goal,
         mode: parse_mode(&stored.mode)?,
+        budget: RunBudget {
+            max_continuations: parse_u32(stored.max_continuations)?,
+            max_elapsed_seconds: parse_u32(stored.max_elapsed_seconds)?,
+        },
     };
     value.validate()?;
     Ok(Some(StatefulRun {
@@ -328,6 +482,7 @@ async fn load_run(
         strategy: stored.strategy,
         strategy_revision: parse_count(stored.strategy_revision)?,
         result: stored.result,
+        continuations_used: parse_u32(stored.continuations_used)?,
         revision: parse_count(stored.revision)?,
         created_at_ms: stored.created_at_ms,
         updated_at_ms: stored.updated_at_ms,
@@ -427,6 +582,10 @@ fn parse_count(value: i64) -> Result<u64, StatefulRunStoreError> {
     u64::try_from(value).map_err(|_| StatefulRunStoreError::CorruptCount)
 }
 
+fn parse_u32(value: i64) -> Result<u32, StatefulRunStoreError> {
+    u32::try_from(value).map_err(|_| StatefulRunStoreError::CorruptCount)
+}
+
 fn validate_record_id(value: &str) -> Result<(), StatefulRunStoreError> {
     if value.is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
         return Err(StatefulRunStoreError::InvalidRecordId);
@@ -498,6 +657,8 @@ pub enum StatefulRunStoreError {
     StrategyRevisionMismatch,
     #[error("list limit must be between 1 and 101")]
     InvalidListLimit,
+    #[error("autonomous lease duration must be between 1 and 600000 milliseconds")]
+    InvalidLeaseDuration,
     #[error("list cursor does not belong to the requested run")]
     InvalidListCursor,
     #[error("stored runtime enum value is unknown: {0}")]

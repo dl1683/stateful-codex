@@ -12,6 +12,28 @@ const MAX_STRATEGY_BYTES: usize = 16 * 1024;
 const MAX_RESULT_BYTES: usize = 32 * 1024;
 const MAX_PACKET_FIELD_BYTES: usize = 8 * 1024;
 const MAX_PACKET_LIST_ITEMS: usize = 32;
+const MAX_CONTINUATIONS: u32 = 1_000;
+const MAX_ELAPSED_SECONDS: u32 = 7 * 24 * 60 * 60;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunBudget {
+    pub max_continuations: u32,
+    pub max_elapsed_seconds: u32,
+}
+
+impl RunBudget {
+    pub fn validate(self) -> Result<(), StatefulRunError> {
+        if self.max_continuations == 0
+            || self.max_continuations > MAX_CONTINUATIONS
+            || self.max_elapsed_seconds < 60
+            || self.max_elapsed_seconds > MAX_ELAPSED_SECONDS
+        {
+            return Err(StatefulRunError::InvalidBudget);
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -67,6 +89,7 @@ pub struct NewStatefulRun {
     pub thread_ids: Vec<String>,
     pub goal: String,
     pub mode: WorkflowMode,
+    pub budget: RunBudget,
 }
 
 impl NewStatefulRun {
@@ -80,7 +103,8 @@ impl NewStatefulRun {
             validate_identity(thread_id, MAX_ID_BYTES)
                 .map_err(|()| StatefulRunError::InvalidThreadIds)?;
         }
-        validate_text(&self.goal, MAX_GOAL_BYTES).map_err(|()| StatefulRunError::InvalidGoal)
+        validate_text(&self.goal, MAX_GOAL_BYTES).map_err(|()| StatefulRunError::InvalidGoal)?;
+        self.budget.validate()
     }
 }
 
@@ -92,6 +116,7 @@ pub struct StatefulRun {
     pub strategy: Option<String>,
     pub strategy_revision: u64,
     pub result: Option<String>,
+    pub continuations_used: u32,
     pub revision: u64,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
@@ -219,6 +244,8 @@ pub enum StatefulRunError {
     InvalidThreadIds,
     #[error("run goal must be non-empty, bounded, trimmed, and contain no NUL")]
     InvalidGoal,
+    #[error("run budget must allow 1-1000 continuations and 60-604800 elapsed seconds")]
+    InvalidBudget,
     #[error("run strategy must be bounded, trimmed, and contain no NUL")]
     InvalidStrategy,
     #[error("run result must be bounded, trimmed, and contain no NUL")]
