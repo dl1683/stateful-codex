@@ -24,16 +24,24 @@ use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::ContextMapCoverage;
+use codex_project_intelligence::ContextMapEntryId;
+use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::NewBlackboardEntry;
+use codex_project_intelligence::NewContextMapEntry;
 use codex_project_intelligence::NewHierarchyNode;
 use codex_project_intelligence::NodeKind;
 use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::RootPromotion;
+use codex_project_intelligence::SourceFingerprint;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::responses;
+use pretty_assertions::assert_eq;
+use serde_json::json;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -115,6 +123,90 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
     Ok(())
 }
 
+#[tokio::test]
+async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_response_created("blackboard-response"),
+                responses::ev_function_call(
+                    "blackboard-call",
+                    "blackboard_query",
+                    &json!({"text": "decisive"}).to_string(),
+                ),
+                responses::ev_completed("blackboard-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("context-map-response"),
+                responses::ev_function_call(
+                    "context-map-call",
+                    "context_map_query",
+                    &json!({"text": "operator setup"}).to_string(),
+                ),
+                responses::ev_completed("context-map-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("done-response"),
+                responses::ev_assistant_message("done-message", "Done"),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Decisive Evidence Project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-query-tools-project".to_string(),
+            },
+        })
+        .await?;
+    seed_root_blackboard(codex_home.path(), &created.project.id).await?;
+    seed_context_map(codex_home.path(), &created.project.id, project_root.path()).await?;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].body_contains_text("blackboard_query"));
+    assert!(requests[0].body_contains_text("context_map_query"));
+    let blackboard_output = requests[1]
+        .function_call_output("blackboard-call")
+        .to_string();
+    assert!(blackboard_output.contains("A decisive project fact survives every thread view."));
+    assert!(blackboard_output.contains(&created.project.id));
+    let context_map_output = requests[2]
+        .function_call_output("context-map-call")
+        .to_string();
+    assert!(context_map_output.contains("Project purpose, setup, and operator instructions."));
+    assert!(context_map_output.contains("README.md"));
+    assert!(context_map_output.contains("current"));
+    Ok(())
+}
+
 async fn run_turn(server: &mut TestAppServer, thread_id: &str) -> Result<()> {
     server
         .start_turn_and_wait_for_completion(TurnStartParams {
@@ -186,6 +278,63 @@ async fn seed_root_blackboard(codex_home: &std::path::Path, project_id: &str) ->
                     kind: BlackboardProvenanceKind::User,
                     source_id: "integration-fixture".to_string(),
                 },
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+async fn seed_context_map(
+    codex_home: &std::path::Path,
+    project_id: &str,
+    project_root: &std::path::Path,
+) -> Result<()> {
+    let sqlite = SqliteConfig::new_for_testing(codex_home.abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await?;
+    let project_node_id = HierarchyNodeId::parse(format!("project-node-{project_id}"))?;
+    let root_node_id = HierarchyNodeId::parse(format!("root-node-{project_id}"))?;
+    let file_node_id = HierarchyNodeId::parse(format!("readme-node-{project_id}"))?;
+    let project_root = project_root.display().to_string();
+    hierarchy
+        .create_node(
+            root_node_id.clone(),
+            NewHierarchyNode {
+                project_id: project_id.to_string(),
+                parent_id: Some(project_node_id),
+                kind: NodeKind::Directory,
+                project_root: Some(project_root.clone()),
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
+    let source_fingerprint = SourceFingerprint::parse("sha256:readme-v1")?;
+    hierarchy
+        .create_node(
+            file_node_id.clone(),
+            NewHierarchyNode {
+                project_id: project_id.to_string(),
+                parent_id: Some(root_node_id),
+                kind: NodeKind::File,
+                project_root: Some(project_root),
+                relative_path: ProjectRelativePath::parse("README.md")?,
+                region_anchor: None,
+                source_fingerprint: Some(source_fingerprint.clone()),
+            },
+        )
+        .await?;
+    ContextMapStore::open(&sqlite)
+        .await?
+        .create_entry(
+            ContextMapEntryId::parse(format!("readme-map-{project_id}"))?,
+            NewContextMapEntry {
+                project_id: project_id.to_string(),
+                node_id: file_node_id,
+                source_fingerprint,
+                description: "Project purpose, setup, and operator instructions.".to_string(),
+                routing_terms: vec!["operator".to_string(), "setup".to_string()],
+                coverage: ContextMapCoverage::Complete,
             },
         )
         .await?;

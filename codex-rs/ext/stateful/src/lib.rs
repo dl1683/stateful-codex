@@ -1,22 +1,27 @@
 //! Project-scoped Stateful Codex integration.
 
 mod root_blackboard;
+mod services;
+mod tools;
 mod world_state;
 
 use std::sync::Arc;
 
 use codex_extension_api::ContextContributor;
+use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::ToolCall;
+use codex_extension_api::ToolContributor;
+use codex_extension_api::ToolExecutor;
 use codex_extension_api::WorldStateContributionInput;
 use codex_extension_api::WorldStateSectionContribution;
-use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
-use tokio::sync::OnceCell;
 
 use crate::root_blackboard::RootBlackboardStatus;
+use crate::services::ProjectIntelligenceServices;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
@@ -43,8 +48,7 @@ impl SelectedProject {
 
 struct StatefulExtension {
     projects: Arc<dyn ThreadStore>,
-    sqlite: Option<SqliteConfig>,
-    blackboard: OnceCell<BlackboardStore>,
+    services: Option<ProjectIntelligenceServices>,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -89,14 +93,10 @@ impl ContextContributor for StatefulExtension {
 
 impl StatefulExtension {
     async fn root_blackboard(&self, project_id: &str) -> RootBlackboardStatus {
-        let Some(sqlite) = self.sqlite.as_ref() else {
+        let Some(services) = self.services.as_ref() else {
             return RootBlackboardStatus::NotConfigured;
         };
-        let store = match self
-            .blackboard
-            .get_or_try_init(|| BlackboardStore::open(sqlite))
-            .await
-        {
+        let store = match services.blackboard().await {
             Ok(store) => store,
             Err(error) => {
                 tracing::warn!(%project_id, %error, "failed to open Stateful blackboard");
@@ -119,15 +119,36 @@ impl StatefulExtension {
     }
 }
 
+impl ToolContributor for StatefulExtension {
+    fn tools(
+        &self,
+        _session_store: &ExtensionData,
+        thread_store: &ExtensionData,
+    ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
+        let (Some(selected), Some(services)) = (
+            thread_store.get::<SelectedProject>(),
+            self.services.as_ref(),
+        ) else {
+            return Vec::new();
+        };
+        tools::project_intelligence_tools(
+            selected.project_id().to_string(),
+            services.clone(),
+            self.projects.clone(),
+        )
+    }
+}
+
 /// Installs project-scoped Stateful context into the Codex extension registry.
 pub fn install<C: Sync>(
     registry: &mut ExtensionRegistryBuilder<C>,
     projects: Arc<dyn ThreadStore>,
     sqlite: Option<SqliteConfig>,
 ) {
-    registry.prompt_contributor(Arc::new(StatefulExtension {
+    let extension = Arc::new(StatefulExtension {
         projects,
-        sqlite,
-        blackboard: OnceCell::new(),
-    }));
+        services: sqlite.map(ProjectIntelligenceServices::new),
+    });
+    registry.prompt_contributor(extension.clone());
+    registry.tool_contributor(extension);
 }
