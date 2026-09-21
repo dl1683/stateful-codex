@@ -191,6 +191,10 @@ pub(super) fn server_notification_thread_target(
             }
         }
         ServerNotification::ProjectChanged(_)
+        | ServerNotification::StatefulRunUpdated(_)
+        | ServerNotification::ObligationUpdated(_)
+        | ServerNotification::SteeringUpdated(_)
+        | ServerNotification::BlackboardUpdated(_)
         | ServerNotification::SkillsChanged(_)
         | ServerNotification::McpServerOauthLoginCompleted(_)
         | ServerNotification::AccountUpdated(_)

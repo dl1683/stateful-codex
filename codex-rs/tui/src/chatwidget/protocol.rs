@@ -378,7 +378,11 @@ impl ChatWidget {
             | ServerNotification::WindowsSandboxSetupCompleted(_)
             | ServerNotification::AccountLoginCompleted(_)
             | ServerNotification::ProjectChanged(_)
-            | ServerNotification::ThreadProjectUpdated(_) => {}
+            | ServerNotification::ThreadProjectUpdated(_)
+            | ServerNotification::StatefulRunUpdated(_)
+            | ServerNotification::ObligationUpdated(_)
+            | ServerNotification::SteeringUpdated(_)
+            | ServerNotification::BlackboardUpdated(_) => {}
             ServerNotification::ContextCompacted(_) => {}
         }
         // Tool and hook activity can recreate a hidden row with its default
