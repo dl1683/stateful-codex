@@ -11,6 +11,8 @@ use codex_app_server_protocol::ContextMapFreshness as ApiContextMapFreshness;
 use codex_app_server_protocol::ContextMapQueryHit as ApiContextMapQueryHit;
 use codex_app_server_protocol::ContextMapQueryParams;
 use codex_app_server_protocol::ContextMapQueryResponse;
+use codex_app_server_protocol::ContextMapRefreshParams;
+use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ContextMapSource as ApiContextMapSource;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
@@ -238,5 +240,87 @@ async fn context_map_query_returns_exact_routes_and_reports_stale_sources() -> R
         .await?;
     assert_eq!(error.error.code, INVALID_PARAMS_ERROR_CODE);
     assert_eq!(error.error.message, "project not found: missing-project");
+    Ok(())
+}
+
+#[tokio::test]
+async fn context_map_refresh_indexes_changes_and_marks_missing_sources() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("README.md"),
+        "# Decisive operator setup\nUse the selected project root.\n",
+    )?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Indexed Project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "context-map-refresh-project".to_string(),
+            },
+        })
+        .await?;
+    let params = ContextMapRefreshParams {
+        project_id: created.project.id.clone(),
+    };
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: params.clone(),
+        })
+        .await?;
+    assert_eq!(
+        refreshed,
+        ContextMapRefreshResponse {
+            files_indexed: 1,
+            files_skipped: 0,
+            missing_files: 0,
+            truncated: false,
+        }
+    );
+    let query = ContextMapQueryParams {
+        project_id: created.project.id.clone(),
+        text: "decisive operator".to_string(),
+        limit: Some(5),
+    };
+    let current: ContextMapQueryResponse = server
+        .request(|request_id| ClientRequest::ContextMapQuery {
+            request_id,
+            params: query.clone(),
+        })
+        .await?;
+    assert_eq!(current.data.len(), 1);
+    assert_eq!(current.data[0].freshness, ApiContextMapFreshness::Current);
+    assert_eq!(current.data[0].source.relative_path, "README.md");
+
+    std::fs::remove_file(project_root.path().join("README.md"))?;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh { request_id, params })
+        .await?;
+    assert_eq!(refreshed.missing_files, 1);
+    let missing: ContextMapQueryResponse = server
+        .request(|request_id| ClientRequest::ContextMapQuery {
+            request_id,
+            params: query,
+        })
+        .await?;
+    assert_eq!(missing.data.len(), 1);
+    assert_eq!(
+        missing.data[0].freshness,
+        ApiContextMapFreshness::SourceUnavailable
+    );
     Ok(())
 }

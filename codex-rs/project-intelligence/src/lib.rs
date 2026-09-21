@@ -5,6 +5,7 @@ mod blackboard_storage;
 mod context_map;
 mod context_map_storage;
 mod hierarchy;
+mod indexer;
 mod search;
 mod storage;
 
@@ -52,6 +53,10 @@ pub use hierarchy::NodeLifecycle;
 pub use hierarchy::ProjectRelativePath;
 pub use hierarchy::RegionAnchor;
 pub use hierarchy::SourceFingerprint;
+pub use indexer::ProjectIndexReport;
+pub use indexer::ProjectIndexRequest;
+pub use indexer::ProjectIndexer;
+pub use indexer::ProjectIndexerError;
 pub use storage::HierarchySourceUpdate;
 pub use storage::HierarchyStore;
 pub use storage::HierarchyStoreError;

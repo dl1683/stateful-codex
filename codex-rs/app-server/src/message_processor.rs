@@ -1492,6 +1492,9 @@ impl MessageProcessor {
             ClientRequest::ContextMapQuery { params, .. } => {
                 self.context_map_processor.context_map_query(params).await
             }
+            ClientRequest::ContextMapRefresh { params, .. } => {
+                self.context_map_processor.context_map_refresh(params).await
+            }
             ClientRequest::ThreadSearch { params, .. } => {
                 self.thread_processor.thread_search(params).await
             }

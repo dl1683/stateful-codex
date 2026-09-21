@@ -22,6 +22,26 @@ pub struct ContextMapQueryResponse {
     pub data: Vec<ContextMapQueryHit>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ContextMapRefreshParams {
+    pub project_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ContextMapRefreshResponse {
+    #[ts(type = "number")]
+    pub files_indexed: u64,
+    #[ts(type = "number")]
+    pub files_skipped: u64,
+    #[ts(type = "number")]
+    pub missing_files: u64,
+    pub truncated: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

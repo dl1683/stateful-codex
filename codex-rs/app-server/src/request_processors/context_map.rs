@@ -7,6 +7,8 @@ use codex_app_server_protocol::ContextMapFreshness as ApiContextMapFreshness;
 use codex_app_server_protocol::ContextMapQueryHit as ApiContextMapQueryHit;
 use codex_app_server_protocol::ContextMapQueryParams;
 use codex_app_server_protocol::ContextMapQueryResponse;
+use codex_app_server_protocol::ContextMapRefreshParams;
+use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ContextMapRegionAnchor as ApiContextMapRegionAnchor;
 use codex_app_server_protocol::ContextMapSource as ApiContextMapSource;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -16,6 +18,10 @@ use codex_project_intelligence::ContextMapHit;
 use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::ContextMapStoreError;
+use codex_project_intelligence::HierarchyStore;
+use codex_project_intelligence::ProjectIndexRequest;
+use codex_project_intelligence::ProjectIndexer;
+use codex_project_intelligence::ProjectIndexerError;
 use codex_state::SqliteConfig;
 use codex_thread_store::StoredProject;
 use codex_thread_store::ThreadStore;
@@ -34,6 +40,7 @@ pub(crate) struct ContextMapRequestProcessor {
     thread_store: Arc<dyn ThreadStore>,
     sqlite: Option<SqliteConfig>,
     context_map: Arc<OnceCell<ContextMapStore>>,
+    hierarchy: Arc<OnceCell<HierarchyStore>>,
 }
 
 impl ContextMapRequestProcessor {
@@ -42,7 +49,50 @@ impl ContextMapRequestProcessor {
             thread_store,
             sqlite,
             context_map: Arc::new(OnceCell::new()),
+            hierarchy: Arc::new(OnceCell::new()),
         }
+    }
+
+    pub(crate) async fn context_map_refresh(
+        &self,
+        params: ContextMapRefreshParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let sqlite = self.sqlite.as_ref().ok_or_else(|| {
+            method_not_found("contextMap/refresh is unavailable without sqlite state")
+        })?;
+        let project = self
+            .thread_store
+            .read_project(params.project_id.clone())
+            .await
+            .map_err(context_map_project_error)?
+            .ok_or_else(|| invalid_params(format!("project not found: {}", params.project_id)))?;
+        let hierarchy = self
+            .hierarchy
+            .get_or_try_init(|| HierarchyStore::open(sqlite))
+            .await
+            .map_err(|error| {
+                internal_error(format!("failed to open project hierarchy: {error}"))
+            })?;
+        let report = ProjectIndexer::new(hierarchy.clone(), self.store().await?.clone())
+            .refresh(ProjectIndexRequest {
+                project_id: project.id,
+                roots: project
+                    .roots
+                    .into_iter()
+                    .map(|root| PathBuf::from(root.path))
+                    .collect(),
+            })
+            .await
+            .map_err(context_map_refresh_error)?;
+        Ok(Some(
+            ContextMapRefreshResponse {
+                files_indexed: report.files_indexed,
+                files_skipped: report.files_skipped,
+                missing_files: report.missing_files,
+                truncated: report.truncated,
+            }
+            .into(),
+        ))
     }
 
     pub(crate) async fn context_map_query(
@@ -154,5 +204,14 @@ fn context_map_store_error(error: ContextMapStoreError) -> JSONRPCErrorError {
     match error {
         ContextMapStoreError::InvalidEntry(error) => invalid_params(error.to_string()),
         error => internal_error(format!("failed to query context map: {error}")),
+    }
+}
+
+fn context_map_refresh_error(error: ProjectIndexerError) -> JSONRPCErrorError {
+    match error {
+        ProjectIndexerError::InvalidRequest | ProjectIndexerError::InvalidRoot => {
+            invalid_params(error.to_string())
+        }
+        error => internal_error(format!("failed to refresh context map: {error}")),
     }
 }

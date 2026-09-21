@@ -819,6 +819,12 @@ client_request_definitions! {
         serialization: global_shared_read("project-intelligence"),
         response: v2::ContextMapQueryResponse,
     },
+    #[experimental("contextMap/refresh")]
+    ContextMapRefresh => "contextMap/refresh" {
+        params: v2::ContextMapRefreshParams,
+        serialization: global("project-intelligence"),
+        response: v2::ContextMapRefreshResponse,
+    },
     ThreadSectionList => "threadSection/list" {
         params: v2::ThreadSectionListParams,
         serialization: global_shared_read("thread-sections"),

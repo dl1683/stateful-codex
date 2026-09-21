@@ -14,7 +14,9 @@ workspace = true
 
 [dependencies]
 codex-state = { workspace = true }
+ignore = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
