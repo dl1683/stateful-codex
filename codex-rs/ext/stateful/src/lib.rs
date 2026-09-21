@@ -5,6 +5,7 @@ mod events;
 mod root_blackboard;
 mod run_world_state;
 mod services;
+mod socratic;
 mod tools;
 mod world_state;
 
@@ -250,5 +251,6 @@ pub fn install<C: Sync>(
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());
+    registry.tool_policy_contributor(extension.clone());
     registry.thread_lifecycle_contributor(extension);
 }

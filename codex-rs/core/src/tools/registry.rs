@@ -21,6 +21,7 @@ use crate::tools::control_tool_analytics::ControlToolCallGuard;
 use crate::tools::flat_tool_name;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use crate::tools::hook_names::HookToolName;
+use crate::tools::lifecycle::enforce_tool_policy;
 use crate::tools::lifecycle::notify_tool_finish;
 use crate::tools::lifecycle::notify_tool_start;
 use crate::tools::router::tool_log_payload;
@@ -650,6 +651,22 @@ impl ToolRegistry {
                     updated_input: None,
                 } => {}
             }
+        }
+
+        if let Some(message) = enforce_tool_policy(&invocation).await {
+            if tool.is_builtin_control_tool() {
+                let mut analytics = ControlToolCallGuard::new(&invocation);
+                analytics.finish(ControlToolCallStatus::Rejected);
+            }
+            let err = FunctionCallError::RespondToModel(message);
+            dispatch_trace.record_failed(&err);
+            notify_tool_finish_if_unclaimed(
+                &invocation,
+                terminal_outcome_reached.as_deref(),
+                ToolCallOutcome::Blocked,
+            )
+            .await;
+            return Err(err);
         }
 
         if tool.mcp_server_name().is_none() {

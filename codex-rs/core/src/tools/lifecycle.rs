@@ -6,6 +6,8 @@ use codex_extension_api::McpToolResultInput;
 use codex_extension_api::ToolCallOutcome;
 use codex_extension_api::ToolCallSource as ExtensionToolCallSource;
 use codex_extension_api::ToolFinishInput;
+use codex_extension_api::ToolPolicyDecision;
+use codex_extension_api::ToolPolicyInput;
 use codex_extension_api::ToolStartInput;
 use codex_file_system::ExecutorFileSystem;
 use codex_protocol::mcp::CallToolResult;
@@ -16,6 +18,31 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
+
+pub(crate) async fn enforce_tool_policy(invocation: &ToolInvocation) -> Option<String> {
+    for contributor in invocation
+        .session
+        .services
+        .extensions
+        .tool_policy_contributors()
+    {
+        let decision = contributor
+            .evaluate(ToolPolicyInput {
+                thread_id: invocation.session.thread_id,
+                session_store: &invocation.session.services.session_extension_data,
+                thread_store: &invocation.session.services.thread_extension_data,
+                turn_store: invocation.turn.extension_data.as_ref(),
+                turn_id: invocation.turn.sub_id.as_str(),
+                tool_name: &invocation.tool_name,
+                source: extension_tool_call_source(invocation.source.clone()),
+            })
+            .await;
+        if let ToolPolicyDecision::Block { reason } = decision {
+            return Some(reason);
+        }
+    }
+    None
+}
 
 pub(crate) async fn notify_tool_start(
     invocation: &ToolInvocation,

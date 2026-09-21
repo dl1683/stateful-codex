@@ -11,6 +11,7 @@ use crate::ThreadLifecycleContributor;
 use crate::TokenUsageContributor;
 use crate::ToolContributor;
 use crate::ToolLifecycleContributor;
+use crate::ToolPolicyContributor;
 use crate::TurnInputContributor;
 use crate::TurnItemContributor;
 use crate::TurnLifecycleContributor;
@@ -38,6 +39,7 @@ impl<C: Sync> Default for ExtensionRegistryBuilder<C> {
                 turn_input_contributors: Vec::new(),
                 tool_contributors: Vec::new(),
                 tool_lifecycle_contributors: Vec::new(),
+                tool_policy_contributors: Vec::new(),
                 turn_item_contributors: Vec::new(),
             },
         }
@@ -132,6 +134,11 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
         self.registry.tool_lifecycle_contributors.push(contributor);
     }
 
+    /// Registers one model tool policy gate.
+    pub fn tool_policy_contributor(&mut self, contributor: Arc<dyn ToolPolicyContributor>) {
+        self.registry.tool_policy_contributors.push(contributor);
+    }
+
     /// Registers one ordered turn-item contributor.
     pub fn turn_item_contributor(&mut self, contributor: Arc<dyn TurnItemContributor>) {
         self.registry.turn_item_contributors.push(contributor);
@@ -157,6 +164,7 @@ pub struct ExtensionRegistry<C: Sync> {
     turn_input_contributors: Vec<Arc<dyn TurnInputContributor>>,
     tool_contributors: Vec<Arc<dyn ToolContributor>>,
     tool_lifecycle_contributors: Vec<Arc<dyn ToolLifecycleContributor>>,
+    tool_policy_contributors: Vec<Arc<dyn ToolPolicyContributor>>,
     turn_item_contributors: Vec<Arc<dyn TurnItemContributor>>,
     approval_review_contributors: Vec<Arc<dyn ApprovalReviewContributor>>,
 }
@@ -178,6 +186,7 @@ impl<C: Sync> ExtensionRegistry<C> {
                 turn_input_contributors: self.turn_input_contributors.clone(),
                 tool_contributors: self.tool_contributors.clone(),
                 tool_lifecycle_contributors: self.tool_lifecycle_contributors.clone(),
+                tool_policy_contributors: self.tool_policy_contributors.clone(),
                 turn_item_contributors: self.turn_item_contributors.clone(),
                 approval_review_contributors: self.approval_review_contributors.clone(),
             },
@@ -270,6 +279,11 @@ impl<C: Sync> ExtensionRegistry<C> {
     /// Returns the registered tool-lifecycle contributors.
     pub fn tool_lifecycle_contributors(&self) -> &[Arc<dyn ToolLifecycleContributor>] {
         &self.tool_lifecycle_contributors
+    }
+
+    /// Returns the registered model tool policy gates.
+    pub fn tool_policy_contributors(&self) -> &[Arc<dyn ToolPolicyContributor>] {
+        &self.tool_policy_contributors
     }
 
     /// Returns the registered ordered turn-item contributors.
