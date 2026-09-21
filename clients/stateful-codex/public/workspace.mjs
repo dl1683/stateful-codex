@@ -273,7 +273,7 @@ app.addEventListener("submit", async (event) => {
       if (!text) return;
       state.contextHits = (
         await action("Searching source map", () =>
-          rpc("contextMap/query", { projectId, text, limit: 50 }),
+          rpc("contextMap/query", { projectId, text, limit: 20 }),
         )
       ).data;
       render();
