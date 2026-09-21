@@ -3,6 +3,7 @@ mod blackboard_write;
 mod context_map;
 mod obligation;
 mod run;
+mod steering;
 
 use std::sync::Arc;
 
@@ -57,6 +58,11 @@ pub(super) fn project_intelligence_tools(
             project_id.clone(),
             services.clone(),
         )),
+        Arc::new(steering::SteeringQueryTool::new(
+            project_id.clone(),
+            services.clone(),
+        )),
+        Arc::new(steering::SteeringReconcileTool::new(project_id, services)),
     ]);
     tools
 }
