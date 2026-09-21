@@ -39,7 +39,7 @@ impl ProjectIntelligenceStatus {
 
     fn fingerprint(&self) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(b"codex-stateful-project-v1\0");
+        hasher.update(b"codex-stateful-project-v2\0");
         match self {
             Self::Available {
                 project,
@@ -71,6 +71,14 @@ impl ProjectIntelligenceStatus {
         append_line(
             &mut body,
             "The user explicitly selected this durable project. Treat threads as views over the same project intelligence; do not infer or switch projects.",
+        );
+        append_line(
+            &mut body,
+            "Start from accumulated project intelligence. Query deeper blackboard state before rereading broadly, then use the context map and exact source when detail or consequential verification is needed.",
+        );
+        append_line(
+            &mut body,
+            "Persist materially reusable understanding: important instructions, facts, numbers, decisions, strategies, questions, contradictions, failures, rejected approaches, signals, and cross-source relationships. Link evidence and preserve uncertainty; do not store routine activity, transient progress, or guesses presented as facts.",
         );
         append_field(&mut body, "Project ID", self.project_id());
         match self {

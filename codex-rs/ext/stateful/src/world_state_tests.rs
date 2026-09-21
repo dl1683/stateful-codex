@@ -61,6 +61,16 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
+            .contains("Query deeper blackboard state before rereading broadly")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("do not store routine activity, transient progress")
+    );
+    assert!(
+        rendered
+            .body()
             .contains("No knowledge has been promoted to the root blackboard yet")
     );
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
