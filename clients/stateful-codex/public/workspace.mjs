@@ -160,6 +160,9 @@ async function refreshWorkspace() {
       cursor: null,
       limit: 100,
       sortDirection: "desc",
+    }).catch((error) => {
+      if (error.code === -32601) return { data: [] };
+      throw error;
     }),
   ]);
   state.project = project.project;
