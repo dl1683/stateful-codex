@@ -17,6 +17,9 @@ const MAX_UNIT_BYTES: usize = 128;
 const MAX_EVIDENCE_LINKS: usize = 32;
 const MAX_PROVENANCE_SOURCE_BYTES: usize = 512;
 const MAX_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
+const MAX_QUERY_BYTES: usize = 1_024;
+const MAX_QUERY_RESULTS: u32 = 50;
+const MAX_ROOT_ENTRIES: u32 = 256;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -209,6 +212,94 @@ pub struct BlackboardEntry {
     pub updated_at_ms: i64,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BlackboardEvidenceFreshness {
+    NotApplicable,
+    Current,
+    Stale,
+    SourceUnavailable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlackboardHit {
+    pub entry: BlackboardEntry,
+    pub evidence_freshness: BlackboardEvidenceFreshness,
+    pub effective_verification: BlackboardVerification,
+}
+
+impl BlackboardHit {
+    pub fn new(entry: BlackboardEntry, evidence_freshness: BlackboardEvidenceFreshness) -> Self {
+        let effective_verification = match (entry.value.verification, evidence_freshness) {
+            (BlackboardVerification::SourceVerified, BlackboardEvidenceFreshness::Current) => {
+                BlackboardVerification::SourceVerified
+            }
+            (BlackboardVerification::SourceVerified, _) => BlackboardVerification::Stale,
+            (verification, _) => verification,
+        };
+        Self {
+            entry,
+            evidence_freshness,
+            effective_verification,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlackboardQuery {
+    pub project_id: String,
+    pub text: Option<String>,
+    pub within_node: Option<HierarchyNodeId>,
+    pub max_results: u32,
+}
+
+impl BlackboardQuery {
+    pub fn validate(&self) -> Result<(), BlackboardError> {
+        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
+            .map_err(|()| BlackboardError::InvalidProjectId)?;
+        if self.max_results == 0 || self.max_results > MAX_QUERY_RESULTS {
+            return Err(BlackboardError::InvalidQuery);
+        }
+        if self.text.as_ref().is_some_and(|text| {
+            text.is_empty() || text.len() > MAX_QUERY_BYTES || text.trim() != text
+        }) {
+            return Err(BlackboardError::InvalidQuery);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlackboardQueryResult {
+    pub data: Vec<BlackboardHit>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RootBlackboardQuery {
+    pub project_id: String,
+    pub max_entries: u32,
+}
+
+impl RootBlackboardQuery {
+    pub fn validate(&self) -> Result<(), BlackboardError> {
+        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
+            .map_err(|()| BlackboardError::InvalidProjectId)?;
+        if self.max_entries == 0 || self.max_entries > MAX_ROOT_ENTRIES {
+            return Err(BlackboardError::InvalidRootQuery);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RootBlackboardProjection {
+    pub project_id: String,
+    pub revision: u64,
+    pub data: Vec<BlackboardHit>,
+    pub omitted_entries: u64,
+}
+
 fn validate_content(value: &str) -> Result<(), BlackboardError> {
     if value.is_empty()
         || value.len() > MAX_CONTENT_BYTES
@@ -313,6 +404,12 @@ pub enum BlackboardError {
     InvalidProvenance,
     #[error("superseded entries require a different successor; other states cannot name one")]
     InvalidSupersession,
+    #[error("blackboard query must be bounded, trimmed, and request 1-50 results")]
+    InvalidQuery,
+    #[error("blackboard query contains no searchable terms")]
+    NoSearchTerms,
+    #[error("root blackboard query must request 1-256 entries")]
+    InvalidRootQuery,
 }
 
 #[cfg(test)]

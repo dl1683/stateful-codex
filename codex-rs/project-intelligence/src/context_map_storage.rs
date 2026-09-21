@@ -19,6 +19,7 @@ use crate::NewContextMapEntry;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::SourceFingerprint;
+use crate::search::literal_prefix_expression;
 use crate::storage::DATABASE_NAME;
 use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
@@ -338,16 +339,7 @@ fn parse_coverage(value: &str) -> Result<ContextMapCoverage, ContextMapStoreErro
 }
 
 fn search_expression(text: &str) -> Result<String, ContextMapStoreError> {
-    let terms = text
-        .split(|character: char| !character.is_alphanumeric() && character != '_')
-        .filter(|term| !term.is_empty())
-        .take(32)
-        .map(|term| format!("\"{term}\"*"))
-        .collect::<Vec<_>>();
-    if terms.is_empty() {
-        return Err(ContextMapError::NoSearchTerms.into());
-    }
-    Ok(terms.join(" OR "))
+    literal_prefix_expression(text).ok_or_else(|| ContextMapError::NoSearchTerms.into())
 }
 
 async fn write_routing_terms(
