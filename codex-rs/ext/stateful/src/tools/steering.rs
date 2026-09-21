@@ -24,7 +24,7 @@ use super::MAX_RESPONSE_BYTES;
 use super::fits_response;
 use super::parse_arguments;
 use super::respond;
-use super::scoped_run;
+use super::thread_run;
 
 const QUERY_TOOL_NAME: &str = "steering_query";
 const RECONCILE_TOOL_NAME: &str = "steering_reconcile";
@@ -33,20 +33,25 @@ const MAX_RETURNED_INPUT_BYTES: usize = 8 * 1024;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct QueryArguments {
-    run_id: String,
     cursor: Option<String>,
     limit: Option<u32>,
 }
 
 pub(super) struct SteeringQueryTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
 }
 
 impl SteeringQueryTool {
-    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        thread_id: String,
+        services: ProjectIntelligenceServices,
+    ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
         }
     }
@@ -56,7 +61,7 @@ impl SteeringQueryTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: QueryArguments = parse_arguments(&call)?;
-        let run = scoped_run(&self.project_id, arguments.run_id, &self.services).await?;
+        let run = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
         let cursor = arguments
             .cursor
             .map(SteeringId::parse)
@@ -111,17 +116,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: QUERY_TOOL_NAME.to_string(),
-            description: "Read exact user steering and its acknowledgement/application state. Check unresolved steering before choosing or revising strategy.".to_string(),
+            description: "Read exact user steering and its acknowledgement/application state for the selected thread's active Stateful run. Check unresolved steering before choosing or revising strategy.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "runId": {"type": "string"},
                     "cursor": {"type": "string"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100}
                 },
-                "required": ["runId"],
                 "additionalProperties": false
             }))
             .unwrap_or_else(|error| unreachable!("invalid static steering query schema: {error}")),
@@ -162,6 +165,7 @@ struct ReconcileArguments {
 
 pub(super) struct SteeringReconcileTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
@@ -169,11 +173,13 @@ pub(super) struct SteeringReconcileTool {
 impl SteeringReconcileTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             event_sink,
         }
@@ -198,6 +204,13 @@ impl SteeringReconcileTool {
         if current.value.project_id != self.project_id {
             return Err(FunctionCallError::RespondToModel(
                 "steering instruction does not belong to the selected project".to_string(),
+            ));
+        }
+        let selected_run = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
+        if current.value.run_id != selected_run.id {
+            return Err(FunctionCallError::RespondToModel(
+                "steering instruction does not belong to the selected thread's active run"
+                    .to_string(),
             ));
         }
         let (status, resulting_strategy_revision, reason, run_revision): (_, _, _, Option<u64>) =
@@ -225,19 +238,13 @@ impl SteeringReconcileTool {
                     let strategy = arguments.strategy.ok_or_else(|| {
                         FunctionCallError::RespondToModel("apply requires strategy".to_string())
                     })?;
-                    let run = scoped_run(
-                        &self.project_id,
-                        current.value.run_id.to_string(),
-                        &self.services,
-                    )
-                    .await?;
-                    if run.status == StatefulRunStatus::Pending {
+                    if selected_run.status == StatefulRunStatus::Pending {
                         return Err(FunctionCallError::RespondToModel(
                         "a pending Socratic run must be resumed by the user before steering can be applied to execution"
                             .to_string(),
                     ));
                     }
-                    if run.status.is_terminal() {
+                    if selected_run.status.is_terminal() {
                         return Err(FunctionCallError::RespondToModel(
                             "cannot apply steering to a terminal run".to_string(),
                         ));

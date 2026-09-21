@@ -60,6 +60,19 @@ impl SelectedProject {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SelectedThread {
+    thread_id: String,
+}
+
+impl SelectedThread {
+    fn new(thread_id: impl Into<String>) -> Self {
+        Self {
+            thread_id: thread_id.into(),
+        }
+    }
+}
+
 struct StatefulExtension {
     projects: Arc<dyn ThreadStore>,
     services: Option<ProjectIntelligenceServices>,
@@ -221,14 +234,16 @@ impl ToolContributor for StatefulExtension {
         _session_store: &ExtensionData,
         thread_store: &ExtensionData,
     ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
-        let (Some(selected), Some(services)) = (
+        let (Some(selected), Some(thread), Some(services)) = (
             thread_store.get::<SelectedProject>(),
+            thread_store.get::<SelectedThread>(),
             self.services.as_ref(),
         ) else {
             return Vec::new();
         };
         tools::project_intelligence_tools(
             selected.project_id().to_string(),
+            thread.thread_id.clone(),
             services.clone(),
             self.projects.clone(),
             self.event_sink.clone(),

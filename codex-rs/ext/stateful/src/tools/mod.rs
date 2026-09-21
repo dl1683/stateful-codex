@@ -11,7 +11,6 @@ use codex_extension_api::FunctionCallError;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
 use codex_stateful_runtime::StatefulRun;
-use codex_stateful_runtime::StatefulRunId;
 use codex_thread_store::ThreadStore;
 use sha2::Digest;
 use sha2::Sha256;
@@ -23,6 +22,7 @@ const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 
 pub(super) fn project_intelligence_tools(
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
@@ -56,20 +56,23 @@ pub(super) fn project_intelligence_tools(
     tools.extend([
         Arc::new(obligation::ObligationUpdateTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             event_sink.clone(),
         )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>,
         Arc::new(run::StatefulRunUpdateTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             event_sink.clone(),
         )),
         Arc::new(steering::SteeringQueryTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
         )),
         Arc::new(steering::SteeringReconcileTool::new(
-            project_id, services, event_sink,
+            project_id, thread_id, services, event_sink,
         )),
     ]);
     tools
@@ -101,23 +104,26 @@ fn stable_id(prefix: &str, project_id: &str, idempotency_key: &str) -> String {
     format!("stateful-{prefix}-{digest:x}")
 }
 
-async fn scoped_run(
+async fn thread_run(
     project_id: &str,
-    raw_run_id: String,
+    thread_id: &str,
     services: &ProjectIntelligenceServices,
 ) -> Result<StatefulRun, FunctionCallError> {
-    let run_id = StatefulRunId::parse(raw_run_id).map_err(respond)?;
     let run = services
         .runtime()
         .await
         .map_err(respond)?
-        .get_run(&run_id)
+        .run_for_thread(thread_id)
         .await
         .map_err(respond)?
-        .ok_or_else(|| FunctionCallError::RespondToModel(format!("run not found: {run_id}")))?;
+        .ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "the selected thread has no active Stateful run".to_string(),
+            )
+        })?;
     if run.value.project_id != project_id {
         return Err(FunctionCallError::RespondToModel(
-            "run does not belong to the selected project".to_string(),
+            "the selected thread's run does not belong to the selected project".to_string(),
         ));
     }
     Ok(run)

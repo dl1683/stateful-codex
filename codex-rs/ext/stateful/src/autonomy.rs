@@ -6,11 +6,13 @@ use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ThreadIdleCause;
 use codex_extension_api::ThreadIdleInput;
 use codex_extension_api::ThreadLifecycleContributor;
+use codex_extension_api::ThreadReadyInput;
 use codex_stateful_runtime::AutonomousClaimOutcome;
 use codex_stateful_runtime::AutonomousClaimRequest;
 use codex_stateful_runtime::StatefulRunId;
 
 use crate::SelectedProject;
+use crate::SelectedThread;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::StatefulExtension;
@@ -52,6 +54,14 @@ impl AutonomousContinuation {
 }
 
 impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
+    fn on_thread_ready<'a>(&'a self, input: ThreadReadyInput<'a, C>) -> ExtensionFuture<'a, ()> {
+        Box::pin(async move {
+            input
+                .thread_store
+                .insert(SelectedThread::new(input.thread_id.to_string()));
+        })
+    }
+
     fn on_thread_idle<'a>(&'a self, input: ThreadIdleInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             if input.cause != ThreadIdleCause::Completed {

@@ -17,14 +17,13 @@ use crate::services::ProjectIntelligenceServices;
 
 use super::parse_arguments;
 use super::respond;
-use super::scoped_run;
+use super::thread_run;
 
 const TOOL_NAME: &str = "stateful_run_update";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Arguments {
-    run_id: String,
     expected_revision: u64,
     status: StatefulRunStatus,
     strategy: Option<String>,
@@ -33,6 +32,7 @@ struct Arguments {
 
 pub(super) struct StatefulRunUpdateTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
@@ -40,11 +40,13 @@ pub(super) struct StatefulRunUpdateTool {
 impl StatefulRunUpdateTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             event_sink,
         }
@@ -67,7 +69,7 @@ impl StatefulRunUpdateTool {
                     .to_string(),
             ));
         }
-        let current = scoped_run(&self.project_id, arguments.run_id, &self.services).await?;
+        let current = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
         if current.status == StatefulRunStatus::Pending {
             return Err(FunctionCallError::RespondToModel(
                 "a Socratic run must be resumed explicitly by the user before execution"
@@ -114,19 +116,18 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Persist a meaningful strategy/status change or final evidence-grounded result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
+            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "runId": {"type": "string"},
                     "expectedRevision": {"type": "integer", "minimum": 1},
                     "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"]},
                     "strategy": {"type": "string"},
                     "result": {"type": "string"}
                 },
-                "required": ["runId", "expectedRevision", "status"],
+                "required": ["expectedRevision", "status"],
                 "additionalProperties": false
             }))
             .unwrap_or_else(|error| unreachable!("invalid static run update schema: {error}")),

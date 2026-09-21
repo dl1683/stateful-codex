@@ -59,7 +59,6 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                     "complete-autonomous-run",
                     "stateful_run_update",
                     &json!({
-                        "runId": started.run.id.clone(),
                         "expectedRevision": 2,
                         "status": "completed",
                         "result": "The unattended investigation reached its evidence-grounded result."

@@ -37,6 +37,8 @@ pub struct ThreadStartInput<'a, C> {
 
 /// Input supplied after the host has registered a fully initialized thread.
 pub struct ThreadReadyInput<'a, C> {
+    /// Canonical identity of the registered thread.
+    pub thread_id: ThreadId,
     /// Host configuration visible after thread registration.
     pub config: &'a C,
     /// Source that created the session for this thread.

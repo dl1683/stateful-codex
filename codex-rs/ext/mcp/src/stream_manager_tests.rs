@@ -60,6 +60,7 @@ async fn connect_loaded_task(
         .await;
     manager
         .on_thread_ready(ThreadReadyInput {
+            thread_id,
             config: &(),
             session_source: &SessionSource::Exec,
             session_store: &session_store,

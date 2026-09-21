@@ -271,6 +271,7 @@ impl CodexThread {
         for contributor in contributors {
             contributor
                 .on_thread_ready(codex_extension_api::ThreadReadyInput {
+                    thread_id: self.session.thread_id(),
                     config: config.as_ref(),
                     session_source: &self.session_source,
                     session_store: &self.session.services.session_extension_data,

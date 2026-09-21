@@ -236,7 +236,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                 responses::ev_function_call(
                     "query-steering",
                     "steering_query",
-                    &json!({"runId": started.run.id.clone()}).to_string(),
+                    &json!({}).to_string(),
                 ),
                 responses::ev_completed("query-steering-response"),
             ]),
@@ -245,7 +245,6 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                     "update-obligation",
                     "obligation_update",
                     &json!({
-                        "runId": started.run.id.clone(),
                         "idempotencyKey": "decisive-connection",
                         "packet": {
                             "examined": ["The source constraint and deployment finding."],
@@ -292,7 +291,6 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                     "complete-run",
                     "stateful_run_update",
                     &json!({
-                        "runId": started.run.id.clone(),
                         "expectedRevision": 2,
                         "status": "completed",
                         "result": "Verified the decisive connection and incorporated the user's direction."

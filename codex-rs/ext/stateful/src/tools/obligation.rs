@@ -17,21 +17,21 @@ use crate::services::ProjectIntelligenceServices;
 
 use super::parse_arguments;
 use super::respond;
-use super::scoped_run;
 use super::stable_id;
+use super::thread_run;
 
 const TOOL_NAME: &str = "obligation_update";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Arguments {
-    run_id: String,
     idempotency_key: String,
     packet: ObligationPacket,
 }
 
 pub(super) struct ObligationUpdateTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
@@ -39,11 +39,13 @@ pub(super) struct ObligationUpdateTool {
 impl ObligationUpdateTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             event_sink,
         }
@@ -54,7 +56,7 @@ impl ObligationUpdateTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: Arguments = parse_arguments(&call)?;
-        let run = scoped_run(&self.project_id, arguments.run_id, &self.services).await?;
+        let run = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
         if run.status.is_terminal() {
             return Err(FunctionCallError::RespondToModel(
                 "cannot update obligations for a terminal run".to_string(),
@@ -101,13 +103,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Record a compact semantic update when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity.".to_string(),
+            description: "Record a compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "runId": {"type": "string"},
                     "idempotencyKey": {"type": "string"},
                     "packet": {
                         "type": "object",
@@ -126,7 +127,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
                         "additionalProperties": false
                     }
                 },
-                "required": ["runId", "idempotencyKey", "packet"],
+                "required": ["idempotencyKey", "packet"],
                 "additionalProperties": false
             }))
             .unwrap_or_else(|error| unreachable!("invalid static obligation schema: {error}")),
