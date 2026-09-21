@@ -14,6 +14,14 @@ use crate::storage::unix_timestamp_millis;
 use crate::storage::validate_list_limit;
 
 impl StatefulRunStore {
+    pub async fn get_steering(
+        &self,
+        id: &SteeringId,
+    ) -> Result<Option<StatefulSteering>, StatefulRunStoreError> {
+        let mut connection = self.pool.acquire().await?;
+        load_steering(&mut connection, id).await
+    }
+
     pub async fn submit_steering(
         &self,
         id: SteeringId,

@@ -1,11 +1,16 @@
 mod blackboard;
 mod blackboard_write;
 mod context_map;
+mod obligation;
+mod run;
 
 use std::sync::Arc;
 
+use codex_extension_api::FunctionCallError;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_stateful_runtime::StatefulRun;
+use codex_stateful_runtime::StatefulRunId;
 use codex_thread_store::ThreadStore;
 use sha2::Digest;
 use sha2::Sha256;
@@ -19,7 +24,7 @@ pub(super) fn project_intelligence_tools(
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
-    vec![
+    let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
         Arc::new(blackboard::BlackboardQueryTool::new(
             project_id.clone(),
             services.clone(),
@@ -38,9 +43,22 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
         )),
         Arc::new(context_map::ContextMapRefreshTool::new(
-            project_id, services, projects,
+            project_id.clone(),
+            services.clone(),
+            projects,
         )),
-    ]
+    ];
+    tools.extend([
+        Arc::new(obligation::ObligationUpdateTool::new(
+            project_id.clone(),
+            services.clone(),
+        )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>,
+        Arc::new(run::StatefulRunUpdateTool::new(
+            project_id.clone(),
+            services.clone(),
+        )),
+    ]);
+    tools
 }
 
 fn parse_arguments<T: for<'de> serde::Deserialize<'de>>(
@@ -67,4 +85,30 @@ fn stable_id(prefix: &str, project_id: &str, idempotency_key: &str) -> String {
     hasher.update(idempotency_key.as_bytes());
     let digest = hasher.finalize();
     format!("stateful-{prefix}-{digest:x}")
+}
+
+async fn scoped_run(
+    project_id: &str,
+    raw_run_id: String,
+    services: &ProjectIntelligenceServices,
+) -> Result<StatefulRun, FunctionCallError> {
+    let run_id = StatefulRunId::parse(raw_run_id).map_err(respond)?;
+    let run = services
+        .runtime()
+        .await
+        .map_err(respond)?
+        .get_run(&run_id)
+        .await
+        .map_err(respond)?
+        .ok_or_else(|| FunctionCallError::RespondToModel(format!("run not found: {run_id}")))?;
+    if run.value.project_id != project_id {
+        return Err(FunctionCallError::RespondToModel(
+            "run does not belong to the selected project".to_string(),
+        ));
+    }
+    Ok(run)
+}
+
+fn respond(error: impl std::fmt::Display) -> FunctionCallError {
+    FunctionCallError::RespondToModel(error.to_string())
 }

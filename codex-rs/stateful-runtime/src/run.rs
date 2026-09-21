@@ -120,6 +120,7 @@ impl StatefulRunUpdate {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
 pub struct ObligationPacket {
     pub examined: Vec<String>,
     pub rationale: Vec<String>,

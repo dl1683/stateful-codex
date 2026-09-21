@@ -117,6 +117,13 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
         )
         .await
         .expect("steering acknowledges");
+    assert_eq!(
+        reopened
+            .get_steering(&steering_id)
+            .await
+            .expect("steering loads"),
+        Some(acknowledged.clone())
+    );
     let resumed = reopened
         .update_run(
             &id,
