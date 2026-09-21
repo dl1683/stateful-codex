@@ -74,7 +74,7 @@ impl ProjectIntelligenceStatus {
         );
         append_line(
             &mut body,
-            "Start from accumulated project intelligence. Query deeper blackboard state before rereading broadly, then use the context map and exact source when detail or consequential verification is needed.",
+            "Start from accumulated project intelligence. If the root lacks relevant detail, use a focused deeper-blackboard query before rereading broadly. Do not query deeper state merely to repeat adequate root knowledge. Use the context map and exact source when detail or consequential verification is needed.",
         );
         append_line(
             &mut body,

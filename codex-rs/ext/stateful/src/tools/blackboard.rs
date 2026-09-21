@@ -128,15 +128,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query accumulated project understanding. Use this after the root blackboard when deeper directory, file, or topic-specific knowledge is needed.".to_string(),
+            description: "Query accumulated project understanding when the root blackboard lacks needed detail. Prefer a focused text query and the smallest useful limit; omit text only when intentionally enumerating a bounded subtree.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "Optional literal topic search."},
+                    "text": {"type": "string", "description": "Optional literal topic search. Prefer this when looking for specific knowledge."},
                     "withinNodeId": {"type": "string", "description": "Optional hierarchy node whose subtree bounds the query."},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Maximum records to return. Use the smallest useful value."}
                 },
                 "additionalProperties": false
             }))

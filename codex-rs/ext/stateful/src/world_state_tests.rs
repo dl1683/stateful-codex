@@ -61,7 +61,12 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("Query deeper blackboard state before rereading broadly")
+            .contains("use a focused deeper-blackboard query before rereading broadly")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("Do not query deeper state merely to repeat adequate root knowledge")
     );
     assert!(
         rendered

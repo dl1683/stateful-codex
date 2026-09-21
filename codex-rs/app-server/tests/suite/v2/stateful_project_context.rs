@@ -327,6 +327,7 @@ async fn assert_latest_request_has_project(
     assert!(body.contains("Decisive Evidence Project"));
     assert!(body.contains("A decisive project fact survives every thread view."));
     assert!(body.contains("verification=unverified"));
+    assert!(body.contains("Do not query deeper state merely to repeat adequate root knowledge"));
     Ok(())
 }
 
