@@ -152,7 +152,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist a new project learning after examining evidence. Omit nodeId only for project-wide knowledge. Reuse idempotencyKey only for an identical retry.".to_string(),
+            description: "Persist new, materially reusable project understanding after examining evidence. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires current context-map evidence links; a shell or tool result alone is not an evidence link. Omit nodeId only for project-wide knowledge. Reuse idempotencyKey only for an identical retry.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -164,10 +164,10 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
                     "content": {"type": "string"},
                     "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false},
                     "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
-                    "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"]},
+                    "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links."},
                     "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
                     "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
-                    "evidence": {"type": "array", "items": {"type": "object", "properties": {"contextMapEntryId": {"type": "string"}, "sourceFingerprint": {"type": "string"}}, "required": ["contextMapEntryId", "sourceFingerprint"], "additionalProperties": false}}
+                    "evidence": {"type": "array", "description": "Current context-map links supporting sourceVerified knowledge.", "items": {"type": "object", "properties": {"contextMapEntryId": {"type": "string"}, "sourceFingerprint": {"type": "string"}}, "required": ["contextMapEntryId", "sourceFingerprint"], "additionalProperties": false}}
                 },
                 "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
                 "additionalProperties": false

@@ -78,7 +78,7 @@ impl ProjectIntelligenceStatus {
         );
         append_line(
             &mut body,
-            "Persist materially reusable understanding: important instructions, facts, numbers, decisions, strategies, questions, contradictions, failures, rejected approaches, signals, and cross-source relationships. Link evidence and preserve uncertainty; do not store routine activity, transient progress, or guesses presented as facts.",
+            "Persist materially reusable understanding: important instructions, facts, numbers, decisions, strategies, questions, contradictions, failures, rejected approaches, signals, and cross-source relationships. Require expected reuse value before writing: do not persist cheap-to-recompute inventories, duplicate adequate root knowledge, routine activity, transient progress, or guesses presented as facts. Link evidence and preserve uncertainty.",
         );
         append_field(&mut body, "Project ID", self.project_id());
         match self {

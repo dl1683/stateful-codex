@@ -71,7 +71,7 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("do not store routine activity, transient progress")
+            .contains("do not persist cheap-to-recompute inventories")
     );
     assert!(
         rendered
