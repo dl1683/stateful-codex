@@ -156,3 +156,41 @@ measure the outcomes the product exists to improve:
 Each scenario must predeclare its expected facts or decisions, use matched
 ordinary/Stateful conditions where comparison is meaningful, preserve negative
 results, and avoid turning component success into a product-level claim.
+
+## Pre-registered benchmark SC-EVAL-002: decisive procurement connection
+
+Corpus: `clients/stateful-codex/eval/fixtures/procurement`.
+
+The Stateful condition first receives one maturation run whose explicit job is
+to map the corpus and persist materially reusable, evidence-linked project
+understanding. The measured question is then asked in a fresh Stateful thread.
+The ordinary condition receives the same measured question in a fresh ordinary
+CLI thread with the same model, reasoning effort, permissions, working
+directory, workspace roots, and prompt. The maturation run is reported
+separately and is not hidden from lifetime-cost interpretation.
+
+Measured prompt:
+
+```text
+Determine-which-vendor-is-viable-under-all-binding-criteria-identify-the-decisive-cross-source-details-that-rule-out-each-alternative-cite-exact-files-and-do-not-edit
+```
+
+Predeclared expected decision and decisive details:
+
+- Cedar is the only viable vendor.
+- Alder fails the EEA gate because `security-addendum.md` permits temporary
+  plaintext access by a support engineer in Virginia, United States, despite
+  the proposal's EU-hosting claim.
+- Birch fails continuity because its 72-hour queue is shorter than the verified
+  96-hour outage in `operations-log.md`.
+- Cedar provides 120 hours of offline acceptance, EEA-only plaintext support,
+  and an authoritative $285,000 year-one total, so it passes all three gates.
+- The answer cites `binding-criteria.md`, `security-addendum.md`,
+  `operations-log.md`, and `finance-schedule.md`, and reports that no files were
+  edited.
+
+The evaluation will record answer correctness, source traceability, read-bearing
+calls, Stateful retrieval and persistence calls, full and uncached token usage,
+and whether the fresh Stateful thread uses accumulated state before reopening
+exact source material. A failure to persist useful knowledge, a stale or
+unsupported claim, or a cost regression remains a negative result.
