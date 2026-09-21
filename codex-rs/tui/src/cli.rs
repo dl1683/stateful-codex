@@ -1,6 +1,7 @@
 use clap::Args;
 use clap::FromArgMatches;
 use clap::Parser;
+use clap::ValueEnum;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::ApprovalModeCliArg;
 use codex_utils_cli::CliConfigOverrides;
@@ -16,6 +17,19 @@ pub struct Cli {
     /// Optional user prompt to start the session.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
+
+    /// Start a Stateful Codex run for the current project directory in the selected workflow mode.
+    #[arg(
+        long = "stateful",
+        value_name = "MODE",
+        value_enum,
+        requires = "prompt"
+    )]
+    pub stateful_mode: Option<StatefulModeCliArg>,
+
+    /// Use an existing Stateful project when more than one project has the current directory.
+    #[arg(long, value_name = "PROJECT_ID", requires = "stateful_mode")]
+    pub stateful_project: Option<String>,
 
     /// Error out when config.toml contains fields that are not recognized by this version of Codex.
     #[arg(long = "strict-config", default_value_t = false)]
@@ -88,6 +102,13 @@ pub struct Cli {
     pub config_overrides: CliConfigOverrides,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum StatefulModeCliArg {
+    Autonomous,
+    Collaborative,
+    Socratic,
+}
+
 impl std::ops::Deref for Cli {
     type Target = SharedCliOptions;
 
@@ -151,3 +172,7 @@ fn mark_tui_args(cmd: clap::Command) -> clap::Command {
     })
     .mut_arg("auto_review", |arg| arg.conflicts_with("approval_policy"))
 }
+
+#[cfg(test)]
+#[path = "cli_tests.rs"]
+mod tests;

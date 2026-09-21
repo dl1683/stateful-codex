@@ -19,6 +19,7 @@ fn spawn_startup_thread_start(
     config: Config,
     app_event_tx: AppEventSender,
     worktree: Option<crate::ManagedTuiWorktree>,
+    stateful_startup: Option<crate::stateful_ui::StatefulStartup>,
 ) {
     let request_handle = app_server.request_handle();
     let thread_params_mode = app_server.thread_params_mode();
@@ -32,6 +33,7 @@ fn spawn_startup_thread_start(
             thread_params_mode,
             remote_cwd_override,
             thread_tool_transport,
+            stateful_startup,
         )
         .await
         .and_then(|started| {
@@ -164,6 +166,8 @@ impl App {
         harness_overrides: ConfigOverrides,
         loader_overrides: LoaderOverrides,
         cloud_config_bundle: CloudConfigBundleLoader,
+        stateful_mode: Option<crate::cli::StatefulModeCliArg>,
+        stateful_project: Option<String>,
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
         session_selection: SessionSelection,
@@ -394,6 +398,21 @@ impl App {
             matches!(&session_selection, SessionSelection::AgentsOverview);
         let mut read_only_thread = false;
         let mut history_notice = None;
+        let stateful_startup = crate::stateful_ui::StatefulStartup::from_cli(
+            stateful_mode,
+            stateful_project,
+            initial_prompt.as_deref(),
+        )?;
+        if stateful_startup.is_some()
+            && !matches!(
+                &session_selection,
+                SessionSelection::StartFresh | SessionSelection::Exit
+            )
+        {
+            color_eyre::eyre::bail!(
+                "--stateful starts a new run; resume an existing Stateful thread without this flag"
+            );
+        }
         let (mut chat_widget, initial_started_thread) = match session_selection {
             SessionSelection::StartFresh
             | SessionSelection::Exit
@@ -405,6 +424,7 @@ impl App {
                         config.clone(),
                         app_event_tx.clone(),
                         managed_worktree.clone(),
+                        stateful_startup.clone(),
                     );
                 }
                 // Count a startup tooltip once the initial chat widget can render it.

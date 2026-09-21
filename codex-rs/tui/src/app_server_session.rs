@@ -1738,6 +1738,7 @@ pub(crate) async fn start_thread_with_request_handle(
     thread_params_mode: ThreadParamsMode,
     remote_cwd_override: Option<PathBuf>,
     thread_tool_transport: ThreadToolTransport,
+    stateful_startup: Option<crate::stateful_ui::StatefulStartup>,
 ) -> Result<AppServerStartedThread> {
     let request_id = RequestId::String(format!("startup-thread-start-{}", Uuid::new_v4()));
     let mut params = thread_start_params_from_config(
@@ -1747,6 +1748,13 @@ pub(crate) async fn start_thread_with_request_handle(
         /*session_start_source*/ None,
     );
     thread_tool_transport.configure(&mut params);
+    let prepared_stateful = match stateful_startup {
+        Some(stateful_startup) => Some(
+            crate::stateful_ui::prepare_startup(&request_handle, &mut params, stateful_startup)
+                .await?,
+        ),
+        None => None,
+    };
     let (response, _history_support, task_tools_available) =
         request_thread_start_with_history_fallback(&request_handle, request_id, params)
             .await
@@ -1756,6 +1764,14 @@ pub(crate) async fn start_thread_with_request_handle(
     let mut started =
         started_thread_from_start_response(response, local_settings, &config, thread_params_mode)
             .await?;
+    if let Some(prepared_stateful) = prepared_stateful {
+        crate::stateful_ui::start_run(
+            &request_handle,
+            &prepared_stateful,
+            started.session.thread_id,
+        )
+        .await?;
+    }
     started.task_tools_available = task_tools_available;
     Ok(started)
 }

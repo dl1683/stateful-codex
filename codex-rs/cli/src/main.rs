@@ -3096,6 +3096,8 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
         no_alt_screen,
         no_daemon,
         prompt,
+        stateful_mode,
+        stateful_project,
         mut config_overrides,
         ..
     } = subcommand_cli;
@@ -3122,6 +3124,12 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
     if let Some(prompt) = prompt {
         // Normalize CRLF/CR to LF so CLI-provided text can't leak `\r` into TUI state.
         interactive.prompt = Some(prompt.replace("\r\n", "\n").replace('\r', "\n"));
+    }
+    if let Some(stateful_mode) = stateful_mode {
+        interactive.stateful_mode = Some(stateful_mode);
+    }
+    if let Some(stateful_project) = stateful_project {
+        interactive.stateful_project = Some(stateful_project);
     }
 
     interactive

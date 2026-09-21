@@ -204,6 +204,7 @@ mod startup_orchestration;
 mod startup_preflight;
 mod startup_presentation;
 mod startup_recovery;
+mod stateful_ui;
 mod status;
 mod status_indicator_widget;
 mod streaming;
@@ -1890,6 +1891,8 @@ async fn run_ratatui_app(
 
     let Cli {
         prompt,
+        stateful_mode,
+        stateful_project,
         shared,
         daemon_cli_executable,
         ..
@@ -1967,6 +1970,8 @@ async fn run_ratatui_app(
         overrides.clone(),
         loader_overrides.clone(),
         cloud_config_bundle,
+        stateful_mode,
+        stateful_project,
         prompt,
         images,
         session_selection,

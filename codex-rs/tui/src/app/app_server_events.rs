@@ -391,9 +391,17 @@ impl App {
                 return;
             }
             ServerNotificationThreadTarget::AppScoped => {
-                tracing::debug!(
-                    "ignoring app-scoped MCP startup notification without a TUI app-level target"
-                );
+                if crate::stateful_ui::handle_app_scoped_notification(
+                    app_server_client.request_handle(),
+                    self.primary_thread_id,
+                    self.app_event_tx.clone(),
+                    notification,
+                )
+                .await
+                {
+                    return;
+                }
+                tracing::debug!("ignoring app-scoped notification without a TUI app-level target");
                 return;
             }
             ServerNotificationThreadTarget::Global => {}

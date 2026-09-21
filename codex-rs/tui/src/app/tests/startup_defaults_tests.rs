@@ -21,6 +21,8 @@ async fn run_startup_for_test(
         ConfigOverrides::default(),
         LoaderOverrides::default(),
         CloudConfigBundleLoader::default(),
+        /*stateful_mode*/ None,
+        /*stateful_project*/ None,
         /*initial_prompt*/ None,
         Vec::new(),
         selection,
@@ -266,6 +268,7 @@ async fn fresh_startup_uses_server_defaults_with_explicit_and_managed_precedence
             server.thread_params_mode(),
             server.remote_cwd_override().map(Path::to_path_buf),
             server.thread_tool_transport(),
+            /*stateful_startup*/ None,
         )
         .await?;
         assert_eq!(selected_model, expected_model, "{choice}");
@@ -356,6 +359,7 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
             server.thread_params_mode(),
             server.remote_cwd_override().map(Path::to_path_buf),
             server.thread_tool_transport(),
+            /*stateful_startup*/ None,
         )
         .await?;
         assert_eq!(started.session.model, selected_model);
