@@ -97,6 +97,13 @@ project intelligence across threads and produced durable semantic obligations;
 their thread IDs are `01a0c5d8-d37a-71c3-9904-8561c286afe8` and
 `01a0c5e2-1a12-7603-85fa-08f138dcc93c`.
 
+A fresh post-remediation CLI run, `01a0c64c-e23b-7333-beec-32603b4d8eb0`,
+also completed through cached ChatGPT login with the exact selected-directory
+answer. Stateful model tools are now bound to the selected thread's active run;
+the model no longer receives or supplies opaque run IDs, and this run completed
+without the malformed-ID retry observed during diagnosis. Focused extension and
+app-server tests cover the same active-run contract.
+
 Focused browser validation also passes against the real gateway, app-server,
 branch CLI, and cached ChatGPT login. A rendered Edge/CDP run demonstrated
 continue, fork, the Socratic execution gate, exact evidence inspection,
@@ -106,7 +113,12 @@ and screenshots are under
 and fixed three client defects: an invalid context-search limit, stale
 thread-scoped session keys that reopened the wrong run, and an unsupported fresh
 history call surfacing as a user-visible error. The client test suite passes
-4/4 after those fixes.
+5/5 after those fixes and the rollout-comparison coverage. A fresh rendered run
+against the rebuilt CLI and code-mode companion created thread
+`01a0c646-d8f7-7571-b398-e77f423b429d`, visibly recovered from the known Windows
+host-shell failure through its approval UI, and displayed the correct obligation
+and completed result. Current screenshots are under
+`%LOCALAPPDATA%/Temp/stateful-client-smoke-1790032608507`.
 
 These results establish a usable end-to-end product slice, not the Stage 8
 release claim. A rollout comparison tool and the first matched ordinary versus
@@ -114,7 +126,10 @@ Stateful CLI benchmark now exist; `STATEFUL_CODEX_EVALUATION.md` records the
 method and result. Both runs were correct and Stateful reduced read-bearing tool
 calls from two to one, but it increased full lifetime tokens by 22.28% and
 uncached input plus output by 45.26% on the trivial inventory task. That negative
-result is preserved rather than presented as a product win. Representative
+result is preserved rather than presented as a product win. The post-remediation
+rerun fixed active-run tool reliability but remained negative: full lifetime
+tokens were 86.34% above the ordinary baseline and uncached input plus output
+were 37.19% above it. Representative
 evaluation of knowledge precision/recall, mature-workspace rereading, decisive
 detail discovery, steering latency, autonomous recovery, and evidence
 correctness remains open. The repository-wide Rust suite also remains an

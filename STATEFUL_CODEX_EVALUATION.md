@@ -78,18 +78,66 @@ specific context fragment or to estimate a stable percentage. It is enough to
 reject any claim that Stateful is already cheaper for every task. The product
 should preserve semantic continuity without pretending that memory is free.
 
+### Remediation rerun SC-EVAL-001R
+
+After binding model-facing Stateful tools to the selected thread's active run,
+the exact benchmark was rerun through the rebuilt native CLI. The new Stateful
+rollout is `01a0c64c-e23b-7333-beec-32603b4d8eb0`. The comparator confirmed
+full parity with the ordinary rollout across entry point, model, reasoning,
+permissions, selected directory, workspace roots, and prompt. Both answers
+again contained the exact total and every expected filename.
+
+The remediation achieved its reliability goal: `steering_query`,
+`obligation_update`, and `stateful_run_update` no longer accepted or received a
+model-authored `runId`. The live run completed its obligation and run update
+without the malformed-ID failure seen in the previous diagnostic run. It used
+one read-bearing call and made no blackboard or context-map query for this
+cheap-to-verify task.
+
+| Measure | Ordinary | Remediated Stateful | Stateful change |
+| --- | ---: | ---: | ---: |
+| Full input tokens | 68,968 | 128,712 | +59,744 |
+| Cached input tokens | 47,360 | 99,328 | +51,968 |
+| Uncached input tokens | 21,608 | 29,384 | +7,776 |
+| Output tokens | 932 | 1,539 | +607 |
+| Full lifetime tokens | 69,900 | 130,251 | +60,351 (+86.34%) |
+| Uncached input + output | 22,540 | 30,923 | +8,383 (+37.19%) |
+| Model responses | 3 | 5 | +2 |
+| Read-bearing tool calls | 2 | 1 | -1 (-50%) |
+
+This remains a negative efficiency result. Uncached input plus output improved
+from 32,741 in the first Stateful run to 30,923 in the remediated run, but the
+model used separate responses for steering, source verification, obligation
+publication, run completion, and the final answer. The resulting cached-context
+replays made full lifetime usage worse. A single rerun cannot separate prompt
+effects from model sampling variance; it does show that removing opaque run IDs
+fixed the observed reliability failure without establishing a token advantage.
+
 ## Live interface validation
 
 The evaluation surface has also been exercised through both supported product
 paths:
 
 - Native CLI: the branch CLI built successfully; five Stateful TUI tests and
-  snapshots passed; and real cached-login Stateful runs completed without API
-  keys or source edits.
+  snapshots passed; and a fresh real cached-login run completed as
+  `01a0c64c-e23b-7333-beec-32603b4d8eb0` without API keys or source edits. Its
+  selected-directory answer was exact, and its active-run tools required no
+  model-authored run ID.
 - Browser client: a rendered client was exercised against the real local
   gateway, branch app-server, branch CLI, and cached login. The run covered
   creating, continuing, and forking threads; exact evidence inspection;
-  Socratic execution gating; pause/resume; and reload recovery.
+  Socratic execution gating; pause/resume; and reload recovery. A fresh run on
+  the remediated package created thread
+  `01a0c646-d8f7-7571-b398-e77f423b429d`, surfaced the known Windows host-shell
+  failure and approval recovery, then displayed the correct semantic obligation
+  and completed result. Its screenshots are under
+  `%LOCALAPPDATA%/Temp/stateful-client-smoke-1790032608507`.
+
+The browser-client suite passes 5/5. Building its code-mode companion locally
+on Windows used the matching `v150.4.0` archive and generated binding from the
+published Codex `rusty-v8-v150.4.0` release because the upstream crate's default
+sandbox archive URL returns 404. This was a local artifact override, not a
+dependency or source change.
 
 These checks demonstrate operability, not comparative product advantage.
 
