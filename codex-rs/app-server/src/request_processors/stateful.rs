@@ -19,6 +19,8 @@ use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_app_server_protocol::StatefulRunResumeParams;
 use codex_app_server_protocol::StatefulRunResumeResponse;
+use codex_app_server_protocol::StatefulRunSetModeParams;
+use codex_app_server_protocol::StatefulRunSetModeResponse;
 use codex_app_server_protocol::StatefulRunStartParams;
 use codex_app_server_protocol::StatefulRunStartResponse;
 use codex_app_server_protocol::StatefulRunUpdatedNotification;
@@ -34,6 +36,7 @@ use codex_stateful_runtime::NewSteeringInstruction;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunModeUpdate;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
@@ -181,6 +184,29 @@ impl StatefulRequestProcessor {
             )
             .await?;
         Ok(Some(StatefulRunCancelResponse { run: api_run(run) }.into()))
+    }
+
+    pub(crate) async fn run_set_mode(
+        &self,
+        params: StatefulRunSetModeParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let id = parse_run_id(params.run_id)?;
+        let run = self
+            .store()
+            .await?
+            .update_mode(
+                &id,
+                StatefulRunModeUpdate {
+                    expected_revision: params.expected_revision,
+                    mode: workflow_mode(params.mode),
+                },
+            )
+            .await
+            .map_err(runtime_error)?;
+        self.notify_run(&run).await;
+        Ok(Some(
+            StatefulRunSetModeResponse { run: api_run(run) }.into(),
+        ))
     }
 
     pub(crate) async fn obligation_list(
@@ -427,6 +453,7 @@ fn runtime_error(error: StatefulRunStoreError) -> JSONRPCErrorError {
         | StatefulRunStoreError::RunIdentityConflict(_)
         | StatefulRunStoreError::RevisionConflict { .. }
         | StatefulRunStoreError::InvalidTransition { .. }
+        | StatefulRunStoreError::InvalidModeTransition
         | StatefulRunStoreError::ObligationNotFound(_)
         | StatefulRunStoreError::ProjectMismatch
         | StatefulRunStoreError::SteeringIdentityConflict(_)

@@ -128,6 +128,23 @@ run_control_response!(StatefulRunPauseResponse);
 run_control_response!(StatefulRunResumeResponse);
 run_control_response!(StatefulRunCancelResponse);
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulRunSetModeParams {
+    pub run_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub mode: StatefulWorkflowMode,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulRunSetModeResponse {
+    pub run: StatefulRun,
+}
+
 #[derive(
     Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema, TS, ExperimentalApi,
 )]

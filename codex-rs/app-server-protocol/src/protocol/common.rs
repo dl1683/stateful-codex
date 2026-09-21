@@ -891,6 +891,12 @@ client_request_definitions! {
         serialization: global("stateful-runtime"),
         response: v2::StatefulRunCancelResponse,
     },
+    #[experimental("statefulRun/setMode")]
+    StatefulRunSetMode => "statefulRun/setMode" {
+        params: v2::StatefulRunSetModeParams,
+        serialization: global("stateful-runtime"),
+        response: v2::StatefulRunSetModeResponse,
+    },
     #[experimental("obligation/list")]
     ObligationList => "obligation/list" {
         params: v2::ObligationListParams,

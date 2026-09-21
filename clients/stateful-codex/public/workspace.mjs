@@ -56,6 +56,15 @@ async function ensureRun() {
   state.status = status;
   if (runResponse.run) {
     state.run = runResponse.run;
+    if (state.run.mode !== selectedMode) {
+      const changed = await rpc("statefulRun/setMode", {
+        runId: state.run.id,
+        expectedRevision: state.run.revision,
+        mode: selectedMode,
+      });
+      state.run = changed.run;
+      state.notice = `Mode changed to ${selectedMode} from your setup choice.`;
+    }
     if (
       sessionStorage.getItem("stateful-created-run-id") === state.run.id &&
       sessionStorage.getItem("stateful-initial-turn-sent") !== state.run.id
@@ -227,6 +236,19 @@ app.addEventListener("submit", async (event) => {
       const input = new FormData(form).get("message")?.toString().trim();
       if (!input) return;
       await action("Sending instruction", () => sendTurn(input));
+    } else if (form.id === "mode-form") {
+      const mode = new FormData(form).get("mode")?.toString();
+      if (!mode || mode === state.run.mode) return;
+      const response = await action("Changing workflow mode", () =>
+        rpc("statefulRun/setMode", {
+          runId: state.run.id,
+          expectedRevision: state.run.revision,
+          mode,
+        }),
+      );
+      state.run = response.run;
+      state.notice = `Mode changed to ${mode}.`;
+      await refresh();
     } else if (form.dataset.requestId) {
       await answerUserRequest(form);
     } else if (form.id === "context-search") {

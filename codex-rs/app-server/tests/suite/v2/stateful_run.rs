@@ -15,6 +15,8 @@ use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_app_server_protocol::StatefulRunResumeParams;
 use codex_app_server_protocol::StatefulRunResumeResponse;
+use codex_app_server_protocol::StatefulRunSetModeParams;
+use codex_app_server_protocol::StatefulRunSetModeResponse;
 use codex_app_server_protocol::StatefulRunStartParams;
 use codex_app_server_protocol::StatefulRunStartResponse;
 use codex_app_server_protocol::StatefulRunStatus;
@@ -114,12 +116,37 @@ async fn stateful_run_preserves_explicit_mode_and_reconciles_live_controls() -> 
         .await?;
     assert_eq!(steering_page.data, vec![steering.steering]);
 
+    let socratic: StatefulRunSetModeResponse = server
+        .request(|request_id| ClientRequest::StatefulRunSetMode {
+            request_id,
+            params: StatefulRunSetModeParams {
+                run_id: started.run.id.clone(),
+                expected_revision: started.run.revision,
+                mode: StatefulWorkflowMode::Socratic,
+            },
+        })
+        .await?;
+    assert_eq!(socratic.run.mode, StatefulWorkflowMode::Socratic);
+    assert_eq!(socratic.run.status, StatefulRunStatus::Pending);
+    let collaborative: StatefulRunSetModeResponse = server
+        .request(|request_id| ClientRequest::StatefulRunSetMode {
+            request_id,
+            params: StatefulRunSetModeParams {
+                run_id: socratic.run.id,
+                expected_revision: socratic.run.revision,
+                mode: StatefulWorkflowMode::Collaborative,
+            },
+        })
+        .await?;
+    assert_eq!(collaborative.run.mode, StatefulWorkflowMode::Collaborative);
+    assert_eq!(collaborative.run.status, StatefulRunStatus::Running);
+
     let paused: StatefulRunPauseResponse = server
         .request(|request_id| ClientRequest::StatefulRunPause {
             request_id,
             params: StatefulRunPauseParams {
                 run_id: started.run.id.clone(),
-                expected_revision: started.run.revision,
+                expected_revision: collaborative.run.revision,
             },
         })
         .await?;

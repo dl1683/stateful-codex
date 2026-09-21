@@ -466,6 +466,13 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
 }
+.mode-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 14px;
+}
 .secondary,
 .text-button {
   border: 1px solid var(--line);

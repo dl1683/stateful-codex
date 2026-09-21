@@ -181,7 +181,7 @@ function renderControls(state) {
   }
   return panel(
     "Run controls",
-    `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div><dl><div><dt>Mode</dt><dd>${escapeHtml(run.mode)}</dd></div><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl><button class="secondary full" data-action="maintain">Maintain project intelligence</button>`,
+    `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div><form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(run.mode)}</select></label><button class="secondary">Change</button></form><dl><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl><button class="secondary full" data-action="maintain">Maintain project intelligence</button>`,
   );
 }
 
@@ -282,6 +282,15 @@ function panel(title, content, action = "") {
 
 function control(action, label) {
   return `<button class="secondary" data-action="${action}">${label}</button>`;
+}
+
+function modeOptions(selected) {
+  return ["autonomous", "collaborative", "socratic"]
+    .map(
+      (mode) =>
+        `<option value="${mode}" ${mode === selected ? "selected" : ""}>${mode[0].toUpperCase()}${mode.slice(1)}</option>`,
+    )
+    .join("");
 }
 
 function empty(message) {

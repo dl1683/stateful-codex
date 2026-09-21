@@ -1556,6 +1556,9 @@ impl MessageProcessor {
             ClientRequest::StatefulRunCancel { params, .. } => {
                 self.stateful_processor.run_cancel(params).await
             }
+            ClientRequest::StatefulRunSetMode { params, .. } => {
+                self.stateful_processor.run_set_mode(params).await
+            }
             ClientRequest::ObligationList { params, .. } => {
                 self.stateful_processor.obligation_list(params).await
             }

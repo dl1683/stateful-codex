@@ -130,6 +130,12 @@ pub struct StatefulRunUpdate {
     pub result: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StatefulRunModeUpdate {
+    pub expected_revision: u64,
+    pub mode: WorkflowMode,
+}
+
 impl StatefulRunUpdate {
     pub fn validate(&self) -> Result<(), StatefulRunError> {
         validate_optional_text(self.strategy.as_deref(), MAX_STRATEGY_BYTES)

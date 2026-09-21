@@ -15,6 +15,7 @@ use crate::RunBudget;
 use crate::StatefulObligation;
 use crate::StatefulRun;
 use crate::StatefulRunId;
+use crate::StatefulRunModeUpdate;
 use crate::StatefulRunStatus;
 use crate::StatefulRunUpdate;
 use crate::WorkflowMode;
@@ -182,6 +183,58 @@ impl StatefulRunStore {
         .bind(update.strategy)
         .bind(i64::from(strategy_changed))
         .bind(update.result)
+        .bind(unix_timestamp_millis()?)
+        .bind(id.as_str())
+        .bind(expected_revision)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if rows != 1 {
+            return Err(StatefulRunStoreError::ConcurrentMutation);
+        }
+        let run = load_run(&mut transaction, id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+        transaction.commit().await?;
+        Ok(run)
+    }
+
+    pub async fn update_mode(
+        &self,
+        id: &StatefulRunId,
+        update: StatefulRunModeUpdate,
+    ) -> Result<StatefulRun, StatefulRunStoreError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current = load_run(&mut transaction, id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+        if current.revision != update.expected_revision {
+            return Err(StatefulRunStoreError::RevisionConflict {
+                expected: update.expected_revision,
+                actual: current.revision,
+            });
+        }
+        if current.status.is_terminal() {
+            return Err(StatefulRunStoreError::InvalidModeTransition);
+        }
+        if current.value.mode == update.mode {
+            transaction.commit().await?;
+            return Ok(current);
+        }
+        let status = match (current.status, update.mode) {
+            (_, WorkflowMode::Socratic) => StatefulRunStatus::Pending,
+            (StatefulRunStatus::Pending, _) => StatefulRunStatus::Running,
+            (status, _) => status,
+        };
+        let expected_revision = i64::try_from(update.expected_revision)
+            .map_err(|_| StatefulRunStoreError::CountOverflow)?;
+        let rows = sqlx::query(
+            "UPDATE stateful_runs
+             SET mode = ?, status = ?, revision = revision + 1, updated_at_ms = ?
+             WHERE id = ? AND revision = ?",
+        )
+        .bind(mode_name(update.mode))
+        .bind(status_name(status))
         .bind(unix_timestamp_millis()?)
         .bind(id.as_str())
         .bind(expected_revision)
@@ -632,6 +685,8 @@ pub enum StatefulRunStoreError {
         from: StatefulRunStatus,
         to: StatefulRunStatus,
     },
+    #[error("cannot change the workflow mode of a terminal run")]
+    InvalidModeTransition,
     #[error("run changed during a guarded update")]
     ConcurrentMutation,
     #[error("obligation ID must be non-empty, bounded, and contain no controls")]
