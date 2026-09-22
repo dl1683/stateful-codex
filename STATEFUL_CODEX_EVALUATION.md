@@ -273,3 +273,59 @@ verification:
 No product-level efficiency advantage is established yet. SC-EVAL-002 does,
 however, establish that the current system can carry a non-obvious decision and
 its provenance across threads and return the right evidence-grounded result.
+
+### Remediation reruns SC-EVAL-002R
+
+Two implementation changes followed the negative result:
+
+- current source routes are resolved into the always-loaded root, and a bounded
+  batch-record tool can persist up to 16 coherent findings in one model call
+  with per-item success or failure; and
+- root rendering now prioritizes semantic content and uses compact `E#`, `R#`,
+  and `S#` aliases instead of repeating opaque IDs, absolute paths, provenance
+  call IDs, and full relationship endpoint IDs.
+
+The batch path is covered through the real app-server/extension integration: one
+model call persisted two independently idempotent records, returned two
+successes and zero failures, and a later query retrieved the result. It has not
+yet been measured in a new corpus-maturation run, so no maturation-cost reduction
+is claimed.
+
+The route-only intermediate CLI rollout is
+`01a0c7db-bb7f-7a50-884f-753920172109`. It consumed 147,944 lifetime tokens and
+37,352 uncached input plus output. It skipped the context-map query but still
+opened all eight files. That result exposed why merely adding routes was
+insufficient: the old 24 KiB root spent most of its budget on repeated machine
+identifiers and paths, truncated the decisive gate-matrix content, and omitted
+later promoted findings.
+
+The compact-root CLI rollout is `01a0c7e3-6569-71e3-a526-3430f1b82fd7`.
+Its injected Stateful project section was 6,456 bytes and contained the full
+gate matrix, every current exact-source route, and every promoted finding
+without entry truncation. API-key environment variables were removed before
+launch; the native branch CLI used the cached Codex ChatGPT login.
+
+| Measure | Ordinary | Original Stateful | Compact-root Stateful |
+| --- | ---: | ---: | ---: |
+| Full lifetime tokens | 72,891 | 237,459 | 149,360 |
+| Uncached input + output | 18,363 | 43,411 | 36,720 |
+| Model responses | 3 | 7 | 5 |
+| Raw source files reopened | 8 | 8 | 8 |
+| Context-map queries | 0 | 1 | 1 |
+
+Relative to the original Stateful measurement, compact root rendering reduced
+full lifetime usage by 88,099 tokens (37.10%) and uncached input plus output by
+6,691 tokens (15.41%). Relative to ordinary Codex it remains a regression:
+104.91% more lifetime tokens and 99.97% more uncached input plus output. Both
+conditions opened all eight raw files. The compact rerun again passed every
+predeclared answer term and completed its semantic obligation and active run
+without a model-authored run ID.
+
+This rerun narrows the diagnosis. Missing or truncated project intelligence is
+no longer the reason for broad verification: the model saw the complete current
+decision and routes, then deliberately rechecked the full eight-file corpus for
+an exact, alternative-by-alternative cited answer. A task that explicitly asks
+for every alternative and exact citations has a high legitimate verification
+floor. Future reduced-rereading evaluation should separately test questions
+whose answer depends on a small subset of a much larger mature corpus. This
+benchmark still fails the lifetime-cost gate and must remain negative evidence.

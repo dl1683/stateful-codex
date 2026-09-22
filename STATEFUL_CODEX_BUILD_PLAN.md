@@ -153,6 +153,25 @@ semantic-persistence round trips; the branch must not be called product-complete
 until a rerun demonstrates those outcomes or the remaining limitation is made
 an explicit release boundary.
 
+That remediation slice is now implemented and measured. Root entries carry
+current exact-source routes; coherent findings can be written through a bounded
+16-record batch call with per-item results; and compact semantic root rendering
+uses short aliases rather than spending the model-visible budget on repeated
+opaque identifiers. The compact root exposed the complete gate matrix and every
+route in 6,456 bytes instead of filling the 24 KiB cap and truncating decisive
+content. Focused extension and app-server integration tests pass.
+
+The matched native CLI rerun `01a0c7e3-6569-71e3-a526-3430f1b82fd7` used the
+cached Codex ChatGPT login with API-key environment variables removed. It
+reduced the prior Stateful result from 237,459 to 149,360 lifetime tokens and
+from 43,411 to 36,720 uncached input plus output, while preserving the correct
+source-grounded answer. It still reopened all eight files and remains roughly
+twice the ordinary run's token cost. The rendering and round-trip work is a
+measured improvement, not closure of the Stage 8 efficiency gate. The batch
+path has integration evidence but still needs a fresh maturation-cost benchmark;
+and selective rereading should be evaluated on a larger corpus where the
+question's decisive source set is materially smaller than the corpus.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
