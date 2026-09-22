@@ -380,3 +380,38 @@ for every alternative and exact citations has a high legitimate verification
 floor. Future reduced-rereading evaluation should separately test questions
 whose answer depends on a small subset of a much larger mature corpus. This
 benchmark still fails the lifetime-cost gate and must remain negative evidence.
+
+## Benchmark SC-EVAL-003: selective controlling evidence
+
+Status: pre-registered before execution on 2026-09-22.
+
+Corpus: the mature `clients/stateful-codex/eval/fixtures/procurement` project
+used by SC-EVAL-002. This benchmark asks a narrow question whose controlling
+source set is smaller than the eight-file corpus.
+
+Prompt:
+
+```text
+Determine whether Alder satisfies the binding EEA data-residency gate. Identify the controlling evidence that overrides any proposal claim, cite exact project files, distinguish this gate decision from overall vendor viability, and do not edit files.
+```
+
+Predeclared expected result:
+
+- Alder fails the binding EEA residency gate.
+- `binding-criteria.md` makes storage, processing, debugging, emergency support,
+  and temporary plaintext access part of the gate.
+- `security-addendum.md` is executed and supersedes inconsistent proposal
+  language; it permits a Virginia support engineer to decrypt and view plaintext
+  records during emergency support.
+- The failed mandatory gate makes Alder non-viable under the conjunctive criteria,
+  but the answer does not need to reevaluate Birch or Cedar.
+- The answer cites exact project files and reports no edits.
+
+The ordinary and Stateful conditions must use the same native `codex exec` entry
+point, model, reasoning effort, working directory, permissions, workspace roots,
+and exact prompt with cached ChatGPT login and no API-key environment variables.
+The result will report answer correctness, files and line ranges opened, Stateful
+retrieval/persistence calls, full lifetime tokens, cached tokens, and uncached
+input plus output. Reading unrelated vendor, operations, or finance files counts
+against the selective-routing claim. Lower source-read breadth without lower
+token cost is useful mechanism evidence but not an efficiency win.
