@@ -218,6 +218,40 @@ Python was unavailable; the live gateway used the existing matching companion
 binary from the preceding validated client build. These are explicit validation
 limits, not product successes.
 
+### 2026-09-22 selective-routing and rebuilt-surface checkpoint
+
+SC-EVAL-003 now provides matched live evidence on the native cached-login CLI.
+After the run-state context was made self-sufficient for complete steering and
+final obligation/run persistence was grouped into one code-mode turn, optimized
+Stateful rollout `01a0c875-8a49-7783-9569-bc9ab50102b9` used three model
+responses and one exact-evidence batch. It opened four of eight project files,
+versus six files and three read-bearing outer calls in ordinary Codex. A
+same-binary ordinary replication, `01a0c880-4ea5-7911-9b19-065635cb608d`,
+reproduced the six-file pattern.
+
+Against that replication, Stateful used 83,056 full measured-turn tokens versus
+101,020 (17.78% fewer), but 32,368 uncached input plus output versus 20,124
+(60.84% more). This proves selective routing and a measured-turn total-token
+advantage in this scenario, not lower uncached or lifetime cost. Maturation cost
+and a stable multi-run distribution remain outside the demonstrated claim.
+
+The optimized branch CLI was rebuilt and run with `OPENAI_API_KEY` and
+`CODEX_API_KEY` removed; the cached ChatGPT login completed the durable run and
+made no project edits. The rebuilt browser gateway on port 4174 reported
+`authMode: chatgpt` and read the exact CLI-created completed run, final result,
+obligation, hierarchy, blackboard, and paginated activity through real v2 RPCs.
+The client suite passes 6/6. The in-app browser harness was again unavailable,
+so there is no new screenshot-level layout claim. An attempted interactive TUI
+smoke was blocked before Codex launched because the PTY wrapper resolves the
+Windows Store `pwsh.exe`, which returns access denied; native `codex exec` is
+validated, while a fresh interactive-terminal observation is not.
+
+The branch is therefore feature-complete for the first product slice but not
+release-complete under Stage 8. Remaining gates are representative precision and
+recall measurement, maturation-inclusive lifetime economics, a stable matched
+run distribution, a fresh rendered browser/TUI pass when the host surfaces are
+available, and the repository-wide Rust suite after explicit approval.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
