@@ -412,6 +412,12 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(requests[0].body_contains_text("final Stateful mutation"));
     assert!(requests[0].body_contains_text("Connect the source constraint to deployment risk."));
     assert!(requests[0].body_contains_text(&submitted.steering.id));
+    assert!(requests[4].body_contains_text("finalAnswerChecklist"));
+    assert!(
+        requests[4]
+            .body_contains_text("The deployment risk is triggered by the source constraint.")
+    );
+    assert!(requests[4].body_contains_text("reconcile the persisted result and final prose"));
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,

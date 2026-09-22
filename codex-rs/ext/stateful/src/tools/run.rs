@@ -6,6 +6,7 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulRunUpdate;
 use serde::Deserialize;
@@ -20,6 +21,8 @@ use super::respond;
 use super::thread_run;
 
 const TOOL_NAME: &str = "stateful_run_update";
+const MAX_FINAL_CHECKLIST_ITEMS: usize = 16;
+const MAX_FINAL_CHECKLIST_ITEM_BYTES: usize = 640;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -76,11 +79,24 @@ impl StatefulRunUpdateTool {
                     .to_string(),
             ));
         }
-        let run = self
-            .services
-            .runtime()
-            .await
-            .map_err(respond)?
+        let runtime = self.services.runtime().await.map_err(respond)?;
+        let final_obligation = if arguments.status == StatefulRunStatus::Completed {
+            Some(
+                runtime
+                    .latest_obligation(&current.id)
+                    .await
+                    .map_err(respond)?
+                    .ok_or_else(|| {
+                        FunctionCallError::RespondToModel(
+                            "completed requires a final semantic obligation that captures every material conclusion, implication, uncertainty, and blocker needed in the final answer"
+                                .to_string(),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+        let run = runtime
             .update_run(
                 &current.id,
                 StatefulRunUpdate {
@@ -99,11 +115,20 @@ impl StatefulRunUpdateTool {
                 revision: run.revision,
             });
         }
+        let (final_answer_checklist, omitted_checklist_items) = final_obligation
+            .as_ref()
+            .map(|obligation| final_answer_checklist(&obligation.value.packet))
+            .unwrap_or_default();
         Ok(Box::new(JsonToolOutput::new(json!({
             "runId": run.id.to_string(),
             "status": status_name(run.status),
             "revision": run.revision,
             "strategyRevision": run.strategy_revision,
+            "finalAnswerChecklist": final_answer_checklist,
+            "omittedChecklistItems": omitted_checklist_items,
+            "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
+                "Before replying, reconcile the persisted result and final prose against every checklist item. Include each material conclusion relevant to the user's request, preserve caveats and blockers, and cite the verified evidence. If omittedChecklistItems is nonzero, also use the full final obligation call you just made."
+            ),
         }))))
     }
 }
@@ -116,14 +141,14 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed is terminal: finish every blackboard, relationship, obligation, steering, and verification operation first, then make completed the final Stateful mutation. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
+            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed requires a final semantic obligation and is terminal: finish every blackboard, relationship, steering, verification, and obligation operation first; ensure the result covers every material conclusion, implication, uncertainty, and blocker in that obligation; then make completed the final Stateful mutation. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
                     "expectedRevision": {"type": "integer", "minimum": 1},
-                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "Use completed only after all durable knowledge and obligation writes are finished; completion removes the active-run binding."},
+                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "Use completed only after a final semantic obligation captures all material answer content and all durable writes are finished; completion removes the active-run binding."},
                     "strategy": {"type": "string"},
                     "result": {"type": "string", "description": "For completed, the final evidence-grounded account after all durable writes and verification."}
                 },
@@ -145,6 +170,39 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     {
         Box::pin(self.handle_call(call))
     }
+}
+
+fn final_answer_checklist(packet: &ObligationPacket) -> (Vec<serde_json::Value>, usize) {
+    let candidates = [
+        ("learning", &packet.learning),
+        ("implication", &packet.implication),
+        ("uncertainty", &packet.uncertainty),
+        ("blocker", &packet.blockers),
+    ];
+    let total = candidates
+        .iter()
+        .map(|(_, items)| items.len())
+        .sum::<usize>();
+    let items = candidates
+        .into_iter()
+        .flat_map(|(category, items)| items.iter().map(move |item| (category, bounded_item(item))))
+        .take(MAX_FINAL_CHECKLIST_ITEMS)
+        .map(|(category, text)| json!({"category": category, "text": text}))
+        .collect::<Vec<_>>();
+    let omitted = total.saturating_sub(items.len());
+    (items, omitted)
+}
+
+fn bounded_item(item: &str) -> String {
+    if item.len() <= MAX_FINAL_CHECKLIST_ITEM_BYTES {
+        return item.to_string();
+    }
+    let marker = "…";
+    let mut boundary = MAX_FINAL_CHECKLIST_ITEM_BYTES.saturating_sub(marker.len());
+    while !item.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    format!("{}{marker}", &item[..boundary])
 }
 
 fn status_name(status: StatefulRunStatus) -> &'static str {

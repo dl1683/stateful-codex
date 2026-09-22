@@ -103,7 +103,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Record a compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity.".to_string(),
+            description: "Record a compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity. Before completion, the final packet must enumerate every material conclusion, implication, uncertainty, and blocker that the persisted result and final answer must preserve.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

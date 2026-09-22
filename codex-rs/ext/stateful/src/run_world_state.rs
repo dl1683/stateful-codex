@@ -138,7 +138,7 @@ impl RunWorldStateStatus {
                 }
                 line(
                     &mut output,
-                    "Persistence order: after evidence review, finish every blackboard, relationship, steering, verification, and semantic obligation operation before marking the run completed. Completion removes the active-run binding and must be the final Stateful mutation. When the final obligation and result are both ready, issue their writes sequentially in one code-mode call rather than spending separate model turns on already-decided persistence.",
+                    "Persistence order: after evidence review, finish every blackboard, relationship, steering, and verification operation. Then record a final semantic obligation containing every material conclusion, implication, uncertainty, and blocker the answer must preserve. Reconcile the persisted result against that packet before marking the run completed. Completion removes the active-run binding, returns the bounded final-answer checklist, and must be the final Stateful mutation. When the final obligation and result are both ready, issue their writes sequentially in one code-mode call rather than spending separate model turns on already-decided persistence.",
                 );
                 if let Some(strategy) = run.strategy.as_deref() {
                     field(&mut output, "Current strategy", strategy);
