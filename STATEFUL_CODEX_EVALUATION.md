@@ -792,3 +792,25 @@ would break even around question 15. No uncached break-even can be projected
 because all three follow-ups regressed. This closes the stable selective-routing
 question for this fixture, but it fails the maturation-inclusive lifetime and
 uncached-cost release gates.
+
+## Benchmark SC-EVAL-005R: deferred-tool remediation replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+Commit `8aa897c673` moves seven exceptional-path Stateful tools behind Codex's
+existing deferred-tool discovery boundary. Exact evidence reading, semantic
+obligation publication, terminal run updates, and active steering reconciliation
+remain immediately visible. Deeper blackboard and context-map queries, context
+refresh, blackboard mutation, relationship mutation, and historical steering
+query remain registered and callable but no longer contribute their full schemas
+to every initial request.
+
+The territory question from SC-EVAL-005 will be rerun once in fresh ordinary and
+Stateful threads using the same rebuilt binary and the original committed prompt
+and answer manifest. Territory is the median uncached regression in the original
+series and needs only the executed side letter, closing checklist, and binding
+policy, making it a useful fixed-overhead probe. The comparison will preserve
+answer correctness, parity, project-file breadth, full tokens, uncached input
+plus output, model responses, and read-bearing calls. One remediation pair can
+show whether the intended payload changed; it cannot replace the three-pair
+distribution or establish maturation-inclusive break-even.
