@@ -656,6 +656,25 @@ updates on long investigations while removing the last diagnosed inference
 round from the short continuity case. Stage 8 remains open pending live evidence
 and a fresh broader distribution.
 
+SC-EVAL-021 retained the exact four-source boundary and complete answer but
+failed the workflow gate. A partial conditional schema produced a scalar `next`
+value and one rejected call; the retry persisted a next-only plan to synthesize
+already-reviewed evidence, which is not useful real-time transparency. The run
+used five responses, 102,833 full tokens, and 27,057 uncached tokens. Live API
+and corpus checks passed, but the mechanism and economics did not.
+
+SC-EVAL-022 is pre-registered before remediation. It removes the fragile
+conditional schema, rejects forward-only packets without semantic learning or
+strategy content, and explicitly excludes synthesis of already-reviewed
+evidence from substantive remaining work. After this narrow replication, the
+evaluation agenda expands to the user-directed distribution: a six-project
+breadth screen, followed by 20 sequential questions on five passing projects.
+That longitudinal phase will measure quality, rereading, compaction continuity,
+state growth, and marginal full/uncached cost by question number so any
+Stateful crossover is observed rather than assumed. Recognized external evals
+and published Codex/Luna baselines follow only after the product-specific
+longitudinal evidence is complete.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

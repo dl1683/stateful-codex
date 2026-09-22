@@ -2159,3 +2159,63 @@ corpus. The SC-EVAL-020 semantic rubric remains unchanged. Full usage must be
 below both SC-EVAL-020's 81,003 tokens and the same-binary ordinary run's 78,593;
 uncached usage must be below SC-EVAL-020's 15,467 and will be compared with the
 ordinary 14,337 without assuming stable provider cache behavior.
+
+### Execution result
+
+SC-EVAL-021 preserved the correct retrieval and answer boundary but failed the
+registered workflow and efficiency gates. Thread
+`01a0ca9f-9c48-7c42-bf59-c760f4af492f` opened exactly the four registered
+continuity sources in one evidence batch and no others. Its visible answer and
+durable result preserve the verified 88/91/94/96-hour history, North Ridge,
+Birch's 72-hour queue and 24-hour intake loss, Cedar's 120-hour claim and
+timestamp/order statement, the verified-history versus vendor-claim
+distinction, and the boundary that this is not final procurement approval. A
+live API read confirmed run
+`run-f4453bd9e75fae9a5a0df210bc0376a8793c523e1ec215710bc9730e5a5a93d5`
+completed at revision 2 with a 4,478-character result. All eight corpus files
+remain byte-identical to the fixture.
+
+The model attempted an intermediate packet whose sole field was scalar `next`.
+The conditional schema had repeated only `minItems` inside its `anyOf` branch;
+the code-mode tool surface consequently did not preserve the base array shape,
+and deserialization rejected the string before persistence. The retry supplied
+the expected list and persisted an obligation containing only a plan to
+synthesize and compare evidence that had already been reviewed. It then
+completed in the following response. The run therefore used five responses,
+one rejected intermediate call, one recorded intermediate call, and one
+successful completion. It consumed 102,833 full tokens and 27,057 uncached
+input-plus-output tokens, respectively 26.95% and 74.93% above SC-EVAL-020 and
+30.84% and 88.72% above the same-binary ordinary run.
+
+This result shows that the first gate was structurally too weak and its
+conditional schema was unnecessarily fragile. A forward-looking sentence alone
+is not a meaningful semantic update, and synthesizing already-reviewed evidence
+into the answer is not additional project work. The failed attempt and retry
+remain in the rollout; SC-EVAL-021 does not pass.
+
+## Benchmark SC-EVAL-022: meaningful intermediate-obligation remediation
+
+Status: pre-registered before implementation on 2026-09-22.
+
+The intermediate tool will retain the ordinary array schema for every packet
+field instead of layering partial property definitions through `anyOf`.
+Runtime validation will require both (a) a forward signal in `next`, `blockers`,
+or `requestedJudgment` and (b) meaningful semantic content in `rationale`,
+`learning`, `implication`, `strategy`, `changed`, `uncertainty`, `blockers`, or
+`requestedJudgment`. A packet containing only `next` will be rejected before
+persistence. Model guidance will state that summarizing, synthesizing, or
+comparing evidence already reviewed for the current answer is final reasoning,
+not substantive remaining work. Short tasks should complete directly; longer
+investigations retain intermediate transparency when evidence, strategy,
+uncertainty, blockers, or user judgment materially change while more work
+remains.
+
+The exact continuity prompt will run once more in a fresh Stateful thread on
+the same mature project and rebuilt binary under the unchanged model, effort,
+authentication, memory, directory, roots, permissions, and no-edit conditions.
+The mechanism gate requires one four-file evidence batch, no intermediate
+obligation call or rejected retry, one terminal call, three model responses,
+one completion attempt, a revision-2 API result, and an unchanged corpus. The
+semantic rubric remains unchanged. Full usage must be below SC-EVAL-020's
+81,003 and the ordinary run's 78,593 tokens; uncached usage must be below
+SC-EVAL-020's 15,467 and will be compared with ordinary's 14,337.
