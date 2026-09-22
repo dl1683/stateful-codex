@@ -489,6 +489,33 @@ final-answer omission remain unproven. The next high-value slice is preserving
 selected decisive root findings in final-answer obligations, followed by a
 fresh matched distribution and the approval-gated repository-wide Rust suite.
 
+### 2026-09-22 durable completion-basis checkpoint
+
+SC-EVAL-012 passed its completion-checklist mechanism gate and its final-prose
+gate but failed its durable-result gate. The assistant's final answer recovered
+the executed liability carve-out from the completion checklist and root state;
+the terminal run result had already been stored without that conclusion and
+could not be repaired afterward. This distinguishes visible answer quality from
+durable semantic integrity and keeps Stage 8 open.
+
+Commit `0f7684a3f4` makes material root selection part of completion rather than
+a post-completion reminder. Stable compact `K` references let the model identify
+the exact root findings relevant to the requested outcome without copying
+opaque entry IDs. Completion resolves the selected current records and their
+evidence routes, then appends those findings before the bounded semantic packet
+in the result prior to the terminal mutation. The design is domain-neutral,
+keeps the broad root intact, adds no model turn, and rejects unknown, duplicate,
+or oversized selections before completion.
+
+The extension suite passes 6/6. Focused app-server integration coverage proves
+that a selected root finding is visible in initial World State, returned in the
+completion checklist, and present in the stored terminal result; the focused
+Autonomous continuation test also passes with the stricter final-obligation and
+explicit-selection contract. SC-EVAL-013 is pre-registered in
+`STATEFUL_CODEX_EVALUATION.md` to replicate the exact termination-risk failure
+against a rebuilt cached-login CLI. Broader matched distribution and the
+approval-gated repository-wide Rust suite remain subsequent release gates.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

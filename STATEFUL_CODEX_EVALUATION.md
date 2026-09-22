@@ -1447,7 +1447,8 @@ final-answer coverage omission and broader lifetime replication still ahead.
 
 ## Benchmark SC-EVAL-012: final semantic coverage replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: executed on 2026-09-22 after pre-registration; mechanism passed, final
+prose passed, and the durable-result gate failed.
 
 SC-EVAL-010's Stateful termination-risk answer omitted the executed
 uncapped-liability carve-out even though the root blackboard contained it, the
@@ -1481,3 +1482,89 @@ distinction, exact evidence, and read-only boundary. The corpus must remain
 byte-identical. A lexical scorer is not sufficient; the rollout, persisted
 state, and final answer will be reviewed directly. One same-corpus replication
 tests the observed coverage failure only and does not close Stage 8.
+
+### Execution result
+
+The rebuilt cached-login CLI completed thread
+`01a0c9d6-ae8c-7623-bd76-e3aed052708d` against the registered mature project,
+corpus, prompt, model, effort, roots, and permissions. Its rollout is
+`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T11-58-05-01a0c9d6-ae8c-7623-bd76-e3aed052708d.jsonl`.
+Post-run SHA-256 comparison found all ten corpus files byte-identical to the
+committed fixture.
+
+The mechanism gate passed. The model wrote a final semantic obligation and then
+made completion the final Stateful mutation. The completion output exposed 13
+bounded checklist items with zero omitted items, including the 60-day notice,
+the planning and insurance figures, uncertainty, and the binding policy's
+uncapped-exposure requirement.
+
+The final prose also passed the registered semantic gate. It expressly stated
+that executed amendment 2 carves data-security exposure out of the master
+agreement's general $2 million liability cap, while preserving the 60-day
+notice, $5.5 million planning scenario, $3 million listed cyber limit, $2.5
+million gross difference, unresolved coverage, planning-versus-contractual
+distinction, exact file citations, and read-only boundary.
+
+The durable result failed. Its narrative said only that the binding policy
+requires uncapped or carved-out exposure to be identified. It did not state the
+material project conclusion already present in the root blackboard: executed
+amendment 2 actually removes the data-security, confidentiality, and IP
+indemnity exposure from the master cap. The final obligation also preserved the
+policy and coverage uncertainty but not that exact root conclusion. The
+post-completion checklist could improve the later assistant prose, but it could
+not alter the already-terminal result supplied as the completion argument.
+
+The run used four model responses. It recorded 93,223 input tokens, including
+65,792 cached input tokens, and 3,984 output tokens. This is a correctness
+replication rather than an economics comparison. SC-EVAL-012 therefore closes
+neither final semantic integrity nor Stage 8; it localizes the remaining defect
+to the boundary between selected durable project knowledge and terminal result
+assembly.
+
+## Benchmark SC-EVAL-013: durable material-finding completion replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+Commit `0f7684a3f4` replaces the post-terminal reminder with a structured,
+domain-neutral completion basis. Root entries now expose compact stable `K`
+references in addition to ephemeral display aliases. A completed run must
+explicitly submit the root references material to the requested outcome. Before
+the run becomes terminal, the completion tool resolves those references against
+the current project root, carries forward their verification and freshness,
+adds exact source paths and line ranges when available, and appends them ahead
+of the bounded final-obligation learning, implications, uncertainties, and
+blockers in the durable result. Empty selection remains possible only as an
+explicit assertion that no root finding is material; unknown, duplicate, or
+oversized selections fail before completion.
+
+The replication will rebuild the native CLI from `0f7684a3f4` and submit the
+exact SC-EVAL-010 termination-risk prompt in one fresh Collaborative thread
+bound to mature project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. It will use the
+same byte-identical ten-file corpus, cached ChatGPT login, cleared API keys,
+`gpt-5.6-luna` at `xhigh`, roots, permissions, and read-only request.
+
+The mechanism passes only if:
+
+1. the root World State exposes stable `K` references;
+2. the completion call selects the reference for the source-verified critical
+   finding that executed amendment 2 removes data-security, confidentiality,
+   and IP-indemnity exposure from the master cap;
+3. the completion output returns that exact finding as a `rootFinding` with its
+   current verification state and ranged source routes;
+4. completion remains the final Stateful mutation; and
+5. the ten corpus files remain byte-identical.
+
+The product behavior passes only if both the persisted run result and final
+assistant prose explicitly state the executed carve-out while preserving the
+60-day notice, $5.5 million planning scenario, $3 million listed cyber limit,
+$2.5 million gross difference, unresolved coverage, planning-versus-contractual
+distinction, exact evidence, and read-only boundary. The result must contain a
+bounded durable completion basis rather than a dump of the root blackboard.
+
+The report will retain model responses, outer calls, per-response cached and
+uncached usage, selected root references, final checklist size, persisted
+result, final prose, mutation order, exact evidence access, and corpus hashes.
+A lexical scorer is not sufficient. One same-corpus replication can close only
+the observed finalization defect; it cannot establish representative
+precision/recall, cache behavior after expiry or root changes, lifetime
+economics, or Stage 8 release readiness.
