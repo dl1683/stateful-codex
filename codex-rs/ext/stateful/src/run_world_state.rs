@@ -17,12 +17,17 @@ const START_MARKER: &str = "<stateful_run>";
 const END_MARKER: &str = "</stateful_run>";
 const MAX_BODY_BYTES: usize = 8 * 1024;
 const MAX_ESTIMATED_TOKENS: usize = 3 * 1024;
+const MAX_RENDERED_STEERING: usize = 5;
+const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
+const TRUNCATION_MARKER: &str =
+    "\n[Stateful run state truncated; query exact tool state before relying on omitted detail.]";
 
 pub(super) enum RunWorldStateStatus {
     Available {
-        run: StatefulRun,
+        run: Box<StatefulRun>,
         obligation: Option<Box<StatefulObligation>>,
         steering: Vec<StatefulSteering>,
+        steering_complete: bool,
     },
     Unavailable {
         project_id: String,
@@ -53,6 +58,7 @@ impl RunWorldStateStatus {
                 run,
                 obligation,
                 steering,
+                steering_complete,
             } => {
                 hash(&mut hasher, run.id.as_str());
                 hasher.update(run.revision.to_be_bytes());
@@ -65,6 +71,7 @@ impl RunWorldStateStatus {
                     hash(&mut hasher, instruction.id.as_str());
                     hasher.update(instruction.revision.to_be_bytes());
                 }
+                hasher.update([u8::from(*steering_complete)]);
             }
             Self::Unavailable { .. } => hasher.update(b"unavailable"),
         }
@@ -87,6 +94,7 @@ impl RunWorldStateStatus {
                 run,
                 obligation,
                 steering,
+                steering_complete,
             } => {
                 field(&mut output, "Run ID", run.id.as_str());
                 field(&mut output, "Run revision", &run.revision.to_string());
@@ -128,9 +136,14 @@ impl RunWorldStateStatus {
                         "Mode obligation: the user explicitly transitioned this Socratic run to execution; follow the agreed strategy and surface unresolved assumptions.",
                     ),
                 }
+                line(
+                    &mut output,
+                    "Persistence efficiency: after evidence review, if a semantic obligation update and a run status/result update are both ready, issue them sequentially in one code-mode call rather than spending separate model turns on already-decided persistence.",
+                );
                 if let Some(strategy) = run.strategy.as_deref() {
                     field(&mut output, "Current strategy", strategy);
                 }
+                render_steering(&mut output, steering, *steering_complete);
                 if let Some(obligation) = obligation {
                     render_packet(&mut output, &obligation.value.packet);
                 } else {
@@ -139,32 +152,69 @@ impl RunWorldStateStatus {
                         "Current obligation: no semantic update has been recorded yet. Record one after the first meaningful learning or strategy decision.",
                     );
                 }
-                if !steering.is_empty() {
-                    line(&mut output, "Unresolved user steering:");
-                    for instruction in steering {
-                        let status = match instruction.status {
-                            SteeringStatus::Submitted => "submitted",
-                            SteeringStatus::Acknowledged => "acknowledged",
-                            SteeringStatus::Applied => "applied",
-                            SteeringStatus::Rejected => "rejected",
-                        };
-                        line(
-                            &mut output,
-                            &format!(
-                                "- [{}; revision {}] {}",
-                                status, instruction.revision, instruction.value.input
-                            ),
-                        );
-                    }
-                    line(
-                        &mut output,
-                        "Acknowledge and visibly apply or reject each instruction; never silently drop it.",
-                    );
-                }
             }
         }
         output
     }
+}
+
+fn render_steering(output: &mut String, steering: &[StatefulSteering], steering_complete: bool) {
+    if steering.is_empty() {
+        if steering_complete {
+            line(
+                output,
+                "Unresolved user steering: none. This current unresolved set is fully represented; do not call steering_query unless historical reconciliation detail is needed.",
+            );
+        } else {
+            line(
+                output,
+                "Unresolved user steering: none in this bounded view, but later records may exist. Use steering_query before choosing or revising strategy.",
+            );
+        }
+        return;
+    }
+
+    line(output, "Unresolved user steering:");
+    let mut shortened = false;
+    for instruction in steering.iter().take(MAX_RENDERED_STEERING) {
+        let status = match instruction.status {
+            SteeringStatus::Submitted => "submitted",
+            SteeringStatus::Acknowledged => "acknowledged",
+            SteeringStatus::Applied => "applied",
+            SteeringStatus::Rejected => "rejected",
+        };
+        let (input, input_shortened) =
+            bounded_text(&instruction.value.input, MAX_RENDERED_STEERING_INPUT_BYTES);
+        shortened |= input_shortened;
+        let suffix = if input_shortened {
+            " [input shortened]"
+        } else {
+            ""
+        };
+        line(
+            output,
+            &format!(
+                "- [id {}; {status}; revision {}] {input}{suffix}",
+                instruction.id, instruction.revision
+            ),
+        );
+    }
+    let complete = steering_complete && steering.len() <= MAX_RENDERED_STEERING && !shortened;
+    if complete {
+        line(
+            output,
+            "This current unresolved steering set is fully represented. Reconcile it directly from these IDs and revisions; do not call steering_query unless historical detail is needed.",
+        );
+    } else {
+        line(
+            output,
+            "This bounded view omitted or shortened unresolved steering. Use steering_query to retrieve the exact remaining detail before choosing or revising strategy.",
+        );
+    }
+    line(
+        output,
+        "Acknowledge and visibly apply or reject each instruction; never silently drop it.",
+    );
 }
 
 pub(super) fn run_world_state_section(
@@ -222,15 +272,33 @@ fn field(output: &mut String, label: &str, value: &str) {
 }
 
 fn line(output: &mut String, value: &str) {
-    if output.len() >= MAX_BODY_BYTES {
+    if output.ends_with(TRUNCATION_MARKER) {
         return;
     }
     let prefix = usize::from(!output.is_empty());
-    let allowed = MAX_BODY_BYTES.saturating_sub(output.len() + prefix);
-    if allowed == 0 {
+    let content_limit = MAX_BODY_BYTES.saturating_sub(TRUNCATION_MARKER.len());
+    let allowed = content_limit.saturating_sub(output.len() + prefix);
+    let value_fits = value.len() <= allowed;
+    if value_fits {
+        let original_len = output.len();
+        if prefix == 1 {
+            output.push('\n');
+        }
+        output.push_str(value);
+        let marker_tokens =
+            codex_utils_string::approx_tokens_from_byte_count(TRUNCATION_MARKER.len());
+        if codex_utils_string::approx_tokens_from_byte_count(output.len())
+            <= (MAX_ESTIMATED_TOKENS as u64).saturating_sub(marker_tokens)
+        {
+            return;
+        }
+        output.truncate(original_len);
+    }
+    if allowed == 0 && output.is_empty() {
+        output.push_str(TRUNCATION_MARKER.trim_start());
         return;
     }
-    if prefix == 1 {
+    if prefix == 1 && output.len() < content_limit {
         output.push('\n');
     }
     let mut boundary = allowed.min(value.len());
@@ -238,10 +306,18 @@ fn line(output: &mut String, value: &str) {
         boundary -= 1;
     }
     output.push_str(&value[..boundary]);
-    if codex_utils_string::approx_tokens_from_byte_count(output.len()) > MAX_ESTIMATED_TOKENS as u64
-    {
-        output.truncate(output.len().saturating_sub(boundary));
+    output.push_str(TRUNCATION_MARKER);
+}
+
+fn bounded_text(value: &str, maximum: usize) -> (&str, bool) {
+    if value.len() <= maximum {
+        return (value, false);
     }
+    let mut boundary = maximum;
+    while !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    (&value[..boundary], true)
 }
 
 fn mode_name(mode: WorkflowMode) -> &'static str {

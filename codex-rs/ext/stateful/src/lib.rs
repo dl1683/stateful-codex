@@ -240,20 +240,11 @@ impl StatefulExtension {
                 });
             }
         };
-        let steering = match store
+        let steering_records = match store
             .list_steering(&run.id, /*after*/ None, /*max_results*/ 100)
             .await
         {
-            Ok(steering) => steering
-                .into_iter()
-                .filter(|instruction| {
-                    matches!(
-                        instruction.status,
-                        codex_stateful_runtime::SteeringStatus::Submitted
-                            | codex_stateful_runtime::SteeringStatus::Acknowledged
-                    )
-                })
-                .collect(),
+            Ok(steering) => steering,
             Err(error) => {
                 tracing::warn!(run_id = %run.id, %error, "failed to load pending steering");
                 return Some(RunWorldStateStatus::Unavailable {
@@ -261,10 +252,22 @@ impl StatefulExtension {
                 });
             }
         };
+        let steering_complete = steering_records.len() < 100;
+        let steering = steering_records
+            .into_iter()
+            .filter(|instruction| {
+                matches!(
+                    instruction.status,
+                    codex_stateful_runtime::SteeringStatus::Submitted
+                        | codex_stateful_runtime::SteeringStatus::Acknowledged
+                )
+            })
+            .collect();
         Some(RunWorldStateStatus::Available {
-            run,
+            run: Box::new(run),
             obligation: obligation.map(Box::new),
             steering,
+            steering_complete,
         })
     }
 }

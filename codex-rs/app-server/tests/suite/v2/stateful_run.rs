@@ -234,14 +234,6 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
         vec![
             responses::sse(vec![
                 responses::ev_function_call(
-                    "query-steering",
-                    "steering_query",
-                    &json!({}).to_string(),
-                ),
-                responses::ev_completed("query-steering-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_function_call(
                     "update-obligation",
                     "obligation_update",
                     &json!({
@@ -347,15 +339,10 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert_eq!(last_run_event.expect("completed run event").revision, 3);
 
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 6);
+    assert_eq!(requests.len(), 5);
     assert!(requests[0].body_contains_text("<stateful_run>"));
     assert!(requests[0].body_contains_text("Connect the source constraint to deployment risk."));
-    assert!(
-        requests[1]
-            .function_call_output("query-steering")
-            .to_string()
-            .contains("submitted")
-    );
+    assert!(requests[0].body_contains_text(&submitted.steering.id));
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,

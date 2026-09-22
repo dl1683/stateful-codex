@@ -16,7 +16,7 @@ use super::run_world_state_section;
 fn run_world_state_is_semantic_bounded_and_stable() {
     let run_id = StatefulRunId::parse("run-1").expect("valid run id");
     let section = run_world_state_section(RunWorldStateStatus::Available {
-        run: StatefulRun {
+        run: Box::new(StatefulRun {
             id: run_id.clone(),
             value: NewStatefulRun {
                 project_id: "project-1".to_string(),
@@ -36,7 +36,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
             revision: 2,
             created_at_ms: 1,
             updated_at_ms: 2,
-        },
+        }),
         obligation: Some(Box::new(StatefulObligation {
             id: "obligation-1".to_string(),
             value: NewObligation {
@@ -54,6 +54,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
             created_at_ms: 2,
         })),
         steering: Vec::new(),
+        steering_complete: true,
     });
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
@@ -62,6 +63,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(rendered.body().contains("Run revision: 2"));
     assert!(rendered.body().contains("Strategy revision: 1"));
     assert!(rendered.body().contains("Do not invoke execution tools"));
+    assert!(rendered.body().contains("Unresolved user steering: none"));
     assert!(
         rendered
             .body()
@@ -73,4 +75,40 @@ fn run_world_state_is_semantic_bounded_and_stable() {
             .render_diff(PreviousWorldStateSection::Known(section.snapshot()))
             .is_none()
     );
+}
+
+#[test]
+fn run_world_state_discloses_omitted_detail() {
+    let section = run_world_state_section(RunWorldStateStatus::Available {
+        run: Box::new(StatefulRun {
+            id: StatefulRunId::parse("run-large").expect("valid run id"),
+            value: NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "x".repeat(super::MAX_BODY_BYTES * 2),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+            status: StatefulRunStatus::Running,
+            strategy: None,
+            strategy_revision: 0,
+            result: None,
+            continuations_used: 0,
+            revision: 1,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }),
+        obligation: None,
+        steering: Vec::new(),
+        steering_complete: true,
+    });
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("first contribution renders");
+    assert!(rendered.body().contains("Stateful run state truncated"));
+    assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
 }

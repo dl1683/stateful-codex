@@ -116,7 +116,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: QUERY_TOOL_NAME.to_string(),
-            description: "Read exact user steering and its acknowledgement/application state for the selected thread's active Stateful run. Check unresolved steering before choosing or revising strategy.".to_string(),
+            description: "Read exact user steering and its acknowledgement/application state for the selected thread's active Stateful run. Current unresolved steering is already supplied in <stateful_run>; use this query only when that section says its view was omitted or shortened, or when historical reconciliation detail is needed.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
