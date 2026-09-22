@@ -10,6 +10,9 @@ export function summarizeEvents(events, expectedTerms = []) {
   let finalAnswer = "";
   let userPrompt = "";
   let modelResponses = 0;
+  let durableCompletion = null;
+  let completionAttempts = 0;
+  const completionRequests = new Map();
   const calls = [];
 
   for (const event of events) {
@@ -27,13 +30,40 @@ export function summarizeEvents(events, expectedTerms = []) {
       if (item.role === "user" && text) userPrompt = text;
     }
     if (
+      item?.type === "custom_tool_call_output" ||
+      item?.type === "function_call_output"
+    ) {
+      const submittedResult = completionRequests.get(item.call_id);
+      const output = submittedResult ? completionOutput(item) : null;
+      if (output?.status === "completed") {
+        const checklist = output.finalAnswerChecklist
+          .map((entry) => entry.text)
+          .filter((text) => typeof text === "string");
+        durableCompletion = {
+          runId: output.runId,
+          revision: output.revision,
+          omittedChecklistItems: output.omittedChecklistItems,
+          submittedResult,
+          checklist,
+          coverageText: [submittedResult, ...checklist].join("\n"),
+        };
+      }
+    }
+    if (
       item?.type === "function_call" ||
       item?.type === "custom_tool_call"
     ) {
-      calls.push({
+      const call = {
         name: item.name ?? "unknown",
         input: toolInput(item),
-      });
+      };
+      calls.push(call);
+      const completedResults = completedRunResults(call);
+      completionAttempts += completedResults.attempts;
+      const submittedResult = completedResults.results.at(-1);
+      if (submittedResult != null) {
+        completionRequests.set(item.call_id, submittedResult);
+      }
     }
   }
 
@@ -75,6 +105,7 @@ export function summarizeEvents(events, expectedTerms = []) {
       uncachedTotalTokens: uncachedInputTokens + usage.output_tokens,
     },
     modelResponses,
+    durableCompletion,
     calls: {
       total: calls.length,
       readBearingToolCalls: calls.filter((call) => READ_PATTERN.test(call.input))
@@ -84,6 +115,7 @@ export function summarizeEvents(events, expectedTerms = []) {
       evidenceReads: namedCalls(calls, "evidence_read"),
       obligationUpdates: namedCalls(calls, "obligation_update"),
       runUpdates: namedCalls(calls, "stateful_run_update"),
+      completionAttempts,
     },
     expectations: {
       allPresent: termChecks.every((check) => check.present),
@@ -91,6 +123,91 @@ export function summarizeEvents(events, expectedTerms = []) {
     },
     finalAnswer,
   };
+}
+
+function completionOutput(item) {
+  const output = Array.isArray(item.output)
+    ? item.output.map((content) => content.text ?? "").join("\n")
+    : String(item.output ?? "");
+  for (const line of output.split(/\r?\n/).reverse()) {
+    const candidate = line.trim();
+    if (!candidate.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed.finalAnswerChecklist)) return parsed;
+    } catch {
+      // Continue past non-JSON process output.
+    }
+  }
+  return null;
+}
+
+function completedRunResults(call) {
+  if (
+    call.name !== "stateful_run_update" &&
+    !call.input.includes("stateful_run_update")
+  ) {
+    return { attempts: 0, results: [] };
+  }
+
+  if (call.name === "stateful_run_update") {
+    try {
+      const input = JSON.parse(call.input);
+      return {
+        attempts: input.status === "completed" ? 1 : 0,
+        results:
+          input.status === "completed" && typeof input.result === "string"
+            ? [input.result]
+            : [],
+      };
+    } catch {
+      // Fall through to the code-mode representation.
+    }
+  }
+
+  const starts = [...call.input.matchAll(/stateful_run_update\s*\(/g)].map(
+    (match) => match.index,
+  );
+  const results = [];
+  let attempts = 0;
+  for (const [index, start] of starts.entries()) {
+    const end = starts[index + 1] ?? call.input.length;
+    const source = call.input.slice(start, end);
+    if (!/status\s*:\s*["']completed["']/.test(source)) continue;
+    attempts += 1;
+    const result = jsStringProperty(source, "result");
+    if (result != null) results.push(result);
+  }
+  return { attempts, results };
+}
+
+function jsStringProperty(source, property) {
+  const match = new RegExp("\\b" + property + "\\s*:\\s*([\"'`])").exec(
+    source,
+  );
+  if (!match) return null;
+  const quote = match[1];
+  let value = "";
+  for (let index = match.index + match[0].length; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === quote) return value;
+    if (character !== "\\") {
+      value += character;
+      continue;
+    }
+    index += 1;
+    if (index >= source.length) return null;
+    const escaped = source[index];
+    value +=
+      escaped === "n"
+        ? "\n"
+        : escaped === "r"
+          ? "\r"
+          : escaped === "t"
+            ? "\t"
+            : escaped;
+  }
+  return null;
 }
 
 export function compareSummaries(baseline, stateful) {
@@ -232,6 +349,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }

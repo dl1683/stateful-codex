@@ -21,9 +21,58 @@ const summary = (id, tokens) => ({
   workspaceRoots: ["C:/work"],
   userPrompt: "What controls?",
   finalAnswer: "The executed amendment controls.",
+  durableCompletion: {
+    runId: "run-1",
+    revision: 2,
+    omittedChecklistItems: 0,
+    checklist: [],
+    coverageText: "The executed amendment controls.",
+  },
   usage: tokens,
   modelResponses: 2,
   calls: { readBearingToolCalls: 1 },
+});
+
+test("requires semantic coverage in the durable completion when registered", () => {
+  const manifest = {
+    name: "durable series",
+    maturationUsage: {
+      totalTokens: 0,
+      uncachedTotalTokens: 0,
+      modelResponses: 0,
+    },
+    cases: [
+      {
+        id: "case",
+        prompt: "What controls?",
+        requireDurableCompletion: true,
+        expectedConcepts: [
+          { name: "authority", termGroups: [["executed"], ["controls"]] },
+        ],
+        forbiddenPhrases: ["proposal controls"],
+      },
+    ],
+  };
+  const stateful = summary("stateful", usage(60, 30));
+  stateful.durableCompletion.coverageText = "The answer was completed.";
+
+  const report = compareSeries(
+    manifest,
+    new Map([
+      [
+        "case",
+        {
+          baseline: summary("baseline", usage(80, 50)),
+          stateful,
+        },
+      ],
+    ]),
+  );
+
+  assert.equal(report.cases[0].baselineAnswer.passed, true);
+  assert.equal(report.cases[0].statefulAnswer.passed, true);
+  assert.equal(report.cases[0].statefulDurableCompletion.passed, false);
+  assert.equal(report.passed, false);
 });
 
 test("keeps maturation cost in the aggregate lifetime result", () => {

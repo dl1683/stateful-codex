@@ -40,16 +40,24 @@ exits with status 2; a run that misses an expected term exits with status 3.
 
 For a pre-registered sequence of follow-up questions, use `eval:series` with
 one named pair per manifest case. The report checks semantic term groups and
-prohibited conclusions, aggregates follow-up usage, adds the recorded
-one-time maturation cost, and reports only a projected break-even when the
-observed average follow-up saving is positive:
+prohibited conclusions. Cases may require the same semantic coverage in the
+Stateful completion result and returned completion basis, preventing a correct
+visible answer from hiding lost project knowledge. A live API read remains the
+authoritative persisted-result check. The report aggregates follow-up usage,
+adds every recorded project-maturation rollout, and reports only a projected
+break-even when the observed average follow-up saving is positive:
 
 ```powershell
 npm run eval:series -- --manifest eval/manifests/licensing-series.json `
+  --maturation-rollout <licensing-maturation.jsonl> `
   --pair economics=<ordinary.jsonl>,<stateful.jsonl> `
   --pair territory=<ordinary.jsonl>,<stateful.jsonl> `
   --pair termination-risk=<ordinary.jsonl>,<stateful.jsonl>
 ```
+
+Repeat `--maturation-rollout` for each independently matured project in a
+multi-project distribution. Omitting it uses the frozen aggregate recorded in
+the manifest.
 
 ## Project-state regression probes
 

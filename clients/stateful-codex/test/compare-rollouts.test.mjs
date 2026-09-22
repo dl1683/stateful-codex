@@ -102,3 +102,61 @@ test("compares full and uncached usage without mixing their definitions", () => 
   assert.equal(actual.stateful.calls.obligationUpdates, 1);
   assert.equal(actual.stateful.expectations.allPresent, true);
 });
+
+test("extracts the terminal result from a code-mode completion call", () => {
+  const input = [
+    "const r = await tools.stateful_run_update({",
+    "  expectedRevision: 1,",
+    "  status: \"completed\",",
+    "  result: \"The executed amendment controls.\\nNo files were edited.\"",
+    "});",
+    "text(r);",
+  ].join("\n");
+  const rollout = events({
+    id: "stateful",
+    stateful: true,
+    input: 150,
+    cached: 100,
+    output: 20,
+  });
+  const call = rollout.find(
+    (event) => event.type === "response_item" && event.payload.type === "custom_tool_call",
+  );
+  call.payload.call_id = "completion-call";
+  call.payload.input = input;
+  rollout.splice(4, 0, {
+    type: "response_item",
+    payload: {
+      type: "custom_tool_call_output",
+      call_id: "completion-call",
+      output: [
+        { type: "input_text", text: "Script completed\nOutput:" },
+        {
+          type: "input_text",
+          text: JSON.stringify({
+            finalAnswerChecklist: [
+              { category: "rootFinding", text: "The $2M cap does not govern." },
+            ],
+            omittedChecklistItems: 0,
+            revision: 2,
+            runId: "run-1",
+            status: "completed",
+          }),
+        },
+      ],
+    },
+  });
+
+  const summary = summarizeEvents(rollout);
+
+  assert.deepEqual(summary.durableCompletion, {
+    runId: "run-1",
+    revision: 2,
+    omittedChecklistItems: 0,
+    submittedResult: "The executed amendment controls.\nNo files were edited.",
+    checklist: ["The $2M cap does not govern."],
+    coverageText:
+      "The executed amendment controls.\nNo files were edited.\nThe $2M cap does not govern.",
+  });
+  assert.equal(summary.calls.completionAttempts, 1);
+});

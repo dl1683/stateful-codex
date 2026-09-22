@@ -22,12 +22,19 @@ export function compareSeries(
       normalizePrompt(benchmarkCase.prompt);
     const baselineAnswer = scoreAnswer(comparison.baseline.finalAnswer, benchmarkCase);
     const statefulAnswer = scoreAnswer(comparison.stateful.finalAnswer, benchmarkCase);
+    const statefulDurableCompletion = benchmarkCase.requireDurableCompletion
+      ? scoreAnswer(
+          comparison.stateful.durableCompletion?.coverageText ?? "",
+          benchmarkCase,
+        )
+      : null;
     return {
       id: benchmarkCase.id,
       promptMatchesManifest,
       comparable: comparison.comparable,
       baselineAnswer,
       statefulAnswer,
+      statefulDurableCompletion,
       baseline: compactSummary(comparison.baseline),
       stateful: compactSummary(comparison.stateful),
       delta: comparison.delta,
@@ -35,7 +42,8 @@ export function compareSeries(
         promptMatchesManifest &&
         comparison.comparable &&
         baselineAnswer.passed &&
-        statefulAnswer.passed,
+        statefulAnswer.passed &&
+        (statefulDurableCompletion?.passed ?? true),
     };
   });
 
@@ -107,6 +115,15 @@ function compactSummary(summary) {
     sessionId: summary.sessionId,
     usage: summary.usage,
     modelResponses: summary.modelResponses,
+    durableCompletion: summary.durableCompletion
+      ? {
+          runId: summary.durableCompletion.runId,
+          revision: summary.durableCompletion.revision,
+          checklistItems: summary.durableCompletion.checklist.length,
+          omittedChecklistItems:
+            summary.durableCompletion.omittedChecklistItems,
+        }
+      : null,
     calls: summary.calls,
   };
 }
@@ -155,20 +172,20 @@ function projectedBreakEven(maturationCost, averageSavings) {
 }
 
 function parseArgs(args) {
-  const options = { pairs: [] };
+  const options = { pairs: [], maturationRollouts: [] };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     const value = args[index + 1];
     if (argument === "--manifest") options.manifest = value;
     else if (argument === "--pair") options.pairs.push(value);
     else if (argument === "--maturation-rollout")
-      options.maturationRollout = value;
+      options.maturationRollouts.push(value);
     else throw new Error(`unknown argument: ${argument}`);
     index += 1;
   }
   if (!options.manifest || options.pairs.length === 0) {
     throw new Error(
-      "usage: --manifest PATH [--maturation-rollout PATH] --pair CASE=BASELINE,STATEFUL [--pair ...]",
+      "usage: --manifest PATH [--maturation-rollout PATH ...] --pair CASE=BASELINE,STATEFUL [--pair ...]",
     );
   }
   return options;
@@ -194,15 +211,21 @@ async function main() {
     });
   }
   let maturationUsage = manifest.maturationUsage;
-  if (options.maturationRollout) {
-    const maturation = summarizeEvents(
-      await readEvents(options.maturationRollout),
+  if (options.maturationRollouts.length > 0) {
+    const maturations = await Promise.all(
+      options.maturationRollouts.map(async (path) =>
+        summarizeEvents(await readEvents(path)),
+      ),
     );
-    maturationUsage = {
-      totalTokens: maturation.usage.totalTokens,
-      uncachedTotalTokens: maturation.usage.uncachedTotalTokens,
-      modelResponses: maturation.modelResponses,
-    };
+    maturationUsage = maturations.reduce(
+      (total, maturation) => ({
+        totalTokens: total.totalTokens + maturation.usage.totalTokens,
+        uncachedTotalTokens:
+          total.uncachedTotalTokens + maturation.usage.uncachedTotalTokens,
+        modelResponses: total.modelResponses + maturation.modelResponses,
+      }),
+      { totalTokens: 0, uncachedTotalTokens: 0, modelResponses: 0 },
+    );
   }
   const report = compareSeries(manifest, rollouts, maturationUsage);
   console.log(JSON.stringify(report, null, 2));
