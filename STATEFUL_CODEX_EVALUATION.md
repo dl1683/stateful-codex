@@ -1924,3 +1924,53 @@ completion overhead without deleting the rich root knowledge that enabled the
 correct cross-source answers. A future preregistered replication also needs a
 semantic evaluator or human rubric fixed before execution; post-hoc expansion
 of this frozen lexical scorer would invalidate the present result.
+
+## Benchmark SC-EVAL-018: atomic completion and outcome-bounded verification
+
+Status: pre-registered before implementation on 2026-09-22.
+
+Response-by-response inspection of SC-EVAL-017 localizes the procurement
+regression. The authority case spent four model responses because it published
+its final obligation and completion in separate inference rounds. The continuity
+case spent five responses because it first verified the four decisive continuity
+sources, then opened two adjacent residency and price sources, and only afterward
+grouped final persistence. The completion call also returned 5,842-7,151
+characters of checklist output, but the avoidable 20,000-plus-token model rounds
+are the dominant cost.
+
+The implementation under test will make the final semantic obligation part of
+the terminal `stateful_run_update` input. Intermediate `obligation_update` calls
+remain available when learning or strategy materially changes during longer
+work, but a terminal call must atomically express the final packet, result, root
+revision, and material root aliases. The selected-project guidance will also say
+that exact verification is bounded by the requested outcome: current verified
+root knowledge may supply adjacent context, but the model should not reopen
+sources merely to prove gates that the question does not ask it to decide.
+
+The replication will use the unchanged authority-and-cost and continuity-basis
+prompts from
+`clients/stateful-codex/eval/manifests/release-distribution.json`. Each runs in a
+fresh ordinary thread and a fresh Stateful thread attached to the mature
+SC-EVAL-017 procurement project. Both conditions use the same rebuilt branch
+binary, cached ChatGPT login with both API-key variables removed, disabled
+ordinary Codex memory, model, effort, roots, permissions, and alternating order.
+The already measured maturation cost remains reported but is not repeated
+because this experiment isolates follow-up completion and verification behavior.
+
+The mechanism gate requires each Stateful run to use one exact-evidence batch,
+one terminal update containing its final obligation, no separate final
+`obligation_update`, one successful completion attempt, at most three model
+responses, a completed revision-2 API result, and no source edit. The semantic
+gate is a human rubric frozen here: authority must preserve all three approved
+totals, the controlling order, the conjunctive/non-waivable rule, and the
+preliminary-not-final distinction; continuity must preserve the verified
+88/91/94/96-hour history, North Ridge, Birch's 72-hour/24-hour consequence,
+Cedar's 120-hour claim and ordering preservation, the verified-history versus
+vendor-claim distinction, and no final-award implication.
+
+The efficiency gate requires fewer full and uncached tokens than the
+corresponding SC-EVAL-017 Stateful runs, whose aggregate was 189,003 full and
+32,587 uncached input-plus-output tokens. The result will also be compared with
+the ordinary SC-EVAL-017 aggregate of 114,445 full and 34,573 uncached tokens,
+but this two-case diagnostic does not replace a fresh full release distribution
+or establish maturation-inclusive release economics.
