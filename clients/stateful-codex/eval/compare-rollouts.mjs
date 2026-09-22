@@ -125,7 +125,7 @@ export function summarizeEvents(events, expectedTerms = []) {
   };
 }
 
-function completionOutput(item) {
+export function completionOutput(item) {
   const output = Array.isArray(item.output)
     ? item.output.map((content) => content.text ?? "").join("\n")
     : String(item.output ?? "");
@@ -146,7 +146,7 @@ function completionOutput(item) {
   return null;
 }
 
-function completedRunResults(call) {
+export function completedRunResults(call) {
   if (
     call.name !== "stateful_run_update" &&
     !call.input.includes("stateful_run_update")
@@ -278,14 +278,14 @@ export async function readEvents(path) {
     });
 }
 
-function messageText(item) {
+export function messageText(item) {
   return (item.content ?? [])
     .filter((content) => ["input_text", "output_text", "text"].includes(content.type))
     .map((content) => content.text ?? "")
     .join("\n");
 }
 
-function toolInput(item) {
+export function toolInput(item) {
   if (typeof item.input === "string") return item.input;
   if (typeof item.arguments === "string") return item.arguments;
   return JSON.stringify(item.input ?? item.arguments ?? {});
