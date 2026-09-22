@@ -143,7 +143,7 @@ export function compareSummaries(baseline, stateful) {
   };
 }
 
-async function readEvents(path) {
+export async function readEvents(path) {
   const text = await readFile(path, "utf8");
   return text
     .split(/\r?\n/)
@@ -176,7 +176,7 @@ function namedCalls(calls, name) {
   ).length;
 }
 
-function normalizePrompt(value) {
+export function normalizePrompt(value) {
   return value.trim().toLocaleLowerCase().replaceAll(/\s+/g, " ");
 }
 

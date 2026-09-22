@@ -1,0 +1,75 @@
+{
+  "name": "SC-EVAL-005 licensing follow-up series",
+  "maturationUsage": {
+    "totalTokens": 649173,
+    "uncachedTotalTokens": 94677,
+    "modelResponses": 15
+  },
+  "cases": [
+    {
+      "id": "economics",
+      "prompt": "What royalty rate currently governs the licensing deal, what annual royalty does the approved forecast imply, and why should the counterparty proposal not control either answer? Cite the exact project files, identify any material assumption behind the forecast, and do not edit files.",
+      "expectedConcepts": [
+        {
+          "name": "current royalty",
+          "termGroups": [["6%", "six percent", "six-percent"], ["amendment 1", "executed amendment"]]
+        },
+        {
+          "name": "approved forecast",
+          "termGroups": [["$20,000,000", "$20 million"], ["$1,200,000", "$1.2 million"], ["approved-finance-schedule.md", "approved finance schedule"]]
+        },
+        {
+          "name": "proposal is stale",
+          "termGroups": [["8%", "eight percent"], ["proposal"], ["does not control", "supersed", "non-binding", "stale"]]
+        },
+        {
+          "name": "forecast assumption",
+          "termGroups": [["forecast", "projection"], ["assumption", "not a guarantee", "not guaranteed", "actual"]]
+        }
+      ],
+      "forbiddenPhrases": ["the current royalty is 8%", "the current royalty remains eight percent"]
+    },
+    {
+      "id": "territory",
+      "prompt": "May the licensee currently sell in Canada? Identify the controlling instrument and the exact condition for Canada to enter the territory, cite the exact project files, distinguish current territorial scope from overall closing readiness, and do not edit files.",
+      "expectedConcepts": [
+        {
+          "name": "Canada currently excluded",
+          "termGroups": [["canada"], ["excluded", "not currently", "may not currently", "cannot currently"]]
+        },
+        {
+          "name": "written consent condition",
+          "termGroups": [["written"], ["consent"], ["executed-side-letter.md", "executed side letter", "side letter"]]
+        },
+        {
+          "name": "closing remains blocked",
+          "termGroups": [["closing-checklist.md", "closing checklist"], ["not ready", "pending", "blocked"], ["board", "counsel"]]
+        }
+      ],
+      "forbiddenPhrases": ["canada is currently included", "the transaction is ready to close"]
+    },
+    {
+      "id": "termination-risk",
+      "prompt": "What is the current termination-for-convenience notice period, and is the modeled data-security exposure fully covered by the identified insurance? Identify the controlling and evidentiary documents, cite the exact project files, distinguish contractual facts from planning assumptions, and do not edit files.",
+      "expectedConcepts": [
+        {
+          "name": "termination notice",
+          "termGroups": [["60", "sixty"], ["day"], ["amendment 2", "executed amendment"]]
+        },
+        {
+          "name": "modeled exposure",
+          "termGroups": [["$5,500,000", "$5.5 million"], ["risk-assessment.md", "risk assessment"], ["scenario", "planning", "not a prediction"]]
+        },
+        {
+          "name": "insurance gap",
+          "termGroups": [["$3,000,000", "$3 million"], ["insurance"], ["$2,500,000", "$2.5 million", "gap", "shortfall", "not fully covered"]]
+        },
+        {
+          "name": "uncapped carve-out",
+          "termGroups": [["data-security", "data security"], ["uncapped", "cap does not apply", "carve-out"], ["master-license.md", "master license"]]
+        }
+      ],
+      "forbiddenPhrases": ["the notice period is 30 days", "the exposure is fully insured"]
+    }
+  ]
+}

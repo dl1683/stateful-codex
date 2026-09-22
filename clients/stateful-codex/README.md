@@ -38,6 +38,19 @@ retrieval and persistence calls. A read-bearing call is a rollout-level proxy,
 not an exact count of operating-system reads. A comparison that fails parity
 exits with status 2; a run that misses an expected term exits with status 3.
 
+For a pre-registered sequence of follow-up questions, use `eval:series` with
+one named pair per manifest case. The report checks semantic term groups and
+prohibited conclusions, aggregates follow-up usage, adds the recorded
+one-time maturation cost, and reports only a projected break-even when the
+observed average follow-up saving is positive:
+
+```powershell
+npm run eval:series -- --manifest eval/manifests/licensing-series.json `
+  --pair economics=<ordinary.jsonl>,<stateful.jsonl> `
+  --pair territory=<ordinary.jsonl>,<stateful.jsonl> `
+  --pair termination-risk=<ordinary.jsonl>,<stateful.jsonl>
+```
+
 ## Project-state regression probes
 
 Evaluate a mature project's structured blackboard against a versioned semantic

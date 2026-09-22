@@ -708,3 +708,30 @@ were removed without accepting snapshot changes. After testing, the gateway was
 restarted against the relinked binary; `/health` returned
 `{"ready":true,"authMode":"chatgpt"}`, `codex login status` returned
 `Logged in using ChatGPT`, and the Git worktree was clean.
+
+## Benchmark SC-EVAL-005: maturation amortization series
+
+Status: pre-registered before execution on 2026-09-22.
+
+This benchmark reuses the mature held-out licensing project from SC-EVAL-004.
+It asks three new consequential questions that depend on different subsets of
+the ten-file corpus: current economics, Canadian territory, and termination
+notice plus modeled insurance exposure. The exact prompts, semantic term
+groups, prohibited conclusions, and one-time maturation usage are committed in
+`clients/stateful-codex/eval/manifests/licensing-series.json` before any run.
+
+Each question will be run once through fresh ordinary and Stateful native CLI
+threads using the same built binary, model, reasoning effort, selected
+directory, workspace roots, permissions, cached ChatGPT login, and cleared API
+key environment. Both answers must pass the pre-registered semantic checks and
+the rollout pair must pass the existing parity checks before its cost is
+included.
+
+The series report will preserve per-question full and uncached token usage,
+model responses, and read-bearing calls. It will report follow-up wins across
+the three pairs, cumulative ordinary follow-up cost, cumulative Stateful
+follow-up cost, and Stateful lifetime cost after adding SC-EVAL-004's 649,173
+full and 94,677 uncached maturation tokens. A projected break-even count is
+reported only when the observed average per-question saving is positive. Three
+pairs can show whether the first saving repeats across distinct questions; it
+cannot establish a universal workload distribution.
