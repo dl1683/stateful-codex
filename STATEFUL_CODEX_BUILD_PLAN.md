@@ -361,6 +361,23 @@ both routes in its next request. SC-EVAL-007 pre-registers a fresh-project
 replication before measuring whether this removes the redundant listing and
 context-query steps observed in SC-EVAL-006.
 
+SC-EVAL-007 now confirms the mechanism on a rebuilt cached-login CLI. Refresh
+returned all ten current routes, and the model performed no context-map query,
+shell listing, or shell content pass before exact verification. Relative to
+SC-EVAL-006, model responses fell from 10 to 8, outer tool calls from 9 to 7,
+full tokens from 344,870 to 279,247 (-19.03%), and uncached input plus output
+from 75,814 to 69,071 (-8.89%). The final state retained 17 of 17 current,
+source-verified findings, all ten concepts under manual review, and no forbidden
+claim. The byte-identical fixture remained unchanged.
+
+The next maturation-efficiency work is now narrower and evidence-driven: clamp
+oversized evidence requests at the bounded tool boundary instead of spending a
+model retry, then remove copied context-entry fingerprints from same-project
+blackboard evidence writes so one malformed identifier cannot split the linked
+batch. The former is a small defensive tool improvement; the latter should use
+current context-map routes rather than weaken source verification. Neither
+should thin the root blackboard or hide memory tools.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

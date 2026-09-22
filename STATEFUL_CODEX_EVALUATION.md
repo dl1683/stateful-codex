@@ -983,7 +983,8 @@ not a matched end-to-end rerun and must not be presented as a release claim.
 
 ## Benchmark SC-EVAL-007: refresh-route maturation replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: executed on 2026-09-22. The procedure below was committed before the
+run and was not changed after observing the result.
 
 Commit `88280d1f1d` changes the model-facing `context_map_refresh` result to
 include a deterministic, response-bounded inventory of current source routes.
@@ -1006,3 +1007,54 @@ context-map-query steps without weakening exact verification or durable state.
 The result will be retained if the model ignores the routes or cost regresses.
 Like SC-EVAL-006, this is a same-corpus mechanism replication rather than a new
 held-out semantic or general-economics claim.
+
+### Execution and result
+
+Native Stateful CLI thread `01a0c93b-f307-7e12-856b-d242cacb5c1b` used fresh
+project `01a0c93b-f2ef-7c00-bf49-710fdcd05d14` rooted at
+`%LOCALAPPDATA%/Temp/stateful-refresh-routes-1790082503050`. The rebuilt branch
+CLI ran `gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication with
+API-key environment variables removed. The temporary ten-file corpus was
+byte-identical before the run, and a post-run directory diff confirmed that it
+remained unchanged.
+
+The first and only discovery call was `context_map_refresh`. It returned all ten
+current routes with `routesTruncated: false`. The model explicitly used that
+inventory to launch exact verification. It issued no `context_map_query`, shell
+file listing, or shell content read. This removed the two context queries and
+broad shell pass observed in SC-EVAL-006.
+
+| Measure | SC-EVAL-006 | SC-EVAL-007 | Delta |
+| --- | ---: | ---: | ---: |
+| Model responses | 10 | 8 | -2 (-20.00%) |
+| Outer custom tool calls | 9 | 7 | -2 (-22.22%) |
+| Full tokens | 344,870 | 279,247 | -65,623 (-19.03%) |
+| Uncached input plus output | 75,814 | 69,071 | -6,743 (-8.89%) |
+| Context-map queries | 2 | 0 | -2 |
+| Shell listing or content passes | 2 | 0 | -2 |
+| Final blackboard findings | 17 | 17 | 0 |
+| Final relationships | 27 | 29 | +2 |
+
+The live frozen-manifest scorer again returned 17 of 17 active, current,
+source-verified, evidence-linked findings, zero forbidden conclusions, and 3 of
+10 literal probes. Manual review found all ten predeclared concepts. This
+preserves the SC-EVAL-006 quality interpretation: perfect supported-entry
+precision and complete manual concept coverage, but not a machine-scored
+semantic-recall pass.
+
+Two avoidable retries remain. The first parallel evidence call requested
+`maxBytes: 100000`, above the declared 12,288-byte tool limit, and was repeated
+with the legal limit. The linked batch then accepted 16 findings and 26
+relationships but rejected one finding whose copied source fingerprint was
+malformed; a single-record retry plus its three relationships produced the
+final 17 findings and 29 relationships. An unrelated memory-maintenance patch
+also failed after durable state was complete. These failures did not change the
+fixture or final state, but their turns and tokens count against the result.
+
+Using the already measured SC-EVAL-005 follow-up aggregate only as a directional
+projection, the new maturation plus three Stateful follow-ups would cost
+571,027 full tokens versus 428,784 ordinary tokens, a remaining 142,243-token
+deficit. The observed follow-up slope projects full-token break-even around
+question seven. Uncached usage would remain 159,123 versus 73,456, an
+85,667-token deficit with no observed break-even. A matched end-to-end series
+is still required before making a lifetime-economics claim.
