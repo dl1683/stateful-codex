@@ -1444,3 +1444,40 @@ SC-EVAL-010 or prove durable savings after provider cache expiry, long idle
 periods, root revisions, different models, or representative workloads. Those
 conditions require a fresh matched distribution. Stage 8 remains open, with the
 final-answer coverage omission and broader lifetime replication still ahead.
+
+## Benchmark SC-EVAL-012: final semantic coverage replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+SC-EVAL-010's Stateful termination-risk answer omitted the executed
+uncapped-liability carve-out even though the root blackboard contained it, the
+model verified the controlling amendment, and the final semantic obligation
+recorded uncapped exposure. The omission occurred at finalization: both the
+persisted result and final prose dropped a material conclusion already present
+in the system's structured understanding.
+
+Commit `4fc80c460c` strengthens the domain-neutral completion contract. A run
+cannot complete without a final semantic obligation. Completion returns a
+bounded checklist drawn from that packet's learnings, implications,
+uncertainties, and blockers, plus an explicit instruction to reconcile the
+persisted result and final prose before replying. The checklist is capped at 16
+items and 640 bytes per item. It does not infer legal concepts, rewrite user
+goals, or add a second finalization turn.
+
+The replication will rebuild the native CLI from `4fc80c460c` and submit the
+exact SC-EVAL-010 termination-risk prompt in one fresh Collaborative thread
+bound to mature project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. It will use the
+same byte-identical corpus, cached ChatGPT login, cleared API keys,
+`gpt-5.6-luna` at `xhigh`, roots, and permissions.
+
+The mechanism passes only if the completion tool output exposes the material
+checklist and terminal completion remains the final Stateful mutation. The
+product behavior passes only if both the persisted result and final prose state
+that the executed amendment removes or carves data-security/confidentiality
+exposure out of the master agreement's general liability cap, while preserving
+the 60-day notice, $5.5 million planning scenario, $3 million identified cyber
+limit, $2.5 million gross difference, unresolved coverage, planning-versus-legal
+distinction, exact evidence, and read-only boundary. The corpus must remain
+byte-identical. A lexical scorer is not sufficient; the rollout, persisted
+state, and final answer will be reviewed directly. One same-corpus replication
+tests the observed coverage failure only and does not close Stage 8.
