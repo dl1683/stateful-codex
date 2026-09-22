@@ -1061,7 +1061,8 @@ is still required before making a lifetime-economics claim.
 
 ## Benchmark SC-EVAL-008: resolved-evidence maturation replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: executed on 2026-09-22. The procedure below was committed before the
+run and was not changed after observing the result.
 
 SC-EVAL-007 exposed two remaining model-correctable retries. Commit
 `783bc5d4af` clamps a positive oversized `evidence_read.maxBytes` request to the
@@ -1086,3 +1087,65 @@ obligation turn, one complete linked write, and one completion turn, with no
 retry for byte limits or evidence identity. The result will be retained if the
 model ignores the new contract or cost regresses. This remains a same-corpus
 mechanism replication, not a new held-out semantic or general-economics claim.
+
+### Execution and result
+
+Native Stateful CLI thread `01a0c955-4d4c-7f81-a704-bcb568cc3407` used fresh
+project `01a0c955-4d3d-7c83-94e8-eefa910dca54` rooted at
+`%LOCALAPPDATA%/Temp/stateful-resolved-evidence-1790084192908`. The rebuilt
+branch CLI ran `gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication
+with API-key environment variables removed. The ten-file corpus was
+byte-identical to the committed fixture before the run, and a post-run
+directory diff confirmed that it remained unchanged.
+
+The route resolver and evidence clamp both worked in live model behavior. The
+model requested `maxBytes: 30000`; the tool applied the 12,288-byte boundary
+without an error or retry. In the successful linked batch, the model supplied
+30 relative-path evidence references and no context-map entry IDs, source
+fingerprints, or node IDs. The resolver persisted current authoritative
+fingerprints, placed single-source findings on their file nodes, and retained
+cross-source conclusions at the project node. Root promotion remained
+independent.
+
+| Measure | SC-EVAL-007 | SC-EVAL-008 | Delta |
+| --- | ---: | ---: | ---: |
+| Model responses | 8 | 11 | +3 (+37.50%) |
+| Outer custom tool calls | 7 | 10 | +3 (+42.86%) |
+| Full tokens | 279,247 | 417,784 | +138,537 (+49.61%) |
+| Uncached input plus output | 69,071 | 75,256 | +6,185 (+8.95%) |
+| Final blackboard findings | 17 | 13 | -4 |
+| Final relationships | 29 | 11 | -18 |
+
+This cost regression is retained. It does not come from failure of the two
+mechanisms under test. The first linked batch was rejected because the model
+naturally copied exact `lineRange` locators from `evidence_read`, while
+blackboard evidence accepted source identity but could not persist line ranges.
+The retry removed the ranges and successfully committed 12 findings and 11
+relationships with zero item failures. A later single-record write added a
+thirteenth source-verified question. The model had already marked the run
+completed before that last write, so its second completion update failed with
+the selected thread having no active Stateful run. No durable finding was lost,
+but the stored terminal result may omit the final question.
+
+All 13 final findings are active, current, source-verified, and evidence-linked.
+Manual semantic review found all ten predeclared concepts and no forbidden
+conclusion. The unchanged literal scorer matched 4 of 10 probes and returned
+`passed: false`; its morphology and same-entry limitations remain visible rather
+than being tuned after the result. The live hierarchy showed the policy
+instruction and effective-date question on the policy file, the territory fact
+on the side-letter file, and genuinely cross-source conclusions at project
+scope.
+
+The run also performed two global-memory reads required by the surrounding
+Codex environment. They are not Stateful project-memory reads, but their turns
+and tokens remain included. Relative to the original SC-EVAL-004 maturation,
+SC-EVAL-008 still used 231,389 fewer full tokens (-35.64%) and 19,421 fewer
+uncached input plus output tokens (-20.51%), but SC-EVAL-007 is the better
+current result.
+
+The next bounded slice is therefore exact line-range persistence, followed by
+terminal-finalization hardening. Exact locators are part of trustworthy
+provenance and should survive from source verification into durable memory;
+they must not be discarded merely to avoid a retry. Completion must likewise
+remain terminal without allowing a model to strand a valid final finding
+outside the run's summarized result.

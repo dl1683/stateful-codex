@@ -392,6 +392,24 @@ oversized request observed in SC-EVAL-007 and route-resolved, source-verified,
 file-level batch persistence. SC-EVAL-008 is pre-registered before rebuilding
 and measuring whether the model eliminates both remaining retries in practice.
 
+SC-EVAL-008 confirmed both mechanisms on a fresh rebuilt cached-login CLI. An
+oversized 30,000-byte evidence request was clamped without a retry, and the
+successful linked write resolved 30 relative-path evidence references without
+model-authored entry IDs, fingerprints, or node IDs. Current fingerprints and
+filesystem-shaped placement were correct. All 13 final findings were current,
+source-verified, and evidence-linked; manual review recovered all ten intended
+concepts with no forbidden conclusion.
+
+The run did not improve total cost over SC-EVAL-007. It used 11 model responses,
+10 outer tool calls, 417,784 full tokens, and 75,256 uncached input plus output.
+The first linked batch failed because blackboard evidence could not persist the
+exact line ranges the model carried forward from `evidence_read`; the retry
+removed those ranges. The model also completed the run before adding one final
+valid question, so a second completion update was rejected even though the
+finding itself persisted. These failures define the next narrow work: preserve
+exact line locators through storage, APIs, tools, and evidence navigation, then
+harden finalization ordering without making terminal runs generally mutable.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
