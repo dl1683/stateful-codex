@@ -11,7 +11,6 @@ use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
-use codex_project_intelligence::BlackboardEvidenceLink;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
@@ -22,13 +21,9 @@ use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
-use codex_project_intelligence::ContextMapEntryId;
-use codex_project_intelligence::ContextMapFreshness;
-use codex_project_intelligence::EvidenceLineRange;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
-use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::RootPromotion;
 use serde::Deserialize;
 use serde_json::json;
@@ -38,6 +33,9 @@ use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
+use super::blackboard_evidence::EvidenceArguments;
+use super::blackboard_evidence::evidence_schema;
+use super::blackboard_evidence::resolve_evidence;
 use super::parse_arguments;
 use super::stable_id;
 
@@ -61,15 +59,6 @@ struct RecordArguments {
     root_promotion: RootPromotion,
     #[serde(default)]
     evidence: Vec<EvidenceArguments>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EvidenceArguments {
-    context_map_entry_id: Option<String>,
-    relative_path: Option<String>,
-    project_root: Option<String>,
-    line_range: Option<EvidenceLineRange>,
 }
 
 #[derive(Deserialize)]
@@ -140,7 +129,8 @@ impl BlackboardRecordTool {
             root_promotion,
             evidence,
         } = arguments;
-        let (evidence, inferred_node_id) = self.resolve_evidence(evidence).await?;
+        let (evidence, inferred_node_id) =
+            resolve_evidence(&self.project_id, &self.services, evidence).await?;
         let node_id = match node_id {
             Some(node_id) => HierarchyNodeId::parse(node_id).map_err(respond)?,
             None => match inferred_node_id {
@@ -201,88 +191,6 @@ impl BlackboardRecordTool {
             });
         }
         Ok(entry)
-    }
-
-    async fn resolve_evidence(
-        &self,
-        arguments: Vec<EvidenceArguments>,
-    ) -> Result<(Vec<BlackboardEvidenceLink>, Option<HierarchyNodeId>), FunctionCallError> {
-        let store = self.services.context_map().await.map_err(respond)?;
-        let mut links = Vec::with_capacity(arguments.len());
-        let mut seen_entries = HashSet::with_capacity(arguments.len());
-        let mut node_ids = HashSet::with_capacity(arguments.len());
-        for argument in arguments {
-            let line_range = argument.line_range;
-            let hit = match (
-                argument.context_map_entry_id,
-                argument.relative_path,
-                argument.project_root,
-            ) {
-                (Some(raw_id), None, None) => {
-                    let id = ContextMapEntryId::parse(raw_id).map_err(respond)?;
-                    store
-                        .get_hit(&self.project_id, &id)
-                        .await
-                        .map_err(respond)?
-                        .ok_or_else(|| {
-                            FunctionCallError::RespondToModel(format!(
-                                "context-map evidence entry not found: {id}"
-                            ))
-                        })?
-                }
-                (None, Some(raw_path), project_root) => {
-                    let relative_path = ProjectRelativePath::parse(raw_path).map_err(respond)?;
-                    let mut hits = store
-                        .file_hits_for_path(&self.project_id, &relative_path)
-                        .await
-                        .map_err(respond)?
-                        .into_iter()
-                        .filter(|hit| {
-                            hit.freshness == ContextMapFreshness::Current
-                                && project_root
-                                    .as_ref()
-                                    .is_none_or(|root| root == &hit.source.project_root)
-                        });
-                    let hit = hits.next().ok_or_else(|| {
-                        FunctionCallError::RespondToModel(format!(
-                            "no current context-map evidence route found for {relative_path}"
-                        ))
-                    })?;
-                    if hits.next().is_some() {
-                        return Err(FunctionCallError::RespondToModel(format!(
-                            "multiple current context-map routes match {relative_path}; provide projectRoot or contextMapEntryId"
-                        )));
-                    }
-                    hit
-                }
-                _ => {
-                    return Err(FunctionCallError::RespondToModel(
-                        "each evidence item must provide exactly one of contextMapEntryId or relativePath; projectRoot is valid only with relativePath"
-                            .to_string(),
-                    ));
-                }
-            };
-            if hit.freshness != ContextMapFreshness::Current {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "context-map evidence is not current: {}",
-                    hit.entry.id
-                )));
-            }
-            node_ids.insert(hit.entry.value.node_id.clone());
-            if seen_entries.insert(hit.entry.id.clone()) {
-                links.push(BlackboardEvidenceLink {
-                    context_map_entry_id: hit.entry.id,
-                    source_fingerprint: hit.entry.value.source_fingerprint,
-                    line_range,
-                });
-            }
-        }
-        let inferred_node_id = if node_ids.len() == 1 {
-            node_ids.into_iter().next()
-        } else {
-            None
-        };
-        Ok((links, inferred_node_id))
     }
 }
 
@@ -515,33 +423,7 @@ fn record_schema() -> serde_json::Value {
             "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
-            "evidence": {
-                "type": "array",
-                "description": "Current context-map routes supporting sourceVerified knowledge. Each item must use exactly one route identity: relativePath (plus projectRoot only when paths collide) or contextMapEntryId for an anchored/exact route. Never send both. IDs and fingerprints are resolved and checked by the tool.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "contextMapEntryId": {"type": "string", "description": "Exact route identity. Exclusive with relativePath and projectRoot."},
-                        "relativePath": {"type": "string", "description": "Preferred project-relative route. Exclusive with contextMapEntryId."},
-                        "projectRoot": {"type": "string", "description": "Optional only with relativePath when multiple selected roots contain the same path."},
-                        "lineRange": {
-                            "type": "object",
-                            "description": "Optional exact 1-based inclusive source lines already verified with evidence_read.",
-                            "properties": {
-                                "start": {"type": "integer", "minimum": 1},
-                                "end": {"type": "integer", "minimum": 1}
-                            },
-                            "required": ["start", "end"],
-                            "additionalProperties": false
-                        }
-                    },
-                    "oneOf": [
-                        {"required": ["contextMapEntryId"]},
-                        {"required": ["relativePath"]}
-                    ],
-                    "additionalProperties": false
-                }
-            }
+            "evidence": evidence_schema()
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false
