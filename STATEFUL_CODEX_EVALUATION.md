@@ -1284,7 +1284,7 @@ maturation-inclusive lifetime savings, or release readiness.
 
 ## Benchmark SC-EVAL-010: current maturation-plus-follow-up series
 
-Status: pre-registered before execution on 2026-09-22.
+Status: executed on 2026-09-22 after pre-registration.
 
 This benchmark tests lifetime behavior using the completed SC-EVAL-009
 maturation and the exact three follow-up cases already frozen in
@@ -1316,3 +1316,57 @@ retrieval and whether the measured one-time maturation cost can plausibly
 amortize across this fixed workload. Three same-corpus questions are not a
 general workload distribution; regressions, scorer failures, and negative
 lifetime results will be retained.
+
+### Execution result
+
+All six fresh native CLI runs completed through cached ChatGPT login with the
+pre-registered binary, model, effort, permissions, roots, and prompts. The
+three Stateful runs were explicitly bound to SC-EVAL-009 project
+`01a0c98a-e567-7890-9711-3260f8fd1a0d`. SHA-256 comparison after the series
+found all ten working-corpus files byte-identical to the committed fixture.
+
+| Case | Ordinary full | Stateful full | Ordinary uncached | Stateful uncached | Ordinary reads | Stateful reads |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| economics | 87,337 | 66,825 | 23,849 | 26,377 | 3 | 1 |
+| territory | 101,767 | 111,343 | 21,127 | 28,399 | 3 | 3 |
+| termination-risk | 119,196 | 70,288 | 20,380 | 28,816 | 5 | 1 |
+| **Follow-up total** | **308,300** | **248,456** | **65,356** | **83,592** | **11** | **5** |
+
+Stateful saved 59,844 full follow-up tokens (19.41%), four model responses,
+and six read-bearing calls. It won full tokens on two of three questions. It
+lost uncached input plus output on every question, increasing aggregate
+uncached follow-up cost by 18,236 tokens (27.90%). Ordinary Codex broadly
+searched or opened all ten project files in every case. Stateful verified four
+exact files for economics, three for territory, and six for termination-risk;
+territory included a repeated side-letter verification. The reduced call count
+therefore represents materially more selective source access, although not the
+ideal one-verification path in every case.
+
+Including the measured SC-EVAL-009 maturation changes the comparison to 499,305
+Stateful full tokens versus 308,300 ordinary tokens, a 191,005-token (61.95%)
+regression. Uncached lifetime cost is 151,657 versus 65,356, an 86,301-token
+(132.05%) regression. If the observed average full-token follow-up saving held,
+the maturation investment would break even at approximately 13 questions.
+There is no projected uncached break-even because every Stateful follow-up was
+more expensive on that measure.
+
+Manual answer review is more informative than the frozen literal scorer here.
+Both economics answers covered all four intended concepts despite the scorer
+missing the stale-proposal wording. Both territory answers covered all three
+concepts despite a Stateful morphology miss. The ordinary termination answer
+covered all four concepts. The Stateful termination answer correctly reported
+60 days, the $5.5 million planning scenario, the $3 million limit, the $2.5
+million gross difference, unresolved coverage, and the planning-versus-legal
+distinction, but its final answer omitted the executed uncapped-liability
+carve-out. That omission is substantive even though the durable root state and
+semantic obligation contained the fact. No answer made a forbidden claim.
+
+SC-EVAL-010 therefore demonstrates current-thread continuity, exact evidence
+routing, and a substantial reduction in broad rereading and full follow-up
+work. It does not close Stage 8. The one-time maturation cost is not amortized
+by this short series, uncached cost regresses consistently, one required concept
+was dropped between durable understanding and the final answer, and three
+same-corpus questions are not a representative workload distribution. The next
+release work should first explain and reduce the fixed uncached context cost
+without weakening the always-loaded root, then test final-answer coverage from
+selected durable findings, and only then run a broader pre-registered workload.

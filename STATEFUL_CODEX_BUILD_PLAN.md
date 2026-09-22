@@ -439,10 +439,7 @@ manual review found all ten concepts, no forbidden conclusion appeared, and
 the corpus remained unchanged.
 
 This closes exact-provenance persistence and terminal finalization as bounded
-implementation slices. It does not close Stage 8. The remaining release work
-is a matched maturation-plus-follow-up distribution that can support lifetime
-economics rather than directional projection and the approval-gated
-repository-wide Rust suite. A fresh Edge render against the live gateway now
+implementation slices. A fresh Edge render against the live gateway now
 passes at 1440 px and 480 px with no horizontal overflow, all 13 durable
 understandings visible, all 30 ranged-evidence controls present, and an exact
 lines 5–11 read rendered correctly. That pass found and closed a UI filter that
@@ -450,6 +447,28 @@ had hidden strategy and decision records; the browser-client suite passes 8/8.
 The post-completion CLI also logged one harmless `UnknownProcessId` cleanup race
 after exit-success; it should remain visible for later operational hardening but
 does not justify interrupting the higher-value release gates.
+
+SC-EVAL-010 then completed the pre-registered current maturation-plus-follow-up
+series. Across three matched questions, Stateful reduced full follow-up tokens
+from 308,300 to 248,456 (19.41%), model responses from 15 to 11, and
+read-bearing calls from 11 to 5. It replaced broad ten-file reading in every
+ordinary run with exact verification of four, three, and six files. Those are
+real mature-workspace gains. However, Stateful uncached follow-up cost increased
+from 65,356 to 83,592 (27.90%) and lost on all three pairs. Including the actual
+250,849-token maturation run yields 499,305 Stateful lifetime tokens versus
+308,300 ordinary tokens and 151,657 uncached tokens versus 65,356. Estimated
+full-token break-even is approximately 13 similar questions; uncached cost has
+no observed break-even. Manual review also found that one Stateful final answer
+omitted the executed uncapped-liability carve-out despite its presence in
+durable state and the semantic obligation.
+
+The branch is therefore functionally complete for the intended first product
+slice but remains short of the Stage 8 release claim. Remaining work is to
+reduce the fixed uncached context cost without sacrificing the rich always-
+loaded root, preserve selected decisive findings through final-answer assembly,
+replicate gains on a broader pre-registered workload, and run the
+approval-gated repository-wide Rust suite. The corpus remained byte-identical
+through all six SC-EVAL-010 runs.
 
 ## System boundaries
 
