@@ -88,6 +88,18 @@ each arm. Required top-level fields are configured in the frozen manifest.
       "quality": {
         "blinded": true,
         "rubricVersion": "stateful-longitudinal-v1",
+        "grader": {
+          "id": "grader-1",
+          "model": "independent-model",
+          "independent": true
+        },
+        "evidenceReferences": [
+          {
+            "path": "source.md",
+            "locator": "lines 10-18",
+            "note": "Supports the correctness judgment."
+          }
+        ],
         "scores": {
           "visibleAnswer": {
             "correctness": 4,
@@ -98,13 +110,27 @@ each arm. Required top-level fields are configured in the frozen manifest.
             "usefulness": 4
           },
           "durableState": null
+        },
+        "rationales": {
+          "visibleAnswer": {
+            "correctness": "Concise source-grounded rationale for this score.",
+            "evidenceTraceability": "Concise source-grounded rationale.",
+            "decisiveDetail": "Concise source-grounded rationale.",
+            "uncertaintyCalibration": "Concise source-grounded rationale.",
+            "contradictionAndFreshness": "Concise source-grounded rationale.",
+            "usefulness": "Concise source-grounded rationale."
+          },
+          "durableState": null
         }
       },
       "sourceAudit": {
+        "method": "manual-v1",
+        "auditor": "auditor-1",
         "uniqueFilesRead": 4,
         "exactRegionsRead": 5,
         "repeatedRegions": 1,
         "broadReads": 0,
+        "failedReads": 0,
         "corpusRevision": "sha256:..."
       },
       "state": null

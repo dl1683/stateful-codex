@@ -7,6 +7,7 @@ import {
   emptyUsage,
   summarizeLongitudinalEvents,
 } from "./summarize-longitudinal-rollout.mjs";
+import { validateObservationField } from "./validate-longitudinal-observation.mjs";
 
 export function compareLongitudinalSuite(
   manifest,
@@ -179,26 +180,6 @@ function missingObservationFields(arm, observation, required = []) {
       (path) => `${arm} observation.${path}`,
     ),
   );
-}
-
-function validateObservationField(observation, field, arm) {
-  if (observation?.[field] == null || typeof observation[field] !== "object") {
-    return [field];
-  }
-  if (field !== "quality") return [];
-  const quality = observation.quality;
-  const missing = [];
-  if (quality.blinded !== true) missing.push("quality.blinded");
-  if (!quality.rubricVersion) missing.push("quality.rubricVersion");
-  if (!quality.scores || typeof quality.scores !== "object") {
-    missing.push("quality.scores");
-    return missing;
-  }
-  if (!quality.scores.visibleAnswer) missing.push("quality.scores.visibleAnswer");
-  if (arm === "stateful" && !quality.scores.durableState) {
-    missing.push("quality.scores.durableState");
-  }
-  return missing;
 }
 
 function compareTurnParity(
