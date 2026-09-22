@@ -641,6 +641,21 @@ targeted same-binary follow-up should cross below ordinary on both full and
 uncached usage. The full release distribution and maturation-inclusive Stage 8
 economics remain open afterward.
 
+SC-EVAL-020 confirmed the evidence boundary: the run opened only the four
+continuity sources, preserved all required facts and caveats, completed once,
+and left the corpus unchanged. It still used four responses because the model
+persisted a complete learning packet with no remaining work through
+`obligation_update`, then immediately repeated it in terminal completion. Full
+usage fell to 81,003 but remained 3.07% above the same-binary ordinary run.
+
+SC-EVAL-021 is pre-registered to distinguish useful intermediate transparency
+from redundant terminal persistence. An intermediate obligation must identify
+substantive next work, a blocker, or requested user judgment; otherwise its
+packet belongs directly in terminal completion. This should preserve meaningful
+updates on long investigations while removing the last diagnosed inference
+round from the short continuity case. Stage 8 remains open pending live evidence
+and a fresh broader distribution.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

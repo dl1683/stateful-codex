@@ -2110,3 +2110,52 @@ security, committee, or Alder sources fails the bounded-outcome gate even if the
 answer remains correct. Full and uncached usage must be below SC-EVAL-019's
 84,033 and 13,377 tokens; comparison with the ordinary 78,593 full and 14,337
 uncached tokens remains diagnostic rather than a release-distribution claim.
+
+### Execution result
+
+The bounded-outcome behavior passed. Thread
+`01a0ca8e-d9f8-7ca3-9ec6-ac8b351debd7` opened exactly the four registered
+continuity sources in one evidence batch, did not open finance, security,
+committee, or Alder material, and concluded only the offline-acceptance
+dimension. Its visible answer preserved the complete verified-history and vendor-
+claim distinction, Birch's 24-hour operational loss, Cedar's 24-hour stated
+margin, and the explicit boundary that this was not final approval across all
+gates. It returned `submittedResult`, completed once, contained no failure
+marker, and left the corpus byte-identical. A live API read confirmed run
+`run-fe5316cfad34b5ecdfce74f6d000a721f93b79cdd1962b68e864ec9e93acb1f9`
+completed at revision 2 with a 4,442-character result.
+
+The complete mechanism and economics gates did not pass. After the decisive
+evidence batch, the model used a separate `obligation_update` containing all of
+its final learning and implications but no `next`, blocker, or requested user
+judgment, then immediately sent the terminal call with substantially the same
+packet. That added a fourth response. The run used 81,003 full and 15,467
+uncached tokens: 3.61% fewer full tokens but 15.62% more uncached tokens than
+SC-EVAL-019 continuity, and 3.07% more full plus 7.88% more uncached than the
+same-binary ordinary run. SC-EVAL-020 closes the adjacent-source behavior defect
+but exposes a redundant semantic-persistence round.
+
+## Benchmark SC-EVAL-021: substantive intermediate-obligation gate
+
+Status: pre-registered before implementation on 2026-09-22.
+
+An intermediate `obligation_update` will require evidence of substantive work
+remaining: at least one nonempty `next`, `blockers`, or `requestedJudgment`
+field. Its schema and tool description will tell the model that answer drafting,
+formatting, and terminal persistence are not substantive next work. When the
+learning packet is final and only the answer remains, the model must place that
+packet directly in `stateful_run_update.finalObligation`. Runtime validation
+will reject an empty-future intermediate packet before persistence. This keeps
+meaningful real-time transparency for longer investigations while eliminating a
+duplicate update at the end of a short task.
+
+The exact SC-EVAL-020 continuity prompt will run once in a fresh Stateful thread
+on the same mature project and rebuilt branch binary under the unchanged model,
+effort, authentication, memory, directory, roots, permissions, and no-edit
+conditions. The mechanism gate requires one four-file evidence batch, no
+intermediate obligation call or rejected retry, one terminal call, three model
+responses, one completion attempt, a revision-2 API result, and an unchanged
+corpus. The SC-EVAL-020 semantic rubric remains unchanged. Full usage must be
+below both SC-EVAL-020's 81,003 tokens and the same-binary ordinary run's 78,593;
+uncached usage must be below SC-EVAL-020's 15,467 and will be compared with the
+ordinary 14,337 without assuming stable provider cache behavior.
