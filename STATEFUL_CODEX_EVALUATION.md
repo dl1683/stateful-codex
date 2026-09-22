@@ -1152,7 +1152,8 @@ outside the run's summarized result.
 
 ## Benchmark SC-EVAL-009: exact-provenance finalization replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: executed on 2026-09-22. The procedure below was committed before the
+run and was not changed after observing the result.
 
 Commit `db88bf1784` preserves optional exact line ranges from model-authored
 blackboard evidence through validation, SQLite revisions, query results, root
@@ -1181,3 +1182,79 @@ line ranges and one final completion, with no evidence-shape retry and no
 post-completion mutation attempt. The result will be retained if the model
 still completes early or cost regresses. This is another same-corpus mechanism
 replication, not a general economics claim.
+
+### Execution and result
+
+Native Stateful CLI thread `01a0c98a-e574-7912-ac68-9f55011304db` used fresh
+project `01a0c98a-e567-7890-9711-3260f8fd1a0d` rooted at
+`%LOCALAPPDATA%/Temp/stateful-exact-provenance-1790087681185`. The rebuilt
+branch CLI ran `gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication
+with `OPENAI_API_KEY` and `CODEX_API_KEY` cleared. Filename and SHA-256
+comparison established that the ten-file corpus was byte-identical to the
+committed fixture before the run. The same comparison after the run found all
+ten files unchanged.
+
+The run used six outer code-mode calls: one context-map refresh combined with
+the required global-memory lookup, one parallel exact-evidence read, one
+semantic obligation update, one linked blackboard batch, one focused
+blackboard-verification call, and one final call that wrote the verification
+obligation before completing the run. Refresh returned all ten routes with no
+truncation. The model issued no context-map query and no shell listing or
+content read of the corpus. Its one parallel `evidence_read` call requested
+`maxBytes: 50000`; the tool clamped each request to 12,288 bytes without an
+error or retry and returned all ten complete sources exactly once.
+
+The first and only linked write accepted all 13 findings and all 19
+relationships with zero failures. The model supplied 30 relative-path evidence
+links with bounded line ranges. Live API inspection after persistence found all
+30 ranges intact, all 13 findings active and current, and all 13 findings
+source-verified and evidence-linked. No evidence-shape retry, single-record
+repair, malformed endpoint, or post-completion mutation occurred.
+
+The terminal-ordering contract also changed live behavior as intended. The
+last outer call first persisted the final semantic obligation and then invoked
+`stateful_run_update(status: "completed")` sequentially. Completion succeeded
+at run revision 2 and was the final Stateful mutation. The terminal result
+therefore includes the same 13 findings, 19 relationships, explicit
+uncertainties, and verification outcome that existed when the run became
+inactive.
+
+| Measure | SC-EVAL-008 | SC-EVAL-009 | Delta |
+| --- | ---: | ---: | ---: |
+| Model responses | 11 | 7 | -4 (-36.36%) |
+| Outer custom tool calls | 10 | 6 | -4 (-40.00%) |
+| Full tokens | 417,784 | 250,849 | -166,935 (-39.96%) |
+| Uncached input plus output | 75,256 | 68,065 | -7,191 (-9.56%) |
+| Final blackboard findings | 13 | 13 | 0 |
+| Final relationships | 11 | 19 | +8 (+72.73%) |
+| Evidence links with exact ranges | 0 | 30 | +30 |
+| Failed or retried persistence calls | 2 | 0 | -2 |
+
+Hierarchy placement remained intentionally generic. The two single-source risk
+findings landed on the risk-assessment file node and the single-source territory
+finding landed on the executed-side-letter file node. The ten findings that
+synthesize multiple sources remained at project scope. No record was unplaced,
+and root promotion remained independent of hierarchy placement.
+
+The unchanged frozen manifest found 13 of 13 currently supported entries,
+zero forbidden conclusions, and 7 of 10 literal concept probes. Manual semantic
+review found all ten predeclared concepts. The three literal misses remain
+visible: the authority record says `supersede inconsistent` rather than the
+manifest's `supersedes inconsistent`; the royalty concept is distributed across
+the operative 6% finding and the linked stale-8% contradiction and uses numeric
+notation; and the base-cap finding omits the literal `Section 7.3` label while
+preserving the amount, aggregate-cap rule, executed carve-outs, and exact source
+range. This establishes complete manual concept coverage and perfect
+supported-entry precision, not a machine-scored semantic-recall pass.
+
+After the successful `turn.completed` event and exit code 0, the CLI emitted a
+single `UnknownProcessId` cleanup log for an already-finished command process.
+It occurred after durable completion and did not change the rollout, project
+state, corpus, or exit result, but it remains recorded as an operational cleanup
+signal rather than being silently discarded.
+
+SC-EVAL-009 closes the two specific failures exposed by SC-EVAL-008: exact
+provenance now survives maturation, and completion is terminal without
+stranding a later durable write. It is still a same-corpus mechanism
+replication. It does not by itself establish general precision/recall,
+maturation-inclusive lifetime savings, or release readiness.

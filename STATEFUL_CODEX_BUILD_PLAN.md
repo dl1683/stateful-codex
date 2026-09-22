@@ -419,12 +419,33 @@ browser API returns only those exact lines, and the UI displays and reuses the
 locator. Focused storage, protocol, extension, app-server, and client suites
 pass.
 
-SC-EVAL-009 is pre-registered to measure the completed provenance path and a
+SC-EVAL-009 was pre-registered to measure the completed provenance path and a
 stricter terminal-ordering contract. The contract will keep completed runs
 immutable: instead of reopening a terminal record, it tells the model that all
 knowledge, relationship, obligation, and verification writes precede the final
-completion call. The live replication will determine whether this removes both
+completion call. The live replication measured whether this removed both
 SC-EVAL-008 retries without adding a second finalization phase.
+
+SC-EVAL-009 subsequently passed both mechanism gates on a fresh byte-identical
+ten-file project. One linked batch accepted 13 findings, 19 relationships, and
+all 30 exact evidence ranges with zero failures or retries. All findings were
+active, current, source-verified, and evidence-linked. The final code-mode call
+wrote the last semantic obligation and then completion sequentially; completion
+was the final Stateful mutation and no terminal reopening was required. The
+run used 7 model responses, 6 outer calls, 250,849 full tokens, and 68,065
+uncached input-plus-output tokens, reductions of 36.36%, 40.00%, 39.96%, and
+9.56% respectively from SC-EVAL-008. The frozen literal scorer reached 7/10,
+manual review found all ten concepts, no forbidden conclusion appeared, and
+the corpus remained unchanged.
+
+This closes exact-provenance persistence and terminal finalization as bounded
+implementation slices. It does not close Stage 8. The remaining release work
+is a matched maturation-plus-follow-up distribution that can support lifetime
+economics rather than directional projection, fresh rendered host validation
+after the provenance UI change, and the approval-gated repository-wide Rust
+suite. The post-completion CLI also logged one harmless `UnknownProcessId`
+cleanup race after exit-success; it should remain visible for later operational
+hardening but does not justify interrupting the higher-value release gates.
 
 ## System boundaries
 
