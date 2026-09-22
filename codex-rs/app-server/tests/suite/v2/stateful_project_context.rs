@@ -10,6 +10,8 @@ use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
+use codex_app_server_protocol::ThreadCompactStartParams;
+use codex_app_server_protocol::ThreadCompactStartResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadResumeParams;
@@ -80,6 +82,17 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
             ..Default::default()
         })
         .await?;
+    run_turn(&mut server, &started.thread.id).await?;
+    assert_latest_request_has_project(&responses, &created.project.id).await?;
+
+    let compact_request = server
+        .send_thread_compact_start_request(ThreadCompactStartParams {
+            thread_id: started.thread.id.clone(),
+        })
+        .await?;
+    let _: ThreadCompactStartResponse = server.read_response(compact_request).await?;
+    let _: codex_app_server_protocol::TurnCompletedNotification =
+        server.read_notification("turn/completed").await?;
     run_turn(&mut server, &started.thread.id).await?;
     assert_latest_request_has_project(&responses, &created.project.id).await?;
 
@@ -436,7 +449,7 @@ async fn assert_latest_request_has_project(
     assert!(body.contains("Decisive Evidence Project"));
     assert!(body.contains("A decisive project fact survives every thread view."));
     assert!(body.contains("verification=unverified"));
-    assert!(body.contains("Do not query deeper state merely to repeat adequate root knowledge"));
+    assert!(body.contains("Do not query deeper state, search by every known filename"));
     Ok(())
 }
 
