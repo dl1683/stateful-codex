@@ -537,3 +537,44 @@ precision or recall: the procurement corpus and existing state had already been
 inspected before the manifest was committed. A held-out corpus must commit its
 expected probes before maturation and model evaluation before supporting a
 general project-memory quality claim.
+
+## Benchmark SC-EVAL-004: held-out licensing memory
+
+Status: pre-registered before execution on 2026-09-22.
+
+Corpus: `clients/stateful-codex/eval/fixtures/licensing`, a ten-file licensing
+review created after the procurement evaluator. The expected semantic manifest
+is committed separately at
+`clients/stateful-codex/eval/manifests/licensing-state.json`; it is outside the
+project root and unavailable to the evaluated agent.
+
+The corpus contains a proposal, master agreement, two executed amendments, an
+executed territory side letter, approved economics, verified risk evidence,
+preliminary minutes, a closing checklist, and a binding review policy. The
+decisive detail is that executed amendment 2 removes data-security,
+confidentiality, and intellectual-property indemnity exposure from the master
+agreement's $2,000,000 general cap. The transaction nevertheless is not ready
+to close because Canadian consent, counsel confirmation, and final board
+approval remain pending.
+
+The evaluation has three phases:
+
+1. A native Stateful maturation run must inspect the project, record reusable
+   evidence-linked understanding, relationships, contradictions, and open
+   questions, and report its full cost.
+2. The committed manifest must score the resulting live blackboard before any
+   probe is changed. It checks ten concepts, current evidence support, and five
+   prohibited affirmative conclusions.
+3. Fresh ordinary and Stateful CLI threads receive the same narrow question:
+
+```text
+Is liability exposure capped at $2,000,000 for a data-security breach under the current licensing documents? Identify the controlling instrument and exact project files, distinguish that liability conclusion from whether the transaction is ready to close, and do not edit files.
+```
+
+The expected answer is no: amendment 2 controls over the master agreement and
+proposal, and its carve-out makes data-security exposure uncapped by Section
+7.3. That conclusion does not make the transaction ready to close; the closing
+checklist's pending conditions remain independently controlling. The measured
+phase will report correctness, exact source breadth, read-bearing calls, full
+and uncached tokens, and model responses. Maturation cost remains explicit in
+the lifetime interpretation.

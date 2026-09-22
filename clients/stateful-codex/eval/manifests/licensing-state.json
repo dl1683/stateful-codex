@@ -1,0 +1,101 @@
+{
+  "name": "held-out licensing controlling knowledge",
+  "expectedConcepts": [
+    {
+      "name": "executed-instrument authority hierarchy",
+      "termGroups": [
+        ["newest executed amendment", "later executed instrument"],
+        ["master agreement", "master license"],
+        ["proposal"],
+        ["supersedes inconsistent"]
+      ]
+    },
+    {
+      "name": "current six-percent royalty",
+      "termGroups": [
+        ["six percent", "six-percent"],
+        ["eight percent", "eight-percent"],
+        ["amendment 1", "executed amendment"],
+        ["$1,200,000"]
+      ]
+    },
+    {
+      "name": "base two-million-dollar cap",
+      "termGroups": [
+        ["$2,000,000"],
+        ["section 7.3"],
+        ["aggregate liability"]
+      ]
+    },
+    {
+      "name": "uncapped data-security and IP exposure",
+      "termGroups": [
+        ["does not apply", "uncapped", "carve-out"],
+        ["data-security", "data security"],
+        ["confidentiality"],
+        ["intellectual-property", "intellectual property"],
+        ["amendment 2", "executed amendment"]
+      ]
+    },
+    {
+      "name": "current 60-day termination notice",
+      "termGroups": [
+        ["60 days", "60-day"],
+        ["30 days", "30-day"],
+        ["termination for convenience"],
+        ["amendment 2", "executed amendment"]
+      ]
+    },
+    {
+      "name": "Canada excluded pending written consent",
+      "termGroups": [
+        ["excluding canada", "canada is excluded"],
+        ["written consent"],
+        ["side letter"]
+      ]
+    },
+    {
+      "name": "modeled exposure and insurance gap",
+      "termGroups": [
+        ["$5,500,000"],
+        ["$3,000,000"],
+        ["insurance"],
+        ["planning scenario", "not a prediction"]
+      ]
+    },
+    {
+      "name": "preliminary minutes are not final approval",
+      "termGroups": [
+        ["preliminary"],
+        ["no final approval", "final approval is pending"],
+        ["$2,000,000"],
+        ["counsel"]
+      ]
+    },
+    {
+      "name": "closing remains blocked",
+      "termGroups": [
+        ["not ready to close", "closing remains"],
+        ["canadian regulatory consent"],
+        ["counsel confirmation"],
+        ["final board", "final closing"]
+      ]
+    },
+    {
+      "name": "open insurance adequacy question",
+      "kinds": ["question"],
+      "termGroups": [
+        ["insurance", "coverage"],
+        ["adequacy", "acceptable"],
+        ["liability carve-outs", "uncapped"]
+      ]
+    }
+  ],
+  "forbiddenPhrases": [
+    "data breach claims are subject to the $2,000,000 cap",
+    "canada is currently included in the territory",
+    "the board finally approved the transaction",
+    "the current royalty remains eight percent",
+    "the transaction is ready to close"
+  ]
+}
