@@ -3,6 +3,7 @@ use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
@@ -130,6 +131,10 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringQueryTool {
             .unwrap_or_else(|error| unreachable!("invalid static steering query schema: {error}")),
             output_schema: None,
         })
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Deferred
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {

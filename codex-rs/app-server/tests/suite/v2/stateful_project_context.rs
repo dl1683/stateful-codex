@@ -207,9 +207,10 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 3);
-    assert!(requests[0].body_contains_text("blackboard_query"));
-    assert!(requests[0].body_contains_text("context_map_query"));
-    assert!(requests[0].body_contains_text("blackboard_record_batch"));
+    assert!(!requests[0].body_contains_text("blackboard_query"));
+    assert!(!requests[0].body_contains_text("context_map_query"));
+    assert!(!requests[0].body_contains_text("blackboard_record_batch"));
+    assert!(requests[0].body_contains_text("evidence_read"));
     assert!(requests[0].body_contains_text("README.md (current)"));
     assert!(requests[0].body_contains_text("smallest decisive source set"));
     let blackboard_output = requests[1]
@@ -399,9 +400,9 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 3);
-    assert!(requests[0].body_contains_text("blackboard_record_batch"));
-    assert!(requests[0].body_contains_text("blackboard_relate"));
-    assert!(requests[0].body_contains_text("context_map_refresh"));
+    assert!(!requests[0].body_contains_text("blackboard_record_batch"));
+    assert!(!requests[0].body_contains_text("blackboard_relate"));
+    assert!(!requests[0].body_contains_text("context_map_refresh"));
     let batch_output: serde_json::Value = serde_json::from_str(
         &requests[1]
             .function_call_output_text("record-call")

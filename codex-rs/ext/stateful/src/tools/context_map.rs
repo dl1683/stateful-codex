@@ -6,6 +6,7 @@ use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
@@ -170,6 +171,10 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
         })
     }
 
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Deferred
+    }
+
     fn supports_parallel_tool_calls(&self) -> bool {
         true
     }
@@ -257,6 +262,10 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
             .unwrap_or_else(|error| unreachable!("invalid static context-map refresh schema: {error}")),
             output_schema: None,
         })
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Deferred
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
