@@ -56,6 +56,15 @@ impl ObligationUpdateTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: Arguments = parse_arguments(&call)?;
+        if arguments.packet.next.is_empty()
+            && arguments.packet.blockers.is_empty()
+            && arguments.packet.requested_judgment.is_empty()
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "intermediate obligation_update requires substantive remaining next work, a blocker, or requested user judgment; answer drafting, formatting, and terminal persistence are not substantive next work. If the packet is final, pass it as stateful_run_update.finalObligation instead."
+                    .to_string(),
+            ));
+        }
         let run = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
         if run.status.is_terminal() {
             return Err(FunctionCallError::RespondToModel(
@@ -101,16 +110,37 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
     }
 
     fn spec(&self) -> ToolSpec {
+        let mut packet_schema = obligation_packet_schema();
+        let Some(packet_schema_object) = packet_schema.as_object_mut() else {
+            unreachable!("obligation packet schema should be an object");
+        };
+        packet_schema_object.insert(
+            "anyOf".to_string(),
+            json!([
+                {
+                    "required": ["next"],
+                    "properties": {"next": {"minItems": 1}}
+                },
+                {
+                    "required": ["blockers"],
+                    "properties": {"blockers": {"minItems": 1}}
+                },
+                {
+                    "required": ["requestedJudgment"],
+                    "properties": {"requestedJudgment": {"minItems": 1}}
+                }
+            ]),
+        );
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Record an intermediate compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity. When the work is ready to complete, put the final packet directly in stateful_run_update instead of spending a separate model turn here.".to_string(),
+            description: "Record an intermediate compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity. Every intermediate packet must identify substantive remaining work in next, a blocker, or requested user judgment. Answer drafting, formatting, and terminal persistence are not substantive next work. When the work is ready to complete, put the final packet directly in stateful_run_update instead of spending a separate model turn here.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
                     "idempotencyKey": {"type": "string"},
-                    "packet": obligation_packet_schema()
+                    "packet": packet_schema
                 },
                 "required": ["idempotencyKey", "packet"],
                 "additionalProperties": false

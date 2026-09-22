@@ -565,3 +565,108 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(result.contains("The deployment risk is triggered by the source constraint."));
     Ok(())
 }
+
+#[tokio::test]
+async fn model_cannot_persist_final_packet_as_intermediate_obligation() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Intermediate obligation gate".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "intermediate-obligation-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: "Return the completed finding without a redundant update.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "intermediate-obligation-run".to_string(),
+            },
+        })
+        .await?;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "empty-future-obligation",
+                    "obligation_update",
+                    &json!({
+                        "idempotencyKey": "redundant-final-packet",
+                        "packet": {
+                            "learning": ["The requested outcome is ready."],
+                            "implication": ["Only the final answer remains."]
+                        }
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("empty-future-obligation-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message(
+                    "gate-observed-message",
+                    "The final packet must be submitted with completion.",
+                ),
+                responses::ev_completed("gate-observed-response"),
+            ]),
+        ],
+    )
+    .await;
+
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id,
+            input: vec![UserInput::Text {
+                text: "Finish the ready result.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].body_contains_text("substantive remaining next work"));
+    assert!(requests[0].body_contains_text("requestedJudgment"));
+    assert!(requests[1].body_contains_text(
+        "intermediate obligation_update requires substantive remaining next work"
+    ));
+    let obligations: ObligationListResponse = server
+        .request(|request_id| ClientRequest::ObligationList {
+            request_id,
+            params: ObligationListParams {
+                run_id: started.run.id,
+                cursor: None,
+                limit: Some(10),
+            },
+        })
+        .await?;
+    assert_eq!(obligations.data, Vec::new());
+    Ok(())
+}
