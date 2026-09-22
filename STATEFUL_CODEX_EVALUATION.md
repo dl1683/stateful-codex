@@ -540,7 +540,8 @@ general project-memory quality claim.
 
 ## Benchmark SC-EVAL-004: held-out licensing memory
 
-Status: pre-registered before execution on 2026-09-22.
+Status: executed on 2026-09-22. The manifest and procedure below were committed
+before the maturation run; neither was changed after observing the result.
 
 Corpus: `clients/stateful-codex/eval/fixtures/licensing`, a ten-file licensing
 review created after the procurement evaluator. The expected semantic manifest
@@ -578,3 +579,114 @@ checklist's pending conditions remain independently controlling. The measured
 phase will report correctness, exact source breadth, read-bearing calls, full
 and uncached tokens, and model responses. Maturation cost remains explicit in
 the lifetime interpretation.
+
+### Maturation result
+
+Native Stateful CLI thread `01a0c88f-9c66-70b1-8210-fd14b2068f3d`
+refreshed the context map, found all ten files with zero skipped or missing,
+read each file once, and did not edit the fixture. It persisted 18 records, 13
+of them root-promoted, with 24 relationships. The records captured the
+authority hierarchy, executed terms, stale proposal and preliminary-board
+contradictions, closing blockers, numbers, cross-source implications, and open
+questions. The run cost was:
+
+| Measure | Result |
+| --- | ---: |
+| Model responses | 15 |
+| Input tokens | 630,185 |
+| Cached input tokens | 554,496 |
+| Output tokens | 18,988 |
+| Full tokens | 649,173 |
+| Uncached input plus output | 94,677 |
+
+This is a substantial one-time maturation cost. It must be amortized across
+future work before Stateful can claim a lifetime economic advantage.
+
+The run also exposed two recoverable ergonomics failures. Its first batched
+source read requested `maxBytes: 20000`, above the declared 12,288-byte limit,
+and had to be retried. One relationship batch used a malformed endpoint ID;
+the successful relationships remained durable and the missing links were
+retried with the correct IDs. These failures count against maturation
+efficiency even though the final state was coherent.
+
+### Held-out state score
+
+The first post-maturation invocation of the committed manifest returned:
+
+- 18 total entries;
+- 17 currently source-supported entries, or 94.44% supported-entry precision;
+- 6 of 10 exact lexical concept probes matched and source-supported;
+- zero prohibited affirmative conclusions; and
+- overall `passed: false`.
+
+The one unsupported entry was a corpus-coverage inventory stating that all ten
+files had been read. It had no source evidence and should not have been
+persisted under the product's reuse-value rule.
+
+Manual inspection shows that all ten intended concepts are present in current,
+source-verified state. Four exact probes missed because the intentionally
+simple scorer requires every literal term group to occur in one entry. Examples
+include `6%` versus `six percent`, `supersede inconsistent` versus `supersedes
+inconsistent`, and `written Canadian regulatory consent` versus the contiguous
+phrase `written consent`; the royalty probe also spans the executed-term and
+approved-forecast records. This means the 6/10 result does not establish 60%
+semantic recall. It does establish that the current lexical scorer is not a
+semantic recall measure, and the unchanged failing result is retained rather
+than tuning the held-out manifest after observation.
+
+### Fresh CLI comparison
+
+Ordinary thread `01a0c898-cab9-7ad1-ac00-aedc316858aa` and Stateful thread
+`01a0c898-c9e2-7670-8f23-57a0f3c1b7f1` used the same locally built CLI,
+`gpt-5.6-luna` at `xhigh`, cached ChatGPT authentication with API-key variables
+removed, identical permissions, identical workspace roots, and the exact
+pre-registered prompt. Both answers were correct, identified executed Amendment
+2 as controlling, cited the master license and closing checklist, separated the
+uncapped data-security conclusion from close readiness, and made no edits.
+
+| Measure | Ordinary | Stateful | Stateful delta |
+| --- | ---: | ---: | ---: |
+| Full tokens | 173,902 | 146,500 | -27,402 (-15.76%) |
+| Uncached input plus output | 45,390 | 35,908 | -9,482 (-20.89%) |
+| Model responses | 6 | 5 | -1 |
+| Read-bearing outer calls | 4 | 3 | -1 |
+| Project files read | 10 | 4 | -6 |
+
+Ordinary Codex listed and reread the entire ten-file corpus. Stateful began
+from the root blackboard and verified four decisive files: the master license,
+executed Amendment 2, the closing checklist, and the binding review policy. Its
+first parallel verification wrapper accidentally forwarded a local `key` field
+to `evidence_read`; it corrected the wrapper and completed the four focused
+reads. The comparison therefore demonstrates reduced rereading and both full-
+token and uncached-token savings despite that avoidable retry.
+
+The generic rollout scorer reported both answer expectations as failed only
+because the post-run check requested the literal phrase `not ready to close`;
+both answers instead said that the liability conclusion does not make the
+transaction ready and that pending items prevent closing. The source-grounded
+meaning is correct. This is another lexical-evaluator limitation, not an answer
+failure.
+
+Including maturation, the first Stateful question is not economically cheaper:
+its cumulative full-token cost is 795,673 and its cumulative uncached cost is
+130,585. The measured per-question saving is real, but this single follow-up
+does not amortize the 649,173-token maturation investment. More consequential
+questions on the same mature project are required to establish a break-even
+point and lifetime advantage.
+
+### Interactive CLI/TUI smoke test
+
+The interactive Stateful CLI was also exercised in a Windows PTY with
+`RUST_LOG=trace`, an explicit log directory, the licensing directory, the
+existing Stateful project, Collaborative mode, cached ChatGPT login, and the
+API key removed. Thread `01a0c8a5-1503-7243-a8bd-f62ad30f2e4f` launched the TUI,
+rendered the selected directory and model, accepted the prompt, streamed and
+rendered `TUI_STATEFUL_OK`, reported token usage, produced a resumable thread,
+and shut down cleanly on Ctrl-C.
+
+The required `just codex` source path compiled through `codex-cli` but could not
+replace `target/debug/codex.exe` because the live Stateful gateway's app-server
+process held that executable open on Windows. The already current local binary
+was then used for the PTY smoke test without stopping the gateway. This proves
+the interactive path operates; it does not claim a clean relink while the live
+gateway owns the output binary.
