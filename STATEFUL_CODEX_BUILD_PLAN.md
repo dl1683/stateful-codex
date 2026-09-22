@@ -532,6 +532,15 @@ revision. Completion can then reject an alias only when the root changed or the
 selection is malformed, while ordinary follow-up runs avoid copying opaque
 identifiers.
 
+Commit `4efb44bcab` implements that narrower contract. The tool requires the
+model-visible root revision with the selected `E` aliases, resolves them only
+against the same ordered projection, and fails before mutation on revision
+drift or malformed selection. Focused extension tests pass 6/6; the durable-
+result and Autonomous app-server scenarios each pass. SC-EVAL-014 is
+pre-registered to confirm that the exact live termination-risk workflow now
+completes without the opaque-reference retry while preserving the durable
+semantic result.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

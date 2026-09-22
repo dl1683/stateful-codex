@@ -1621,3 +1621,44 @@ SC-EVAL-013 proves durable semantic carry-through for the observed failure. It
 does not establish representative final-answer recall or lifetime economics,
 and the opaque-reference retry should be removed before the broader matched
 distribution.
+
+## Benchmark SC-EVAL-014: revision-bound completion alias replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+Commit `4efb44bcab` removes the opaque `K` handles exposed by SC-EVAL-013.
+Completion now uses the compact `E` aliases already present in the root
+blackboard plus the project-intelligence revision shown beside them. The tool
+resolves aliases only against that exact revision and rejects a changed root,
+malformed alias, duplicate selection, or out-of-range alias before terminal
+mutation. New knowledge created during the current run remains covered by the
+automatically appended final semantic packet; if root ordering changes, the
+model must review the new revision rather than silently binding an old alias to
+a different finding.
+
+The replication will rebuild the native CLI from `4efb44bcab` and submit the
+exact termination-risk prompt again in one fresh Collaborative thread bound to
+mature project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. It will use the same
+byte-identical ten-file corpus, cached ChatGPT login, cleared API keys,
+`gpt-5.6-luna` at `xhigh`, roots, permissions, and read-only request.
+
+The mechanism passes only if the initial root exposes its revision and `E`
+aliases without opaque completion handles; the completion call supplies that
+exact `rootRevision`, selects the alias containing the executed liability
+carve-out, succeeds without an alias/reference retry, returns the selected
+current source-verified finding with ranged routes, and remains the final
+Stateful mutation. The corpus must remain byte-identical.
+
+The product behavior passes only if both the persisted run result and final
+assistant prose preserve the executed carve-out, 60-day notice, $5.5 million
+planning scenario, $3 million listed cyber limit, $2.5 million gross
+difference, unresolved coverage, planning-versus-contractual distinction,
+exact evidence, and read-only boundary. The report will retain every model
+response and outer call, the selected revision and aliases, persisted API
+result, final prose, mutation order, per-response cached and uncached usage,
+and corpus hashes.
+
+This replication tests whether the new addressing contract removes the exact
+copy failure observed in SC-EVAL-013 without weakening durable result coverage.
+It does not establish behavior after a concurrent root revision, representative
+precision/recall, lifetime economics, or Stage 8 release readiness.
