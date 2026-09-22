@@ -487,3 +487,28 @@ The replication will be compared with optimized Stateful rollout
 raw files opened, model responses, full and uncached usage, and cache behavior.
 One replicated pair remains directional evidence rather than a stable
 performance distribution.
+
+Execution completed in ordinary rollout
+`01a0c880-4ea5-7911-9b19-065635cb608d`. Comparator parity with the optimized
+Stateful rollout passed for every field. The ordinary answer reached the right
+gate and viability conclusions, but it did not explicitly report that no files
+were edited; a post-run clean-worktree check confirmed no edits. The Stateful
+answer included the explicit no-edit statement.
+
+| Measure | Same-binary ordinary | Optimized Stateful |
+| --- | ---: | ---: |
+| Full measured-turn tokens | 101,020 | 83,056 |
+| Cached input tokens | 80,896 | 50,688 |
+| Uncached input + output | 20,124 | 32,368 |
+| Model responses | 4 | 3 |
+| Read-bearing outer tool calls | 3 | 1 |
+| Distinct raw project files opened | 6 | 4 |
+
+The ordinary replication again opened the three controlling residency files
+plus the operations log, finance schedule, and preliminary committee notes.
+The optimized Stateful run remained narrower by two files and two read-bearing
+outer calls. It used 17,964 fewer full tokens (17.78%) but 12,244 more uncached
+input plus output (60.84%). This reproduces the selective-routing and full-token
+advantages while also reproducing the uncached-cost regression. The result
+strengthens the mechanism finding; it still does not establish lower lifetime
+cost after workspace maturation or a stable performance distribution.
