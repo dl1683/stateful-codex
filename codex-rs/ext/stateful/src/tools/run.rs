@@ -116,16 +116,16 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
+            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed is terminal: finish every blackboard, relationship, obligation, steering, and verification operation first, then make completed the final Stateful mutation. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
                     "expectedRevision": {"type": "integer", "minimum": 1},
-                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"]},
+                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "Use completed only after all durable knowledge and obligation writes are finished; completion removes the active-run binding."},
                     "strategy": {"type": "string"},
-                    "result": {"type": "string"}
+                    "result": {"type": "string", "description": "For completed, the final evidence-grounded account after all durable writes and verification."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false

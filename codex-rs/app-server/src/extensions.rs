@@ -190,7 +190,7 @@ impl AutonomousContinuationSink for AppServerAutonomousContinuationSink {
             let continuation = ContextualUserFragment::into(InternalModelContextFragment::new(
                 InternalContextSource::from_static("stateful_autonomous"),
                 format!(
-                    "Continue Autonomous Stateful run {} toward its explicit goal. Use the current World State and verify current source state before acting so completed work is not repeated. Continue useful authorized work without routine checkpoints. Record a semantic obligation update when learning, strategy, uncertainty, or readiness materially changes. Mark the run completed with an evidence-grounded result when the goal is satisfied, or blocked only for a genuine authorization or external-state boundary.",
+                    "Continue Autonomous Stateful run {} toward its explicit goal. Use the current World State and verify current source state before acting so completed work is not repeated. Continue useful authorized work without routine checkpoints. Record a semantic obligation update when learning, strategy, uncertainty, or readiness materially changes. Finish every durable knowledge, relationship, steering, verification, and obligation write before marking the run completed; completion must be the final Stateful mutation. Complete with an evidence-grounded result when the goal is satisfied, or block only for a genuine authorization or external-state boundary.",
                     request.run_id
                 ),
             ));

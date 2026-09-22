@@ -341,6 +341,8 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     let requests = response_log.requests();
     assert_eq!(requests.len(), 5);
     assert!(requests[0].body_contains_text("<stateful_run>"));
+    assert!(requests[0].body_contains_text("completion removes the active-run binding"));
+    assert!(requests[0].body_contains_text("final Stateful mutation"));
     assert!(requests[0].body_contains_text("Connect the source constraint to deployment risk."));
     assert!(requests[0].body_contains_text(&submitted.steering.id));
     let obligations: ObligationListResponse = server

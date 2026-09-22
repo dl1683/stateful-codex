@@ -138,7 +138,7 @@ impl RunWorldStateStatus {
                 }
                 line(
                     &mut output,
-                    "Persistence efficiency: after evidence review, if a semantic obligation update and a run status/result update are both ready, issue them sequentially in one code-mode call rather than spending separate model turns on already-decided persistence.",
+                    "Persistence order: after evidence review, finish every blackboard, relationship, steering, verification, and semantic obligation operation before marking the run completed. Completion removes the active-run binding and must be the final Stateful mutation. When the final obligation and result are both ready, issue their writes sequentially in one code-mode call rather than spending separate model turns on already-decided persistence.",
                 );
                 if let Some(strategy) = run.strategy.as_deref() {
                     field(&mut output, "Current strategy", strategy);
