@@ -1,5 +1,6 @@
 mod blackboard;
 mod blackboard_evidence;
+mod blackboard_update;
 mod blackboard_write;
 mod context_map;
 mod evidence;
@@ -40,6 +41,11 @@ pub(super) fn project_intelligence_tools(
             event_sink.clone(),
         )),
         Arc::new(blackboard_write::BlackboardBatchRecordTool::new(
+            project_id.clone(),
+            services.clone(),
+            event_sink.clone(),
+        )),
+        Arc::new(blackboard_update::BlackboardUpdateTool::new(
             project_id.clone(),
             services.clone(),
             event_sink.clone(),

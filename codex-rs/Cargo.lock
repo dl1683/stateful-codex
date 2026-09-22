@@ -4713,11 +4713,13 @@ dependencies = [
  "codex-state",
  "codex-stateful-runtime",
  "codex-thread-store",
+ "codex-utils-absolute-path",
  "codex-utils-string",
  "pretty_assertions",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "tracing",
 ]
