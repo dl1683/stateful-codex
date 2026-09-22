@@ -383,7 +383,7 @@ benchmark still fails the lifetime-cost gate and must remain negative evidence.
 
 ## Benchmark SC-EVAL-003: selective controlling evidence
 
-Status: pre-registered before execution on 2026-09-22.
+Status: pre-registered and executed on 2026-09-22.
 
 Corpus: the mature `clients/stateful-codex/eval/fixtures/procurement` project
 used by SC-EVAL-002. This benchmark asks a narrow question whose controlling
@@ -415,3 +415,58 @@ retrieval/persistence calls, full lifetime tokens, cached tokens, and uncached
 input plus output. Reading unrelated vendor, operations, or finance files counts
 against the selective-routing claim. Lower source-read breadth without lower
 token cost is useful mechanism evidence but not an efficiency win.
+
+### Execution and result
+
+The matched ordinary rollout is `01a0c860-5a90-7ff1-9542-f673bf38faf3`.
+The first Stateful rollout is `01a0c861-6e0f-7850-b0a9-1beb71ec7140`.
+After that run exposed two avoidable orchestration turns, the run-state context
+was changed to identify complete pending steering directly and to ask the model
+to publish an already-decided obligation and terminal run update sequentially
+in one code-mode call. The resulting optimized rollout is
+`01a0c875-8a49-7783-9569-bc9ab50102b9` at commit `4154ebcbc9`.
+
+All three runs used native `codex exec`, `gpt-5.6-luna` at `xhigh`, the same
+prompt, working directory, workspace root, `never` approval,
+`danger-full-access`, the cached ChatGPT login, and no API-key environment
+variables. The comparator accepted every parity field. All three answers
+reached the correct controlling result and reported no edits.
+
+| Measure | Ordinary | First Stateful | Optimized Stateful |
+| --- | ---: | ---: | ---: |
+| Full measured-turn tokens | 102,914 | 140,567 | 83,056 |
+| Cached input tokens | 81,920 | 106,496 | 50,688 |
+| Uncached input + output | 20,994 | 34,071 | 32,368 |
+| Model responses | 4 | 5 | 3 |
+| Read-bearing outer tool calls | 3 | 1 | 1 |
+| Distinct raw project files opened | 6 | 3 | 4 |
+| Steering-query calls | 0 | 1 | 0 |
+| Stateful persistence model turns | 0 | 2 | 1 |
+
+Ordinary Codex opened `binding-criteria.md`, `security-addendum.md`,
+`vendor-alder.md`, `operations-log.md`, `finance-schedule.md`, and
+`committee-notes.md`. The first Stateful run opened only the three decisive
+residency sources: the binding criteria, executed addendum, and Alder proposal.
+The optimized rerun opened those three plus the finance schedule. It still
+avoided the operations log, committee notes, and the other two vendor files.
+Thus the optimized condition reduced raw-file breadth from six to four (33.3%)
+and outer read-bearing calls from three to one, while the first Stateful run
+demonstrated the stricter three-file minimum.
+
+The optimized rollout did not call `steering_query`. Its first model tool turn
+used one `evidence_read` batch for four exact line ranges. Its second and final
+tool turn issued `obligation_update` and then `stateful_run_update` in one
+code-mode call. The durable run completed with a semantic packet and an
+evidence-grounded result. This removed two model responses relative to the
+first Stateful run and reduced its full measured-turn usage by 57,511 tokens
+(40.91%) and uncached input plus output by 1,703 tokens (5.00%).
+
+Relative to ordinary Codex, the optimized run used 19,858 fewer full tokens
+(19.30%) and one fewer model response, but 11,374 more uncached input plus
+output (54.18%). It also reopened one predeclared non-controlling finance file.
+The measured turn therefore demonstrates selective source routing and lower
+full-token usage, but not a clean uncached-token or lifetime-cost advantage.
+The already-incurred maturation cost is not hidden in this comparison, and a
+single stochastic rerun cannot establish a stable performance distribution.
+The next efficiency work should reduce fixed injected/tool-schema overhead and
+repeat matched runs without sacrificing the exact-source behavior shown here.
