@@ -67,12 +67,13 @@ impl EvidenceReadTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: EvidenceArguments = parse_arguments(&call)?;
-        let max_bytes = arguments.max_bytes.unwrap_or(DEFAULT_BYTES);
-        if max_bytes == 0 || max_bytes > MAX_BYTES {
+        let requested_max_bytes = arguments.max_bytes.unwrap_or(DEFAULT_BYTES);
+        if requested_max_bytes == 0 {
             return Err(FunctionCallError::RespondToModel(format!(
                 "maxBytes must be between 1 and {MAX_BYTES}"
             )));
         }
+        let max_bytes = requested_max_bytes.min(MAX_BYTES);
         let project = self
             .projects
             .read_project(self.project_id.clone())
@@ -120,6 +121,8 @@ impl EvidenceReadTool {
             "firstLine": result.first_line,
             "lastLine": result.last_line,
             "truncated": result.truncated,
+            "maxBytesApplied": max_bytes,
+            "maxBytesClamped": requested_max_bytes != max_bytes,
             "revision": result.hit.entry.revision,
         });
         if !fits_response(&output, byte_budget) {

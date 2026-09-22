@@ -238,7 +238,8 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
                     "evidence_read",
                     &json!({
                         "relativePath": "decision.md",
-                        "lineRange": {"start": 2, "end": 3}
+                        "lineRange": {"start": 2, "end": 3},
+                        "maxBytes": 100_000
                     })
                     .to_string(),
                 ),
@@ -311,6 +312,8 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
     assert_eq!(output["firstLine"], 2);
     assert_eq!(output["lastLine"], 3);
     assert_eq!(output["truncated"], false);
+    assert_eq!(output["maxBytesApplied"], 12_288);
+    assert_eq!(output["maxBytesClamped"], true);
     Ok(())
 }
 
