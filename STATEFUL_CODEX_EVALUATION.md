@@ -690,3 +690,21 @@ process held that executable open on Windows. The already current local binary
 was then used for the PTY smoke test without stopping the gateway. This proves
 the interactive path operates; it does not claim a clean relink while the live
 gateway owns the output binary.
+
+The gateway was subsequently stopped so the focused crate checks could relink
+the binary. `just test -p codex-cli` ran 448 tests: 447 passed and the unrelated
+`sandbox_fetches_and_enforces_cloud_managed_permission_profile` test timed out
+twice while launching a nested Windows sandbox. The Stateful root-to-exec CLI
+selection test passed. A targeted `just test -p codex-tui stateful_ui` then ran
+the four Stateful TUI tests; all four passed, with nextest reporting one existing
+leaky-handle annotation. These cover selected mode/project startup, native run
+attachment, semantic obligation rendering, and durable completion rendering.
+
+The full `codex-tui` crate suite was also attempted and is not green on this
+checkout. It exposed broad non-Stateful Windows failures: active-theme snapshot
+drift, multiple stack overflows in session and pagination tests, and several
+timeout/leak failures. The generated `.snap.new` and `.pending-snap` artifacts
+were removed without accepting snapshot changes. After testing, the gateway was
+restarted against the relinked binary; `/health` returned
+`{"ready":true,"authMode":"chatgpt"}`, `codex login status` returned
+`Logged in using ChatGPT`, and the Git worktree was clean.
