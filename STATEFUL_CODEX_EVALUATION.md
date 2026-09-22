@@ -1058,3 +1058,31 @@ deficit. The observed follow-up slope projects full-token break-even around
 question seven. Uncached usage would remain 159,123 versus 73,456, an
 85,667-token deficit with no observed break-even. A matched end-to-end series
 is still required before making a lifetime-economics claim.
+
+## Benchmark SC-EVAL-008: resolved-evidence maturation replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+SC-EVAL-007 exposed two remaining model-correctable retries. Commit
+`783bc5d4af` clamps a positive oversized `evidence_read.maxBytes` request to the
+12,288-byte model-context boundary and reports the applied limit and clamp
+state; zero remains invalid. Commit `c2708822c0` replaces model-authored source
+fingerprints in blackboard writes with current route references. The tool
+resolves and verifies the authoritative context-map entry and fingerprint. When
+`nodeId` is omitted, evidence from exactly one source also places the finding on
+that file node; cross-source findings remain project-wide and root promotion is
+unchanged.
+
+This replication will use another fresh byte-identical copy of the same
+ten-file licensing corpus, rebuilt branch CLI, cached ChatGPT login, cleared
+API-key variables, exact SC-EVAL-004 prompt, and `gpt-5.6-luna` at `xhigh`. It
+will compare with SC-EVAL-007 and report refresh-route use, evidence-read
+clamping or retries, blackboard batch success, source-route versus opaque-value
+evidence inputs, file-level placement, model responses, outer tool calls, full
+and uncached tokens, final state quality, and source edits.
+
+The intended mechanism result is one refresh, one exact-evidence turn, one
+obligation turn, one complete linked write, and one completion turn, with no
+retry for byte limits or evidence identity. The result will be retained if the
+model ignores the new contract or cost regresses. This remains a same-corpus
+mechanism replication, not a new held-out semantic or general-economics claim.

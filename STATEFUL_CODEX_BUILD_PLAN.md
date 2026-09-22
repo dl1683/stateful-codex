@@ -378,6 +378,20 @@ batch. The former is a small defensive tool improvement; the latter should use
 current context-map routes rather than weaken source verification. Neither
 should thin the root blackboard or hide memory tools.
 
+Those two defensive slices are now implemented. Oversized positive evidence
+reads are transparently clamped to the existing 12 KiB response boundary, and
+blackboard evidence accepts current source routes rather than model-copied
+fingerprints. The resolver persists the authoritative current entry ID and
+fingerprint itself. A single-source finding without an explicit node now lands
+on the corresponding file blackboard; multi-source knowledge remains at the
+project level, while root promotion remains independent. Existing exact-ID
+references remain available for anchored regions or duplicate paths.
+
+The extension suite passes 5/5, and focused app-server tests prove both the live
+oversized request observed in SC-EVAL-007 and route-resolved, source-verified,
+file-level batch persistence. SC-EVAL-008 is pre-registered before rebuilding
+and measuring whether the model eliminates both remaining retries in practice.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
