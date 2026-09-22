@@ -7,6 +7,7 @@
   "projects": [
     {
       "id": "project-01",
+      "isolatedCopies": true,
       "requireStatefulProjectState": true,
       "requireDurableCompletion": true,
       "cases": [

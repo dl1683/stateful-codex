@@ -59,7 +59,15 @@ function compareProject(
     ];
     if (baselineTurn) addUsage(cumulative.baseline, baselineTurn.usage);
     if (statefulTurn) addUsage(cumulative.stateful, statefulTurn.usage);
-    const parity = compareTurnParity(baseline, stateful, baselineTurn, statefulTurn);
+    const parity = compareTurnParity(
+      project,
+      baseline,
+      stateful,
+      baselineTurn,
+      statefulTurn,
+      baselineObservation,
+      statefulObservation,
+    );
     return {
       id: benchmarkCase.id,
       promptMatches: {
@@ -193,9 +201,18 @@ function validateObservationField(observation, field, arm) {
   return missing;
 }
 
-function compareTurnParity(baselineSession, statefulSession, baseline, stateful) {
+function compareTurnParity(
+  project,
+  baselineSession,
+  statefulSession,
+  baseline,
+  stateful,
+  baselineObservation,
+  statefulObservation,
+) {
   const left = baseline?.configuration;
   const right = stateful?.configuration;
+  const isolatedCopies = project.isolatedCopies === true;
   return {
     originator: sameDefined(baselineSession.originator, statefulSession.originator),
     source: sameDefined(baselineSession.source, statefulSession.source),
@@ -204,10 +221,19 @@ function compareTurnParity(baselineSession, statefulSession, baseline, stateful)
     approvalPolicy: sameDefined(left?.approvalPolicy, right?.approvalPolicy),
     sandboxPolicy: sameDefined(left?.sandboxPolicy, right?.sandboxPolicy),
     permissionProfile: sameDefined(left?.permissionProfile, right?.permissionProfile),
-    cwd: sameDefined(left?.cwd, right?.cwd),
-    workspaceRoots:
-      left?.workspaceRoots != null &&
-      JSON.stringify(left.workspaceRoots) === JSON.stringify(right?.workspaceRoots),
+    cwd: isolatedCopies
+      ? left?.cwd != null && right?.cwd != null
+      : sameDefined(left?.cwd, right?.cwd),
+    workspaceRoots: isolatedCopies
+      ? left?.workspaceRoots?.length > 0 && right?.workspaceRoots?.length > 0
+      : left?.workspaceRoots != null &&
+        JSON.stringify(left.workspaceRoots) === JSON.stringify(right?.workspaceRoots),
+    corpusRevision:
+      !isolatedCopies ||
+      sameDefined(
+        baselineObservation?.sourceAudit?.corpusRevision,
+        statefulObservation?.sourceAudit?.corpusRevision,
+      ),
   };
 }
 

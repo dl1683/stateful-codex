@@ -13,7 +13,11 @@ function observation(withState) {
       durableState: withState ? { correctness: 4 } : null,
     },
   };
-  const sourceAudit = { exactRegions: 1, repeatedReads: 0 };
+  const sourceAudit = {
+    exactRegions: 1,
+    repeatedReads: 0,
+    corpusRevision: "sha256:matched",
+  };
   return {
     cases: {
       q1: {
@@ -40,6 +44,7 @@ test("compares continuous sequences with cumulative deltas and clustered aggrega
     projects: [
       {
         id: "licensing",
+        isolatedCopies: true,
         requireStatefulProjectState: false,
         requireDurableCompletion: false,
         cases: [
@@ -69,6 +74,18 @@ test("compares continuous sequences with cumulative deltas and clustered aggrega
     usage(110, 40, 10),
     usage(130, 100, 10),
   ]);
+  for (const event of baseline) {
+    if (event.type === "turn_context") {
+      event.payload.cwd = "C:/baseline";
+      event.payload.workspace_roots = ["C:/baseline"];
+    }
+  }
+  for (const event of stateful) {
+    if (event.type === "turn_context") {
+      event.payload.cwd = "C:/stateful";
+      event.payload.workspace_roots = ["C:/stateful"];
+    }
+  }
 
   const report = compareLongitudinalSuite(
     manifest,

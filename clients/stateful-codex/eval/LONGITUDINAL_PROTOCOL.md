@@ -24,10 +24,12 @@ Each project has two arms that begin from empty project state:
 1. ordinary Codex in one continuous thread; and
 2. Stateful Codex in one continuous thread.
 
-The arms use the same ordered questions, source revision, model, reasoning
-effort, harness build, permissions, workspace roots, authentication mode, retry
-policy, and execution budget. The user still selects the project, thread, and
-mode. The evaluator does not infer them.
+The arms use isolated copies of the same corpus, the same ordered questions and
+source revisions, model, reasoning effort, harness build, permissions,
+authentication mode, retry policy, and execution budget. Per-turn corpus hashes
+prove source equivalence; filesystem paths may differ solely because the copies
+are isolated. The user still selects the project, thread, and mode. The
+evaluator does not infer them.
 
 Question order is frozen before either arm is run. The sequence includes:
 
