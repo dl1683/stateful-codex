@@ -56,21 +56,6 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
             ]),
             responses::sse(vec![
                 responses::ev_function_call(
-                    "record-autonomous-result",
-                    "obligation_update",
-                    &json!({
-                        "idempotencyKey": "autonomous-result",
-                        "packet": {
-                            "learning": ["The unattended investigation reached its evidence-grounded result."],
-                            "implication": ["The run can now complete without user intervention."]
-                        }
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("record-autonomous-result-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_function_call(
                     "complete-autonomous-run",
                     "stateful_run_update",
                     &json!({
@@ -78,7 +63,12 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                         "status": "completed",
                         "result": "The unattended investigation reached its evidence-grounded result.",
                         "rootRevision": 0,
-                        "materialRootFindings": []
+                        "materialRootFindings": [],
+                        "completionIdempotencyKey": "autonomous-result",
+                        "finalObligation": {
+                            "learning": ["The unattended investigation reached its evidence-grounded result."],
+                            "implication": ["The run can now complete without user intervention."]
+                        }
                     })
                     .to_string(),
                 ),
@@ -115,7 +105,7 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
     );
     let _: TurnCompletedNotification = server.read_notification("turn/completed").await?;
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 3);
     assert!(requests[1].body_contains_text("Continue Autonomous Stateful run"));
     Ok(())
 }

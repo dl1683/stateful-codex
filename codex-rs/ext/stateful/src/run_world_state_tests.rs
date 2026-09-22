@@ -77,6 +77,16 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
+            .contains("one stateful_run_update call carrying completionIdempotencyKey")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("reserve that tool for meaningful intermediate updates")
+    );
+    assert!(
+        rendered
+            .body()
             .contains("Learned: One unresolved assumption")
     );
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);

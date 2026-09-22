@@ -422,7 +422,15 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                         "status": "completed",
                         "result": "Verified the decisive connection and incorporated the user's direction.",
                         "rootRevision": root_revision,
-                        "materialRootFindings": [material_finding_reference]
+                        "materialRootFindings": [material_finding_reference],
+                        "completionIdempotencyKey": "final-decisive-connection",
+                        "finalObligation": {
+                            "examined": ["The verified source constraint and deployment finding."],
+                            "learning": ["The deployment risk is triggered by the source constraint."],
+                            "implication": ["The decisive project constraint must remain in the durable result."],
+                            "uncertainty": ["No material uncertainty remains for this connection."],
+                            "blockers": ["No blocker remains."]
+                        }
                     })
                     .to_string(),
                 ),
@@ -447,10 +455,14 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
         })
         .await?;
 
-    let obligation_event: ObligationUpdatedNotification =
+    let first_obligation_event: ObligationUpdatedNotification =
         server.read_notification("obligation/updated").await?;
-    assert_eq!(obligation_event.run_id, started.run.id);
-    assert_eq!(obligation_event.revision, 1);
+    let final_obligation_event: ObligationUpdatedNotification =
+        server.read_notification("obligation/updated").await?;
+    assert_eq!(first_obligation_event.run_id, started.run.id);
+    assert_eq!(first_obligation_event.revision, 1);
+    assert_eq!(final_obligation_event.run_id, started.run.id);
+    assert_eq!(final_obligation_event.revision, 1);
     let mut last_steering_event = None;
     for _ in 0..3 {
         last_steering_event = Some(
@@ -478,7 +490,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     let requests = response_log.requests();
     assert_eq!(requests.len(), 5);
     assert!(requests[0].body_contains_text("<stateful_run>"));
-    assert!(requests[0].body_contains_text("completion removes the active-run binding"));
+    assert!(requests[0].body_contains_text("removes the active-run binding"));
     assert!(requests[0].body_contains_text("final Stateful mutation"));
     assert!(requests[0].body_contains_text("rootRevision"));
     assert!(
@@ -512,11 +524,12 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             },
         })
         .await?;
-    assert_eq!(obligations.data.len(), 1);
-    assert_eq!(
-        obligations.data[0].packet.learning,
-        vec!["The deployment risk is triggered by the source constraint."]
-    );
+    assert_eq!(obligations.data.len(), 2);
+    assert!(obligations.data.iter().any(|obligation| {
+        obligation.packet.learning
+            == vec!["The deployment risk is triggered by the source constraint."]
+            && obligation.packet.blockers == vec!["No blocker remains."]
+    }));
     let steering: SteeringListResponse = server
         .request(|request_id| ClientRequest::SteeringList {
             request_id,

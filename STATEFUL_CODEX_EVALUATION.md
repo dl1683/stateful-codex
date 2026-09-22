@@ -1925,7 +1925,7 @@ correct cross-source answers. A future preregistered replication also needs a
 semantic evaluator or human rubric fixed before execution; post-hoc expansion
 of this frozen lexical scorer would invalidate the present result.
 
-## Benchmark SC-EVAL-018: atomic completion and outcome-bounded verification
+## Benchmark SC-EVAL-018: single-call completion and outcome-bounded verification
 
 Status: pre-registered before implementation on 2026-09-22.
 
@@ -1941,7 +1941,7 @@ are the dominant cost.
 The implementation under test will make the final semantic obligation part of
 the terminal `stateful_run_update` input. Intermediate `obligation_update` calls
 remain available when learning or strategy materially changes during longer
-work, but a terminal call must atomically express the final packet, result, root
+work, but one terminal tool operation must express the final packet, result, root
 revision, and material root aliases. The selected-project guidance will also say
 that exact verification is bounded by the requested outcome: current verified
 root knowledge may supply adjacent context, but the model should not reopen

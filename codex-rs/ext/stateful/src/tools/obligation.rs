@@ -103,29 +103,14 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Record a compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity. Before completion, the final packet must enumerate every material conclusion, implication, uncertainty, and blocker that the persisted result and final answer must preserve.".to_string(),
+            description: "Record an intermediate compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes. Explain significance; do not narrate routine tool activity. When the work is ready to complete, put the final packet directly in stateful_run_update instead of spending a separate model turn here.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
                     "idempotencyKey": {"type": "string"},
-                    "packet": {
-                        "type": "object",
-                        "properties": {
-                            "examined": string_list(),
-                            "rationale": string_list(),
-                            "learning": string_list(),
-                            "implication": string_list(),
-                            "strategy": string_list(),
-                            "changed": string_list(),
-                            "next": string_list(),
-                            "uncertainty": string_list(),
-                            "blockers": string_list(),
-                            "requestedJudgment": string_list()
-                        },
-                        "additionalProperties": false
-                    }
+                    "packet": obligation_packet_schema()
                 },
                 "required": ["idempotencyKey", "packet"],
                 "additionalProperties": false
@@ -145,6 +130,25 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
     {
         Box::pin(self.handle_call(call))
     }
+}
+
+pub(super) fn obligation_packet_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "examined": string_list(),
+            "rationale": string_list(),
+            "learning": string_list(),
+            "implication": string_list(),
+            "strategy": string_list(),
+            "changed": string_list(),
+            "next": string_list(),
+            "uncertainty": string_list(),
+            "blockers": string_list(),
+            "requestedJudgment": string_list()
+        },
+        "additionalProperties": false
+    })
 }
 
 fn string_list() -> serde_json::Value {
