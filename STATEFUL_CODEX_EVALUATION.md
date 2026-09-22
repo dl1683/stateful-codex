@@ -1727,7 +1727,11 @@ fresh Stateful thread attached to that project's durable intelligence. Every
 pair must use the same rebuilt branch binary, cached ChatGPT login with
 `OPENAI_API_KEY` and `CODEX_API_KEY` removed, model, reasoning effort, prompt,
 working directory, roots, approval policy, sandbox policy, and permission
-profile. Pair order will alternate which condition runs first. The two actual
+profile. Codex's separate user-memory feature will be disabled in both
+conditions because it already contains notes about these fixtures and would
+leak expected answers into the benchmark; Stateful project intelligence remains
+enabled only for the Stateful condition. Pair order will alternate which
+condition runs first. The two actual
 maturation rollouts are mandatory inputs to the aggregate scorer; a missing
 project maturation is an error rather than a zero-cost default.
 
