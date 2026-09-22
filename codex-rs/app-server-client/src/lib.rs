@@ -18,6 +18,7 @@
 
 mod path;
 mod remote;
+mod stateful;
 
 use std::error::Error;
 use std::fmt;
@@ -66,6 +67,13 @@ pub use crate::path::AppServerPath;
 pub use crate::remote::RemoteAppServerClient;
 pub use crate::remote::RemoteAppServerConnectArgs;
 pub use crate::remote::RemoteAppServerEndpoint;
+pub use crate::stateful::DEFAULT_STATEFUL_MAX_CONTINUATIONS;
+pub use crate::stateful::DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS;
+pub use crate::stateful::PreparedStatefulStartup;
+pub use crate::stateful::StatefulStartup;
+pub use crate::stateful::StatefulStartupError;
+pub use crate::stateful::prepare_stateful_startup;
+pub use crate::stateful::start_stateful_run;
 
 /// Transitional access to core-only embedded app-server types.
 ///

@@ -10,42 +10,29 @@ use crate::history_cell::HistoryCell;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_lines;
 use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_client::PreparedStatefulStartup as ClientPreparedStatefulStartup;
+use codex_app_server_client::StatefulStartup as ClientStatefulStartup;
+use codex_app_server_client::prepare_stateful_startup;
+use codex_app_server_client::start_stateful_run;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ObligationListParams;
 use codex_app_server_protocol::ObligationListResponse;
 use codex_app_server_protocol::ObligationUpdatedNotification;
-use codex_app_server_protocol::ProjectCreateParams;
-use codex_app_server_protocol::ProjectCreateResponse;
-use codex_app_server_protocol::ProjectListParams;
-use codex_app_server_protocol::ProjectListResponse;
-use codex_app_server_protocol::ProjectReadParams;
-use codex_app_server_protocol::ProjectReadResponse;
-use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::StatefulObligation;
 use codex_app_server_protocol::StatefulRun;
-use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
-use codex_app_server_protocol::StatefulRunStartParams;
-use codex_app_server_protocol::StatefulRunStartResponse;
 use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_protocol::ThreadId;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use color_eyre::eyre::Context;
 use color_eyre::eyre::ContextCompat;
 use color_eyre::eyre::Result;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use sha2::Digest;
-use sha2::Sha256;
-use std::path::Path;
-
-const DEFAULT_MAX_CONTINUATIONS: u32 = 24;
-const DEFAULT_MAX_ELAPSED_SECONDS: u32 = 14_400;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StatefulStartup {
@@ -68,7 +55,7 @@ impl StatefulStartup {
             .filter(|goal| !goal.is_empty())
             .context("--stateful requires a non-empty goal prompt")?;
         Ok(Some(Self {
-            mode: mode.into(),
+            mode: workflow_mode(mode),
             project_id,
             goal: goal.to_string(),
         }))
@@ -76,117 +63,17 @@ impl StatefulStartup {
 }
 
 #[derive(Debug)]
-pub(crate) struct PreparedStatefulStartup {
-    project_id: String,
-    mode: StatefulWorkflowMode,
-    goal: String,
-}
+pub(crate) struct PreparedStatefulStartup(ClientPreparedStatefulStartup);
 
 pub(crate) async fn prepare_startup(
     request_handle: &AppServerRequestHandle,
     thread_params: &mut ThreadStartParams,
     startup: StatefulStartup,
 ) -> Result<PreparedStatefulStartup> {
-    let project_root = project_root(thread_params)?;
-    let project_id = resolve_project(request_handle, &project_root, startup.project_id).await?;
-    thread_params.project_id = Some(project_id.clone());
-    Ok(PreparedStatefulStartup {
-        project_id,
-        mode: startup.mode,
-        goal: startup.goal,
-    })
-}
-
-async fn resolve_project(
-    request_handle: &AppServerRequestHandle,
-    root: &AbsolutePathBuf,
-    selected_project_id: Option<String>,
-) -> Result<String> {
-    if let Some(project_id) = selected_project_id {
-        let response: ProjectReadResponse = request_handle
-            .request_typed(ClientRequest::ProjectRead {
-                request_id: RequestId::String("stateful-project-read".to_string()),
-                params: ProjectReadParams {
-                    project_id: project_id.clone(),
-                },
-            })
-            .await
-            .context("failed to read the selected Stateful project")?;
-        if !response.project.roots.iter().any(|item| item.path == *root) {
-            color_eyre::eyre::bail!(
-                "Stateful project {project_id} does not include the selected directory {}",
-                root.as_path().display()
-            );
-        }
-        return Ok(project_id);
-    }
-
-    let matching_projects = projects_for_root(request_handle, root).await?;
-    match matching_projects.as_slice() {
-        [] => create_project(request_handle, root).await,
-        [project_id] => Ok(project_id.clone()),
-        project_ids => color_eyre::eyre::bail!(
-            "multiple Stateful projects use {}: {}. Select one with --stateful-project",
-            root.as_path().display(),
-            project_ids.join(", ")
-        ),
-    }
-}
-
-async fn projects_for_root(
-    request_handle: &AppServerRequestHandle,
-    root: &AbsolutePathBuf,
-) -> Result<Vec<String>> {
-    let mut cursor = None;
-    let mut project_ids = Vec::new();
-    let mut page = 0_u32;
-    loop {
-        let response: ProjectListResponse = request_handle
-            .request_typed(ClientRequest::ProjectList {
-                request_id: RequestId::String(format!("stateful-project-list-{page}")),
-                params: ProjectListParams {
-                    cursor,
-                    limit: Some(100),
-                    sort_key: None,
-                    sort_direction: None,
-                },
-            })
-            .await
-            .context("failed to list Stateful projects")?;
-        project_ids.extend(
-            response
-                .data
-                .into_iter()
-                .filter(|project| project.roots.iter().any(|item| item.path == *root))
-                .map(|project| project.id),
-        );
-        let Some(next_cursor) = response.next_cursor else {
-            return Ok(project_ids);
-        };
-        cursor = Some(next_cursor);
-        page = page.saturating_add(1);
-    }
-}
-
-async fn create_project(
-    request_handle: &AppServerRequestHandle,
-    root: &AbsolutePathBuf,
-) -> Result<String> {
-    let root_text = root.as_path().to_string_lossy();
-    let digest = Sha256::digest(root_text.as_bytes());
-    let response: ProjectCreateResponse = request_handle
-        .request_typed(ClientRequest::ProjectCreate {
-            request_id: RequestId::String(format!("stateful-project-{digest:x}")),
-            params: ProjectCreateParams {
-                name: project_name(root.as_path()),
-                roots: vec![ProjectRoot { path: root.clone() }],
-                metadata: None,
-                idempotency_key: format!("stateful-tui-project-v1-{digest:x}"),
-            },
-        })
-        .await
-        .context("failed to create the Stateful project")?;
-    Ok(response.project.id)
+    let startup = ClientStatefulStartup::new(startup.mode, startup.project_id, startup.goal)?;
+    Ok(PreparedStatefulStartup(
+        prepare_stateful_startup(request_handle, thread_params, startup).await?,
+    ))
 }
 
 pub(crate) async fn start_run(
@@ -194,51 +81,15 @@ pub(crate) async fn start_run(
     startup: &PreparedStatefulStartup,
     thread_id: ThreadId,
 ) -> Result<()> {
-    let thread_id = thread_id.to_string();
-    let _: StatefulRunStartResponse = request_handle
-        .request_typed(ClientRequest::StatefulRunStart {
-            request_id: RequestId::String(format!("stateful-run-{thread_id}")),
-            params: StatefulRunStartParams {
-                project_id: startup.project_id.clone(),
-                thread_id: thread_id.clone(),
-                goal: startup.goal.clone(),
-                mode: startup.mode,
-                budget: StatefulRunBudget {
-                    max_continuations: DEFAULT_MAX_CONTINUATIONS,
-                    max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
-                },
-                idempotency_key: format!("stateful-tui-run-v1-{thread_id}"),
-            },
-        })
-        .await
-        .context("failed to start the Stateful run")?;
+    start_stateful_run(request_handle, &startup.0, &thread_id.to_string()).await?;
     Ok(())
 }
 
-fn project_root(thread_params: &ThreadStartParams) -> Result<AbsolutePathBuf> {
-    let root = thread_params
-        .cwd
-        .as_deref()
-        .context("--stateful requires an explicit project directory")?;
-    AbsolutePathBuf::from_absolute_path(root)
-        .context("--stateful requires an absolute project directory")
-}
-
-fn project_name(root: &Path) -> String {
-    root.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| root.display().to_string())
-}
-
-impl From<StatefulModeCliArg> for StatefulWorkflowMode {
-    fn from(value: StatefulModeCliArg) -> Self {
-        match value {
-            StatefulModeCliArg::Autonomous => Self::Autonomous,
-            StatefulModeCliArg::Collaborative => Self::Collaborative,
-            StatefulModeCliArg::Socratic => Self::Socratic,
-        }
+fn workflow_mode(mode: StatefulModeCliArg) -> StatefulWorkflowMode {
+    match mode {
+        StatefulModeCliArg::Autonomous => StatefulWorkflowMode::Autonomous,
+        StatefulModeCliArg::Collaborative => StatefulWorkflowMode::Collaborative,
+        StatefulModeCliArg::Socratic => StatefulWorkflowMode::Socratic,
     }
 }
 

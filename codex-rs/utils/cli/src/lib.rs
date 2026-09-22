@@ -4,6 +4,7 @@ pub(crate) mod format_env_display;
 mod resume_command;
 mod sandbox_mode_cli_arg;
 mod shared_options;
+mod stateful_mode_cli_arg;
 
 pub use approval_mode_cli_arg::ApprovalModeCliArg;
 pub use codex_protocol::config_types::ProfileV2Name;
@@ -13,3 +14,4 @@ pub use resume_command::resume_command;
 pub use resume_command::resume_hint;
 pub use sandbox_mode_cli_arg::SandboxModeCliArg;
 pub use shared_options::SharedCliOptions;
+pub use stateful_mode_cli_arg::StatefulModeCliArg;

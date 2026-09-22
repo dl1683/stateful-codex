@@ -1,11 +1,11 @@
 use clap::Args;
 use clap::FromArgMatches;
 use clap::Parser;
-use clap::ValueEnum;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cli::ApprovalModeCliArg;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::SharedCliOptions;
+pub use codex_utils_cli::StatefulModeCliArg;
 
 #[derive(Parser, Clone, Debug)]
 #[command(version)]
@@ -100,13 +100,6 @@ pub struct Cli {
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum StatefulModeCliArg {
-    Autonomous,
-    Collaborative,
-    Socratic,
 }
 
 impl std::ops::Deref for Cli {

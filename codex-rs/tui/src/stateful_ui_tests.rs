@@ -4,12 +4,17 @@ use crate::dynamic_tools_mcp::ThreadToolTransport;
 use crate::legacy_core::config::ConfigBuilder;
 use crate::legacy_core::config::ConfigOverrides;
 use crate::local_settings::LocalSettings;
+use codex_app_server_client::DEFAULT_STATEFUL_MAX_CONTINUATIONS as DEFAULT_MAX_CONTINUATIONS;
+use codex_app_server_client::DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS as DEFAULT_MAX_ELAPSED_SECONDS;
 use codex_app_server_protocol::ProjectReadParams;
 use codex_app_server_protocol::ProjectReadResponse;
+use codex_app_server_protocol::ProjectRoot;
+use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use color_eyre::eyre::ContextCompat;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -29,16 +34,6 @@ fn cli_selection_requires_a_goal_and_preserves_the_selected_mode() {
             goal: "investigate the evidence".to_string(),
         })
     );
-}
-
-#[test]
-fn project_name_uses_the_selected_directory() {
-    let path = if cfg!(windows) {
-        Path::new(r"C:\work\alpha")
-    } else {
-        Path::new("/work/alpha")
-    };
-    assert_eq!(project_name(path), "alpha");
 }
 
 #[test]
