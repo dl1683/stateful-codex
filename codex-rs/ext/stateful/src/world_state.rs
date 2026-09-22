@@ -18,8 +18,8 @@ const MAX_PROJECT_ROOT_BYTES: usize = 4 * 1024;
 
 pub(super) enum ProjectIntelligenceStatus {
     Available {
-        project: StoredProject,
-        root_blackboard: RootBlackboardStatus,
+        project: Box<StoredProject>,
+        root_blackboard: Box<RootBlackboardStatus>,
     },
     Missing {
         project_id: String,
@@ -74,11 +74,11 @@ impl ProjectIntelligenceStatus {
         );
         append_line(
             &mut body,
-            "Start from accumulated project intelligence. If the root lacks relevant detail, use a focused deeper-blackboard query before rereading broadly. Do not query deeper state merely to repeat adequate root knowledge. Use the context map and exact source when detail or consequential verification is needed.",
+            "Start from accumulated project intelligence. If current source-verified root knowledge answers the question, use its embedded routes to verify only the smallest decisive source set whose exact wording can change the answer. Do not query deeper state, search by every known filename, or reread the corpus merely to repeat adequate root knowledge. Use a focused deeper-blackboard or context-map query only when the root or its routes are insufficient.",
         );
         append_line(
             &mut body,
-            "Persist materially reusable understanding: important instructions, facts, numbers, decisions, strategies, questions, contradictions, failures, rejected approaches, signals, and cross-source relationships. Require expected reuse value before writing: do not persist cheap-to-recompute inventories, duplicate adequate root knowledge, routine activity, transient progress, or guesses presented as facts. Link evidence and preserve uncertainty.",
+            "Persist materially reusable understanding: important instructions, facts, numbers, decisions, strategies, questions, contradictions, failures, rejected approaches, signals, and cross-source relationships. Require expected reuse value before writing: do not persist cheap-to-recompute inventories, duplicate adequate root knowledge, routine activity, transient progress, or guesses presented as facts. Link evidence and preserve uncertainty. After one evidence-review pass, commit coherent findings with the bounded batch tool instead of forcing one model round trip per record.",
         );
         append_field(&mut body, "Project ID", self.project_id());
         match self {

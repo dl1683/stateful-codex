@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use codex_project_intelligence::BlackboardEvidenceFreshness;
 use codex_project_intelligence::BlackboardHit;
 use codex_project_intelligence::BlackboardImportance;
@@ -5,6 +7,9 @@ use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ContextMapEntryId;
+use codex_project_intelligence::ContextMapFreshness;
+use codex_project_intelligence::ContextMapHit;
 use codex_project_intelligence::RootBlackboardProjection;
 use sha2::Digest;
 use sha2::Sha256;
@@ -17,20 +22,26 @@ const MAX_ENTRY_BYTES: usize = 3 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
 
 pub(super) enum RootBlackboardStatus {
-    Available(RootBlackboardProjection),
+    Available(ResolvedRootBlackboard),
     NotConfigured,
     Unavailable,
+}
+
+pub(super) struct ResolvedRootBlackboard {
+    pub(super) projection: RootBlackboardProjection,
+    pub(super) evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
 }
 
 impl RootBlackboardStatus {
     pub(super) fn update_fingerprint(&self, hasher: &mut Sha256) {
         match self {
-            Self::Available(projection) => {
+            Self::Available(root) => {
+                let projection = &root.projection;
                 hasher.update(b"blackboard-available\0");
                 hasher.update(projection.revision.to_be_bytes());
                 hasher.update(projection.omitted_entries.to_be_bytes());
                 for hit in &projection.data {
-                    hash_component(hasher, &render_hit(hit));
+                    hash_component(hasher, &render_hit(hit, &root.evidence_routes));
                 }
             }
             Self::NotConfigured => hasher.update(b"blackboard-not-configured\0"),
@@ -41,7 +52,7 @@ impl RootBlackboardStatus {
 
 pub(super) fn render_root_blackboard(output: &mut String, status: &RootBlackboardStatus) {
     match status {
-        RootBlackboardStatus::Available(projection) => render_projection(output, projection),
+        RootBlackboardStatus::Available(root) => render_projection(output, root),
         RootBlackboardStatus::NotConfigured => append_line(
             output,
             "Project intelligence is unavailable because persistent state is disabled. Use source files as ground truth and do not claim memory readiness.",
@@ -53,7 +64,8 @@ pub(super) fn render_root_blackboard(output: &mut String, status: &RootBlackboar
     }
 }
 
-fn render_projection(output: &mut String, projection: &RootBlackboardProjection) {
+fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
+    let projection = &root.projection;
     append_line(
         output,
         &format!("Project intelligence revision: {}", projection.revision),
@@ -64,7 +76,11 @@ fn render_projection(output: &mut String, projection: &RootBlackboardProjection)
     );
     let mut omitted = projection.omitted_entries;
     for hit in &projection.data {
-        if !try_append_line(output, &render_hit(hit), ROOT_FOOTER_RESERVE_BYTES) {
+        if !try_append_line(
+            output,
+            &render_hit(hit, &root.evidence_routes),
+            ROOT_FOOTER_RESERVE_BYTES,
+        ) {
             omitted = omitted.saturating_add(1);
         }
     }
@@ -84,17 +100,40 @@ fn render_projection(output: &mut String, projection: &RootBlackboardProjection)
     }
     append_line(
         output,
-        "Use deeper blackboard queries for specific understanding, then the context map and exact source for consequential verification.",
+        "For consequential claims, verify against exact source. When current source routes are embedded above, open only the smallest decisive source set whose exact wording can change the answer; do not reopen every supporting file by default. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient.",
     );
 }
 
-fn render_hit(hit: &BlackboardHit) -> String {
+fn render_hit(
+    hit: &BlackboardHit,
+    evidence_routes: &HashMap<ContextMapEntryId, ContextMapHit>,
+) -> String {
     let entry = &hit.entry;
     let value = &entry.value;
     let evidence = value
         .evidence
         .iter()
-        .map(|link| link.context_map_entry_id.as_str())
+        .map(|link| {
+            evidence_routes.get(&link.context_map_entry_id).map_or_else(
+                || link.context_map_entry_id.to_string(),
+                |route| {
+                    let anchor = route
+                        .source
+                        .region_anchor
+                        .as_ref()
+                        .map(|anchor| format!("#{}:{}", anchor.scheme, anchor.locator))
+                        .unwrap_or_default();
+                    format!(
+                        "{}@{}::{}{}({})",
+                        link.context_map_entry_id,
+                        single_line(&route.source.project_root),
+                        route.source.relative_path,
+                        anchor,
+                        context_freshness_name(route.freshness),
+                    )
+                },
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     let structured = value
@@ -148,6 +187,14 @@ fn render_hit(hit: &BlackboardHit) -> String {
         line.push_str(&marker);
     }
     line
+}
+
+fn context_freshness_name(freshness: ContextMapFreshness) -> &'static str {
+    match freshness {
+        ContextMapFreshness::Current => "current",
+        ContextMapFreshness::Stale => "stale",
+        ContextMapFreshness::SourceUnavailable => "sourceUnavailable",
+    }
 }
 
 fn single_line(value: &str) -> String {

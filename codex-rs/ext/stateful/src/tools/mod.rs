@@ -37,6 +37,11 @@ pub(super) fn project_intelligence_tools(
             services.clone(),
             event_sink.clone(),
         )),
+        Arc::new(blackboard_write::BlackboardBatchRecordTool::new(
+            project_id.clone(),
+            services.clone(),
+            event_sink.clone(),
+        )),
         Arc::new(blackboard_write::BlackboardRelateTool::new(
             project_id.clone(),
             services.clone(),

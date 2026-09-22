@@ -8,6 +8,7 @@ use super::MAX_BODY_BYTES;
 use super::MAX_ESTIMATED_TOKENS;
 use super::ProjectIntelligenceStatus;
 use super::project_world_state_section;
+use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 
 fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
@@ -26,13 +27,16 @@ fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
 fn available(project: StoredProject) -> ProjectIntelligenceStatus {
     let project_id = project.id.clone();
     ProjectIntelligenceStatus::Available {
-        project,
-        root_blackboard: RootBlackboardStatus::Available(RootBlackboardProjection {
-            project_id,
-            revision: 0,
-            data: Vec::new(),
-            omitted_entries: 0,
-        }),
+        project: Box::new(project),
+        root_blackboard: Box::new(RootBlackboardStatus::Available(ResolvedRootBlackboard {
+            projection: RootBlackboardProjection {
+                project_id,
+                revision: 0,
+                data: Vec::new(),
+                omitted_entries: 0,
+            },
+            evidence_routes: Default::default(),
+        })),
     }
 }
 
@@ -61,18 +65,19 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("use a focused deeper-blackboard query before rereading broadly")
+            .contains("verify only the smallest decisive source set")
     );
     assert!(
         rendered
             .body()
-            .contains("Do not query deeper state merely to repeat adequate root knowledge")
+            .contains("Do not query deeper state, search by every known filename")
     );
     assert!(
         rendered
             .body()
             .contains("do not persist cheap-to-recompute inventories")
     );
+    assert!(rendered.body().contains("bounded batch tool"));
     assert!(
         rendered
             .body()

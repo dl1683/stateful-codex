@@ -17,6 +17,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
 use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardEvidenceLink;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
@@ -193,6 +194,9 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     assert_eq!(requests.len(), 3);
     assert!(requests[0].body_contains_text("blackboard_query"));
     assert!(requests[0].body_contains_text("context_map_query"));
+    assert!(requests[0].body_contains_text("blackboard_record_batch"));
+    assert!(requests[0].body_contains_text("README.md(current)"));
+    assert!(requests[0].body_contains_text("smallest decisive source set"));
     let blackboard_output = requests[1]
         .function_call_output("blackboard-call")
         .to_string();
@@ -208,7 +212,7 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
 }
 
 #[tokio::test]
-async fn model_can_record_and_retrieve_project_learning() -> Result<()> {
+async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -240,15 +244,28 @@ async fn model_can_record_and_retrieve_project_learning() -> Result<()> {
             responses::sse(vec![
                 responses::ev_function_call(
                     "record-call",
-                    "blackboard_record",
+                    "blackboard_record_batch",
                     &json!({
-                        "idempotencyKey": "strategy-learned",
-                        "kind": "strategy",
-                        "content": "Use the durable project state before rereading source files.",
-                        "confidenceBasisPoints": 8000,
-                        "verification": "unverified",
-                        "importance": "high",
-                        "rootPromotion": "promoted"
+                        "records": [
+                            {
+                                "idempotencyKey": "strategy-learned",
+                                "kind": "strategy",
+                                "content": "Use the durable project state before rereading source files.",
+                                "confidenceBasisPoints": 8000,
+                                "verification": "unverified",
+                                "importance": "high",
+                                "rootPromotion": "promoted"
+                            },
+                            {
+                                "idempotencyKey": "open-question-learned",
+                                "kind": "question",
+                                "content": "Which exact source can change the current strategy?",
+                                "confidenceBasisPoints": 7000,
+                                "verification": "unverified",
+                                "importance": "normal",
+                                "rootPromotion": "candidate"
+                            }
+                        ]
                     })
                     .to_string(),
                 ),
@@ -279,14 +296,16 @@ async fn model_can_record_and_retrieve_project_learning() -> Result<()> {
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 3);
+    assert!(requests[0].body_contains_text("blackboard_record_batch"));
     assert!(requests[0].body_contains_text("blackboard_relate"));
     assert!(requests[0].body_contains_text("context_map_refresh"));
-    assert!(
-        requests[1]
-            .function_call_output("record-call")
-            .to_string()
-            .contains("recorded")
-    );
+    let batch_output: serde_json::Value = serde_json::from_str(
+        &requests[1]
+            .function_call_output_text("record-call")
+            .expect("batch output should be text"),
+    )?;
+    assert_eq!(batch_output["recorded"], 2);
+    assert_eq!(batch_output["failed"], 0);
     assert!(
         requests[2]
             .function_call_output("query-call")
@@ -414,17 +433,43 @@ async fn seed_context_map(
             },
         )
         .await?;
+    let context_map_entry_id = ContextMapEntryId::parse(format!("readme-map-{project_id}"))?;
     ContextMapStore::open(&sqlite)
         .await?
         .create_entry(
-            ContextMapEntryId::parse(format!("readme-map-{project_id}"))?,
+            context_map_entry_id.clone(),
             NewContextMapEntry {
                 project_id: project_id.to_string(),
-                node_id: file_node_id,
-                source_fingerprint,
+                node_id: file_node_id.clone(),
+                source_fingerprint: source_fingerprint.clone(),
                 description: "Project purpose, setup, and operator instructions.".to_string(),
                 routing_terms: vec!["operator".to_string(), "setup".to_string()],
                 coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await?;
+    BlackboardStore::open(&sqlite)
+        .await?
+        .create_entry(
+            BlackboardEntryId::parse(format!("readme-fact-{project_id}"))?,
+            NewBlackboardEntry {
+                project_id: project_id.to_string(),
+                node_id: file_node_id,
+                kind: BlackboardKind::Fact,
+                content: "README contains the current operator instructions.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(9_000)?,
+                verification: BlackboardVerification::SourceVerified,
+                importance: BlackboardImportance::High,
+                root_promotion: RootPromotion::Promoted,
+                evidence: vec![BlackboardEvidenceLink {
+                    context_map_entry_id,
+                    source_fingerprint,
+                }],
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "integration-fixture".to_string(),
+                },
             },
         )
         .await?;

@@ -24,6 +24,7 @@ use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
 
+use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
 use crate::run_world_state::run_world_state_section;
@@ -97,8 +98,8 @@ impl ContextContributor for StatefulExtension {
                 Ok(Some(project)) => {
                     let root_blackboard = self.root_blackboard(&project.id).await;
                     ProjectIntelligenceStatus::Available {
-                        project,
-                        root_blackboard,
+                        project: Box::new(project),
+                        root_blackboard: Box::new(root_blackboard),
                     }
                 }
                 Ok(None) => ProjectIntelligenceStatus::Missing {
@@ -146,7 +147,47 @@ impl StatefulExtension {
             })
             .await
         {
-            Ok(projection) => RootBlackboardStatus::Available(projection),
+            Ok(projection) => {
+                let context_map = match services.context_map().await {
+                    Ok(context_map) => context_map,
+                    Err(error) => {
+                        tracing::warn!(%project_id, %error, "failed to resolve root evidence routes");
+                        return RootBlackboardStatus::Available(ResolvedRootBlackboard {
+                            projection,
+                            evidence_routes: Default::default(),
+                        });
+                    }
+                };
+                let mut evidence_routes = std::collections::HashMap::new();
+                for evidence in projection
+                    .data
+                    .iter()
+                    .flat_map(|hit| &hit.entry.value.evidence)
+                {
+                    if evidence_routes.contains_key(&evidence.context_map_entry_id) {
+                        continue;
+                    }
+                    match context_map
+                        .get_hit(project_id, &evidence.context_map_entry_id)
+                        .await
+                    {
+                        Ok(Some(hit)) => {
+                            evidence_routes.insert(evidence.context_map_entry_id.clone(), hit);
+                        }
+                        Ok(None) => {}
+                        Err(error) => tracing::warn!(
+                            %project_id,
+                            context_map_entry_id = %evidence.context_map_entry_id,
+                            %error,
+                            "failed to resolve a root evidence route"
+                        ),
+                    }
+                }
+                RootBlackboardStatus::Available(ResolvedRootBlackboard {
+                    projection,
+                    evidence_routes,
+                })
+            }
             Err(error) => {
                 tracing::warn!(%project_id, %error, "failed to load Stateful root blackboard");
                 RootBlackboardStatus::Unavailable
