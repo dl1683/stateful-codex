@@ -195,7 +195,7 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     assert!(requests[0].body_contains_text("blackboard_query"));
     assert!(requests[0].body_contains_text("context_map_query"));
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
-    assert!(requests[0].body_contains_text("README.md(current)"));
+    assert!(requests[0].body_contains_text("README.md (current)"));
     assert!(requests[0].body_contains_text("smallest decisive source set"));
     let blackboard_output = requests[1]
         .function_call_output("blackboard-call")

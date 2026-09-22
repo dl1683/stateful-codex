@@ -19,6 +19,7 @@ use crate::world_state::hash_component;
 use crate::world_state::try_append_line;
 
 const MAX_ENTRY_BYTES: usize = 3 * 1024;
+const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 12 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
 
 pub(super) enum RootBlackboardStatus {
@@ -40,9 +41,9 @@ impl RootBlackboardStatus {
                 hasher.update(b"blackboard-available\0");
                 hasher.update(projection.revision.to_be_bytes());
                 hasher.update(projection.omitted_entries.to_be_bytes());
-                for hit in &projection.data {
-                    hash_component(hasher, &render_hit(hit, &root.evidence_routes));
-                }
+                let mut rendered = String::new();
+                render_projection(&mut rendered, root);
+                hash_component(hasher, &rendered);
             }
             Self::NotConfigured => hasher.update(b"blackboard-not-configured\0"),
             Self::Unavailable => hasher.update(b"blackboard-unavailable\0"),
@@ -74,11 +75,23 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
         output,
         "Root blackboard (active, explicitly promoted knowledge):",
     );
+    let entry_aliases = projection
+        .data
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| (hit.entry.id.to_string(), format!("E{}", index + 1)))
+        .collect::<HashMap<_, _>>();
+    let evidence_aliases = render_evidence_catalog(output, root);
     let mut omitted = projection.omitted_entries;
-    for hit in &projection.data {
+    for (index, hit) in projection.data.iter().enumerate() {
         if !try_append_line(
             output,
-            &render_hit(hit, &root.evidence_routes),
+            &render_hit(
+                &format!("E{}", index + 1),
+                hit,
+                &entry_aliases,
+                &evidence_aliases,
+            ),
             ROOT_FOOTER_RESERVE_BYTES,
         ) {
             omitted = omitted.saturating_add(1);
@@ -100,40 +113,85 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
     }
     append_line(
         output,
-        "For consequential claims, verify against exact source. When current source routes are embedded above, open only the smallest decisive source set whose exact wording can change the answer; do not reopen every supporting file by default. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient.",
+        "For consequential claims, verify against exact source. Use the S aliases above to open only the smallest decisive source set whose exact wording can change the answer; do not reopen every supporting file by default or call a full-corpus read the smallest set. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient.",
     );
 }
 
+fn render_evidence_catalog(
+    output: &mut String,
+    root: &ResolvedRootBlackboard,
+) -> HashMap<ContextMapEntryId, String> {
+    let mut ordered_routes = Vec::new();
+    for evidence in root
+        .projection
+        .data
+        .iter()
+        .flat_map(|hit| &hit.entry.value.evidence)
+    {
+        if root
+            .evidence_routes
+            .contains_key(&evidence.context_map_entry_id)
+            && !ordered_routes.contains(&evidence.context_map_entry_id)
+        {
+            ordered_routes.push(evidence.context_map_entry_id.clone());
+        }
+    }
+    if ordered_routes.is_empty() {
+        return HashMap::new();
+    }
+
+    append_line(output, "Exact-source aliases:");
+    let mut root_aliases = HashMap::new();
+    for entry_id in &ordered_routes {
+        let route = &root.evidence_routes[entry_id];
+        if root_aliases.contains_key(&route.source.project_root) {
+            continue;
+        }
+        let alias = format!("R{}", root_aliases.len() + 1);
+        let line = format!("- {alias}={}", single_line(&route.source.project_root));
+        if try_append_line(output, &line, ROOT_KNOWLEDGE_RESERVE_BYTES) {
+            root_aliases.insert(route.source.project_root.clone(), alias);
+        }
+    }
+
+    let mut evidence_aliases = HashMap::new();
+    for entry_id in ordered_routes {
+        let route = &root.evidence_routes[&entry_id];
+        let Some(root_alias) = root_aliases.get(&route.source.project_root) else {
+            continue;
+        };
+        let alias = format!("S{}", evidence_aliases.len() + 1);
+        let anchor = route
+            .source
+            .region_anchor
+            .as_ref()
+            .map(|anchor| format!("#{}:{}", anchor.scheme, anchor.locator))
+            .unwrap_or_default();
+        let line = format!(
+            "- {alias}={root_alias}::{}{anchor} ({})",
+            route.source.relative_path,
+            context_freshness_name(route.freshness),
+        );
+        if try_append_line(output, &line, ROOT_KNOWLEDGE_RESERVE_BYTES) {
+            evidence_aliases.insert(entry_id, alias);
+        }
+    }
+    evidence_aliases
+}
+
 fn render_hit(
+    alias: &str,
     hit: &BlackboardHit,
-    evidence_routes: &HashMap<ContextMapEntryId, ContextMapHit>,
+    entry_aliases: &HashMap<String, String>,
+    evidence_aliases: &HashMap<ContextMapEntryId, String>,
 ) -> String {
     let entry = &hit.entry;
     let value = &entry.value;
     let evidence = value
         .evidence
         .iter()
-        .map(|link| {
-            evidence_routes.get(&link.context_map_entry_id).map_or_else(
-                || link.context_map_entry_id.to_string(),
-                |route| {
-                    let anchor = route
-                        .source
-                        .region_anchor
-                        .as_ref()
-                        .map(|anchor| format!("#{}:{}", anchor.scheme, anchor.locator))
-                        .unwrap_or_default();
-                    format!(
-                        "{}@{}::{}{}({})",
-                        link.context_map_entry_id,
-                        single_line(&route.source.project_root),
-                        route.source.relative_path,
-                        anchor,
-                        context_freshness_name(route.freshness),
-                    )
-                },
-            )
-        })
+        .filter_map(|link| evidence_aliases.get(&link.context_map_entry_id))
+        .cloned()
         .collect::<Vec<_>>()
         .join(",");
     let structured = value
@@ -153,35 +211,34 @@ fn render_hit(
         .relations
         .iter()
         .map(|relation| {
-            format!(
-                "{}:{}->{}",
-                relation_kind_name(relation.value.kind),
-                relation.value.from_entry_id,
-                relation.value.to_entry_id
-            )
+            let from = entry_aliases
+                .get(relation.value.from_entry_id.as_str())
+                .map(String::as_str)
+                .unwrap_or("deeper");
+            let to = entry_aliases
+                .get(relation.value.to_entry_id.as_str())
+                .map(String::as_str)
+                .unwrap_or("deeper");
+            format!("{}:{from}>{to}", relation_kind_name(relation.value.kind))
         })
         .collect::<Vec<_>>()
         .join(",");
     let mut line = format!(
-        "- id={} node={} revision={} kind={} verification={} declared={} evidenceFreshness={} importance={} confidence={} provenance={}:{}{} evidence=[{}] relations=[{}] content={}",
-        entry.id,
-        value.node_id,
-        entry.revision,
+        "- {alias} [{} {}; verification={}; declared={}; evidence={}; confidence={}; provenance={}] content={}{} sources=[{}] relations=[{}]",
+        importance_name(value.importance),
         kind_name(value.kind),
         verification_name(hit.effective_verification),
         verification_name(value.verification),
         freshness_name(hit.evidence_freshness),
-        importance_name(value.importance),
         value.confidence.basis_points(),
         provenance_name(value.provenance.kind),
-        single_line(&value.provenance.source_id),
+        single_line(&value.content),
         structured,
         evidence,
         relations,
-        single_line(&value.content),
     );
     if line.len() > MAX_ENTRY_BYTES {
-        let marker = format!("… [entry truncated; query id={}]", entry.id);
+        let marker = format!("… [{alias} truncated; query blackboard by content]");
         let maximum = MAX_ENTRY_BYTES.saturating_sub(marker.len());
         line.truncate(floor_char_boundary(&line, maximum));
         line.push_str(&marker);
