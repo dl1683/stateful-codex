@@ -735,3 +735,60 @@ full and 94,677 uncached maturation tokens. A projected break-even count is
 reported only when the observed average per-question saving is positive. Three
 pairs can show whether the first saving repeats across distinct questions; it
 cannot establish a universal workload distribution.
+
+### Execution and result
+
+All six fresh runs used the same branch binary, `gpt-5.6-luna` at `xhigh`, the
+same licensing directory and workspace root, `never` approval,
+`danger-full-access`, cached ChatGPT authentication, and cleared
+`OPENAI_API_KEY` and `CODEX_API_KEY`. The rollout comparator accepted every
+parity field. The paired thread IDs are:
+
+| Question | Ordinary | Stateful |
+| --- | --- | --- |
+| Economics | `01a0c8c1-aa6a-71f2-ac7a-3b2a0b450f89` | `01a0c8c2-d0f8-75c1-a29f-b47ea7049ac1` |
+| Territory | `01a0c8c4-9760-7cd1-9a74-a38270081e86` | `01a0c8c5-d66c-7881-9e72-944812d73eda` |
+| Termination and risk | `01a0c8c7-52fa-74c2-aca1-0bfc71831455` | `01a0c8ca-438a-77e1-be0a-1606fcc85e3f` |
+
+Each answer reached the correct substantive result, cited exact project files,
+distinguished executed terms from proposals or planning assumptions, and made
+no edits. Ordinary Codex opened all ten project files for every question.
+Stateful Codex verified four files for economics, three for territory, and four
+for termination and risk. It began from the mature root blackboard and did not
+need a deeper-blackboard or context-map query.
+
+| Measure | Ordinary | Stateful follow-ups | Delta |
+| --- | ---: | ---: | ---: |
+| Full tokens | 428,784 | 291,780 | -137,004 (-31.95%) |
+| Uncached input plus output | 73,456 | 90,052 | +16,596 (+22.59%) |
+| Model responses | 16 | 10 | -6 |
+| Read-bearing outer calls | 13 | 4 | -9 |
+| Raw project files opened across pairs | 30 | 11 | -19 |
+| Per-question full-token wins | — | 3 of 3 | — |
+| Per-question uncached-token wins | — | 0 of 3 | — |
+
+The full-token improvement is stable across these three distinct questions:
+Stateful saved 25.49%, 40.14%, and 29.73% respectively. The uncached result is
+also stable in the wrong direction: it cost 16.62%, 19.24%, and 30.48% more.
+The mechanism therefore reduces rereading, model turns, and cached/full token
+work, while its fixed uncached context and tool overhead remains too high.
+
+The committed lexical scorer returned `passed: false`. Its raw failure is not
+being repaired after observation. The Stateful economics answer described the
+proposal as “explicitly subordinate” and said it should control neither answer,
+rather than using the registered `does not control`/`supersed`/`non-binding`/
+`stale` strings. The ordinary territory answer said the licensee “may not sell”
+and quoted “excluding Canada,” rather than one registered exclusion phrase.
+Both risk answers described the data-security claims as outside or removed from
+the cap rather than using the registered `uncapped`/`cap does not apply`/
+`carve-out` wording. These are scorer misses, not substantive errors; the raw
+failure remains evidence that a literal manifest is not a semantic judge.
+
+Adding the recorded maturation run yields 940,953 full and 184,729 uncached
+Stateful tokens for this three-question series, versus 428,784 full and 73,456
+uncached ordinary tokens. Stateful therefore remains behind by 512,169 full and
+111,273 uncached tokens. At the observed average full-token saving, maturation
+would break even around question 15. No uncached break-even can be projected
+because all three follow-ups regressed. This closes the stable selective-routing
+question for this fixture, but it fails the maturation-inclusive lifetime and
+uncached-cost release gates.

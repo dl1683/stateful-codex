@@ -252,6 +252,33 @@ recall measurement, maturation-inclusive lifetime economics, a stable matched
 run distribution, a fresh rendered browser/TUI pass when the host surfaces are
 available, and the repository-wide Rust suite after explicit approval.
 
+### 2026-09-22 held-out memory and amortization checkpoint
+
+SC-EVAL-004 matured a previously held-out ten-file licensing project, preserved
+all ten intended concepts in source-verified state under manual semantic review,
+and then answered a fresh liability question by reopening four files instead of
+ten. The first literal state scorer remained at 6/10 because valid concepts used
+different morphology or spanned entries; its unchanged failure and one genuinely
+unsupported corpus-inventory entry are preserved in the evaluation record.
+
+SC-EVAL-005 then ran three additional pre-registered matched CLI pairs against
+that mature project. Stateful reopened 11 project files across the three
+questions versus ordinary Codex's 30, used four read-bearing outer calls versus
+13, and used ten model responses versus 16. It won full tokens in all three
+pairs, reducing the aggregate from 428,784 to 291,780 (31.95%). It lost uncached
+input plus output in all three, increasing the aggregate from 73,456 to 90,052
+(22.59%). Including the 649,173-token maturation run leaves Stateful 512,169
+full tokens and 111,273 uncached tokens behind ordinary for this series. The
+observed full-token slope projects break-even around question 15; the uncached
+slope has no break-even.
+
+A fresh interactive TUI run also completed through cached ChatGPT login and the
+four focused Stateful TUI tests pass. The remaining release work is therefore
+not basic CLI/TUI wiring or selective source routing. It is reducing fixed
+uncached context/tool overhead, demonstrating maturation-inclusive advantage on
+an appropriate workload, obtaining a fresh rendered browser pass when that
+surface is available, and running the approval-gated repository-wide Rust suite.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
