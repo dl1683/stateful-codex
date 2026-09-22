@@ -1149,3 +1149,35 @@ provenance and should survive from source verification into durable memory;
 they must not be discarded merely to avoid a retry. Completion must likewise
 remain terminal without allowing a model to strand a valid final finding
 outside the run's summarized result.
+
+## Benchmark SC-EVAL-009: exact-provenance finalization replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+Commit `db88bf1784` preserves optional exact line ranges from model-authored
+blackboard evidence through validation, SQLite revisions, query results, root
+World State aliases, app-server v2, and browser evidence reads. It retains one
+source link per finding and one bounded inclusive range per source. Existing
+whole-source links remain valid. Focused storage, protocol, extension,
+app-server, and browser-client tests pass.
+
+SC-EVAL-008 also showed that a model can mark a run completed, persist a final
+valid finding, and then attempt another completion update. Terminal runs must
+not become generally mutable to accommodate that ordering error. Before this
+replication, the active-run context and terminal tool contract will state that
+all blackboard, relationship, obligation, and verification work must finish
+before `completed`, and that completion is the final Stateful mutation.
+
+The replication will use a fresh byte-identical copy of the same ten-file
+licensing corpus, rebuilt branch CLI, cached ChatGPT login, cleared API-key
+variables, exact SC-EVAL-004 prompt, and `gpt-5.6-luna` at `xhigh`. It will
+report whether exact line ranges survive the linked batch, whether the batch
+requires a retry, whether completion is the final Stateful mutation, model
+responses, outer calls, full and uncached tokens, state quality, hierarchy
+placement, and source edits.
+
+The intended mechanism result is one successful linked write containing exact
+line ranges and one final completion, with no evidence-shape retry and no
+post-completion mutation attempt. The result will be retained if the model
+still completes early or cost regresses. This is another same-corpus mechanism
+replication, not a general economics claim.

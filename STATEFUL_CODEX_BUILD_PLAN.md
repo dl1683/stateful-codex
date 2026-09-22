@@ -410,6 +410,22 @@ finding itself persisted. These failures define the next narrow work: preserve
 exact line locators through storage, APIs, tools, and evidence navigation, then
 harden finalization ordering without making terminal runs generally mutable.
 
+Exact line-range provenance is now implemented in `db88bf1784`. The bounded
+locator survives model writes, durable revisions, blackboard queries, root
+source aliases, v2 APIs, and browser evidence navigation. The model-facing
+integration test proves that `lineRange: {start: 2, end: 3}` is returned by the
+next query and rendered as `S1:L2-L3` in the next request's World State. The
+browser API returns only those exact lines, and the UI displays and reuses the
+locator. Focused storage, protocol, extension, app-server, and client suites
+pass.
+
+SC-EVAL-009 is pre-registered to measure the completed provenance path and a
+stricter terminal-ordering contract. The contract will keep completed runs
+immutable: instead of reopening a terminal record, it tells the model that all
+knowledge, relationship, obligation, and verification writes precede the final
+completion call. The live replication will determine whether this removes both
+SC-EVAL-008 retries without adding a second finalization phase.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
