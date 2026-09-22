@@ -1,0 +1,164 @@
+{
+  "name": "SC-EVAL-015 two-project release distribution",
+  "expectedMaturationRollouts": 2,
+  "projects": [
+    {
+      "id": "procurement",
+      "fixture": "eval/fixtures/procurement",
+      "maturationPrompt": "Build durable project intelligence for this entire selected project. Map the controlling requirements, source-authority relationships, material facts and numbers, contradictions, decisions, and open questions. Verify exact sources before promotion, connect non-obvious cross-source implications, preserve precise source routes, publish a semantic obligation explaining what was learned and why it matters, and do not edit project files."
+    },
+    {
+      "id": "licensing",
+      "fixture": "eval/fixtures/licensing",
+      "maturationPrompt": "Build durable project intelligence for this entire selected project. Map the controlling requirements, source-authority relationships, material facts and numbers, contradictions, decisions, and open questions. Verify exact sources before promotion, connect non-obvious cross-source implications, preserve precise source routes, publish a semantic obligation explaining what was learned and why it matters, and do not edit project files."
+    }
+  ],
+  "cases": [
+    {
+      "id": "procurement-viability",
+      "project": "procurement",
+      "prompt": "Which vendor is currently viable under every binding deployment criterion, why does each alternative fail, and has any vendor actually been awarded the contract? Identify the controlling and evidentiary documents, cite the exact project files, distinguish preliminary preference from a final decision, and do not edit files.",
+      "requireDurableCompletion": true,
+      "expectedConcepts": [
+        {
+          "name": "Cedar is the only currently viable candidate",
+          "termGroups": [["cedar"], ["only currently viable", "only viable", "sole viable"], ["120"], ["$285,000"]]
+        },
+        {
+          "name": "Alder fails binding residency",
+          "termGroups": [["alder"], ["virginia"], ["plaintext"], ["outside the eea", "outside eea"], ["security-addendum.md", "security addendum"]]
+        },
+        {
+          "name": "Birch fails binding continuity",
+          "termGroups": [["birch"], ["72"], ["96"], ["24"], ["operations-log.md", "operations log"]]
+        },
+        {
+          "name": "No final award",
+          "termGroups": [["no vendor", "no final"], ["award", "approved"], ["preliminary", "provisional"], ["committee-notes.md", "committee notes"]]
+        }
+      ],
+      "forbiddenPhrases": ["alder is viable", "birch is viable", "cedar was awarded", "cedar won the contract"]
+    },
+    {
+      "id": "procurement-authority-and-cost",
+      "project": "procurement",
+      "prompt": "What are the authoritative year-one totals for Alder, Birch, and Cedar, and can Alder's lowest headline subscription or the committee's preliminary preference override a residency or continuity failure? Cite the exact project files, identify the authority order, and do not edit files.",
+      "requireDurableCompletion": true,
+      "expectedConcepts": [
+        {
+          "name": "Authoritative totals",
+          "termGroups": [["$248,000"], ["$236,000"], ["$285,000"], ["finance-schedule.md", "finance schedule"]]
+        },
+        {
+          "name": "All totals pass cost gate",
+          "termGroups": [["$300,000"], ["all three", "each vendor"], ["within", "under"]]
+        },
+        {
+          "name": "Price cannot cure other failures",
+          "termGroups": [["cannot", "does not"], ["repair", "override", "waive"], ["residency"], ["continuity"]]
+        },
+        {
+          "name": "Preliminary preference is not final",
+          "termGroups": [["alder"], ["preliminary", "provisional"], ["not final", "no vendor has been finally approved"], ["committee-notes.md", "committee notes"]]
+        }
+      ],
+      "forbiddenPhrases": ["alder should be selected because it is cheapest", "the committee finally approved alder"]
+    },
+    {
+      "id": "procurement-continuity-basis",
+      "project": "procurement",
+      "prompt": "Why is 96 consecutive hours the binding offline-acceptance requirement, and what does the evidence imply for Birch and Cedar? Cite the exact project files, quantify the operational consequence, distinguish verified history from vendor claims, and do not edit files.",
+      "requireDurableCompletion": true,
+      "expectedConcepts": [
+        {
+          "name": "Verified 96-hour basis",
+          "termGroups": [["north ridge"], ["96"], ["verified", "observed"], ["operations-log.md", "operations log"]]
+        },
+        {
+          "name": "Birch loses 24 hours",
+          "termGroups": [["birch"], ["72"], ["24"], ["reject", "lost", "fail"]]
+        },
+        {
+          "name": "Cedar claim satisfies duration",
+          "termGroups": [["cedar"], ["120"], ["timestamp"], ["ordering"], ["vendor-cedar.md", "cedar proposal"]]
+        },
+        {
+          "name": "Claims remain distinct from observed history",
+          "termGroups": [["proposal", "advertised", "vendor claim"], ["verified", "observed"], ["96"]]
+        }
+      ],
+      "forbiddenPhrases": ["72 hours satisfies the requirement", "birch passes the continuity gate"]
+    },
+    {
+      "id": "licensing-economics",
+      "project": "licensing",
+      "prompt": "What royalty rate currently governs the licensing deal, what annual royalty does the approved forecast imply, and why should the counterparty proposal not control either answer? Cite the exact project files, identify any material assumption behind the forecast, and do not edit files.",
+      "requireDurableCompletion": true,
+      "expectedConcepts": [
+        {
+          "name": "Current royalty",
+          "termGroups": [["6%", "six percent", "six-percent"], ["amendment 1", "executed amendment"]]
+        },
+        {
+          "name": "Approved forecast",
+          "termGroups": [["$20,000,000", "$20 million"], ["$1,200,000", "$1.2 million"], ["approved-finance-schedule.md", "approved finance schedule"]]
+        },
+        {
+          "name": "Proposal is stale",
+          "termGroups": [["8%", "eight percent"], ["proposal"], ["does not control", "supersed", "non-binding", "stale"]]
+        },
+        {
+          "name": "Forecast is an assumption",
+          "termGroups": [["forecast", "projection"], ["assumption", "not a guarantee", "not guaranteed", "actual"]]
+        }
+      ],
+      "forbiddenPhrases": ["the current royalty is 8%", "the current royalty remains eight percent"]
+    },
+    {
+      "id": "licensing-territory",
+      "project": "licensing",
+      "prompt": "May the licensee currently sell in Canada? Identify the controlling instrument and the exact condition for Canada to enter the territory, cite the exact project files, distinguish current territorial scope from overall closing readiness, and do not edit files.",
+      "requireDurableCompletion": true,
+      "expectedConcepts": [
+        {
+          "name": "Canada currently excluded",
+          "termGroups": [["canada"], ["excluded", "not currently", "may not currently", "cannot currently"]]
+        },
+        {
+          "name": "Written consent condition",
+          "termGroups": [["written"], ["consent"], ["licensor"], ["executed-side-letter.md", "executed side letter", "side letter"]]
+        },
+        {
+          "name": "Closing remains blocked",
+          "termGroups": [["closing-checklist.md", "closing checklist"], ["not ready", "pending", "blocked"], ["board"], ["counsel"]]
+        }
+      ],
+      "forbiddenPhrases": ["canada is currently included", "the transaction is ready to close"]
+    },
+    {
+      "id": "licensing-termination-risk",
+      "project": "licensing",
+      "prompt": "What is the current termination-for-convenience notice period, and is the modeled data-security exposure fully covered by the identified insurance? Identify the controlling and evidentiary documents, cite the exact project files, distinguish contractual facts from planning assumptions, and do not edit files.",
+      "requireDurableCompletion": true,
+      "expectedConcepts": [
+        {
+          "name": "Termination notice",
+          "termGroups": [["60", "sixty"], ["day"], ["amendment 2", "executed amendment"]]
+        },
+        {
+          "name": "Modeled exposure",
+          "termGroups": [["$5,500,000", "$5.5 million"], ["risk-assessment.md", "risk assessment"], ["scenario", "planning", "not a prediction"]]
+        },
+        {
+          "name": "Insurance gap",
+          "termGroups": [["$3,000,000", "$3 million"], ["insurance"], ["$2,500,000", "$2.5 million", "gap", "shortfall", "not fully covered"]]
+        },
+        {
+          "name": "Uncapped carve-out",
+          "termGroups": [["data-security", "data security"], ["uncapped", "cap does not apply", "does not govern", "carve-out"], ["master-license.md", "master license"], ["executed-amendment-2.md", "amendment 2"]]
+        }
+      ],
+      "forbiddenPhrases": ["the notice period is 30 days", "the exposure is fully insured"]
+    }
+  ]
+}

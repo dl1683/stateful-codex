@@ -558,6 +558,16 @@ pre-registered matched workload that measures state precision/recall, decisive
 detail preservation, selective rereading, and maturation-inclusive economics;
 the repository-wide Rust suite remains approval-gated.
 
+Commit `c60f6c969d` closes a release-evaluator blind spot exposed by
+SC-EVAL-012: matched series can now require registered concepts in the
+Stateful completion result and returned completion basis, not only the visible
+assistant answer. The evaluator also counts completion attempts and accepts all
+measured project-maturation rollouts instead of silently representing a multi-
+project distribution with one startup cost. Its 11-test client/evaluation suite
+passes, and it reconstructs the real SC-EVAL-014 completion as one attempt with
+15 checklist items. SC-EVAL-015 freezes the next six-pair, two-project protocol
+before execution; persisted results still require independent live API reads.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

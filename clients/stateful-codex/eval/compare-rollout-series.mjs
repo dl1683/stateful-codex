@@ -30,6 +30,7 @@ export function compareSeries(
       : null;
     return {
       id: benchmarkCase.id,
+      project: benchmarkCase.project ?? null,
       promptMatchesManifest,
       comparable: comparison.comparable,
       baselineAnswer,
@@ -194,6 +195,22 @@ function parseArgs(args) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(await readFile(options.manifest, "utf8"));
+  if (
+    manifest.expectedMaturationRollouts != null &&
+    options.maturationRollouts.length !== manifest.expectedMaturationRollouts
+  ) {
+    throw new Error(
+      `manifest requires exactly ${manifest.expectedMaturationRollouts} maturation rollouts`,
+    );
+  }
+  if (
+    options.maturationRollouts.length === 0 &&
+    manifest.maturationUsage == null
+  ) {
+    throw new Error(
+      "manifest has no frozen maturation usage; provide --maturation-rollout",
+    );
+  }
   const rollouts = new Map();
   for (const pair of options.pairs) {
     const [id, paths] = pair.split("=", 2);

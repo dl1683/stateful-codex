@@ -57,7 +57,8 @@ npm run eval:series -- --manifest eval/manifests/licensing-series.json `
 
 Repeat `--maturation-rollout` for each independently matured project in a
 multi-project distribution. Omitting it uses the frozen aggregate recorded in
-the manifest.
+the manifest. A manifest may set `expectedMaturationRollouts` to reject an
+accidentally incomplete lifetime-cost calculation.
 
 ## Project-state regression probes
 

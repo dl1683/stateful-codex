@@ -1705,3 +1705,51 @@ durable semantic coverage. It remains one same-corpus replication. A broader
 pre-registered matched distribution, representative precision and recall,
 maturation-inclusive economics, concurrent-root behavior, and the approval-
 gated repository-wide Rust suite remain open Stage 8 evidence.
+
+## Benchmark SC-EVAL-015: two-project release distribution
+
+Status: pre-registered before execution on 2026-09-22.
+
+The frozen manifest is
+`clients/stateful-codex/eval/manifests/release-distribution.json`. It contains
+six outcome questions across the independently matured procurement and
+licensing projects: binding vendor viability, authority and cost, the verified
+continuity basis, current licensing economics, Canadian territory, and
+termination/data-security risk. Each case fixes its prompt, expected semantic
+concepts, prohibited conclusions, project identity, and requirement that the
+Stateful completion result plus returned completion basis preserve the same
+material coverage as the visible answer.
+
+Each fixture will be copied to a fresh temporary directory and hashed before
+execution. One Collaborative Stateful maturation run per project will use the
+exact manifest prompt, then each case will run as a fresh ordinary thread and a
+fresh Stateful thread attached to that project's durable intelligence. Every
+pair must use the same rebuilt branch binary, cached ChatGPT login with
+`OPENAI_API_KEY` and `CODEX_API_KEY` removed, model, reasoning effort, prompt,
+working directory, roots, approval policy, sandbox policy, and permission
+profile. Pair order will alternate which condition runs first. The two actual
+maturation rollouts are mandatory inputs to the aggregate scorer; a missing
+project maturation is an error rather than a zero-cost default.
+
+The correctness gate requires all twelve visible answers to contain every
+registered concept and no prohibited conclusion. Each of the six Stateful runs
+must also complete once without a completion retry, expose a successful durable
+completion record in the rollout, and pass the same semantic checks across its
+submitted result and returned completion basis. A live API read must separately
+confirm that terminal revision and persisted result; the rollout reconstruction
+is not treated as authoritative storage evidence. Both fixture copies must
+remain byte-identical.
+
+The retrieval gate requires Stateful to use fewer aggregate read-bearing calls
+and fewer unique raw project files than ordinary Codex without weakening exact
+source citations. The economics gate requires lower aggregate full follow-up
+tokens and will report uncached follow-up usage, both measured maturation runs,
+total lifetime delta, win counts, and projected break-even without hiding a
+regression. No uncached or maturation-inclusive advantage will be claimed
+unless the measured totals actually establish it.
+
+This distribution is deliberately broader than a same-question replication but
+is still two small synthetic knowledge corpora. It can close the observed
+cross-case durable-coverage and short-distribution gates. It cannot alone prove
+large-corpus scaling, code-editing workloads, multi-day cache behavior,
+concurrent root revisions, or general production readiness.
