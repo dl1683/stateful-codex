@@ -814,3 +814,45 @@ answer correctness, parity, project-file breadth, full tokens, uncached input
 plus output, model responses, and read-bearing calls. One remediation pair can
 show whether the intended payload changed; it cannot replace the three-pair
 distribution or establish maturation-inclusive break-even.
+
+### Execution, diagnosis, and decision
+
+The same-binary ordinary thread is
+`01a0c8e5-1458-7a11-ad92-ca037549a2a1`; the Stateful thread is
+`01a0c8e7-623f-7182-89e3-0efe34244e6b`. Both passed every parity field and the
+three direct answer checks. Ordinary reopened all ten files. Stateful verified
+only `executed-side-letter.md`, `closing-checklist.md`, and
+`binding-review-policy.md`, completed the semantic obligation and run, and made
+no source edits.
+
+| Measure | Ordinary | Stateful | Stateful delta |
+| --- | ---: | ---: | ---: |
+| Full tokens | 156,315 | 82,664 | -73,651 (-47.12%) |
+| Uncached input plus output | 40,091 | 54,504 | +14,413 (+35.95%) |
+| Model responses | 6 | 3 | -3 |
+| Read-bearing outer calls | 4 | 1 | -3 |
+| Project files opened | 10 | 3 | -7 |
+
+The intended schema reduction was real but small. The optimized Stateful first
+request contained 26,062 input tokens, versus 26,442 in the original territory
+run: 380 fewer tokens. Provider cache behavior dominated the result. The three
+optimized Stateful responses received 1,792, 0, and 26,368 cached input tokens
+respectively. The second request alone contributed 27,021 uncached input tokens;
+the third then cached almost the entire prefix. This is not evidence that the
+root blackboard was reread or that selective routing failed.
+
+The mature root project fragment is 11,150 characters and carries the 13
+decisive source-routed findings and their relationships. The 1,311-character run
+fragment carries the explicit user-selected mode, goal, constraints, current
+steering state, and completion contract. Removing either would trade away the
+product behavior being measured. Moving the exceptional tools behind discovery
+saved only about 1.4% of the first input while making core memory-authoring and
+routing capabilities less immediately discoverable.
+
+The deferred-tool implementation is therefore rejected and reverted. The
+result remains useful: full-token and rereading advantages strengthened, while
+uncached cost remains dominated by volatile prefix-cache misses rather than a
+large removable tool-schema block. Future efficiency work must preserve the
+rich root and explicit run contract, measure distributions rather than a single
+cache outcome, and target stable prefix construction or maturation efficiency
+only when the host/provider boundary makes that actionable.

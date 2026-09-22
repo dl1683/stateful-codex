@@ -279,6 +279,18 @@ uncached context/tool overhead, demonstrating maturation-inclusive advantage on
 an appropriate workload, obtaining a fresh rendered browser pass when that
 surface is available, and running the approval-gated repository-wide Rust suite.
 
+One bounded attempt to reduce the uncached overhead moved seven exceptional
+Stateful tool schemas behind Codex's deferred-tool boundary. A same-binary
+territory replication still reduced full tokens by 47.12%, model responses by
+three, and file reads from ten to three, but increased uncached input plus output
+by 35.95%. The initial request shrank by only 380 tokens; a zero-cache second
+response accounted for 27,021 uncached input tokens before the third response
+cached 26,368. Because the small schema saving did not justify making core
+memory tools less discoverable, the change was reverted and preserved as
+negative evidence in `STATEFUL_CODEX_EVALUATION.md`. Do not respond to this
+result by thinning the rich root blackboard or explicit run contract that
+enabled selective retrieval.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
