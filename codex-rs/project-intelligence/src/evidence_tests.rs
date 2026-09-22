@@ -1,0 +1,78 @@
+use codex_state::SqliteConfig;
+use codex_utils_absolute_path::test_support::PathExt;
+use pretty_assertions::assert_eq;
+use tempfile::TempDir;
+
+use super::*;
+use crate::ContextMapStore;
+use crate::HierarchyStore;
+use crate::ProjectIndexRequest;
+use crate::ProjectIndexer;
+
+#[tokio::test]
+async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    let source = root.path().join("evidence.txt");
+    std::fs::write(&source, "alpha\nbeta\ngamma\ndelta\n").expect("write fixture");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    ProjectIndexer::new(
+        HierarchyStore::open(&sqlite).await.expect("hierarchy"),
+        context_map.clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    })
+    .await
+    .expect("index project");
+    let relative_path = ProjectRelativePath::parse("evidence.txt").expect("relative path");
+    let hit = context_map
+        .file_hits_for_path("project-1", &relative_path)
+        .await
+        .expect("source lookup")
+        .into_iter()
+        .next()
+        .expect("indexed source");
+    let reader = EvidenceReader::new(context_map);
+    let result = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            project_root: None,
+            relative_path: relative_path.clone(),
+            line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            max_bytes: 64,
+        })
+        .await
+        .expect("read exact lines");
+
+    assert_eq!(
+        result,
+        EvidenceReadResult {
+            hit,
+            content: "beta\ngamma\n".to_string(),
+            bytes_returned: 11,
+            total_bytes: 23,
+            total_lines: 4,
+            first_line: Some(2),
+            last_line: Some(3),
+            truncated: false,
+        }
+    );
+
+    std::fs::write(source, "alpha\nchanged\ngamma\ndelta\n").expect("change source");
+    let error = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            project_root: None,
+            relative_path,
+            line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            max_bytes: 64,
+        })
+        .await
+        .expect_err("changed source must not support evidence");
+    assert!(matches!(error, EvidenceReadError::SourceChanged));
+}

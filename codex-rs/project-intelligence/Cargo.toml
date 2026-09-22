@@ -19,7 +19,7 @@ serde = { workspace = true, features = ["derive"] }
 sha2 = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "rt"] }
 
 [dev-dependencies]
 codex-utils-absolute-path = { workspace = true }

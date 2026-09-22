@@ -18,6 +18,7 @@ use crate::HierarchyNodeId;
 use crate::NewContextMapEntry;
 use crate::NodeKind;
 use crate::NodeLifecycle;
+use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
 use crate::search::literal_prefix_expression;
 use crate::storage::DATABASE_NAME;
@@ -106,19 +107,39 @@ impl ContextMapStore {
         id: &ContextMapEntryId,
     ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
         let mut connection = self.pool.acquire().await?;
-        let Some(entry) = load_entry(&mut connection, project_id, id).await? else {
-            return Ok(None);
-        };
-        let node = load_node(&mut connection, project_id, &entry.value.node_id)
-            .await?
-            .ok_or_else(|| ContextMapStoreError::NodeNotFound(entry.value.node_id.to_string()))?;
-        let freshness = entry.freshness_against(&node)?;
-        let source = entry.source_route(&node)?;
-        Ok(Some(ContextMapHit {
-            entry,
-            source,
-            freshness,
-        }))
+        load_hit(&mut connection, project_id, id).await
+    }
+
+    pub async fn file_hits_for_path(
+        &self,
+        project_id: &str,
+        relative_path: &ProjectRelativePath,
+    ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
+        let mut connection = self.pool.acquire().await?;
+        let raw_ids = sqlx::query_scalar::<_, String>(
+            "SELECT entry.id
+             FROM context_map_entries AS entry
+             JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+             WHERE entry.project_id = ? AND node.project_id = ?
+               AND node.kind = 'file' AND node.relative_path = ?
+             ORDER BY node.project_root, entry.id",
+        )
+        .bind(project_id)
+        .bind(project_id)
+        .bind(relative_path.as_str())
+        .fetch_all(&mut *connection)
+        .await?;
+        let mut hits = Vec::with_capacity(raw_ids.len());
+        for raw_id in raw_ids {
+            let id = ContextMapEntryId::parse(&raw_id)
+                .map_err(|_| ContextMapStoreError::CorruptEntry(raw_id))?;
+            hits.push(
+                load_hit(&mut connection, project_id, &id)
+                    .await?
+                    .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?,
+            );
+        }
+        Ok(hits)
     }
 
     pub async fn query(
@@ -146,21 +167,11 @@ impl ContextMapStore {
         for raw_id in entry_ids {
             let id = ContextMapEntryId::parse(&raw_id)
                 .map_err(|_| ContextMapStoreError::CorruptEntry(raw_id))?;
-            let entry = load_entry(&mut connection, &query.project_id, &id)
-                .await?
-                .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
-            let node = load_node(&mut connection, &query.project_id, &entry.value.node_id)
-                .await?
-                .ok_or_else(|| {
-                    ContextMapStoreError::NodeNotFound(entry.value.node_id.to_string())
-                })?;
-            let freshness = entry.freshness_against(&node)?;
-            let source = entry.source_route(&node)?;
-            hits.push(ContextMapHit {
-                entry,
-                source,
-                freshness,
-            });
+            hits.push(
+                load_hit(&mut connection, &query.project_id, &id)
+                    .await?
+                    .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?,
+            );
         }
         Ok(hits)
     }
@@ -252,6 +263,26 @@ struct StoredContextMapEntry {
     created_at_ms: i64,
     updated_at_ms: i64,
     last_verified_at_ms: Option<i64>,
+}
+
+async fn load_hit(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    id: &ContextMapEntryId,
+) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
+    let Some(entry) = load_entry(connection, project_id, id).await? else {
+        return Ok(None);
+    };
+    let node = load_node(connection, project_id, &entry.value.node_id)
+        .await?
+        .ok_or_else(|| ContextMapStoreError::NodeNotFound(entry.value.node_id.to_string()))?;
+    let freshness = entry.freshness_against(&node)?;
+    let source = entry.source_route(&node)?;
+    Ok(Some(ContextMapHit {
+        entry,
+        source,
+        freshness,
+    }))
 }
 
 async fn load_entry(
