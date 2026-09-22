@@ -6,9 +6,19 @@ import { finished } from "node:stream/promises";
 
 import { corpusHash } from "./corpus-hash.mjs";
 
+const MEMORY_ISOLATION_ARGS = [
+  "-c",
+  "memories.use_memories=false",
+  "-c",
+  "memories.generate_memories=false",
+];
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(await readFile(options.manifest, "utf8"));
+  if (manifest.memoryPolicy !== "disabled") {
+    throw new Error("longitudinal manifests must explicitly disable host memory");
+  }
   const project = manifest.projects.find((candidate) => candidate.id === options.project);
   if (!project) throw new Error(`unknown project: ${options.project}`);
   const snapshot = JSON.parse(
@@ -108,6 +118,7 @@ function startArgs(options) {
     options.model,
     "-c",
     `model_reasoning_effort=\"${options.reasoningEffort}\"`,
+    ...MEMORY_ISOLATION_ARGS,
     "--sandbox",
     "read-only",
     "-C",
@@ -128,6 +139,7 @@ function resumeArgs(options) {
     options.model,
     "-c",
     `model_reasoning_effort=\"${options.reasoningEffort}\"`,
+    ...MEMORY_ISOLATION_ARGS,
     "-c",
     "sandbox_mode=\"read-only\"",
   ];

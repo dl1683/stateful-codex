@@ -31,6 +31,12 @@ prove source equivalence; filesystem paths may differ solely because the copies
 are isolated. The user still selects the project, thread, and mode. The
 evaluator does not infer them.
 
+Host Codex memories are disabled in both arms while cached ChatGPT
+authentication is retained. This prevents project-specific notes from earlier
+unrelated sessions from supplying either arm with hidden prior state. Memory
+use and memory generation must both be disabled explicitly in the frozen
+manifest runner; removing API-key environment variables is not sufficient.
+
 Question order is frozen before either arm is run. The sequence includes:
 
 - early corpus-learning questions;

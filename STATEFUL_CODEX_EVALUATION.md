@@ -2353,3 +2353,26 @@ Autonomous mode. A run is operationally valid only if it completes, preserves
 the corpus, exposes project state, commits its durable result, and yields the
 required blinded quality, source-audit, and state observations. No result is
 recorded yet.
+
+### Pre-cohort isolation correction
+
+The first AGI pair was an infrastructure dry run, not an SC-EVAL-023 result.
+The arms completed against identical unchanged corpora, but the Stateful stderr
+showed an attempted read of the host memory registry. Removing API-key
+environment variables had preserved cached ChatGPT login as intended, but had
+not disabled Codex's separate memory subsystem. The ordinary arm used
+1,158,270 total tokens and 132,734 uncached-input-plus-output tokens; the
+Stateful arm used 1,394,703 and 137,743 respectively, with 18 versus 10
+read-bearing operations. Those values remain an operational diagnostic only.
+They are excluded from the registered cohort because project-specific prior
+memory could replace work that either experimental condition was meant to do.
+
+The following Latent-Space-Reasoning ordinary arm was interrupted as soon as
+the contamination path was confirmed, before any outcome was accepted. The
+runner now requires an explicit disabled-memory policy and passes both
+`memories.use_memories=false` and `memories.generate_memories=false` while
+retaining the cached ChatGPT login. The registered cohort will restart from
+fresh snapshot paths so the completed dry-run Stateful project identity and
+state cannot carry forward. Every final result will therefore be collected
+after this correction; no favorable or unfavorable completed result was
+selected for inclusion.

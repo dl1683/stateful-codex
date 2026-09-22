@@ -1,5 +1,6 @@
 {
   "name": "Stateful Codex longitudinal suite",
+  "memoryPolicy": "disabled",
   "requiredObservations": {
     "baseline": ["quality", "sourceAudit"],
     "stateful": ["quality", "sourceAudit", "state"]

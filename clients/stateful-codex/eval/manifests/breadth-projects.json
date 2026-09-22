@@ -3,6 +3,7 @@
   "model": "gpt-5.6-luna",
   "reasoningEffort": "high",
   "mode": "autonomous",
+  "memoryPolicy": "disabled",
   "requiredObservations": {
     "baseline": ["quality", "sourceAudit"],
     "stateful": ["quality", "sourceAudit", "state"]
