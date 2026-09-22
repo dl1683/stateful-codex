@@ -37,3 +37,21 @@ expected answer terms, and reports read-bearing tool calls plus Stateful
 retrieval and persistence calls. A read-bearing call is a rollout-level proxy,
 not an exact count of operating-system reads. A comparison that fails parity
 exits with status 2; a run that misses an expected term exits with status 3.
+
+## Project-state regression probes
+
+Evaluate a mature project's structured blackboard against a versioned semantic
+manifest through the live gateway:
+
+```powershell
+npm run eval:state -- --project <project-id>
+```
+
+The default procurement manifest checks expected decisions, decisive facts,
+contradictions, and open questions. It reports semantic probe recall separately
+from supported-entry precision. A supported entry must be active,
+source-verified, linked to evidence, and current against the indexed source.
+The command fails if the 50-entry snapshot is truncated, a probe is missing or
+unsupported, an entry lacks current support, or a prohibited affirmative claim
+appears. These deterministic probes are regression evidence, not a substitute
+for independent semantic review or a held-out precision benchmark.

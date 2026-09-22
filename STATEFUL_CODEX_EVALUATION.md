@@ -512,3 +512,28 @@ input plus output (60.84%). This reproduces the selective-routing and full-token
 advantages while also reproducing the uncached-cost regression. The result
 strengthens the mechanism finding; it still does not establish lower lifetime
 cost after workspace maturation or a stable performance distribution.
+
+## Project-state quality instrumentation
+
+`clients/stateful-codex/eval/evaluate-project-state.mjs` now reads a live
+project through the real gateway and scores a versioned manifest. It separates:
+
+- semantic concept recall;
+- recall of concepts backed by current source-verified evidence;
+- the fraction of returned entries that are active, source-verified,
+  evidence-linked, and current; and
+- prohibited affirmative conclusions.
+
+It refuses a completeness result when the bounded 50-entry response is
+truncated. The default procurement manifest covers 11 controlling facts,
+decisions, contradictions, and open questions. At project-intelligence revision
+43, the live mature project returned 14 of 14 currently supported entries,
+matched and currently supported all 11 probes, and contained no prohibited
+affirmative conclusion. The client suite, including the scorer behavior, passes
+7/7.
+
+This is a regression baseline, not an independent estimate of semantic
+precision or recall: the procurement corpus and existing state had already been
+inspected before the manifest was committed. A held-out corpus must commit its
+expected probes before maturation and model evaluation before supporting a
+general project-memory quality claim.

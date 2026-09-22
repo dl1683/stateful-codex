@@ -1,0 +1,121 @@
+{
+  "name": "procurement controlling knowledge",
+  "expectedConcepts": [
+    {
+      "name": "binding conjunctive gates",
+      "kinds": ["fact", "decision"],
+      "termGroups": [
+        ["all three gates", "passes all three"],
+        ["emergency support"],
+        ["temporary plaintext"],
+        ["96 consecutive hours"],
+        ["$300,000"]
+      ]
+    },
+    {
+      "name": "authority hierarchy",
+      "kinds": ["decision"],
+      "termGroups": [
+        ["supersedes inconsistent proposal"],
+        ["approved finance schedule"],
+        ["preliminary"],
+        ["no vendor is finally approved"]
+      ]
+    },
+    {
+      "name": "Alder residency failure",
+      "termGroups": [
+        ["alder"],
+        ["not viable", "fails binding residency"],
+        ["virginia"],
+        ["plaintext"],
+        ["outside the eea"]
+      ]
+    },
+    {
+      "name": "Birch continuity failure",
+      "termGroups": [
+        ["birch"],
+        ["not viable", "continuity fail"],
+        ["72-hour", "72 hour"],
+        ["96-hour", "96 hour"],
+        ["24-hour", "24 hours"]
+      ]
+    },
+    {
+      "name": "Cedar sole viable candidate without final award",
+      "termGroups": [
+        ["cedar"],
+        ["only candidate", "only currently viable"],
+        ["120"],
+        ["$285,000"],
+        ["not a recorded final award", "does not establish that cedar was awarded"]
+      ]
+    },
+    {
+      "name": "authoritative finance totals",
+      "kinds": ["number"],
+      "termGroups": [
+        ["authoritative year-one"],
+        ["$248,000"],
+        ["$236,000"],
+        ["$285,000"]
+      ]
+    },
+    {
+      "name": "verified 96-hour outage basis",
+      "termGroups": [
+        ["north ridge"],
+        ["96-hour", "96 hour"],
+        ["72-hour", "72 hour"],
+        ["24 hours", "24-hour"]
+      ]
+    },
+    {
+      "name": "resolved Alder proposal contradiction",
+      "kinds": ["contradiction"],
+      "termGroups": [
+        ["alder"],
+        ["eu hosted", "eu-hosting"],
+        ["executed addendum"],
+        ["outside the eea"]
+      ]
+    },
+    {
+      "name": "open final-award question",
+      "kinds": ["question"],
+      "termGroups": [
+        ["no vendor has been finally approved"],
+        ["cedar"],
+        ["final committee decision", "award record"]
+      ]
+    },
+    {
+      "name": "open residency-contract completeness question",
+      "kinds": ["question"],
+      "termGroups": [
+        ["birch"],
+        ["cedar"],
+        ["debugging"],
+        ["before award"]
+      ]
+    },
+    {
+      "name": "open Cedar schedule question",
+      "kinds": ["question"],
+      "termGroups": [
+        ["cedar"],
+        ["2026-10-10"],
+        ["decision date"],
+        ["schedule commitment"]
+      ]
+    }
+  ],
+  "forbiddenPhrases": [
+    "alder is viable",
+    "birch is viable",
+    "cedar was awarded the contract",
+    "cedar is selected as the winner",
+    "committee approved alder"
+  ]
+}

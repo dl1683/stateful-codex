@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "eval": "node eval/compare-rollouts.mjs",
+    "eval:state": "node eval/evaluate-project-state.mjs",
     "start": "node server.mjs",
     "test": "node --test"
   },
