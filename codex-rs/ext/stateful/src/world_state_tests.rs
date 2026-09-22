@@ -80,6 +80,11 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
+            .contains("do not turn a question about one criterion")
+    );
+    assert!(
+        rendered
+            .body()
             .contains("Do not query deeper state, search by every known filename")
     );
     assert!(

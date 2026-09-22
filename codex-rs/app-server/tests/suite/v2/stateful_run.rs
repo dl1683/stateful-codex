@@ -490,6 +490,9 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     let requests = response_log.requests();
     assert_eq!(requests.len(), 5);
     assert!(requests[0].body_contains_text("<stateful_run>"));
+    assert!(requests[0].body_contains_text(
+        "do not turn a question about one criterion or decision dimension into an overall project determination"
+    ));
     assert!(requests[0].body_contains_text("removes the active-run binding"));
     assert!(requests[0].body_contains_text("final Stateful mutation"));
     assert!(requests[0].body_contains_text("rootRevision"));

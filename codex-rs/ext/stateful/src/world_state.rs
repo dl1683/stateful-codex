@@ -74,7 +74,7 @@ impl ProjectIntelligenceStatus {
         );
         append_line(
             &mut body,
-            "Start from accumulated project intelligence. If current source-verified root knowledge answers the question, use evidence_read with its embedded paths and narrow line ranges to verify only the smallest decisive source set whose exact wording can change the answer. Bound exact verification to the requested outcome: rely on current source-verified root knowledge for adjacent context instead of reopening sources merely to prove unrelated gates or broaden the answer. Do not query deeper state, search by every known filename, or reread the corpus merely to repeat adequate root knowledge. Use a focused deeper-blackboard or context-map query only when the root or its routes are insufficient.",
+            "Start from accumulated project intelligence. If current source-verified root knowledge answers the question, use evidence_read with its embedded paths and narrow line ranges to verify only the smallest decisive source set whose exact wording can change the answer. Bound exact verification to the requested outcome: do not turn a question about one criterion or decision dimension into an overall project determination. Verify and conclude the requested dimension, rely on current source-verified root knowledge for labelled adjacent context, and state when broader viability or approval is outside this evidence review instead of reopening unrelated sources to re-prove it. Do not query deeper state, search by every known filename, or reread the corpus merely to repeat adequate root knowledge. Use a focused deeper-blackboard or context-map query only when the root or its routes are insufficient.",
         );
         append_line(
             &mut body,
