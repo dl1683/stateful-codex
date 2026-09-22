@@ -2289,3 +2289,30 @@ A turn-aware evaluator is therefore a prerequisite, not post-hoc analysis.
 Published external Codex or Luna scores remain contextual unless model,
 benchmark version, harness, budget, retry policy, and scoring are demonstrably
 comparable.
+
+### Turn-aware evaluator checkpoint
+
+The prerequisite evaluator is now implemented at
+`clients/stateful-codex/eval/compare-longitudinal-rollouts.mjs`. It consumes one
+continuous rollout per arm, attributes response usage through persisted turn
+IDs, reconciles the response sum with the recorded turn total, and reports
+per-turn plus cumulative cost without re-summing cumulative thread usage. It
+also records actual compaction checkpoints, latency, read operations, rejected
+tool results, exact `evidence_read` regions, completion attempts, and the
+model-visible Stateful project/root projection size, revision, omissions, and
+freshness at each turn.
+
+The evaluator deliberately does not infer semantic quality, complete source
+access, or deep-state size from rollout prose. Frozen case-keyed observation
+files provide blinded rubric scores, an audited source ledger, and post-turn
+state counts. Missing required evidence invalidates the comparison. Literal
+term checks remain explicitly diagnostic. Multi-project aggregation reports
+project win counts and labels projects—not questions—as the clustered units.
+
+The complete frozen method and observation shape are in
+`clients/stateful-codex/eval/LONGITUDINAL_PROTOCOL.md`; a non-registered shape
+example is in `eval/manifests/longitudinal-template.json`. The synthetic focused
+tests pass, and the parser was also exercised against an existing five-turn
+rollout containing a canonical compaction. That live historical file correctly
+surfaced four incomplete/superseded turns rather than silently treating them as
+valid observations. No six-project result has been run or claimed yet.

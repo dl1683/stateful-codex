@@ -1,0 +1,22 @@
+{
+  "name": "Stateful Codex longitudinal suite",
+  "requiredObservations": {
+    "baseline": ["quality", "sourceAudit"],
+    "stateful": ["quality", "sourceAudit", "state"]
+  },
+  "projects": [
+    {
+      "id": "project-01",
+      "requireStatefulProjectState": true,
+      "requireDurableCompletion": true,
+      "cases": [
+        {
+          "id": "q01",
+          "prompt": "Replace this placeholder with the frozen first question.",
+          "expectedConcepts": [],
+          "forbiddenPhrases": []
+        }
+      ]
+    }
+  ]
+}
