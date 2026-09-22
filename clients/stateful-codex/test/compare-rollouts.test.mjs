@@ -8,7 +8,7 @@ import {
 
 function events({ id, stateful = false, input, cached, output }) {
   const toolInput = stateful
-    ? "text(await tools.blackboard_query({text: 'files'})); text(await tools.exec_command({cmd: 'Get-ChildItem'})); text(await tools.obligation_update({}));"
+    ? "text(await tools.blackboard_query({text: 'files'})); text(await tools.evidence_read({relativePath: 'decision.md'})); text(await tools.obligation_update({}));"
     : "text(await tools.exec_command({cmd: 'Get-ChildItem'}));";
   return [
     {
@@ -98,6 +98,7 @@ test("compares full and uncached usage without mixing their definitions", () => 
   assert.equal(actual.baseline.calls.readBearingToolCalls, 1);
   assert.equal(actual.stateful.calls.readBearingToolCalls, 1);
   assert.equal(actual.stateful.calls.blackboardQueries, 1);
+  assert.equal(actual.stateful.calls.evidenceReads, 1);
   assert.equal(actual.stateful.calls.obligationUpdates, 1);
   assert.equal(actual.stateful.expectations.allPresent, true);
 });

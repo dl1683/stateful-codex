@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-const READ_PATTERN = /\b(Get-ChildItem|Get-Content|Select-String|read_file|read_text_file|cat|sed|rg|grep)\b/i;
+const READ_PATTERN = /\b(Get-ChildItem|Get-Content|Select-String|evidence_read|read_file|read_text_file|cat|sed|rg|grep)\b/i;
 
 export function summarizeEvents(events, expectedTerms = []) {
   let metadata = null;
@@ -81,6 +81,7 @@ export function summarizeEvents(events, expectedTerms = []) {
         .length,
       blackboardQueries: namedCalls(calls, "blackboard_query"),
       contextMapQueries: namedCalls(calls, "context_map_query"),
+      evidenceReads: namedCalls(calls, "evidence_read"),
       obligationUpdates: namedCalls(calls, "obligation_update"),
       runUpdates: namedCalls(calls, "stateful_run_update"),
     },
