@@ -399,6 +399,10 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("decision.md"),
+        "Durable project state should route back to this exact source.\n",
+    )?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -420,7 +424,25 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
             },
         })
         .await?;
-    seed_root_blackboard(codex_home.path(), &created.project.id).await?;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let context_store =
+        ContextMapStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs())).await?;
+    let route = context_store
+        .file_hits_for_path(
+            &created.project.id,
+            &ProjectRelativePath::parse("decision.md")?,
+        )
+        .await?
+        .pop()
+        .expect("refreshed source route should exist");
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -435,9 +457,10 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
                                 "kind": "strategy",
                                 "content": "Use the durable project state before rereading source files.",
                                 "confidenceBasisPoints": 8000,
-                                "verification": "unverified",
+                                "verification": "sourceVerified",
                                 "importance": "high",
-                                "rootPromotion": "promoted"
+                                "rootPromotion": "promoted",
+                                "evidence": [{"relativePath": "decision.md"}]
                             },
                             {
                                 "idempotencyKey": "open-question-learned",
@@ -502,11 +525,29 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     assert_eq!(batch_output["relationsRecorded"], 1);
     assert_eq!(batch_output["relationsFailed"], 0);
     assert_eq!(batch_output["relationResults"][0]["recorded"], true);
-    assert!(
-        requests[2]
-            .function_call_output("query-call")
-            .to_string()
-            .contains("Use the durable project state before rereading source files.")
+    let query_output: serde_json::Value = serde_json::from_str(
+        &requests[2]
+            .function_call_output_text("query-call")
+            .expect("query output should be text"),
+    )?;
+    assert_eq!(
+        query_output["data"][0]["nodeId"],
+        route.entry.value.node_id.to_string()
+    );
+    assert_eq!(
+        query_output["data"][0]["declaredVerification"],
+        "sourceVerified"
+    );
+    assert_eq!(
+        query_output["data"][0]["effectiveVerification"],
+        "sourceVerified"
+    );
+    assert_eq!(
+        query_output["data"][0]["evidence"][0],
+        json!({
+            "contextMapEntryId": route.entry.id.to_string(),
+            "sourceFingerprint": route.entry.value.source_fingerprint.to_string(),
+        })
     );
     Ok(())
 }

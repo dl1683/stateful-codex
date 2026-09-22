@@ -22,9 +22,12 @@ use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::ContextMapEntryId;
+use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
+use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::RootPromotion;
 use serde::Deserialize;
 use serde_json::json;
@@ -56,7 +59,15 @@ struct RecordArguments {
     importance: BlackboardImportance,
     root_promotion: RootPromotion,
     #[serde(default)]
-    evidence: Vec<BlackboardEvidenceLink>,
+    evidence: Vec<EvidenceArguments>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EvidenceArguments {
+    context_map_entry_id: Option<String>,
+    relative_path: Option<String>,
+    project_root: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -115,30 +126,43 @@ impl BlackboardRecordTool {
         arguments: RecordArguments,
         source_id: &str,
     ) -> Result<BlackboardEntry, FunctionCallError> {
-        let node_id = match arguments.node_id {
+        let RecordArguments {
+            idempotency_key,
+            node_id,
+            kind,
+            content,
+            structured_value,
+            confidence_basis_points,
+            verification,
+            importance,
+            root_promotion,
+            evidence,
+        } = arguments;
+        let (evidence, inferred_node_id) = self.resolve_evidence(evidence).await?;
+        let node_id = match node_id {
             Some(node_id) => HierarchyNodeId::parse(node_id).map_err(respond)?,
-            None => {
-                self.services
-                    .hierarchy()
-                    .await
-                    .map_err(respond)?
-                    .project_node(&self.project_id)
-                    .await
-                    .map_err(respond)?
-                    .ok_or_else(|| {
-                        FunctionCallError::RespondToModel(
-                            "project hierarchy is empty; refresh the context map first".to_string(),
-                        )
-                    })?
-                    .id
-            }
+            None => match inferred_node_id {
+                Some(node_id) => node_id,
+                None => {
+                    self.services
+                        .hierarchy()
+                        .await
+                        .map_err(respond)?
+                        .project_node(&self.project_id)
+                        .await
+                        .map_err(respond)?
+                        .ok_or_else(|| {
+                            FunctionCallError::RespondToModel(
+                                "project hierarchy is empty; refresh the context map first"
+                                    .to_string(),
+                            )
+                        })?
+                        .id
+                }
+            },
         };
-        let id = BlackboardEntryId::parse(stable_id(
-            "entry",
-            &self.project_id,
-            &arguments.idempotency_key,
-        ))
-        .map_err(respond)?;
+        let id = BlackboardEntryId::parse(stable_id("entry", &self.project_id, &idempotency_key))
+            .map_err(respond)?;
         let entry = self
             .services
             .blackboard()
@@ -149,17 +173,15 @@ impl BlackboardRecordTool {
                 NewBlackboardEntry {
                     project_id: self.project_id.clone(),
                     node_id,
-                    kind: arguments.kind,
-                    content: arguments.content,
-                    structured_value: arguments.structured_value,
-                    confidence: ConfidenceScore::from_basis_points(
-                        arguments.confidence_basis_points,
-                    )
-                    .map_err(respond)?,
-                    verification: arguments.verification,
-                    importance: arguments.importance,
-                    root_promotion: arguments.root_promotion,
-                    evidence: arguments.evidence,
+                    kind,
+                    content,
+                    structured_value,
+                    confidence: ConfidenceScore::from_basis_points(confidence_basis_points)
+                        .map_err(respond)?,
+                    verification,
+                    importance,
+                    root_promotion,
+                    evidence,
                     provenance: BlackboardProvenance {
                         kind: BlackboardProvenanceKind::Agent,
                         source_id: source_id.to_string(),
@@ -178,6 +200,86 @@ impl BlackboardRecordTool {
         }
         Ok(entry)
     }
+
+    async fn resolve_evidence(
+        &self,
+        arguments: Vec<EvidenceArguments>,
+    ) -> Result<(Vec<BlackboardEvidenceLink>, Option<HierarchyNodeId>), FunctionCallError> {
+        let store = self.services.context_map().await.map_err(respond)?;
+        let mut links = Vec::with_capacity(arguments.len());
+        let mut seen_entries = HashSet::with_capacity(arguments.len());
+        let mut node_ids = HashSet::with_capacity(arguments.len());
+        for argument in arguments {
+            let hit = match (
+                argument.context_map_entry_id,
+                argument.relative_path,
+                argument.project_root,
+            ) {
+                (Some(raw_id), None, None) => {
+                    let id = ContextMapEntryId::parse(raw_id).map_err(respond)?;
+                    store
+                        .get_hit(&self.project_id, &id)
+                        .await
+                        .map_err(respond)?
+                        .ok_or_else(|| {
+                            FunctionCallError::RespondToModel(format!(
+                                "context-map evidence entry not found: {id}"
+                            ))
+                        })?
+                }
+                (None, Some(raw_path), project_root) => {
+                    let relative_path = ProjectRelativePath::parse(raw_path).map_err(respond)?;
+                    let mut hits = store
+                        .file_hits_for_path(&self.project_id, &relative_path)
+                        .await
+                        .map_err(respond)?
+                        .into_iter()
+                        .filter(|hit| {
+                            hit.freshness == ContextMapFreshness::Current
+                                && project_root
+                                    .as_ref()
+                                    .is_none_or(|root| root == &hit.source.project_root)
+                        });
+                    let hit = hits.next().ok_or_else(|| {
+                        FunctionCallError::RespondToModel(format!(
+                            "no current context-map evidence route found for {relative_path}"
+                        ))
+                    })?;
+                    if hits.next().is_some() {
+                        return Err(FunctionCallError::RespondToModel(format!(
+                            "multiple current context-map routes match {relative_path}; provide projectRoot or contextMapEntryId"
+                        )));
+                    }
+                    hit
+                }
+                _ => {
+                    return Err(FunctionCallError::RespondToModel(
+                        "each evidence item must provide exactly one of contextMapEntryId or relativePath; projectRoot is valid only with relativePath"
+                            .to_string(),
+                    ));
+                }
+            };
+            if hit.freshness != ContextMapFreshness::Current {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "context-map evidence is not current: {}",
+                    hit.entry.id
+                )));
+            }
+            node_ids.insert(hit.entry.value.node_id.clone());
+            if seen_entries.insert(hit.entry.id.clone()) {
+                links.push(BlackboardEvidenceLink {
+                    context_map_entry_id: hit.entry.id,
+                    source_fingerprint: hit.entry.value.source_fingerprint,
+                });
+            }
+        }
+        let inferred_node_id = if node_ids.len() == 1 {
+            node_ids.into_iter().next()
+        } else {
+            None
+        };
+        Ok((links, inferred_node_id))
+    }
 }
 
 impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
@@ -188,7 +290,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires current context-map evidence links; a shell or tool result alone is not an evidence link. Omit nodeId only for project-wide knowledge. Reuse idempotencyKey only for an identical retry.".to_string(),
+            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires current context-map evidence routes; supply relativePath from refresh/evidence_read and let the tool bind current IDs and fingerprints. A shell result alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&record_schema())
@@ -409,7 +511,23 @@ fn record_schema() -> serde_json::Value {
             "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
-            "evidence": {"type": "array", "description": "Current context-map links supporting sourceVerified knowledge.", "items": {"type": "object", "properties": {"contextMapEntryId": {"type": "string"}, "sourceFingerprint": {"type": "string"}}, "required": ["contextMapEntryId", "sourceFingerprint"], "additionalProperties": false}}
+            "evidence": {
+                "type": "array",
+                "description": "Current context-map routes supporting sourceVerified knowledge. Prefer relativePath; add projectRoot only when paths collide. Use contextMapEntryId for an anchored region or exact route identity. IDs and fingerprints are resolved and checked by the tool.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "contextMapEntryId": {"type": "string"},
+                        "relativePath": {"type": "string"},
+                        "projectRoot": {"type": "string"}
+                    },
+                    "anyOf": [
+                        {"required": ["contextMapEntryId"]},
+                        {"required": ["relativePath"]}
+                    ],
+                    "additionalProperties": false
+                }
+            }
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false
