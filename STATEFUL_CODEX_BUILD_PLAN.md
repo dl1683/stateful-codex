@@ -701,6 +701,17 @@ ordinary and Stateful arms will run the same continuous sequence from empty
 state. Fresh-thread project transfer remains a separately labelled experiment,
 and all six breadth outcomes and exclusions remain visible.
 
+### Senior checkpoint review contract
+
+Periodic Astra and Sol checkpoints are adversarial implementation reviews in
+service of the fixed product intent. Reviewers may challenge architecture,
+sequencing, mechanisms, evidence, ergonomics, and execution quality, but must
+not argue against or narrow the outcomes defined in
+`STATEFUL_CODEX_PRODUCT_INTENT.md`. Every material criticism must include a
+specific better approach, enough implementation detail to act on it, relevant
+tradeoffs, and a concrete validation method. A checkpoint that only rejects the
+current approach, or substitutes a different product objective, is incomplete.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
