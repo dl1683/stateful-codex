@@ -2045,3 +2045,68 @@ verified history versus vendor claims, and the explicit statement that viability
 is not a recorded final approval. Any new unsupported conclusion or weakened
 caveat fails the run. Token use and response count will be reported, but this is
 a correctness replication rather than an economics claim.
+
+### Execution result
+
+SC-EVAL-019 passed every registered mechanism and semantic gate. Authority
+thread `01a0ca86-4356-7403-82de-3701e6c14f87` used one evidence batch and one
+terminal call; continuity thread `01a0ca87-6f61-7da1-a1ba-f5c2a1d25499` used
+two evidence batches and one terminal call. Both completion outputs contained
+the named `submittedResult`, neither used a separate final obligation, both
+completed on the first attempt, and neither contained a failure marker. Live
+API reads confirmed runs
+`run-84a3c6207976ad707a7b82bb0d4276c5efcb1fd56dbf9954228f1b53c624a3a0`
+and
+`run-8d73434252388fb04cf8a2d356eaa36fbaf89e3572ab541817b2aa9e5416697f`
+as completed at revision 2. Their persisted results contain 6,742 and 5,474
+characters, and the corpus remained byte-identical.
+
+The visible authority answer preserved all three totals, the controlling order,
+the conjunctive/non-waivable rule, Alder and Birch's distinct failures, Cedar's
+current evidence status, and the explicit statement that no final approval is
+recorded. The visible continuity answer preserved the verified 88/91/94/96-hour
+history, North Ridge, Birch's 72-hour queue and 24-hour loss, Cedar's 120-hour
+claim and ordering preservation, the verified-history/vendor-claim distinction,
+and the explicit statement that Cedar's viability is not a recorded final
+approval. Neither added an unsupported award or certainty claim.
+
+The runs used seven responses, 145,312 full tokens, and 24,224 uncached
+input-plus-output tokens. Relative to SC-EVAL-018, full usage rose 1,019 tokens
+(0.71%) while uncached usage fell 15,109 tokens (38.42%) because both initial
+requests reused the project cache. Against SC-EVAL-018's same-binary ordinary
+pair, Stateful used 6.58% more full tokens but 13.66% fewer uncached tokens. The
+final-answer fidelity defect is closed. The remaining full-token difference is
+largely the continuity run's second evidence/inference round, not completion
+persistence or final-answer repair.
+
+## Benchmark SC-EVAL-020: bounded-outcome continuity replication
+
+Status: pre-registered before implementation on 2026-09-22.
+
+The selected-project guidance will make outcome scope explicit: do not turn a
+question about one criterion or decision dimension into an overall project
+determination. Verify and conclude the requested dimension; use current
+source-verified root knowledge only as labelled adjacent context, and state when
+broader viability or approval is outside the evidence review rather than opening
+unrequested sources to re-prove it. This remains domain-neutral and does not
+restrict the model when the user's requested outcome actually requires all
+dimensions.
+
+The unchanged continuity-basis prompt will run in one fresh Stateful thread on
+the same mature procurement project and rebuilt branch binary, with the same
+authentication, disabled ordinary memory, model, effort, directory, roots,
+permissions, and no-edit boundary. It will be compared with SC-EVAL-019
+continuity thread `01a0ca87-6f61-7da1-a1ba-f5c2a1d25499` and the same-binary
+ordinary continuity thread `01a0ca7c-e83d-7322-8333-f02a40622fdb`.
+
+The mechanism gate requires one evidence batch limited to
+`binding-criteria.md`, `operations-log.md`, `vendor-birch.md`, and
+`vendor-cedar.md`; one terminal call with `finalObligation` and
+`submittedResult`; at most three model responses; one completion attempt; a
+completed revision-2 API result; and an unchanged corpus. The semantic gate
+requires all SC-EVAL-019 continuity facts and caveats while stating that the
+answer decides the continuity dimension, not overall approval. Opening finance,
+security, committee, or Alder sources fails the bounded-outcome gate even if the
+answer remains correct. Full and uncached usage must be below SC-EVAL-019's
+84,033 and 13,377 tokens; comparison with the ordinary 78,593 full and 14,337
+uncached tokens remains diagnostic rather than a release-distribution claim.

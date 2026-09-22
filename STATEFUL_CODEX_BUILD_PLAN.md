@@ -625,6 +625,22 @@ is pre-registered to return the submitted narrative as a named completion output
 and require semantic preservation during final-answer formatting. Stage 8
 remains open pending that replication and broader economics evidence.
 
+Commit `633de3b08b` adds the named submitted result and an explicit semantic-
+preservation instruction. SC-EVAL-019 passed both live replications: visible
+answers retained every registered conclusion and caveat, both runs completed
+once and persisted at revision 2, and the corpus remained unchanged. The pair
+used 24,224 uncached tokens, 13.66% fewer than its same-binary ordinary pair, but
+145,312 full tokens, 6.58% more. Continuity again spent an extra round verifying
+finance and security before making an all-gates conclusion.
+
+SC-EVAL-020 is pre-registered to make outcome scope explicit and replicate that
+continuity case. A one-dimension question should not trigger an overall project
+determination or re-verification of unrelated gates. If the model follows that
+contract without losing the exact continuity evidence or approval caveat, the
+targeted same-binary follow-up should cross below ordinary on both full and
+uncached usage. The full release distribution and maturation-inclusive Stage 8
+economics remain open afterward.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
