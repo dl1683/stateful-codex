@@ -1281,3 +1281,38 @@ provenance now survives maturation, and completion is terminal without
 stranding a later durable write. It is still a same-corpus mechanism
 replication. It does not by itself establish general precision/recall,
 maturation-inclusive lifetime savings, or release readiness.
+
+## Benchmark SC-EVAL-010: current maturation-plus-follow-up series
+
+Status: pre-registered before execution on 2026-09-22.
+
+This benchmark tests lifetime behavior using the completed SC-EVAL-009
+maturation and the exact three follow-up cases already frozen in
+`clients/stateful-codex/eval/manifests/licensing-series.json`. The maturation
+rollout is
+`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T10-35-18-01a0c98a-e574-7912-ac68-9f55011304db.jsonl`;
+its observed 250,849 full tokens, 68,065 uncached input-plus-output tokens, and
+7 model responses will be read from the rollout rather than replacing the old
+SC-EVAL-005 cost embedded in the frozen manifest.
+
+Each economics, territory, and termination-risk prompt will run once through a
+fresh ordinary native CLI thread and once through a fresh Collaborative
+Stateful native CLI thread explicitly bound to SC-EVAL-009 project
+`01a0c98a-e567-7890-9711-3260f8fd1a0d`. Every pair will use the same rebuilt
+branch binary, `gpt-5.6-luna` at `xhigh`, project directory, workspace roots,
+permissions, cached ChatGPT login, and cleared API-key environment. The corpus
+must remain byte-identical after all six runs.
+
+The existing parity and frozen lexical checks will remain unchanged. The report
+will preserve substantive manual review separately because prior runs establish
+that literal morphology and same-entry requirements can reject correct answers.
+It will report per-question and aggregate full and uncached tokens, model
+responses, read-bearing calls, exact files opened, follow-up wins, actual
+maturation-inclusive lifetime cost, and projected break-even only when average
+savings are positive.
+
+This benchmark can show whether the current mechanism repeats selective
+retrieval and whether the measured one-time maturation cost can plausibly
+amortize across this fixed workload. Three same-corpus questions are not a
+general workload distribution; regressions, scorer failures, and negative
+lifetime results will be retained.
