@@ -1,4 +1,7 @@
+use codex_extension_api::ExtensionData;
+use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::PreviousWorldStateSection;
+use codex_extension_api::PromptCacheAffinity;
 use codex_project_intelligence::RootBlackboardProjection;
 use codex_thread_store::StoredProject;
 use codex_thread_store::StoredProjectRoot;
@@ -8,6 +11,7 @@ use super::MAX_BODY_BYTES;
 use super::MAX_ESTIMATED_TOKENS;
 use super::ProjectIntelligenceStatus;
 use super::project_world_state_section;
+use crate::SelectedProject;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 
@@ -114,4 +118,35 @@ fn long_project_metadata_is_truncated_on_utf8_boundaries() {
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
     assert!(codex_utils_string::approx_token_count(rendered.body()) <= MAX_ESTIMATED_TOKENS);
     assert!(std::str::from_utf8(rendered.body().as_bytes()).is_ok());
+}
+
+#[test]
+fn selected_project_keeps_cache_affinity_in_sync() {
+    let mut init = ExtensionDataInit::new();
+    SelectedProject::insert_initial(&mut init, "project-1");
+    let data = ExtensionData::new_with_init("thread-1", init);
+
+    assert_eq!(
+        data.get::<PromptCacheAffinity>()
+            .and_then(|affinity| affinity.key()),
+        Some("stateful-project:project-1".to_string())
+    );
+    SelectedProject::insert(&data, "project-2");
+    assert_eq!(
+        data.get::<SelectedProject>()
+            .map(|selected| selected.project_id().to_string()),
+        Some("project-2".to_string())
+    );
+    assert_eq!(
+        data.get::<PromptCacheAffinity>()
+            .and_then(|affinity| affinity.key()),
+        Some("stateful-project:project-2".to_string())
+    );
+    SelectedProject::remove(&data);
+    assert_eq!(data.get::<SelectedProject>(), None);
+    assert_eq!(
+        data.get::<PromptCacheAffinity>()
+            .and_then(|affinity| affinity.key()),
+        None
+    );
 }

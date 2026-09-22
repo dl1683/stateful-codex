@@ -38,6 +38,73 @@ use serde_json::json;
 use tempfile::TempDir;
 
 #[tokio::test]
+async fn selected_project_provides_shared_prompt_cache_affinity() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Shared project cache".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "shared-project-cache".to_string(),
+            },
+        })
+        .await?;
+    let expected_cache_key = format!("stateful-project:{}", project.project.id);
+
+    for (response_id, message_id) in [
+        ("first-response", "first-message"),
+        ("second-response", "second-message"),
+    ] {
+        let request = responses::mount_sse_once(
+            &responses_server,
+            responses::sse(vec![
+                responses::ev_response_created(response_id),
+                responses::ev_assistant_message(message_id, "Done"),
+                responses::ev_completed(response_id),
+            ]),
+        )
+        .await;
+        let thread = server
+            .start_thread(ThreadStartParams {
+                project_id: Some(project.project.id.clone()),
+                ..Default::default()
+            })
+            .await?;
+        server
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: thread.thread.id,
+                input: vec![UserInput::Text {
+                    text: "Use the selected project.".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+
+        let request = request.single_request();
+        assert_eq!(
+            request.body_json()["prompt_cache_key"].as_str(),
+            Some(expected_cache_key.as_str())
+        );
+        assert_eq!(
+            request.header("session-id"),
+            Some(expected_cache_key.clone())
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn stateful_run_preserves_explicit_mode_and_reconciles_live_controls() -> Result<()> {
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;

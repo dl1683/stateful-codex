@@ -1138,6 +1138,28 @@ fn internal_session_prompt_cache_key_is_scoped_to_parent_thread() {
 }
 
 #[test]
+fn prompt_cache_affinity_can_follow_a_project_across_threads() {
+    let mut client = test_model_client(SessionSource::Cli);
+    let affinity = Arc::new(codex_extension_api::PromptCacheAffinity::new(
+        "stateful-project:one",
+    ));
+    client.prompt_cache_affinity = Arc::clone(&affinity);
+    let metadata = test_responses_metadata_for_client(
+        &client,
+        Some("turn-123"),
+        "window-1".to_string(),
+        None,
+        TestCodexResponsesRequestKind::Turn,
+    );
+
+    assert_eq!(client.prompt_cache_key(&metadata), "stateful-project:one");
+    affinity.set("stateful-project:two");
+    assert_eq!(client.prompt_cache_key(&metadata), "stateful-project:two");
+    affinity.clear();
+    assert_eq!(client.prompt_cache_key(&metadata), metadata.session_id);
+}
+
+#[test]
 fn build_subagent_headers_sets_internal_memory_consolidation_label() {
     let client = test_model_client(SessionSource::Internal(
         InternalSessionSource::MemoryConsolidation,

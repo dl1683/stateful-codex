@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use codex_extension_api::ExtensionData;
+use codex_extension_api::PromptCacheAffinity;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -137,4 +138,20 @@ fn store_remains_usable_after_panicking_initializer() {
 
     assert!(result.is_err());
     assert_eq!(*data.get_or_init(|| 99_u64), 99);
+}
+
+#[test]
+fn prompt_cache_affinity_updates_through_shared_attachment() {
+    let data = ExtensionData::new("thread-1");
+    let affinity = data.get_or_init(PromptCacheAffinity::default);
+
+    assert_eq!(affinity.key(), None);
+    affinity.set("project-1");
+    assert_eq!(
+        data.get::<PromptCacheAffinity>()
+            .and_then(|value| value.key()),
+        Some("project-1".to_string())
+    );
+    affinity.clear();
+    assert_eq!(affinity.key(), None);
 }

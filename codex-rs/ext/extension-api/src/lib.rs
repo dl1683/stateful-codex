@@ -1,6 +1,7 @@
 mod allowed_tools;
 mod capabilities;
 mod contributors;
+mod prompt_cache_affinity;
 mod registry;
 mod session_isolation;
 mod state;
@@ -8,6 +9,7 @@ mod turn_admission;
 mod user_instructions;
 
 pub use allowed_tools::AllowedTools;
+pub use prompt_cache_affinity::PromptCacheAffinity;
 pub use session_isolation::SessionIsolation;
 
 pub use capabilities::ConversationHistorySnapshot;

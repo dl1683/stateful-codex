@@ -975,6 +975,8 @@ impl Session {
             thread_id.to_string(),
             thread_extension_init,
         );
+        let prompt_cache_affinity =
+            thread_extension_data.get_or_init(codex_extension_api::PromptCacheAffinity::default);
         // Capture follows the flag; replay selects reviewer policy from the saved checkpoint.
         let guardian_context_mode = GuardianContextMode::from_features(&config.features);
         thread_extension_data.insert(crate::context::GuardianReviewEvidence::default());
@@ -1719,6 +1721,7 @@ impl Session {
                         session_configuration.parent_thread_id,
                     )
                     .or(fork_cache_key),
+                    prompt_cache_affinity,
                     tx_event.clone(),
                     codex_responses_headers,
                 ),

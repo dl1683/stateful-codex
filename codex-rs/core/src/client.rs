@@ -262,6 +262,7 @@ pub struct ModelClient {
     state: Arc<ModelClientState>,
     agent_identity_policy: AgentIdentityAuthPolicy,
     prompt_cache_key_override: Option<String>,
+    prompt_cache_affinity: Arc<codex_extension_api::PromptCacheAffinity>,
     codex_responses_headers: Option<Arc<CodexResponsesHeaders>>,
     event_sender: Option<Sender<ProtocolEvent>>,
     http_client_factory: HttpClientFactory,
@@ -528,6 +529,7 @@ impl ModelClient {
             }),
             agent_identity_policy,
             prompt_cache_key_override: None,
+            prompt_cache_affinity: Arc::new(codex_extension_api::PromptCacheAffinity::default()),
             codex_responses_headers: None,
             event_sender: None,
             http_client_factory,
@@ -549,10 +551,12 @@ impl ModelClient {
     pub(crate) fn with_session_context(
         mut self,
         prompt_cache_key_override: Option<String>,
+        prompt_cache_affinity: Arc<codex_extension_api::PromptCacheAffinity>,
         event_sender: Sender<ProtocolEvent>,
         codex_responses_headers: Option<Arc<CodexResponsesHeaders>>,
     ) -> Self {
         self.prompt_cache_key_override = prompt_cache_key_override;
+        self.prompt_cache_affinity = prompt_cache_affinity;
         self.event_sender = Some(event_sender);
         self.codex_responses_headers = codex_responses_headers;
         self
@@ -561,6 +565,10 @@ impl ModelClient {
     fn prompt_cache_key(&self, responses_metadata: &CodexResponsesMetadata) -> String {
         if let Some(prompt_cache_key) = &self.prompt_cache_key_override {
             return prompt_cache_key.clone();
+        }
+
+        if let Some(prompt_cache_key) = self.prompt_cache_affinity.key() {
+            return prompt_cache_key;
         }
 
         if let SessionSource::Internal(source) = &self.state.session_source

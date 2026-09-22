@@ -1467,7 +1467,7 @@ impl ThreadRequestProcessor {
             thread_extension_init.insert(selected_capability_roots);
         }
         if let Some(project_id) = project_id.as_ref() {
-            thread_extension_init.insert(SelectedProject::new(project_id.clone()));
+            SelectedProject::insert_initial(&mut thread_extension_init, project_id.clone());
         }
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
@@ -2043,14 +2043,13 @@ impl ThreadRequestProcessor {
             if let Some(project_id) = project_update.as_ref() {
                 match project_id {
                     Some(project_id) => {
-                        loaded_thread
-                            .thread_extension_data()
-                            .insert(SelectedProject::new(project_id.clone()));
+                        SelectedProject::insert(
+                            loaded_thread.thread_extension_data(),
+                            project_id.clone(),
+                        );
                     }
                     None => {
-                        loaded_thread
-                            .thread_extension_data()
-                            .remove::<SelectedProject>();
+                        SelectedProject::remove(loaded_thread.thread_extension_data());
                     }
                 }
             }
@@ -2290,9 +2289,7 @@ impl ThreadRequestProcessor {
             )));
         }
         if let Some(project_id) = selected_project_id {
-            codex_thread
-                .thread_extension_data()
-                .insert(SelectedProject::new(project_id));
+            SelectedProject::insert(codex_thread.thread_extension_data(), project_id);
         }
         codex_thread
             .restore_thread_settings(settings)
@@ -3967,9 +3964,10 @@ impl ThreadRequestProcessor {
                 ..
             }) => {
                 if let Some(project_id) = selected_project_id.as_ref() {
-                    codex_thread
-                        .thread_extension_data()
-                        .insert(SelectedProject::new(project_id.clone()));
+                    SelectedProject::insert(
+                        codex_thread.thread_extension_data(),
+                        project_id.clone(),
+                    );
                 }
                 let ThreadResumeTarget::Client(request_id) = target else {
                     // Observe lifecycle events without attaching a client subscription.
@@ -5156,7 +5154,7 @@ impl ThreadRequestProcessor {
 
         let mut thread_extension_init = ExtensionDataInit::new();
         if let Some(project_id) = inherited_project_id.as_ref() {
-            thread_extension_init.insert(SelectedProject::new(project_id.clone()));
+            SelectedProject::insert_initial(&mut thread_extension_init, project_id.clone());
         }
         let fork_options = StartThreadOptions {
             thread_source,

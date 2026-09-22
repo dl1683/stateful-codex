@@ -13,8 +13,10 @@ use std::sync::Arc;
 
 use codex_extension_api::ContextContributor;
 use codex_extension_api::ExtensionData;
+use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::PromptCacheAffinity;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolContributor;
 use codex_extension_api::ToolExecutor;
@@ -58,6 +60,31 @@ impl SelectedProject {
 
     pub fn project_id(&self) -> &str {
         &self.project_id
+    }
+
+    /// Installs project selection before a thread runtime is created.
+    pub fn insert_initial(data: &mut ExtensionDataInit, project_id: impl Into<String>) {
+        let selected = Self::new(project_id);
+        data.insert(PromptCacheAffinity::new(selected.prompt_cache_key()));
+        data.insert(selected);
+    }
+
+    /// Updates project selection for an existing thread runtime.
+    pub fn insert(data: &ExtensionData, project_id: impl Into<String>) {
+        let selected = Self::new(project_id);
+        data.get_or_init(PromptCacheAffinity::default)
+            .set(selected.prompt_cache_key());
+        data.insert(selected);
+    }
+
+    /// Removes project selection and returns cache routing to thread scope.
+    pub fn remove(data: &ExtensionData) {
+        data.remove::<Self>();
+        data.get_or_init(PromptCacheAffinity::default).clear();
+    }
+
+    fn prompt_cache_key(&self) -> String {
+        format!("stateful-project:{}", self.project_id)
     }
 }
 
