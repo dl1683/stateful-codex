@@ -68,6 +68,7 @@ async function runTurn(options) {
     env: authEnvironment(),
     windowsHide: true,
   });
+  child.stdin.end();
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => {
@@ -151,6 +152,7 @@ async function assertChatGptLogin(codex, cwd) {
 
 async function capture(command, args, cwd) {
   const child = spawn(command, args, { cwd, env: authEnvironment(), windowsHide: true });
+  child.stdin.end();
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => (stdout += chunk));
