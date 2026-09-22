@@ -1370,3 +1370,40 @@ same-corpus questions are not a representative workload distribution. The next
 release work should first explain and reduce the fixed uncached context cost
 without weakening the always-loaded root, then test final-answer coverage from
 selected durable findings, and only then run a broader pre-registered workload.
+
+## Benchmark SC-EVAL-011: project-scoped prompt-cache replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+SC-EVAL-010 showed that every ordinary first response reused 9,984 cached input
+tokens while every Stateful first response reused zero, including three
+consecutive threads over the same mature project. Per-response traces localized
+most of the uncached regression to this missing cross-thread prefix reuse rather
+than to repeated source reads or the approximately 4,500-token root increment.
+
+Commit `c0f120f009` introduces a mutable host-owned prompt-cache affinity. The
+explicitly selected Stateful project supplies the affinity; thread and session
+identity remain in request metadata, user project selection remains authoritative,
+and changing or clearing that selection updates cache routing. Internal review
+and ephemeral-fork overrides retain precedence. Focused tests verify the shared
+attachment, live key changes, selection synchronization, and equal outbound
+cache keys across two independent app-server threads.
+
+The live replication will rebuild the native CLI from `c0f120f009`, clear API-key
+environment variables, and use cached ChatGPT login with `gpt-5.6-luna` at
+`xhigh`. It will submit the exact SC-EVAL-010 economics prompt twice in two fresh
+Collaborative Stateful threads explicitly bound to mature project
+`01a0c98a-e567-7890-9711-3260f8fd1a0d` and the byte-identical ten-file corpus.
+No blackboard mutation or source edit is requested; each run may record its
+semantic obligation and terminal result.
+
+The first run is the cache warmer. The second run is the measurement. The report
+will preserve each response's input, cached input, uncached input, output, total
+tokens, calls, answer coverage, exact evidence access, and corpus SHA-256 state.
+The mechanism passes only if the second thread's first response reports nonzero
+cached input and lower uncached input than the warmer's first response while
+retaining the correct evidence-grounded answer. A 12,000-token cached prefix and
+at least 25% first-response uncached reduction are recorded as useful directional
+thresholds, not release claims. A miss or regression will be retained. Two
+same-project runs test cache routing only; they do not establish general lifetime
+economics or close Stage 8.
