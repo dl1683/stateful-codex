@@ -134,13 +134,19 @@ test("extracts the terminal result from a code-mode completion call", () => {
         {
           type: "input_text",
           text: JSON.stringify({
-            finalAnswerChecklist: [
-              { category: "rootFinding", text: "The $2M cap does not govern." },
-            ],
-            omittedChecklistItems: 0,
-            revision: 2,
-            runId: "run-1",
-            status: "completed",
+            finalObligation: { recorded: true },
+            completion: {
+              finalAnswerChecklist: [
+                {
+                  category: "rootFinding",
+                  text: "The $2M cap does not govern.",
+                },
+              ],
+              omittedChecklistItems: 0,
+              revision: 2,
+              runId: "run-1",
+              status: "completed",
+            },
           }),
         },
       ],
