@@ -470,6 +470,25 @@ replicate gains on a broader pre-registered workload, and run the
 approval-gated repository-wide Rust suite. The corpus remained byte-identical
 through all six SC-EVAL-010 runs.
 
+The first uncached-cost remediation is now implemented in `c0f120f009` and
+measured by pre-registered SC-EVAL-011. Stateful prompt-cache affinity follows
+the project explicitly selected by the user, including live selection changes,
+while thread/session metadata remains distinct and internal review/fork
+overrides retain precedence. Two independent app-server threads expose the same
+project cache key in focused integration coverage. In the real cached-login CLI
+replication, the second fresh thread reused 12,032 first-response input tokens
+instead of zero and reduced first-response uncached input from 20,938 to 8,239
+(60.65%). Whole-turn uncached input plus output fell from 27,155 to 14,822
+(45.42%) with identical four-source verification, three model responses, two
+outer calls, complete answer coverage, and a byte-identical corpus.
+
+This removes the diagnosed adjacent-thread cache-prefix defect without cutting
+the root blackboard. It is not yet the Stage 8 economics claim: provider cache
+expiry, root changes, broader workloads, and the previously observed
+final-answer omission remain unproven. The next high-value slice is preserving
+selected decisive root findings in final-answer obligations, followed by a
+fresh matched distribution and the approval-gated repository-wide Rust suite.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

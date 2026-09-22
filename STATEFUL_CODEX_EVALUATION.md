@@ -1373,7 +1373,7 @@ selected durable findings, and only then run a broader pre-registered workload.
 
 ## Benchmark SC-EVAL-011: project-scoped prompt-cache replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: passed on 2026-09-22 after pre-registration.
 
 SC-EVAL-010 showed that every ordinary first response reused 9,984 cached input
 tokens while every Stateful first response reused zero, including three
@@ -1407,3 +1407,40 @@ at least 25% first-response uncached reduction are recorded as useful directiona
 thresholds, not release claims. A miss or regression will be retained. Two
 same-project runs test cache routing only; they do not establish general lifetime
 economics or close Stage 8.
+
+### Execution result
+
+The rebuilt CLI completed two fresh Collaborative Stateful threads through
+cached ChatGPT login with cleared API-key variables. The warmer was thread
+`01a0c9ca-c37b-72c1-b176-0bf5a5420c11`; the measurement was thread
+`01a0c9cb-dc13-78a1-823e-b014ce67e8ce`. Both used the exact registered prompt,
+project, corpus, model, effort, and permissions. Each answered all four intended
+concepts, verified the same four exact source regions in one code-mode call,
+wrote one semantic obligation followed by terminal completion in a second call,
+and made no unsupported claim.
+
+| Measure | Warmer | Measurement | Delta |
+| --- | ---: | ---: | ---: |
+| First-response input | 20,938 | 20,271 | -667 |
+| First-response cached input | 0 | 12,032 | +12,032 |
+| First-response uncached input | 20,938 | 8,239 | -12,699 (-60.65%) |
+| Turn full tokens | 69,651 | 67,302 | -2,349 (-3.37%) |
+| Turn uncached input plus output | 27,155 | 14,822 | -12,333 (-45.42%) |
+| Model responses | 3 | 3 | 0 |
+| Outer calls | 2 | 2 | 0 |
+
+The measurement therefore passes both registered directional thresholds: it
+reused 12,032 first-response tokens and reduced first-response uncached input by
+more than 25%. The result also confirms that the cache win did not come from
+less verification, fewer semantic writes, answer truncation, or source edits.
+Post-run SHA-256 comparison found all ten corpus files byte-identical to the
+committed fixture.
+
+SC-EVAL-011 closes the concrete cross-thread cache-affinity defect exposed by
+SC-EVAL-010. It supports the product model that threads are views over one
+project and shows that a rich stable root can remain available without being
+fully uncached on every adjacent thread. It does not retroactively change
+SC-EVAL-010 or prove durable savings after provider cache expiry, long idle
+periods, root revisions, different models, or representative workloads. Those
+conditions require a fresh matched distribution. Stage 8 remains open, with the
+final-answer coverage omission and broader lifetime replication still ahead.
