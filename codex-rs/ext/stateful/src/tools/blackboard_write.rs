@@ -517,13 +517,13 @@ fn record_schema() -> serde_json::Value {
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
             "evidence": {
                 "type": "array",
-                "description": "Current context-map routes supporting sourceVerified knowledge. Prefer relativePath; add projectRoot only when paths collide. Use contextMapEntryId for an anchored region or exact route identity. IDs and fingerprints are resolved and checked by the tool.",
+                "description": "Current context-map routes supporting sourceVerified knowledge. Each item must use exactly one route identity: relativePath (plus projectRoot only when paths collide) or contextMapEntryId for an anchored/exact route. Never send both. IDs and fingerprints are resolved and checked by the tool.",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "contextMapEntryId": {"type": "string"},
-                        "relativePath": {"type": "string"},
-                        "projectRoot": {"type": "string"},
+                        "contextMapEntryId": {"type": "string", "description": "Exact route identity. Exclusive with relativePath and projectRoot."},
+                        "relativePath": {"type": "string", "description": "Preferred project-relative route. Exclusive with contextMapEntryId."},
+                        "projectRoot": {"type": "string", "description": "Optional only with relativePath when multiple selected roots contain the same path."},
                         "lineRange": {
                             "type": "object",
                             "description": "Optional exact 1-based inclusive source lines already verified with evidence_read.",
@@ -535,7 +535,7 @@ fn record_schema() -> serde_json::Value {
                             "additionalProperties": false
                         }
                     },
-                    "anyOf": [
+                    "oneOf": [
                         {"required": ["contextMapEntryId"]},
                         {"required": ["relativePath"]}
                     ],
