@@ -470,3 +470,20 @@ The already-incurred maturation cost is not hidden in this comparison, and a
 single stochastic rerun cannot establish a stable performance distribution.
 The next efficiency work should reduce fixed injected/tool-schema overhead and
 repeat matched runs without sacrificing the exact-source behavior shown here.
+
+### Same-binary ordinary replication SC-EVAL-003R
+
+Status: pre-registered before execution on 2026-09-22.
+
+The original ordinary run predates commit `4154ebcbc9`, while the optimized
+Stateful run uses the binary built from that commit. The runtime change is
+Stateful-specific, but one ordinary replication will remove the binary-version
+confound without spending on a broad run matrix. It will use that same built
+binary, exact prompt, model and reasoning effort, working directory, workspace
+root, permissions, cached ChatGPT login, and cleared API-key environment.
+
+The replication will be compared with optimized Stateful rollout
+`01a0c875-8a49-7783-9569-bc9ab50102b9`. The report will preserve correctness,
+raw files opened, model responses, full and uncached usage, and cache behavior.
+One replicated pair remains directional evidence rather than a stable
+performance distribution.
