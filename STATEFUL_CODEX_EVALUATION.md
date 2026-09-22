@@ -980,3 +980,29 @@ full-token break-even around question eight instead of question fifteen. The
 same series would still cost 165,866 uncached tokens versus 73,456 ordinary, so
 there is still no observed uncached break-even. These cross-run calculations are
 not a matched end-to-end rerun and must not be presented as a release claim.
+
+## Benchmark SC-EVAL-007: refresh-route maturation replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+Commit `88280d1f1d` changes the model-facing `context_map_refresh` result to
+include a deterministic, response-bounded inventory of current source routes.
+The tool description directs the model to use those routes directly and call
+`context_map_query` only when the inventory is truncated or insufficient. The
+app-server protocol remains unchanged, and projects with more routes than the
+bounded response retain targeted query as the fallback.
+
+This replication will copy the unchanged ten-file licensing corpus to another
+fresh temporary directory, rebuild the branch CLI, remove API-key environment
+variables, and run the exact SC-EVAL-004 maturation prompt with
+`gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication. It will compare
+against SC-EVAL-006 and report whether the model uses refresh-returned routes,
+context-map queries, shell listing or reads, exact evidence reads, model
+responses, custom tool calls, full and uncached token usage, state quality,
+persistence failures, and source edits.
+
+The intended mechanism result is removal of the separate file-list and
+context-map-query steps without weakening exact verification or durable state.
+The result will be retained if the model ignores the routes or cost regresses.
+Like SC-EVAL-006, this is a same-corpus mechanism replication rather than a new
+held-out semantic or general-economics claim.

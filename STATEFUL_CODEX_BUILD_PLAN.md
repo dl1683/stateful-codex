@@ -350,6 +350,17 @@ question 8 under that observed follow-up slope; uncached usage still has no
 break-even. A matched end-to-end series and a stable workload distribution
 remain required before claiming lifetime economic advantage.
 
+The next bounded efficiency slice is committed in `88280d1f1d`. A model-issued
+`context_map_refresh` now returns a response-capped inventory of current source
+routes, allowing a fresh small project to proceed directly to exact evidence.
+Targeted `context_map_query` remains available when the inventory is truncated
+or does not identify the needed source, and the app-server protocol is
+unchanged. Storage and extension suites pass 26/26 and 5/5; a focused
+app-server integration test proves that a model refresh over two files receives
+both routes in its next request. SC-EVAL-007 pre-registers a fresh-project
+replication before measuring whether this removes the redundant listing and
+context-query steps observed in SC-EVAL-006.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
