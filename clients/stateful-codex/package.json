@@ -5,6 +5,8 @@
   "scripts": {
     "eval": "node eval/compare-rollouts.mjs",
     "eval:longitudinal": "node eval/compare-longitudinal-rollouts.mjs",
+    "eval:prepare": "node eval/prepare-longitudinal-snapshots.mjs",
+    "eval:run-arm": "node eval/run-longitudinal-arm.mjs",
     "eval:series": "node eval/compare-rollout-series.mjs",
     "eval:state": "node eval/evaluate-project-state.mjs",
     "start": "node server.mjs",

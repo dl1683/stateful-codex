@@ -2316,3 +2316,40 @@ tests pass, and the parser was also exercised against an existing five-turn
 rollout containing a canonical compaction. That live historical file correctly
 surfaced four incomplete/superseded turns rather than silently treating them as
 valid observations. No six-project result has been run or claimed yet.
+
+## Benchmark SC-EVAL-023: six-project breadth screen
+
+Status: pre-registered before any model arm was run on 2026-09-22.
+
+The cohort is selected by workload coverage rather than expected outcome:
+
+- AGI Thesis: technical-thesis and evidence synthesis;
+- Latent-Space-Reasoning: long-running empirical research;
+- Open Exploration: publication research and buyer evidence;
+- Iqidis: production TypeScript application analysis;
+- new-computation-model: mathematical and theoretical-computer-science research;
+- memory-benchmark-harness: reserved replication in agent-memory evaluation
+  software.
+
+The first five are the preselected longitudinal cohort if the breadth screen is
+operationally valid. The sixth is reported as a reserved replication rather
+than substituted for an unfavorable result. Procurement is excluded because it
+is the frozen development case. The exact source selections and one breadth
+question per project are frozen in `eval/manifests/breadth-projects.json`.
+
+Each arm receives an isolated copy of the same `rg --files`-visible current
+corpus, with ignored caches, build outputs, credentials, prior `.blackboard`,
+and prior `.codex` state excluded. The AGI corpus is intentionally bounded to
+the root thesis controls plus `publication` and `reviews`; its multi-gigabyte
+raw experiment store is outside this screen. The six pre-run corpus hashes and
+file counts are frozen in `breadth-snapshot-hashes.json`. The preparation tool
+verifies byte identity between arms, and the runner rehashes the corpus before
+and after every turn.
+
+Both arms use the branch debug binary, cached ChatGPT login with API-key
+environment variables removed, Luna at high reasoning effort, read-only source
+permissions, and one continuous thread per project. Stateful uses explicit
+Autonomous mode. A run is operationally valid only if it completes, preserves
+the corpus, exposes project state, commits its durable result, and yields the
+required blinded quality, source-audit, and state observations. No result is
+recorded yet.

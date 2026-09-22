@@ -1,0 +1,37 @@
+{
+  "manifest": "breadth-projects.json",
+  "preparedAt": "2026-09-22",
+  "selection": "rg --files-visible current corpus plus explicit root files",
+  "projects": [
+    {
+      "id": "agi-thesis",
+      "files": 67,
+      "sha256": "e235ff12c70f454fd6c30de27cfd815fc9ddecc791f551cd054ccb7c485a2a45"
+    },
+    {
+      "id": "latent-space-reasoning",
+      "files": 1795,
+      "sha256": "3b5cd39805d87e8ce9a9a670671a0c286dbb75f30240b8c64498bf931a7c1f56"
+    },
+    {
+      "id": "open-exploration",
+      "files": 593,
+      "sha256": "307a5d9c56431ca2efc9e58823ff39d503b3d437c186167e065197cf05ea5eeb"
+    },
+    {
+      "id": "iqidis",
+      "files": 1883,
+      "sha256": "b96635f34dcf63f0e73581a83de1d0909c9fa97647684b6918965a10e3221253"
+    },
+    {
+      "id": "new-computation-model",
+      "files": 199,
+      "sha256": "fad93c108809b34f2ed4f28583bdb3dc511118cb3fbc51eef00aa735f54eda51"
+    },
+    {
+      "id": "memory-benchmark-harness",
+      "files": 27,
+      "sha256": "25aeb8a7f5c99eca73357e281751ff2dec98c9bc6df19b12ad4fff13005989bd"
+    }
+  ]
+}

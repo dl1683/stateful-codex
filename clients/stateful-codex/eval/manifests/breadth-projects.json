@@ -1,0 +1,112 @@
+{
+  "name": "SC-EVAL-023 six-project breadth screen",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "high",
+  "mode": "autonomous",
+  "requiredObservations": {
+    "baseline": ["quality", "sourceAudit"],
+    "stateful": ["quality", "sourceAudit", "state"]
+  },
+  "projects": [
+    {
+      "id": "agi-thesis",
+      "selectionRole": "longitudinal",
+      "domain": "technical thesis and evidence synthesis",
+      "isolatedCopies": true,
+      "source": {
+        "project": "AGI Thesis",
+        "roots": ["publication", "reviews"],
+        "rootFiles": ["README.md", "AGENDA.md", "MASTER_PROMPT.md", "THESIS_CONSTITUTION.md", "RESEARCH_COEVOLUTION_LEDGER.md", "TECHNICAL_APPENDIX_REASONING_STATE.md", "THE_INTELLIGENCE_TRANSITION.md", "THE_INTELLIGENCE_TRANSITION_TECHNICAL_ANNEX.md", "VISION_CORE.md"]
+      },
+      "cases": [
+        {
+          "id": "breadth",
+          "prompt": "Within this selected corpus, identify the thesis's single most load-bearing empirical vulnerability: the weakest evidence link that, if falsified or left unresolved, most constrains the central accumulating-intelligence claim. Reconstruct the claim, the evidence actually present, the strongest counterevidence or limitation, and the smallest decisive next experiment. Cite exact files and sections, distinguish established fact from thesis interpretation, and do not edit files."
+        }
+      ]
+    },
+    {
+      "id": "latent-space-reasoning",
+      "selectionRole": "longitudinal",
+      "domain": "long-running empirical research",
+      "isolatedCopies": true,
+      "source": {
+        "project": "Latent-Space-Reasoning",
+        "roots": ["."],
+        "excludeNames": ["scratchpad"]
+      },
+      "cases": [
+        {
+          "id": "breadth",
+          "prompt": "What do S58, S62, and S65 collectively establish and fail to establish about cumulative capability acquisition? Identify the decisive result from each, whether later work superseded or narrowed it, and the strongest conclusion the current record licenses. Cite exact artifacts and evidence, distinguish observation from interpretation, and do not edit files."
+        }
+      ]
+    },
+    {
+      "id": "open-exploration",
+      "selectionRole": "longitudinal",
+      "domain": "publication research and buyer evidence",
+      "isolatedCopies": true,
+      "source": {
+        "project": "Market Reports",
+        "subdir": "Open Exploration",
+        "roots": ["."]
+      },
+      "cases": [
+        {
+          "id": "breadth",
+          "prompt": "Produce an evidence packet, not publishable prose, selecting the one current research thread closest to a buyer-relevant insight. Show the decisive cross-source connection, the strongest disconfirming evidence or negative result, the remaining buyer-evidence gap, and the exact files supporting each judgment. Do not imitate the author's voice and do not edit files."
+        }
+      ]
+    },
+    {
+      "id": "iqidis",
+      "selectionRole": "longitudinal",
+      "domain": "production TypeScript application",
+      "isolatedCopies": true,
+      "source": {
+        "project": "iqidis",
+        "roots": ["."],
+        "excludeNames": ["tsconfig.tsbuildinfo"]
+      },
+      "cases": [
+        {
+          "id": "breadth",
+          "prompt": "Trace current organization scoping end to end for one authenticated server-side data-access path. Identify where user identity is established, how the selected organization propagates, where authorization is enforced, and the most consequential plausible cross-tenant isolation gap. Cite exact files and functions, separate verified code behavior from hypotheses, and do not edit files."
+        }
+      ]
+    },
+    {
+      "id": "new-computation-model",
+      "selectionRole": "longitudinal",
+      "domain": "mathematical and theoretical computer science research",
+      "isolatedCopies": true,
+      "source": {
+        "project": "new-computation-model",
+        "roots": ["."]
+      },
+      "cases": [
+        {
+          "id": "breadth",
+          "prompt": "Given the current Terminal Gate 2 verdict, reconstruct the minimal proof-and-debt chain blocking the composed CAN result. Trace the dependencies among CanonRep32, identity semantics, and equivariant observation transport, identify superseded status claims, and select the single highest-information next theorem or test allowed by the governing documents. Cite exact controlling files and sections, and do not edit files."
+        }
+      ]
+    },
+    {
+      "id": "memory-benchmark-harness",
+      "selectionRole": "reservedReplication",
+      "domain": "agent memory evaluation software",
+      "isolatedCopies": true,
+      "source": {
+        "project": "memory-benchmark-harness",
+        "roots": ["."]
+      },
+      "cases": [
+        {
+          "id": "breadth",
+          "prompt": "What does the current evidence actually establish about MapU transfer versus benchmark-specific gains across AMA-Bench and MemoryArena? Identify the regression evidence that rules out tempting default changes, the comparability limits, and the next architecture target best supported by the record. Cite exact result and code artifacts, distinguish official evidence from smoke tests, and do not edit files."
+        }
+      ]
+    }
+  ]
+}
