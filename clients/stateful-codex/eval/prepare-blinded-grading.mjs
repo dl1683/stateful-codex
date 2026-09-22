@@ -26,12 +26,21 @@ export function armForLabel(projectId, seed, label) {
 
 export function redactArmPaths(value, snapshotRoot, projectId) {
   let redacted = value;
+  const snapshotPattern = escapeRegExp(snapshotRoot).replaceAll("\\\\", "[\\\\/]");
+  redacted = redacted.replace(
+    new RegExp(`${snapshotPattern}[\\\\/][^\\\\/]+[\\\\/](?:baseline|stateful)`, "gi"),
+    "PROJECT_ROOT",
+  );
   for (const arm of ["baseline", "stateful"]) {
     const armRoot = path.join(snapshotRoot, projectId, arm);
     const variants = [armRoot, armRoot.replaceAll("\\", "/")];
-    for (const variant of variants) redacted = redacted.replaceAll(variant, "<PROJECT_ROOT>");
+    for (const variant of variants) redacted = redacted.replaceAll(variant, "PROJECT_ROOT");
   }
   return redacted;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function main() {

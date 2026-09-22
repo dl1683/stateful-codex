@@ -21,6 +21,14 @@ test("redacts both arm-specific source roots", () => {
   ].join("\n");
   assert.equal(
     redactArmPaths(value, root, "project"),
-    "<PROJECT_ROOT>\\a.md\n<PROJECT_ROOT>/b.md",
+    "PROJECT_ROOT\\a.md\nPROJECT_ROOT/b.md",
+  );
+});
+
+test("redacts arm paths even when an answer misspells the project directory", () => {
+  const value = "<C:\\snapshots\\project-alias\\stateful\\result.json:10>";
+  assert.equal(
+    redactArmPaths(value, "C:\\snapshots", "project",),
+    "<PROJECT_ROOT\\result.json:10>",
   );
 });
