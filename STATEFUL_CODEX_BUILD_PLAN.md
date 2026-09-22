@@ -322,6 +322,17 @@ The reviewed workspace snapshot was updated and the browser-client suite passes
 does not close the maturation-inclusive lifetime-cost or repository-wide Rust
 suite gates.
 
+The first maturation-efficiency slice is also implemented. A bounded
+`blackboard_record_batch` call can now commit up to 24 findings and 48
+relationships together. Relationships use the records' idempotency keys as
+local references, so the model does not have to copy generated entry IDs into
+later turns. Existing incremental record and relation tools remain intact. A
+focused app-server integration test proves that one model call persists two
+findings plus their relationship; the extension suite passes 5/5 and the
+focused app-server test passes 1/1. SC-EVAL-006 pre-registers a fresh-project
+replication of the original maturation workload before measuring whether the
+new path changes real model behavior or cost.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

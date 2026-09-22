@@ -894,3 +894,30 @@ The workspace HTML snapshot changed with the layout and the complete client
 suite passes 8/8. This establishes a fresh rendered browser pass for the current
 executable. It is not evidence of maturation-inclusive token advantage and does
 not substitute for the approval-gated repository-wide Rust suite.
+
+## Benchmark SC-EVAL-006: linked-batch maturation replication
+
+Status: pre-registered before execution on 2026-09-22.
+
+The SC-EVAL-004 maturation trace required separate turns for a 16-record batch,
+a relationship batch using copied opaque entry IDs, a second two-record batch,
+another relationship batch, and a retry after one copied endpoint ID was
+malformed. Commit `093cfc3211` raises the bounded finding batch to 24 and lets
+the same call persist up to 48 relationships by referencing the records'
+idempotency keys. The existing single-record and entry-ID relation tools remain
+available for incremental updates.
+
+This replication will copy the unchanged ten-file licensing corpus to a fresh
+temporary directory so project identity and durable state start empty, rebuild
+the branch CLI, remove API-key environment variables, and run the exact
+SC-EVAL-004 maturation prompt with `gpt-5.6-luna` at `xhigh` through cached
+ChatGPT authentication. It will report model responses, tool-call sequence,
+blackboard records and relationships, full and uncached token usage, malformed
+or retried persistence calls, and source edits.
+
+This is a same-corpus mechanism replication, not a new held-out semantic test.
+Its purpose is to determine whether the model naturally uses the linked batch
+and whether that removes persistence turns and opaque-ID failures while
+preserving the existing state quality. The result will be recorded even if the
+model ignores the new path or cost regresses. No claim about general maturation
+economics will be made from one replication.
