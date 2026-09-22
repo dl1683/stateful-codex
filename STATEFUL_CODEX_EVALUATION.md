@@ -1974,3 +1974,74 @@ corresponding SC-EVAL-017 Stateful runs, whose aggregate was 189,003 full and
 the ordinary SC-EVAL-017 aggregate of 114,445 full and 34,573 uncached tokens,
 but this two-case diagnostic does not replace a fresh full release distribution
 or establish maturation-inclusive release economics.
+
+### Execution result
+
+The single-call completion mechanism passed in both Stateful runs. Authority
+thread `01a0ca7a-4d3d-71f3-9123-6fa1be61bbe9` used one five-file evidence batch
+and one terminal `stateful_run_update` carrying `finalObligation`; continuity
+thread `01a0ca7b-b2a1-72e3-b15d-3edf978b1a45` used two evidence batches and the
+same single terminal operation. Neither used a separate final
+`obligation_update`, both completed on their first attempt, and live API reads
+confirmed revision-2 completed results of 7,923 and 5,466 characters. No
+Stateful rollout contained a failure marker, and all eight source files remained
+byte-identical.
+
+The authority run met the three-response target. Its first response received no
+cached input, unlike the preceding project-affine runs, so it consumed 64,248
+full and 28,920 uncached tokens. The continuity run still opened finance and
+security after its first decisive four-file continuity batch because the model
+chose to establish all three viability gates. It therefore used four responses,
+80,045 full tokens, and 10,413 uncached tokens. The exact-outcome guidance did
+not eliminate that adjacent verification round, so the one-batch/three-response
+mechanism gate failed for continuity.
+
+Together the two Stateful runs used 144,293 full tokens, 44,710 fewer than
+SC-EVAL-017's 189,003, a 23.66% improvement. Responses fell from nine to seven.
+The zero-cache authority start raised aggregate uncached usage to 39,333, 20.70%
+above the previous 32,587 despite continuity's improvement. The same-binary
+ordinary replications used 136,346 full and 28,058 uncached tokens; Stateful was
+5.83% higher on full tokens and 40.18% higher on uncached tokens in this live
+pair. The ordinary authority run also emitted a non-fatal missing collaboration-
+thread host log after producing its correct answer; that environmental event is
+retained and not attributed to Stateful.
+
+Both visible answers and durable results preserve the registered substantive
+facts without an unsupported award. A narrower final-assembly defect remains:
+both submitted terminal narratives explicitly said the committee recorded no
+final approval or that Cedar's status was viability rather than final approval,
+while the later visible prose reduced that to provisional/current-evidence
+wording. The completion checklist did not prevent this small but consequential
+caveat loss. SC-EVAL-018 therefore passes the single-call completion change and
+full-token improvement target, but fails its complete mechanism gate and its
+uncached target. It is not a release-economics result.
+
+## Benchmark SC-EVAL-019: submitted-result final-answer fidelity
+
+Status: pre-registered before implementation on 2026-09-22.
+
+The completion tool will return the model's own concise submitted terminal
+narrative as a named `submittedResult`, in addition to the bounded checklist.
+Its instruction will require the visible final answer to preserve that narrative
+without dropping or weakening any conclusion, caveat, uncertainty, or blocker;
+formatting and exact-source links may improve, but semantic compression may not
+remove material content. This does not change the durable result, root
+blackboard, obligation packet, or evidence policy.
+
+The exact SC-EVAL-018 authority and continuity prompts will each run once in a
+fresh Stateful thread on the same mature procurement project and rebuilt branch
+binary. Authentication, disabled ordinary memory, model, effort, working
+directory, roots, permissions, and no-edit boundary remain unchanged. No
+ordinary replication is needed because the change affects only post-completion
+Stateful answer assembly.
+
+The mechanism gate requires one successful terminal call carrying
+`finalObligation`, a returned `submittedResult`, no separate final obligation
+call, a completed revision-2 API result, and a byte-identical corpus. The
+semantic gate requires the visible answer to preserve every material conclusion
+in `submittedResult`, including all three authoritative totals and non-waiver
+order for authority, the complete 96/72/24/120-hour distinction for continuity,
+verified history versus vendor claims, and the explicit statement that viability
+is not a recorded final approval. Any new unsupported conclusion or weakened
+caveat fails the run. Token use and response count will be reported, but this is
+a correctness replication rather than an economics claim.

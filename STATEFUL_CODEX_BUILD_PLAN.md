@@ -609,6 +609,22 @@ procurement follow-ups' cached-context and completion overhead without thinning
 the broad root that produced the correct cross-source reasoning; the approval-
 gated repository-wide Rust suite also remains open.
 
+Commit `3dc47450a5` makes terminal completion one semantic tool operation carrying
+the final obligation, result, root revision, and selected findings. Intermediate
+obligation updates remain available for meaningful discoveries, but simple work
+no longer requires a separate final-obligation inference round. SC-EVAL-018
+confirmed first-attempt revision-2 durable completion in both targeted cases and
+reduced their aggregate full usage 23.66% from 189,003 to 144,293 tokens. One
+case still spent an adjacent-verification response, and a zero-cache first
+request made aggregate uncached usage regress.
+
+The live runs also localized a correctness issue after persistence: each
+submitted terminal result contained an explicit no-final-approval caveat, but
+the subsequently generated visible answer softened or omitted it. SC-EVAL-019
+is pre-registered to return the submitted narrative as a named completion output
+and require semantic preservation during final-answer formatting. Stage 8
+remains open pending that replication and broader economics evidence.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
