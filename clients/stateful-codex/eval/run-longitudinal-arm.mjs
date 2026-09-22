@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { finished } from "node:stream/promises";
+import { pathToFileURL } from "node:url";
 
 import { corpusHash } from "./corpus-hash.mjs";
 
@@ -37,49 +38,92 @@ async function main() {
 
   for (let index = state.nextCase; index < project.cases.length; index += 1) {
     const benchmarkCase = project.cases[index];
-    console.error(`[${project.id}/${options.arm}] ${benchmarkCase.id}`);
-    const output = await runTurn({
-      ...options,
-      workspace,
-      resultRoot,
-      index,
-      prompt: benchmarkCase.prompt,
+    const unresolved = unresolvedAttemptForCase(state, benchmarkCase.id);
+    if (unresolved) {
+      throw new Error(
+        `attempt ${unresolved.number} for ${benchmarkCase.id} is ${unresolved.status}; reconcile its canonical turn before retrying`,
+      );
+    }
+    const attempt = {
+      caseId: benchmarkCase.id,
+      number: nextAttemptNumber(state, benchmarkCase.id),
+      status: "running",
+      startedAtMs: Date.now(),
+      completedAtMs: null,
+      durationMs: null,
+      exitCode: null,
       threadId: state.threadId,
-      mode: manifest.mode ?? "autonomous",
-      model: manifest.model,
-      reasoningEffort: manifest.reasoningEffort ?? "high",
-    });
+      error: null,
+    };
+    state.attempts.push(attempt);
+    await writeState(statePath, state);
+    console.error(`[${project.id}/${options.arm}] ${benchmarkCase.id}`);
+    let output;
+    try {
+      output = await runTurn({
+        ...options,
+        workspace,
+        resultRoot,
+        index,
+        attempt: attempt.number,
+        prompt: benchmarkCase.prompt,
+        threadId: state.threadId,
+        mode: manifest.mode ?? "autonomous",
+        model: manifest.model,
+        reasoningEffort: manifest.reasoningEffort ?? "high",
+      });
+    } catch (error) {
+      finishAttempt(attempt, { status: "failed", error });
+      await writeState(statePath, state);
+      throw error;
+    }
     state.threadId ??= output.threadId;
-    if (!state.threadId) throw new Error("Codex output did not report a thread ID");
+    attempt.threadId = state.threadId;
+    if (!state.threadId) {
+      const error = new Error("Codex output did not report a thread ID");
+      finishAttempt(attempt, { status: "failed", error, exitCode: output.exitCode });
+      await writeState(statePath, state);
+      throw error;
+    }
     const currentHash = await corpusHash(workspace);
     if (currentHash.sha256 !== snapshot.corpus.sha256) {
-      throw new Error(`corpus changed during ${project.id}/${options.arm}/${benchmarkCase.id}`);
+      const error = new Error(
+        `corpus changed during ${project.id}/${options.arm}/${benchmarkCase.id}`,
+      );
+      finishAttempt(attempt, { status: "invalid", error, exitCode: output.exitCode });
+      await writeState(statePath, state);
+      throw error;
     }
     const turnRecord = {
       id: benchmarkCase.id,
+      attempt: attempt.number,
       exitCode: output.exitCode,
       corpusRevision: `sha256:${currentHash.sha256}`,
     };
-    state.turns.push(turnRecord);
     if (output.exitCode !== 0) {
-      await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
-      throw new Error(`Codex exited ${output.exitCode}`);
+      const error = new Error(`Codex exited ${output.exitCode}`);
+      finishAttempt(attempt, { status: "failed", error, exitCode: output.exitCode });
+      await writeState(statePath, state);
+      throw error;
     }
+    finishAttempt(attempt, { status: "completed", exitCode: output.exitCode });
+    state.turns.push(turnRecord);
     state.nextCase = index + 1;
-    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    await writeState(statePath, state);
   }
 }
 
 async function runTurn(options) {
   const turn = String(options.index + 1).padStart(2, "0");
+  const attempt = String(options.attempt).padStart(2, "0");
   const args = options.threadId
     ? resumeArgs(options)
     : startArgs(options);
   const stdoutFile = createWriteStream(
-    path.join(options.resultRoot, `turn-${turn}.stdout.jsonl`),
+    path.join(options.resultRoot, `turn-${turn}-attempt-${attempt}.stdout.jsonl`),
   );
   const stderrFile = createWriteStream(
-    path.join(options.resultRoot, `turn-${turn}.stderr.txt`),
+    path.join(options.resultRoot, `turn-${turn}-attempt-${attempt}.stderr.txt`),
   );
   const child = spawn(options.codex, args, {
     cwd: options.workspace,
@@ -194,11 +238,37 @@ function authEnvironment() {
 
 async function readState(statePath, project, arm) {
   try {
-    return JSON.parse(await readFile(statePath, "utf8"));
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    state.attempts ??= [];
+    return state;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    return { project, arm, threadId: null, nextCase: 0, turns: [] };
+    return { project, arm, threadId: null, nextCase: 0, turns: [], attempts: [] };
   }
+}
+
+export function nextAttemptNumber(state, caseId) {
+  return state.attempts.filter((attempt) => attempt.caseId === caseId).length + 1;
+}
+
+export function unresolvedAttemptForCase(state, caseId) {
+  return state.attempts.find(
+    (attempt) => attempt.caseId === caseId && attempt.status !== "completed",
+  );
+}
+
+function finishAttempt(attempt, { status, exitCode = null, error = null }) {
+  attempt.status = status;
+  attempt.completedAtMs = Date.now();
+  attempt.durationMs = attempt.completedAtMs - attempt.startedAtMs;
+  attempt.exitCode = exitCode;
+  attempt.error = error == null ? null : String(error.message ?? error);
+}
+
+async function writeState(statePath, state) {
+  const temporaryPath = `${statePath}.tmp-${process.pid}`;
+  await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`);
+  await rename(temporaryPath, statePath);
 }
 
 function parseArgs(args) {
@@ -231,4 +301,6 @@ function parseArgs(args) {
   return options;
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
