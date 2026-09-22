@@ -224,6 +224,22 @@ textarea {
   gap: 16px;
   min-width: 0;
 }
+.findings-work {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.findings-work .finding-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.findings-work .finding-list article {
+  min-width: 0;
+  margin-top: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-strong);
+  padding: 14px;
+}
 .workspace-panel {
   min-width: 0;
   margin: 0;
@@ -606,14 +622,20 @@ dd {
   .packet {
     grid-template-columns: 1fr;
   }
+  .findings-work .finding-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (min-width: 761px) and (max-width: 1180px) {
   .workspace-grid {
     grid-template-columns: minmax(230px, 0.8fr) minmax(440px, 1.4fr);
   }
-  .workspace-grid > aside:last-child {
+  .controls-panel {
     grid-column: 1 / -1;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .findings-work .finding-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

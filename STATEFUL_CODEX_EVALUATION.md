@@ -856,3 +856,41 @@ large removable tool-schema block. Future efficiency work must preserve the
 rich root and explicit run contract, measure distributions rather than a single
 cache outcome, and target stable prefix construction or maturation efficiency
 only when the host/provider boundary makes that actionable.
+
+## Fresh rendered browser validation
+
+Status: passed on 2026-09-22 against the live port-4174 gateway, current branch
+CLI, and cached ChatGPT login.
+
+The browser created Collaborative thread
+`01a0c904-e60c-7391-9845-a9211c9e3233` for the mature licensing project with
+this predeclared, read-only task: determine the currently executed royalty rate
+and controlling instrument, verify exact evidence, publish one concise semantic
+obligation, complete the run, and do not edit project files. Durable run
+`run-33c385b12d21a4b44b90a9fcdc1587c24a46d8c107cce2bd52bf6b415f685f8a`
+completed with zero continuations. It reported 6% of net sales from 2026-03-01
+and identified executed Amendment 1's express replacement of master Section 4.2
+as controlling. The rendered obligation separately stated the learning and its
+implication, and the strategy explained why the executed amendment rather than
+the stale 8% proposal controlled.
+
+The UI's evidence action returned the exact 296-byte
+`executed-amendment-1.md` revision. The visible source included execution by
+both parties on 2026-02-05, the Section 4.2 replacement, and the six-percent
+royalty. No licensing fixture path changed.
+
+The first full-page render exposed a layout failure rather than a data failure:
+18 findings remained in a narrow right rail, producing a 5,042-pixel page with
+large blank regions under the hierarchy and result. The corrected layout keeps
+operational controls in the right rail and renders findings as a separate
+full-width responsive grid. The same desktop page is now 2,615 pixels tall and
+retains all findings, badges, evidence links, obligations, strategy, result,
+controls, and source routing. Renders at 1440 px, 768 px, and 480 px were
+visually inspected; the finding grid resolves to three, two, and one columns
+respectively. The exact-evidence state was also inspected. Evidence images are
+under `%LOCALAPPDATA%/Temp/stateful-client-render-1790078328677`.
+
+The workspace HTML snapshot changed with the layout and the complete client
+suite passes 8/8. This establishes a fresh rendered browser pass for the current
+executable. It is not evidence of maturation-inclusive token advantage and does
+not substitute for the approval-gated repository-wide Rust suite.

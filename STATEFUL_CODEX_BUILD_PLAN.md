@@ -291,6 +291,37 @@ negative evidence in `STATEFUL_CODEX_EVALUATION.md`. Do not respond to this
 result by thinning the rich root blackboard or explicit run contract that
 enabled selective retrieval.
 
+### 2026-09-22 fresh rendered browser checkpoint
+
+A fresh Edge render against the live gateway on port 4174 and the current
+branch CLI completed a new Collaborative browser run using cached ChatGPT
+authentication. Thread `01a0c904-e60c-7391-9845-a9211c9e3233` and run
+`run-33c385b12d21a4b44b90a9fcdc1587c24a46d8c107cce2bd52bf6b415f685f8a`
+answered a predeclared licensing question from the mature project state. The
+result correctly identified the executed 6% royalty and Amendment 1 as the
+controlling instrument, published a concise learned/implication obligation,
+advanced the strategy revision, completed without a continuation, and made no
+fixture edits. The evidence control opened the exact 296-byte
+`executed-amendment-1.md` source containing the executed date, replacement
+clause, and six-percent term.
+
+The rendered inspection found a real information-design defect: accumulated
+findings occupied a narrow third column for the entire page, leaving the main
+work area blank below the result. At intermediate widths, the controls,
+steering, and long findings list were compressed into three narrow columns.
+The workspace now keeps run controls and steering in the operational rail, then
+places findings in a full-width responsive grid below the live work. The same
+18-finding workspace dropped from 5,042 to 2,615 rendered pixels at 1440 px
+without hiding state; it uses three finding columns on wide screens, two at
+intermediate widths, and one on mobile. Desktop, 768 px, and 480 px renders and
+the exact-evidence state were inspected. Screenshots are under
+`%LOCALAPPDATA%/Temp/stateful-client-render-1790078328677`.
+
+The reviewed workspace snapshot was updated and the browser-client suite passes
+8/8. This closes the fresh rendered-browser gate for the current executable. It
+does not close the maturation-inclusive lifetime-cost or repository-wide Rust
+suite gates.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

@@ -34,11 +34,13 @@ export function renderWorkspace(state) {
           ${renderActivity(state.activity)}
           ${renderInstructionForm(state)}
         </section>
-        <aside class="stack-panel">
+        <aside class="stack-panel controls-panel">
           ${renderControls(state)}
           ${renderSteering(state)}
-          ${renderFindings(state)}
         </aside>
+        <section class="findings-work">
+          ${renderFindings(state)}
+        </section>
       </div>
       ${renderRequests(state.pendingRequests)}
     </main>`;
