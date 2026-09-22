@@ -315,6 +315,83 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
 }
 
 #[tokio::test]
+async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call("refresh-call", "context_map_refresh", "{}"),
+                responses::ev_completed("refresh-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done-message", "Done"),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("alpha.md"),
+        "# Alpha\nfirst route\n",
+    )?;
+    std::fs::write(
+        project_root.path().join("beta.md"),
+        "# Beta\nsecond route\n",
+    )?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Refresh routes project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-refresh-routes-project".to_string(),
+            },
+        })
+        .await?;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 2);
+    let output: serde_json::Value = serde_json::from_str(
+        &requests[1]
+            .function_call_output_text("refresh-call")
+            .expect("refresh output should be text"),
+    )?;
+    assert_eq!(output["filesIndexed"], 2);
+    assert_eq!(output["routesTruncated"], false);
+    assert_eq!(output["routes"].as_array().map(Vec::len), Some(2));
+    assert_eq!(output["routes"][0]["source"]["relativePath"], "alpha.md");
+    assert_eq!(output["routes"][1]["source"]["relativePath"], "beta.md");
+    assert!(
+        output["routes"][0]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("# Alpha"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;

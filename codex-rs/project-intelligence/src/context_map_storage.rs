@@ -12,6 +12,7 @@ use crate::ContextMapEntryUpdate;
 use crate::ContextMapError;
 use crate::ContextMapFreshness;
 use crate::ContextMapHit;
+use crate::ContextMapListQuery;
 use crate::ContextMapQuery;
 use crate::HierarchyNode;
 use crate::HierarchyNodeId;
@@ -159,6 +160,40 @@ impl ContextMapStore {
              LIMIT ?",
         )
         .bind(expression)
+        .bind(&query.project_id)
+        .bind(limit)
+        .fetch_all(&mut *connection)
+        .await?;
+        let mut hits = Vec::with_capacity(entry_ids.len());
+        for raw_id in entry_ids {
+            let id = ContextMapEntryId::parse(&raw_id)
+                .map_err(|_| ContextMapStoreError::CorruptEntry(raw_id))?;
+            hits.push(
+                load_hit(&mut connection, &query.project_id, &id)
+                    .await?
+                    .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?,
+            );
+        }
+        Ok(hits)
+    }
+
+    pub async fn list_project(
+        &self,
+        query: ContextMapListQuery,
+    ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
+        query.validate()?;
+        let limit = i64::from(query.max_results);
+        let mut connection = self.pool.acquire().await?;
+        let entry_ids = sqlx::query_scalar::<_, String>(
+            "SELECT entry.id
+             FROM context_map_entries AS entry
+             JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+             WHERE entry.project_id = ? AND node.project_id = ?
+               AND node.lifecycle = 'active'
+             ORDER BY node.project_root, node.relative_path, entry.id
+             LIMIT ?",
+        )
+        .bind(&query.project_id)
         .bind(&query.project_id)
         .bind(limit)
         .fetch_all(&mut *connection)

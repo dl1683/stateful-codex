@@ -136,6 +136,23 @@ impl ContextMapQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextMapListQuery {
+    pub project_id: String,
+    pub max_results: u32,
+}
+
+impl ContextMapListQuery {
+    pub fn validate(&self) -> Result<(), ContextMapError> {
+        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
+            .map_err(|()| ContextMapError::InvalidProjectId)?;
+        if self.max_results == 0 || self.max_results > MAX_QUERY_RESULTS {
+            return Err(ContextMapError::InvalidQuery);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextMapHit {
     pub entry: ContextMapEntry,
     pub source: ContextMapSource,

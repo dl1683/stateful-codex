@@ -10,6 +10,8 @@ use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::ContextMapFreshness;
+use codex_project_intelligence::ContextMapHit;
+use codex_project_intelligence::ContextMapListQuery;
 use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
@@ -27,6 +29,7 @@ const TOOL_NAME: &str = "context_map_query";
 const REFRESH_TOOL_NAME: &str = "context_map_refresh";
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 20;
+const REFRESH_ROUTE_LIMIT: u32 = 20;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -89,30 +92,7 @@ impl ContextMapQueryTool {
         let mut data = Vec::new();
         let mut truncated = false;
         for hit in hits {
-            if !project
-                .roots
-                .iter()
-                .any(|root| root.path == hit.source.project_root)
-            {
-                return Err(FunctionCallError::RespondToModel(
-                    "stored context-map route is outside the selected project roots".to_string(),
-                ));
-            }
-            let item = json!({
-                "entryId": hit.entry.id.to_string(),
-                "nodeId": hit.entry.value.node_id.to_string(),
-                "sourceFingerprint": hit.entry.value.source_fingerprint.to_string(),
-                "description": hit.entry.value.description,
-                "routingTerms": hit.entry.value.routing_terms,
-                "coverage": hit.entry.value.coverage,
-                "freshness": freshness_name(hit.freshness),
-                "source": {
-                    "projectRoot": hit.source.project_root,
-                    "relativePath": hit.source.relative_path.to_string(),
-                    "regionAnchor": hit.source.region_anchor,
-                },
-                "revision": hit.entry.revision,
-            });
+            let item = route_json(hit, &project)?;
             data.push(item);
             if !fits_response(
                 &json!({
@@ -222,18 +202,54 @@ impl ContextMapRefreshTool {
             project_id: self.project_id.clone(),
             roots: project
                 .roots
-                .into_iter()
-                .map(|root| PathBuf::from(root.path))
+                .iter()
+                .map(|root| PathBuf::from(&root.path))
                 .collect(),
         })
         .await
         .map_err(respond)?;
+        let routes = self
+            .services
+            .context_map()
+            .await
+            .map_err(respond)?
+            .list_project(ContextMapListQuery {
+                project_id: self.project_id.clone(),
+                max_results: REFRESH_ROUTE_LIMIT,
+            })
+            .await
+            .map_err(respond)?;
+        let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let mut data = Vec::new();
+        let mut routes_truncated = routes.len() == REFRESH_ROUTE_LIMIT as usize;
+        for hit in routes {
+            let item = route_json(hit, &project)?;
+            data.push(item);
+            if !fits_response(
+                &json!({
+                    "projectId": self.project_id,
+                    "filesIndexed": report.files_indexed,
+                    "filesSkipped": report.files_skipped,
+                    "missingFiles": report.missing_files,
+                    "truncated": report.truncated,
+                    "routes": &data,
+                    "routesTruncated": routes_truncated,
+                }),
+                byte_budget,
+            ) {
+                data.pop();
+                routes_truncated = true;
+                break;
+            }
+        }
         Ok(Box::new(JsonToolOutput::new(json!({
             "projectId": self.project_id,
             "filesIndexed": report.files_indexed,
             "filesSkipped": report.files_skipped,
             "missingFiles": report.missing_files,
             "truncated": report.truncated,
+            "routes": data,
+            "routesTruncated": routes_truncated,
         }))))
     }
 }
@@ -246,7 +262,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: REFRESH_TOOL_NAME.to_string(),
-            description: "Refresh the selected project's filesystem hierarchy and source-routing index. Use when the context map is empty or project files changed.".to_string(),
+            description: "Refresh the selected project's filesystem hierarchy and source-routing index. Use when the context map is empty or project files changed. The result includes a bounded source-route inventory; use those routes directly and query the context map only when the inventory is truncated or does not identify the needed source.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -269,6 +285,36 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
     {
         Box::pin(self.handle_call(call))
     }
+}
+
+fn route_json(
+    hit: ContextMapHit,
+    project: &codex_thread_store::StoredProject,
+) -> Result<serde_json::Value, FunctionCallError> {
+    if !project
+        .roots
+        .iter()
+        .any(|root| root.path == hit.source.project_root)
+    {
+        return Err(FunctionCallError::RespondToModel(
+            "stored context-map route is outside the selected project roots".to_string(),
+        ));
+    }
+    Ok(json!({
+        "entryId": hit.entry.id.to_string(),
+        "nodeId": hit.entry.value.node_id.to_string(),
+        "sourceFingerprint": hit.entry.value.source_fingerprint.to_string(),
+        "description": hit.entry.value.description,
+        "routingTerms": hit.entry.value.routing_terms,
+        "coverage": hit.entry.value.coverage,
+        "freshness": freshness_name(hit.freshness),
+        "source": {
+            "projectRoot": hit.source.project_root,
+            "relativePath": hit.source.relative_path.to_string(),
+            "regionAnchor": hit.source.region_anchor,
+        },
+        "revision": hit.entry.revision,
+    }))
 }
 
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
