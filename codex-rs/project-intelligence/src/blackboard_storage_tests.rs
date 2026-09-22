@@ -13,6 +13,7 @@ use crate::BlackboardRelationId;
 use crate::BlackboardRelationKind;
 use crate::ContextMapCoverage;
 use crate::ContextMapStore;
+use crate::EvidenceLineRange;
 use crate::HierarchyNodeId;
 use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;
@@ -118,6 +119,7 @@ async fn fixture(temp_dir: &TempDir) -> (HierarchyStore, BlackboardStore, Blackb
                 evidence: vec![BlackboardEvidenceLink {
                     context_map_entry_id: map_id,
                     source_fingerprint: fingerprint("sha256:abc"),
+                    line_range: Some(EvidenceLineRange { start: 2, end: 4 }),
                 }],
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,

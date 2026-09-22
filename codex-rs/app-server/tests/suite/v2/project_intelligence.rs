@@ -11,6 +11,7 @@ use codex_app_server_protocol::ContextMapQueryResponse;
 use codex_app_server_protocol::ContextMapRefreshParams;
 use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::EvidenceEncoding;
+use codex_app_server_protocol::EvidenceLineRange;
 use codex_app_server_protocol::EvidenceReadParams;
 use codex_app_server_protocol::EvidenceReadResponse;
 use codex_app_server_protocol::ProjectCreateParams;
@@ -143,6 +144,7 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
             params: EvidenceReadParams {
                 project_id: status.project_id.clone(),
                 context_map_entry_id: route.entry_id.clone(),
+                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
                 max_bytes: Some(12),
             },
         })
@@ -156,10 +158,13 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
             source_fingerprint: route.source_fingerprint,
             source: route.source,
             encoding: EvidenceEncoding::Utf8,
-            content: "decisive=42\n".to_string(),
-            bytes_returned: 12,
+            content: "next".to_string(),
+            bytes_returned: 4,
             total_bytes: 16,
-            truncated: true,
+            total_lines: 2,
+            first_line: Some(2),
+            last_line: Some(2),
+            truncated: false,
             revision: route.revision,
         }
     );

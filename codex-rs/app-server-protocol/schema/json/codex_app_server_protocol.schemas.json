@@ -8219,6 +8219,16 @@
           "contextMapEntryId": {
             "type": "string"
           },
+          "lineRange": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/EvidenceLineRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sourceFingerprint": {
             "type": "string"
           }
@@ -11410,6 +11420,25 @@
           "base64"
         ],
         "type": "string"
+      },
+      "EvidenceLineRange": {
+        "properties": {
+          "end": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "start": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "end",
+          "start"
+        ],
+        "type": "object"
       },
       "ExperimentalFeature": {
         "properties": {

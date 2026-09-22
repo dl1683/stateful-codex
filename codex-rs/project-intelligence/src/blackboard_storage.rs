@@ -139,6 +139,8 @@ struct StoredBlackboardEntry {
 struct StoredEvidenceLink {
     context_map_entry_id: String,
     source_fingerprint: String,
+    first_line: Option<i64>,
+    last_line: Option<i64>,
 }
 
 #[derive(FromRow)]
@@ -173,7 +175,7 @@ async fn load_entry(
         return Ok(None);
     };
     let evidence = sqlx::query_as::<_, StoredEvidenceLink>(
-        "SELECT context_map_entry_id, source_fingerprint
+        "SELECT context_map_entry_id, source_fingerprint, first_line, last_line
          FROM blackboard_evidence_links
          WHERE entry_id = ? AND revision = ?
          ORDER BY position",
@@ -193,6 +195,16 @@ async fn load_entry(
                 SourceFingerprint::parse(link.source_fingerprint),
                 &stored.id,
             )?,
+            line_range: match (link.first_line, link.last_line) {
+                (None, None) => None,
+                (Some(first_line), Some(last_line)) => Some(crate::EvidenceLineRange {
+                    start: u64::try_from(first_line)
+                        .map_err(|_| BlackboardStoreError::CorruptEntry(stored.id.clone()))?,
+                    end: u64::try_from(last_line)
+                        .map_err(|_| BlackboardStoreError::CorruptEntry(stored.id.clone()))?,
+                }),
+                _ => return Err(BlackboardStoreError::CorruptEntry(stored.id.clone())),
+            },
         })
     })
     .collect::<Result<Vec<_>, BlackboardStoreError>>()?;
@@ -333,14 +345,27 @@ async fn write_revision(
     for (position, link) in value.evidence.iter().enumerate() {
         sqlx::query(
             "INSERT INTO blackboard_evidence_links (
-                entry_id, revision, position, context_map_entry_id, source_fingerprint
-             ) VALUES (?, ?, ?, ?, ?)",
+                entry_id, revision, position, context_map_entry_id, source_fingerprint,
+                first_line, last_line
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.as_str())
         .bind(revision)
         .bind(i64::try_from(position).map_err(|_| BlackboardStoreError::PositionOverflow)?)
         .bind(link.context_map_entry_id.as_str())
         .bind(link.source_fingerprint.as_str())
+        .bind(
+            link.line_range
+                .map(|range| i64::try_from(range.start))
+                .transpose()
+                .map_err(|_| BlackboardStoreError::PositionOverflow)?,
+        )
+        .bind(
+            link.line_range
+                .map(|range| i64::try_from(range.end))
+                .transpose()
+                .map_err(|_| BlackboardStoreError::PositionOverflow)?,
+        )
         .execute(&mut *connection)
         .await?;
     }

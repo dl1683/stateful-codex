@@ -69,7 +69,12 @@ export function workspaceFixture() {
         "node-file",
         "number",
         "The operative threshold is 60%, not 40%.",
-        [{ contextMapEntryId: "map-1" }],
+        [
+          {
+            contextMapEntryId: "map-1",
+            lineRange: { start: 7, end: 7 },
+          },
+        ],
         "current",
         "sourceVerified",
         [{ id: "relation-1" }],
@@ -103,6 +108,9 @@ export function workspaceFixture() {
       encoding: "utf8",
       bytesReturned: 43,
       totalBytes: 43,
+      totalLines: 7,
+      firstLine: 7,
+      lastLine: 7,
       truncated: false,
       content: "Clause 7: the threshold is amended to 60%.",
       source: source("sources/amendment.txt"),

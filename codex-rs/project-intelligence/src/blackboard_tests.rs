@@ -6,6 +6,7 @@ fn evidence(id: &str) -> BlackboardEvidenceLink {
     BlackboardEvidenceLink {
         context_map_entry_id: ContextMapEntryId::parse(id).expect("valid context-map ID"),
         source_fingerprint: SourceFingerprint::parse("sha256:source").expect("valid fingerprint"),
+        line_range: Some(EvidenceLineRange { start: 4, end: 7 }),
     }
 }
 
@@ -53,6 +54,25 @@ fn source_verified_entries_require_unique_evidence() {
     assert_eq!(
         value.validate(),
         Err(BlackboardError::DuplicateEvidenceLink)
+    );
+}
+
+#[test]
+fn evidence_line_ranges_are_bounded_and_ordered() {
+    let mut value = entry();
+    value.evidence[0].line_range = Some(EvidenceLineRange { start: 0, end: 1 });
+    assert_eq!(
+        value.validate(),
+        Err(BlackboardError::InvalidEvidenceLineRange)
+    );
+
+    value.evidence[0].line_range = Some(EvidenceLineRange {
+        start: 1,
+        end: 2_001,
+    });
+    assert_eq!(
+        value.validate(),
+        Err(BlackboardError::InvalidEvidenceLineRange)
     );
 }
 

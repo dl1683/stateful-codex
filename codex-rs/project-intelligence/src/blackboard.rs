@@ -6,6 +6,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::ContextMapEntryId;
+use crate::EvidenceLineRange;
 use crate::HierarchyNodeId;
 use crate::SourceFingerprint;
 
@@ -165,6 +166,7 @@ pub struct BlackboardStructuredValue {
 pub struct BlackboardEvidenceLink {
     pub context_map_entry_id: ContextMapEntryId,
     pub source_fingerprint: SourceFingerprint,
+    pub line_range: Option<EvidenceLineRange>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -438,6 +440,12 @@ fn validate_evidence(
     if verification == BlackboardVerification::SourceVerified && evidence.is_empty() {
         return Err(BlackboardError::VerifiedWithoutEvidence);
     }
+    if evidence
+        .iter()
+        .any(|link| link.line_range.is_some_and(|range| !range.is_valid()))
+    {
+        return Err(BlackboardError::InvalidEvidenceLineRange);
+    }
     Ok(())
 }
 
@@ -481,6 +489,10 @@ pub enum BlackboardError {
     DuplicateEvidenceLink,
     #[error("source-verified blackboard entries require evidence")]
     VerifiedWithoutEvidence,
+    #[error(
+        "blackboard evidence line ranges must be positive, ordered, and span at most 2000 lines"
+    )]
+    InvalidEvidenceLineRange,
     #[error("blackboard provenance must identify one bounded source without controls")]
     InvalidProvenance,
     #[error("blackboard relations must connect two different entries")]

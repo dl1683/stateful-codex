@@ -453,14 +453,6 @@ class BlackboardEvidenceFreshness(Enum):
     source_unavailable = "sourceUnavailable"
 
 
-class BlackboardEvidenceLink(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    context_map_entry_id: Annotated[str, Field(alias="contextMapEntryId")]
-    source_fingerprint: Annotated[str, Field(alias="sourceFingerprint")]
-
-
 class BlackboardImportance(Enum):
     critical = "critical"
     high = "high"
@@ -1417,6 +1409,14 @@ class EnvironmentConnectionNotification(BaseModel):
 class EvidenceEncoding(Enum):
     utf8 = "utf8"
     base64 = "base64"
+
+
+class EvidenceLineRange(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    end: Annotated[int, Field(ge=0)]
+    start: Annotated[int, Field(ge=0)]
 
 
 class ExperimentalFeatureEnablementSetParams(BaseModel):
@@ -6948,6 +6948,15 @@ class AppsReadResponse(BaseModel):
     )
     apps: list[ConnectorMetadata]
     missing_app_ids: Annotated[list[str], Field(alias="missingAppIds")]
+
+
+class BlackboardEvidenceLink(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    context_map_entry_id: Annotated[str, Field(alias="contextMapEntryId")]
+    line_range: Annotated[EvidenceLineRange | None, Field(alias="lineRange")] = None
+    source_fingerprint: Annotated[str, Field(alias="sourceFingerprint")]
 
 
 class BlackboardProvenance(BaseModel):

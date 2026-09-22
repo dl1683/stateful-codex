@@ -24,6 +24,7 @@ use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::ContextMapFreshness;
+use codex_project_intelligence::EvidenceLineRange;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
@@ -68,6 +69,7 @@ struct EvidenceArguments {
     context_map_entry_id: Option<String>,
     relative_path: Option<String>,
     project_root: Option<String>,
+    line_range: Option<EvidenceLineRange>,
 }
 
 #[derive(Deserialize)]
@@ -210,6 +212,7 @@ impl BlackboardRecordTool {
         let mut seen_entries = HashSet::with_capacity(arguments.len());
         let mut node_ids = HashSet::with_capacity(arguments.len());
         for argument in arguments {
+            let line_range = argument.line_range;
             let hit = match (
                 argument.context_map_entry_id,
                 argument.relative_path,
@@ -270,6 +273,7 @@ impl BlackboardRecordTool {
                 links.push(BlackboardEvidenceLink {
                     context_map_entry_id: hit.entry.id,
                     source_fingerprint: hit.entry.value.source_fingerprint,
+                    line_range,
                 });
             }
         }
@@ -290,7 +294,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires current context-map evidence routes; supply relativePath from refresh/evidence_read and let the tool bind current IDs and fingerprints. A shell result alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
+            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires current context-map evidence routes; supply relativePath and any exact lineRange from evidence_read, then let the tool bind current IDs and fingerprints. A shell result alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&record_schema())
@@ -519,7 +523,17 @@ fn record_schema() -> serde_json::Value {
                     "properties": {
                         "contextMapEntryId": {"type": "string"},
                         "relativePath": {"type": "string"},
-                        "projectRoot": {"type": "string"}
+                        "projectRoot": {"type": "string"},
+                        "lineRange": {
+                            "type": "object",
+                            "description": "Optional exact 1-based inclusive source lines already verified with evidence_read.",
+                            "properties": {
+                                "start": {"type": "integer", "minimum": 1},
+                                "end": {"type": "integer", "minimum": 1}
+                            },
+                            "required": ["start", "end"],
+                            "additionalProperties": false
+                        }
                     },
                     "anyOf": [
                         {"required": ["contextMapEntryId"]},

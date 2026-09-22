@@ -460,7 +460,10 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
                                 "verification": "sourceVerified",
                                 "importance": "high",
                                 "rootPromotion": "promoted",
-                                "evidence": [{"relativePath": "decision.md"}]
+                                "evidence": [{
+                                    "relativePath": "decision.md",
+                                    "lineRange": {"start": 2, "end": 3}
+                                }]
                             },
                             {
                                 "idempotencyKey": "open-question-learned",
@@ -525,6 +528,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     assert_eq!(batch_output["relationsRecorded"], 1);
     assert_eq!(batch_output["relationsFailed"], 0);
     assert_eq!(batch_output["relationResults"][0]["recorded"], true);
+    assert!(requests[1].body_contains_text("S1:L2-L3"));
     let query_output: serde_json::Value = serde_json::from_str(
         &requests[2]
             .function_call_output_text("query-call")
@@ -547,6 +551,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
         json!({
             "contextMapEntryId": route.entry.id.to_string(),
             "sourceFingerprint": route.entry.value.source_fingerprint.to_string(),
+            "lineRange": {"start": 2, "end": 3},
         })
     );
     Ok(())
@@ -702,6 +707,7 @@ async fn seed_context_map(
                 evidence: vec![BlackboardEvidenceLink {
                     context_map_entry_id,
                     source_fingerprint,
+                    line_range: None,
                 }],
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::User,

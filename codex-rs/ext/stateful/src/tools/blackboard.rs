@@ -85,6 +85,7 @@ impl BlackboardQueryTool {
                 "evidence": hit.entry.value.evidence.into_iter().map(|link| json!({
                     "contextMapEntryId": link.context_map_entry_id.to_string(),
                     "sourceFingerprint": link.source_fingerprint.to_string(),
+                    "lineRange": link.line_range,
                 })).collect::<Vec<_>>(),
                 "provenance": hit.entry.value.provenance,
                 "relations": hit.relations.into_iter().map(|relation| json!({

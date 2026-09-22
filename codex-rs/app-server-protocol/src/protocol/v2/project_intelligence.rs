@@ -103,7 +103,19 @@ pub struct EvidenceReadParams {
     pub project_id: String,
     pub context_map_entry_id: String,
     #[ts(optional = nullable)]
+    pub line_range: Option<EvidenceLineRange>,
+    #[ts(optional = nullable)]
     pub max_bytes: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EvidenceLineRange {
+    #[ts(type = "number")]
+    pub start: u64,
+    #[ts(type = "number")]
+    pub end: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -121,6 +133,12 @@ pub struct EvidenceReadResponse {
     pub bytes_returned: u64,
     #[ts(type = "number")]
     pub total_bytes: u64,
+    #[ts(type = "number")]
+    pub total_lines: u64,
+    #[ts(type = "number | null")]
+    pub first_line: Option<u64>,
+    #[ts(type = "number | null")]
+    pub last_line: Option<u64>,
     pub truncated: bool,
     #[ts(type = "number")]
     pub revision: u64,

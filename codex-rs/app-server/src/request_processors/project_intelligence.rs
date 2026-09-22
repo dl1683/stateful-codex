@@ -20,6 +20,9 @@ use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::ContextMapStoreError;
+use codex_project_intelligence::EvidenceLineRange as InternalEvidenceLineRange;
+use codex_project_intelligence::EvidenceReadRequest as InternalEvidenceReadRequest;
+use codex_project_intelligence::EvidenceReader;
 use codex_project_intelligence::HierarchyNode;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::NodeKind;
@@ -151,7 +154,56 @@ impl ProjectIntelligenceRequestProcessor {
                 "evidence source resolves outside its project root",
             ));
         }
-        let (bytes, total_bytes, fingerprint) =
+        if let Some(line_range) = params.line_range {
+            let read = EvidenceReader::new(self.context_map().await?.clone())
+                .read(InternalEvidenceReadRequest {
+                    project_id: params.project_id.clone(),
+                    project_roots: project
+                        .roots
+                        .iter()
+                        .map(|root| PathBuf::from(&root.path))
+                        .collect(),
+                    project_root: Some(PathBuf::from(&hit.source.project_root)),
+                    relative_path: hit.source.relative_path.clone(),
+                    line_range: Some(InternalEvidenceLineRange {
+                        start: line_range.start,
+                        end: line_range.end,
+                    }),
+                    max_bytes,
+                })
+                .await
+                .map_err(|error| invalid_params(error.to_string()))?;
+            return Ok(Some(
+                EvidenceReadResponse {
+                    project_id: params.project_id,
+                    context_map_entry_id: entry_id.to_string(),
+                    node_id: read.hit.entry.value.node_id.to_string(),
+                    source_fingerprint: read.hit.entry.value.source_fingerprint.to_string(),
+                    source: ApiContextMapSource {
+                        project_root: AbsolutePathBuf::from_absolute_path(root).map_err(
+                            |error| {
+                                internal_error(format!(
+                                    "canonical evidence root is invalid: {error}"
+                                ))
+                            },
+                        )?,
+                        relative_path: read.hit.source.relative_path.to_string(),
+                        region_anchor: None,
+                    },
+                    encoding: EvidenceEncoding::Utf8,
+                    content: read.content,
+                    bytes_returned: read.bytes_returned,
+                    total_bytes: read.total_bytes,
+                    total_lines: read.total_lines,
+                    first_line: read.first_line,
+                    last_line: read.last_line,
+                    truncated: read.truncated,
+                    revision: read.hit.entry.revision,
+                }
+                .into(),
+            ));
+        }
+        let (bytes, total_bytes, total_lines, fingerprint) =
             read_and_fingerprint(&canonical_path, max_bytes).await?;
         if fingerprint != hit.entry.value.source_fingerprint.as_str() {
             return Err(invalid_params(
@@ -181,6 +233,9 @@ impl ProjectIntelligenceRequestProcessor {
                 content,
                 bytes_returned,
                 total_bytes,
+                total_lines,
+                first_line: None,
+                last_line: None,
                 truncated: bytes_returned < total_bytes,
                 revision: hit.entry.revision,
             }
@@ -297,7 +352,7 @@ fn api_node(node: HierarchyNode) -> Result<ProjectIntelligenceNode, JSONRPCError
 async fn read_and_fingerprint(
     path: &std::path::Path,
     max_bytes: u32,
-) -> Result<(Vec<u8>, u64, String), JSONRPCErrorError> {
+) -> Result<(Vec<u8>, u64, u64, String), JSONRPCErrorError> {
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|error| invalid_params(format!("failed to open evidence source: {error}")))?;
@@ -305,6 +360,9 @@ async fn read_and_fingerprint(
     let mut returned = Vec::with_capacity(max_bytes as usize);
     let mut buffer = [0_u8; 64 * 1024];
     let mut total_bytes = 0_u64;
+    let mut total_lines = 0_u64;
+    let mut saw_bytes = false;
+    let mut ended_with_newline = false;
     loop {
         let read = file
             .read(&mut buffer)
@@ -319,12 +377,26 @@ async fn read_and_fingerprint(
             )
             .ok_or_else(|| internal_error("evidence byte count overflow"))?;
         hasher.update(&buffer[..read]);
+        saw_bytes = true;
+        total_lines = total_lines
+            .checked_add(
+                u64::try_from(buffer[..read].iter().filter(|byte| **byte == b'\n').count())
+                    .map_err(|_| internal_error("evidence line count overflow"))?,
+            )
+            .ok_or_else(|| internal_error("evidence line count overflow"))?;
+        ended_with_newline = buffer[read - 1] == b'\n';
         let remaining = max_bytes as usize - returned.len();
         returned.extend_from_slice(&buffer[..read.min(remaining)]);
+    }
+    if saw_bytes && !ended_with_newline {
+        total_lines = total_lines
+            .checked_add(1)
+            .ok_or_else(|| internal_error("evidence line count overflow"))?;
     }
     Ok((
         returned,
         total_bytes,
+        total_lines,
         format!("sha256:{:x}", hasher.finalize()),
     ))
 }

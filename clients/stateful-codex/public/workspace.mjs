@@ -314,10 +314,17 @@ app.addEventListener("click", async (event) => {
         );
         break;
       case "evidence":
+        const lineRange = button.dataset.firstLine
+          ? {
+              start: Number(button.dataset.firstLine),
+              end: Number(button.dataset.lastLine),
+            }
+          : null;
         state.evidence = await action("Verifying exact evidence", () =>
           rpc("evidence/read", {
             projectId,
             contextMapEntryId: button.dataset.entryId,
+            lineRange,
             maxBytes: 32768,
           }),
         );

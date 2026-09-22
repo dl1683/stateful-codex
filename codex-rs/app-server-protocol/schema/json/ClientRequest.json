@@ -226,6 +226,16 @@
         "contextMapEntryId": {
           "type": "string"
         },
+        "lineRange": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EvidenceLineRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "sourceFingerprint": {
           "type": "string"
         }
@@ -983,6 +993,25 @@
           "type": "object"
         }
       ]
+    },
+    "EvidenceLineRange": {
+      "properties": {
+        "end": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
     },
     "ExperimentalFeatureEnablementSetParams": {
       "properties": {

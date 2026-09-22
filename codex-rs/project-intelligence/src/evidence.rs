@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 
+use serde::Deserialize;
+use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use thiserror::Error;
@@ -15,10 +17,20 @@ use crate::ProjectRelativePath;
 pub const MAX_EVIDENCE_READ_BYTES: u32 = 64 * 1024;
 const MAX_LINE_SPAN: u64 = 2_000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EvidenceLineRange {
     pub start: u64,
     pub end: u64,
+}
+
+impl EvidenceLineRange {
+    pub(crate) fn is_valid(self) -> bool {
+        self.start > 0
+            && self.end >= self.start
+            && self.end <= i64::MAX as u64
+            && self.end.saturating_sub(self.start) < MAX_LINE_SPAN
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,11 +151,7 @@ fn validate_request(request: &EvidenceReadRequest) -> Result<(), EvidenceReadErr
     {
         return Err(EvidenceReadError::InvalidRequest);
     }
-    if let Some(range) = request.line_range
-        && (range.start == 0
-            || range.end < range.start
-            || range.end.saturating_sub(range.start) >= MAX_LINE_SPAN)
-    {
+    if request.line_range.is_some_and(|range| !range.is_valid()) {
         return Err(EvidenceReadError::InvalidLineRange);
     }
     Ok(())

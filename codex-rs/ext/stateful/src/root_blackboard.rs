@@ -190,8 +190,14 @@ fn render_hit(
     let evidence = value
         .evidence
         .iter()
-        .filter_map(|link| evidence_aliases.get(&link.context_map_entry_id))
-        .cloned()
+        .filter_map(|link| {
+            evidence_aliases
+                .get(&link.context_map_entry_id)
+                .map(|alias| match link.line_range {
+                    Some(range) => format!("{alias}:L{}-L{}", range.start, range.end),
+                    None => alias.clone(),
+                })
+        })
         .collect::<Vec<_>>()
         .join(",");
     let structured = value

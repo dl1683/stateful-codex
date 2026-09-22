@@ -4,6 +4,8 @@ use codex_experimental_api_macros::ExperimentalApi;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::EvidenceLineRange;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -150,6 +152,7 @@ pub struct BlackboardStructuredValue {
 pub struct BlackboardEvidenceLink {
     pub context_map_entry_id: String,
     pub source_fingerprint: String,
+    pub line_range: Option<EvidenceLineRange>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

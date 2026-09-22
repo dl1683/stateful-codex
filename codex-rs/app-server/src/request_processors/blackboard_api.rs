@@ -12,6 +12,7 @@ use codex_app_server_protocol::BlackboardRelationKind as ApiRelationKind;
 use codex_app_server_protocol::BlackboardRootPromotion as ApiRootPromotion;
 use codex_app_server_protocol::BlackboardStructuredValue as ApiStructuredValue;
 use codex_app_server_protocol::BlackboardVerification as ApiVerification;
+use codex_app_server_protocol::EvidenceLineRange as ApiEvidenceLineRange;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryState;
@@ -26,6 +27,7 @@ use codex_project_intelligence::BlackboardRelation;
 use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ContextMapEntryId;
+use codex_project_intelligence::EvidenceLineRange;
 use codex_project_intelligence::RootPromotion;
 use codex_project_intelligence::SourceFingerprint;
 
@@ -65,6 +67,10 @@ pub(super) fn api_entry(entry: BlackboardEntry) -> ApiEntry {
             .map(|link| ApiEvidenceLink {
                 context_map_entry_id: link.context_map_entry_id.to_string(),
                 source_fingerprint: link.source_fingerprint.to_string(),
+                line_range: link.line_range.map(|range| ApiEvidenceLineRange {
+                    start: range.start,
+                    end: range.end,
+                }),
             })
             .collect(),
         provenance: api_provenance(entry.value.provenance),
@@ -181,6 +187,10 @@ pub(super) fn internal_evidence(
                     .map_err(|error| invalid_params(error.to_string()))?,
                 source_fingerprint: SourceFingerprint::parse(link.source_fingerprint)
                     .map_err(|error| invalid_params(error.to_string()))?,
+                line_range: link.line_range.map(|range| EvidenceLineRange {
+                    start: range.start,
+                    end: range.end,
+                }),
             })
         })
         .collect()

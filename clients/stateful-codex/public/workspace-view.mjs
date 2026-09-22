@@ -112,7 +112,10 @@ function renderContextHit(hit) {
 }
 
 function renderEvidence(evidence) {
-  return `<article class="evidence"><div><strong>Exact evidence</strong><span class="badge verified">${escapeHtml(evidence.encoding)} · ${evidence.bytesReturned}/${evidence.totalBytes} bytes${evidence.truncated ? " · truncated" : ""}</span></div><p class="path">${escapeHtml(evidence.source.relativePath || evidence.source.projectRoot)}</p><pre>${escapeHtml(evidence.content)}</pre></article>`;
+  const lines = evidence.firstLine
+    ? ` · lines ${evidence.firstLine}–${evidence.lastLine}`
+    : "";
+  return `<article class="evidence"><div><strong>Exact evidence</strong><span class="badge verified">${escapeHtml(evidence.encoding)} · ${evidence.bytesReturned}/${evidence.totalBytes} bytes${lines}${evidence.truncated ? " · truncated" : ""}</span></div><p class="path">${escapeHtml(evidence.source.relativePath || evidence.source.projectRoot)}</p><pre>${escapeHtml(evidence.content)}</pre></article>`;
 }
 
 function renderObligation(obligation) {
@@ -241,7 +244,7 @@ function renderFinding(hit) {
   const evidence = entry.evidence
     .map(
       (link) =>
-        `<button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(link.contextMapEntryId)}" ${hit.evidenceFreshness !== "current" ? "disabled" : ""}>Open evidence</button>`,
+        `<button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(link.contextMapEntryId)}"${link.lineRange ? ` data-first-line="${link.lineRange.start}" data-last-line="${link.lineRange.end}"` : ""} ${hit.evidenceFreshness !== "current" ? "disabled" : ""}>Open evidence${link.lineRange ? ` · lines ${link.lineRange.start}–${link.lineRange.end}` : ""}</button>`,
     )
     .join("");
   return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span><span class="badge ${escapeHtml(hit.evidenceFreshness)}">${escapeHtml(hit.evidenceFreshness)}</span></div><p>${escapeHtml(entry.content)}</p>${evidence}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
