@@ -5,6 +5,7 @@ use clap::ValueEnum;
 use codex_protocol::protocol::ThreadSource;
 use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::SharedCliOptions;
+use codex_utils_cli::StatefulModeCliArg;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -23,6 +24,19 @@ pub struct Cli {
 
     #[clap(flatten)]
     pub shared: ExecSharedCliOptions,
+
+    /// Start a Stateful Codex run for the selected project directory.
+    #[arg(long = "stateful", value_name = "MODE", value_enum, global = true)]
+    pub stateful_mode: Option<StatefulModeCliArg>,
+
+    /// Use an existing Stateful project when more than one project has the selected directory.
+    #[arg(
+        long = "stateful-project",
+        value_name = "PROJECT_ID",
+        requires = "stateful_mode",
+        global = true
+    )]
+    pub stateful_project: Option<String>,
 
     /// Source classification for newly created or forked threads.
     #[arg(long = "thread-source", value_name = "SOURCE", global = true)]
@@ -91,6 +105,21 @@ impl std::ops::Deref for Cli {
 impl std::ops::DerefMut for Cli {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.shared.0
+    }
+}
+
+impl Cli {
+    pub fn inherit_stateful_root_options(
+        &mut self,
+        mode: Option<StatefulModeCliArg>,
+        project_id: Option<String>,
+    ) {
+        if self.stateful_mode.is_none() {
+            self.stateful_mode = mode;
+        }
+        if self.stateful_project.is_none() {
+            self.stateful_project = project_id;
+        }
     }
 }
 

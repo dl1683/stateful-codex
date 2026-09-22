@@ -1298,6 +1298,10 @@ async fn cli_main(
             exec_cli
                 .shared
                 .inherit_exec_root_options(&interactive.shared);
+            exec_cli.inherit_stateful_root_options(
+                interactive.stateful_mode,
+                interactive.stateful_project.clone(),
+            );
             exec_cli.strict_config |= root_strict_config;
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
@@ -3371,6 +3375,10 @@ mod tests {
         };
         exec.shared
             .inherit_exec_root_options(&cli.interactive.shared);
+        exec.inherit_stateful_root_options(
+            cli.interactive.stateful_mode,
+            cli.interactive.stateful_project,
+        );
         prepend_config_flags(&mut exec.config_overrides, cli.config_overrides);
         exec.shared
             .take_auto_review_config_overrides(&mut exec.config_overrides);
@@ -3656,6 +3664,25 @@ mod tests {
             ]
         );
         assert!(exec.sandbox_mode.is_none());
+    }
+
+    #[test]
+    fn stateful_selection_propagates_from_root_to_exec() {
+        let exec = finalize_exec_from_args(&[
+            "codex",
+            "--stateful",
+            "collaborative",
+            "--stateful-project",
+            "project-1",
+            "exec",
+            "investigate",
+        ]);
+
+        assert_eq!(
+            exec.stateful_mode,
+            Some(codex_utils_cli::StatefulModeCliArg::Collaborative)
+        );
+        assert_eq!(exec.stateful_project.as_deref(), Some("project-1"));
     }
 
     #[test]

@@ -15,13 +15,17 @@ mod worktree;
 pub use cli::Cli;
 pub use cli::Command;
 pub use cli::ReviewArgs;
+use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
 use codex_app_server_client::EnvironmentManager;
 use codex_app_server_client::ExecServerRuntimePaths;
 use codex_app_server_client::InProcessAppServerClient;
 use codex_app_server_client::InProcessClientStartArgs;
 use codex_app_server_client::InProcessServerEvent;
+use codex_app_server_client::StatefulStartup;
 use codex_app_server_client::TypedRequestError;
+use codex_app_server_client::prepare_stateful_startup;
+use codex_app_server_client::start_stateful_run;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -33,6 +37,7 @@ use codex_app_server_protocol::ReviewStartResponse;
 use codex_app_server_protocol::ReviewTarget as ApiReviewTarget;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::Thread as AppServerThread;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
@@ -106,6 +111,7 @@ use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
 use codex_utils_cli::SharedCliOptions;
+use codex_utils_cli::StatefulModeCliArg;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
 use codex_worktree::CreateWorktree;
@@ -229,6 +235,8 @@ struct ExecRunArgs {
     output_schema_path: Option<PathBuf>,
     prompt: Option<String>,
     skip_git_repo_check: bool,
+    stateful_mode: Option<StatefulModeCliArg>,
+    stateful_project: Option<String>,
     stderr_with_ansi: bool,
     thread_source: ThreadSource,
 }
@@ -265,6 +273,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         mut command,
         strict_config,
         shared,
+        stateful_mode,
+        stateful_project,
         thread_source,
         skip_git_repo_check,
         ephemeral,
@@ -293,6 +303,15 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         mut add_dir,
         worktree,
     } = shared;
+
+    if stateful_mode.is_some() && command.is_some() {
+        anyhow::bail!(
+            "--stateful starts a new run; resume, fork, and review existing sessions without this flag"
+        );
+    }
+    if stateful_project.is_some() && stateful_mode.is_none() {
+        anyhow::bail!("--stateful-project requires --stateful");
+    }
 
     if worktree {
         if ignore_user_config {
@@ -735,6 +754,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         output_schema_path,
         prompt,
         skip_git_repo_check,
+        stateful_mode,
+        stateful_project,
         stderr_with_ansi,
         thread_source: thread_source.map(Into::into).unwrap_or(ThreadSource::User),
     })
@@ -835,6 +856,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         output_schema_path,
         prompt,
         skip_git_repo_check,
+        stateful_mode,
+        stateful_project,
         stderr_with_ansi,
         thread_source,
     } = args;
@@ -958,6 +981,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             )
         }
     };
+    let stateful_startup = stateful_mode
+        .map(|mode| {
+            StatefulStartup::new(
+                stateful_workflow_mode(mode),
+                stateful_project,
+                prompt_summary.clone(),
+            )
+        })
+        .transpose()?;
 
     // When --yolo (dangerously_bypass_approvals_and_sandbox) is set, also skip the git repo check
     // since the user is explicitly running in an externally sandboxed environment.
@@ -1002,9 +1034,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     .map_err(anyhow::Error::msg)?;
             (session_configured.thread_id, session_configured)
         } else {
-            let response = start_thread(&client, &mut request_ids, &config, &thread_source)
-                .await
-                .map_err(anyhow::Error::msg)?;
+            let response = start_thread(
+                &client,
+                &mut request_ids,
+                &config,
+                &thread_source,
+                /*stateful_startup*/ None,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
             let session_configured =
                 session_configured_from_thread_start_response(&response, &config)
                     .map_err(anyhow::Error::msg)?;
@@ -1076,9 +1114,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         .map_err(anyhow::Error::msg)?;
         (session_configured.thread_id, session_configured)
     } else {
-        let response = start_thread(&client, &mut request_ids, &config, &thread_source)
-            .await
-            .map_err(anyhow::Error::msg)?;
+        let response = start_thread(
+            &client,
+            &mut request_ids,
+            &config,
+            &thread_source,
+            stateful_startup,
+        )
+        .await
+        .map_err(anyhow::Error::msg)?;
         let session_configured = session_configured_from_thread_start_response(&response, &config)
             .map_err(anyhow::Error::msg)?;
         (session_configured.thread_id, session_configured)
@@ -1318,17 +1362,34 @@ async fn start_thread(
     request_ids: &mut RequestIdSequencer,
     config: &Config,
     thread_source: &ThreadSource,
+    stateful_startup: Option<StatefulStartup>,
 ) -> Result<ThreadStartResponse, String> {
     let mut params = thread_start_params_from_config(config, thread_source);
+    let request_handle = AppServerRequestHandle::InProcess(client.request_handle());
+    let prepared_stateful = match stateful_startup {
+        Some(startup) => Some(
+            prepare_stateful_startup(&request_handle, &mut params, startup)
+                .await
+                .map_err(|error| error.to_string())?,
+        ),
+        None => None,
+    };
     loop {
         match client
-            .request_typed(ClientRequest::ThreadStart {
+            .request_typed::<ThreadStartResponse>(ClientRequest::ThreadStart {
                 request_id: request_ids.next(),
                 params: params.clone(),
             })
             .await
         {
-            Ok(response) => return Ok(response),
+            Ok(response) => {
+                if let Some(startup) = prepared_stateful.as_ref() {
+                    start_stateful_run(&request_handle, startup, &response.thread.id)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                return Ok(response);
+            }
             Err(TypedRequestError::Server { source, .. })
                 if params.history_mode.is_some()
                     && source.code == -32600
@@ -1339,6 +1400,14 @@ async fn start_thread(
             }
             Err(err) => return Err(format!("thread/start: {err}")),
         }
+    }
+}
+
+fn stateful_workflow_mode(mode: StatefulModeCliArg) -> StatefulWorkflowMode {
+    match mode {
+        StatefulModeCliArg::Autonomous => StatefulWorkflowMode::Autonomous,
+        StatefulModeCliArg::Collaborative => StatefulWorkflowMode::Collaborative,
+        StatefulModeCliArg::Socratic => StatefulWorkflowMode::Socratic,
     }
 }
 
