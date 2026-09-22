@@ -135,9 +135,10 @@ function completionOutput(item) {
     try {
       const parsed = JSON.parse(candidate);
       if (Array.isArray(parsed.finalAnswerChecklist)) return parsed;
-      if (Array.isArray(parsed.completion?.finalAnswerChecklist)) {
-        return parsed.completion;
-      }
+      const nested = Object.values(parsed).find((value) =>
+        Array.isArray(value?.finalAnswerChecklist),
+      );
+      if (nested) return nested;
     } catch {
       // Continue past non-JSON process output.
     }

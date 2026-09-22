@@ -135,7 +135,7 @@ test("extracts the terminal result from a code-mode completion call", () => {
           type: "input_text",
           text: JSON.stringify({
             finalObligation: { recorded: true },
-            completion: {
+            completed: {
               finalAnswerChecklist: [
                 {
                   category: "rootFinding",
