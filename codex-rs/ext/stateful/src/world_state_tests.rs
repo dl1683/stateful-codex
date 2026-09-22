@@ -88,6 +88,16 @@ fn renders_selected_project_as_bounded_typed_world_state() {
             .body()
             .contains("No knowledge has been promoted to the root blackboard yet")
     );
+    assert!(
+        rendered
+            .body()
+            .contains("select at most 8 highest-priority E aliases")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("rootRevision is not expectedRevision")
+    );
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
 }
 

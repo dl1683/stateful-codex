@@ -98,6 +98,13 @@ impl RunWorldStateStatus {
             } => {
                 field(&mut output, "Run ID", run.id.as_str());
                 field(&mut output, "Run revision", &run.revision.to_string());
+                line(
+                    &mut output,
+                    &format!(
+                        "Run-update precondition: pass expectedRevision: {} to stateful_run_update. This is the run revision; never substitute the separate project intelligence revision.",
+                        run.revision
+                    ),
+                );
                 field(
                     &mut output,
                     "Strategy revision",

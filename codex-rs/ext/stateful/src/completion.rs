@@ -37,7 +37,7 @@ pub(crate) async fn prepare_completion(
 ) -> Result<CompletionRecord, FunctionCallError> {
     if material_root_findings.len() > MAX_MATERIAL_ROOT_FINDINGS {
         return Err(respond(format!(
-            "materialRootFindings accepts at most {MAX_MATERIAL_ROOT_FINDINGS} root aliases"
+            "materialRootFindings accepts at most {MAX_MATERIAL_ROOT_FINDINGS} root aliases; select the highest-priority findings directly material to the outcome and preserve the remainder in the final semantic obligation"
         )));
     }
     let mut unique_references = HashSet::new();

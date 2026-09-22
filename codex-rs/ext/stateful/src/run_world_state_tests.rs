@@ -61,6 +61,16 @@ fn run_world_state_is_semantic_bounded_and_stable() {
         .expect("first contribution renders");
     assert!(rendered.body().contains("Mode: Socratic"));
     assert!(rendered.body().contains("Run revision: 2"));
+    assert!(
+        rendered
+            .body()
+            .contains("pass expectedRevision: 2 to stateful_run_update")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("never substitute the separate project intelligence revision")
+    );
     assert!(rendered.body().contains("Strategy revision: 1"));
     assert!(rendered.body().contains("Do not invoke execution tools"));
     assert!(rendered.body().contains("Unresolved user steering: none"));

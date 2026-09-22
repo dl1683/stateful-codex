@@ -90,8 +90,7 @@ impl StatefulRunUpdateTool {
         let completion = if status == StatefulRunStatus::Completed {
             let material_root_findings = material_root_findings.ok_or_else(|| {
                 FunctionCallError::RespondToModel(
-                    "completed requires materialRootFindings; pass every materially relevant E alias from the current root blackboard, or [] only after determining none is material"
-                        .to_string(),
+                    format!("completed requires materialRootFindings; pass at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome, preserve additional conclusions in the final semantic obligation, or pass [] only after determining no root finding is material")
                 )
             })?;
             let root_revision = root_revision.ok_or_else(|| {
@@ -188,18 +187,18 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed requires a final semantic obligation plus rootRevision and an explicit materialRootFindings selection: finish every blackboard, relationship, steering, verification, and obligation operation first; copy the current project intelligence revision and select every materially relevant E alias from that root; then make completed the final Stateful mutation. The tool rejects a changed root before mutation and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
+            description: format!("Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed requires a final semantic obligation plus rootRevision and an explicit materialRootFindings selection: finish every blackboard, relationship, steering, verification, and obligation operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome and preserve additional conclusions in the obligation; then make completed the final Stateful mutation. The tool rejects a changed root before mutation and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "expectedRevision": {"type": "integer", "minimum": 1},
+                    "expectedRevision": {"type": "integer", "minimum": 1, "description": "Copy the Run revision from the Stateful run World State. This is not the project intelligence revision used by rootRevision."},
                     "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "Use completed only after a final semantic obligation captures all material answer content and all durable writes are finished; completion removes the active-run binding."},
                     "strategy": {"type": "string"},
                     "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative after all durable writes and verification. The tool appends the structured completion basis."},
                     "rootRevision": {"type": "integer", "minimum": 0, "description": "Required for completed. Copy the project intelligence revision shown with the current root blackboard; completion fails before mutation if it changed."},
-                    "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": "Required for completed. Include every materially relevant E alias shown in the root blackboard at rootRevision; use [] only after determining no root finding is material to the requested outcome."}
+                    "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": format!("Required for completed. Select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases shown at rootRevision that are directly material to the requested outcome; preserve additional material conclusions in the final semantic obligation. Use [] only after determining no root finding is material.")}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false

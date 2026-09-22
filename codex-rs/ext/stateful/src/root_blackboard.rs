@@ -14,6 +14,7 @@ use codex_project_intelligence::RootBlackboardProjection;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::world_state::append_line;
 use crate::world_state::hash_component;
 use crate::world_state::try_append_line;
@@ -113,7 +114,9 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
     }
     append_line(
         output,
-        "For consequential claims, verify against exact source. Use evidence_read with the S paths and source line hints above to open only the smallest decisive line ranges whose wording can change the answer; do not reopen every supporting file by default or call a full-corpus read the smallest set. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient. At completion, pass this project intelligence revision as rootRevision and every materially relevant E alias in materialRootFindings so those exact findings remain in the durable result; use an empty list only after determining that no root finding is material to the requested outcome.",
+        &format!(
+            "For consequential claims, verify against exact source. Use evidence_read with the S paths and source line hints above to open only the smallest decisive line ranges whose wording can change the answer; do not reopen every supporting file by default or call a full-corpus read the smallest set. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient. At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve any additional material conclusions in the final semantic obligation; use an empty alias list only after determining that no root finding is material. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
+        ),
     );
 }
 
