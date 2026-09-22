@@ -163,49 +163,33 @@ impl StatefulRunStore {
     ) -> Result<StatefulRun, StatefulRunStoreError> {
         update.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current = load_run(&mut transaction, id)
-            .await?
-            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
-        if current.revision != update.expected_revision {
-            return Err(StatefulRunStoreError::RevisionConflict {
-                expected: update.expected_revision,
-                actual: current.revision,
-            });
-        }
-        if !valid_transition(current.status, update.status) {
-            return Err(StatefulRunStoreError::InvalidTransition {
-                from: current.status,
-                to: update.status,
-            });
-        }
-        let expected_revision = i64::try_from(update.expected_revision)
-            .map_err(|_| StatefulRunStoreError::CountOverflow)?;
-        let strategy_changed = current.strategy != update.strategy;
-        let rows = sqlx::query(
-            "UPDATE stateful_runs
-             SET status = ?, strategy = ?,
-                 strategy_revision = strategy_revision + ?, result = ?,
-                 revision = revision + 1, updated_at_ms = ?
-             WHERE id = ? AND revision = ?",
-        )
-        .bind(status_name(update.status))
-        .bind(update.strategy)
-        .bind(i64::from(strategy_changed))
-        .bind(update.result)
-        .bind(unix_timestamp_millis()?)
-        .bind(id.as_str())
-        .bind(expected_revision)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected();
-        if rows != 1 {
-            return Err(StatefulRunStoreError::ConcurrentMutation);
-        }
-        let run = load_run(&mut transaction, id)
-            .await?
-            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+        let run = update_run_in_transaction(&mut transaction, id, update).await?;
         transaction.commit().await?;
         Ok(run)
+    }
+
+    pub async fn complete_run_with_obligation(
+        &self,
+        id: &StatefulRunId,
+        update: StatefulRunUpdate,
+        obligation_id: String,
+        obligation: NewObligation,
+    ) -> Result<(StatefulRun, StatefulObligation), StatefulRunStoreError> {
+        update.validate()?;
+        validate_record_id(&obligation_id)?;
+        obligation.validate()?;
+        if update.status != StatefulRunStatus::Completed {
+            return Err(StatefulRunStoreError::CompletionStatusRequired);
+        }
+        if obligation.run_id != *id {
+            return Err(StatefulRunStoreError::ObligationRunMismatch);
+        }
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let run = update_run_in_transaction(&mut transaction, id, update).await?;
+        let obligation =
+            append_obligation_in_transaction(&mut transaction, obligation_id, obligation).await?;
+        transaction.commit().await?;
+        Ok((run, obligation))
     }
 
     pub async fn update_mode(
@@ -456,38 +440,7 @@ impl StatefulRunStore {
         validate_record_id(&id)?;
         value.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if let Some(existing) = load_obligation_by_id(&mut transaction, &id).await? {
-            if existing.value != value {
-                return Err(StatefulRunStoreError::ObligationIdentityConflict(id));
-            }
-            transaction.commit().await?;
-            return Ok(existing);
-        }
-        let run = load_run(&mut transaction, &value.run_id)
-            .await?
-            .ok_or_else(|| StatefulRunStoreError::RunNotFound(value.run_id.to_string()))?;
-        if run.value.project_id != value.project_id {
-            return Err(StatefulRunStoreError::ProjectMismatch);
-        }
-        let result = sqlx::query(
-            "INSERT INTO stateful_obligations (
-                id, project_id, run_id, packet_json, provenance_source_id,
-                revision, created_at_ms
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(&value.project_id)
-        .bind(value.run_id.as_str())
-        .bind(serde_json::to_string(&value.packet)?)
-        .bind(&value.provenance_source_id)
-        .bind(INITIAL_REVISION)
-        .bind(unix_timestamp_millis()?)
-        .execute(&mut *transaction)
-        .await?;
-        let sequence = result.last_insert_rowid();
-        let obligation = load_obligation_by_sequence(&mut transaction, sequence)
-            .await?
-            .ok_or_else(|| StatefulRunStoreError::ObligationNotFound(id))?;
+        let obligation = append_obligation_in_transaction(&mut transaction, id, value).await?;
         transaction.commit().await?;
         Ok(obligation)
     }
@@ -542,6 +495,92 @@ impl StatefulRunStore {
         }
         Ok(data)
     }
+}
+
+async fn update_run_in_transaction(
+    connection: &mut SqliteConnection,
+    id: &StatefulRunId,
+    update: StatefulRunUpdate,
+) -> Result<StatefulRun, StatefulRunStoreError> {
+    let current = load_run(connection, id)
+        .await?
+        .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+    if current.revision != update.expected_revision {
+        return Err(StatefulRunStoreError::RevisionConflict {
+            expected: update.expected_revision,
+            actual: current.revision,
+        });
+    }
+    if !valid_transition(current.status, update.status) {
+        return Err(StatefulRunStoreError::InvalidTransition {
+            from: current.status,
+            to: update.status,
+        });
+    }
+    let expected_revision = i64::try_from(update.expected_revision)
+        .map_err(|_| StatefulRunStoreError::CountOverflow)?;
+    let strategy_changed = current.strategy != update.strategy;
+    let rows = sqlx::query(
+        "UPDATE stateful_runs
+         SET status = ?, strategy = ?,
+             strategy_revision = strategy_revision + ?, result = ?,
+             revision = revision + 1, updated_at_ms = ?
+         WHERE id = ? AND revision = ?",
+    )
+    .bind(status_name(update.status))
+    .bind(update.strategy)
+    .bind(i64::from(strategy_changed))
+    .bind(update.result)
+    .bind(unix_timestamp_millis()?)
+    .bind(id.as_str())
+    .bind(expected_revision)
+    .execute(&mut *connection)
+    .await?
+    .rows_affected();
+    if rows != 1 {
+        return Err(StatefulRunStoreError::ConcurrentMutation);
+    }
+    load_run(connection, id)
+        .await?
+        .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))
+}
+
+async fn append_obligation_in_transaction(
+    connection: &mut SqliteConnection,
+    id: String,
+    value: NewObligation,
+) -> Result<StatefulObligation, StatefulRunStoreError> {
+    if let Some(existing) = load_obligation_by_id(connection, &id).await? {
+        if existing.value != value {
+            return Err(StatefulRunStoreError::ObligationIdentityConflict(id));
+        }
+        return Ok(existing);
+    }
+    let run = load_run(connection, &value.run_id)
+        .await?
+        .ok_or_else(|| StatefulRunStoreError::RunNotFound(value.run_id.to_string()))?;
+    if run.value.project_id != value.project_id {
+        return Err(StatefulRunStoreError::ProjectMismatch);
+    }
+    let result = sqlx::query(
+        "INSERT INTO stateful_obligations (
+            id, project_id, run_id, packet_json, provenance_source_id,
+            revision, created_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&value.project_id)
+    .bind(value.run_id.as_str())
+    .bind(serde_json::to_string(&value.packet)?)
+    .bind(&value.provenance_source_id)
+    .bind(INITIAL_REVISION)
+    .bind(unix_timestamp_millis()?)
+    .execute(&mut *connection)
+    .await?;
+    let sequence = result.last_insert_rowid();
+    load_obligation_by_sequence(connection, sequence)
+        .await?
+        .ok_or(StatefulRunStoreError::ObligationNotFound(id))
 }
 
 #[derive(FromRow)]
@@ -786,6 +825,10 @@ pub enum StatefulRunStoreError {
     CorruptObligationSequence(i64),
     #[error("obligation project does not match its run")]
     ProjectMismatch,
+    #[error("atomic completion requires completed run status")]
+    CompletionStatusRequired,
+    #[error("completion obligation does not belong to the completed run")]
+    ObligationRunMismatch,
     #[error("steering ID was already used for different content: {0}")]
     SteeringIdentityConflict(String),
     #[error("steering instruction not found: {0}")]

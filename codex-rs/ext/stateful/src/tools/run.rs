@@ -141,18 +141,15 @@ impl StatefulRunUpdateTool {
                 &material_root_findings,
             )
             .await?;
-            let obligation = runtime
-                .append_obligation(
-                    stable_id("obligation", &self.project_id, &completion_idempotency_key),
-                    NewObligation {
-                        project_id: self.project_id.clone(),
-                        run_id: current.id.clone(),
-                        packet: final_obligation,
-                        provenance_source_id: call.call_id.clone(),
-                    },
-                )
-                .await
-                .map_err(respond)?;
+            let obligation = (
+                stable_id("obligation", &self.project_id, &completion_idempotency_key),
+                NewObligation {
+                    project_id: self.project_id.clone(),
+                    run_id: current.id.clone(),
+                    packet: final_obligation,
+                    provenance_source_id: call.call_id.clone(),
+                },
+            );
             (Some(completion), Some(obligation))
         } else {
             if material_root_findings.is_some()
@@ -166,22 +163,31 @@ impl StatefulRunUpdateTool {
             }
             (None, None)
         };
-        let run = runtime
-            .update_run(
-                &current.id,
-                StatefulRunUpdate {
-                    expected_revision,
-                    status,
-                    strategy: strategy.or(current.strategy),
-                    result: completion
-                        .as_ref()
-                        .map(|completion| completion.result.clone())
-                        .or(result)
-                        .or(current.result),
-                },
+        let update = StatefulRunUpdate {
+            expected_revision,
+            status,
+            strategy: strategy.or(current.strategy),
+            result: completion
+                .as_ref()
+                .map(|completion| completion.result.clone())
+                .or(result)
+                .or(current.result),
+        };
+        let (run, final_obligation) = if let Some((obligation_id, obligation)) = final_obligation {
+            let (run, obligation) = runtime
+                .complete_run_with_obligation(&current.id, update, obligation_id, obligation)
+                .await
+                .map_err(respond)?;
+            (run, Some(obligation))
+        } else {
+            (
+                runtime
+                    .update_run(&current.id, update)
+                    .await
+                    .map_err(respond)?,
+                None,
             )
-            .await
-            .map_err(respond)?;
+        };
         if let Some(event_sink) = &self.event_sink {
             if let Some(obligation) = &final_obligation {
                 event_sink.emit(StatefulEvent::ObligationUpdated {
@@ -227,7 +233,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: format!("Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed records finalObligation and the terminal result in one tool operation: finish every blackboard, relationship, steering, and verification operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome; then supply completionIdempotencyKey, finalObligation, and the result in this single final Stateful mutation. The tool rejects changed run or root revisions before persistence and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
+            description: format!("Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed records finalObligation and the terminal result together in one atomic storage transaction: finish every blackboard, relationship, steering, and verification operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome; then supply completionIdempotencyKey, finalObligation, and the result in this single final Stateful mutation. The tool rejects changed run or root revisions before persistence and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

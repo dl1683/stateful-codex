@@ -266,6 +266,113 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
 }
 
 #[tokio::test]
+async fn final_obligation_and_completion_commit_atomically() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let store = StatefulRunStore::open(&sqlite).await.expect("store opens");
+    let run_id = StatefulRunId::parse("atomic-completion-run").expect("valid run ID");
+    let created = store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["atomic-completion-thread".to_string()],
+                goal: "Persist the final result and obligation together.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+        )
+        .await
+        .expect("run inserts");
+    let existing = store
+        .append_obligation(
+            "conflicting-final-obligation".to_string(),
+            NewObligation {
+                project_id: "project-1".to_string(),
+                run_id: run_id.clone(),
+                packet: ObligationPacket {
+                    learning: vec!["An earlier learning remains recorded.".to_string()],
+                    next: vec!["Complete the investigation.".to_string()],
+                    ..Default::default()
+                },
+                provenance_source_id: "earlier-turn".to_string(),
+            },
+        )
+        .await
+        .expect("earlier obligation inserts");
+    let completion_update = StatefulRunUpdate {
+        expected_revision: created.revision,
+        status: StatefulRunStatus::Completed,
+        strategy: None,
+        result: Some("The investigation is complete.".to_string()),
+    };
+    let final_obligation = NewObligation {
+        project_id: "project-1".to_string(),
+        run_id: run_id.clone(),
+        packet: ObligationPacket {
+            learning: vec!["The final conclusion is source verified.".to_string()],
+            implication: vec!["The result is ready to use.".to_string()],
+            ..Default::default()
+        },
+        provenance_source_id: "completion-turn".to_string(),
+    };
+
+    let error = store
+        .complete_run_with_obligation(
+            &run_id,
+            completion_update.clone(),
+            "conflicting-final-obligation".to_string(),
+            final_obligation.clone(),
+        )
+        .await
+        .expect_err("obligation conflict rolls completion back");
+    assert_eq!(
+        error.to_string(),
+        StatefulRunStoreError::ObligationIdentityConflict(
+            "conflicting-final-obligation".to_string()
+        )
+        .to_string()
+    );
+    assert_eq!(
+        store.get_run(&run_id).await.expect("run loads"),
+        Some(created)
+    );
+    assert_eq!(
+        store
+            .latest_obligation(&run_id)
+            .await
+            .expect("obligation loads"),
+        Some(existing)
+    );
+
+    let (completed, obligation) = store
+        .complete_run_with_obligation(
+            &run_id,
+            completion_update,
+            "successful-final-obligation".to_string(),
+            final_obligation.clone(),
+        )
+        .await
+        .expect("completion commits");
+    assert_eq!(completed.status, StatefulRunStatus::Completed);
+    assert_eq!(obligation.value, final_obligation);
+    assert_eq!(
+        store.get_run(&run_id).await.expect("completed run loads"),
+        Some(completed)
+    );
+    assert_eq!(
+        store
+            .latest_obligation(&run_id)
+            .await
+            .expect("final obligation loads"),
+        Some(obligation)
+    );
+}
+
+#[tokio::test]
 async fn terminal_run_rejects_new_steering() {
     let temp_dir = TempDir::new().expect("tempdir created");
     let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
