@@ -70,3 +70,52 @@ test("keeps maturation cost in the aggregate lifetime result", () => {
     uncachedTotalTokens: 2,
   });
 });
+
+test("accepts measured maturation usage without changing the frozen manifest", () => {
+  const manifest = {
+    name: "series",
+    maturationUsage: {
+      totalTokens: 100,
+      uncachedTotalTokens: 40,
+      modelResponses: 3,
+    },
+    cases: [
+      {
+        id: "case",
+        prompt: "What controls?",
+        expectedConcepts: [
+          { name: "authority", termGroups: [["executed"], ["controls"]] },
+        ],
+        forbiddenPhrases: ["proposal controls"],
+      },
+    ],
+  };
+  const measured = {
+    totalTokens: 25,
+    uncachedTotalTokens: 10,
+    modelResponses: 1,
+  };
+
+  const report = compareSeries(
+    manifest,
+    new Map([
+      [
+        "case",
+        {
+          baseline: summary("baseline", usage(80, 50)),
+          stateful: summary("stateful", usage(60, 30)),
+        },
+      ],
+    ]),
+    measured,
+  );
+
+  assert.deepEqual(report.aggregate.maturation, measured);
+  assert.deepEqual(report.aggregate.statefulLifetime, {
+    totalTokens: 85,
+    uncachedTotalTokens: 40,
+    modelResponses: 3,
+    readBearingToolCalls: 1,
+  });
+  assert.equal(manifest.maturationUsage.totalTokens, 100);
+});

@@ -8,7 +8,11 @@ import {
   summarizeEvents,
 } from "./compare-rollouts.mjs";
 
-export function compareSeries(manifest, rollouts) {
+export function compareSeries(
+  manifest,
+  rollouts,
+  maturationUsage = manifest.maturationUsage,
+) {
   const cases = manifest.cases.map((benchmarkCase) => {
     const paths = rollouts.get(benchmarkCase.id);
     if (!paths) throw new Error(`missing rollout pair for ${benchmarkCase.id}`);
@@ -37,7 +41,7 @@ export function compareSeries(manifest, rollouts) {
 
   const baseline = sumCases(cases, "baseline");
   const followUps = sumCases(cases, "stateful");
-  const maturation = manifest.maturationUsage;
+  const maturation = maturationUsage;
   const statefulLifetime = addUsage(followUps, maturation);
   const perQuestionSavings = {
     totalTokens: baseline.totalTokens - followUps.totalTokens,
@@ -157,12 +161,14 @@ function parseArgs(args) {
     const value = args[index + 1];
     if (argument === "--manifest") options.manifest = value;
     else if (argument === "--pair") options.pairs.push(value);
+    else if (argument === "--maturation-rollout")
+      options.maturationRollout = value;
     else throw new Error(`unknown argument: ${argument}`);
     index += 1;
   }
   if (!options.manifest || options.pairs.length === 0) {
     throw new Error(
-      "usage: --manifest PATH --pair CASE=BASELINE,STATEFUL [--pair ...]",
+      "usage: --manifest PATH [--maturation-rollout PATH] --pair CASE=BASELINE,STATEFUL [--pair ...]",
     );
   }
   return options;
@@ -187,7 +193,18 @@ async function main() {
       stateful: summarizeEvents(statefulEvents),
     });
   }
-  const report = compareSeries(manifest, rollouts);
+  let maturationUsage = manifest.maturationUsage;
+  if (options.maturationRollout) {
+    const maturation = summarizeEvents(
+      await readEvents(options.maturationRollout),
+    );
+    maturationUsage = {
+      totalTokens: maturation.usage.totalTokens,
+      uncachedTotalTokens: maturation.usage.uncachedTotalTokens,
+      modelResponses: maturation.modelResponses,
+    };
+  }
+  const report = compareSeries(manifest, rollouts, maturationUsage);
   console.log(JSON.stringify(report, null, 2));
   if (!report.passed) process.exitCode = 2;
 }
