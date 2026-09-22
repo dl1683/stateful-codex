@@ -139,6 +139,20 @@ Windows Store `pwsh.exe` returns access denied; Stateful recovery and non-shell
 tools continue, but that host-shell problem must not be reported as successful
 command execution.
 
+The pre-registered decisive-detail benchmark SC-EVAL-002 has now also completed
+through matched native CLI runs. Both ordinary and fresh-thread Stateful Codex
+returned the correct, exact-source-grounded Cedar decision, and Stateful reused
+project memory before verification. It nevertheless reopened the same eight raw
+files as ordinary Codex and increased full lifetime tokens from 72,891 to
+237,459 (+225.77%) and uncached input plus output from 18,363 to 43,411
+(+136.40%). The preceding maturation run consumed another 994,169 tokens. This
+is positive evidence for continuity, decisive-detail preservation, and
+traceability, but a failed Stage 8 gate for reduced rereading and lifetime cost.
+The next implementation slice must make exact verification selective and reduce
+semantic-persistence round trips; the branch must not be called product-complete
+until a rerun demonstrates those outcomes or the remaining limitation is made
+an explicit release boundary.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

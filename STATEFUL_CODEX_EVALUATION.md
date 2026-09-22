@@ -157,7 +157,7 @@ Each scenario must predeclare its expected facts or decisions, use matched
 ordinary/Stateful conditions where comparison is meaningful, preserve negative
 results, and avoid turning component success into a product-level claim.
 
-## Pre-registered benchmark SC-EVAL-002: decisive procurement connection
+## Benchmark SC-EVAL-002: decisive procurement connection
 
 Corpus: `clients/stateful-codex/eval/fixtures/procurement`.
 
@@ -194,3 +194,82 @@ calls, Stateful retrieval and persistence calls, full and uncached token usage,
 and whether the fresh Stateful thread uses accumulated state before reopening
 exact source material. A failure to persist useful knowledge, a stale or
 unsupported claim, or a cost regression remains a negative result.
+
+### Maturation run
+
+The Stateful workspace was matured in an autonomous native CLI run before the
+measured question. Rollout `01a0c657-cded-7882-891d-e4ae2911ea33` read all eight
+files and persisted the binding gates, authority order, authoritative costs,
+verified outage requirement, vendor outcomes, the Cedar-only gate matrix, the
+contradiction with the preliminary ranking, open questions, and cross-source
+relationships. It correctly preserved the distinction between "only viable
+candidate" and "finally awarded."
+
+The maturation run also exposed reliability and cost problems. The model had to
+recover from an omitted confidence field, a source-fingerprint typo, an
+idempotency collision after a partially successful batch, and an invalid
+relationship kind. Recovery preserved the final state, but the run consumed
+994,169 lifetime tokens: 971,091 input tokens, of which 864,000 were cached, and
+23,078 output tokens. That one-time cost is part of the product's lifetime cost;
+it cannot be excluded merely because the measured question ran later.
+
+### Matched measured runs
+
+The ordinary rollout is `01a0c660-a7eb-7092-b5b4-11e1213b779f`; the fresh
+Stateful rollout is `01a0c662-8f72-7333-809d-9a1267b5164f`. Both used the native
+TUI/CLI, cached ChatGPT login, `gpt-5.6-luna` with `xhigh` reasoning,
+`danger-full-access`, the exact same selected directory and workspace root, and
+the exact pre-registered prompt. The comparator accepted every parity field.
+
+Both answers passed every predeclared content check. Both selected Cedar, found
+the Virginia plaintext-access conflict and 72-versus-96-hour continuity
+failure, reported Cedar's 120-hour queue and $285,000 authoritative total,
+cited the controlling exact files, distinguished viability from final award,
+and reported no edits.
+
+| Measure | Ordinary | Stateful | Stateful change |
+| --- | ---: | ---: | ---: |
+| Full input tokens | 70,715 | 234,695 | +163,980 |
+| Cached input tokens | 54,528 | 194,048 | +139,520 |
+| Uncached input tokens | 16,187 | 40,647 | +24,460 |
+| Output tokens | 2,176 | 2,764 | +588 |
+| Full lifetime tokens | 72,891 | 237,459 | +164,568 (+225.77%) |
+| Uncached input + output | 18,363 | 43,411 | +25,048 (+136.40%) |
+| Model responses | 3 | 7 | +4 |
+| Raw source files reopened | 8 | 8 | 0 |
+
+The rollout-level comparator reports two ordinary read-bearing calls and one
+Stateful read-bearing call because each call may contain parallel operations.
+Inspection of the call contents shows that each condition opened all eight raw
+source files. The proxy must therefore not be presented as a 50% source-read
+reduction in this benchmark.
+
+Stateful did use accumulated state first: it queried steering, then used the
+context map, then reopened the corpus. It published a concise semantic
+obligation and completed the durable run through tools bound to the selected
+thread; no model-authored run ID was present. That demonstrates continuity,
+correct decisive-detail recovery, source traceability, and semantic progress.
+It does not demonstrate the intended mature-workspace access pattern.
+
+### Interpretation
+
+SC-EVAL-002 fails the reduced-rereading and token-efficiency gates. The mature
+root state already contained the decision and decisive cross-source facts, yet
+the measured run performed eight broad context-map searches and reopened every
+file to produce exact citations. Stateful added four model responses and more
+than doubled both full and uncached usage. Including maturation makes the
+lifetime economics substantially worse.
+
+The next remediation should target the two observed causes rather than weaken
+verification:
+
+1. make source verification selective by directing the model from verified
+   root claims to the smallest controlling source set, using the context map as
+   a locator rather than querying once per known filename; and
+2. reduce persistence round trips during maturation so a coherent group of
+   validated findings can be committed and projected without repeatedly
+   replaying a large context between individual semantic writes.
+
+No product-level efficiency advantage is established yet. SC-EVAL-002 does,
+however, establish that the current system can carry a non-obvious decision and
+its provenance across threads and return the right evidence-grounded result.
