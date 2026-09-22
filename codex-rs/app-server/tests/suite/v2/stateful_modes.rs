@@ -77,6 +77,7 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                         "expectedRevision": 2,
                         "status": "completed",
                         "result": "The unattended investigation reached its evidence-grounded result.",
+                        "rootRevision": 0,
                         "materialRootFindings": []
                     })
                     .to_string(),

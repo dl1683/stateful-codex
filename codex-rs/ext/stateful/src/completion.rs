@@ -1,9 +1,7 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write;
 
 use codex_extension_api::FunctionCallError;
-use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEvidenceFreshness;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardVerification;
@@ -11,8 +9,6 @@ use codex_project_intelligence::RootBlackboardQuery;
 use codex_stateful_runtime::ObligationPacket;
 use serde_json::Value;
 use serde_json::json;
-use sha2::Digest;
-use sha2::Sha256;
 
 use crate::services::ProjectIntelligenceServices;
 
@@ -36,11 +32,12 @@ pub(crate) async fn prepare_completion(
     services: &ProjectIntelligenceServices,
     result: &str,
     packet: &ObligationPacket,
+    root_revision: u64,
     material_root_findings: &[String],
 ) -> Result<CompletionRecord, FunctionCallError> {
     if material_root_findings.len() > MAX_MATERIAL_ROOT_FINDINGS {
         return Err(respond(format!(
-            "materialRootFindings accepts at most {MAX_MATERIAL_ROOT_FINDINGS} stable K references"
+            "materialRootFindings accepts at most {MAX_MATERIAL_ROOT_FINDINGS} root aliases"
         )));
     }
     let mut unique_references = HashSet::new();
@@ -54,7 +51,8 @@ pub(crate) async fn prepare_completion(
     }
 
     let mut checklist =
-        material_root_checklist(project_id, services, material_root_findings).await?;
+        material_root_checklist(project_id, services, root_revision, material_root_findings)
+            .await?;
     checklist.extend(packet_checklist(packet));
     if checklist.is_empty() {
         return Err(respond(
@@ -94,20 +92,12 @@ pub(crate) async fn prepare_completion(
     })
 }
 
-pub(crate) fn root_finding_reference(entry_id: &BlackboardEntryId) -> String {
-    let digest = Sha256::digest(entry_id.as_str().as_bytes());
-    let digest = format!("{digest:x}");
-    format!("K{}", &digest[..16])
-}
-
 async fn material_root_checklist(
     project_id: &str,
     services: &ProjectIntelligenceServices,
+    expected_root_revision: u64,
     requested_references: &[String],
 ) -> Result<Vec<ChecklistItem>, FunctionCallError> {
-    if requested_references.is_empty() {
-        return Ok(Vec::new());
-    }
     let projection = services
         .blackboard()
         .await
@@ -118,23 +108,35 @@ async fn material_root_checklist(
         })
         .await
         .map_err(respond)?;
-    let mut hits_by_reference = HashMap::new();
-    for hit in projection.data {
-        let reference = root_finding_reference(&hit.entry.id);
-        if hits_by_reference.insert(reference.clone(), hit).is_some() {
-            return Err(respond(format!(
-                "root finding reference collision for {reference}; completion cannot safely identify the selected finding"
-            )));
-        }
+    if projection.revision != expected_root_revision {
+        return Err(respond(format!(
+            "root blackboard changed from revision {expected_root_revision} to {}; review the current root aliases before completing",
+            projection.revision
+        )));
     }
     let context_map = services.context_map().await.map_err(respond)?;
     let mut items = Vec::with_capacity(requested_references.len());
     for reference in requested_references {
-        let hit = hits_by_reference.get(reference).ok_or_else(|| {
-            respond(format!(
-                "unknown material root finding reference {reference}; use only stable K references shown in the current root blackboard"
-            ))
-        })?;
+        let Some(raw_index) = reference.strip_prefix('E') else {
+            return Err(respond(format!(
+                "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
+            )));
+        };
+        let Ok(index) = raw_index.parse::<usize>() else {
+            return Err(respond(format!(
+                "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
+            )));
+        };
+        if index == 0 || raw_index.starts_with('0') {
+            return Err(respond(format!(
+                "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
+            )));
+        }
+        let Some(hit) = projection.data.get(index - 1) else {
+            return Err(respond(format!(
+                "unknown material root finding alias {reference} at root revision {expected_root_revision}"
+            )));
+        };
         let mut sources = Vec::new();
         for evidence in &hit.entry.value.evidence {
             let Some(route) = context_map

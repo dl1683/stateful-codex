@@ -29,6 +29,7 @@ struct Arguments {
     status: StatefulRunStatus,
     strategy: Option<String>,
     result: Option<String>,
+    root_revision: Option<u64>,
     material_root_findings: Option<Vec<String>>,
 }
 
@@ -63,6 +64,7 @@ impl StatefulRunUpdateTool {
             status,
             strategy,
             result,
+            root_revision,
             material_root_findings,
         } = parse_arguments(&call)?;
         if !matches!(
@@ -88,7 +90,13 @@ impl StatefulRunUpdateTool {
         let completion = if status == StatefulRunStatus::Completed {
             let material_root_findings = material_root_findings.ok_or_else(|| {
                 FunctionCallError::RespondToModel(
-                    "completed requires materialRootFindings; pass every materially relevant stable K reference from the root blackboard, or [] only after determining none is material"
+                    "completed requires materialRootFindings; pass every materially relevant E alias from the current root blackboard, or [] only after determining none is material"
+                        .to_string(),
+                )
+            })?;
+            let root_revision = root_revision.ok_or_else(|| {
+                FunctionCallError::RespondToModel(
+                    "completed requires rootRevision from the current project intelligence World State"
                         .to_string(),
                 )
             })?;
@@ -114,14 +122,16 @@ impl StatefulRunUpdateTool {
                     })?
                     .value
                     .packet,
+                    root_revision,
                     &material_root_findings,
                 )
                 .await?,
             )
         } else {
-            if material_root_findings.is_some() {
+            if material_root_findings.is_some() || root_revision.is_some() {
                 return Err(FunctionCallError::RespondToModel(
-                    "materialRootFindings is only valid when status is completed".to_string(),
+                    "rootRevision and materialRootFindings are only valid when status is completed"
+                        .to_string(),
                 ));
             }
             None
@@ -178,7 +188,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed requires a final semantic obligation and an explicit materialRootFindings selection: finish every blackboard, relationship, steering, verification, and obligation operation first; select every materially relevant stable K reference from the root blackboard; then make completed the final Stateful mutation. The tool appends the selected root findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
+            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed requires a final semantic obligation plus rootRevision and an explicit materialRootFindings selection: finish every blackboard, relationship, steering, verification, and obligation operation first; copy the current project intelligence revision and select every materially relevant E alias from that root; then make completed the final Stateful mutation. The tool rejects a changed root before mutation and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -188,7 +198,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "Use completed only after a final semantic obligation captures all material answer content and all durable writes are finished; completion removes the active-run binding."},
                     "strategy": {"type": "string"},
                     "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative after all durable writes and verification. The tool appends the structured completion basis."},
-                    "materialRootFindings": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": "Required for completed. Include every materially relevant stable K reference shown in the root blackboard; use [] only after determining no root finding is material to the requested outcome."}
+                    "rootRevision": {"type": "integer", "minimum": 0, "description": "Required for completed. Copy the project intelligence revision shown with the current root blackboard; completion fails before mutation if it changed."},
+                    "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": "Required for completed. Include every materially relevant E alias shown in the root blackboard at rootRevision; use [] only after determining no root finding is material to the requested outcome."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false
