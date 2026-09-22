@@ -589,6 +589,26 @@ contract to `oneOf` with explicit mutual-exclusion descriptions. SC-EVAL-017 is
 pre-registered from fresh projects; if both maturation preflights pass without
 these retries, it proceeds to the six matched release cases.
 
+SC-EVAL-017 then completed both clean maturations and all six matched pairs. All
+six Stateful follow-ups completed on their first terminal call; live API reads
+confirmed completed revision-2 durable results, no Stateful rollout contained a
+failure marker, and both corpora remained byte-identical. Manual semantic review
+passes every visible answer and durable result. The unchanged frozen lexical
+scorer reports three procurement misses because valid phrasing did not match its
+narrow alternatives; that negative result is retained rather than tuned away.
+
+The system reduced read-bearing calls from 20 to seven, per-question unique raw
+file reads from 54 to 29, model responses from 26 to 21, and follow-up uncached
+input plus output from 97,693 to 77,806. It nevertheless increased follow-up full
+tokens from 381,853 to 430,830. Including 447,702 full and 114,134 uncached
+maturation tokens leaves Stateful 496,679 full tokens and 94,247 uncached tokens
+behind ordinary Codex for the six-question lifetime. This closes the short-
+distribution correctness, durability, and selective-rereading evidence gaps but
+not the Stage 8 economics gate. The next high-value slice is to reduce the
+procurement follow-ups' cached-context and completion overhead without thinning
+the broad root that produced the correct cross-source reasoning; the approval-
+gated repository-wide Rust suite also remains open.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

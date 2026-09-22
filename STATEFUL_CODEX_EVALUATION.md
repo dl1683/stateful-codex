@@ -1847,7 +1847,8 @@ obligation and terminal update are correctly grouped in one code-mode call; its
 
 ## Benchmark SC-EVAL-017: exclusive-evidence two-project distribution
 
-Status: pre-registered before execution on 2026-09-22.
+Status: completed on 2026-09-22; mechanism and semantic-correctness review
+passed, retrieval improved, and maturation-inclusive economics failed.
 
 SC-EVAL-017 repeats the exact frozen six-case manifest and all SC-EVAL-016
 conditions from two new byte-identical project directories using the rebuilt
@@ -1857,3 +1858,69 @@ persist its coherent evidence-linked batch without retrying an invalid evidence
 identity. Any failure or retry remains in the rollout and stops execution before
 the matched cases. If both maturations pass, all six ordinary/Stateful pairs
 will run under the already frozen order and gates.
+
+### Execution result
+
+Both fresh maturation preflights passed the repaired contracts without an
+invalid evidence identity or terminal-call retry. Procurement thread
+`01a0ca3e-3bf3-7ad1-b99e-90b2b78ef2d9` persisted eight findings and nine
+relationships in run
+`run-6d5c68a0f1e9ecd3788f58983a232299470658112e0124c3aaa869e60f38e695`;
+licensing thread `01a0ca41-cee0-7402-b78f-8a925d3b80bd` persisted fourteen
+findings and ten relationships in run
+`run-86ae359bc9dc850cdde43ab432a1080bbfdbf82d964dfd586eae359e22c67a1e`.
+Each completed on its first terminal call. Together they consumed 447,702 full
+tokens, 114,134 uncached input-plus-output tokens, and fifteen model responses.
+The licensing maturation also discovered a cross-source closing gap: the
+executed side letter requires both Canadian regulatory consent and licensor
+written acknowledgement, while the closing checklist explicitly tracks only
+the consent.
+
+All twelve frozen matched runs completed. Every Stateful follow-up completed on
+its first terminal call, and no Stateful rollout contains a failed script or
+terminal mutation. A fresh real-gateway read independently confirmed all six
+Stateful runs as `completed` at revision 2 with nonempty persisted results.
+Post-run SHA-256 comparison found no difference between either temporary corpus
+and its source fixture: all eight procurement files and all ten licensing files
+remained byte-identical.
+
+The unchanged literal scorer reports the distribution as failed. It passes all
+three licensing pairs and the visible procurement continuity pair, but rejects
+semantically correct procurement wording such as "the only vendor shown to pass
+every binding deployment criterion" because the frozen alternatives require
+"only viable" or "sole viable." It similarly rejects complete statements about
+all three sub-cap totals and preliminary, non-final committee notes because the
+registered phrases are narrower. The durable continuity result says Cedar
+"meets the continuity gate" with 120 hours and 24 hours of headroom rather than
+using the scorer's exact "satisfies" alternative. These misses are retained
+unchanged as evidence about evaluator brittleness; the manifest was not tuned
+after seeing the answers. Independent semantic review finds all twelve visible
+answers and all six Stateful durable results correct, complete for the prompts,
+properly caveated, and source-grounded.
+
+Retrieval improved materially. Ordinary Codex used 20 read-bearing outer calls;
+Stateful used seven, a 65% reduction. Manual call-input inspection shows ordinary
+Codex reopened all project files in every case, totaling 54 per-question unique
+raw-file reads, while Stateful opened 29, a 46.30% reduction. Model responses
+fell from 26 to 21 (19.23%). Stateful follow-ups used 77,806 uncached
+input-plus-output tokens versus 97,693 for ordinary Codex, a 20.36% reduction,
+and won five of six pairs on that measure.
+
+The full-token and lifetime gates failed. Stateful follow-ups used 430,830 full
+tokens versus 381,853 for ordinary Codex, a 12.83% increase, and won only one of
+six pairs. Including the two required maturations raises Stateful lifetime use
+to 878,532 full tokens and 191,940 uncached tokens, respectively 496,679
+(130.07%) and 94,247 (96.47%) above the ordinary series. The observed uncached
+slope projects break-even only around question 35; the observed full-token slope
+has no break-even. Procurement follow-ups account for the full-token regression,
+while the licensing cases show one substantial full-token win and two near-ties.
+
+SC-EVAL-017 therefore establishes the intended continuity, durable semantic
+integrity, decisive-detail preservation, selective routing, exact-source
+verification, and read-only behavior across this small distribution. It does
+not establish lower full lifetime token use or release readiness. The next
+optimization must explain and reduce procurement's repeated cached-context and
+completion overhead without deleting the rich root knowledge that enabled the
+correct cross-source answers. A future preregistered replication also needs a
+semantic evaluator or human rubric fixed before execution; post-hoc expansion
+of this frozen lexical scorer would invalidate the present result.
