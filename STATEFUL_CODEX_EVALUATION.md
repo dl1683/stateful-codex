@@ -1523,7 +1523,8 @@ assembly.
 
 ## Benchmark SC-EVAL-013: durable material-finding completion replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: passed on 2026-09-22 after pre-registration, with one rejected opaque-
+reference attempt retained as an operational efficiency finding.
 
 Commit `0f7684a3f4` replaces the post-terminal reminder with a structured,
 domain-neutral completion basis. Root entries now expose compact stable `K`
@@ -1568,3 +1569,55 @@ A lexical scorer is not sufficient. One same-corpus replication can close only
 the observed finalization defect; it cannot establish representative
 precision/recall, cache behavior after expiry or root changes, lifetime
 economics, or Stage 8 release readiness.
+
+### Execution result
+
+The rebuilt cached-login CLI completed thread
+`01a0c9f8-5fbb-7a23-ab17-dfaa26a73cfa`; its rollout is
+`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T12-34-53-01a0c9f8-5fbb-7a23-ab17-dfaa26a73cfa.jsonl`.
+It used the exact registered prompt, mature project, byte-identical corpus,
+model, effort, roots, permissions, and cleared API-key environment. A real
+gateway/API read after the turn confirmed run
+`run-4d7df998518f144b9fe69e173051aa2912e76f41d6dd6a2521cbc4e016f7f908`
+at terminal revision 2.
+
+All registered correctness gates passed. The initial World State exposed stable
+`K` references. The successful completion selected seven materially relevant
+root findings, including the source-verified critical carve-out record. The
+tool returned those findings first in the 16-item completion checklist with
+current verification and exact ranged routes; four lower-priority final-packet
+items were reported as omitted from the bounded checklist and remained in the
+structured obligation. Completion was the final Stateful mutation. SHA-256
+comparison found all ten corpus files unchanged.
+
+The persisted result now expressly records that the master agreement's $2
+million aggregate cap does not govern data-security, confidentiality, and
+IP-indemnity obligations under executed amendment 2. It includes the 60-day
+notice, superseded 30-day baseline, $5.5 million planning scenario, $3 million
+listed cyber limit, $2.5 million gross difference, unresolved coverage,
+planning-versus-contractual distinction, no-edit boundary, and exact source
+ranges. The final assistant prose independently preserves the same substantive
+conclusions and exact file citations. This closes the specific durable-result
+failure from SC-EVAL-012.
+
+The run used five model responses and four outer custom-tool calls: one
+non-project memory lookup, one five-file exact-evidence batch, one combined
+final-obligation/failed-completion call, and one successful completion retry.
+It consumed 118,455 input tokens, including 89,088 cached input tokens, and
+3,767 output tokens: 122,222 full tokens and 33,134 uncached input plus output.
+
+The failed attempt is material negative evidence about the mechanism's
+ergonomics. The model submitted two hexadecimal references that were not in the
+rendered root. Completion rejected the first unknown reference before changing
+run state, after which the model copied seven valid references and succeeded.
+Fail-closed behavior is correct, but opaque reference copying caused an
+avoidable response and approximately 3,022 uncached input-plus-output tokens in
+the retry response. The next narrow slice should retain explicit model
+selection while replacing opaque references with compact display aliases bound
+to an explicit root revision. That gives the tool an optimistic-concurrency
+check without asking the model to reproduce hashes.
+
+SC-EVAL-013 proves durable semantic carry-through for the observed failure. It
+does not establish representative final-answer recall or lifetime economics,
+and the opaque-reference retry should be removed before the broader matched
+distribution.

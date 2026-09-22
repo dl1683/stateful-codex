@@ -516,6 +516,22 @@ explicit-selection contract. SC-EVAL-013 is pre-registered in
 against a rebuilt cached-login CLI. Broader matched distribution and the
 approval-gated repository-wide Rust suite remain subsequent release gates.
 
+SC-EVAL-013 subsequently passed the durable-result gate on a rebuilt live CLI.
+The selected source-verified carve-out, exact source ranges, notice period,
+planning figures, coverage uncertainty, and final semantic packet all survived
+in the terminal API result and final prose; the corpus remained byte-identical.
+This closes the specific SC-EVAL-012 correctness failure.
+
+The run also exposed that compact opaque hashes are still poor model-facing
+handles. Its first completion attempt invented two `K` references; validation
+rejected the call before mutation, and a retry with seven valid references
+succeeded. The safety boundary worked, but the retry added a fifth response and
+roughly 3,022 uncached input-plus-output tokens. Before the broader workload,
+replace these hashes with the already-rendered `E` aliases plus an explicit root
+revision. Completion can then reject an alias only when the root changed or the
+selection is malformed, while ordinary follow-up runs avoid copying opaque
+identifiers.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
