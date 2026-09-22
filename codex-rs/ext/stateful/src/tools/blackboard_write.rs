@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use codex_extension_api::FunctionCallError;
 use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
@@ -13,6 +16,7 @@ use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardRelation;
 use codex_project_intelligence::BlackboardRelationId;
 use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardStructuredValue;
@@ -36,7 +40,8 @@ use super::stable_id;
 const RECORD_TOOL_NAME: &str = "blackboard_record";
 const BATCH_RECORD_TOOL_NAME: &str = "blackboard_record_batch";
 const RELATE_TOOL_NAME: &str = "blackboard_relate";
-const MAX_BATCH_RECORDS: usize = 16;
+const MAX_BATCH_RECORDS: usize = 24;
+const MAX_BATCH_RELATIONS: usize = 48;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -56,8 +61,21 @@ struct RecordArguments {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchRelationArguments {
+    idempotency_key: String,
+    from_record_key: String,
+    to_record_key: String,
+    kind: BlackboardRelationKind,
+    note: Option<String>,
+    confidence_basis_points: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BatchRecordArguments {
     records: Vec<RecordArguments>,
+    #[serde(default)]
+    relations: Vec<BatchRelationArguments>,
 }
 
 pub(super) struct BlackboardRecordTool {
@@ -193,6 +211,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
 
 pub(super) struct BlackboardBatchRecordTool {
     recorder: BlackboardRecordTool,
+    relator: BlackboardRelateTool,
 }
 
 impl BlackboardBatchRecordTool {
@@ -202,7 +221,12 @@ impl BlackboardBatchRecordTool {
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
-            recorder: BlackboardRecordTool::new(project_id, services, event_sink),
+            recorder: BlackboardRecordTool::new(
+                project_id.clone(),
+                services.clone(),
+                event_sink.clone(),
+            ),
+            relator: BlackboardRelateTool::new(project_id, services, event_sink),
         }
     }
 
@@ -210,18 +234,35 @@ impl BlackboardBatchRecordTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: BatchRecordArguments = parse_arguments(&call)?;
-        if arguments.records.is_empty() || arguments.records.len() > MAX_BATCH_RECORDS {
+        let BatchRecordArguments { records, relations } = parse_arguments(&call)?;
+        if records.is_empty() || records.len() > MAX_BATCH_RECORDS {
             return Err(FunctionCallError::RespondToModel(format!(
                 "records must contain 1-{MAX_BATCH_RECORDS} items"
             )));
         }
-        let mut results = Vec::with_capacity(arguments.records.len());
+        if relations.len() > MAX_BATCH_RELATIONS {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "relations must contain 0-{MAX_BATCH_RELATIONS} items"
+            )));
+        }
+        let mut seen_record_keys = HashSet::with_capacity(records.len());
+        for record in &records {
+            if !seen_record_keys.insert(record.idempotency_key.clone()) {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "duplicate record idempotencyKey: {}",
+                    record.idempotency_key
+                )));
+            }
+        }
+        let mut results = Vec::with_capacity(records.len());
+        let mut entry_ids = HashMap::with_capacity(records.len());
         let mut recorded = 0usize;
-        for (index, record) in arguments.records.into_iter().enumerate() {
+        for (index, record) in records.into_iter().enumerate() {
+            let record_key = record.idempotency_key.clone();
             match self.recorder.record(record, &call.call_id).await {
                 Ok(entry) => {
                     recorded += 1;
+                    entry_ids.insert(record_key, entry.id.clone());
                     results.push(json!({
                         "index": index,
                         "entryId": entry.id.to_string(),
@@ -236,10 +277,70 @@ impl BlackboardBatchRecordTool {
                 })),
             }
         }
+        let failed = results.len().saturating_sub(recorded);
+        let mut relation_results = Vec::with_capacity(relations.len());
+        let mut relations_recorded = 0usize;
+        for (index, relation) in relations.into_iter().enumerate() {
+            let relation_key = relation.idempotency_key.clone();
+            let Some(from_entry_id) = entry_ids.get(&relation.from_record_key) else {
+                relation_results.push(json!({
+                    "index": index,
+                    "idempotencyKey": relation_key,
+                    "recorded": false,
+                    "error": format!(
+                        "fromRecordKey was not recorded successfully: {}",
+                        relation.from_record_key
+                    ),
+                }));
+                continue;
+            };
+            let Some(to_entry_id) = entry_ids.get(&relation.to_record_key) else {
+                relation_results.push(json!({
+                    "index": index,
+                    "idempotencyKey": relation_key,
+                    "recorded": false,
+                    "error": format!(
+                        "toRecordKey was not recorded successfully: {}",
+                        relation.to_record_key
+                    ),
+                }));
+                continue;
+            };
+            let arguments = RelateArguments {
+                idempotency_key: relation.idempotency_key,
+                from_entry_id: from_entry_id.to_string(),
+                to_entry_id: to_entry_id.to_string(),
+                kind: relation.kind,
+                note: relation.note,
+                confidence_basis_points: relation.confidence_basis_points,
+            };
+            match self.relator.relate(arguments, &call.call_id).await {
+                Ok(created) => {
+                    relations_recorded += 1;
+                    relation_results.push(json!({
+                        "index": index,
+                        "idempotencyKey": relation_key,
+                        "relationId": created.id.to_string(),
+                        "revision": created.revision,
+                        "recorded": true,
+                    }));
+                }
+                Err(error) => relation_results.push(json!({
+                    "index": index,
+                    "idempotencyKey": relation_key,
+                    "recorded": false,
+                    "error": error.to_string(),
+                })),
+            }
+        }
+        let relations_failed = relation_results.len().saturating_sub(relations_recorded);
         Ok(Box::new(JsonToolOutput::new(json!({
             "recorded": recorded,
-            "failed": results.len().saturating_sub(recorded),
+            "failed": failed,
             "results": results,
+            "relationsRecorded": relations_recorded,
+            "relationsFailed": relations_failed,
+            "relationResults": relation_results,
         }))))
     }
 }
@@ -253,7 +354,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings in one bounded call. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this over separate blackboard_record calls after one evidence-review pass."
+                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings and up to {MAX_BATCH_RELATIONS} relationships in one bounded call. Relations reference record idempotencyKey values from this same call through fromRecordKey and toRecordKey, avoiding opaque entry-ID copying. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this after one evidence-review pass."
             ),
             strict: false,
             defer_loading: None,
@@ -265,6 +366,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
                         "minItems": 1,
                         "maxItems": MAX_BATCH_RECORDS,
                         "items": record_schema()
+                    },
+                    "relations": {
+                        "type": "array",
+                        "maxItems": MAX_BATCH_RELATIONS,
+                        "description": "Optional relationships among records in this call, referenced by record idempotencyKey.",
+                        "items": batch_relation_schema()
                     }
                 },
                 "required": ["records"],
@@ -309,6 +416,22 @@ fn record_schema() -> serde_json::Value {
     })
 }
 
+fn batch_relation_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "idempotencyKey": {"type": "string"},
+            "fromRecordKey": {"type": "string", "description": "idempotencyKey of the source record in this batch."},
+            "toRecordKey": {"type": "string", "description": "idempotencyKey of the target record in this batch."},
+            "kind": {"type": "string", "enum": ["supports", "contradicts", "dependsOn", "relatedTo"]},
+            "note": {"type": "string"},
+            "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000}
+        },
+        "required": ["idempotencyKey", "fromRecordKey", "toRecordKey", "kind", "confidenceBasisPoints"],
+        "additionalProperties": false
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RelateArguments {
@@ -344,6 +467,19 @@ impl BlackboardRelateTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: RelateArguments = parse_arguments(&call)?;
+        let relation = self.relate(arguments, &call.call_id).await?;
+        Ok(Box::new(JsonToolOutput::new(json!({
+            "relationId": relation.id.to_string(),
+            "revision": relation.revision,
+            "recorded": true,
+        }))))
+    }
+
+    async fn relate(
+        &self,
+        arguments: RelateArguments,
+        source_id: &str,
+    ) -> Result<BlackboardRelation, FunctionCallError> {
         let id = BlackboardRelationId::parse(stable_id(
             "relation",
             &self.project_id,
@@ -371,7 +507,7 @@ impl BlackboardRelateTool {
                     .map_err(respond)?,
                     provenance: BlackboardProvenance {
                         kind: BlackboardProvenanceKind::Agent,
-                        source_id: call.call_id,
+                        source_id: source_id.to_string(),
                     },
                 },
             )
@@ -385,11 +521,7 @@ impl BlackboardRelateTool {
                 revision: relation.revision,
             });
         }
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "relationId": relation.id.to_string(),
-            "revision": relation.revision,
-            "recorded": true,
-        }))))
+        Ok(relation)
     }
 }
 
