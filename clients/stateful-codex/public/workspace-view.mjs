@@ -162,8 +162,15 @@ function renderLive(state) {
 }
 
 function renderActivity(items) {
-  const recent = items.filter(isSupportingActivity).slice(-12);
+  const recent = items
+    .map(normalizeThreadItem)
+    .filter(isSupportingActivity)
+    .slice(-12);
   return `<details class="workspace-panel"><summary>Supporting activity · ${recent.length} recent items</summary><div class="activity-list">${recent.length ? recent.map((item) => `<div><span>${escapeHtml(activityLabel(item))}</span><small>${escapeHtml(activityDetail(item))}</small></div>`).join("") : empty("No supporting activity yet.")}</div></details>`;
+}
+
+function normalizeThreadItem(entry) {
+  return entry?.item ? { ...entry.item, turnId: entry.turnId } : entry;
 }
 
 function renderControls(state) {

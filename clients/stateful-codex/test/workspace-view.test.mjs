@@ -17,6 +17,8 @@ test("workspace presents semantic progress and evidence before raw activity", as
       actual.indexOf("Supporting activity"),
   );
   assert.match(actual, /A result is not automatically verified/);
+  assert.match(actual, /Command/);
+  assert.doesNotMatch(actual, /undefined · Recorded/);
 });
 
 test("terminal workspace preserves the record without accepting dead controls", () => {

@@ -109,10 +109,13 @@ export function workspaceFixture() {
     },
     activity: [
       {
-        type: "commandExecution",
-        id: "item-1",
-        status: "completed",
-        command: "rg threshold sources",
+        turnId: "turn-3",
+        item: {
+          type: "commandExecution",
+          id: "item-1",
+          status: "completed",
+          command: "rg threshold sources",
+        },
       },
     ],
     pendingRequests: [
