@@ -500,6 +500,10 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(requests[0].body_contains_text("Connect the source constraint to deployment risk."));
     assert!(requests[0].body_contains_text(&submitted.steering.id));
     assert!(requests[4].body_contains_text("finalAnswerChecklist"));
+    assert!(requests[4].body_contains_text("submittedResult"));
+    assert!(requests[4].body_contains_text(
+        "Verified the decisive connection and incorporated the user's direction."
+    ));
     assert!(requests[4].body_contains_text("rootFinding"));
     assert!(requests[4].body_contains_text(material_finding_reference));
     assert!(
@@ -511,9 +515,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
         requests[4]
             .body_contains_text("The deployment risk is triggered by the source constraint.")
     );
-    assert!(
-        requests[4].body_contains_text("durable result now contains this bounded completion basis")
-    );
+    assert!(requests[4].body_contains_text("Return submittedResult as the final answer"));
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,

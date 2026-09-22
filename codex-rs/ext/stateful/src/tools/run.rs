@@ -94,6 +94,9 @@ impl StatefulRunUpdateTool {
             ));
         }
         let runtime = self.services.runtime().await.map_err(respond)?;
+        let submitted_result = (status == StatefulRunStatus::Completed)
+            .then(|| result.clone())
+            .flatten();
         let (completion, final_obligation) = if status == StatefulRunStatus::Completed {
             if current.revision != expected_revision {
                 return Err(FunctionCallError::RespondToModel(format!(
@@ -208,8 +211,9 @@ impl StatefulRunUpdateTool {
             "strategyRevision": run.strategy_revision,
             "finalAnswerChecklist": final_answer_checklist,
             "omittedChecklistItems": omitted_checklist_items,
+            "submittedResult": submitted_result,
             "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
-                "The durable result now contains this bounded completion basis. Before replying, reconcile the final prose against every checklist item, preserve caveats and blockers, and cite the verified evidence. If omittedChecklistItems is nonzero, also use the full final obligation call you just made."
+                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Use finalAnswerChecklist only to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, also use finalObligation from this call."
             ),
         }))))
     }
