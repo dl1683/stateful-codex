@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { finished } from "node:stream/promises";
 
 import { corpusHash } from "./corpus-hash.mjs";
 
@@ -63,31 +65,38 @@ async function runTurn(options) {
   const args = options.threadId
     ? resumeArgs(options)
     : startArgs(options);
+  const stdoutFile = createWriteStream(
+    path.join(options.resultRoot, `turn-${turn}.stdout.jsonl`),
+  );
+  const stderrFile = createWriteStream(
+    path.join(options.resultRoot, `turn-${turn}.stderr.txt`),
+  );
   const child = spawn(options.codex, args, {
     cwd: options.workspace,
     env: authEnvironment(),
     windowsHide: true,
   });
   child.stdin.end();
-  let stdout = "";
-  let stderr = "";
+  child.stdout.pipe(stdoutFile);
+  child.stderr.pipe(stderrFile);
+  let threadId = options.threadId;
+  let pendingLine = "";
   child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-    process.stdout.write(chunk);
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-    process.stderr.write(chunk);
+    if (threadId) return;
+    const lines = `${pendingLine}${chunk}`.split(/\r?\n/);
+    pendingLine = lines.pop() ?? "";
+    for (const line of lines) {
+      threadId ??= extractThreadId(line);
+    }
+    if (pendingLine.length > 65_536) pendingLine = "";
   });
   const exitCode = await new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("close", resolve);
   });
-  await Promise.all([
-    writeFile(path.join(options.resultRoot, `turn-${turn}.stdout.jsonl`), stdout),
-    writeFile(path.join(options.resultRoot, `turn-${turn}.stderr.txt`), stderr),
-  ]);
-  return { exitCode, threadId: options.threadId ?? extractThreadId(stdout) };
+  await Promise.all([finished(stdoutFile), finished(stderrFile)]);
+  threadId ??= extractThreadId(pendingLine);
+  return { exitCode, threadId };
 }
 
 function startArgs(options) {
