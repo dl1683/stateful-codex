@@ -1624,7 +1624,7 @@ distribution.
 
 ## Benchmark SC-EVAL-014: revision-bound completion alias replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: passed on 2026-09-22 after pre-registration.
 
 Commit `4efb44bcab` removes the opaque `K` handles exposed by SC-EVAL-013.
 Completion now uses the compact `E` aliases already present in the root
@@ -1662,3 +1662,46 @@ This replication tests whether the new addressing contract removes the exact
 copy failure observed in SC-EVAL-013 without weakening durable result coverage.
 It does not establish behavior after a concurrent root revision, representative
 precision/recall, lifetime economics, or Stage 8 release readiness.
+
+### Execution result
+
+The rebuilt cached-login CLI completed thread
+`01a0ca0b-28a8-7dd2-91b7-730d7c1c54f2`; its rollout is
+`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T12-55-24-01a0ca0b-28a8-7dd2-91b7-730d7c1c54f2.jsonl`.
+It used the registered prompt, mature project, byte-identical ten-file corpus,
+model, effort, roots, permissions, and cleared API-key environment. The cached
+ChatGPT login supplied authentication.
+
+All registered mechanism gates passed. The initial root exposed revision 54 and
+compact `E` aliases without `K` handles. Completion supplied `rootRevision: 54`
+and selected `E1`, `E6`, `E8`, `E9`, `E12`, and `E13`; it succeeded on the first
+attempt, returned all six current source-verified root findings with exact
+ranged routes, and remained the final Stateful mutation. The rollout contains
+no opaque `K` reference. SHA-256 comparison found all ten corpus files
+byte-identical after the run.
+
+The product-behavior gates also passed. Both final prose and the persisted
+result preserve the 60-day notice, superseded 30-day baseline, $5.5 million
+planning scenario, $3 million listed cyber limit, $2.5 million gross difference,
+the executed amendment's data-security carve-out, pending coverage and counsel
+review, the planning-versus-contractual distinction, exact evidence, and the
+read-only boundary. A real gateway/API read confirmed run
+`run-2b309747a13c75404f697c262114b81fa63fc847e1de1432334ef244a817170e`
+at terminal revision 2 with a 5,016-character durable result. The completion
+checklist contained 15 items and omitted none.
+
+The run used four model responses and three outer custom-tool calls: one
+four-file exact-evidence batch, one final semantic obligation update, and one
+successful completion. It consumed 94,549 input tokens, including 66,816 cached
+input tokens, and 2,496 output tokens: 97,045 full tokens and 30,229 uncached
+input plus output. Relative to SC-EVAL-013, that is 25,177 fewer full tokens
+(20.60%), 2,905 fewer uncached input-plus-output tokens (8.77%), one fewer model
+response, one fewer outer call, and no completion retry. It also avoided a raw
+read of `binding-review-policy.md` because the verified root carried the needed
+relationship and route.
+
+SC-EVAL-014 closes the model-facing completion-addressing defect without losing
+durable semantic coverage. It remains one same-corpus replication. A broader
+pre-registered matched distribution, representative precision and recall,
+maturation-inclusive economics, concurrent-root behavior, and the approval-
+gated repository-wide Rust suite remain open Stage 8 evidence.

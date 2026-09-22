@@ -541,6 +541,23 @@ pre-registered to confirm that the exact live termination-risk workflow now
 completes without the opaque-reference retry while preserving the durable
 semantic result.
 
+SC-EVAL-014 subsequently passed every registered mechanism and product gate on
+the rebuilt cached-login CLI. It completed with the root's revision and six
+material `E` aliases on the first attempt, used no opaque completion handle,
+preserved all required contractual, planning, coverage, provenance, and no-edit
+details in both final prose and the terminal API result, and left all ten source
+files byte-identical. A real gateway read confirmed the completed revision-2
+run and its 5,016-character durable result.
+
+The addressing change reduced the replication from five model responses and
+four outer calls to four responses and three calls. Full measured tokens fell
+20.60% to 97,045 and uncached input plus output fell 8.77% to 30,229 relative to
+SC-EVAL-013. This closes the observed completion-integrity and handle-ergonomics
+defects. It does not close Stage 8: the next high-value evidence is a broader
+pre-registered matched workload that measures state precision/recall, decisive
+detail preservation, selective rereading, and maturation-inclusive economics;
+the repository-wide Rust suite remains approval-gated.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
