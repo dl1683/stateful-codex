@@ -18,3 +18,16 @@ test("workspace presents semantic progress and evidence before raw activity", as
   );
   assert.match(actual, /A result is not automatically verified/);
 });
+
+test("terminal workspace preserves the record without accepting dead controls", () => {
+  const state = workspaceFixture();
+  state.run.status = "completed";
+
+  const actual = renderWorkspace(state);
+
+  assert.doesNotMatch(actual, /id="steering-form"/);
+  assert.doesNotMatch(actual, /id="mode-form"/);
+  assert.doesNotMatch(actual, /id="message-form"/);
+  assert.doesNotMatch(actual, /data-action="maintain"/);
+  assert.match(actual, /Start another outcome/);
+});

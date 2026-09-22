@@ -32,7 +32,7 @@ export function renderWorkspace(state) {
           ${renderResult(state)}
           ${renderLive(state)}
           ${renderActivity(state.activity)}
-          ${renderInstructionForm()}
+          ${renderInstructionForm(state)}
         </section>
         <aside class="stack-panel">
           ${renderControls(state)}
@@ -169,6 +169,7 @@ function renderActivity(items) {
 function renderControls(state) {
   const run = state.run;
   if (!run) return panel("Run controls", empty("Preparing the run."));
+  const terminal = isTerminalRun(run);
   const buttons = [];
   if (run.status === "running") buttons.push(control("pause", "Pause"));
   if (run.status === "paused" || run.status === "pending") {
@@ -181,15 +182,18 @@ function renderControls(state) {
   }
   return panel(
     "Run controls",
-    `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div><form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(run.mode)}</select></label><button class="secondary">Change</button></form><dl><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl>${renderRecovery(run, state.recovery)}<button class="secondary full" data-action="maintain">Maintain project intelligence</button>`,
+    `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div>${terminal ? `<p class="microcopy">This outcome is closed. Its mode and record are preserved.</p>${newOutcomeLink()}` : `<form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(run.mode)}</select></label><button class="secondary">Change</button></form>`}<dl><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl>${renderRecovery(run, state.recovery)}${terminal ? "" : `<button class="secondary full" data-action="maintain">Maintain project intelligence</button>`}`,
   );
 }
 
 function renderSteering(state) {
   const items = state.steering.slice(-5).reverse();
+  const input = isTerminalRun(state.run)
+    ? `<p class="microcopy">Steering is closed with this outcome. Start another outcome to continue from the same project intelligence.</p>${newOutcomeLink()}`
+    : `<form id="steering-form" class="stack"><textarea name="steering" placeholder="Follow this fact, connect these findings, or change direction…" required></textarea><button class="primary">Submit steering</button></form>`;
   return panel(
     "Steer the work",
-    `<form id="steering-form" class="stack"><textarea name="steering" placeholder="Follow this fact, connect these findings, or change direction…" required></textarea><button class="primary">Submit steering</button></form>${items.length ? `<div class="steering-list">${items.map((item) => `<article><p>${escapeHtml(item.input)}</p><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}</article>`).join("")}</div>` : `<p class="microcopy">Your exact instruction and its application state remain visible.</p>`}`,
+    `${input}${items.length ? `<div class="steering-list">${items.map((item) => `<article><p>${escapeHtml(item.input)}</p><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}</article>`).join("")}</div>` : `<p class="microcopy">Your exact instruction and its application state remain visible.</p>`}`,
   );
 }
 
@@ -234,11 +238,25 @@ function renderFinding(hit) {
   return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span><span class="badge ${escapeHtml(hit.evidenceFreshness)}">${escapeHtml(hit.evidenceFreshness)}</span></div><p>${escapeHtml(entry.content)}</p>${evidence}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
 }
 
-function renderInstructionForm() {
+function renderInstructionForm(state) {
+  if (isTerminalRun(state.run)) {
+    return panel(
+      "Continue the work",
+      `<p class="microcopy">Create a new outcome to continue or fork this thread with a fresh explicit goal.</p>${newOutcomeLink()}`,
+    );
+  }
   return panel(
     "Add an instruction",
     `<form id="message-form" class="inline-form"><textarea name="message" placeholder="Ask, clarify, or direct the active thread…" required></textarea><button class="primary">Send</button></form>`,
   );
+}
+
+function isTerminalRun(run) {
+  return ["completed", "cancelled", "failed"].includes(run?.status);
+}
+
+function newOutcomeLink() {
+  return `<a class="text-button" href="/">Start another outcome</a>`;
 }
 
 function renderRequests(requests) {

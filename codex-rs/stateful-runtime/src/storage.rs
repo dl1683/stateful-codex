@@ -801,6 +801,8 @@ pub enum StatefulRunStoreError {
     SteeringStrategyUnchanged,
     #[error("steering cannot be applied while the run is {0:?}")]
     SteeringRunNotExecutable(StatefulRunStatus),
+    #[error("cannot submit steering to a terminal run ({0:?})")]
+    SteeringRunTerminal(StatefulRunStatus),
     #[error("list limit must be between 1 and 101")]
     InvalidListLimit,
     #[error("autonomous lease duration must be between 1 and 600000 milliseconds")]

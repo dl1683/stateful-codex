@@ -41,13 +41,14 @@ impl StatefulRunStore {
             transaction.commit().await?;
             return Ok(existing);
         }
-        let run_project: Option<String> =
-            sqlx::query_scalar("SELECT project_id FROM stateful_runs WHERE id = ?")
-                .bind(value.run_id.as_str())
-                .fetch_optional(&mut *transaction)
-                .await?;
-        if run_project.as_deref() != Some(&value.project_id) {
+        let run = load_run(&mut transaction, &value.run_id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::RunNotFound(value.run_id.to_string()))?;
+        if run.value.project_id != value.project_id {
             return Err(StatefulRunStoreError::ProjectMismatch);
+        }
+        if run.status.is_terminal() {
+            return Err(StatefulRunStoreError::SteeringRunTerminal(run.status));
         }
         let now = unix_timestamp_millis()?;
         sqlx::query(

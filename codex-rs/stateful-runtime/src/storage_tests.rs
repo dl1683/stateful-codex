@@ -18,6 +18,7 @@ use crate::SteeringId;
 use crate::WorkflowMode;
 
 use super::StatefulRunStore;
+use super::StatefulRunStoreError;
 
 #[tokio::test]
 async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
@@ -261,5 +262,59 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
             .previous_turn_id
             .as_deref(),
         Some("turn-before-crash")
+    );
+}
+
+#[tokio::test]
+async fn terminal_run_rejects_new_steering() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let store = StatefulRunStore::open(&sqlite).await.expect("store opens");
+    let run_id = StatefulRunId::parse("completed-run").expect("valid run ID");
+    let created = store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "Complete the bounded investigation.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+        )
+        .await
+        .expect("run inserts");
+    store
+        .update_run(
+            &run_id,
+            StatefulRunUpdate {
+                expected_revision: created.revision,
+                status: StatefulRunStatus::Completed,
+                strategy: None,
+                result: Some("The investigation is complete.".to_string()),
+            },
+        )
+        .await
+        .expect("run completes");
+
+    let error = store
+        .submit_steering(
+            SteeringId::parse("late-steering").expect("valid steering ID"),
+            NewSteeringInstruction {
+                project_id: "project-1".to_string(),
+                run_id,
+                input: "Change the completed strategy.".to_string(),
+                affected_obligation_ids: Vec::new(),
+            },
+        )
+        .await
+        .expect_err("terminal run rejects steering");
+
+    assert_eq!(
+        error.to_string(),
+        StatefulRunStoreError::SteeringRunTerminal(StatefulRunStatus::Completed).to_string()
     );
 }
