@@ -35,7 +35,6 @@ pub use codex_tools::ToolCallSource;
 pub use codex_tools::ToolEnvironment;
 pub use codex_tools::ToolExecutor;
 pub use codex_tools::ToolExecutorFuture;
-pub use codex_tools::ToolExposure;
 pub use codex_tools::ToolName;
 pub use codex_tools::ToolOutput;
 pub use codex_tools::ToolPayload;
