@@ -32,9 +32,28 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardImportance;
+use codex_project_intelligence::BlackboardKind;
+use codex_project_intelligence::BlackboardProvenance;
+use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardStore;
+use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::HierarchyStore;
+use codex_project_intelligence::NewBlackboardEntry;
+use codex_project_intelligence::NewHierarchyNode;
+use codex_project_intelligence::NodeKind;
+use codex_project_intelligence::ProjectRelativePath;
+use codex_project_intelligence::RootPromotion;
+use codex_state::SqliteConfig;
+use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use sha2::Digest;
+use sha2::Sha256;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -263,6 +282,51 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             },
         })
         .await?;
+    let sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    let project_node_id = HierarchyNodeId::parse(format!("project-node-{}", project.project.id))?;
+    HierarchyStore::open(&sqlite)
+        .await?
+        .create_node(
+            project_node_id.clone(),
+            NewHierarchyNode {
+                project_id: project.project.id.clone(),
+                parent_id: None,
+                kind: NodeKind::Project,
+                project_root: None,
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
+    let material_finding_id =
+        BlackboardEntryId::parse(format!("material-finding-{}", project.project.id))?;
+    BlackboardStore::open(&sqlite)
+        .await?
+        .create_entry(
+            material_finding_id.clone(),
+            NewBlackboardEntry {
+                project_id: project.project.id.clone(),
+                node_id: project_node_id,
+                kind: BlackboardKind::Fact,
+                content: "The decisive project constraint must remain in the durable result."
+                    .to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(10_000)?,
+                verification: BlackboardVerification::UserConfirmed,
+                importance: BlackboardImportance::Critical,
+                root_promotion: RootPromotion::Promoted,
+                evidence: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "completion-integration-fixture".to_string(),
+                },
+            },
+        )
+        .await?;
+    let material_finding_digest = Sha256::digest(material_finding_id.as_str().as_bytes());
+    let material_finding_digest = format!("{material_finding_digest:x}");
+    let material_finding_reference = format!("K{}", &material_finding_digest[..16]);
     let thread = server
         .start_thread(ThreadStartParams {
             project_id: Some(project.project.id.clone()),
@@ -352,7 +416,8 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                     &json!({
                         "expectedRevision": 2,
                         "status": "completed",
-                        "result": "Verified the decisive connection and incorporated the user's direction."
+                        "result": "Verified the decisive connection and incorporated the user's direction.",
+                        "materialRootFindings": [material_finding_reference.clone()]
                     })
                     .to_string(),
                 ),
@@ -410,14 +475,24 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(requests[0].body_contains_text("<stateful_run>"));
     assert!(requests[0].body_contains_text("completion removes the active-run binding"));
     assert!(requests[0].body_contains_text("final Stateful mutation"));
+    assert!(requests[0].body_contains_text(&material_finding_reference));
     assert!(requests[0].body_contains_text("Connect the source constraint to deployment risk."));
     assert!(requests[0].body_contains_text(&submitted.steering.id));
     assert!(requests[4].body_contains_text("finalAnswerChecklist"));
+    assert!(requests[4].body_contains_text("rootFinding"));
+    assert!(requests[4].body_contains_text(&material_finding_reference));
+    assert!(
+        requests[4].body_contains_text(
+            "The decisive project constraint must remain in the durable result."
+        )
+    );
     assert!(
         requests[4]
             .body_contains_text("The deployment risk is triggered by the source constraint.")
     );
-    assert!(requests[4].body_contains_text("reconcile the persisted result and final prose"));
+    assert!(
+        requests[4].body_contains_text("durable result now contains this bounded completion basis")
+    );
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,
@@ -453,9 +528,13 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             },
         })
         .await?;
-    assert_eq!(
-        read.run.expect("completed run remains readable").status,
-        StatefulRunStatus::Completed
-    );
+    let run = read.run.expect("completed run remains readable");
+    assert_eq!(run.status, StatefulRunStatus::Completed);
+    let result = run.result.expect("completed run preserves its result");
+    assert!(result.contains("Verified the decisive connection"));
+    assert!(result.contains("Durable completion basis:"));
+    assert!(result.contains(&material_finding_reference));
+    assert!(result.contains("The decisive project constraint must remain in the durable result."));
+    assert!(result.contains("The deployment risk is triggered by the source constraint."));
     Ok(())
 }

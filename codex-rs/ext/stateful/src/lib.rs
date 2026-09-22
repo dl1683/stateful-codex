@@ -1,6 +1,7 @@
 //! Project-scoped Stateful Codex integration.
 
 mod autonomy;
+mod completion;
 mod events;
 mod root_blackboard;
 mod run_world_state;

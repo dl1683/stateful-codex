@@ -6,7 +6,6 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
-use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulRunUpdate;
 use serde::Deserialize;
@@ -14,6 +13,8 @@ use serde_json::json;
 
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
+use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
+use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
 
 use super::parse_arguments;
@@ -21,9 +22,6 @@ use super::respond;
 use super::thread_run;
 
 const TOOL_NAME: &str = "stateful_run_update";
-const MAX_FINAL_CHECKLIST_ITEMS: usize = 16;
-const MAX_FINAL_CHECKLIST_ITEM_BYTES: usize = 640;
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Arguments {
@@ -31,6 +29,7 @@ struct Arguments {
     status: StatefulRunStatus,
     strategy: Option<String>,
     result: Option<String>,
+    material_root_findings: Option<Vec<String>>,
 }
 
 pub(super) struct StatefulRunUpdateTool {
@@ -59,9 +58,15 @@ impl StatefulRunUpdateTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: Arguments = parse_arguments(&call)?;
+        let Arguments {
+            expected_revision,
+            status,
+            strategy,
+            result,
+            material_root_findings,
+        } = parse_arguments(&call)?;
         if !matches!(
-            arguments.status,
+            status,
             StatefulRunStatus::Running
                 | StatefulRunStatus::Blocked
                 | StatefulRunStatus::Completed
@@ -80,30 +85,59 @@ impl StatefulRunUpdateTool {
             ));
         }
         let runtime = self.services.runtime().await.map_err(respond)?;
-        let final_obligation = if arguments.status == StatefulRunStatus::Completed {
+        let completion = if status == StatefulRunStatus::Completed {
+            let material_root_findings = material_root_findings.ok_or_else(|| {
+                FunctionCallError::RespondToModel(
+                    "completed requires materialRootFindings; pass every materially relevant stable K reference from the root blackboard, or [] only after determining none is material"
+                        .to_string(),
+                )
+            })?;
+            let result = result.as_deref().ok_or_else(|| {
+                FunctionCallError::RespondToModel(
+                    "completed requires a final evidence-grounded result".to_string(),
+                )
+            })?;
             Some(
-                runtime
-                    .latest_obligation(&current.id)
-                    .await
-                    .map_err(respond)?
-                    .ok_or_else(|| {
+                prepare_completion(
+                    &self.project_id,
+                    &self.services,
+                    result,
+                    &runtime
+                        .latest_obligation(&current.id)
+                        .await
+                        .map_err(respond)?
+                        .ok_or_else(|| {
                         FunctionCallError::RespondToModel(
                             "completed requires a final semantic obligation that captures every material conclusion, implication, uncertainty, and blocker needed in the final answer"
                                 .to_string(),
                         )
-                    })?,
+                    })?
+                    .value
+                    .packet,
+                    &material_root_findings,
+                )
+                .await?,
             )
         } else {
+            if material_root_findings.is_some() {
+                return Err(FunctionCallError::RespondToModel(
+                    "materialRootFindings is only valid when status is completed".to_string(),
+                ));
+            }
             None
         };
         let run = runtime
             .update_run(
                 &current.id,
                 StatefulRunUpdate {
-                    expected_revision: arguments.expected_revision,
-                    status: arguments.status,
-                    strategy: arguments.strategy.or(current.strategy),
-                    result: arguments.result.or(current.result),
+                    expected_revision,
+                    status,
+                    strategy: strategy.or(current.strategy),
+                    result: completion
+                        .as_ref()
+                        .map(|completion| completion.result.clone())
+                        .or(result)
+                        .or(current.result),
                 },
             )
             .await
@@ -115,10 +149,13 @@ impl StatefulRunUpdateTool {
                 revision: run.revision,
             });
         }
-        let (final_answer_checklist, omitted_checklist_items) = final_obligation
+        let final_answer_checklist = completion
             .as_ref()
-            .map(|obligation| final_answer_checklist(&obligation.value.packet))
+            .map(|completion| completion.checklist.clone())
             .unwrap_or_default();
+        let omitted_checklist_items = completion
+            .as_ref()
+            .map_or(0, |completion| completion.omitted_checklist_items);
         Ok(Box::new(JsonToolOutput::new(json!({
             "runId": run.id.to_string(),
             "status": status_name(run.status),
@@ -127,7 +164,7 @@ impl StatefulRunUpdateTool {
             "finalAnswerChecklist": final_answer_checklist,
             "omittedChecklistItems": omitted_checklist_items,
             "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
-                "Before replying, reconcile the persisted result and final prose against every checklist item. Include each material conclusion relevant to the user's request, preserve caveats and blockers, and cite the verified evidence. If omittedChecklistItems is nonzero, also use the full final obligation call you just made."
+                "The durable result now contains this bounded completion basis. Before replying, reconcile the final prose against every checklist item, preserve caveats and blockers, and cite the verified evidence. If omittedChecklistItems is nonzero, also use the full final obligation call you just made."
             ),
         }))))
     }
@@ -141,7 +178,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed requires a final semantic obligation and is terminal: finish every blackboard, relationship, steering, verification, and obligation operation first; ensure the result covers every material conclusion, implication, uncertainty, and blocker in that obligation; then make completed the final Stateful mutation. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
+            description: "Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. Completed requires a final semantic obligation and an explicit materialRootFindings selection: finish every blackboard, relationship, steering, verification, and obligation operation first; select every materially relevant stable K reference from the root blackboard; then make completed the final Stateful mutation. The tool appends the selected root findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -150,7 +187,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "expectedRevision": {"type": "integer", "minimum": 1},
                     "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "Use completed only after a final semantic obligation captures all material answer content and all durable writes are finished; completion removes the active-run binding."},
                     "strategy": {"type": "string"},
-                    "result": {"type": "string", "description": "For completed, the final evidence-grounded account after all durable writes and verification."}
+                    "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative after all durable writes and verification. The tool appends the structured completion basis."},
+                    "materialRootFindings": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": "Required for completed. Include every materially relevant stable K reference shown in the root blackboard; use [] only after determining no root finding is material to the requested outcome."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false
@@ -170,39 +208,6 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     {
         Box::pin(self.handle_call(call))
     }
-}
-
-fn final_answer_checklist(packet: &ObligationPacket) -> (Vec<serde_json::Value>, usize) {
-    let candidates = [
-        ("learning", &packet.learning),
-        ("implication", &packet.implication),
-        ("uncertainty", &packet.uncertainty),
-        ("blocker", &packet.blockers),
-    ];
-    let total = candidates
-        .iter()
-        .map(|(_, items)| items.len())
-        .sum::<usize>();
-    let items = candidates
-        .into_iter()
-        .flat_map(|(category, items)| items.iter().map(move |item| (category, bounded_item(item))))
-        .take(MAX_FINAL_CHECKLIST_ITEMS)
-        .map(|(category, text)| json!({"category": category, "text": text}))
-        .collect::<Vec<_>>();
-    let omitted = total.saturating_sub(items.len());
-    (items, omitted)
-}
-
-fn bounded_item(item: &str) -> String {
-    if item.len() <= MAX_FINAL_CHECKLIST_ITEM_BYTES {
-        return item.to_string();
-    }
-    let marker = "…";
-    let mut boundary = MAX_FINAL_CHECKLIST_ITEM_BYTES.saturating_sub(marker.len());
-    while !item.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    format!("{}{marker}", &item[..boundary])
 }
 
 fn status_name(status: StatefulRunStatus) -> &'static str {

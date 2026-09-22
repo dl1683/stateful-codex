@@ -14,6 +14,7 @@ use codex_project_intelligence::RootBlackboardProjection;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::completion::root_finding_reference;
 use crate::world_state::append_line;
 use crate::world_state::hash_component;
 use crate::world_state::try_append_line;
@@ -113,7 +114,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
     }
     append_line(
         output,
-        "For consequential claims, verify against exact source. Use evidence_read with the S paths and source line hints above to open only the smallest decisive line ranges whose wording can change the answer; do not reopen every supporting file by default or call a full-corpus read the smallest set. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient.",
+        "For consequential claims, verify against exact source. Use evidence_read with the S paths and source line hints above to open only the smallest decisive line ranges whose wording can change the answer; do not reopen every supporting file by default or call a full-corpus read the smallest set. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient. At completion, pass every materially relevant stable K reference in materialRootFindings so those exact findings remain in the durable result; use an empty list only after determining that no root finding is material to the requested outcome.",
     );
 }
 
@@ -187,6 +188,7 @@ fn render_hit(
 ) -> String {
     let entry = &hit.entry;
     let value = &entry.value;
+    let stable_reference = root_finding_reference(&entry.id);
     let evidence = value
         .evidence
         .iter()
@@ -230,7 +232,7 @@ fn render_hit(
         .collect::<Vec<_>>()
         .join(",");
     let mut line = format!(
-        "- {alias} [{} {}; verification={}; declared={}; evidence={}; confidence={}; provenance={}] content={}{} sources=[{}] relations=[{}]",
+        "- {alias} {stable_reference} [{} {}; verification={}; declared={}; evidence={}; confidence={}; provenance={}] content={}{} sources=[{}] relations=[{}]",
         importance_name(value.importance),
         kind_name(value.kind),
         verification_name(hit.effective_verification),
