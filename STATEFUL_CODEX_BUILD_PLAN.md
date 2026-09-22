@@ -568,6 +568,17 @@ passes, and it reconstructs the real SC-EVAL-014 completion as one attempt with
 15 checklist items. SC-EVAL-015 freezes the next six-pair, two-project protocol
 before execution; persisted results still require independent live API reads.
 
+SC-EVAL-015 stopped after its first fresh maturation run exposed conflicting
+completion instructions. The model first tried 13 aliases against the eight-
+alias cap, then confused project-intelligence revision 45 with run revision 1;
+both invalid calls failed before terminal mutation, and a third corrected call
+succeeded. Commit `6f0f03c981` now renders the exact run `expectedRevision`,
+explicitly distinguishes it from `rootRevision`, and consistently instructs
+the model to select at most eight highest-priority aliases while preserving the
+remainder in the final obligation. Focused tests pass and the CLI rebuild
+succeeds. SC-EVAL-016 pre-registers an exact fresh replication before any
+matched case is run.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse

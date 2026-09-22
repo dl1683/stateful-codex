@@ -1708,7 +1708,8 @@ gated repository-wide Rust suite remain open Stage 8 evidence.
 
 ## Benchmark SC-EVAL-015: two-project release distribution
 
-Status: pre-registered before execution on 2026-09-22.
+Status: stopped after the first maturation run exposed a completion-contract
+retry on 2026-09-22; no matched outcome case was run.
 
 The frozen manifest is
 `clients/stateful-codex/eval/manifests/release-distribution.json`. It contains
@@ -1757,3 +1758,55 @@ is still two small synthetic knowledge corpora. It can close the observed
 cross-case durable-coverage and short-distribution gates. It cannot alone prove
 large-corpus scaling, code-editing workloads, multi-day cache behavior,
 concurrent root revisions, or general production readiness.
+
+### Execution result
+
+The fresh procurement maturation completed thread
+`01a0ca24-35fc-7513-9ec0-6d422e1cae46` and persisted 13 source-verified
+findings plus 14 relationships across all eight files. It correctly captured
+the conjunctive gates, authority order, Alder and Birch failures, Cedar's sole
+apparent eligibility, chronology, costs, and unresolved final-award question.
+The source copy was byte-identical before execution, and the final answer
+reported no source edits.
+
+The completion path needed three attempts. First, the model selected all 13
+root aliases even though the tool cap is eight. After correctly reducing the
+selection, it copied project-intelligence revision 45 into both `rootRevision`
+and the unrelated `expectedRevision`; the run correctly rejected that call
+because its revision was 1. The third call used `expectedRevision: 1`,
+`rootRevision: 45`, and eight aliases and completed successfully at run revision
+2. The run consumed 453,078 full tokens and 68,054 uncached input plus output.
+
+This is a product-contract failure rather than evidence about the matched
+distribution. The rendered root said to select every material alias despite the
+eight-item bound, and the two nearby revision numbers were not explicitly
+distinguished at the call site. No ordinary or follow-up Stateful cases were
+run. SC-EVAL-015 is retained as negative evidence and is not used for release
+economics.
+
+Commit `6f0f03c981` makes the contract self-consistent. The run World State now
+renders the exact current `expectedRevision` and says not to substitute project
+intelligence revision. The root footer and tool schema say to select at most
+eight highest-priority directly material aliases and preserve additional
+conclusions in the final semantic obligation. Focused extension tests pass 6/6,
+the scoped lint and repository formatting completed, and the branch CLI was
+rebuilt. The unchanged code-mode companion rebuild remains blocked by the known
+external Windows V8 archive download; the existing matching binary is retained.
+
+## Benchmark SC-EVAL-016: disambiguated two-project distribution
+
+Status: pre-registered before execution on 2026-09-22.
+
+SC-EVAL-016 repeats the exact frozen SC-EVAL-015 manifest and protocol from
+fresh byte-identical procurement and licensing directories using the rebuilt
+CLI from `6f0f03c981`. The same two maturation prompts, six matched questions,
+condition-order alternation, disabled ordinary memory, authentication, model,
+effort, roots, permissions, correctness gates, live persisted-result checks,
+and economics accounting apply without modification.
+
+The added operational gate is explicit: each maturation and Stateful follow-up
+must select no more than eight aliases, must keep run `expectedRevision`
+distinct from project `rootRevision`, and must complete on its first terminal
+call. Any retry is retained as a failure and its cost remains in the rollout.
+Fresh directories and project identities prevent the successful SC-EVAL-015
+maturation state from entering this replication.
