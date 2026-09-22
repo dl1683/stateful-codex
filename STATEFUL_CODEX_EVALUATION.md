@@ -1795,7 +1795,8 @@ external Windows V8 archive download; the existing matching binary is retained.
 
 ## Benchmark SC-EVAL-016: disambiguated two-project distribution
 
-Status: pre-registered before execution on 2026-09-22.
+Status: stopped after both maturation runs exposed a separate evidence-schema
+contradiction on 2026-09-22; no matched outcome case was run.
 
 SC-EVAL-016 repeats the exact frozen SC-EVAL-015 manifest and protocol from
 fresh byte-identical procurement and licensing directories using the rebuilt
@@ -1810,3 +1811,49 @@ distinct from project `rootRevision`, and must complete on its first terminal
 call. Any retry is retained as a failure and its cost remains in the rollout.
 Fresh directories and project identities prevent the successful SC-EVAL-015
 maturation state from entering this replication.
+
+### Execution result
+
+The repaired completion contract passed in both fresh projects. Procurement
+thread `01a0ca30-f52a-71b2-b6ca-3e52e7c1d9dc` selected exactly eight aliases,
+kept run revision 1 distinct from project revision 41, and completed on its
+first terminal call. It persisted 14 source-verified findings and nine
+relationships. The run used six model responses, five outer calls, 159,212 full
+tokens, and 65,004 uncached input plus output. Relative to SC-EVAL-015's failed
+preflight, full usage fell 64.86% and the two completion retries disappeared.
+
+Licensing thread `01a0ca36-26b2-7ef3-9117-b51c4b9af46b` also completed on its
+first terminal call with the correct run/root revisions and eight aliases. It
+persisted 12 source-verified findings and 13 relationships, used seven model
+responses and six outer calls, and consumed 207,649 full tokens plus 58,657
+uncached input and output. Both fresh corpora remained byte-identical.
+
+The licensing run exposed a different pre-completion retry. Its first atomic
+batch supplied both `contextMapEntryId` and `relativePath` for each evidence
+item. Runtime correctly rejected the entire batch because exactly one route
+identity is valid, but the published JSON schema used `anyOf`, which allowed an
+item containing both alternatives. The second batch used only context-map IDs
+and succeeded. Continuing the matched cases would mix a known avoidable
+maturation cost into the release distribution, so execution stopped before any
+ordinary or follow-up run.
+
+Commit `22290f0b98` replaces the evidence schema's `anyOf` with `oneOf` and
+states the mutual exclusion on the array and both identity fields. Focused
+extension tests pass 6/6, the scoped lint and repository formatting completed,
+and the branch CLI was rebuilt. The evaluator was also corrected in
+`d9a3a970c1` to recognize the nested completion output produced when the final
+obligation and terminal update are correctly grouped in one code-mode call; its
+11-test suite passes and reconstructs both live completion records.
+
+## Benchmark SC-EVAL-017: exclusive-evidence two-project distribution
+
+Status: pre-registered before execution on 2026-09-22.
+
+SC-EVAL-017 repeats the exact frozen six-case manifest and all SC-EVAL-016
+conditions from two new byte-identical project directories using the rebuilt
+CLI from `22290f0b98`. Neither prior project's durable intelligence will be
+reused. In addition to the existing completion gate, each maturation must
+persist its coherent evidence-linked batch without retrying an invalid evidence
+identity. Any failure or retry remains in the rollout and stops execution before
+the matched cases. If both maturations pass, all six ordinary/Stateful pairs
+will run under the already frozen order and gates.

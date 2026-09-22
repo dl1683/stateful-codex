@@ -579,6 +579,16 @@ remainder in the final obligation. Focused tests pass and the CLI rebuild
 succeeds. SC-EVAL-016 pre-registers an exact fresh replication before any
 matched case is run.
 
+SC-EVAL-016 confirmed the completion fix in two fresh maturations: both used the
+correct run/root revisions, selected eight aliases, and completed on the first
+terminal call. Procurement full usage fell 64.86% from the failed SC-EVAL-015
+preflight. The licensing run then found a separate contract mismatch: the
+evidence schema's `anyOf` allowed both route identities although runtime requires
+exactly one, causing an atomic batch retry. Commit `22290f0b98` changes that
+contract to `oneOf` with explicit mutual-exclusion descriptions. SC-EVAL-017 is
+pre-registered from fresh projects; if both maturation preflights pass without
+these retries, it proceeds to the six matched release cases.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
