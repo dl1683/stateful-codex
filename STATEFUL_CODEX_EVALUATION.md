@@ -141,6 +141,57 @@ dependency or source change.
 
 These checks demonstrate operability, not comparative product advantage.
 
+### 2026-09-22 noninteractive CLI and live client regression
+
+Testing exposed that root-level `--stateful` selection was silently dropped by
+`codex exec`; the first attempted run therefore was not valid Stateful evidence.
+After sharing native startup between TUI and exec and propagating the selection,
+rollout `01a0c83a-c55b-75d0-89fa-8ab8b9cbebd5` ran through cached ChatGPT login
+with both API-key environment variables removed. It received a selected project
+and durable run, used `steering_query`, bounded `evidence_read` calls, one semantic
+obligation update, and a terminal run update. It made no shell/file-read call and
+no source edit. The answer correctly selected Cedar and cited exact project
+files.
+
+The final usage record was 116,310 input tokens, 83,200 cached input tokens,
+2,920 output tokens, and 119,230 lifetime tokens. Uncached input plus output was
+36,030. Because the prompt and entry point differ from the registered ordinary
+baseline, this run is not reported as a comparative win. It demonstrates that
+the repaired exec path is genuinely Stateful and that exact-range verification
+works in a real run.
+
+The local browser gateway then completed two real client-path runs with cached
+ChatGPT login:
+
+- Thread `01a0c841-34c6-7d31-a76a-68da3373edaf` automatically received the
+  mature root blackboard and exact-source aliases, explicitly skipped deeper
+  search, verified the controlling line ranges, published one obligation, and
+  completed with the correct result. Its final usage was 124,627 lifetime tokens
+  with 90,880 cached input tokens and 33,747 uncached input plus output.
+- Thread `01a0c851-0974-74f2-92a6-db2ba4c9f3e6` began with a submitted user
+  steering instruction. During the live turn the instruction became `applied`,
+  its resulting strategy revision became 1, and the durable strategy,
+  obligation, and final result all incorporated the requested distinction
+  between viability and a final award.
+
+The live exercise also proved and fixed a terminal-state defect. A completed run
+accepted a new steering instruction in `submitted` state even though it could
+never be applied. The runtime now rejects terminal-run steering, and the client
+does not offer steering, mode, maintenance, or free-form instruction controls on
+a terminal outcome; it preserves the record and offers `Start another outcome`.
+The focused runtime test passes, the browser-client suite passes 6/6, and the
+rebuilt live gateway rejects the same request with `cannot submit steering to a
+terminal run (Completed)`.
+
+No fresh screenshot-based run was possible in this session because the in-app
+browser automation capability was unavailable. HTTP delivery, real gateway RPC,
+real model execution, durable state reads, and renderer tests were exercised.
+Rebuilding the code-mode companion was independently blocked by the pinned V8
+archive download on Windows; the live gateway used the existing companion from
+the prior validated build. This limits the scope of the fresh client claim but
+does not affect the successful branch CLI rebuild or the real gateway/model
+results above.
+
 ## Open release evidence
 
 The Stage 8 release claim remains open until representative paired scenarios

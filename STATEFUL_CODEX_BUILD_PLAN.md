@@ -172,6 +172,52 @@ path has integration evidence but still needs a fresh maturation-cost benchmark;
 and selective rereading should be evaluated on a larger corpus where the
 question's decisive source set is materially smaller than the corpus.
 
+### 2026-09-22 CLI and client validation checkpoint
+
+The noninteractive `codex exec` path originally accepted the root `--stateful`
+option but did not propagate it into exec startup. The apparent Stateful run was
+therefore ordinary Codex behavior. The branch now shares one project/run startup
+implementation between TUI and exec, propagates root and exec-local Stateful
+selection, attaches the chosen project before `thread/start`, and creates the
+durable run before the first model request. Focused app-server-client, exec, TUI,
+and CLI tests passed before the required lint/format pass.
+
+A fresh cached-login exec run, `01a0c83a-c55b-75d0-89fa-8ab8b9cbebd5`, was
+launched with `OPENAI_API_KEY` and `CODEX_API_KEY` removed. Its rollout contains
+the selected Stateful project and run, used bounded `evidence_read` line ranges
+instead of shell/file reads, queried steering, published a semantic obligation,
+completed the run, returned the correct Cedar decision, and made no source edits.
+It consumed 119,230 lifetime tokens, including 83,200 cached input tokens; its
+uncached input plus output was 36,030. This is a live mechanism check, not a
+matched benchmark or an efficiency claim.
+
+The real browser gateway was also exercised on a separate loopback port with the
+fresh branch CLI and cached ChatGPT login. Thread
+`01a0c841-34c6-7d31-a76a-68da3373edaf` received the mature root blackboard,
+explicitly judged deeper search unnecessary, and verified only exact routed line
+ranges before completing. A second client-path run,
+`01a0c851-0974-74f2-92a6-db2ba4c9f3e6`, proved live steering: the instruction
+advanced from submitted to applied, the run strategy revision advanced from 0
+to 1, and the requested viability-versus-final-award distinction appeared in the
+durable strategy, obligation, and result.
+
+That exercise found one trust defect: the API accepted steering after a run had
+completed, leaving an instruction that could never be applied. The runtime now
+rejects new steering on terminal runs, and the web client replaces terminal
+steering, mode, maintenance, and instruction controls with an explicit path to a
+new outcome while retaining the completed record. The focused runtime test and
+browser-client suite (6/6) pass; a rebuilt live gateway now rejects the formerly
+accepted request with the terminal-run reason.
+
+The in-app browser automation tool was unavailable in the validating session, so
+this checkpoint does not add a fresh rendered screenshot. The HTTP/RPC gateway,
+real model turns, persisted state, and pure rendering tests were exercised. A
+fresh `codex-code-mode-host` build was also blocked before compiling project code
+because the pinned V8 crate could not download its Windows prebuilt archive and
+Python was unavailable; the live gateway used the existing matching companion
+binary from the preceding validated client build. These are explicit validation
+limits, not product successes.
+
 ## System boundaries
 
 ### Existing Codex primitives to reuse
