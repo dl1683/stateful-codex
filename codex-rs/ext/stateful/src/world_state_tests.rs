@@ -67,6 +67,7 @@ fn renders_selected_project_as_bounded_typed_world_state() {
             .body()
             .contains("verify only the smallest decisive source set")
     );
+    assert!(rendered.body().contains("use evidence_read"));
     assert!(
         rendered
             .body()

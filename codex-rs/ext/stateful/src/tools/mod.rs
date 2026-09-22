@@ -1,6 +1,7 @@
 mod blackboard;
 mod blackboard_write;
 mod context_map;
+mod evidence;
 mod obligation;
 mod run;
 mod steering;
@@ -53,6 +54,11 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
         )),
         Arc::new(context_map::ContextMapRefreshTool::new(
+            project_id.clone(),
+            services.clone(),
+            projects.clone(),
+        )),
+        Arc::new(evidence::EvidenceReadTool::new(
             project_id.clone(),
             services.clone(),
             projects,

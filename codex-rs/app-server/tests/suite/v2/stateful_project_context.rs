@@ -5,6 +5,8 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ContextMapRefreshParams;
+use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
@@ -208,6 +210,94 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     assert!(context_map_output.contains("Project purpose, setup, and operator instructions."));
     assert!(context_map_output.contains("README.md"));
     assert!(context_map_output.contains("current"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "evidence-call",
+                    "evidence_read",
+                    &json!({
+                        "relativePath": "decision.md",
+                        "lineRange": {"start": 2, "end": 3}
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("evidence-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done-message", "Done"),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("decision.md"),
+        "preamble\ndecisive clause\ncontrolling number: 42\nunrelated appendix\n",
+    )?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Selective evidence project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-selective-evidence-project".to_string(),
+            },
+        })
+        .await?;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].body_contains_text("evidence_read"));
+    let output: serde_json::Value = serde_json::from_str(
+        &requests[1]
+            .function_call_output_text("evidence-call")
+            .expect("evidence output should be text"),
+    )?;
+    assert_eq!(
+        output["content"],
+        "decisive clause\ncontrolling number: 42\n"
+    );
+    assert_eq!(output["firstLine"], 2);
+    assert_eq!(output["lastLine"], 3);
+    assert_eq!(output["truncated"], false);
     Ok(())
 }
 

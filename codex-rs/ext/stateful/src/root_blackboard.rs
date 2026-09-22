@@ -113,7 +113,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
     }
     append_line(
         output,
-        "For consequential claims, verify against exact source. Use the S aliases above to open only the smallest decisive source set whose exact wording can change the answer; do not reopen every supporting file by default or call a full-corpus read the smallest set. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient.",
+        "For consequential claims, verify against exact source. Use evidence_read with the S paths and source line hints above to open only the smallest decisive line ranges whose wording can change the answer; do not reopen every supporting file by default or call a full-corpus read the smallest set. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient.",
     );
 }
 
