@@ -668,12 +668,38 @@ conditional schema, rejects forward-only packets without semantic learning or
 strategy content, and explicitly excludes synthesis of already-reviewed
 evidence from substantive remaining work. After this narrow replication, the
 evaluation agenda expands to the user-directed distribution: a six-project
-breadth screen, followed by 20 sequential questions on five passing projects.
+breadth screen, followed by 20 sequential questions on five projects selected
+for domain and workload coverage before comparative results are observed.
 That longitudinal phase will measure quality, rereading, compaction continuity,
 state growth, and marginal full/uncached cost by question number so any
 Stateful crossover is observed rather than assumed. Recognized external evals
 and published Codex/Luna baselines follow only after the product-specific
 longitudinal evidence is complete.
+
+The adversarial senior checkpoint found a separate correctness defect before
+that scale-up: terminal `stateful_run_update` previously committed its final
+obligation and run transition in two SQLite transactions. Commit `f42997030f`
+adds one guarded transaction for both records. A forced obligation-identity
+failure proves the run update rolls back; the success path and model-facing
+completion integration pass. The tool may now accurately describe terminal
+persistence as atomic.
+
+SC-EVAL-022 removed the schema-shape retry but did not pass. The model opened
+two adjacent sources, persisted an intermediate update whose only remaining
+work was answer completion, and used five responses, 109,325 full tokens, and
+31,501 uncached tokens. The result remained correct, durable, and source-safe,
+but the workflow and economics regressed. This repeated procurement prompt is
+now frozen as a development case rather than tuned again.
+
+Before the six-project breadth screen, the evaluator must become turn-aware.
+The present series comparator assumes one rollout per question and sums final
+cumulative usage; reusing a thread would double-count earlier turns, while
+fresh threads would not test natural compaction. The new evaluator must measure
+per-turn deltas, actual compaction events, quality, source reads, retries,
+latency, state growth, injected root size, freshness, and cumulative cost. Both
+ordinary and Stateful arms will run the same continuous sequence from empty
+state. Fresh-thread project transfer remains a separately labelled experiment,
+and all six breadth outcomes and exclusions remain visible.
 
 ## System boundaries
 

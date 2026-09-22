@@ -2219,3 +2219,73 @@ one completion attempt, a revision-2 API result, and an unchanged corpus. The
 semantic rubric remains unchanged. Full usage must be below SC-EVAL-020's
 81,003 and the ordinary run's 78,593 tokens; uncached usage must be below
 SC-EVAL-020's 15,467 and will be compared with ordinary's 14,337.
+
+### Execution result
+
+SC-EVAL-022 removed the malformed scalar retry but failed the registered
+retrieval, workflow, response-count, and economics gates. Thread
+`01a0cab8-0dff-7c32-afd4-927ea33683b8` first opened the four registered
+continuity sources, then opened `finance-schedule.md` and
+`security-addendum.md` to make an unrequested all-gate viability determination.
+It persisted an intermediate packet whose stated remaining work was to complete
+the answer, then completed in the following response. There was no rejected
+tool call, and the final obligation and completed run now committed through the
+same storage transaction.
+
+The visible answer and durable result are substantively correct and preserve
+the verified outage history, North Ridge, the 24-hour Birch loss, Cedar's
+claimed 120-hour capacity and ordering preservation, the verified-history
+versus vendor-claim distinction, and the no-final-approval caveat. A live API
+read confirmed run
+`run-3e2303305a5733db09daa1d7642895b73f64e3e543e90971d64a6a5e185ddde7`
+completed at revision 2 with a 5,340-character result. The eight source files
+remain byte-identical to the fixture.
+
+The run used five model responses, two evidence batches, one intermediate
+obligation, one successful completion, 109,325 full tokens, and 31,501 uncached
+input-plus-output tokens. That is 34.96% more full and 103.66% more uncached
+than SC-EVAL-020, and 39.10% more full plus 119.72% more uncached than the
+same-binary ordinary run. SC-EVAL-022 does not pass.
+
+This procurement continuity prompt has now served as a repeated development
+case. Further prompt-specific policy tuning would risk overfitting while still
+being unable to validate semantic novelty structurally. The case is frozen
+here. The next evaluation work moves to diverse projects and measures whether
+intermediate updates are useful as an outcome, rather than adding another
+presence-rule proxy.
+
+## Longitudinal evaluation program
+
+Status: design and tooling phase begins after SC-EVAL-022; no comparative
+project result is pre-registered yet.
+
+The next experiment follows the user-directed ladder while preventing
+selection and accounting bias:
+
+1. Curate six diverse projects and publish all six breadth results. Five
+   longitudinal projects will be selected by domain and workload coverage
+   before comparative results are observed; the sixth is a reserved replication
+   project, not a pool from which only winners are chosen.
+2. Run matched continuous ordinary and Stateful threads from empty state over
+   20 sequential questions on each of the five projects. Both arms receive the
+   same ordered work and native history; cross-thread transfer is a separate
+   experiment.
+3. Record per-turn rather than cumulative-session usage, actual compaction
+   events, source regions and repeat reads, retries, wall time, state revisions,
+   injected root size, maintenance cost, state freshness, and cumulative cost
+   from question one.
+4. Include tasks that genuinely cross compaction boundaries, a thread restart,
+   source revisions that invalidate prior conclusions, cross-source deductions,
+   contradictions, and questions whose supported answer is unknown.
+5. Freeze semantic obligations and a blinded evidence rubric before execution.
+   Literal term matching remains diagnostic only. Visible answers and durable
+   state are scored separately for correctness, decisive-detail coverage,
+   unsupported claims, uncertainty calibration, contradiction handling, and
+   stale-state repair.
+
+The existing one-rollout-per-question series comparator cannot measure this
+design because cumulative usage would be double-counted in continued threads.
+A turn-aware evaluator is therefore a prerequisite, not post-hoc analysis.
+Published external Codex or Luna scores remain contextual unless model,
+benchmark version, harness, budget, retry policy, and scoring are demonstrably
+comparable.
