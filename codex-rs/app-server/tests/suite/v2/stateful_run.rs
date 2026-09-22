@@ -620,8 +620,7 @@ async fn model_cannot_persist_final_packet_as_intermediate_obligation() -> Resul
                     &json!({
                         "idempotencyKey": "redundant-final-packet",
                         "packet": {
-                            "learning": ["The requested outcome is ready."],
-                            "implication": ["Only the final answer remains."]
+                            "next": ["Synthesize the already-reviewed evidence into the final answer."]
                         }
                     })
                     .to_string(),
@@ -652,11 +651,12 @@ async fn model_cannot_persist_final_packet_as_intermediate_obligation() -> Resul
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 2);
-    assert!(requests[0].body_contains_text("substantive remaining next work"));
+    assert!(requests[0].body_contains_text("meaningful semantic content"));
     assert!(requests[0].body_contains_text("requestedJudgment"));
-    assert!(requests[1].body_contains_text(
-        "intermediate obligation_update requires substantive remaining next work"
-    ));
+    assert!(
+        requests[1]
+            .body_contains_text("intermediate obligation_update requires meaningful learning")
+    );
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,

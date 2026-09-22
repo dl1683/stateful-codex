@@ -82,13 +82,14 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
-            .contains("every intermediate update requires substantive remaining next work")
+            .contains("every intermediate update requires meaningful semantic change")
     );
     assert!(
         rendered
             .body()
-            .contains("Answer drafting, formatting, and terminal persistence do not qualify")
+            .contains("synthesizing, or comparing already-reviewed evidence")
     );
+    assert!(rendered.body().contains("run result atomically"));
     assert!(
         rendered
             .body()
