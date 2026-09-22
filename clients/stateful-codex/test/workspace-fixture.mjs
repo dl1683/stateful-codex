@@ -66,6 +66,24 @@ export function workspaceFixture() {
     ],
     blackboard: [
       hit(
+        "node-project",
+        "strategy",
+        "Verify the amended threshold before relying on the earlier conclusion.",
+        [{ contextMapEntryId: "map-1" }],
+        "current",
+        "sourceVerified",
+        [],
+      ),
+      hit(
+        "node-project",
+        "decision",
+        "The earlier conclusion must be revised.",
+        [{ contextMapEntryId: "map-1" }],
+        "current",
+        "sourceVerified",
+        [],
+      ),
+      hit(
         "node-file",
         "number",
         "The operative threshold is 60%, not 40%.",

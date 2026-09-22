@@ -212,20 +212,11 @@ function renderSteering(state) {
 function renderFindings(state) {
   const selected = state.selectedNodeId;
   const entries = state.blackboard
-    .filter((hit) => !selected || hit.entry.nodeId === selected)
-    .filter((hit) =>
-      [
-        "fact",
-        "claim",
-        "number",
-        "question",
-        "contradiction",
-        "signal",
-        "failure",
-      ].includes(hit.entry.kind),
-    );
+    .filter((hit) => !selected || hit.entry.nodeId === selected);
   return panel(
-    selected ? "Selected-node findings" : "Findings & open signals",
+    selected
+      ? "Selected-node understanding"
+      : "Project understanding & open signals",
     entries.length
       ? `<div class="finding-list">${entries.map(renderFinding).join("")}</div>`
       : empty(

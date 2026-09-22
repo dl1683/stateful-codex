@@ -1236,6 +1236,29 @@ finding landed on the executed-side-letter file node. The ten findings that
 synthesize multiple sources remained at project scope. No record was unplaced,
 and root promotion remained independent of hierarchy placement.
 
+### Rendered exact-evidence validation
+
+A direct Edge 153 render against the live port-4174 gateway reopened the
+completed SC-EVAL-009 project and exercised a persisted ranged-evidence control.
+The first pass exposed a transparency mismatch: project status reported 13
+understandings, while the findings surface silently filtered out the durable
+`strategy` and `decision` kinds and displayed only 11 cards. The UI now renders
+every blackboard kind under `Project understanding & open signals`; the reviewed
+workspace fixture includes strategy and decision cards, and the browser-client
+suite passes 8/8.
+
+The second live render displayed all 13 understanding cards, including one
+strategy and one decision, plus all 30 exact-range evidence controls. Clicking
+`Open evidence · lines 5–11` opened only `risk-assessment.md` lines 5–11 and
+displayed `408/455 bytes · lines 5–11`; the text began with the identifiable
+diagnostic-record fact and ended with the unresolved coverage/exclusions
+question. No UI or RPC error appeared. At both 1440 by 900 and 480 by 900, the
+page had no horizontal overflow and retained the completed run, semantic
+obligation, strategy, result, hierarchy, controls, exact evidence, and all
+project-understanding cards. The inspected captures are
+`%LOCALAPPDATA%/Temp/stateful-sc009-final-desktop.png` and
+`%LOCALAPPDATA%/Temp/stateful-sc009-final-mobile.png`.
+
 The unchanged frozen manifest found 13 of 13 currently supported entries,
 zero forbidden conclusions, and 7 of 10 literal concept probes. Manual semantic
 review found all ten predeclared concepts. The three literal misses remain

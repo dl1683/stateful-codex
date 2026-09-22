@@ -441,11 +441,15 @@ the corpus remained unchanged.
 This closes exact-provenance persistence and terminal finalization as bounded
 implementation slices. It does not close Stage 8. The remaining release work
 is a matched maturation-plus-follow-up distribution that can support lifetime
-economics rather than directional projection, fresh rendered host validation
-after the provenance UI change, and the approval-gated repository-wide Rust
-suite. The post-completion CLI also logged one harmless `UnknownProcessId`
-cleanup race after exit-success; it should remain visible for later operational
-hardening but does not justify interrupting the higher-value release gates.
+economics rather than directional projection and the approval-gated
+repository-wide Rust suite. A fresh Edge render against the live gateway now
+passes at 1440 px and 480 px with no horizontal overflow, all 13 durable
+understandings visible, all 30 ranged-evidence controls present, and an exact
+lines 5–11 read rendered correctly. That pass found and closed a UI filter that
+had hidden strategy and decision records; the browser-client suite passes 8/8.
+The post-completion CLI also logged one harmless `UnknownProcessId` cleanup race
+after exit-success; it should remain visible for later operational hardening but
+does not justify interrupting the higher-value release gates.
 
 ## System boundaries
 
