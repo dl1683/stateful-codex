@@ -329,9 +329,26 @@ local references, so the model does not have to copy generated entry IDs into
 later turns. Existing incremental record and relation tools remain intact. A
 focused app-server integration test proves that one model call persists two
 findings plus their relationship; the extension suite passes 5/5 and the
-focused app-server test passes 1/1. SC-EVAL-006 pre-registers a fresh-project
-replication of the original maturation workload before measuring whether the
-new path changes real model behavior or cost.
+focused app-server test passes 1/1.
+
+SC-EVAL-006 then repeated the original maturation workload in a fresh project
+over a byte-identical copy of the ten-file corpus. The model naturally used one
+linked batch for all 17 findings and 27 relationships with zero failures. Versus
+SC-EVAL-004, model responses fell from 15 to 10, custom tool calls from 14 to 9,
+full tokens from 649,173 to 344,870 (-46.88%), and uncached input plus output
+from 94,677 to 75,814 (-19.92%). All 17 findings are current, source-verified,
+and evidence-linked; manual review found all ten predeclared concepts and no
+forbidden conclusion. The frozen literal scorer matched only 3/10 because its
+single-entry string rules miss equivalent wording and linked multi-entry
+concepts; that result remains unchanged and is not being tuned post hoc.
+
+This closes the first measured maturation-round-trip remediation, not Stage 8.
+Combining the improved maturation cost with the already measured three-question
+series leaves a directional 207,866 full-token and 92,410 uncached-token deficit
+to ordinary Codex. Full-token break-even moves from roughly question 15 to
+question 8 under that observed follow-up slope; uncached usage still has no
+break-even. A matched end-to-end series and a stable workload distribution
+remain required before claiming lifetime economic advantage.
 
 ## System boundaries
 

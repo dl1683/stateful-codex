@@ -897,7 +897,8 @@ not substitute for the approval-gated repository-wide Rust suite.
 
 ## Benchmark SC-EVAL-006: linked-batch maturation replication
 
-Status: pre-registered before execution on 2026-09-22.
+Status: executed on 2026-09-22. The procedure below was committed before the
+run and was not changed after observing the result.
 
 The SC-EVAL-004 maturation trace required separate turns for a 16-record batch,
 a relationship batch using copied opaque entry IDs, a second two-record batch,
@@ -921,3 +922,61 @@ and whether that removes persistence turns and opaque-ID failures while
 preserving the existing state quality. The result will be recorded even if the
 model ignores the new path or cost regresses. No claim about general maturation
 economics will be made from one replication.
+
+### Execution and result
+
+Native Stateful CLI thread `01a0c91e-af11-7aa0-a7f9-cd77a9ccb9a2` used a
+fresh project rooted at
+`%LOCALAPPDATA%/Temp/stateful-maturation-1790080610019`, `gpt-5.6-luna` at
+`xhigh`, cached ChatGPT authentication, and no API-key environment variables.
+The temporary corpus contains the same ten filenames and is byte-for-byte
+identical to the committed licensing fixture. A post-run hash comparison also
+confirmed that no source file changed.
+
+The model inspected all ten files, verified exact evidence from all ten through
+one parallel `evidence_read` call, and persisted 17 findings plus 27
+relationships. All 17 findings and all 27 relationships were accepted in one
+`blackboard_record_batch` call with zero failures. The relationship endpoints
+used local idempotency keys; there was no malformed opaque entry ID and no
+persistence retry. The unsupported corpus-inventory record from SC-EVAL-004
+was not recreated.
+
+| Measure | SC-EVAL-004 | SC-EVAL-006 | Delta |
+| --- | ---: | ---: | ---: |
+| Model responses | 15 | 10 | -5 (-33.33%) |
+| Custom tool calls | 14 | 9 | -5 (-35.71%) |
+| Full tokens | 649,173 | 344,870 | -304,303 (-46.88%) |
+| Uncached input plus output | 94,677 | 75,814 | -18,863 (-19.92%) |
+| Blackboard findings | 18 | 17 | -1 |
+| Relationships | 24 | 27 | +3 |
+| Malformed or retried persistence calls | 1 | 0 | -1 |
+
+The live frozen-manifest scorer returned 17 of 17 active, current,
+source-verified, evidence-linked findings, zero forbidden conclusions, and
+3 of 10 literal concept probes. Manual semantic review found all ten intended
+concepts: the authority hierarchy, current royalty, base cap and executed
+carve-outs, termination, territory, risk/insurance gap, preliminary-board
+contradiction, closing blockers, and open insurance question. The lower literal
+score is retained rather than tuned after observation. Its misses again require
+all registered strings in one finding and do not recognize representations such
+as `6%` for `six percent`, `convenience termination` for `termination for
+convenience`, or one concept intentionally split across linked executed-term and
+economics findings. The result therefore establishes perfect supported-entry
+precision and complete manual concept coverage, not a machine-scored semantic
+recall pass.
+
+The linked batch changed real model behavior and materially reduced maturation
+cost without thinning the root blackboard or hiding core memory tools. It does
+not establish general maturation economics: this is one same-corpus mechanism
+replication, and the run still used a full-corpus shell pass before exact-source
+verification, a context refresh plus two context queries, and three final
+blackboard checks grouped into one tool turn.
+
+Using the already measured SC-EVAL-005 follow-up aggregate only as a directional
+lifetime projection, the improved maturation plus three Stateful follow-ups
+would cost 636,650 full tokens versus 428,784 ordinary tokens, a remaining
+207,866-token deficit. The observed average full-token follow-up saving projects
+full-token break-even around question eight instead of question fifteen. The
+same series would still cost 165,866 uncached tokens versus 73,456 ordinary, so
+there is still no observed uncached break-even. These cross-run calculations are
+not a matched end-to-end rerun and must not be presented as a release claim.
