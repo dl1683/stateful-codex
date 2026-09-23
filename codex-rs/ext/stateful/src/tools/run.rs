@@ -240,7 +240,7 @@ impl StatefulRunUpdateTool {
             "omittedChecklistItems": omitted_checklist_items,
             "submittedResult": submitted_result,
             "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
-                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, also use finalObligation from this call."
+                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. For a Windows drive path, use the exact C:/... Markdown target form and never rewrite it as /C:/.... Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, also use finalObligation from this call."
             ),
         }))))
     }
