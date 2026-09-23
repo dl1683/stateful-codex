@@ -32,6 +32,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/target \
     --mount=type=cache,target=/v8 \
+    OPENSSL_STATIC=1 \
     STATEFUL_CODEX_SOURCE_COMMIT="$SOURCE_COMMIT" \
     STATEFUL_CODEX_TARGET_DIR=/target \
     STATEFUL_CODEX_V8_CACHE_DIR=/v8 \

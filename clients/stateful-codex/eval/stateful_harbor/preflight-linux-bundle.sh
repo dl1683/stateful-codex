@@ -22,6 +22,12 @@ container="$(docker create --entrypoint sh "$task_image" -c '
   set -eu
   mkdir -p /tmp/stateful-codex-preflight
   tar -xzf /tmp/stateful-codex.tar.gz -C /tmp/stateful-codex-preflight
+  if ldd /tmp/stateful-codex-preflight/bin/codex | grep -F "not found"; then
+    exit 1
+  fi
+  if ldd /tmp/stateful-codex-preflight/bin/codex-code-mode-host | grep -F "not found"; then
+    exit 1
+  fi
   /tmp/stateful-codex-preflight/bin/codex --version
   /tmp/stateful-codex-preflight/bin/codex-code-mode-host --help >/dev/null
   test -s /tmp/stateful-codex-preflight/codex-package.json
