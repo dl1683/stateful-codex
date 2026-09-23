@@ -340,5 +340,6 @@ pub fn install<C: Sync>(
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());
     registry.tool_policy_contributor(extension.clone());
+    registry.turn_lifecycle_contributor(extension.clone());
     registry.thread_lifecycle_contributor(extension);
 }

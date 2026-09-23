@@ -94,5 +94,6 @@ async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::R
     assert!(request.body_contains_text("Investigate the second Stateful goal"));
     assert!(request.body_contains_text("<stateful_run>"));
     assert!(request.body_contains_text("stateful_run_update"));
+    assert!(!request.body_contains_text("Continue Autonomous Stateful run"));
     Ok(())
 }

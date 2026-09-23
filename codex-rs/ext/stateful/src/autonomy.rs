@@ -7,6 +7,8 @@ use codex_extension_api::ThreadIdleCause;
 use codex_extension_api::ThreadIdleInput;
 use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::ThreadReadyInput;
+use codex_extension_api::TurnLifecycleContributor;
+use codex_extension_api::TurnStartInput;
 use codex_stateful_runtime::AutonomousClaimOutcome;
 use codex_stateful_runtime::AutonomousClaimRequest;
 use codex_stateful_runtime::StatefulRunId;
@@ -45,6 +47,12 @@ pub trait AutonomousContinuationSink: Send + Sync {
 pub struct AutonomousContinuation {
     pub(crate) owner_id: String,
     pub(crate) sink: Arc<dyn AutonomousContinuationSink>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ActiveRunTurn {
+    run_id: StatefulRunId,
+    turn_id: String,
 }
 
 impl AutonomousContinuation {
@@ -90,6 +98,12 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
                     return;
                 }
             };
+            let Some(active_turn) = input.thread_store.get::<ActiveRunTurn>() else {
+                return;
+            };
+            if active_turn.run_id != run.id || active_turn.turn_id != previous_turn_id {
+                return;
+            }
             let request = PendingContinuation {
                 thread_id: input.thread_id.to_string(),
                 run_id: run.id,
@@ -112,6 +126,48 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
                     )
                     .await;
                 });
+            }
+        })
+    }
+}
+
+impl TurnLifecycleContributor for StatefulExtension {
+    fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
+        Box::pin(async move {
+            let (Some(selected), Some(thread), Some(services)) = (
+                input.thread_store.get::<SelectedProject>(),
+                input.thread_store.get::<SelectedThread>(),
+                self.services.as_ref(),
+            ) else {
+                input.thread_store.remove::<ActiveRunTurn>();
+                return;
+            };
+            let store = match services.runtime().await {
+                Ok(store) => store,
+                Err(error) => {
+                    input.thread_store.remove::<ActiveRunTurn>();
+                    tracing::warn!(%error, "failed to open Stateful run store at turn start");
+                    return;
+                }
+            };
+            match store.run_for_thread(&thread.thread_id).await {
+                Ok(Some(run)) if run.value.project_id == selected.project_id() => {
+                    input.thread_store.insert(ActiveRunTurn {
+                        run_id: run.id,
+                        turn_id: input.turn_id.to_string(),
+                    });
+                }
+                Ok(_) => {
+                    input.thread_store.remove::<ActiveRunTurn>();
+                }
+                Err(error) => {
+                    input.thread_store.remove::<ActiveRunTurn>();
+                    tracing::warn!(
+                        thread_id = %thread.thread_id,
+                        %error,
+                        "failed to bind a Stateful run to its starting turn"
+                    );
+                }
             }
         })
     }
