@@ -8,6 +8,7 @@ import test from "node:test";
 import { corpusHash } from "../eval/corpus-hash.mjs";
 import {
   authEnvironment,
+  captureCorpusArtifact,
   compactionArgs,
   nextAttemptNumber,
   platformSandboxArgs,
@@ -126,6 +127,29 @@ test("selects the Windows sandbox without changing other platforms", () => {
   ]);
   assert.deepEqual(platformSandboxArgs("linux"), []);
   assert.deepEqual(platformSandboxArgs("darwin"), []);
+});
+
+test("preserves and reuses an exact content-addressed corpus artifact", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "stateful-corpus-artifact-"));
+  const workspace = path.join(root, "workspace");
+  const resultRoot = path.join(root, "results");
+  try {
+    await mkdir(workspace);
+    await writeFile(path.join(workspace, "facts.md"), "The limit is ten.\n");
+    const corpus = await corpusHash(workspace);
+    const first = await captureCorpusArtifact({ workspace, resultRoot, corpus });
+    const second = await captureCorpusArtifact({ workspace, resultRoot, corpus });
+    assert.deepEqual(second, first);
+    assert.equal(await readFile(path.join(first.path, "facts.md"), "utf8"), "The limit is ten.\n");
+
+    await writeFile(path.join(workspace, "facts.md"), "The limit is six.\n");
+    assert.equal(
+      await readFile(path.join(first.path, "facts.md"), "utf8"),
+      "The limit is ten.\n",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("applies a hash-pinned source intervention once and resumes idempotently", async () => {

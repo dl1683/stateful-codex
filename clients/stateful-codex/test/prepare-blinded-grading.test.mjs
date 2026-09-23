@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   armForLabel,
   gradingOutputsOverlap,
+  requireMatchingCorpusArtifacts,
   redactArmPaths,
 } from "../eval/prepare-blinded-grading.mjs";
 
@@ -47,5 +48,24 @@ test("redacts absolute arm paths even when the snapshot directory is hallucinate
   assert.equal(
     redactArmPaths(value, "C:\\snapshots", "project"),
     "<PROJECT_ROOT\\result.json:10> and PROJECT_ROOT/a.md",
+  );
+});
+
+test("requires both arms to preserve the same exact per-turn corpus", () => {
+  const turn = {
+    corpusRevision: `sha256:${"a".repeat(64)}`,
+    corpusArtifact: { path: "corpora/a", sha256: "a".repeat(64), files: 4 },
+  };
+  assert.equal(
+    requireMatchingCorpusArtifacts("project", "q01", turn, structuredClone(turn)),
+    turn.corpusArtifact,
+  );
+  assert.throws(
+    () =>
+      requireMatchingCorpusArtifacts("project", "q01", turn, {
+        ...structuredClone(turn),
+        corpusArtifact: { path: "corpora/b", sha256: "b".repeat(64), files: 4 },
+      }),
+    /corpus artifact mismatch/,
   );
 });

@@ -94,60 +94,90 @@ async function main() {
     const labels = Object.fromEntries(
       ["A", "B"].map((label) => [label, armForLabel(project.id, options.seed, label)]),
     );
-    const benchmarkCase = project.cases[0];
-    const packet = {
-      rubricVersion: RUBRIC_VERSION,
-      artifact: "visibleAnswers",
-      project: {
-        id: project.id,
-        domain: project.domain,
-        prompt: benchmarkCase.prompt,
-        corpusRevision: arms.baseline.state.turns[0].corpusRevision,
-        sourceRoot: path.join(options.snapshotRoot, project.id, "baseline"),
-      },
-      instructions: {
-        blinded: true,
-        scoreRange: "0-4 integer per dimension",
-        dimensions: DIMENSIONS,
-        compareVisibleAnswers: ["A", "B"],
-        requirements: [
-          "Verify consequential claims against the supplied source corpus.",
-          "Do not infer product arm identity or use token, latency, or tool-count evidence.",
-          "For every dimension, provide a score and concise evidence-backed rationale.",
-          "Identify material unsupported claims, missed decisive details, and citation failures.",
-          "Choose A, B, or tie only after scoring each answer independently.",
-        ],
-      },
-      visibleAnswers: Object.fromEntries(
-        Object.entries(labels).map(([label, arm]) => [
-          label,
-          redactArmPaths(
-            arms[arm].summary.turns[0].finalAnswer,
-            options.snapshotRoot,
-            project.id,
-          ),
-        ]),
-      ),
-    };
-    const serializedPacket = `${JSON.stringify(packet, null, 2)}\n`;
-    mapping.projects[project.id] = {
+    const projectMapping = {
       labels,
-      packetSha256: createHash("sha256").update(serializedPacket).digest("hex"),
       rollouts: {
         baseline: arms.baseline.rolloutPath,
         stateful: arms.stateful.rolloutPath,
       },
+      cases: {},
     };
-    await writeFile(
-      path.join(options.output, `${project.id}.packet.json`),
-      serializedPacket,
-    );
+    mapping.projects[project.id] = projectMapping;
+    const projectOutput = path.join(options.output, project.id);
+    await mkdir(projectOutput, { recursive: true });
+    for (const [index, benchmarkCase] of project.cases.entries()) {
+      const corpusArtifact = requireMatchingCorpusArtifacts(
+        project.id,
+        benchmarkCase.id,
+        arms.baseline.state.turns[index],
+        arms.stateful.state.turns[index],
+      );
+      const packet = {
+        rubricVersion: RUBRIC_VERSION,
+        artifact: "visibleAnswers",
+        project: {
+          id: project.id,
+          domain: project.domain,
+          caseId: benchmarkCase.id,
+          prompt: benchmarkCase.prompt,
+          corpusRevision: `sha256:${corpusArtifact.sha256}`,
+          sourceRoot: corpusArtifact.path,
+        },
+        instructions: {
+          blinded: true,
+          scoreRange: "0-4 integer per dimension",
+          dimensions: DIMENSIONS,
+          compareVisibleAnswers: ["A", "B"],
+          requirements: [
+            "Verify consequential claims against the supplied source corpus.",
+            "Do not infer product arm identity or use token, latency, or tool-count evidence.",
+            "For every dimension, provide a score and concise evidence-backed rationale.",
+            "Identify material unsupported claims, missed decisive details, and citation failures.",
+            "Choose A, B, or tie only after scoring each answer independently.",
+          ],
+        },
+        visibleAnswers: Object.fromEntries(
+          Object.entries(labels).map(([label, arm]) => [
+            label,
+            redactArmPaths(
+              arms[arm].summary.turns[index].finalAnswer,
+              options.snapshotRoot,
+              project.id,
+            ),
+          ]),
+        ),
+      };
+      const serializedPacket = `${JSON.stringify(packet, null, 2)}\n`;
+      const filename = `${benchmarkCase.id}.packet.json`;
+      projectMapping.cases[benchmarkCase.id] = {
+        packet: path.join(project.id, filename),
+        packetSha256: createHash("sha256").update(serializedPacket).digest("hex"),
+      };
+      await writeFile(path.join(projectOutput, filename), serializedPacket);
+    }
   }
 
   await writeFile(
     path.join(options.mappingOutput, "grading-map.json"),
     `${JSON.stringify(mapping, null, 2)}\n`,
   );
+}
+
+export function requireMatchingCorpusArtifacts(projectId, caseId, baseline, stateful) {
+  const left = baseline?.corpusArtifact;
+  const right = stateful?.corpusArtifact;
+  if (!left || !right) {
+    throw new Error(`missing corpus artifact for ${projectId}/${caseId}`);
+  }
+  if (
+    left.sha256 !== right.sha256 ||
+    left.files !== right.files ||
+    baseline.corpusRevision !== `sha256:${left.sha256}` ||
+    stateful.corpusRevision !== `sha256:${right.sha256}`
+  ) {
+    throw new Error(`corpus artifact mismatch for ${projectId}/${caseId}`);
+  }
+  return left;
 }
 
 function parseArgs(args) {

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { link, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { cp, link, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { finished } from "node:stream/promises";
@@ -87,6 +87,15 @@ async function main() {
       state,
     });
     if (intervention.applied) await writeState(statePath, state);
+    const preTurnHash = await corpusHash(workspace);
+    if (`sha256:${preTurnHash.sha256}` !== state.corpusRevision) {
+      throw new Error(`corpus changed before ${project.id}/${options.arm}/${benchmarkCase.id}`);
+    }
+    const corpusArtifact = await captureCorpusArtifact({
+      workspace,
+      resultRoot,
+      corpus: preTurnHash,
+    });
     const unresolved = unresolvedAttemptForCase(state, benchmarkCase.id);
     if (unresolved) {
       throw new Error(
@@ -161,6 +170,7 @@ async function main() {
       attempt: attempt.number,
       exitCode: output.exitCode,
       corpusRevision: state.corpusRevision,
+      corpusArtifact,
       intervention: intervention.record,
     };
     if (output.exitCode !== 0) {
@@ -209,6 +219,35 @@ async function main() {
     state.nextCase = index + 1;
     await writeState(statePath, state);
   }
+}
+
+export async function captureCorpusArtifact({ workspace, resultRoot, corpus }) {
+  const artifactRoot = path.join(resultRoot, "corpora", corpus.sha256);
+  try {
+    const existing = await corpusHash(artifactRoot);
+    if (existing.sha256 !== corpus.sha256 || existing.files !== corpus.files) {
+      throw new Error(`stored corpus artifact ${corpus.sha256} does not match its identity`);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const temporaryRoot = `${artifactRoot}.tmp-${process.pid}`;
+    await mkdir(path.dirname(artifactRoot), { recursive: true });
+    await cp(workspace, temporaryRoot, {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+    const captured = await corpusHash(temporaryRoot);
+    if (captured.sha256 !== corpus.sha256 || captured.files !== corpus.files) {
+      throw new Error(`captured corpus changed while preserving ${corpus.sha256}`);
+    }
+    await rename(temporaryRoot, artifactRoot);
+  }
+  return {
+    path: artifactRoot,
+    sha256: corpus.sha256,
+    files: corpus.files,
+  };
 }
 
 async function runTurn(options) {
