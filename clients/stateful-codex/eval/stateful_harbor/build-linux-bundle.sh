@@ -47,12 +47,14 @@ curl -fsSL "$v8_release/$v8_binding" -o "$v8_dir/$v8_binding"
 
 export RUSTY_V8_ARCHIVE="$v8_dir/$v8_archive"
 export RUSTY_V8_SRC_BINDING_PATH="$v8_dir/$v8_binding"
-cargo build \
-  --manifest-path "$repo_root/codex-rs/Cargo.toml" \
-  --target-dir "$target_dir" \
-  --release \
-  -p codex-cli \
-  -p codex-code-mode-host
+(
+  cd "$repo_root/codex-rs"
+  cargo build \
+    --target-dir "$target_dir" \
+    --release \
+    -p codex-cli \
+    -p codex-code-mode-host
+)
 
 install -m 0755 "$target_dir/release/codex" "$staging/package/bin/codex"
 install -m 0755 \
