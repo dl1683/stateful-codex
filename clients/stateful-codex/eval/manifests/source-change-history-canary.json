@@ -1,5 +1,5 @@
 {
-  "name": "SC-EVAL-025 source-change incremental-growth compaction canary",
+  "name": "SC-EVAL-026 explicit historical-state retrieval canary",
   "model": "gpt-5.6-luna",
   "reasoningEffort": "high",
   "mode": "autonomous",
@@ -16,7 +16,7 @@
     {
       "id": "source-change-canary",
       "selectionRole": "diagnosticCanary",
-      "domain": "policy revision and durable correction",
+      "domain": "policy revision and explicit historical retrieval",
       "isolatedCopies": true,
       "requireStatefulProjectState": true,
       "requireDurableCompletion": true,
@@ -40,15 +40,15 @@
           "id": "revise-v2",
           "prompt": "The project sources may have changed. Re-verify the controlling policy against the raw source, reassess the launch decision, and explicitly repair any durable conclusion that the new evidence supersedes while retaining truthful historical provenance. Cite exact files and lines. Do not edit files.",
           "intervention": {
-            "id": "executed-policy-v2",
+            "id": "executed-policy-v2-history-hidden",
             "expectedBeforeCorpusRevision": "sha256:cc5328f922a26fb9b5e89556604faddf9eefbef25b8813efc68fd98eed1c9155",
-            "expectedAfterCorpusRevision": "sha256:b5e160e014c8e7ae94dd90c93a5ed576bbb49a144ef67a19bb48ecca3c2a6318",
+            "expectedAfterCorpusRevision": "sha256:65a099965f58052906c14d2f6d8a61ae448735b920744a780015bc600c5115cd",
             "files": [
               {
                 "path": "policy.md",
-                "replacement": "../revisions/source-change-canary/policy-v2.md",
+                "replacement": "../revisions/source-change-canary/policy-v2-history-hidden.md",
                 "expectedBeforeSha256": "79647a43c5c02d1c26d56b5ccbac4287f70f7afb62e6697e86941603d65d01ed",
-                "replacementSha256": "6590a1e036e9edc478b0c717c2e21dd2cc1457960a310b8ece33bfbfdc51d60a"
+                "replacementSha256": "62927ad1f8e25747262bade3cba32bbd2b85f1db12c9c2cf00d607f71e36561d"
               }
             ]
           },
@@ -64,6 +64,7 @@
         {
           "id": "reconcile",
           "prompt": "Explain the complete decision history now: what the prior policy established, what changed, which conclusion is current, and how the preserved evidence should distinguish historical support from current support. Use project state first and verify only the exact source regions needed. Do not edit files.",
+          "statefulToolAssertions": {"blackboardEntryScopes": ["historical"]},
           "expectedConcepts": [
             {"name": "historical-current-distinction", "termGroups": [["10"], ["6"], ["historical"], ["current"]]},
             {"name": "current-decision", "termGroups": [["8"], ["not permitted"]]}
