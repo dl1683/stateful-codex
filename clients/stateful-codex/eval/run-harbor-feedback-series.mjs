@@ -15,6 +15,7 @@ const POLL_INTERVAL_MS = 10_000;
 const MAX_FEEDBACK_CHARS = 7_000;
 const MAX_INFRA_RETRIES = 3;
 const INFRA_RETRY_DELAY_MS = 30_000;
+const PROTOCOL = "harbor-feedback-series-v2";
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -112,7 +113,11 @@ async function runValidAttempt({ entry, attempt, resultHistory, options }) {
 
     await waitForJob(jobDir, options.jobTimeoutMs, harborProcess);
     const trial = await readOnlyTrialResult(jobDir);
-    await validateTrialIdentity(trial, entry.task, stateDir);
+    const executionProtocol = await validateTrialIdentity(
+      trial,
+      entry.task,
+      stateDir,
+    );
 
     if (!isPreAgentInfrastructureFailure(trial.result)) {
       await access(path.join(trial.trialDir, "agent", "stateful-state.sha256"));
@@ -125,6 +130,7 @@ async function runValidAttempt({ entry, attempt, resultHistory, options }) {
         );
       }
       return {
+        protocol: executionProtocol,
         jobName,
         resultPath: trial.resultPath,
         reward: trial.result.verifier_result?.rewards?.reward ?? null,
@@ -275,6 +281,12 @@ async function validateTrialIdentity(trial, task, stateDir) {
   if (stateMount?.source !== expectedSource || stateMount.type !== "bind") {
     throw new Error(`state mount mismatch for ${task}`);
   }
+  const instructions = config.extra_instructions ?? [];
+  return instructions.some((instruction) =>
+    instruction.includes("Authoritative outcome history:"),
+  )
+    ? PROTOCOL
+    : "harbor-feedback-series-v1";
 }
 
 function isPreAgentInfrastructureFailure(result) {
@@ -352,7 +364,6 @@ async function recordControllerOutcome(options, task, attempt, outcome) {
   await mkdir(stateDirectory, { recursive: true });
   const statePath = path.join(stateDirectory, `${task}-a${attempt}.json`);
   const state = {
-    protocol: "harbor-feedback-series-v1",
     task,
     attempt,
     ...outcome,
@@ -366,7 +377,7 @@ async function recordControllerOutcome(options, task, attempt, outcome) {
 async function recordRunManifest(options, cohort) {
   const manifestPath = path.join(options.stateRoot, "feedback-series-run.json");
   const expected = {
-    protocol: "harbor-feedback-series-v1",
+    protocol: PROTOCOL,
     dataset: options.dataset,
     model: options.model,
     effort: options.effort,
