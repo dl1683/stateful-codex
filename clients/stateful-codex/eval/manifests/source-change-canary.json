@@ -37,14 +37,14 @@
           "prompt": "The project sources may have changed. Re-verify the controlling policy against the raw source, reassess the launch decision, and explicitly repair any durable conclusion that the new evidence supersedes while retaining truthful historical provenance. Cite exact files and lines. Do not edit files.",
           "intervention": {
             "id": "executed-policy-v2",
-            "expectedBeforeCorpusRevision": "sha256:76b06b36598980d77f68bb13de24cce31acaa67f2fbcb1ec0dfb93ba08e3d51c",
-            "expectedAfterCorpusRevision": "sha256:6512ebca2135a80e68f1bffb304dae700c06aab3c4f5596735fcebdfd9ca4b64",
+            "expectedBeforeCorpusRevision": "sha256:cc5328f922a26fb9b5e89556604faddf9eefbef25b8813efc68fd98eed1c9155",
+            "expectedAfterCorpusRevision": "sha256:b5e160e014c8e7ae94dd90c93a5ed576bbb49a144ef67a19bb48ecca3c2a6318",
             "files": [
               {
                 "path": "policy.md",
                 "replacement": "../revisions/source-change-canary/policy-v2.md",
-                "expectedBeforeSha256": "13ee5c9e737f79323a04cf6cc7fef651c6fa58f6b332605a2e96ee55c514d230",
-                "replacementSha256": "e50d744d872b7f1ea2425dfeaeaca0a0dd794062dc4a590b3e83a493e8b906e1"
+                "expectedBeforeSha256": "79647a43c5c02d1c26d56b5ccbac4287f70f7afb62e6697e86941603d65d01ed",
+                "replacementSha256": "6590a1e036e9edc478b0c717c2e21dd2cc1457960a310b8ece33bfbfdc51d60a"
               }
             ]
           },
