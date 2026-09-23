@@ -2,7 +2,13 @@
 
 FROM rust:1.95-bullseye AS builder
 
-RUN apt-get update \
+RUN printf '%s\n' \
+        'deb https://snapshot.debian.org/archive/debian/20260520T000000Z bullseye main' \
+        'deb https://snapshot.debian.org/archive/debian-security/20260520T000000Z bullseye-security main' \
+        > /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' \
+        > /etc/apt/apt.conf.d/99snapshot \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
