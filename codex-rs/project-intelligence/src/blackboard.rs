@@ -331,6 +331,7 @@ pub struct BlackboardQuery {
     pub project_id: String,
     pub text: Option<String>,
     pub within_node: Option<HierarchyNodeId>,
+    pub root_promotion: Option<RootPromotion>,
     pub max_results: u32,
 }
 
@@ -379,6 +380,7 @@ pub struct RootBlackboardProjection {
     pub revision: u64,
     pub data: Vec<BlackboardHit>,
     pub omitted_entries: u64,
+    pub candidate_entries: u64,
 }
 
 fn validate_content(value: &str) -> Result<(), BlackboardError> {

@@ -273,12 +273,13 @@ async fn root_projection_and_deeper_query_derive_live_evidence_state() {
         )]
     );
     assert_eq!(initial.omitted_entries, 0);
+    assert_eq!(initial.candidate_entries, 0);
 
     let mut deeper_value = created.value.clone();
     deeper_value.node_id = HierarchyNodeId::parse("node-file").expect("valid node ID");
     deeper_value.content = "A hidden deployment constraint affects the strategy.".to_string();
     deeper_value.verification = BlackboardVerification::Unverified;
-    deeper_value.root_promotion = RootPromotion::NotPromoted;
+    deeper_value.root_promotion = RootPromotion::Candidate;
     deeper_value.evidence.clear();
     deeper_value.provenance.source_id = "turn-3".to_string();
     let deeper = blackboard
@@ -294,6 +295,7 @@ async fn root_projection_and_deeper_query_derive_live_evidence_state() {
                 project_id: "project-1".to_string(),
                 text: Some("deployment constraint".to_string()),
                 within_node: Some(HierarchyNodeId::parse("node-file").expect("valid node ID"),),
+                root_promotion: Some(RootPromotion::Candidate),
                 max_results: 10,
             })
             .await
@@ -314,6 +316,7 @@ async fn root_projection_and_deeper_query_derive_live_evidence_state() {
         .await
         .expect("root projection reloads");
     assert_eq!(before_source_change.data, initial.data);
+    assert_eq!(before_source_change.candidate_entries, 1);
     assert!(before_source_change.revision > initial.revision);
 
     hierarchy
@@ -404,6 +407,7 @@ async fn blackboard_relations_are_project_scoped_idempotent_and_queryable() {
             project_id: "project-1".to_string(),
             text: Some("implementation strategy".to_string()),
             within_node: None,
+            root_promotion: None,
             max_results: 10,
         })
         .await

@@ -15,7 +15,14 @@ use crate::storage::load_node;
 use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::load_entry;
+use super::promotion_name;
 use super::relation::load_relations_for_entry;
+
+#[derive(FromRow)]
+struct RootEntryCounts {
+    promoted: i64,
+    candidates: i64,
+}
 
 impl BlackboardStore {
     pub async fn query(
@@ -48,13 +55,16 @@ impl BlackboardStore {
     ) -> Result<RootBlackboardProjection, BlackboardStoreError> {
         query.validate()?;
         let mut connection = self.pool.acquire().await?;
-        let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*)
+        let counts = sqlx::query_as::<_, RootEntryCounts>(
+            "SELECT
+                COALESCE(SUM(CASE WHEN revision.root_promotion = 'promoted' THEN 1 ELSE 0 END), 0)
+                    AS promoted,
+                COALESCE(SUM(CASE WHEN revision.root_promotion = 'candidate' THEN 1 ELSE 0 END), 0)
+                    AS candidates
              FROM blackboard_entries AS entry
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             WHERE entry.project_id = ? AND revision.state = 'active'
-               AND revision.root_promotion = 'promoted'",
+             WHERE entry.project_id = ? AND revision.state = 'active'",
         )
         .bind(&query.project_id)
         .fetch_one(&mut *connection)
@@ -91,9 +101,11 @@ impl BlackboardStore {
             revision: u64::try_from(revision)
                 .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
             data,
-            omitted_entries: u64::try_from(total)
+            omitted_entries: u64::try_from(counts.promoted)
                 .map_err(|_| BlackboardStoreError::CountOverflow)?
                 .saturating_sub(u64::from(query.max_entries)),
+            candidate_entries: u64::try_from(counts.candidates)
+                .map_err(|_| BlackboardStoreError::CountOverflow)?,
         })
     }
 }
@@ -103,6 +115,7 @@ async fn query_entry_ids(
     query: &BlackboardQuery,
     limit: i64,
 ) -> Result<Vec<String>, BlackboardStoreError> {
+    let promotion_filter = query.root_promotion.map(promotion_name);
     match (&query.text, &query.within_node) {
         (Some(text), Some(node_id)) => {
             let expression =
@@ -122,6 +135,7 @@ async fn query_entry_ids(
                  WHERE blackboard_search MATCH ? AND entry.project_id = ?
                    AND entry.node_id IN (SELECT id FROM scoped_nodes)
                    AND revision.state = 'active'
+                   AND (? IS NULL OR revision.root_promotion = ?)
                  ORDER BY bm25(blackboard_search), entry.id LIMIT ?",
             )
             .bind(&query.project_id)
@@ -129,6 +143,8 @@ async fn query_entry_ids(
             .bind(&query.project_id)
             .bind(expression)
             .bind(&query.project_id)
+            .bind(promotion_filter)
+            .bind(promotion_filter)
             .bind(limit)
             .fetch_all(connection)
             .await
@@ -144,10 +160,13 @@ async fn query_entry_ids(
                    ON revision.entry_id = entry.id AND revision.revision = entry.revision
                  WHERE blackboard_search MATCH ? AND entry.project_id = ?
                    AND revision.state = 'active'
+                   AND (? IS NULL OR revision.root_promotion = ?)
                  ORDER BY bm25(blackboard_search), entry.id LIMIT ?",
             )
             .bind(expression)
             .bind(&query.project_id)
+            .bind(promotion_filter)
+            .bind(promotion_filter)
             .bind(limit)
             .fetch_all(connection)
             .await
@@ -166,6 +185,7 @@ async fn query_entry_ids(
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
              WHERE entry.project_id = ? AND entry.node_id IN (SELECT id FROM scoped_nodes)
                AND revision.state = 'active'
+               AND (? IS NULL OR revision.root_promotion = ?)
              ORDER BY CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                  WHEN 'normal' THEN 2 ELSE 3 END, entry.id LIMIT ?",
@@ -174,6 +194,8 @@ async fn query_entry_ids(
         .bind(node_id.as_str())
         .bind(&query.project_id)
         .bind(&query.project_id)
+        .bind(promotion_filter)
+        .bind(promotion_filter)
         .bind(limit)
         .fetch_all(connection)
         .await
@@ -183,11 +205,14 @@ async fn query_entry_ids(
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
              WHERE entry.project_id = ? AND revision.state = 'active'
+               AND (? IS NULL OR revision.root_promotion = ?)
              ORDER BY CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                  WHEN 'normal' THEN 2 ELSE 3 END, entry.id LIMIT ?",
         )
         .bind(&query.project_id)
+        .bind(promotion_filter)
+        .bind(promotion_filter)
         .bind(limit)
         .fetch_all(connection)
         .await

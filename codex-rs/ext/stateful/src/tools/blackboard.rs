@@ -8,6 +8,7 @@ use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::RootPromotion;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -26,6 +27,7 @@ const MAX_LIMIT: u32 = 50;
 struct QueryArguments {
     text: Option<String>,
     within_node_id: Option<String>,
+    root_promotion: Option<RootPromotion>,
     limit: Option<u32>,
 }
 
@@ -62,6 +64,7 @@ impl BlackboardQueryTool {
                 project_id: self.project_id.clone(),
                 text: arguments.text,
                 within_node,
+                root_promotion: arguments.root_promotion,
                 max_results: limit,
             })
             .await
@@ -82,6 +85,7 @@ impl BlackboardQueryTool {
                 "effectiveVerification": hit.effective_verification,
                 "evidenceFreshness": hit.evidence_freshness,
                 "importance": hit.entry.value.importance,
+                "rootPromotion": hit.entry.value.root_promotion,
                 "evidence": hit.entry.value.evidence.into_iter().map(|link| json!({
                     "contextMapEntryId": link.context_map_entry_id.to_string(),
                     "sourceFingerprint": link.source_fingerprint.to_string(),
@@ -129,7 +133,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query accumulated project understanding when the root blackboard lacks needed detail. Prefer a focused text query and the smallest useful limit; omit text only when intentionally enumerating a bounded subtree.".to_string(),
+            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review candidate knowledge deliberately, and omit text only when intentionally enumerating a bounded set.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -137,6 +141,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
                 "properties": {
                     "text": {"type": "string", "description": "Optional literal topic search. Prefer this when looking for specific knowledge."},
                     "withinNodeId": {"type": "string", "description": "Optional hierarchy node whose subtree bounds the query."},
+                    "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"], "description": "Optional lifecycle filter. Use candidate to review pending root-promotion decisions."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Maximum records to return. Use the smallest useful value."}
                 },
                 "additionalProperties": false

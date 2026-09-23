@@ -42,6 +42,7 @@ impl RootBlackboardStatus {
                 hasher.update(b"blackboard-available\0");
                 hasher.update(projection.revision.to_be_bytes());
                 hasher.update(projection.omitted_entries.to_be_bytes());
+                hasher.update(projection.candidate_entries.to_be_bytes());
                 let mut rendered = String::new();
                 render_projection(&mut rendered, root);
                 hash_component(hasher, &rendered);
@@ -102,6 +103,15 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
         append_line(
             output,
             "- No knowledge has been promoted to the root blackboard yet.",
+        );
+    }
+    if projection.candidate_entries > 0 {
+        append_line(
+            output,
+            &format!(
+                "- {} active candidate entries await an explicit project-relevance decision. Query with rootPromotion=candidate, then use blackboard_update_batch to promote, keep deeper, revise, supersede, or retire them; do not infer that candidate means verified.",
+                projection.candidate_entries
+            ),
         );
     }
     if omitted > 0 {

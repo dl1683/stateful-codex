@@ -241,6 +241,7 @@ impl BlackboardRequestProcessor {
                     .map(HierarchyNodeId::parse)
                     .transpose()
                     .map_err(|error| invalid_params(error.to_string()))?,
+                root_promotion: None,
                 max_results: params.limit.unwrap_or(DEFAULT_QUERY_LIMIT),
             })
             .await

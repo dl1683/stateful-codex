@@ -38,6 +38,7 @@ fn available(project: StoredProject) -> ProjectIntelligenceStatus {
                 revision: 0,
                 data: Vec::new(),
                 omitted_entries: 0,
+                candidate_entries: 2,
             },
             evidence_routes: Default::default(),
         })),
@@ -97,6 +98,11 @@ fn renders_selected_project_as_bounded_typed_world_state() {
         rendered
             .body()
             .contains("No knowledge has been promoted to the root blackboard yet")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("2 active candidate entries await an explicit project-relevance decision")
     );
     assert!(
         rendered
