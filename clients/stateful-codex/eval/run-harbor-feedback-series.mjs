@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   access,
+  cp,
   mkdir,
   readFile,
   readdir,
@@ -77,8 +78,15 @@ async function runValidAttempt({ entry, attempt, previousResult, options }) {
     const existingJobResult = await readJsonIfPresent(
       path.join(jobDir, "result.json"),
     );
+    let harborProcess = null;
     if (!existingJobResult) {
-      await launchHarbor({
+      await snapshotAttemptBaseline({
+        stateDir,
+        stateRoot: options.stateRoot,
+        task: entry.task,
+        attempt,
+      });
+      harborProcess = launchHarbor({
         task: entry.task,
         jobName,
         stateDir,
@@ -87,7 +95,7 @@ async function runValidAttempt({ entry, attempt, previousResult, options }) {
       });
     }
 
-    await waitForJob(jobDir, options.jobTimeoutMs);
+    await waitForJob(jobDir, options.jobTimeoutMs, harborProcess);
     const trial = await readOnlyTrialResult(jobDir);
     await validateTrialIdentity(trial, entry.task, stateDir);
 
@@ -120,7 +128,7 @@ async function runValidAttempt({ entry, attempt, previousResult, options }) {
   );
 }
 
-async function launchHarbor({ task, jobName, stateDir, feedback, options }) {
+function launchHarbor({ task, jobName, stateDir, feedback, options }) {
   const mount = JSON.stringify([
     {
       type: "bind",
@@ -183,16 +191,32 @@ async function launchHarbor({ task, jobName, stateDir, feedback, options }) {
   child.on("error", (error) => {
     console.error(`[${task}] failed to launch ${jobName}: ${error.message}`);
   });
+  return child;
 }
 
-async function waitForJob(jobDir, timeoutMs) {
+async function waitForJob(jobDir, timeoutMs, harborProcess) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const result = await readJsonIfPresent(path.join(jobDir, "result.json"));
     if (result?.finished_at) return result;
+    if (harborProcess?.exitCode != null) {
+      throw new Error(
+        `Harbor exited with code ${harborProcess.exitCode} before finishing ${jobDir}`,
+      );
+    }
     await delay(POLL_INTERVAL_MS);
   }
   throw new Error(`timed out waiting for ${jobDir}`);
+}
+
+async function snapshotAttemptBaseline({ stateDir, stateRoot, task, attempt }) {
+  const baselineRoot = path.join(stateRoot, "feedback-series-baselines");
+  const baseline = path.join(baselineRoot, `${task}-a${attempt}`);
+  if (await exists(baseline)) return;
+  await mkdir(baselineRoot, { recursive: true });
+  const temporary = `${baseline}.tmp`;
+  await cp(stateDir, temporary, { recursive: true, errorOnExist: true });
+  await rename(temporary, baseline);
 }
 
 async function readOnlyTrialResult(jobDir) {
