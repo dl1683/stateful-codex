@@ -25,13 +25,48 @@ v8_version="$(
     resolved-v8-crate-version
 )"
 v8_release="https://github.com/openai/codex/releases/download/rusty-v8-v$v8_version"
-v8_dir="$staging/rusty_v8"
+v8_dir="${STATEFUL_CODEX_V8_CACHE_DIR:-$target_dir/rusty_v8}"
 v8_archive="librusty_v8_${v8_profile}_${target}.a.gz"
 v8_binding="src_binding_${v8_profile}_${target}.rs"
 v8_checksums="rusty_v8_${v8_profile}_${target}.sha256"
 trusted_manifests="$repo_root/third_party/v8/rusty_v8_${v8_version//./_}_release_manifests.sha256"
 mkdir -p "$v8_dir"
-curl -fsSL "$v8_release/$v8_checksums" -o "$v8_dir/$v8_checksums"
+curl_options=(
+  --fail
+  --silent
+  --show-error
+  --location
+  --retry 3
+  --retry-all-errors
+  --connect-timeout 15
+  --max-time 300
+)
+
+download_v8_artifact() {
+  local name="$1"
+  local partial="$v8_dir/$name.partial"
+  curl "${curl_options[@]}" "$v8_release/$name" -o "$partial"
+  mv -f "$partial" "$v8_dir/$name"
+}
+
+ensure_v8_artifact() {
+  local name="$1"
+  local expected
+  local actual=""
+  expected="$(grep -F "  $name" "$v8_dir/$v8_checksums" | cut -d ' ' -f 1)"
+  if [[ -z "$expected" ]]; then
+    echo "missing checksum for $name" >&2
+    exit 1
+  fi
+  if [[ -f "$v8_dir/$name" ]]; then
+    actual="$(sha256sum "$v8_dir/$name" | cut -d ' ' -f 1)"
+  fi
+  if [[ "$actual" != "$expected" ]]; then
+    download_v8_artifact "$name"
+  fi
+}
+
+download_v8_artifact "$v8_checksums"
 expected_manifest_checksum="$(
   grep -F "  $v8_checksums" "$trusted_manifests" | cut -d ' ' -f 1
 )"
@@ -41,8 +76,8 @@ if [[ -z "$expected_manifest_checksum" || \
   echo "checksum mismatch for $v8_checksums" >&2
   exit 1
 fi
-curl -fsSL "$v8_release/$v8_archive" -o "$v8_dir/$v8_archive"
-curl -fsSL "$v8_release/$v8_binding" -o "$v8_dir/$v8_binding"
+ensure_v8_artifact "$v8_archive"
+ensure_v8_artifact "$v8_binding"
 (cd "$v8_dir" && tr -d '\r' < "$v8_checksums" | sha256sum --check -)
 
 export RUSTY_V8_ARCHIVE="$v8_dir/$v8_archive"
