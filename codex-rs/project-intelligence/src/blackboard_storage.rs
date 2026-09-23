@@ -455,6 +455,8 @@ pub enum BlackboardStoreError {
     EvidenceFingerprintMismatch,
     #[error("blackboard evidence source is not current")]
     EvidenceNotCurrent,
+    #[error("terminal blackboard revisions must preserve their historical evidence")]
+    HistoricalEvidenceChanged,
     #[error("blackboard evidence position overflow")]
     PositionOverflow,
     #[error("blackboard revision overflow")]

@@ -61,7 +61,19 @@ impl BlackboardStore {
             provenance: update.provenance,
         };
         value.validate()?;
-        validate_evidence(&mut transaction, &value).await?;
+        let preserves_historical_evidence = value.evidence == current.value.evidence
+            && (update.state != BlackboardEntryState::Active
+                || matches!(
+                    value.verification,
+                    crate::BlackboardVerification::Disputed | crate::BlackboardVerification::Stale
+                ));
+        if update.state != BlackboardEntryState::Active && value.evidence != current.value.evidence
+        {
+            return Err(BlackboardStoreError::HistoricalEvidenceChanged);
+        }
+        if !preserves_historical_evidence {
+            validate_evidence(&mut transaction, &value).await?;
+        }
         let now = unix_timestamp_millis()?;
         let rows_affected = sqlx::query(
             "UPDATE blackboard_entries

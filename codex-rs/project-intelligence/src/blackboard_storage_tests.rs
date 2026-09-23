@@ -12,6 +12,7 @@ use crate::BlackboardQueryResult;
 use crate::BlackboardRelationId;
 use crate::BlackboardRelationKind;
 use crate::ContextMapCoverage;
+use crate::ContextMapEntryUpdate;
 use crate::ContextMapStore;
 use crate::EvidenceLineRange;
 use crate::HierarchyNodeId;
@@ -252,6 +253,163 @@ async fn guarded_updates_supersede_entries_without_rewriting_identity() {
             .await,
         Err(BlackboardStoreError::EntryNotActive(id)) if id == created.id.as_str()
     ));
+}
+
+#[tokio::test]
+async fn stale_evidence_can_be_demoted_superseded_and_retired_without_rewriting_history() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (hierarchy, blackboard, created, file_revision) = fixture(&temp_dir).await;
+    let retired_id = BlackboardEntryId::parse("fact-purpose-retired").expect("valid entry ID");
+    let mut retired_value = created.value.clone();
+    retired_value.content = "The old README also defined a retired constraint.".to_string();
+    let retired = blackboard
+        .create_entry(retired_id, retired_value)
+        .await
+        .expect("second historical entry inserts");
+
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let context_map = ContextMapStore::open(&sqlite)
+        .await
+        .expect("context map opens");
+    let map_id = ContextMapEntryId::parse("map-readme").expect("valid map ID");
+    let old_map = context_map
+        .get_entry("project-1", &map_id)
+        .await
+        .expect("context map loads")
+        .expect("context map exists");
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &HierarchyNodeId::parse("node-file").expect("valid node ID"),
+            HierarchySourceUpdate {
+                expected_revision: file_revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:def")),
+            },
+        )
+        .await
+        .expect("source fingerprint changes");
+    context_map
+        .update_entry(
+            "project-1",
+            &map_id,
+            ContextMapEntryUpdate {
+                expected_revision: old_map.revision,
+                source_fingerprint: fingerprint("sha256:def"),
+                description: "Revised project purpose and constraints.".to_string(),
+                routing_terms: vec!["purpose".to_string()],
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("context map refreshes");
+
+    let historical_evidence = created.value.evidence.clone();
+    let demoted = blackboard
+        .update_entry(
+            "project-1",
+            &created.id,
+            BlackboardEntryUpdate {
+                expected_revision: created.revision,
+                kind: created.value.kind,
+                content: created.value.content.clone(),
+                structured_value: created.value.structured_value.clone(),
+                confidence: created.value.confidence,
+                verification: BlackboardVerification::Stale,
+                importance: created.value.importance,
+                root_promotion: RootPromotion::NotPromoted,
+                evidence: historical_evidence.clone(),
+                state: BlackboardEntryState::Active,
+                superseded_by: None,
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Maintenance,
+                    source_id: "source-refresh".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("stale claim demotes without rewriting evidence");
+    assert_eq!(demoted.value.evidence, historical_evidence);
+
+    let successor_id = BlackboardEntryId::parse("fact-purpose-current").expect("valid entry ID");
+    let mut successor_value = created.value.clone();
+    successor_value.content = "The revised README defines the current purpose.".to_string();
+    successor_value.evidence = vec![BlackboardEvidenceLink {
+        context_map_entry_id: map_id,
+        source_fingerprint: fingerprint("sha256:def"),
+        line_range: Some(EvidenceLineRange { start: 3, end: 5 }),
+    }];
+    successor_value.provenance.source_id = "turn-current".to_string();
+    blackboard
+        .create_entry(successor_id.clone(), successor_value)
+        .await
+        .expect("current successor inserts");
+
+    let superseded = blackboard
+        .update_entry(
+            "project-1",
+            &created.id,
+            BlackboardEntryUpdate {
+                expected_revision: demoted.revision,
+                kind: demoted.value.kind,
+                content: demoted.value.content.clone(),
+                structured_value: demoted.value.structured_value.clone(),
+                confidence: demoted.value.confidence,
+                verification: demoted.value.verification,
+                importance: demoted.value.importance,
+                root_promotion: demoted.value.root_promotion,
+                evidence: demoted.value.evidence.clone(),
+                state: BlackboardEntryState::Superseded,
+                superseded_by: Some(successor_id.clone()),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "turn-current".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("stale claim supersedes");
+    assert_eq!(
+        (
+            superseded.state,
+            superseded.superseded_by,
+            superseded.value.evidence
+        ),
+        (
+            BlackboardEntryState::Superseded,
+            Some(successor_id),
+            historical_evidence.clone()
+        )
+    );
+
+    let retired = blackboard
+        .update_entry(
+            "project-1",
+            &retired.id,
+            BlackboardEntryUpdate {
+                expected_revision: retired.revision,
+                kind: retired.value.kind,
+                content: retired.value.content,
+                structured_value: retired.value.structured_value,
+                confidence: retired.value.confidence,
+                verification: retired.value.verification,
+                importance: retired.value.importance,
+                root_promotion: RootPromotion::NotPromoted,
+                evidence: retired.value.evidence,
+                state: BlackboardEntryState::Tombstoned,
+                superseded_by: None,
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Maintenance,
+                    source_id: "source-refresh".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("stale claim retires");
+    assert_eq!(
+        (retired.state, retired.value.evidence),
+        (BlackboardEntryState::Tombstoned, historical_evidence)
+    );
 }
 
 #[tokio::test]
