@@ -27,10 +27,22 @@ v8_profile="ptrcomp_sandbox_release"
 
 mkdir -p "$output_dir" "$staging/package/bin"
 
-v8_version="$(
-  python3 "$repo_root/.github/scripts/rusty_v8_bazel.py" \
-    resolved-v8-crate-version
-)"
+mapfile -t v8_versions < <(
+  awk '
+    $0 == "name = \"v8\"" {
+      getline
+      if ($1 == "version" && $2 == "=") {
+        gsub(/\"/, "", $3)
+        print $3
+      }
+    }
+  ' "$repo_root/codex-rs/Cargo.lock" | sort -u
+)
+if [[ "${#v8_versions[@]}" -ne 1 ]]; then
+  echo "expected exactly one resolved v8 version" >&2
+  exit 1
+fi
+v8_version="${v8_versions[0]}"
 v8_release="https://github.com/openai/codex/releases/download/rusty-v8-v$v8_version"
 v8_dir="${STATEFUL_CODEX_V8_CACHE_DIR:-$target_dir/rusty_v8}"
 v8_archive="librusty_v8_${v8_profile}_${target}.a.gz"
