@@ -25,11 +25,19 @@ async function main() {
   const semaphore = new Semaphore(options.concurrency);
 
   const results = await Promise.allSettled(
-    tasks.map((entry) => runTaskSeries(entry, options, semaphore)),
+    tasks.map(async (entry) => {
+      try {
+        await runTaskSeries(entry, options, semaphore);
+      } catch (error) {
+        console.error(
+          `[${entry.task}] series failed: ${error?.stack ?? error}`,
+        );
+        throw error;
+      }
+    }),
   );
   const failures = results.filter((result) => result.status === "rejected");
   if (failures.length > 0) {
-    for (const failure of failures) console.error(failure.reason);
     throw new Error(`${failures.length} task series failed`);
   }
 }
