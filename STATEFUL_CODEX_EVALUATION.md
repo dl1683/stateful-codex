@@ -2705,3 +2705,66 @@ once during preflight. The canonical run uses a clean checkout of commit
 check rejects global Harbor 0.16.1 and accepts the pinned Harbor 0.23.0 checkout.
 An install-only `fix-git` check through that executable completed in 25 seconds
 with zero exceptions before the scored relaunch.
+
+### Full-run checkpoint and failure ledger
+
+The pinned relaunch was deliberately checkpointed after 19 result records when
+the eight active workers prevented a second Windows process from observing the
+job. Ten records are valid scored trials and must remain in the final result:
+eight rewards of 1.0 (`kv-store-grpc`, `openssl-selfsigned-cert`,
+`log-summary-date-ranges`, `write-compressor`, `torch-tensor-parallelism`,
+`model-extraction-relu-logits`, `regex-log`, and
+`schemelike-metacircular-eval`) and two rewards of 0.0 (`pypi-server` and
+`dna-assembly`). The checkpoint job is retained at
+`%LOCALAPPDATA%/Temp/stateful-harbor-full-20260923/sc-tb21-stateful-full445-pinned-ef3a1ff`.
+
+The two scored failures are product evidence, not infrastructure exclusions:
+
+- `pypi-server` built `vectorops-0.1.0`, served it successfully, and installed
+  it from the requested local index while the agent was active. The model first
+  noticed that a `nohup` server was cleaned up with its shell, then moved the
+  server into a persistent command session. That session still belonged to the
+  agent lifecycle and ended before Harbor invoked the verifier. The verifier's
+  independent `pip install` therefore received connection refusals. The lesson
+  is that self-validation is insufficient when the delivered service must
+  survive agent teardown; the final environment boundary must be tested.
+- `dna-assembly` produced structurally valid primers and matched every required
+  annealing site, but its eGFP pair failed the verifier's melting-temperature
+  calculation. The official values were 67.716453 and 62.305244 degrees C, a
+  5.411209-degree difference against a maximum of 5.0. The 0.411209-degree miss
+  shows that scientific tasks require the exact specified or verifier-equivalent
+  calculation rather than a nearby local approximation.
+
+One checkpoint record, `qemu-alpine-ssh`, is infrastructure-invalid. The agent
+never ran because `apt-get install ca-certificates ripgrep` fetched a stale
+Debian Bullseye security package URL and received HTTP 404. It contributes no
+score and requires a fresh independent replacement. The other eight records
+were cancelled by the checkpoint while their tasks were active and likewise
+contribute no score: `torch-pipeline-parallelism`, `circuit-fibsqrt`,
+`path-tracing`, `pytorch-model-recovery`,
+`llm-inference-batching-scheduler`, `caffe-cifar-10`, `mteb-leaderboard`, and
+`regex-chess`.
+
+The resume work exposed three orchestration mistakes before consuming any valid
+trial slot. First, Harbor 0.23 uses repeatable singular
+`--exclude-task-name`, not the plural spelling. Second, CLI dataset filters
+cannot attach to a dataset supplied only through `--config`; they belong inside
+the dataset object. Third, Harbor matches the fully qualified
+`terminal-bench/<task>` name, so bare names excluded nothing. Dry runs caught
+all three errors. Short seven-, six-, and four-worker launches were then
+cancelled while diagnosing the Windows observer-process conflict. They produced
+only cancellations plus repeated pre-agent `qemu-alpine-ssh` mirror failures,
+no valid verifier result, and no reusable score.
+
+The remaining protocol is split into bounded jobs rather than one opaque
+435-trial process. Task names are sorted deterministically from the pinned
+445-trial lock. Round 1 schedules one attempt for the 79 tasks without a valid
+checkpoint result in batches of 30, 30, and 19. Rounds 2 through 5 each schedule
+one fresh attempt for all 89 tasks in batches of 30, 30, and 29. This yields 15
+jobs and exactly 435 remaining trial slots; together with the ten preserved
+valid checkpoint results, it yields the canonical 445. Each job uses eight-way
+concurrency, fresh containers and isolated Stateful databases, zero automatic
+retries, and an inspection gate before the next job. Valid rewards of either
+0 or 1 are immutable. Only a trial with no agent/verifier result because of an
+infrastructure exception or explicit cancellation is replaced, and every such
+replacement remains documented.
