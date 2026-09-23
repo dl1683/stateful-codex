@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "bixbench-v1.5-bix18-deterministic-smoke",
+  "stateScope": "question",
+  "upstream": {
+    "benchmarkRepository": "FUture-House/BixBench",
+    "benchmarkRevision": "49311180bdacb324c596f2e07596c126f2004008",
+    "environmentRepository": "Future-House/data-analysis-crow",
+    "environmentRevision": "953a6b13c5f8e15354525bca08636f620994f954"
+  },
+  "dataset": {
+    "repository": "futurehouse/BixBench",
+    "revision": "f8cc3bdcc6357c88b8c3648306522b9c422dc95a",
+    "metadataSha256": "0d1204dcdae7193a9132ced5a3502008f6b3b163debc1b65b2aa2d86cb132dc9"
+  },
+  "capsules": {
+    "CapsuleFolder-d59734d2-a3e0-462a-a5fd-c8ddc11392b8.zip": "e4eaba8d25a8071d570c00edd33aab8b8353da1153f4ed27f45cac6048600afa"
+  },
+  "tasks": [
+    "bix-18-q1"
+  ]
+}

@@ -1,0 +1,14 @@
+ARG BIXBENCH_BASE_IMAGE=stateful-bixbench-env:fhda-v1.5.0-amd64
+FROM ${BIXBENCH_BASE_IMAGE}
+
+# The scientific environment is inherited unchanged from FutureHouse's pinned
+# v1.5.0 Dockerfile. These are only the shell utilities the Codex harness uses.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        jq \
+        ripgrep && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
