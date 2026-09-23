@@ -8,6 +8,10 @@ import { pathToFileURL } from "node:url";
 
 import { corpusHash } from "./corpus-hash.mjs";
 import { writeProjectStateArtifact } from "./export-project-state.mjs";
+import {
+  applyScheduledIntervention,
+  validateInterventionSchedule,
+} from "./source-intervention.mjs";
 
 const MEMORY_ISOLATION_ARGS = [
   "-c",
@@ -28,18 +32,42 @@ async function main() {
     await readFile(path.join(options.snapshotRoot, project.id, "snapshot.json"), "utf8"),
   );
   const workspace = snapshot[options.arm];
+  const scheduledInterventions = await validateInterventionSchedule(
+    project.cases,
+    `sha256:${snapshot.corpus.sha256}`,
+    path.dirname(options.manifest),
+  );
+  if (
+    JSON.stringify(scheduledInterventions) !==
+    JSON.stringify(snapshot.interventionSchedule ?? [])
+  ) {
+    throw new Error(`source intervention schedule changed for ${project.id}`);
+  }
   const resultRoot = path.join(options.output, project.id, options.arm);
   await mkdir(resultRoot, { recursive: true });
   const statePath = path.join(resultRoot, "run-state.json");
-  const state = await readState(statePath, project.id, options.arm);
-  const initialHash = await corpusHash(workspace);
-  if (initialHash.sha256 !== snapshot.corpus.sha256) {
+  const initialRevision = `sha256:${snapshot.corpus.sha256}`;
+  const state = await readState(
+    statePath,
+    project.id,
+    options.arm,
+    initialRevision,
+  );
+  const openingHash = await corpusHash(workspace);
+  if (`sha256:${openingHash.sha256}` !== state.corpusRevision) {
     throw new Error(`corpus changed before ${project.id}/${options.arm}`);
   }
   await assertChatGptLogin(options.codex, workspace, options.sqliteHome);
 
   for (let index = state.nextCase; index < project.cases.length; index += 1) {
     const benchmarkCase = project.cases[index];
+    const intervention = await applyScheduledIntervention({
+      workspace,
+      manifestDirectory: path.dirname(options.manifest),
+      intervention: benchmarkCase.intervention,
+      state,
+    });
+    if (intervention.applied) await writeState(statePath, state);
     const unresolved = unresolvedAttemptForCase(state, benchmarkCase.id);
     if (unresolved) {
       throw new Error(
@@ -88,7 +116,7 @@ async function main() {
       throw error;
     }
     const currentHash = await corpusHash(workspace);
-    if (currentHash.sha256 !== snapshot.corpus.sha256) {
+    if (`sha256:${currentHash.sha256}` !== state.corpusRevision) {
       const error = new Error(
         `corpus changed during ${project.id}/${options.arm}/${benchmarkCase.id}`,
       );
@@ -100,7 +128,8 @@ async function main() {
       id: benchmarkCase.id,
       attempt: attempt.number,
       exitCode: output.exitCode,
-      corpusRevision: `sha256:${currentHash.sha256}`,
+      corpusRevision: state.corpusRevision,
+      intervention: intervention.record,
     };
     if (output.exitCode !== 0) {
       const error = new Error(`Codex exited ${output.exitCode}`);
@@ -269,14 +298,25 @@ function authEnvironment(sqliteHome) {
   return environment;
 }
 
-async function readState(statePath, project, arm) {
+async function readState(statePath, project, arm, initialRevision) {
   try {
     const state = JSON.parse(await readFile(statePath, "utf8"));
     state.attempts ??= [];
+    state.appliedInterventions ??= [];
+    state.corpusRevision ??= state.turns.at(-1)?.corpusRevision ?? initialRevision;
     return state;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    return { project, arm, threadId: null, nextCase: 0, turns: [], attempts: [] };
+    return {
+      project,
+      arm,
+      threadId: null,
+      nextCase: 0,
+      corpusRevision: initialRevision,
+      appliedInterventions: [],
+      turns: [],
+      attempts: [],
+    };
   }
 }
 

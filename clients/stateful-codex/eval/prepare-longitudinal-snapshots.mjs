@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { corpusHash } from "./corpus-hash.mjs";
+import { validateInterventionSchedule } from "./source-intervention.mjs";
 
 const DEFAULT_EXCLUDES = new Set([
   ".git",
@@ -46,12 +47,18 @@ async function main() {
     if (baselineHash.sha256 !== statefulHash.sha256) {
       throw new Error(`isolated copies differ for ${project.id}`);
     }
+    const interventionSchedule = await validateInterventionSchedule(
+      project.cases,
+      `sha256:${baselineHash.sha256}`,
+      path.dirname(options.manifest),
+    );
     const record = {
       id: project.id,
       sourceRoot,
       baseline,
       stateful,
       corpus: baselineHash,
+      interventionSchedule,
     };
     prepared.push(record);
     await writeFile(

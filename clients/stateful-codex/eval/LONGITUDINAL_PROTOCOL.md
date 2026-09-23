@@ -51,6 +51,40 @@ Fresh-thread transfer is a separate experiment. It must not replace the
 continuous-thread primary arms because that would avoid the compaction behavior
 the longitudinal test is intended to measure.
 
+## Frozen source interventions
+
+A source change is attached to the case that first observes it. The manifest
+contains the exact predecessor and successor corpus hashes plus the old and new
+hash of every replaced file. Replacement payload paths are resolved relative to
+the manifest. Only existing files may be replaced.
+
+```json
+{
+  "id": "q11",
+  "prompt": "Reassess the earlier conclusion after the amendment.",
+  "intervention": {
+    "id": "executed-amendment-v2",
+    "expectedBeforeCorpusRevision": "sha256:...",
+    "expectedAfterCorpusRevision": "sha256:...",
+    "files": [
+      {
+        "path": "agreement.md",
+        "replacement": "revisions/agreement-v2.md",
+        "expectedBeforeSha256": "...",
+        "replacementSha256": "..."
+      }
+    ]
+  }
+}
+```
+
+Snapshot preparation validates the intervention chain and replacement hashes
+before either arm runs. At the case boundary the runner verifies the live corpus
+and every old file hash, applies the replacement atomically, verifies the full
+successor corpus hash, and persists the intervention before inference. Resume is
+idempotent. Any unplanned change, broken chain, or mismatched payload invalidates
+the arm instead of being normalized away.
+
 ## Rollout-derived measurements
 
 `compare-longitudinal-rollouts.mjs` reads one append-only rollout per arm and
