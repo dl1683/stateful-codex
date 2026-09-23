@@ -302,10 +302,21 @@ async function buildFeedbackHistory(resultPaths) {
   for (let index = 0; index < resultPaths.length; index += 1) {
     feedback.push(await buildFeedback(resultPaths[index], index + 1));
   }
-  return `Authoritative outcome history: ${feedback.join(" ")}`.slice(
-    0,
-    MAX_FEEDBACK_CHARS,
+  const prefix = "Authoritative outcome history: ";
+  const separators = Math.max(0, feedback.length - 1);
+  const itemBudget = Math.floor(
+    (MAX_FEEDBACK_CHARS - prefix.length - separators) / feedback.length,
   );
+  const bounded = feedback.map((item) => boundFeedbackItem(item, itemBudget));
+  return `${prefix}${bounded.join(" ")}`;
+}
+
+function boundFeedbackItem(feedback, maxChars) {
+  if (feedback.length <= maxChars) return feedback;
+  const marker = " [... diagnostic truncated ...] ";
+  const tailChars = Math.min(1_000, Math.floor(maxChars / 2));
+  const headChars = maxChars - marker.length - tailChars;
+  return `${feedback.slice(0, headChars)}${marker}${feedback.slice(-tailChars)}`;
 }
 
 async function buildFeedback(resultPath, attempt) {
