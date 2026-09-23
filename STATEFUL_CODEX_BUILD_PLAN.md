@@ -734,12 +734,29 @@ plus all database integrity checks pass. A credential-scanned allowlisted local
 packet and tracked machine-readable result preserve the evidence without raw
 session or authentication material.
 
-The next external slice is a small Stateful-only multi-task smoke with active
-failure monitoring. A broader run proceeds only after those tasks complete
-without harness, bundle, authentication, verifier, or artifact-capture faults.
-Published Codex 0.144.1 Luna-max performance is a descriptive comparator because
-its released binary differs; no additional ordinary-control run is needed for
-the smoke.
+The Stateful-only multi-task smoke is complete. Four tasks across four exact
+images passed in one attempt each with zero exceptions or retries. All captured
+state manifests matched and all 32 SQLite databases passed integrity checks.
+Two tasks created reusable project intelligence; two completed with obligations
+but no blackboard or context-map entries, so the run validates the external
+harness rather than compounding memory. Non-Git task outputs were not exported
+after container deletion, an explicit evidence limitation for future public
+packets. The tracked record is
+`clients/stateful-codex/eval/results/terminal-bench-2-1-stateful-smoke4-20260923.json`.
+
+The next slice uses the turn-aware longitudinal runner for concurrent isolated
+project-family smokes. Each family retains one workspace, selected project,
+continuous thread, dedicated `CODEX_HOME`, and SQLite home while its questions
+run in order. Every successful turn must pin the same thread, corpus revision,
+state snapshot hash, project-intelligence revision, and completed run revision
+before the next question starts. Independent families may execute concurrently;
+their state directories must never be shared. The broader five-project,
+twenty-question distribution begins only after this inheritance contract passes.
+
+Published Codex 0.144.1 Luna-max performance remains a descriptive aggregate
+comparator because its released binary differs. Its public submission exposes
+75.73% over 445 trials but not task-level results visible to a non-maintainer
+Harbor account. No additional ordinary-control Terminal-Bench run is required.
 
 ### Senior checkpoint review contract
 

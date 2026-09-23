@@ -2625,9 +2625,51 @@ scan found no matches. The machine-readable tracked result is
 `clients/stateful-codex/eval/results/terminal-bench-2-1-fix-git-20260923.json`.
 The packet has not been uploaded or presented as an official leaderboard entry.
 
-The next external step is a small multi-task Stateful-only smoke with proactive
-runtime/error checks, followed by a frozen broader run only if those tasks are
-operationally clean. Its score may be compared descriptively with the published
-Codex 0.144.1 Luna-max result of 75.73% over 445 trials, but build drift prevents
-a causal claim. No additional ordinary-control spend is required for that
-smoke.
+## Benchmark SC-EVAL-028: Terminal-Bench four-task Stateful smoke
+
+Status: passed on 2026-09-23. One Stateful trial each of
+`cobol-modernization`, `vulnerable-secret`, `db-wal-recovery`, and
+`multi-source-data-merger` completed with reward 1.0, yielding 4/4, zero
+exceptions, and zero retries in 19 minutes 59 seconds. The run used the same
+portable bundle, cached Codex login, Luna max configuration, and pinned Harbor
+commit as SC-EVAL-027. All four exact task images passed bundle preflight before
+model inference.
+
+The job consumed 2,068,846 input tokens, of which 1,884,160 were cached,
+48,487 output tokens, and $0.1328048 reported cost. The trials respectively
+used 27, 10, 18, and eight represented model calls. Every verifier assertion
+passed: 3/3 for COBOL modernization, 3/3 for vulnerable-secret, 7/7 for WAL
+recovery, and 3/3 for the multi-source merger.
+
+Artifact validation found no silent runtime failure. Every captured state-file
+hash matched its manifest and all 32 SQLite databases passed
+`PRAGMA integrity_check`. Each run was durably `completed` at revision 2.
+COBOL modernization retained three blackboard entries, five context-map
+entries, eight evidence links, and one relationship. WAL recovery retained two
+blackboard entries, four context-map entries, two evidence links, and one
+relationship. The other two tasks retained semantic obligations and completed
+runs but no reusable project-intelligence entries; their success therefore does
+not demonstrate a memory mechanism.
+
+These non-Git `/app` tasks declared no Harbor artifact paths, so their exported
+`final.patch` files are empty and the deleted containers' final workspace files
+are not independently preserved. The verifier outputs and trajectories prove
+the scored outcomes, but this smoke is not yet a complete public evidence
+packet. The longitudinal runner captures per-turn corpus snapshots and durable
+state and is the correct next vehicle for inherited-state validation.
+
+The public Codex 0.144.1 Luna-max submission reports 75.73% over 445 trials.
+Its GitHub record exposes aggregate metrics and opaque trial IDs, but neither
+the original source job nor the leaderboard-owned clone returned task rows to
+an authenticated non-maintainer Harbor account. Exact public Codex results for
+these four tasks therefore remain unavailable. Comparing this selected 4/4
+directly with the full-suite 75.73% would confound task mix, sample size, and
+build version and is not permitted.
+
+The tracked result is
+`clients/stateful-codex/eval/results/terminal-bench-2-1-stateful-smoke4-20260923.json`.
+The next gate is a small set of concurrent, isolated project-family smokes.
+Questions run sequentially inside each family against one continuous thread,
+workspace, and SQLite home; families may run concurrently. A post-turn state
+artifact and revision chain must prove that each later question inherited the
+earlier state before the broader longitudinal distribution begins.
