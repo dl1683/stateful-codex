@@ -2975,21 +2975,39 @@ The four valid failures are:
   exact-byte correctness failure and a useful example of self-observation not
   being converted into corrective action.
 
-`qemu-alpine-ssh` and `qemu-startup` are not scored zeros. In both trials the
-agent completed, but the official verifier's own setup attempted to install
-`curl` from stale Debian Bullseye security-mirror package URLs. Downloads for
-`libnghttp2-14`, `libcurl4`, and `curl` returned HTTP 404. The verifier then had
-no `curl`, could not install `uv`, had no `/root/.local/bin/env`, and had no
-`uvx`; no substantive task assertion ran. These are verifier-prerequisite
-failures outside the adapter and agent. They remain documented, consume no
-official trial slot, and require fresh independent replacements after the exact
-image can install the verifier prerequisites. The adapter's earlier CA-package
-fix did work: both agents ran, so this is a separate downstream failure.
-An immediate no-model probe of both exact task images reproduced the same three
-package 404s, so launching replacement trials now would knowingly repeat the
-invalid condition. The two-task replacement manifest is retained at
-`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-r1b3-qemu-replacement-2.json`
-and remains gated on that exact probe succeeding without task modification.
+The first `qemu-alpine-ssh` and `qemu-startup` records are not scored zeros. In
+both trials the agent completed, but the official verifier's own setup attempted
+to install `curl` from stale Debian Bullseye security-mirror package URLs.
+Downloads for `libnghttp2-14`, `libcurl4`, and `curl` returned HTTP 404. The
+verifier then had no `curl`, could not install `uv`, had no
+`/root/.local/bin/env`, and had no `uvx`; no substantive task assertion ran.
+These verifier-prerequisite failures remain documented and consume no valid
+trial slot. The adapter's earlier CA-package fix did work: both agents ran, so
+this was a separate downstream failure.
+
+A no-model probe established that both unmodified task images already contained
+commented Debian snapshot sources pinned to 2025-10-20 and that enabling only
+those image-authored sources made the verifier prerequisites installable. The
+replacement job therefore bind-mounted an explicit source list containing those
+same three snapshot repositories read-only at `/etc/apt/sources.list`. It did
+not change either task prompt, image, agent, model, verifier, or answer. Because
+this is an explicit host-side infrastructure repair rather than the untouched
+published environment, the results are labeled **infrastructure-repaired** and
+must not be represented as an untouched official submission.
+
+The pinned replacement job is retained at
+`%LOCALAPPDATA%/Temp/stateful-harbor-full-20260923/sc-tb21-stateful-r1b3-qemu-repaired-2-pinned-ef3a1ff`.
+It used the committed replacement manifest at
+`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-r1b3-qemu-replacement-2.json`,
+ran both official verifiers substantively, and produced one pass and one
+failure. `qemu-startup` completed in 431 seconds and passed the official kernel
+and telnet assertion. `qemu-alpine-ssh` reached the 900-second agent limit; the
+verifier then ran normally but received `Connection reset by peer` from port
+2222 instead of an authenticated Alpine shell. That record is a valid task
+failure despite the accompanying `AgentTimeoutError`, because the requested
+post-agent service was tested and failed. The replacement job used 4,003,335
+input tokens, 3,802,368 cached input tokens, 37,453 output tokens, and
+$0.16118436 of reported cost.
 
 The valid batch mix was six hard and 11 medium tasks. Stateful passed four hard
 and nine medium tasks and failed two of each. Successful tasks had a declared
@@ -3017,9 +3035,19 @@ round-one batch record, including the two invalid qemu attempts, cumulative
 usage is 234,735,940 input tokens, 224,531,840 cached input tokens, 2,213,722
 output tokens, and $9.18792320.
 
-Round 1 is not yet complete. The canonical ledger currently contains 87 valid
-fresh trials over 87 distinct tasks: 69 passes and 18 failures, or 79.31% for
-the incomplete single-attempt breadth screen. The two qemu tasks are pending
-fresh replacements. Neither the 79.31% interim rate nor any 89-task projection
-is the official Terminal-Bench score; the protocol still requires all 445
-fresh trials.
+Round 1 is complete as a single-attempt breadth screen. The canonical ledger
+contains one valid fresh result for every one of the 89 distinct tasks: 70
+passes and 19 failures, or **78.65%**. By declared difficulty, Stateful passed
+3 of 4 easy tasks (75.00%), 45 of 55 medium tasks (81.82%), and 22 of 30 hard
+tasks (73.33%). The result is not easy-task dominated, and seven of the nine
+hard tasks in batch 1, eight of the eleven hard tasks in batch 2, and four of
+the six hard valid tasks in batch 3 passed.
+
+Across the checkpoint, all three breadth batches, both invalid original qemu
+records, and the two infrastructure-repaired replacements, total execution was
+238,739,275 input tokens, 228,334,208 cached input tokens, 2,251,175 output
+tokens, and $9.34910756 of reported cost. Those are execution-accounting totals,
+not an official 445-trial score. The 78.65% breadth rate is directional
+pass-at-one evidence only; Terminal-Bench's published five-attempt protocol
+still requires 445 fresh independent trials and reports both trial accuracy and
+task-level pass-at-five.
