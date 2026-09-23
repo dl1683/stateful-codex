@@ -33,7 +33,11 @@ async function main() {
         ),
       );
     }
-    tasks.push({ task: entry.task, attempts });
+    tasks.push({
+      task: entry.task,
+      trajectory: summarizeTrajectory(attempts),
+      attempts,
+    });
   }
 
   const completed = tasks.flatMap((task) => task.attempts);
@@ -138,6 +142,45 @@ function aggregate(records, attempt) {
       (record) => record.attempt > 1 && record.memoryMutationObserved === false,
     ).length,
     infrastructureRetries: sum(numeric("infrastructureRetries")),
+  };
+}
+
+function summarizeTrajectory(attempts) {
+  const transitions = attempts.slice(1).map((attempt, index) => ({
+    from: attempts[index].reward,
+    to: attempt.reward,
+  }));
+  const costs = attempts.map((attempt) => attempt.costUsd);
+  const coldCostUsd = costs[0] ?? null;
+  const finalCostUsd = costs.at(-1) ?? null;
+  const passingCosts = attempts
+    .filter((attempt) => attempt.reward === 1)
+    .map((attempt) => attempt.costUsd)
+    .filter(Number.isFinite);
+  return {
+    rewards: attempts.map((attempt) => attempt.reward),
+    coldReward: attempts[0]?.reward ?? null,
+    finalReward: attempts.at(-1)?.reward ?? null,
+    warmPasses: attempts.slice(1).filter((attempt) => attempt.reward === 1)
+      .length,
+    warmFailures: attempts.slice(1).filter((attempt) => attempt.reward !== 1)
+      .length,
+    passToFailTransitions: transitions.filter(
+      (transition) => transition.from === 1 && transition.to !== 1,
+    ).length,
+    failToPassTransitions: transitions.filter(
+      (transition) => transition.from !== 1 && transition.to === 1,
+    ).length,
+    coldCostUsd,
+    finalCostUsd,
+    finalToColdCostRatio:
+      Number.isFinite(coldCostUsd) &&
+      coldCostUsd > 0 &&
+      Number.isFinite(finalCostUsd)
+        ? finalCostUsd / coldCostUsd
+        : null,
+    lowestPassingCostUsd:
+      passingCosts.length === 0 ? null : Math.min(...passingCosts),
   };
 }
 
