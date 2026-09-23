@@ -107,7 +107,7 @@ pub(super) async fn resolve_evidence(
 pub(super) fn evidence_schema() -> serde_json::Value {
     json!({
         "type": "array",
-        "description": "Current context-map routes supporting sourceVerified knowledge. Each item must use exactly one route identity: relativePath (plus projectRoot only when paths collide) or contextMapEntryId for an anchored/exact route. Never send both. IDs and fingerprints are resolved and checked by the tool.",
+        "description": "Current context-map routes supporting sourceVerified knowledge. Prefer copying the blackboardEvidence object returned by evidence_read unchanged; it contains the exact route and complete returned line range. Otherwise each item must use exactly one route identity: relativePath (plus projectRoot only when paths collide) or contextMapEntryId for an anchored/exact route. Never send both. IDs and fingerprints are resolved and checked by the tool.",
         "items": {
             "type": "object",
             "properties": {
@@ -116,7 +116,7 @@ pub(super) fn evidence_schema() -> serde_json::Value {
                 "projectRoot": {"type": "string", "description": "Optional only with relativePath when multiple selected roots contain the same path."},
                 "lineRange": {
                     "type": "object",
-                    "description": "Optional exact 1-based inclusive source lines already verified with evidence_read.",
+                    "description": "Exact 1-based inclusive source lines copied from a non-null evidence_read blackboardEvidence result. Omit unless that exact complete range was read.",
                     "properties": {
                         "start": {"type": "integer", "minimum": 1},
                         "end": {"type": "integer", "minimum": 1}

@@ -104,11 +104,25 @@ impl EvidenceReadTool {
                 .map_err(respond)?;
 
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let context_map_entry_id = result.hit.entry.id.to_string();
+        let returned_line_range = match (result.first_line, result.last_line) {
+            (Some(start), Some(end)) if !result.truncated => Some(json!({
+                "start": start,
+                "end": end,
+            })),
+            _ => None,
+        };
+        let blackboard_evidence = returned_line_range.as_ref().map(|line_range| {
+            json!({
+                "contextMapEntryId": context_map_entry_id,
+                "lineRange": line_range,
+            })
+        });
         let mut content = result.content;
         let original_bytes = content.len();
         let mut output = json!({
             "projectId": self.project_id,
-            "contextMapEntryId": result.hit.entry.id.to_string(),
+            "contextMapEntryId": context_map_entry_id,
             "sourceFingerprint": result.hit.entry.value.source_fingerprint.to_string(),
             "source": {
                 "projectRoot": result.hit.source.project_root,
@@ -123,12 +137,14 @@ impl EvidenceReadTool {
             "truncated": result.truncated,
             "maxBytesApplied": max_bytes,
             "maxBytesClamped": requested_max_bytes != max_bytes,
+            "blackboardEvidence": blackboard_evidence,
             "revision": result.hit.entry.revision,
         });
         if !fits_response(&output, byte_budget) {
             output["content"] = json!("");
             output["bytesReturned"] = json!(0);
             output["truncated"] = json!(true);
+            output["blackboardEvidence"] = serde_json::Value::Null;
             if !fits_response(&output, byte_budget) {
                 return Err(FunctionCallError::RespondToModel(
                     "response budget leaves no room for evidence metadata".to_string(),
@@ -163,7 +179,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read a fingerprint-verified exact source or line range through the selected project's context map. When root blackboard evidence already names a source and lines, prefer this focused tool over a context-map search or broad shell read. Request only the smallest line range whose wording can change the answer; changed or stale sources are rejected.".to_string(),
+            description: "Read a fingerprint-verified exact source or line range through the selected project's context map. When root blackboard evidence already names a source and lines, prefer this focused tool over a context-map search or broad shell read. Request only the smallest line range whose wording can change the answer; changed or stale sources are rejected. When blackboardEvidence is non-null, copy that object unchanged into a blackboard record's evidence array so the persisted locator exactly matches the verified text. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
