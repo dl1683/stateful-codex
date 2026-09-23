@@ -1,7 +1,7 @@
 {
   "n_attempts": 5,
   "n_concurrent_trials": 8,
-  "quiet": true,
+  "quiet": false,
   "retry": {
     "max_retries": 0
   },
