@@ -64,6 +64,7 @@
         {
           "id": "reconcile",
           "prompt": "Explain the complete decision history now: what the prior policy established, what changed, which conclusion is current, and how the preserved evidence should distinguish historical support from current support. Use project state first and verify only the exact source regions needed. Do not edit files.",
+          "statefulToolAssertions": {"blackboardEntryScopes": ["historical"]},
           "expectedConcepts": [
             {"name": "historical-current-distinction", "termGroups": [["10"], ["6"], ["historical"], ["current"]]},
             {"name": "current-decision", "termGroups": [["8"], ["not permitted"]]}

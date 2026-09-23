@@ -53,6 +53,12 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
       "text(await tools.obligation_update({next: 'answer'}));",
     ),
     toolOutput("bad-call", "Script failed\nScript error:\ninvalid type"),
+    toolCall(
+      "turn-2",
+      "history-call",
+      "text(await tools.blackboard_query({text: 'threshold', entryScope: 'historical'}));",
+    ),
+    toolOutput("history-call", "Script completed"),
     usageRecord(
       "turn-2",
       "response-2",
@@ -98,6 +104,7 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
   assert.equal(summary.turns[1].compaction.observed, 1);
   assert.equal(summary.turns[1].compaction.canonicalEvents[0].windowNumber, 1);
   assert.equal(summary.turns[1].calls.rejectedToolResults, 1);
+  assert.deepEqual(summary.turns[1].calls.blackboardEntryScopes, ["historical"]);
   assert.equal(summary.turns[1].calls.evidenceReads.length, 2);
   assert.deepEqual(summary.turns[0].calls.evidenceReads, [
     { relativePath: "decision.md", lineStart: 2, lineEnd: 4 },

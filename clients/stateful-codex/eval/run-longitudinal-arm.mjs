@@ -7,12 +7,15 @@ import { finished } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 
 import { corpusHash } from "./corpus-hash.mjs";
+import { readEvents } from "./compare-rollouts.mjs";
 import { writeProjectStateArtifact } from "./export-project-state.mjs";
 import { findRolloutPath } from "./rollout-path.mjs";
 import {
   applyScheduledIntervention,
   validateInterventionSchedule,
 } from "./source-intervention.mjs";
+import { summarizeLongitudinalEvents } from "./summarize-longitudinal-rollout.mjs";
+import { validateRolloutToolAssertions } from "./validate-rollout-tools.mjs";
 import { validateStateEvidenceAssertions } from "./validate-state-evidence.mjs";
 
 const MEMORY_ISOLATION_ARGS = [
@@ -173,6 +176,10 @@ async function main() {
       );
       let stateArtifact;
       try {
+        turnRecord.toolAssertions = validateRolloutToolAssertions({
+          summary: summarizeLongitudinalEvents(await readEvents(state.rolloutPath)),
+          benchmarkCase,
+        });
         stateArtifact = await writeProjectStateArtifact({
           sqliteHome: options.sqliteHome,
           threadId: state.threadId,

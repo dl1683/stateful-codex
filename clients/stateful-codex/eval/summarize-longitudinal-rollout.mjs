@@ -270,12 +270,30 @@ function summarizeCalls(turn) {
     uniqueEvidencePaths,
     repeatedEvidenceReads: evidenceReads.length - uniqueEvidencePaths.length,
     blackboardQueries: namedInvocations(turn.calls, "blackboard_query"),
+    blackboardEntryScopes: extractBlackboardEntryScopes(turn.calls),
     contextMapQueries: namedInvocations(turn.calls, "context_map_query"),
     obligationUpdates: namedInvocations(turn.calls, "obligation_update"),
     runUpdates: namedInvocations(turn.calls, "stateful_run_update"),
     completionAttempts: turn.completionAttempts,
     rejectedToolResults: turn.rejectedToolResults,
   };
+}
+
+function extractBlackboardEntryScopes(calls) {
+  const scopes = [];
+  for (const call of calls) {
+    if (call.name === "blackboard_query") {
+      try {
+        scopes.push(JSON.parse(call.input).entryScope ?? "active");
+      } catch {
+        scopes.push("invalid");
+      }
+    }
+    for (const match of call.input.matchAll(/\bblackboard_query\s*\(\s*\{([\s\S]*?)\}\s*\)/g)) {
+      scopes.push(stringProperty(match[1], "entryScope") ?? "active");
+    }
+  }
+  return scopes;
 }
 
 function namedInvocations(calls, name) {
