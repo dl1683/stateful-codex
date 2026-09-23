@@ -11,6 +11,8 @@ import {
   nextAttemptNumber,
   platformSandboxArgs,
   prepareIsolatedCodexHome,
+  reconcileFailedAttempt,
+  resumeArgs,
   unresolvedAttemptForCase,
 } from "../eval/run-longitudinal-arm.mjs";
 import {
@@ -40,6 +42,26 @@ test("requires reconciliation after a failed or interrupted attempt", () => {
   };
   assert.equal(unresolvedAttemptForCase(state, "q01"), failed);
   assert.equal(unresolvedAttemptForCase(state, "q00"), undefined);
+
+  const reconciled = reconcileFailedAttempt(state, "q01", "fixed harness");
+  assert.equal(reconciled.status, "reconciled");
+  assert.equal(reconciled.reconciliation, "fixed harness");
+  assert.equal(unresolvedAttemptForCase(state, "q01"), undefined);
+  assert.equal(nextAttemptNumber(state, "q01"), 2);
+});
+
+test("resumes a Stateful thread without starting a second Stateful run", () => {
+  const args = resumeArgs({
+    threadId: "thread-1",
+    prompt: "continue",
+    model: "gpt-test",
+    reasoningEffort: "high",
+    compaction: null,
+    arm: "stateful",
+    mode: "autonomous",
+  });
+  assert.equal(args.includes("--stateful"), false);
+  assert.deepEqual(args.slice(-2), ["thread-1", "continue"]);
 });
 
 test("isolates evaluation history while reusing the cached login", async () => {

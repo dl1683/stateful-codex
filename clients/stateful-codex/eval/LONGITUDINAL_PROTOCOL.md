@@ -93,6 +93,11 @@ successor corpus hash, and persists the intervention before inference. Resume is
 idempotent. Any unplanned change, broken chain, or mismatched payload invalidates
 the arm instead of being normalized away.
 
+Failed attempts remain in `run-state.json` and block an automatic retry. After
+the cause is corrected, `--reconcile-failed REASON` records the reconciliation
+on that exact attempt and creates a newly numbered attempt. Stateful resumes do
+not pass `--stateful` again because the existing thread already owns the run.
+
 ## Rollout-derived measurements
 
 `compare-longitudinal-rollouts.mjs` reads one append-only rollout per arm and

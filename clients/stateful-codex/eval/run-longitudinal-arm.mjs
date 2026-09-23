@@ -54,6 +54,14 @@ async function main() {
     options.arm,
     initialRevision,
   );
+  if (options.reconcileFailed) {
+    const benchmarkCase = project.cases[state.nextCase];
+    if (!benchmarkCase) {
+      throw new Error("there is no pending case with a failed attempt to reconcile");
+    }
+    reconcileFailedAttempt(state, benchmarkCase.id, options.reconcileFailed);
+    await writeState(statePath, state);
+  }
   const openingHash = await corpusHash(workspace);
   if (`sha256:${openingHash.sha256}` !== state.corpusRevision) {
     throw new Error(`corpus changed before ${project.id}/${options.arm}`);
@@ -239,7 +247,7 @@ function startArgs(options) {
   return args;
 }
 
-function resumeArgs(options) {
+export function resumeArgs(options) {
   const args = [
     "exec",
     "resume",
@@ -255,7 +263,6 @@ function resumeArgs(options) {
     "-c",
     "sandbox_mode=\"read-only\"",
   ];
-  if (options.arm === "stateful") args.push("--stateful", options.mode);
   args.push(options.threadId, options.prompt);
   return args;
 }
@@ -384,8 +391,24 @@ export function nextAttemptNumber(state, caseId) {
 
 export function unresolvedAttemptForCase(state, caseId) {
   return state.attempts.find(
-    (attempt) => attempt.caseId === caseId && attempt.status !== "completed",
+    (attempt) =>
+      attempt.caseId === caseId &&
+      !["completed", "reconciled"].includes(attempt.status),
   );
+}
+
+export function reconcileFailedAttempt(state, caseId, reason) {
+  const attempt = unresolvedAttemptForCase(state, caseId);
+  if (!attempt) throw new Error(`no unresolved attempt for ${caseId}`);
+  if (attempt.status !== "failed") {
+    throw new Error(
+      `attempt ${attempt.number} for ${caseId} is ${attempt.status}, not failed`,
+    );
+  }
+  attempt.status = "reconciled";
+  attempt.reconciledAtMs = Date.now();
+  attempt.reconciliation = reason;
+  return attempt;
 }
 
 function finishAttempt(attempt, { status, exitCode = null, error = null }) {
@@ -415,6 +438,7 @@ function parseArgs(args) {
     else if (argument === "--sqlite-home") options.sqliteHome = value;
     else if (argument === "--codex-home") options.codexHome = value;
     else if (argument === "--auth-home") options.authHome = value;
+    else if (argument === "--reconcile-failed") options.reconcileFailed = value;
     else throw new Error(`unknown argument: ${argument}`);
   }
   if (
@@ -426,7 +450,7 @@ function parseArgs(args) {
     !options.codex
   ) {
     throw new Error(
-      "usage: --manifest PATH --project ID --arm baseline|stateful --snapshot-root PATH --output PATH --codex PATH [--sqlite-home PATH] [--codex-home PATH] [--auth-home PATH]",
+      "usage: --manifest PATH --project ID --arm baseline|stateful --snapshot-root PATH --output PATH --codex PATH [--sqlite-home PATH] [--codex-home PATH] [--auth-home PATH] [--reconcile-failed REASON]",
     );
   }
   for (const field of ["manifest", "snapshotRoot", "output", "codex"]) {
