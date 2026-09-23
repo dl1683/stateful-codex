@@ -258,7 +258,12 @@ async function observedBlackboardMutation(trialDir) {
   for (const file of files) {
     if (!file.endsWith(".jsonl")) continue;
     const content = await readFile(file, "utf8");
-    if (content.includes("tools.blackboard_update_batch")) return true;
+    if (
+      content.includes("tools.blackboard_record_batch") ||
+      content.includes("tools.blackboard_update_batch")
+    ) {
+      return true;
+    }
   }
   return false;
 }
