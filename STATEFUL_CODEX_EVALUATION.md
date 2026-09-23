@@ -3007,7 +3007,9 @@ verifier then ran normally but received `Connection reset by peer` from port
 failure despite the accompanying `AgentTimeoutError`, because the requested
 post-agent service was tested and failed. The replacement job used 4,003,335
 input tokens, 3,802,368 cached input tokens, 37,453 output tokens, and
-$0.16118436 of reported cost.
+$0.16118436 of reported cost. All 32 files named by the two exported state
+manifests match their recorded SHA-256 values, and all 16 copied SQLite
+databases pass `PRAGMA integrity_check`.
 
 The valid batch mix was six hard and 11 medium tasks. Stateful passed four hard
 and nine medium tasks and failed two of each. Successful tasks had a declared
