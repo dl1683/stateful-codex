@@ -4,6 +4,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::*;
+use crate::BlackboardEntryScope;
 use crate::BlackboardEntryUpdate;
 use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
@@ -224,6 +225,26 @@ async fn guarded_updates_supersede_entries_without_rewriting_identity() {
         .update_entry("project-1", &created.id, update.clone())
         .await
         .expect("entry supersedes");
+    assert_eq!(
+        blackboard
+            .query(BlackboardQuery {
+                project_id: "project-1".to_string(),
+                text: Some("README defines project purpose".to_string()),
+                within_node: None,
+                root_promotion: None,
+                entry_scope: BlackboardEntryScope::Historical,
+                max_results: 10,
+            })
+            .await
+            .expect("historical query succeeds"),
+        BlackboardQueryResult {
+            data: vec![BlackboardHit::new(
+                superseded.clone(),
+                BlackboardEvidenceFreshness::Current,
+            )],
+            truncated: false,
+        }
+    );
     assert_eq!(
         (
             superseded.revision,
@@ -454,6 +475,7 @@ async fn root_projection_and_deeper_query_derive_live_evidence_state() {
                 text: Some("deployment constraint".to_string()),
                 within_node: Some(HierarchyNodeId::parse("node-file").expect("valid node ID"),),
                 root_promotion: Some(RootPromotion::Candidate),
+                entry_scope: BlackboardEntryScope::Active,
                 max_results: 10,
             })
             .await
@@ -566,6 +588,7 @@ async fn blackboard_relations_are_project_scoped_idempotent_and_queryable() {
             text: Some("implementation strategy".to_string()),
             within_node: None,
             root_promotion: None,
+            entry_scope: BlackboardEntryScope::Active,
             max_results: 10,
         })
         .await

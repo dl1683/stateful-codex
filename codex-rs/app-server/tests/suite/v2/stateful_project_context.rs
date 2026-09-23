@@ -47,6 +47,8 @@ use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use sha2::Digest;
+use sha2::Sha256;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -640,6 +642,8 @@ async fn seed_context_map(
     project_id: &str,
     project_root: &std::path::Path,
 ) -> Result<()> {
+    let source = b"# Project\n\nOperator setup and project instructions.\n";
+    std::fs::write(project_root.join("README.md"), source)?;
     let sqlite = SqliteConfig::new_for_testing(codex_home.abs());
     let hierarchy = HierarchyStore::open(&sqlite).await?;
     let project_node_id = HierarchyNodeId::parse(format!("project-node-{project_id}"))?;
@@ -660,7 +664,8 @@ async fn seed_context_map(
             },
         )
         .await?;
-    let source_fingerprint = SourceFingerprint::parse("sha256:readme-v1")?;
+    let source_fingerprint =
+        SourceFingerprint::parse(format!("sha256:{:x}", Sha256::digest(source)))?;
     hierarchy
         .create_node(
             file_node_id.clone(),

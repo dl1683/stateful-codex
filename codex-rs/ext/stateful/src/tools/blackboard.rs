@@ -6,6 +6,7 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_project_intelligence::BlackboardEntryScope;
 use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::RootPromotion;
@@ -28,6 +29,7 @@ struct QueryArguments {
     text: Option<String>,
     within_node_id: Option<String>,
     root_promotion: Option<RootPromotion>,
+    entry_scope: Option<BlackboardEntryScope>,
     limit: Option<u32>,
 }
 
@@ -65,6 +67,9 @@ impl BlackboardQueryTool {
                 text: arguments.text,
                 within_node,
                 root_promotion: arguments.root_promotion,
+                entry_scope: arguments
+                    .entry_scope
+                    .unwrap_or(BlackboardEntryScope::Active),
                 max_results: limit,
             })
             .await
@@ -77,6 +82,8 @@ impl BlackboardQueryTool {
                 "entryId": hit.entry.id.to_string(),
                 "nodeId": hit.entry.value.node_id.to_string(),
                 "revision": hit.entry.revision,
+                "state": hit.entry.state,
+                "supersededBy": hit.entry.superseded_by.map(|id| id.to_string()),
                 "kind": hit.entry.value.kind,
                 "content": hit.entry.value.content,
                 "structuredValue": hit.entry.value.structured_value,
@@ -133,7 +140,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review candidate knowledge deliberately, and omit text only when intentionally enumerating a bounded set.".to_string(),
+            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Active knowledge is the default. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review candidate knowledge deliberately, and omit text only when intentionally enumerating a bounded set.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -142,6 +149,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
                     "text": {"type": "string", "description": "Optional literal topic search. Prefer this when looking for specific knowledge."},
                     "withinNodeId": {"type": "string", "description": "Optional hierarchy node whose subtree bounds the query."},
                     "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"], "description": "Optional lifecycle filter. Use candidate to review pending root-promotion decisions."},
+                    "entryScope": {"type": "string", "enum": ["active", "historical", "all"], "description": "Entry lifecycle scope. Defaults to active; historical returns superseded and tombstoned entries."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Maximum records to return. Use the smallest useful value."}
                 },
                 "additionalProperties": false

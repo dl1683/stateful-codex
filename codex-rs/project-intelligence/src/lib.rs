@@ -13,6 +13,7 @@ mod storage;
 
 pub use blackboard::BlackboardEntry;
 pub use blackboard::BlackboardEntryId;
+pub use blackboard::BlackboardEntryScope;
 pub use blackboard::BlackboardEntryState;
 pub use blackboard::BlackboardEntryUpdate;
 pub use blackboard::BlackboardError;

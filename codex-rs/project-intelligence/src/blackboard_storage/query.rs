@@ -2,6 +2,7 @@ use sqlx::FromRow;
 use sqlx::SqliteConnection;
 
 use crate::BlackboardEntryId;
+use crate::BlackboardEntryScope;
 use crate::BlackboardError;
 use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
@@ -116,6 +117,7 @@ async fn query_entry_ids(
     limit: i64,
 ) -> Result<Vec<String>, BlackboardStoreError> {
     let promotion_filter = query.root_promotion.map(promotion_name);
+    let entry_scope = entry_scope_name(query.entry_scope);
     match (&query.text, &query.within_node) {
         (Some(text), Some(node_id)) => {
             let expression =
@@ -134,7 +136,9 @@ async fn query_entry_ids(
                    ON revision.entry_id = entry.id AND revision.revision = entry.revision
                  WHERE blackboard_search MATCH ? AND entry.project_id = ?
                    AND entry.node_id IN (SELECT id FROM scoped_nodes)
-                   AND revision.state = 'active'
+                   AND CASE ? WHEN 'active' THEN revision.state = 'active'
+                              WHEN 'historical' THEN revision.state <> 'active'
+                              ELSE 1 END
                    AND (? IS NULL OR revision.root_promotion = ?)
                  ORDER BY bm25(blackboard_search), entry.id LIMIT ?",
             )
@@ -143,6 +147,7 @@ async fn query_entry_ids(
             .bind(&query.project_id)
             .bind(expression)
             .bind(&query.project_id)
+            .bind(entry_scope)
             .bind(promotion_filter)
             .bind(promotion_filter)
             .bind(limit)
@@ -159,12 +164,15 @@ async fn query_entry_ids(
                  JOIN blackboard_entry_revisions AS revision
                    ON revision.entry_id = entry.id AND revision.revision = entry.revision
                  WHERE blackboard_search MATCH ? AND entry.project_id = ?
-                   AND revision.state = 'active'
+                   AND CASE ? WHEN 'active' THEN revision.state = 'active'
+                              WHEN 'historical' THEN revision.state <> 'active'
+                              ELSE 1 END
                    AND (? IS NULL OR revision.root_promotion = ?)
                  ORDER BY bm25(blackboard_search), entry.id LIMIT ?",
             )
             .bind(expression)
             .bind(&query.project_id)
+            .bind(entry_scope)
             .bind(promotion_filter)
             .bind(promotion_filter)
             .bind(limit)
@@ -184,7 +192,9 @@ async fn query_entry_ids(
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
              WHERE entry.project_id = ? AND entry.node_id IN (SELECT id FROM scoped_nodes)
-               AND revision.state = 'active'
+               AND CASE ? WHEN 'active' THEN revision.state = 'active'
+                          WHEN 'historical' THEN revision.state <> 'active'
+                          ELSE 1 END
                AND (? IS NULL OR revision.root_promotion = ?)
              ORDER BY CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
@@ -194,6 +204,7 @@ async fn query_entry_ids(
         .bind(node_id.as_str())
         .bind(&query.project_id)
         .bind(&query.project_id)
+        .bind(entry_scope)
         .bind(promotion_filter)
         .bind(promotion_filter)
         .bind(limit)
@@ -204,19 +215,31 @@ async fn query_entry_ids(
             "SELECT entry.id FROM blackboard_entries AS entry
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             WHERE entry.project_id = ? AND revision.state = 'active'
+             WHERE entry.project_id = ?
+               AND CASE ? WHEN 'active' THEN revision.state = 'active'
+                          WHEN 'historical' THEN revision.state <> 'active'
+                          ELSE 1 END
                AND (? IS NULL OR revision.root_promotion = ?)
              ORDER BY CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                  WHEN 'normal' THEN 2 ELSE 3 END, entry.id LIMIT ?",
         )
         .bind(&query.project_id)
+        .bind(entry_scope)
         .bind(promotion_filter)
         .bind(promotion_filter)
         .bind(limit)
         .fetch_all(connection)
         .await
         .map_err(Into::into),
+    }
+}
+
+fn entry_scope_name(scope: BlackboardEntryScope) -> &'static str {
+    match scope {
+        BlackboardEntryScope::Active => "active",
+        BlackboardEntryScope::Historical => "historical",
+        BlackboardEntryScope::All => "all",
     }
 }
 

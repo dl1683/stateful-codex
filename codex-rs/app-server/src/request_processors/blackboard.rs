@@ -10,6 +10,7 @@ use codex_app_server_protocol::BlackboardUpsertResponse;
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardEntryScope;
 use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardEntryUpdate;
 use codex_project_intelligence::BlackboardQuery;
@@ -242,6 +243,7 @@ impl BlackboardRequestProcessor {
                     .transpose()
                     .map_err(|error| invalid_params(error.to_string()))?,
                 root_promotion: None,
+                entry_scope: BlackboardEntryScope::Active,
                 max_results: params.limit.unwrap_or(DEFAULT_QUERY_LIMIT),
             })
             .await

@@ -119,6 +119,14 @@ pub enum BlackboardEntryState {
     Tombstoned,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BlackboardEntryScope {
+    Active,
+    Historical,
+    All,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BlackboardProvenanceKind {
@@ -332,6 +340,7 @@ pub struct BlackboardQuery {
     pub text: Option<String>,
     pub within_node: Option<HierarchyNodeId>,
     pub root_promotion: Option<RootPromotion>,
+    pub entry_scope: BlackboardEntryScope,
     pub max_results: u32,
 }
 
