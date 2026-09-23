@@ -41,6 +41,7 @@ fn available(project: StoredProject) -> ProjectIntelligenceStatus {
                 candidate_entries: 2,
             },
             evidence_routes: Default::default(),
+            evidence_audit: None,
         })),
     }
 }

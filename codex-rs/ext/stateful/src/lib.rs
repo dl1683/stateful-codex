@@ -7,6 +7,7 @@ mod root_blackboard;
 mod run_world_state;
 mod services;
 mod socratic;
+mod source_freshness;
 mod tools;
 mod world_state;
 
@@ -32,6 +33,8 @@ use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
 use crate::run_world_state::run_world_state_section;
 use crate::services::ProjectIntelligenceServices;
+use crate::source_freshness::RootEvidenceAudit;
+use crate::source_freshness::audit_root_evidence;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
@@ -124,7 +127,7 @@ impl ContextContributor for StatefulExtension {
                 .await
             {
                 Ok(Some(project)) => {
-                    let root_blackboard = self.root_blackboard(&project.id).await;
+                    let root_blackboard = self.root_blackboard(&project, input.turn_store).await;
                     ProjectIntelligenceStatus::Available {
                         project: Box::new(project),
                         root_blackboard: Box::new(root_blackboard),
@@ -157,7 +160,12 @@ impl ContextContributor for StatefulExtension {
 }
 
 impl StatefulExtension {
-    async fn root_blackboard(&self, project_id: &str) -> RootBlackboardStatus {
+    async fn root_blackboard(
+        &self,
+        project: &codex_thread_store::StoredProject,
+        turn_store: &ExtensionData,
+    ) -> RootBlackboardStatus {
+        let project_id = &project.id;
         let Some(services) = self.services.as_ref() else {
             return RootBlackboardStatus::NotConfigured;
         };
@@ -183,7 +191,32 @@ impl StatefulExtension {
                         return RootBlackboardStatus::Available(ResolvedRootBlackboard {
                             projection,
                             evidence_routes: Default::default(),
+                            evidence_audit: Some(RootEvidenceAudit {
+                                project_id: project_id.to_string(),
+                                statuses: Default::default(),
+                            }),
                         });
+                    }
+                };
+                let evidence_ids = projection
+                    .data
+                    .iter()
+                    .flat_map(|hit| &hit.entry.value.evidence)
+                    .map(|evidence| evidence.context_map_entry_id.clone())
+                    .collect::<Vec<_>>();
+                let evidence_audit = match turn_store.get::<RootEvidenceAudit>() {
+                    Some(audit) if audit.project_id == *project_id => audit,
+                    _ => {
+                        let roots = project
+                            .roots
+                            .iter()
+                            .map(|root| std::path::PathBuf::from(&root.path))
+                            .collect::<Vec<_>>();
+                        let audit = Arc::new(
+                            audit_root_evidence(services, project_id, &roots, evidence_ids).await,
+                        );
+                        turn_store.insert((*audit).clone());
+                        audit
                     }
                 };
                 let mut evidence_routes = std::collections::HashMap::new();
@@ -214,6 +247,7 @@ impl StatefulExtension {
                 RootBlackboardStatus::Available(ResolvedRootBlackboard {
                     projection,
                     evidence_routes,
+                    evidence_audit: Some((*evidence_audit).clone()),
                 })
             }
             Err(error) => {
@@ -343,3 +377,7 @@ pub fn install<C: Sync>(
     registry.turn_lifecycle_contributor(extension.clone());
     registry.thread_lifecycle_contributor(extension);
 }
+
+#[cfg(test)]
+#[path = "freshness_tests.rs"]
+mod freshness_tests;
