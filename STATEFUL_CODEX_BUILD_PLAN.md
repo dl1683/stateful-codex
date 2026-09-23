@@ -712,6 +712,35 @@ ordinary and Stateful arms will run the same continuous sequence from empty
 state. Fresh-thread project transfer remains a separately labelled experiment,
 and all six breadth outcomes and exclusions remain visible.
 
+### 2026-09-23 Terminal-Bench harness checkpoint
+
+The first version-pinned Harbor technical control is complete on
+Terminal-Bench 2.1 `fix-git`. One ordinary run failed the exact about-file
+verifier after dropping required conflict-resolution content; three Stateful
+replications passed both verifier tests. The first treatment cost 2.24 times the
+control, and the final fully shareable replication cost 3.46 times the control.
+This is directional evidence that the semantic workflow and exact verification
+can prevent a subtle destructive edit, plus negative evidence for small-task
+efficiency. It is one cold-start task and does not establish a memory advantage,
+a stable quality delta, or a leaderboard score.
+
+The adapter now installs one content-addressed portable branch bundle, uses only
+the cached Codex login, changes only the explicit Stateful flag between agents,
+and exports ATIF/native trajectories, verifier results, initial/final Git state,
+committed and uncommitted patches, the isolated SQLite state, and stable hashes.
+The first exporter incorrectly assumed `/app` was the Git root; commit
+`fc620e7dd1` records the actual repository root, and the final 4,914-byte patch
+plus all database integrity checks pass. A credential-scanned allowlisted local
+packet and tracked machine-readable result preserve the evidence without raw
+session or authentication material.
+
+The next external slice is a small Stateful-only multi-task smoke with active
+failure monitoring. A broader run proceeds only after those tasks complete
+without harness, bundle, authentication, verifier, or artifact-capture faults.
+Published Codex 0.144.1 Luna-max performance is a descriptive comparator because
+its released binary differs; no additional ordinary-control run is needed for
+the smoke.
+
 ### Senior checkpoint review contract
 
 Periodic Astra and Sol checkpoints are adversarial implementation reviews in

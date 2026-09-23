@@ -2557,3 +2557,77 @@ schema-valid ATIF trajectories, retain all-attempt token and latency costs, and
 capture the final patch even on failure. A three-to-five-task smoke precedes
 any frozen full run. Official claims require the complete benchmark and its
 canonical limits; pilot results remain engineering diagnostics.
+
+## Benchmark SC-EVAL-027: Terminal-Bench `fix-git` technical control
+
+Status: one ordinary control and three Stateful replications completed on
+2026-09-23. This is a successful harness and evidence-export pilot, not an
+official submission, complete Terminal-Bench score, or statistically meaningful
+quality claim.
+
+Every run used task checksum
+`d3220d70bc668ec6f4034fab51e62873dff724a61f824d764fd201d6f5e7a88a`,
+image `alexgshaw/fix-git:20260403`, `openai/gpt-5.6-luna` at max effort,
+cached Codex login with API-key environment variables removed, Harbor commit
+`15da91c18580a25489f5bdf2ee71029f3ff3bb2e`, and bundle digest
+`a321910f2cae0ccfed8e3b412f4f3ef7a7ec22f62f683444655be6c76c6841ad`.
+The bundle identifies source commit `ef3a1ff83886563df02cc567c9ff1fd9cb580d10`.
+The control received no Stateful flag; the treatment received only
+`--stateful autonomous` in addition to the shared configuration.
+
+Ordinary trial `fix-git__gzoXJJL` found detached commit `c499730`, merged it,
+and passed the layout-file test. Its conflict-resolution edit nevertheless
+removed the required prior-experience paragraph from `_includes/about.md`, so
+the exact-file verifier failed and reward was 0.0. Its eight represented model
+calls used 129,629 input tokens, 114,688 cached input tokens, 4,302 output
+tokens, 117.848 seconds of adapter execution, and $0.01044436 reported cost.
+
+The first matched Stateful trial, `fix-git__UcYWBSM`, preserved the paragraph,
+passed both tests, and received reward 1.0. It used 299,076 input tokens,
+260,096 cached input tokens, 8,633 output tokens, 183.076 seconds, and
+$0.02335752: 2.24 times the control's reported cost. Two artifact-export
+replications also passed, yielding three Stateful passes in three attempts. The
+final shareable trial, `fix-git__kbi3spG`, used 575,883 input tokens, 509,952
+cached input tokens, 10,611 output tokens, 235.632 seconds, and $0.03611844,
+or 3.46 times the preserved control. This task therefore supplies a useful
+correctness signal and a clear small-task overhead warning at the same time.
+
+The trajectories explain more than the scalar reward. Both systems recovered
+the same Git object and encountered the same about-page conflict. Ordinary
+Codex stated that it would preserve the shared paragraph but its patch deleted
+it, then stopped after conflict-marker and whitespace checks. Stateful Codex
+persisted an early semantic obligation to inspect and preserve the candidate,
+refreshed the context map after the merge, opened exact source ranges, recorded
+the verified content and build limitation in project intelligence, and carried
+those facts through its final obligation and result. That extra verification
+correlates with the successful outcome, but this cold-start sample cannot show
+that mature persistent memory caused it.
+
+The final trial exports a 4,914-byte committed patch, initial and final commit
+IDs, schema-valid ATIF and native trajectories, both verifier cases, three
+blackboard entries, two evidence links, two relations, 83 context-map entries,
+two obligations, and the completed run. All original state-file hashes matched
+before inspection, every SQLite database passed `PRAGMA integrity_check`, and
+the portable ten-file state manifest also verifies. The first exporter assumed
+the task repository was `/app` and produced empty patches for the control and
+first treatment; `fc620e7dd1` now records the actual Git top-level. The control
+was deliberately not rerun merely to repair packaging; its transcript and
+verifier evidence remain intact and the limitation is explicit.
+
+The local allowlisted packet excludes login material, raw encrypted session
+files, lock files, and mutable SQLite shared-memory files. It is stored outside
+Git at
+`clients/stateful-codex/eval/artifacts/terminal-bench-2-1-fix-git-20260923-public.tar.gz`
+with SHA-256
+`35f3c218a7bf559583b9583b7b179575c6a65c5b5d206287d5cc914e6142a293`.
+Its 40-file manifest and portable-state manifest pass, and a credential-pattern
+scan found no matches. The machine-readable tracked result is
+`clients/stateful-codex/eval/results/terminal-bench-2-1-fix-git-20260923.json`.
+The packet has not been uploaded or presented as an official leaderboard entry.
+
+The next external step is a small multi-task Stateful-only smoke with proactive
+runtime/error checks, followed by a frozen broader run only if those tasks are
+operationally clean. Its score may be compared descriptively with the published
+Codex 0.144.1 Luna-max result of 75.73% over 445 trials, but build drift prevents
+a causal claim. No additional ordinary-control spend is required for that
+smoke.

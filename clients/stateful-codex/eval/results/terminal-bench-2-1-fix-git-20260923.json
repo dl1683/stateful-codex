@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "status": "technical-control-pilot",
+  "recordedAt": "2026-09-23",
+  "protocol": {
+    "dataset": "terminal-bench/terminal-bench-2-1",
+    "task": "terminal-bench/fix-git",
+    "taskChecksum": "d3220d70bc668ec6f4034fab51e62873dff724a61f824d764fd201d6f5e7a88a",
+    "taskImage": "alexgshaw/fix-git:20260403",
+    "model": "openai/gpt-5.6-luna",
+    "reasoningEffort": "max",
+    "authentication": "cached-codex-login",
+    "apiKeyEnvironmentRemoved": true,
+    "harborCommit": "15da91c18580a25489f5bdf2ee71029f3ff3bb2e",
+    "bundleSha256": "a321910f2cae0ccfed8e3b412f4f3ef7a7ec22f62f683444655be6c76c6841ad",
+    "codexSourceCommit": "ef3a1ff83886563df02cc567c9ff1fd9cb580d10"
+  },
+  "ordinaryControl": {
+    "job": "sc-tb21-fix-git-control-ef3a1ff-compat2",
+    "trial": "fix-git__gzoXJJL",
+    "adapter": "bundled-codex",
+    "statefulMode": null,
+    "reward": 0.0,
+    "verifierTestsPassed": 1,
+    "verifierTestsTotal": 2,
+    "inputTokens": 129629,
+    "cachedInputTokens": 114688,
+    "outputTokens": 4302,
+    "reportedCostUsd": 0.01044436,
+    "adapterDurationSeconds": 117.848073,
+    "atifModelCalls": 8,
+    "outcome": "The layout file passed, but conflict resolution removed required about-page content and the exact-file verifier failed.",
+    "artifactLimitation": "final.patch is empty because the original exporter assumed /app was the Git root; the native and ATIF trajectories plus verifier output are preserved."
+  },
+  "statefulReplications": [
+    {
+      "job": "sc-tb21-fix-git-stateful-ef3a1ff-compat2",
+      "trial": "fix-git__UcYWBSM",
+      "reward": 1.0,
+      "inputTokens": 299076,
+      "cachedInputTokens": 260096,
+      "outputTokens": 8633,
+      "reportedCostUsd": 0.02335752,
+      "adapterDurationSeconds": 183.075717,
+      "atifModelCalls": 13,
+      "artifactExporter": "pre-state-export"
+    },
+    {
+      "job": "sc-tb21-fix-git-stateful-evidence-ef3a1ff",
+      "trial": "fix-git__KZXCN8G",
+      "reward": 1.0,
+      "inputTokens": 635935,
+      "cachedInputTokens": 548864,
+      "outputTokens": 10098,
+      "reportedCostUsd": 0.04050908,
+      "adapterDurationSeconds": 232.193789,
+      "atifModelCalls": 22,
+      "artifactExporter": "state-export-with-incorrect-fixed-git-root"
+    },
+    {
+      "job": "sc-tb21-fix-git-stateful-shareable-ef3a1ff",
+      "trial": "fix-git__kbi3spG",
+      "reward": 1.0,
+      "verifierTestsPassed": 2,
+      "verifierTestsTotal": 2,
+      "inputTokens": 575883,
+      "cachedInputTokens": 509952,
+      "outputTokens": 10611,
+      "reportedCostUsd": 0.03611844,
+      "adapterDurationSeconds": 235.631531,
+      "atifModelCalls": 20,
+      "initialCommit": "d7d3e4ba9350f634d92d39ace2b471433ee57d50",
+      "finalCommit": "99e3e07272a23ed63ff3dc06626420067b822167",
+      "finalPatchBytes": 4914,
+      "blackboardEntries": 3,
+      "blackboardEvidenceLinks": 2,
+      "blackboardRelations": 2,
+      "contextMapEntries": 83,
+      "obligations": 2,
+      "runs": 1,
+      "databaseIntegrity": "ok",
+      "artifactExporter": "portable-shareable"
+    }
+  ],
+  "publicPacket": {
+    "path": "clients/stateful-codex/eval/artifacts/terminal-bench-2-1-fix-git-20260923-public.tar.gz",
+    "bytes": 218651,
+    "sha256": "35f3c218a7bf559583b9583b7b179575c6a65c5b5d206287d5cc914e6142a293",
+    "tracked": false,
+    "uploaded": false,
+    "credentialPatternScan": "no matches",
+    "packetManifestValid": true,
+    "portableStateManifestValid": true
+  },
+  "publishedComparator": {
+    "agent": "Codex 0.144.1",
+    "model": "GPT-5.6 Luna",
+    "reasoningEffort": "max",
+    "trials": 445,
+    "accuracyPercent": 75.73,
+    "standardErrorPercentagePoints": 1.32,
+    "reportedCostUsd": 241.45,
+    "averageDurationSeconds": 457.3,
+    "harborJob": "4860a28f-bc1a-5367-9885-57ff9ccc3a15"
+  },
+  "claimBoundary": [
+    "This is one ordinary control and three Stateful replications of one task, not a complete benchmark.",
+    "All three Stateful runs passed and the single ordinary run failed, which is directional evidence only.",
+    "The task is cold-start and cannot establish a mature-blackboard or cross-turn memory advantage.",
+    "The shareable Stateful run used 3.46 times the reported cost of the preserved ordinary control.",
+    "The public Codex score used a different released Codex build and supports descriptive, not causal, comparison."
+  ]
+}
