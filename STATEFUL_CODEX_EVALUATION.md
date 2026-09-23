@@ -2904,3 +2904,17 @@ the pinned 89-task lock:
 `clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-r1b3-19.json`.
 It retains one attempt, eight independent workers, fresh per-trial state, and
 zero automatic retries.
+
+The pre-batch dry run resolved exactly those 19 trials. A direct setup probe
+then reproduced the earlier `qemu-alpine-ssh` infrastructure failure without a
+model call: the Bullseye image already contained a nonempty CA certificate
+bundle, but Harbor's unconditional `ca-certificates` install tried to upgrade
+it to a security-mirror version whose package URL returned HTTP 404. Installing
+the actually missing `ripgrep` package with the existing CA bundle succeeded.
+The adapter now installs normal command dependencies first and installs
+`ca-certificates` only when `/etc/ssl/certs/ca-certificates.crt` is missing or
+empty. This does not change the task, model, bundle, or Stateful behavior; it
+removes an unnecessary package upgrade that prevented the agent from starting.
+An exact-image Harbor install-only trial then completed in 20 seconds with zero
+exceptions and no model or verifier execution. The scored batch may therefore
+include the task without knowingly repeating the pre-agent failure.

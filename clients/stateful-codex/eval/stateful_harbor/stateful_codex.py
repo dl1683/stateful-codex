@@ -187,8 +187,14 @@ class BundledCodex(Codex):
     async def install(self, environment: BaseEnvironment) -> None:
         await self.ensure_system_dependencies(
             environment,
-            ("bash", "ca_certificates", "coreutils", "ripgrep", "tar"),
+            ("bash", "coreutils", "ripgrep", "tar"),
         )
+        certificate_check = await environment.exec(
+            command="test -s /etc/ssl/certs/ca-certificates.crt",
+            user="root",
+        )
+        if certificate_check.return_code != 0:
+            await self.ensure_system_dependencies(environment, ("ca_certificates",))
         await environment.upload_file(
             self._bundle_path, self._REMOTE_ARCHIVE.as_posix()
         )
