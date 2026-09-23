@@ -1,4 +1,8 @@
 use std::path::Path;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
@@ -24,12 +28,14 @@ use crate::TypedRequestError;
 
 pub const DEFAULT_STATEFUL_MAX_CONTINUATIONS: u32 = 24;
 pub const DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS: u32 = 14_400;
+static NEXT_STATEFUL_RUN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatefulStartup {
     mode: StatefulWorkflowMode,
     project_id: Option<String>,
     goal: String,
+    idempotency_key: String,
 }
 
 impl StatefulStartup {
@@ -46,6 +52,7 @@ impl StatefulStartup {
             mode,
             project_id,
             goal,
+            idempotency_key: new_run_idempotency_key(),
         })
     }
 }
@@ -55,6 +62,7 @@ pub struct PreparedStatefulStartup {
     project_id: String,
     mode: StatefulWorkflowMode,
     goal: String,
+    idempotency_key: String,
 }
 
 pub async fn prepare_stateful_startup(
@@ -74,6 +82,7 @@ pub async fn prepare_stateful_startup(
         project_id,
         mode: startup.mode,
         goal: startup.goal,
+        idempotency_key: startup.idempotency_key,
     })
 }
 
@@ -84,7 +93,10 @@ pub async fn start_stateful_run(
 ) -> Result<(), StatefulStartupError> {
     let _: StatefulRunStartResponse = request_handle
         .request_typed(ClientRequest::StatefulRunStart {
-            request_id: RequestId::String(format!("stateful-run-{thread_id}")),
+            request_id: RequestId::String(format!(
+                "stateful-run-{thread_id}-{}",
+                startup.idempotency_key
+            )),
             params: StatefulRunStartParams {
                 project_id: startup.project_id.clone(),
                 thread_id: thread_id.to_string(),
@@ -94,7 +106,7 @@ pub async fn start_stateful_run(
                     max_continuations: DEFAULT_STATEFUL_MAX_CONTINUATIONS,
                     max_elapsed_seconds: DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS,
                 },
-                idempotency_key: format!("stateful-client-run-v1-{thread_id}"),
+                idempotency_key: startup.idempotency_key.clone(),
             },
         })
         .await
@@ -103,6 +115,18 @@ pub async fn start_stateful_run(
             source,
         })?;
     Ok(())
+}
+
+fn new_run_idempotency_key() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = NEXT_STATEFUL_RUN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "stateful-client-run-v2-{}-{timestamp}-{sequence}",
+        std::process::id()
+    )
 }
 
 async fn resolve_project(

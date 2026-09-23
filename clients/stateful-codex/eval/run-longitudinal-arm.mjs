@@ -263,6 +263,7 @@ export function resumeArgs(options) {
     "-c",
     "sandbox_mode=\"read-only\"",
   ];
+  if (options.arm === "stateful") args.push("--stateful", options.mode);
   args.push(options.threadId, options.prompt);
   return args;
 }

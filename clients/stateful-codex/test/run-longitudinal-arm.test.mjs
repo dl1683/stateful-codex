@@ -50,7 +50,7 @@ test("requires reconciliation after a failed or interrupted attempt", () => {
   assert.equal(nextAttemptNumber(state, "q01"), 2);
 });
 
-test("resumes a Stateful thread without starting a second Stateful run", () => {
+test("starts a new Stateful run when resuming the selected thread", () => {
   const args = resumeArgs({
     threadId: "thread-1",
     prompt: "continue",
@@ -60,8 +60,12 @@ test("resumes a Stateful thread without starting a second Stateful run", () => {
     arm: "stateful",
     mode: "autonomous",
   });
-  assert.equal(args.includes("--stateful"), false);
-  assert.deepEqual(args.slice(-2), ["thread-1", "continue"]);
+  assert.deepEqual(args.slice(-4), [
+    "--stateful",
+    "autonomous",
+    "thread-1",
+    "continue",
+  ]);
 });
 
 test("isolates evaluation history while reusing the cached login", async () => {

@@ -304,9 +304,9 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         worktree,
     } = shared;
 
-    if stateful_mode.is_some() && command.is_some() {
+    if stateful_mode.is_some() && !matches!(command.as_ref(), None | Some(ExecCommand::Resume(_))) {
         anyhow::bail!(
-            "--stateful starts a new run; resume, fork, and review existing sessions without this flag"
+            "--stateful starts a new run and is supported only for a new or resumed thread"
         );
     }
     if stateful_project.is_some() && stateful_mode.is_none() {
@@ -1032,6 +1032,17 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             let session_configured =
                 session_configured_from_thread_resume_response(&response, &config)
                     .map_err(anyhow::Error::msg)?;
+            if let Some(startup) = stateful_startup.clone() {
+                start_stateful_run_for_existing_thread(
+                    &client,
+                    &config,
+                    &thread_source,
+                    startup,
+                    &session_configured.thread_id.to_string(),
+                )
+                .await
+                .map_err(anyhow::Error::msg)?;
+            }
             (session_configured.thread_id, session_configured)
         } else {
             let response = start_thread(
@@ -1401,6 +1412,23 @@ async fn start_thread(
             Err(err) => return Err(format!("thread/start: {err}")),
         }
     }
+}
+
+async fn start_stateful_run_for_existing_thread(
+    client: &InProcessAppServerClient,
+    config: &Config,
+    thread_source: &ThreadSource,
+    startup: StatefulStartup,
+    thread_id: &str,
+) -> Result<(), String> {
+    let request_handle = AppServerRequestHandle::InProcess(client.request_handle());
+    let mut params = thread_start_params_from_config(config, thread_source);
+    let prepared = prepare_stateful_startup(&request_handle, &mut params, startup)
+        .await
+        .map_err(|error| error.to_string())?;
+    start_stateful_run(&request_handle, &prepared, thread_id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 fn stateful_workflow_mode(mode: StatefulModeCliArg) -> StatefulWorkflowMode {

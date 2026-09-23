@@ -95,8 +95,9 @@ the arm instead of being normalized away.
 
 Failed attempts remain in `run-state.json` and block an automatic retry. After
 the cause is corrected, `--reconcile-failed REASON` records the reconciliation
-on that exact attempt and creates a newly numbered attempt. Stateful resumes do
-not pass `--stateful` again because the existing thread already owns the run.
+on that exact attempt and creates a newly numbered attempt. Stateful resumes
+pass the user-selected mode again to start a new run for the new question while
+retaining the selected thread and project intelligence.
 
 ## Rollout-derived measurements
 
