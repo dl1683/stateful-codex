@@ -16,7 +16,9 @@ import {
   reconcileFailedAttempt,
   resumeArgs,
   unresolvedAttemptForCase,
+  validateStateInheritance,
 } from "../eval/run-longitudinal-arm.mjs";
+import { stateArtifactHash } from "../eval/export-project-state.mjs";
 import {
   applyScheduledIntervention,
   validateInterventionSchedule,
@@ -152,6 +154,44 @@ test("preserves and reuses an exact content-addressed corpus artifact", async ()
   }
 });
 
+test("proves a resumed turn inherited the preceding project state", () => {
+  const previous = stateArtifact({ revision: 7 });
+  const current = stateArtifact({
+    revision: 9,
+    runId: "run-2",
+    extraEntry: true,
+  });
+  const result = validateStateInheritance({
+    previous,
+    current,
+    currentTurn: {
+      projectState: { atFirstResponse: { revision: 7 } },
+    },
+    threadId: "thread-1",
+  });
+  assert.equal(result.passed, true);
+  assert.equal(result.priorIntelligenceRevision, 7);
+  assert.equal(result.currentIntelligenceRevision, 9);
+  assert.equal(result.retainedBlackboardEntries, 1);
+});
+
+test("rejects a resumed turn that did not load the preceding revision", () => {
+  const previous = stateArtifact({ revision: 7 });
+  const current = stateArtifact({ revision: 9, runId: "run-2" });
+  assert.throws(
+    () =>
+      validateStateInheritance({
+        previous,
+        current,
+        currentTurn: {
+          projectState: { atFirstResponse: { revision: 0 } },
+        },
+        threadId: "thread-1",
+      }),
+    /did not start from the preceding intelligence revision/,
+  );
+});
+
 test("applies a hash-pinned source intervention once and resumes idempotently", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "stateful-intervention-"));
   const workspace = path.join(root, "workspace");
@@ -234,4 +274,36 @@ test("applies a hash-pinned source intervention once and resumes idempotently", 
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function stateArtifact({ revision, runId = "run-1", extraEntry = false }) {
+  const artifact = {
+    formatVersion: "stateful-project-state-v1",
+    projectId: "project-1",
+    intelligenceRevision: revision,
+    run: {
+      id: runId,
+      threadIds: ["thread-1"],
+    },
+    obligations: [],
+    steering: [],
+    hierarchy: [{ id: "node-1" }],
+    contextMap: [{ id: "route-1" }],
+    blackboard: {
+      entries: [
+        { id: "entry-1" },
+        ...(extraEntry ? [{ id: "entry-2" }] : []),
+      ],
+      revisions: [
+        { entryId: "entry-1", revision: 1 },
+        ...(extraEntry ? [{ entryId: "entry-2", revision: 1 }] : []),
+      ],
+      evidenceLinks: [],
+      relations: [],
+    },
+    counts: {},
+    corpusRevision: "sha256:test",
+    capturedAtMs: 1,
+  };
+  return { ...artifact, snapshotSha256: stateArtifactHash(artifact) };
 }

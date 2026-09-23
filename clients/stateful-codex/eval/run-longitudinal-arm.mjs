@@ -8,7 +8,10 @@ import { pathToFileURL } from "node:url";
 
 import { corpusHash } from "./corpus-hash.mjs";
 import { readEvents } from "./compare-rollouts.mjs";
-import { writeProjectStateArtifact } from "./export-project-state.mjs";
+import {
+  stateArtifactHash,
+  writeProjectStateArtifact,
+} from "./export-project-state.mjs";
 import { findRolloutPath } from "./rollout-path.mjs";
 import {
   applyScheduledIntervention,
@@ -186,8 +189,9 @@ async function main() {
       );
       let stateArtifact;
       try {
+        const summary = summarizeLongitudinalEvents(await readEvents(state.rolloutPath));
         turnRecord.toolAssertions = validateRolloutToolAssertions({
-          summary: summarizeLongitudinalEvents(await readEvents(state.rolloutPath)),
+          summary,
           benchmarkCase,
         });
         stateArtifact = await writeProjectStateArtifact({
@@ -203,6 +207,13 @@ async function main() {
           intelligenceRevision: stateArtifact.intelligenceRevision,
           runRevision: stateArtifact.run.revision,
         };
+        const previousStateArtifact = await readPreviousStateArtifact(state);
+        turnRecord.stateInheritance = validateStateInheritance({
+          previous: previousStateArtifact,
+          current: stateArtifact,
+          currentTurn: summary.turns.at(-1),
+          threadId: state.threadId,
+        });
         turnRecord.stateEvidenceAssertions = await validateStateEvidenceAssertions({
           state: stateArtifact,
           benchmarkCase,
@@ -218,6 +229,92 @@ async function main() {
     state.turns.push(turnRecord);
     state.nextCase = index + 1;
     await writeState(statePath, state);
+  }
+}
+
+async function readPreviousStateArtifact(state) {
+  const previous = state.turns.at(-1)?.stateArtifact;
+  if (!previous) return null;
+  const artifact = JSON.parse(await readFile(previous.path, "utf8"));
+  if (artifact.snapshotSha256 !== previous.snapshotSha256) {
+    throw new Error("previous state artifact identity changed in run-state");
+  }
+  return artifact;
+}
+
+export function validateStateInheritance({
+  previous,
+  current,
+  currentTurn,
+  threadId,
+}) {
+  if (!previous) return { required: false, passed: true };
+  const failures = [];
+  if (previous.snapshotSha256 !== stateArtifactHash(previous)) {
+    failures.push("previous state artifact hash changed");
+  }
+  if (current.snapshotSha256 !== stateArtifactHash(current)) {
+    failures.push("current state artifact hash is invalid");
+  }
+  if (current.projectId !== previous.projectId) {
+    failures.push("project identity changed");
+  }
+  if (current.intelligenceRevision < previous.intelligenceRevision) {
+    failures.push("project intelligence revision regressed");
+  }
+  if (currentTurn?.projectState?.atFirstResponse?.revision !== previous.intelligenceRevision) {
+    failures.push("the next turn did not start from the preceding intelligence revision");
+  }
+  if (!current.run?.threadIds?.includes(threadId)) {
+    failures.push("the completed run is not attached to the continuous thread");
+  }
+  preserveIds(failures, "hierarchy nodes", previous.hierarchy, current.hierarchy);
+  preserveIds(failures, "context-map entries", previous.contextMap, current.contextMap);
+  preserveIds(
+    failures,
+    "blackboard entries",
+    previous.blackboard?.entries,
+    current.blackboard?.entries,
+  );
+  preserveRevisions(
+    failures,
+    previous.blackboard?.revisions,
+    current.blackboard?.revisions,
+  );
+  if (failures.length > 0) {
+    throw new Error(`state inheritance validation failed: ${failures.join("; ")}`);
+  }
+  return {
+    required: true,
+    passed: true,
+    projectId: current.projectId,
+    threadId,
+    priorSnapshotSha256: previous.snapshotSha256,
+    priorIntelligenceRevision: previous.intelligenceRevision,
+    initialVisibleIntelligenceRevision: currentTurn.projectState.atFirstResponse.revision,
+    currentIntelligenceRevision: current.intelligenceRevision,
+    retainedHierarchyNodes: previous.hierarchy.length,
+    retainedContextMapEntries: previous.contextMap.length,
+    retainedBlackboardEntries: previous.blackboard.entries.length,
+    retainedBlackboardRevisions: previous.blackboard.revisions.length,
+  };
+}
+
+function preserveIds(failures, label, previous = [], current = []) {
+  const currentIds = new Set(current.map((record) => record.id));
+  const missing = previous.filter((record) => !currentIds.has(record.id));
+  if (missing.length > 0) failures.push(`${label} lost ${missing.length} prior records`);
+}
+
+function preserveRevisions(failures, previous = [], current = []) {
+  const currentKeys = new Set(
+    current.map((record) => `${record.entryId}:${record.revision}`),
+  );
+  const missing = previous.filter(
+    (record) => !currentKeys.has(`${record.entryId}:${record.revision}`),
+  );
+  if (missing.length > 0) {
+    failures.push(`blackboard history lost ${missing.length} prior revisions`);
   }
 }
 
