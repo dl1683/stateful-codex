@@ -72,7 +72,7 @@ function fixtureState(workspace, fingerprint) {
         {
           entryId: "threshold-entry",
           revision: 1,
-          verification: "sourceVerified",
+          verification: "source_verified",
           content: "The controlling threshold is 10.",
         },
       ],

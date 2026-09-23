@@ -31,7 +31,7 @@ export async function validateStateEvidenceAssertions({
     validateAssertion(assertion, benchmarkCase.id);
     const candidates = revisions.filter(
       (revision) =>
-        revision.verification === "sourceVerified" &&
+        revision.verification === "source_verified" &&
         includesTermGroups(revision.content, assertion.entryTermGroups),
     );
     let matched = null;
