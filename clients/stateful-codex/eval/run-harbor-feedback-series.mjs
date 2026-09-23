@@ -21,6 +21,7 @@ async function main() {
   await validateOptions(options);
 
   const cohort = JSON.parse(await readFile(options.cohort, "utf8"));
+  await recordRunManifest(options, cohort);
   const tasks = await prioritizeStartedTasks(cohort, options);
   const semaphore = new Semaphore(options.concurrency);
 
@@ -360,6 +361,38 @@ async function recordControllerOutcome(options, task, attempt, outcome) {
   const temporary = `${statePath}.tmp`;
   await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   await rename(temporary, statePath);
+}
+
+async function recordRunManifest(options, cohort) {
+  const manifestPath = path.join(options.stateRoot, "feedback-series-run.json");
+  const expected = {
+    protocol: "harbor-feedback-series-v1",
+    dataset: options.dataset,
+    model: options.model,
+    effort: options.effort,
+    attempts: options.attempts,
+    concurrency: options.concurrency,
+    jobPrefix: options.jobPrefix,
+    bundleSha256: options.bundleSha256,
+    authMode: "cachedChatgpt",
+    apiKeyEnvironmentRemoved: true,
+    tasks: cohort.map((entry) => ({
+      task: entry.task,
+      coldTrial: entry.coldTrial,
+      coldReward: entry.coldReward,
+      coldManifestSha256: entry.coldManifestSha256,
+    })),
+  };
+  const existing = await readJsonIfPresent(manifestPath);
+  if (existing) {
+    if (JSON.stringify(existing) !== JSON.stringify(expected)) {
+      throw new Error(`feedback series manifest mismatch: ${manifestPath}`);
+    }
+    return;
+  }
+  const temporary = `${manifestPath}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(expected, null, 2)}\n`, "utf8");
+  await rename(temporary, manifestPath);
 }
 
 async function findColdResult(entry, jobsDir) {
