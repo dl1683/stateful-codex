@@ -45,6 +45,13 @@ locations without changing the authentication mode.
 On Windows the runner explicitly selects the unelevated sandbox so an isolated
 home retains read-only command execution without inheriting user configuration.
 
+Compaction configuration includes both its token limit and accounting scope.
+The original source-change canary retains `total` scope as an extreme fixed-
+prefix stress test. Separately labelled `body_after_prefix` diagnostics compare
+equal incremental context growth without counting each arm's initial fixed
+prefix against the same small limit. Production-default economics are reported
+separately; results from these regimes are never substituted for one another.
+
 Question order is frozen before either arm is run. The sequence includes:
 
 - early corpus-learning questions;

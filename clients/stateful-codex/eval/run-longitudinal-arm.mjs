@@ -281,7 +281,7 @@ export function resumeArgs(options) {
   return args;
 }
 
-function compactionArgs(compaction) {
+export function compactionArgs(compaction) {
   if (!compaction) return [];
   if (
     !Number.isSafeInteger(compaction.autoCompactTokenLimit) ||
@@ -289,9 +289,15 @@ function compactionArgs(compaction) {
   ) {
     throw new Error("compaction.autoCompactTokenLimit must be an integer of at least 1000");
   }
+  const scope = compaction.scope ?? "total";
+  if (!["total", "body_after_prefix"].includes(scope)) {
+    throw new Error("compaction.scope must be total or body_after_prefix");
+  }
   return [
     "-c",
     `model_auto_compact_token_limit=${compaction.autoCompactTokenLimit}`,
+    "-c",
+    `model_auto_compact_token_limit_scope="${scope}"`,
   ];
 }
 

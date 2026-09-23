@@ -8,6 +8,7 @@ import test from "node:test";
 import { corpusHash } from "../eval/corpus-hash.mjs";
 import {
   authEnvironment,
+  compactionArgs,
   nextAttemptNumber,
   platformSandboxArgs,
   prepareIsolatedCodexHome,
@@ -66,6 +67,30 @@ test("starts a new Stateful run when resuming the selected thread", () => {
     "thread-1",
     "continue",
   ]);
+});
+
+test("freezes total or body-after-prefix compaction scope explicitly", () => {
+  assert.deepEqual(
+    compactionArgs({ autoCompactTokenLimit: 20_000 }),
+    [
+      "-c",
+      "model_auto_compact_token_limit=20000",
+      "-c",
+      'model_auto_compact_token_limit_scope="total"',
+    ],
+  );
+  assert.deepEqual(
+    compactionArgs({
+      autoCompactTokenLimit: 20_000,
+      scope: "body_after_prefix",
+    }),
+    [
+      "-c",
+      "model_auto_compact_token_limit=20000",
+      "-c",
+      'model_auto_compact_token_limit_scope="body_after_prefix"',
+    ],
+  );
 });
 
 test("isolates evaluation history while reusing the cached login", async () => {

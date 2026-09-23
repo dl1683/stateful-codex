@@ -1,0 +1,78 @@
+{
+  "name": "SC-EVAL-025 source-change incremental-growth compaction canary",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "high",
+  "mode": "autonomous",
+  "memoryPolicy": "disabled",
+  "compaction": {
+    "autoCompactTokenLimit": 20000,
+    "scope": "body_after_prefix"
+  },
+  "requiredObservations": {
+    "baseline": ["quality", "sourceAudit"],
+    "stateful": ["quality", "sourceAudit", "state"]
+  },
+  "projects": [
+    {
+      "id": "source-change-canary",
+      "selectionRole": "diagnosticCanary",
+      "domain": "policy revision and durable correction",
+      "isolatedCopies": true,
+      "requireStatefulProjectState": true,
+      "requireDurableCompletion": true,
+      "source": {
+        "project": "source-change-canary",
+        "roots": ["."]
+      },
+      "cases": [
+        {
+          "id": "learn-v1",
+          "prompt": "Using only this selected project, determine whether launch is currently permitted. Identify the controlling source, calculate the answer from the measured value, preserve the consequential conclusion and exact evidence for later work, and cite exact files and lines. Do not edit files.",
+          "expectedConcepts": [
+            {"name": "v1-threshold", "termGroups": [["10"], ["8"], ["permitted"]]}
+          ],
+          "forbiddenPhrases": ["6 or fewer"]
+        },
+        {
+          "id": "revise-v2",
+          "prompt": "The project sources may have changed. Re-verify the controlling policy against the raw source, reassess the launch decision, and explicitly repair any durable conclusion that the new evidence supersedes while retaining truthful historical provenance. Cite exact files and lines. Do not edit files.",
+          "intervention": {
+            "id": "executed-policy-v2",
+            "expectedBeforeCorpusRevision": "sha256:cc5328f922a26fb9b5e89556604faddf9eefbef25b8813efc68fd98eed1c9155",
+            "expectedAfterCorpusRevision": "sha256:b5e160e014c8e7ae94dd90c93a5ed576bbb49a144ef67a19bb48ecca3c2a6318",
+            "files": [
+              {
+                "path": "policy.md",
+                "replacement": "../revisions/source-change-canary/policy-v2.md",
+                "expectedBeforeSha256": "79647a43c5c02d1c26d56b5ccbac4287f70f7afb62e6697e86941603d65d01ed",
+                "replacementSha256": "6590a1e036e9edc478b0c717c2e21dd2cc1457960a310b8ece33bfbfdc51d60a"
+              }
+            ]
+          },
+          "expectedConcepts": [
+            {"name": "v2-threshold", "termGroups": [["6"], ["8"], ["not permitted"]]},
+            {"name": "supersession", "termGroups": [["replaces", "supersedes", "superseded"]]}
+          ],
+          "forbiddenPhrases": ["launch is permitted"]
+        },
+        {
+          "id": "reconcile",
+          "prompt": "Explain the complete decision history now: what the prior policy established, what changed, which conclusion is current, and how the preserved evidence should distinguish historical support from current support. Use project state first and verify only the exact source regions needed. Do not edit files.",
+          "expectedConcepts": [
+            {"name": "historical-current-distinction", "termGroups": [["10"], ["6"], ["historical"], ["current"]]},
+            {"name": "current-decision", "termGroups": [["8"], ["not permitted"]]}
+          ],
+          "forbiddenPhrases": []
+        },
+        {
+          "id": "post-compaction-recall",
+          "prompt": "Without broadly rereading the project, state the current launch decision, the exact controlling threshold and measured count, and the superseded threshold. Verify the controlling lines if needed and cite them. Do not edit files.",
+          "expectedConcepts": [
+            {"name": "post-compaction-current", "termGroups": [["6"], ["8"], ["not permitted"], ["10"]]}
+          ],
+          "forbiddenPhrases": ["launch is permitted"]
+        }
+      ]
+    }
+  ]
+}
