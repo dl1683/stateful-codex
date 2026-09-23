@@ -25,6 +25,7 @@ RUN printf '%s\n' \
 
 WORKDIR /src
 COPY . .
+RUN find . -type f -name '*.sh' -exec sed -i 's/\r$//' {} +
 
 ARG SOURCE_COMMIT
 RUN --mount=type=cache,target=/usr/local/cargo/git \
