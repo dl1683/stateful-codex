@@ -26,6 +26,10 @@ export function armForLabel(projectId, seed, label) {
 
 export function redactArmPaths(value, snapshotRoot, projectId) {
   let redacted = value;
+  redacted = redacted.replace(
+    /[A-Za-z]:[\\/][^<>"\r\n]*?[\\/](?:baseline|stateful)(?=[\\/])/gi,
+    "PROJECT_ROOT",
+  );
   const snapshotPattern = escapeRegExp(snapshotRoot).replaceAll("\\\\", "[\\\\/]");
   redacted = redacted.replace(
     new RegExp(`${snapshotPattern}[\\\\/][^\\\\/]+[\\\\/](?:baseline|stateful)`, "gi"),
@@ -37,6 +41,17 @@ export function redactArmPaths(value, snapshotRoot, projectId) {
     for (const variant of variants) redacted = redacted.replaceAll(variant, "PROJECT_ROOT");
   }
   return redacted;
+}
+
+export function gradingOutputsOverlap(publicOutput, privateOutput) {
+  const publicPath = path.resolve(publicOutput);
+  const privatePath = path.resolve(privateOutput);
+  return containsPath(publicPath, privatePath) || containsPath(privatePath, publicPath);
+}
+
+function containsPath(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function escapeRegExp(value) {
@@ -52,7 +67,13 @@ async function main() {
     seed: options.seed,
     projects: {},
   };
+  if (gradingOutputsOverlap(options.output, options.mappingOutput)) {
+    throw new Error(
+      "public grading packets and the private arm mapping must use disjoint directories",
+    );
+  }
   await mkdir(options.output, { recursive: true });
+  await mkdir(options.mappingOutput, { recursive: true });
 
   for (const project of manifest.projects) {
     const arms = {};
@@ -73,9 +94,9 @@ async function main() {
       ["A", "B"].map((label) => [label, armForLabel(project.id, options.seed, label)]),
     );
     const benchmarkCase = project.cases[0];
-    const statefulTurn = arms.stateful.summary.turns[0];
     const packet = {
       rubricVersion: RUBRIC_VERSION,
+      artifact: "visibleAnswers",
       project: {
         id: project.id,
         domain: project.domain,
@@ -106,19 +127,11 @@ async function main() {
           ),
         ]),
       ),
-      durableState: {
-        label: "S",
-        instructions:
-          "Score this persistent record independently for semantic fidelity, evidence traceability, compression value, uncertainty preservation, and future usability. It is not a third visible answer.",
-        value: redactArmPaths(
-          statefulTurn.durableCompletion?.submittedResult ?? "",
-          options.snapshotRoot,
-          project.id,
-        ),
-      },
     };
+    const serializedPacket = `${JSON.stringify(packet, null, 2)}\n`;
     mapping.projects[project.id] = {
       labels,
+      packetSha256: createHash("sha256").update(serializedPacket).digest("hex"),
       rollouts: {
         baseline: arms.baseline.rolloutPath,
         stateful: arms.stateful.rolloutPath,
@@ -126,12 +139,12 @@ async function main() {
     };
     await writeFile(
       path.join(options.output, `${project.id}.packet.json`),
-      `${JSON.stringify(packet, null, 2)}\n`,
+      serializedPacket,
     );
   }
 
   await writeFile(
-    path.join(options.output, "grading-map.json"),
+    path.join(options.mappingOutput, "grading-map.json"),
     `${JSON.stringify(mapping, null, 2)}\n`,
   );
 }
@@ -145,6 +158,7 @@ function parseArgs(args) {
     else if (argument === "--snapshot-root") options.snapshotRoot = value;
     else if (argument === "--sessions-root") options.sessionsRoot = value;
     else if (argument === "--output") options.output = value;
+    else if (argument === "--mapping-output") options.mappingOutput = value;
     else if (argument === "--seed") options.seed = value;
     else throw new Error(`unknown argument: ${argument}`);
   }
@@ -154,11 +168,12 @@ function parseArgs(args) {
     "snapshotRoot",
     "sessionsRoot",
     "output",
+    "mappingOutput",
     "seed",
   ];
   if (required.some((field) => !options[field])) {
     throw new Error(
-      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --sessions-root PATH --output PATH --seed VALUE",
+      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --sessions-root PATH --output PATH --mapping-output PATH --seed VALUE",
     );
   }
   for (const field of required.filter((field) => field !== "seed")) {

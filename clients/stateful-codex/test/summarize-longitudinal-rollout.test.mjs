@@ -28,7 +28,7 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
     toolCall(
       "turn-1",
       "read-1",
-      "text(await tools.evidence_read({relativePath: 'decision.md', lineStart: 2, lineEnd: 4}));",
+      "text(await tools.evidence_read({relativePath: 'decision.md', lineRange: {start: 2, end: 4}}));",
     ),
     toolOutput("read-1", "Script completed"),
     usageRecord("turn-1", "response-1", firstUsage, firstUsage, firstUsage),
@@ -99,6 +99,9 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
   assert.equal(summary.turns[1].compaction.canonicalEvents[0].windowNumber, 1);
   assert.equal(summary.turns[1].calls.rejectedToolResults, 1);
   assert.equal(summary.turns[1].calls.evidenceReads.length, 2);
+  assert.deepEqual(summary.turns[0].calls.evidenceReads, [
+    { relativePath: "decision.md", lineStart: 2, lineEnd: 4 },
+  ]);
   assert.equal(summary.turns[1].calls.repeatedEvidenceReads, 1);
   assert.equal(summary.turns[1].projectState.atFirstResponse.revision, 7);
   assert.equal(summary.turns[1].projectState.atFirstResponse.rootEntries, 1);

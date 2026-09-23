@@ -293,8 +293,8 @@ function extractEvidenceReads(call) {
       const input = JSON.parse(call.input);
       return [{
         relativePath: input.relativePath ?? null,
-        lineStart: input.lineStart ?? null,
-        lineEnd: input.lineEnd ?? null,
+        lineStart: input.lineRange?.start ?? input.lineStart ?? null,
+        lineEnd: input.lineRange?.end ?? input.lineEnd ?? null,
       }];
     } catch {
       return [];
@@ -306,8 +306,12 @@ function extractEvidenceReads(call) {
     if (relativePath) {
       reads.push({
         relativePath,
-        lineStart: numberProperty(match[1], "lineStart"),
-        lineEnd: numberProperty(match[1], "lineEnd"),
+        lineStart:
+          nestedNumberProperty(match[1], "lineRange", "start") ??
+          numberProperty(match[1], "lineStart"),
+        lineEnd:
+          nestedNumberProperty(match[1], "lineRange", "end") ??
+          numberProperty(match[1], "lineEnd"),
       });
     }
   }
@@ -320,6 +324,13 @@ function stringProperty(source, property) {
 
 function numberProperty(source, property) {
   const match = new RegExp(`\\b${property}\\s*:\\s*(\\d+)`).exec(source);
+  return match ? Number(match[1]) : null;
+}
+
+function nestedNumberProperty(source, object, property) {
+  const match = new RegExp(
+    `\\b${object}\\s*:\\s*\\{[\\s\\S]*?\\b${property}\\s*:\\s*(\\d+)`,
+  ).exec(source);
   return match ? Number(match[1]) : null;
 }
 
