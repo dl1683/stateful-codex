@@ -101,6 +101,7 @@ async function main() {
         mode: manifest.mode ?? "autonomous",
         model: manifest.model,
         reasoningEffort: manifest.reasoningEffort ?? "high",
+        compaction: manifest.compaction ?? null,
       });
     } catch (error) {
       finishAttempt(attempt, { status: "failed", error });
@@ -219,6 +220,7 @@ function startArgs(options) {
     options.model,
     "-c",
     `model_reasoning_effort=\"${options.reasoningEffort}\"`,
+    ...compactionArgs(options.compaction),
     ...MEMORY_ISOLATION_ARGS,
     "--sandbox",
     "read-only",
@@ -240,6 +242,7 @@ function resumeArgs(options) {
     options.model,
     "-c",
     `model_reasoning_effort=\"${options.reasoningEffort}\"`,
+    ...compactionArgs(options.compaction),
     ...MEMORY_ISOLATION_ARGS,
     "-c",
     "sandbox_mode=\"read-only\"",
@@ -247,6 +250,20 @@ function resumeArgs(options) {
   if (options.arm === "stateful") args.push("--stateful", options.mode);
   args.push(options.threadId, options.prompt);
   return args;
+}
+
+function compactionArgs(compaction) {
+  if (!compaction) return [];
+  if (
+    !Number.isSafeInteger(compaction.autoCompactTokenLimit) ||
+    compaction.autoCompactTokenLimit < 1_000
+  ) {
+    throw new Error("compaction.autoCompactTokenLimit must be an integer of at least 1000");
+  }
+  return [
+    "-c",
+    `model_auto_compact_token_limit=${compaction.autoCompactTokenLimit}`,
+  ];
 }
 
 function extractThreadId(output) {
