@@ -14,6 +14,7 @@ import { pathToFileURL } from "node:url";
 const POLL_INTERVAL_MS = 10_000;
 const MAX_FEEDBACK_CHARS = 7_000;
 const MAX_INFRA_RETRIES = 3;
+const INFRA_RETRY_DELAY_MS = 30_000;
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -124,9 +125,18 @@ async function runValidAttempt({ entry, attempt, previousResult, options }) {
       };
     }
 
+    if (infraRetry === MAX_INFRA_RETRIES) break;
+    const detail = [
+      trial.result.exception_info?.exception_type,
+      trial.result.exception_info?.exception_message,
+    ]
+      .filter(Boolean)
+      .join(": ")
+      .slice(-1_000);
     console.error(
-      `[${entry.task}/attempt-${attempt}] pre-agent infrastructure failure; retry ${infraRetry + 1}/${MAX_INFRA_RETRIES}`,
+      `[${entry.task}/attempt-${attempt}] pre-agent infrastructure failure; retry ${infraRetry + 1}/${MAX_INFRA_RETRIES} after ${INFRA_RETRY_DELAY_MS / 1_000}s${detail ? `: ${detail}` : ""}`,
     );
+    await delay(INFRA_RETRY_DELAY_MS);
   }
 
   throw new Error(
