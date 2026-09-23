@@ -744,14 +744,14 @@ after container deletion, an explicit evidence limitation for future public
 packets. The tracked record is
 `clients/stateful-codex/eval/results/terminal-bench-2-1-stateful-smoke4-20260923.json`.
 
-The next slice uses the turn-aware longitudinal runner for concurrent isolated
-project-family smokes. Each family retains one workspace, selected project,
-continuous thread, dedicated `CODEX_HOME`, and SQLite home while its questions
-run in order. Every successful turn must pin the same thread, corpus revision,
-state snapshot hash, project-intelligence revision, and completed run revision
-before the next question starts. Independent families may execute concurrently;
-their state directories must never be shared. The broader five-project,
-twenty-question distribution begins only after this inheritance contract passes.
+The proposed SC-EVAL-029 project-family smoke was retired before producing a
+result. It was a product-specific longitudinal experiment, not a
+Terminal-Bench task structure, and must not be described as Terminal-Bench
+evidence. The external benchmark now follows Terminal-Bench 2.1 exactly: 89
+official tasks with five fresh independent trials each. Every trial receives a
+new task container and isolated Stateful database, and concurrency is used only
+to schedule independent trials. Product-specific compounding evaluation remains
+separate from Terminal-Bench and is not a prerequisite for this full run.
 
 Published Codex 0.144.1 Luna-max performance remains a descriptive aggregate
 comparator because its released binary differs. Its public submission exposes

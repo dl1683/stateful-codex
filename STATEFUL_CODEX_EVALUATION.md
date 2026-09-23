@@ -2668,8 +2668,23 @@ build version and is not permitted.
 
 The tracked result is
 `clients/stateful-codex/eval/results/terminal-bench-2-1-stateful-smoke4-20260923.json`.
-The next gate is a small set of concurrent, isolated project-family smokes.
-Questions run sequentially inside each family against one continuous thread,
-workspace, and SQLite home; families may run concurrently. A post-turn state
-artifact and revision chain must prove that each later question inherited the
-earlier state before the broader longitudinal distribution begins.
+
+SC-EVAL-029, the proposed product-specific concurrent project-family smoke, was
+retired before it produced a result. One procurement turn completed correctly
+but hit an over-narrow state-evidence assertion; one source-change turn
+completed before the orchestration process interrupted its second turn; and
+the first licensing turn was interrupted. Those partial records remain outside
+Git as negative harness evidence and are not repaired, scored, or described as
+Terminal-Bench. Terminal-Bench 2.1 defines 89 independent tasks rather than
+cross-task longitudinal families, so no relationship between its tasks will be
+inferred for evaluation.
+
+The next external gate follows the canonical Terminal-Bench 2.1 protocol: all
+89 official tasks, five fresh independent trials per task, 445 trials total.
+Every trial receives a new task container and isolated Stateful database; no
+project intelligence crosses trial boundaries. Trials may execute concurrently
+because concurrency changes scheduling rather than task semantics. The pinned
+job configuration is
+`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-full.json`.
+The public Codex result remains a descriptive comparator because its released
+Codex binary differs from this branch build.
