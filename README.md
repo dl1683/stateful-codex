@@ -14,6 +14,10 @@
 
 </div>
 
+<p align="center">
+  <img src="./clients/stateful-codex/assets/setup-ready.png" alt="Stateful Codex project, thread, and workflow-mode setup" width="88%" />
+</p>
+
 Stateful Codex is an experimental fork of OpenAI Codex for complex work that
 outlives one context window. It treats the user-selected directory as a durable
 project, turns what the agent learns into queryable project intelligence, and
