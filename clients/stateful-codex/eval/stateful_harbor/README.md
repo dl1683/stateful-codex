@@ -11,19 +11,30 @@ protocol change and requires revalidation before a scored run.
 
 ## Build the Linux bundle
 
-Run from a Linux checkout or WSL. The worktree must be clean so the SHA-256 can
-identify an exact source commit.
+Build with Docker from any checkout where Bash is available. The worktree must
+be clean so the SHA-256 can identify an exact source commit. The builder uses
+Rust 1.95 on Debian Bullseye (glibc 2.31), rather than inheriting a potentially
+newer host glibc.
 
 ```bash
-bash clients/stateful-codex/eval/stateful_harbor/build-linux-bundle.sh
+bash clients/stateful-codex/eval/stateful_harbor/build-portable-linux-bundle.sh
 ```
-
-For faster WSL builds, set `STATEFUL_CODEX_TARGET_DIR` to a directory inside
-the Linux filesystem before running the script.
 
 The script builds `codex` and `codex-code-mode-host`, creates a deterministic
 package under `clients/stateful-codex/eval/artifacts/`, and writes its SHA-256
-sidecar. Binaries are deliberately not committed.
+sidecar. Docker BuildKit caches the Rust and V8 inputs between builds. Binaries
+are deliberately not committed.
+
+Before Harbor can invoke a model, run the archive in the exact task image:
+
+```bash
+bash clients/stateful-codex/eval/stateful_harbor/preflight-linux-bundle.sh \
+  clients/stateful-codex/eval/artifacts/stateful-codex-<commit>-x86_64-unknown-linux-gnu.tar.gz
+```
+
+The preflight verifies the digest, extracts the archive inside the task image,
+and starts both packaged binaries. A compatibility failure therefore stops the
+evaluation before authentication or model usage.
 
 ## Configure Harbor
 

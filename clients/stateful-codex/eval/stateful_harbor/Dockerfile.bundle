@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1.7
+
+FROM rust:1.95-bullseye AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        clang \
+        cmake \
+        curl \
+        git \
+        libsqlite3-dev \
+        libssl-dev \
+        pkg-config \
+        protobuf-compiler \
+        python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+ARG SOURCE_COMMIT
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/target \
+    --mount=type=cache,target=/v8 \
+    STATEFUL_CODEX_SOURCE_COMMIT="$SOURCE_COMMIT" \
+    STATEFUL_CODEX_TARGET_DIR=/target \
+    STATEFUL_CODEX_V8_CACHE_DIR=/v8 \
+    bash clients/stateful-codex/eval/stateful_harbor/build-linux-bundle.sh /out
+
+FROM scratch
+COPY --from=builder /out/ /
