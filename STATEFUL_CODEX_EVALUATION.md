@@ -2768,3 +2768,139 @@ retries, and an inspection gate before the next job. Valid rewards of either
 0 or 1 are immutable. Only a trial with no agent/verifier result because of an
 infrastructure exception or explicit cancellation is replaced, and every such
 replacement remains documented.
+
+### Round 1, batches 1 and 2
+
+Status: 60 additional valid trials completed on 2026-09-23. Together with the
+ten preserved checkpoint trials, the run now has 70 valid trials over 70
+distinct tasks: 56 rewards of 1.0 and 14 rewards of 0.0, or 80.00% for this
+single-attempt breadth screen. This is not the Terminal-Bench headline score.
+The official accuracy is the number of successful trials divided by all 445
+fresh trials. Best-of-five task coverage is separately reported as `pass@5`.
+For reference, the published Codex 0.144.1 Luna-max submission reports 337 of
+445 successful trials (75.73% +/- 1.32 percentage points) and `pass@5` 0.8876,
+equivalent to 79 of 89 tasks solved at least once. Its different Codex build
+makes it a descriptive comparator, not a matched control.
+
+Primary scoring and comparator sources are the official
+[`metrics.py`](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/leaderboard/src/leaderboard/core/metrics.py),
+[Codex Luna-max submission](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/leaderboard/submissions/2026-07-11-openai-gpt-5-6-luna-max-codex.json),
+and [Terminal-Bench 2.1 task chart](https://github.com/harbor-framework/terminal-bench-docs/blob/main/components/terminal-bench-2-1-charts.tsx).
+
+Round-one batch 1 is retained at
+`%LOCALAPPDATA%/Temp/stateful-harbor-full-20260923/sc-tb21-stateful-r1b1-30-pinned-ef3a1ff`.
+It completed 30 valid trials in 55 minutes 57 seconds with 25 passes and five
+failures. It used 78,334,480 input tokens, 75,023,744 cached input tokens,
+589,365 output tokens, and $2.86986008 of reported cost. The five failures are:
+
+- `chess-best-move`: `/app/move.txt` contained the valid mating move `g2g4`
+  but omitted the second required mating move `e2e4`. This is an
+  exhaustiveness failure, not an infrastructure failure.
+- `configure-git-webserver`: the agent built and locally exercised the Git
+  deployment path, but kept its HTTP process attached to an agent command
+  session and did not leave an independently managed SSH service. The official
+  post-agent clone/push/curl verifier received HTTP 000. The task requires a
+  server the user can access after configuration, and the official reference
+  starts both SSH and nginx as services; this is a valid delivery-lifecycle
+  failure.
+- `dna-insert`: the primers were structurally valid and annealed at the correct
+  sites, but the official melting temperatures were 66.274364 and 59.742459
+  degrees C. Their 6.531905-degree difference exceeded the required maximum of
+  5 degrees. This is a scientific-calculation near miss.
+- `extract-moves-from-video`: the agent exhausted the 1,800-second budget and
+  never created `/app/solution.txt`. The verifier ran and failed both output
+  checks, so the timeout remains a scored zero.
+- `filter-js-from-html`: six executable XSS cases survived, and five of twelve
+  clean inputs were changed after the verifier's normalization. This is a
+  substantive security/correctness failure rather than a formatting-only miss.
+
+Batch 1 was not easy-task dominated. Its declared mix was nine hard, 19 medium,
+and two easy tasks; Stateful passed seven hard, 16 medium, and both easy tasks.
+Among the 24 successful tasks with nonzero author expert-time estimates, the
+median was 60 minutes and the mean 224.58 minutes. The five failures had a
+45-minute median and 51-minute mean. The official Terminal-Bench 2.1 task chart
+covers only a subset, but the covered failures include tasks with representative
+agent pass rates of 47.1% (`configure-git-webserver`), 17.1%
+(`extract-moves-from-video`), and 4.3% (`filter-js-from-html`).
+
+Round-one batch 2 is retained at
+`%LOCALAPPDATA%/Temp/stateful-harbor-full-20260923/sc-tb21-stateful-r1b2-30-pinned-ef3a1ff`.
+It completed 30 valid trials in 49 minutes 49 seconds with 23 passes and seven
+failures. It used 87,629,742 input tokens, 84,237,056 cached input tokens,
+775,966 output tokens, and $3.29443752 of reported cost. Its failures are:
+
+- `gcode-to-text`: the agent reconstructed and visually inspected the embossed
+  geometry, but wrote `flag{gcode_iz_ch4LLenc1Ng}` instead of the verifier's
+  `flag{gc0d3_iz_ch4LLenGiNg}`. It then exact-read and persisted its own wrong
+  generated file. This separates artifact verification from semantic
+  correctness: evidence that the requested bytes were written is not evidence
+  that the decoded bytes are right.
+- `gpt2-codegolf`: the 900-second budget expired after the agent produced a
+  compiling sub-5,000-byte implementation and a correct GPT-2 token ID for its
+  smoke prompt, but its generation remained repetitive and wrong. The verifier
+  compiled and ran the program; the required warranty substring was absent.
+  This is an incomplete numerical/model-layout implementation.
+- `largest-eigenval`: the 900-second budget expired just after the agent found
+  and repaired a column-permutation validation bug. All 18 eigenpair/dominance
+  assertions passed, as did speed at sizes 2, 3, 4, 7, 8, 9, and 10, but the
+  candidate lost the timing comparisons at sizes 5 and 6. This is a valid
+  performance near miss rather than infrastructure noise.
+- `make-doom-for-mips`: the agent installed the cross-toolchain and compiled 81
+  Doom objects, but did not finish a compatible freestanding runtime and ELF
+  before the 900-second limit. `vm.js` did not produce `/tmp/frame.bmp`, and all
+  three verifier cases failed. This is a major incomplete implementation.
+- `mteb-retrieve`: the agent loaded the exact model revision through the
+  required MTEB version but chose raw embeddings because the prompt does not
+  name an MTEB retrieval task. That ranked HumanEval fifth; the reference uses
+  SciFact query/passage prompts and expects `MTEB: Massive Text Embedding
+  Benchmark`. The official zero is valid for protocol accounting, but the
+  failure is specification-sensitive because the hidden SciFact choice is not
+  stated explicitly in the task.
+- `overfull-hbox`: compilation and input-integrity checks passed, but two
+  overfull warnings remained, including 20.01048 pt and 0.46426 pt. The agent
+  exhausted the 750-second budget while iterating allowed synonym replacements.
+  This is a valid incomplete near miss.
+- `protein-assembly`: the output was one valid DNA line within the size and GC
+  limits, but the translated fusion did not contain the verifier-recognized
+  donor sequence in the required FLAG-donor-DHFR-acceptor-SNAP order. The agent
+  manually expanded crystallographic placeholder residues and persisted its
+  inferred component selection without proving exact FASTA identity. This is a
+  substantive biological-selection/sequence failure.
+
+Batch 2 contained 11 hard, 17 medium, and two easy tasks. Stateful passed eight
+hard, 14 medium, and one easy task. The 23 successes had a 60-minute median and
+112.39-minute mean declared expert estimate; the seven failures had a 60-minute
+median and 447.86-minute mean, driven especially by the 2,400-minute
+`gpt2-codegolf` estimate and 480-minute Doom estimate. The failures therefore
+skew harder rather than easier by author effort. Public representative-agent
+rates reinforce the mix: Stateful passed `install-windows-3.11` at 21.4%,
+`mteb-leaderboard` at 44.3%, and `mcmc-sampling-stan` at 72.9%; it failed
+`gpt2-codegolf` at 14.3%, `make-doom-for-mips` at 4.3%,
+`protein-assembly` at 20.0%, `mteb-retrieve` at 45.7%, and `overfull-hbox` at
+51.4%. These rates are task-mix context, not task-level Codex baselines.
+
+The Stateful artifacts are intact. Batch 1's 372 and batch 2's 432 exported
+state-manifest files all match their recorded SHA-256 values. All 240 SQLite
+databases in each batch pass `PRAGMA integrity_check`. Completed trials retain
+terminal revision-2 runs; the four batch-2 timeouts retain revision-1 running
+records because they never reached the terminal mutation, which is faithful to
+the interrupted execution rather than a hidden successful completion. Batch 2
+also demonstrates bounded persistence at very different corpus sizes: most
+trials created zero to hundreds of context-map routes, while the successful
+`install-windows-3.11` task retained 20,000 routes and 23,180 hierarchy nodes.
+
+Resource sampling during batch 2 produced 89 observations. Host CPU averaged
+37.12%, reached 97%, and had a nearest-rank 95th percentile of 90%; free memory
+never fell below 17,243 MiB, and eight task containers were active at once.
+Memory was not the constraint, but CPU saturation and Docker/I/O contention
+make a higher concurrency level an unjustified protocol risk. Subsequent jobs
+therefore remain at eight workers and do not overlap.
+
+Across the ten-trial checkpoint and these two batches, cumulative reported usage
+is 183,477,835 input tokens, 175,474,816 cached input tokens, 1,693,991 output
+tokens, and $7.14288932. The final round-one manifest contains the exact 19
+remaining task names derived by subtracting the 70 valid distinct tasks from
+the pinned 89-task lock:
+`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-r1b3-19.json`.
+It retains one attempt, eight independent workers, fresh per-trial state, and
+zero automatic retries.
