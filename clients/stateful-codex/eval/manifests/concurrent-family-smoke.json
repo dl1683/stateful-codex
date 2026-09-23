@@ -1,0 +1,231 @@
+{
+  "name": "SC-EVAL-029 concurrent family inheritance smoke",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "high",
+  "mode": "autonomous",
+  "memoryPolicy": "disabled",
+  "compaction": {
+    "autoCompactTokenLimit": 20000,
+    "scope": "body_after_prefix"
+  },
+  "requiredObservations": {
+    "baseline": [],
+    "stateful": []
+  },
+  "projects": [
+    {
+      "id": "procurement-smoke",
+      "selectionRole": "mechanismSmoke",
+      "domain": "procurement decision and evidence synthesis",
+      "isolatedCopies": true,
+      "requireStatefulProjectState": true,
+      "requireDurableCompletion": true,
+      "source": {
+        "project": "procurement",
+        "roots": ["."]
+      },
+      "cases": [
+        {
+          "id": "viability",
+          "prompt": "Which vendor is currently viable under every binding deployment criterion, why does each alternative fail, and has any vendor actually been awarded the contract? Preserve the controlling findings and exact evidence for later questions, cite exact project files, distinguish preliminary preference from a final decision, and do not edit files.",
+          "stateEvidenceAssertions": [
+            {
+              "name": "all-gates-control-viability",
+              "entryTermGroups": [["viable"], ["cedar"]],
+              "sourceTermGroups": [["passes all three"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "Cedar is the only currently viable candidate",
+              "termGroups": [["cedar"], ["only currently viable", "only viable", "sole viable"]]
+            },
+            {
+              "name": "No final award",
+              "termGroups": [["no vendor", "no final"], ["award", "approved"]]
+            }
+          ],
+          "forbiddenPhrases": ["cedar was awarded", "cedar won the contract"]
+        },
+        {
+          "id": "authority-and-cost",
+          "prompt": "Using accumulated project understanding first, give the authoritative year-one totals for Alder, Birch, and Cedar, and explain whether a low headline price or preliminary preference can override another binding failure. Verify only the decisive source regions, cite exact files, and do not edit files.",
+          "stateEvidenceAssertions": [
+            {
+              "name": "authoritative-year-one-totals",
+              "entryTermGroups": [["248,000"], ["236,000"], ["285,000"]],
+              "sourceTermGroups": [["248,000"], ["236,000"], ["285,000"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "Authoritative totals",
+              "termGroups": [["$248,000"], ["$236,000"], ["$285,000"]]
+            }
+          ],
+          "forbiddenPhrases": ["alder should be selected because it is cheapest"]
+        },
+        {
+          "id": "continuity-basis",
+          "prompt": "Using project state first, explain why 96 consecutive hours is the binding offline requirement and what the evidence implies for Birch and Cedar. Quantify the operational consequence, distinguish verified history from vendor claims, cite exact files, and do not edit files.",
+          "stateEvidenceAssertions": [
+            {
+              "name": "verified-96-hour-basis",
+              "entryTermGroups": [["96"], ["north ridge"]],
+              "sourceTermGroups": [["96 hours"], ["minimum offline acceptance requirement"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "Birch loses 24 hours",
+              "termGroups": [["birch"], ["72"], ["24"]]
+            }
+          ],
+          "forbiddenPhrases": ["72 hours satisfies the requirement"]
+        }
+      ]
+    },
+    {
+      "id": "licensing-smoke",
+      "selectionRole": "mechanismSmoke",
+      "domain": "contract authority and financial implications",
+      "isolatedCopies": true,
+      "requireStatefulProjectState": true,
+      "requireDurableCompletion": true,
+      "source": {
+        "project": "licensing",
+        "roots": ["."]
+      },
+      "cases": [
+        {
+          "id": "economics",
+          "prompt": "What royalty rate currently governs the licensing deal, what annual royalty does the approved forecast imply, and why should the counterparty proposal not control either answer? Preserve the controlling findings and exact evidence for later questions, cite exact project files, identify the forecast assumption, and do not edit files.",
+          "stateEvidenceAssertions": [
+            {
+              "name": "executed-six-percent-rate",
+              "entryTermGroups": [["six percent", "6%"]],
+              "sourceTermGroups": [["six percent of net sales"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "Current royalty and forecast",
+              "termGroups": [["6%", "six percent"], ["$1,200,000", "$1.2 million"]]
+            }
+          ],
+          "forbiddenPhrases": ["the current royalty is 8%"]
+        },
+        {
+          "id": "territory",
+          "prompt": "Using accumulated project understanding first, may the licensee currently sell in Canada? Identify the controlling instrument and exact condition for Canada to enter the territory, distinguish territorial scope from closing readiness, cite exact files, and do not edit files.",
+          "stateEvidenceAssertions": [
+            {
+              "name": "canada-written-consent-condition",
+              "entryTermGroups": [["canada"], ["written consent"]],
+              "sourceTermGroups": [["worldwide excluding canada"], ["written consent"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "Canada currently excluded",
+              "termGroups": [["canada"], ["excluded", "not currently", "cannot currently"]]
+            }
+          ],
+          "forbiddenPhrases": ["canada is currently included"]
+        },
+        {
+          "id": "termination-risk",
+          "prompt": "Using project state first, state the current termination-for-convenience notice period and determine whether the modeled data-security exposure is fully covered by the identified insurance. Distinguish contractual facts from planning assumptions, cite exact files, and do not edit files.",
+          "stateEvidenceAssertions": [
+            {
+              "name": "sixty-day-termination",
+              "entryTermGroups": [["60 days", "sixty days"]],
+              "sourceTermGroups": [["requires 60 days"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "Notice and insurance gap",
+              "termGroups": [["60"], ["$2,500,000", "$2.5 million", "gap", "shortfall"]]
+            }
+          ],
+          "forbiddenPhrases": ["the notice period is 30 days", "the exposure is fully insured"]
+        }
+      ]
+    },
+    {
+      "id": "source-change-smoke",
+      "selectionRole": "mechanismSmoke",
+      "domain": "policy revision and durable correction",
+      "isolatedCopies": true,
+      "requireStatefulProjectState": true,
+      "requireDurableCompletion": true,
+      "source": {
+        "project": "source-change-canary",
+        "roots": ["."]
+      },
+      "cases": [
+        {
+          "id": "learn-v1",
+          "prompt": "Using only this selected project, determine whether launch is currently permitted. Identify the controlling source, calculate the answer from the measured value, preserve the consequential conclusion and exact evidence for later work, and cite exact files and lines. Do not edit files.",
+          "stateEvidenceAssertions": [
+            {
+              "name": "v1-threshold-lines",
+              "entryTermGroups": [["10"]],
+              "sourceTermGroups": [["10 or fewer"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "v1-threshold",
+              "termGroups": [["10"], ["8"], ["permitted"]]
+            }
+          ],
+          "forbiddenPhrases": ["6 or fewer"]
+        },
+        {
+          "id": "revise-v2",
+          "prompt": "The project sources may have changed. Re-verify the controlling policy against the raw source, reassess the launch decision, and explicitly repair any durable conclusion that the new evidence supersedes while retaining truthful historical provenance. Cite exact files and lines. Do not edit files.",
+          "intervention": {
+            "id": "executed-policy-v2-smoke",
+            "expectedBeforeCorpusRevision": "sha256:cc5328f922a26fb9b5e89556604faddf9eefbef25b8813efc68fd98eed1c9155",
+            "expectedAfterCorpusRevision": "sha256:b5e160e014c8e7ae94dd90c93a5ed576bbb49a144ef67a19bb48ecca3c2a6318",
+            "files": [
+              {
+                "path": "policy.md",
+                "replacement": "../revisions/source-change-canary/policy-v2.md",
+                "expectedBeforeSha256": "79647a43c5c02d1c26d56b5ccbac4287f70f7afb62e6697e86941603d65d01ed",
+                "replacementSha256": "6590a1e036e9edc478b0c717c2e21dd2cc1457960a310b8ece33bfbfdc51d60a"
+              }
+            ]
+          },
+          "stateEvidenceAssertions": [
+            {
+              "name": "v2-threshold-lines",
+              "entryTermGroups": [["6"]],
+              "sourceTermGroups": [["6 or fewer"]]
+            }
+          ],
+          "expectedConcepts": [
+            {
+              "name": "v2-threshold",
+              "termGroups": [["6"], ["8"], ["not permitted"]]
+            }
+          ],
+          "forbiddenPhrases": ["launch is permitted"]
+        },
+        {
+          "id": "reconcile",
+          "prompt": "Explain the complete decision history now: what the prior policy established, what changed, which conclusion is current, and how preserved evidence distinguishes historical support from current support. Use project state first and verify only the exact source regions needed. Do not edit files.",
+          "expectedConcepts": [
+            {
+              "name": "historical-current distinction",
+              "termGroups": [["10"], ["6"], ["historical"], ["current"]]
+            }
+          ],
+          "forbiddenPhrases": ["launch is permitted"]
+        }
+      ]
+    }
+  ]
+}
