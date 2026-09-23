@@ -31,6 +31,25 @@ async function runTaskSeries(entry, options, semaphore) {
   let previousResult = await findColdResult(entry, options.jobsDir);
 
   for (let attempt = 2; attempt <= options.attempts; attempt += 1) {
+    const completedJob = await readJsonIfPresent(
+      path.join(
+        options.jobsDir,
+        `${options.jobPrefix}-${entry.task}-a${attempt}`,
+        "result.json",
+      ),
+    );
+    if (completedJob?.finished_at && completedJob.stats?.n_errored_trials === 0) {
+      const outcome = await runValidAttempt({
+        entry,
+        attempt,
+        previousResult,
+        options,
+      });
+      previousResult = outcome.resultPath;
+      await recordControllerOutcome(options, entry.task, attempt, outcome);
+      continue;
+    }
+
     const release = await semaphore.acquire();
     try {
       const outcome = await runValidAttempt({
