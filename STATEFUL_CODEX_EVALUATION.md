@@ -2797,12 +2797,18 @@ failures. It used 78,334,480 input tokens, 75,023,744 cached input tokens,
   but omitted the second required mating move `e2e4`. This is an
   exhaustiveness failure, not an infrastructure failure.
 - `configure-git-webserver`: the agent built and locally exercised the Git
-  deployment path, but kept its HTTP process attached to an agent command
-  session and did not leave an independently managed SSH service. The official
-  post-agent clone/push/curl verifier received HTTP 000. The task requires a
-  server the user can access after configuration, and the official reference
-  starts both SSH and nginx as services; this is a valid delivery-lifecycle
-  failure.
+  deployment path, but tested Git through the local filesystem as the existing
+  `ubuntu` account rather than through the requested
+  `user@server:/git/server` transport. It never installed or started an SSH
+  server, and it kept its Python HTTP process alive with `exec sleep infinity`
+  inside an agent-owned command session. That session ended before the
+  verifier, so the official post-agent SSH clone/push/curl workflow received
+  HTTP 000. The prompt does not literally say "survive agent teardown," but it
+  asks for servers the user can access after configuration; post-agent
+  availability is therefore part of the requested outcome. The official
+  reference independently confirms the intended implementation by starting
+  both SSH and nginx as services. This is a valid delivery-lifecycle failure,
+  not a hidden-condition or infrastructure exclusion.
 - `dna-insert`: the primers were structurally valid and annealed at the correct
   sites, but the official melting temperatures were 66.274364 and 59.742459
   degrees C. Their 6.531905-degree difference exceeded the required maximum of
@@ -2918,3 +2924,102 @@ removes an unnecessary package upgrade that prevented the agent from starting.
 An exact-image Harbor install-only trial then completed in 20 seconds with zero
 exceptions and no model or verifier execution. The scored batch may therefore
 include the task without knowingly repeating the pre-agent failure.
+
+### Round 1, batch 3
+
+Round-one batch 3 is retained at
+`%LOCALAPPDATA%/Temp/stateful-harbor-full-20260923/sc-tb21-stateful-r1b3-19-pinned-ef3a1ff`.
+It ran for 1 hour 6 minutes 9 seconds and produced 19 reward-bearing records:
+13 apparent passes and six apparent failures. Two of those failures are invalid
+verifier-infrastructure records, leaving 17 valid trials with 13 rewards of 1.0
+and four rewards of 0.0. The 13 valid passes are
+`pytorch-model-recovery`, `query-optimize`, `regex-chess`, `reshard-c4-data`,
+`rstan-to-pystan`, `sam-cell-seg`, `sparql-university`, `sqlite-db-truncate`,
+`sqlite-with-gcov`, `torch-pipeline-parallelism`, `tune-mjcf`,
+`vulnerable-secret`, and `winning-avg-corewars`.
+
+The four valid failures are:
+
+- `train-fasttext`: the agent exhausted its execution budget after building
+  fastText and running a long sequence of feature, loss, and quantization
+  experiments. Its last measured trigram candidate reached 0.6188 on the
+  supplied test data, just below the requested 0.62 threshold, but the decisive
+  failure is more basic: it never checkpointed any candidate to the required
+  `/app/model.bin`. The verifier therefore failed both accuracy and size checks
+  because the deliverable was absent. This is a search-budget and deadline
+  management failure. A best-known valid artifact should have been installed
+  before spending the remaining budget on optional experiments.
+- `raman-fitting`: the agent parsed the decimal-comma data and performed many
+  numerical fits, but treated the first column as the fitting coordinate. The
+  task data require the reciprocal conversion `1e7 / x` before selecting the
+  G and 2D Raman bands. Consequently it fit raw-coordinate features near
+  19,197 and 33,251 instead of peaks near 1,580 and 2,670. The produced G
+  parameters were `x0=19197.453631`, `gamma=402.843617`,
+  `amplitude=73538.824490`, and `offset=12162.500740`, versus expected values
+  1580.3, 9.06, 8382.69, and 5561.03; the 2D values were similarly wrong.
+  This is a scientific unit/domain interpretation failure, not optimizer
+  precision noise.
+- `video-processing`: the script existed, ran, used only allowed imports, and
+  passed three of five verifier assertions. On the example it reported takeoff
+  54 within the accepted 50--54 range but landing 61 against 62--64. On the
+  private video it reported takeoff 216 against 219--223; the assertion stopped
+  before the landing value was evaluated. This is a genuine but close
+  generalization/calibration miss: one frame early on the visible landing and
+  three frames early on private takeoff.
+- `sanitize-git-repo`: all planted credentials were removed, placeholders were
+  consistent, and no unrelated file was edited. The sole failing condition was
+  exact content preservation for the contaminated JSON file: patch application
+  added a final newline to a file that originally had none. The agent explicitly
+  detected and reported that difference but accepted it as harmless, while the
+  task required avoiding any non-secret modification. This is a valid
+  exact-byte correctness failure and a useful example of self-observation not
+  being converted into corrective action.
+
+`qemu-alpine-ssh` and `qemu-startup` are not scored zeros. In both trials the
+agent completed, but the official verifier's own setup attempted to install
+`curl` from stale Debian Bullseye security-mirror package URLs. Downloads for
+`libnghttp2-14`, `libcurl4`, and `curl` returned HTTP 404. The verifier then had
+no `curl`, could not install `uv`, had no `/root/.local/bin/env`, and had no
+`uvx`; no substantive task assertion ran. These are verifier-prerequisite
+failures outside the adapter and agent. They remain documented, consume no
+official trial slot, and require fresh independent replacements after the exact
+image can install the verifier prerequisites. The adapter's earlier CA-package
+fix did work: both agents ran, so this is a separate downstream failure.
+An immediate no-model probe of both exact task images reproduced the same three
+package 404s, so launching replacement trials now would knowingly repeat the
+invalid condition. The two-task replacement manifest is retained at
+`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-r1b3-qemu-replacement-2.json`
+and remains gated on that exact probe succeeding without task modification.
+
+The valid batch mix was six hard and 11 medium tasks. Stateful passed four hard
+and nine medium tasks and failed two of each. Successful tasks had a declared
+expert-time median of 60 minutes and mean of 274.23 minutes; failures had a
+30-minute median and 116.25-minute mean. This batch therefore provides no
+evidence that the high pass rate came from an easy subset. In particular, the
+hard passes include `regex-chess` (1,440 expert minutes), `sparql-university`
+(800), `sam-cell-seg` (600), and `torch-pipeline-parallelism` (240).
+
+All 237 files named by the batch's exported state manifests match their
+recorded SHA-256 values, and all 152 exported SQLite databases pass
+`PRAGMA integrity_check`. Completed trials have terminal revision-2 run
+records; `train-fasttext` correctly remains a revision-1 running record because
+the timeout interrupted it before terminal state mutation. Persistence scaled
+from small records to 19,804 context-map routes and 19,809 hierarchy nodes for
+the successful `reshard-c4-data` trial, and to 2,389 routes and 2,452 nodes for
+the successful `sqlite-with-gcov` trial.
+
+The whole 19-record execution used 51,258,105 input tokens, 49,057,024 cached
+input tokens, 519,731 output tokens, and $2.04503388. Those execution totals
+include the two invalid qemu trials because the agents had already run. The 17
+valid trials alone used 48,441,740 input tokens, 46,402,816 cached input tokens,
+483,204 output tokens, and $1.91568592. Across every executed checkpoint and
+round-one batch record, including the two invalid qemu attempts, cumulative
+usage is 234,735,940 input tokens, 224,531,840 cached input tokens, 2,213,722
+output tokens, and $9.18792320.
+
+Round 1 is not yet complete. The canonical ledger currently contains 87 valid
+fresh trials over 87 distinct tasks: 69 passes and 18 failures, or 79.31% for
+the incomplete single-attempt breadth screen. The two qemu tasks are pending
+fresh replacements. Neither the 79.31% interim rate nor any 89-task projection
+is the official Terminal-Bench score; the protocol still requires all 445
+fresh trials.
