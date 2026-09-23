@@ -7,7 +7,20 @@ configuration, and Harbor trajectory converter.
 
 The integration is pinned to Harbor commit
 `15da91c18580a25489f5bdf2ee71029f3ff3bb2e`. A different Harbor revision is a
-protocol change and requires revalidation before a scored run.
+protocol change and requires revalidation before a scored run. The adapter
+verifies the active Harbor installation against that Git revision before task
+expansion; writing the intended commit into artifact metadata is not treated as
+proof of the executing runtime.
+
+Run Harbor from a clean checkout of that exact commit and its frozen lockfile,
+not from a mutable global installation:
+
+```powershell
+git clone --filter=blob:none --no-checkout https://github.com/harbor-framework/harbor.git <harbor-root>
+git -C <harbor-root> checkout --detach 15da91c18580a25489f5bdf2ee71029f3ff3bb2e
+uv sync --frozen --project <harbor-root>
+$harbor = "<harbor-root>\.venv\Scripts\harbor.exe"
+```
 
 ## Build the Linux bundle
 
@@ -58,8 +71,8 @@ task list, trial count, model, reasoning effort, timeout, and every other job
 setting identical. For example:
 
 ```powershell
-harbor run -d terminal-bench/terminal-bench-2-1 -i terminal-bench/fix-git -k 1 -n 1 -a stateful_harbor.stateful_codex:BundledCodex -m openai/gpt-5.6-luna --effort max
-harbor run -d terminal-bench/terminal-bench-2-1 -i terminal-bench/fix-git -k 1 -n 1 -a stateful_harbor.stateful_codex:StatefulCodex -m openai/gpt-5.6-luna --effort max
+& $harbor run -d terminal-bench/terminal-bench-2-1 -i terminal-bench/fix-git -k 1 -n 1 -a stateful_harbor.stateful_codex:BundledCodex -m openai/gpt-5.6-luna --effort max
+& $harbor run -d terminal-bench/terminal-bench-2-1 -i terminal-bench/fix-git -k 1 -n 1 -a stateful_harbor.stateful_codex:StatefulCodex -m openai/gpt-5.6-luna --effort max
 ```
 
 Run one paired task first to validate that the only behavioral difference is

@@ -6,14 +6,18 @@ Stateful workflow selection.
 """
 
 import hashlib
+import importlib.metadata as importlib_metadata
 import json
 import os
 import re
 import shlex
+import subprocess
 import time
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar, override
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from harbor.agents.installed.codex import Codex
 from harbor.environments.base import BaseEnvironment
@@ -48,9 +52,68 @@ class BundledCodex(Codex):
         kwargs: dict[str, Any] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
+        cls._verify_harbor_runtime()
         super().preflight(kwargs, env)
         cls._bundle_settings(env, verify_content=True)
         cls._auth_path(env)
+
+    @classmethod
+    def _verify_harbor_runtime(cls) -> None:
+        distribution = importlib_metadata.distribution("harbor")
+        direct_url_text = distribution.read_text("direct_url.json")
+        if not direct_url_text:
+            raise RuntimeError(
+                "Stateful Codex evaluation requires Harbor commit "
+                f"{HARBOR_COMMIT}; the active Harbor {distribution.version} "
+                "installation is not tied to a source revision"
+            )
+        direct_url = json.loads(direct_url_text)
+        vcs_commit = direct_url.get("vcs_info", {}).get("commit_id")
+        if vcs_commit:
+            actual_commit = vcs_commit
+        else:
+            parsed = urlparse(direct_url.get("url", ""))
+            if parsed.scheme != "file":
+                raise RuntimeError(
+                    "the active Harbor installation does not expose a verifiable "
+                    "source revision"
+                )
+            source_path = Path(url2pathname(unquote(parsed.path))).resolve()
+            try:
+                actual_commit = subprocess.run(
+                    ["git", "-C", str(source_path), "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                dirty = subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(source_path),
+                        "status",
+                        "--porcelain",
+                        "--untracked-files=no",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            except (OSError, subprocess.CalledProcessError) as exc:
+                raise RuntimeError(
+                    "the active Harbor source revision could not be verified"
+                ) from exc
+            if dirty:
+                raise RuntimeError("the pinned Harbor source checkout is dirty")
+        if actual_commit != HARBOR_COMMIT:
+            raise RuntimeError(
+                f"Stateful Codex evaluation requires Harbor {HARBOR_COMMIT}, "
+                f"not {actual_commit}"
+            )
+        if not hasattr(Codex, "ensure_system_dependencies"):
+            raise RuntimeError(
+                "the pinned Harbor runtime lacks ensure_system_dependencies"
+            )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)

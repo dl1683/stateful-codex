@@ -2688,3 +2688,20 @@ job configuration is
 `clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-full.json`.
 The public Codex result remains a descriptive comparator because its released
 Codex binary differs from this branch build.
+
+The first full launch expanded all 445 slots but stopped every slot during
+agent installation before model execution. The global `harbor` command had
+resolved PyPI Harbor 0.16.1, whose Codex base class lacks the pinned adapter's
+`ensure_system_dependencies` contract. The earlier four-task smoke had run the
+compatible pinned API, but the adapter merely wrote the intended Harbor commit
+to artifacts and did not verify the executing package. The failed job remains
+at `%LOCALAPPDATA%/Temp/stateful-harbor-full-20260923/sc-tb21-stateful-full445-ef3a1ff`.
+It contains 445 uniform setup exceptions, zero valid trials, no agent
+executions, and no verifier executions.
+
+The adapter now rejects an unpinned, mismatched, or dirty Harbor source runtime
+once during preflight. The canonical run uses a clean checkout of commit
+`15da91c18580a25489f5bdf2ee71029f3ff3bb2e` and `uv sync --frozen`; a direct
+check rejects global Harbor 0.16.1 and accepts the pinned Harbor 0.23.0 checkout.
+An install-only `fix-git` check through that executable completed in 25 seconds
+with zero exceptions before the scored relaunch.

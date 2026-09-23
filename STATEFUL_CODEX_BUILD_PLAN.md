@@ -753,6 +753,14 @@ new task container and isolated Stateful database, and concurrency is used only
 to schedule independent trials. Product-specific compounding evaluation remains
 separate from Terminal-Bench and is not a prerequisite for this full run.
 
+The first 445-slot launch exposed Harbor runtime drift before any model call:
+the global Harbor 0.16.1 installation lacked the dependency helper required by
+the pinned adapter, so every slot ended during setup. The earlier smoke had used
+the compatible pinned API. The adapter now rejects an unpinned, mismatched, or
+dirty Harbor source runtime before task expansion. A clean checkout of the
+protocol's exact Harbor commit with its frozen dependency lock passed a
+single-task install-only check and is the sole executable for the scored run.
+
 Published Codex 0.144.1 Luna-max performance remains a descriptive aggregate
 comparator because its released binary differs. Its public submission exposes
 75.73% over 445 trials but not task-level results visible to a non-maintainer
