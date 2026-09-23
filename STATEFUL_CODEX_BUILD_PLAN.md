@@ -766,6 +766,24 @@ comparator because its released binary differs. Its public submission exposes
 75.73% over 445 trials but not task-level results visible to a non-maintainer
 Harbor account. No additional ordinary-control Terminal-Bench run is required.
 
+The feedback-conditioned persistent-state pilot was frozen after 50 valid
+attempts so evaluation budget could move to a new domain. Eight task families
+completed all five attempts. Their fifth attempts cost 22.0% less than their
+cold attempts in aggregate and passed 7/8 tasks versus 5/8 cold; mean cost over
+all 32 warm attempts was 20.8% below the cold-attempt mean. Two cold failures
+were repaired, while `video-processing` failed all five attempts and became
+more expensive, and two attempted project-state mutations were missed. This is
+encouraging longitudinal product evidence, not official Terminal-Bench
+pass-at-five and not a controlled comparison against repeated ordinary Codex.
+The exact 50-attempt ledger and full limitations are recorded in SC-EVAL-030.
+
+The next benchmark gate is BixBench rather than completing the remaining 25
+repeats. This deliberately trades repeated evidence in one task distribution
+for a higher-information test of scientific-research work. Before a broad run,
+the BixBench adapter must demonstrate custom-harness compatibility, task and
+state isolation, unchanged scoring, complete artifact capture, and one valid
+smoke result.
+
 ### Senior checkpoint review contract
 
 Periodic Astra and Sol checkpoints are adversarial implementation reviews in

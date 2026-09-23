@@ -3053,3 +3053,93 @@ not an official 445-trial score. The 78.65% breadth rate is directional
 pass-at-one evidence only; Terminal-Bench's published five-attempt protocol
 still requires 445 fresh independent trials and reports both trial accuracy and
 task-level pass-at-five.
+
+## Benchmark SC-EVAL-030: feedback-conditioned persistent-state pilot
+
+### Question and protocol
+
+This pilot asks a product question that the official Terminal-Bench protocol
+does not ask: when an agent revisits the same project and can retain structured
+knowledge of its prior work and authoritative verifier outcomes, does its work
+become cheaper or more successful?
+
+Each attempt received a fresh task container. Only the task's own Stateful
+project database persisted, so no task could inherit facts from another task.
+Attempts two through five also received the cumulative official verifier
+history from earlier attempts. The model was `openai/gpt-5.6-luna` at maximum
+effort through the cached ChatGPT login. The dataset, Harbor runtime, and agent
+bundle were pinned. This is therefore a feedback-conditioned longitudinal
+product experiment, not Terminal-Bench pass-at-five and not an official score.
+
+The pilot was intentionally frozen after 50 valid attempts. Eight of the 15
+selected task families had completed all five attempts; the other seven had
+between one and three completed attempts. Continuing the remaining 25 repeats
+would add less information than moving the same evaluation budget to a new
+scientific-research domain. The complete machine-readable frozen ledger is
+`clients/stateful-codex/eval/results/terminal-bench-2-1-feedback-pilot-50-20260923.json`
+(SHA-256 `765046a7c0edd22f023962ba07069e6eb098ebd3ad21bbf76763b148c1d02a9c`).
+
+### Frozen result
+
+Across all 50 completed attempts, 40 passed and ten failed, for an 80.0% trial
+pass rate. Reported execution cost was $5.12689804. The run recorded two missed
+project-state mutations and nine infrastructure retries; both are included in
+the public ledger rather than silently discarded.
+
+The clean longitudinal comparison is the eight-family cohort with all five
+attempts complete:
+
+| Task | Rewards, attempts 1-5 | Cold cost | Final cost | Final vs. cold |
+| --- | --- | ---: | ---: | ---: |
+| `vulnerable-secret` | `11111` | $0.0192 | $0.0189 | -1.9% |
+| `winning-avg-corewars` | `11111` | $0.1141 | $0.0293 | -74.3% |
+| `regex-chess` | `10101` | $0.3512 | $0.3075 | -12.4% |
+| `sam-cell-seg` | `11011` | $0.1360 | $0.1059 | -22.2% |
+| `torch-tensor-parallelism` | `11111` | $0.0463 | $0.0329 | -28.9% |
+| `configure-git-webserver` | `01111` | $0.1254 | $0.1235 | -1.5% |
+| `video-processing` | `00000` | $0.1422 | $0.1604 | +12.8% |
+| `sanitize-git-repo` | `01111` | $0.1149 | $0.0403 | -64.9% |
+
+For those eight families:
+
+- cold attempts passed 5/8; fifth attempts passed 7/8;
+- two of the three cold failures were repaired by the fifth attempt;
+- cold attempts cost $1.04927264 in aggregate and fifth attempts cost
+  $0.81863588, a 22.0% reduction;
+- the mean across all 32 warm attempts was $0.10381426 versus a $0.13115908
+  cold-attempt mean, a 20.8% reduction; and
+- among the five families that passed both cold and final attempts, final cost
+  was 25.8% lower while preserving a passing result.
+
+### What the pilot does and does not establish
+
+The directional result supports the product thesis: persistent project state
+can help repair failed work and can reduce the cost of later work on the same
+project. It is especially encouraging because this was the first execution of
+the feedback-aware protocol against an early system rather than a tuned repeat
+study.
+
+The result is not causal proof that project intelligence alone produced the
+reduction. Prompt caching, model sampling, explicit verifier feedback, and the
+task distribution also affect cost and success. There was no repeated ordinary
+Codex control arm. Later attempts were not monotonically better:
+`regex-chess` regressed twice and recovered twice, `sam-cell-seg` regressed once,
+and `video-processing` failed all five attempts while becoming more expensive.
+The two persistence misses also show that the state update path is not yet
+perfectly reliable. Those are product findings, not records to remove.
+
+Seven interrupted attempts created during the decision to pivot were excluded
+before scoring because their Harbor processes had ended while task containers
+were still running. Their mounted project-state directories were archived, the
+exact pre-attempt baselines were restored and hash-verified, and the stopped
+containers and task networks were removed. No partial verifier result or
+partial state mutation entered the 50-attempt ledger.
+
+### Next gate
+
+The next external evaluation is BixBench. It provides a materially different
+scientific-research workload and therefore more information about whether the
+same project-intelligence mechanisms generalize beyond software execution. The
+first gate is a custom-harness compatibility and scoring smoke; a larger run is
+allowed only after task isolation, artifact capture, and evaluator integrity
+are demonstrated.
