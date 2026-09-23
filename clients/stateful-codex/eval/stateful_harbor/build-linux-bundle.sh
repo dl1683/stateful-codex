@@ -10,6 +10,8 @@ archive="$output_dir/stateful-codex-$short_commit-x86_64-unknown-linux-gnu.tar.g
 target_dir="${STATEFUL_CODEX_TARGET_DIR:-$repo_root/codex-rs/target}"
 staging="$(mktemp -d)"
 trap 'rm -rf -- "$staging"' EXIT
+target="x86_64-unknown-linux-gnu"
+v8_profile="ptrcomp_sandbox_release"
 
 if [[ -n "$(git -C "$repo_root" status --short)" ]]; then
   echo "refusing to package a dirty worktree" >&2
@@ -17,6 +19,34 @@ if [[ -n "$(git -C "$repo_root" status --short)" ]]; then
 fi
 
 mkdir -p "$output_dir" "$staging/package/bin"
+
+v8_version="$(
+  python3 "$repo_root/.github/scripts/rusty_v8_bazel.py" \
+    resolved-v8-crate-version
+)"
+v8_release="https://github.com/openai/codex/releases/download/rusty-v8-v$v8_version"
+v8_dir="$staging/rusty_v8"
+v8_archive="librusty_v8_${v8_profile}_${target}.a.gz"
+v8_binding="src_binding_${v8_profile}_${target}.rs"
+v8_checksums="rusty_v8_${v8_profile}_${target}.sha256"
+trusted_manifests="$repo_root/third_party/v8/rusty_v8_${v8_version//./_}_release_manifests.sha256"
+mkdir -p "$v8_dir"
+curl -fsSL "$v8_release/$v8_checksums" -o "$v8_dir/$v8_checksums"
+expected_manifest_checksum="$(
+  grep -F "  $v8_checksums" "$trusted_manifests" | cut -d ' ' -f 1
+)"
+actual_manifest_checksum="$(sha256sum "$v8_dir/$v8_checksums" | cut -d ' ' -f 1)"
+if [[ -z "$expected_manifest_checksum" || \
+  "$actual_manifest_checksum" != "$expected_manifest_checksum" ]]; then
+  echo "checksum mismatch for $v8_checksums" >&2
+  exit 1
+fi
+curl -fsSL "$v8_release/$v8_archive" -o "$v8_dir/$v8_archive"
+curl -fsSL "$v8_release/$v8_binding" -o "$v8_dir/$v8_binding"
+(cd "$v8_dir" && tr -d '\r' < "$v8_checksums" | sha256sum --check -)
+
+export RUSTY_V8_ARCHIVE="$v8_dir/$v8_archive"
+export RUSTY_V8_SRC_BINDING_PATH="$v8_dir/$v8_binding"
 cargo build \
   --manifest-path "$repo_root/codex-rs/Cargo.toml" \
   --target-dir "$target_dir" \
