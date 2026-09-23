@@ -2451,3 +2451,109 @@ separate lane. Automated raw-read counts from these Windows rollouts are lower
 bounds because the parser does not yet expand looped `type`, `find`, and
 `findstr` commands into per-file reads; no read-saving claim is made from those
 counts.
+
+## Benchmark SC-EVAL-026: explicit historical-state retrieval
+
+Status: matched mechanism diagnostic completed on 2026-09-23. It is not a
+protocol-valid comparative result because blinded quality, independent source
+audits, and state observations were not collected before arm identity was
+revealed. The case named `post-compaction-recall` also observed zero compactions
+in both arms, so this run does not establish post-compaction recall.
+
+The frozen v2 source removed every mention of the old threshold. The clean
+artifacts are under
+`%LOCALAPPDATA%/Temp/stateful-history-run-20260923b`; ordinary thread
+`01a0cd7a-c1cb-7a42-8e28-b40463edce51` and Stateful thread
+`01a0cd75-5ad7-7f83-90cf-a2aec12ade18` each completed all four turns on their
+first attempt. Both arms returned the correct v1 and v2 decisions in every
+turn. Stateful persisted the old 10-defect policy and permitted decision as
+superseded revisions, kept the current 6-defect policy and not-permitted
+decision active, and preserved the unchanged measured count of 8.
+
+The reconcile turn provides direct mechanism evidence. Its rollout contains
+`blackboard_query({entryScope: "historical", ...})`; the response returns the
+superseded v1 entries, correct old source fingerprint
+`79647a43c5c02d1c26d56b5ccbac4287f70f7afb62e6697e86941603d65d01ed`, and
+threshold 10 with stale historical verification. The model then correctly
+distinguishes that history from the current 6-defect source. This closes the
+prior defect where a correct history answer could be inferred from v2 restating
+v1. It does not prove counterfactual dependence on the query, because native
+same-thread conversation history was also present.
+
+The economics failed:
+
+| Measure | Ordinary | Stateful | Stateful change |
+| --- | ---: | ---: | ---: |
+| Full lifetime tokens | 134,154 | 992,033 | +857,879 (+639.47%) |
+| Uncached input + output | 26,890 | 84,257 | +57,367 (+213.34%) |
+| Model responses | 9 | 27 | +18 |
+| Recorded read operations | 7 | 13 | +6 |
+| Rejected tool results | 0 | 2 | +2 |
+| Canonical compactions | 0 | 0 | 0 |
+| Turn duration | 132,442 ms | 317,816 ms | +185,374 ms |
+
+The excess work is not attributable to compaction in this run. The trace shows
+a malformed v1 persistence call, one correct stale-source rejection followed by
+refresh, a v2 relationship failure that required another mutation, and repeated
+semantic persistence rounds. The last turn is directionally better on marginal
+uncached usage—5,260 Stateful versus 9,541 ordinary—but the four-turn
+maturation-inclusive lifetime remains a large regression.
+
+Three integrity defects remain visible. First, the reconcile completion copied
+the correct fingerprint incorrectly as the invented hybrid
+`79647ad1f8e25747262bade3cba32bbd2b85f1db12c9c2cf00d607f71e36561d`;
+the authoritative stored evidence links still contain the correct fingerprint.
+Second, Stateful answer links use `/C:/...` and are not valid Windows paths even
+though their prose and line ranges are substantively correct. Third, the runner
+retained only a hash of each turn's corpus; after intervention its grading
+packet would have shown v2 while grading the v1 answer. Commit `462b5a25c1`
+fixes future runs by preserving one content-addressed corpus artifact per
+distinct turn revision and producing a separate blinded packet for every
+question. SC-EVAL-026 remains honestly ungraded rather than reconstructing
+missing observations after seeing the arms.
+
+## External custom-harness benchmark ladder
+
+Status: primary-source review completed on 2026-09-23; no public submission,
+maintainer contact, or external benchmark run has been performed.
+
+The relevant unit is an agent-model pair. Published model-only scores from an
+organizer-controlled scaffold cannot measure Stateful Codex. The external
+program therefore uses the same built Codex binary and `gpt-5.6-luna` setting
+with Stateful disabled and enabled, changing only the intentional project-state
+layer.
+
+1. Terminal-Bench 2.1 is the strongest immediate local harness comparison. Its
+   89-task public dataset and Harbor runner accept arbitrary custom agents, and
+   its published table includes Codex CLI. GPT-5.3-Codex scores 79.1% with
+   Codex CLI and 68.5% with Terminus 2, directly demonstrating that the harness
+   changes the outcome. Official community submissions are currently closed;
+   public Harbor uploads are shareable evidence but do not create an official
+   leaderboard row. The full published protocol requires five trials for every
+   task, or 445 trials per arm.
+2. SWE-bench Verified and Multilingual currently provide the open publication
+   route. Stateful Codex generates patches; the official harness grades them;
+   `swebench submit package`, `publish`, `register`, and `verify` produce a
+   public artifact repository and registration pull request. Metadata records
+   the agent separately from the model. The default `swebench infer` command
+   uses mini-SWE-agent and must not replace our custom agent execution.
+3. SWE-bench Pro V2 is a useful locked local protocol and adapter reference,
+   but it was released on 2026-09-22 with 642 tasks and must not be compared to
+   older v1 results. Its repository includes a pinned Codex adapter and
+   fresh-sandbox patch regrading. An open custom-agent leaderboard admission
+   path has not been verified.
+4. SWE-Marathon v1.1 is the highest-relevance long-horizon supplement. Its 20
+   tasks run through Harbor and its public scripts name Codex with
+   `gpt-5.6-luna` at high effort. A declared configuration is not a measured
+   score, and no open official submission process has been verified.
+5. DeepSWE v1.1 can run custom harnesses locally, but its official leaderboard
+   standardizes on mini-SWE-agent. Its published Luna result is therefore not a
+   Stateful-versus-Codex-harness baseline.
+
+The next implementation is one version-pinned Harbor installed-agent adapter,
+not one script per benchmark. It must install a hashed Stateful bundle, isolate
+project state per task and trial, preserve state only within that trial, emit
+schema-valid ATIF trajectories, retain all-attempt token and latency costs, and
+capture the final patch even on failure. A three-to-five-task smoke precedes
+any frozen full run. Official claims require the complete benchmark and its
+canonical limits; pilot results remain engineering diagnostics.
