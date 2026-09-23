@@ -315,16 +315,30 @@ async function findColdResult(entry, jobsDir) {
 
 async function prioritizeStartedTasks(cohort, options) {
   const annotated = await Promise.all(
-    cohort.map(async (entry, index) => ({
-      entry,
-      index,
-      started: await exists(
-        path.join(options.jobsDir, `${options.jobPrefix}-${entry.task}-a2`),
-      ),
-    })),
+    cohort.map(async (entry, index) => {
+      let active = false;
+      let started = false;
+      for (let attempt = 2; attempt <= options.attempts; attempt += 1) {
+        const result = await readJsonIfPresent(
+          path.join(
+            options.jobsDir,
+            `${options.jobPrefix}-${entry.task}-a${attempt}`,
+            "result.json",
+          ),
+        );
+        if (result) started = true;
+        if (result && !result.finished_at) active = true;
+      }
+      return { entry, index, active, started };
+    }),
   );
   return annotated
-    .sort((left, right) => Number(right.started) - Number(left.started) || left.index - right.index)
+    .sort(
+      (left, right) =>
+        Number(right.active) - Number(left.active) ||
+        Number(right.started) - Number(left.started) ||
+        left.index - right.index,
+    )
     .map(({ entry }) => entry);
 }
 
