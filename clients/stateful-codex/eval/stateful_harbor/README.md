@@ -101,3 +101,63 @@ be audited after the container is gone. The SQLite state home is outside the
 transient Codex session home, so state survives resume or multiple steps inside
 one trial. Harbor's fresh task container prevents state from crossing trial
 boundaries.
+
+## Feedback-conditioned repeat study
+
+`eval/run-harbor-feedback-series.mjs` measures practical project learning; it
+is not an official Terminal-Bench pass-at-five run. Every attempt receives a
+fresh task container and must recreate the requested deliverable. Only that
+task's Stateful project directory persists. Tasks never share state.
+
+Attempts for one task run sequentially, while different tasks may run in
+parallel. Each later attempt receives the bounded, authoritative outcome
+history for every earlier attempt, including verifier failures. The model is
+required to reconcile those outcomes with project intelligence and preserve
+reusable mechanisms, failures, and uncertainty. A missing blackboard mutation
+is recorded as a persistence miss but does not erase an otherwise valid model
+and verifier result.
+
+Pre-agent infrastructure failures may be retried and are not counted as task
+outcomes. Once the agent starts, its failures, timeouts, verifier failures, and
+later regressions remain part of the evidence. Successful attempts are also
+repeated so the study can observe both cost changes and pass-to-fail
+regressions. This protocol therefore supports claims about feedback-conditioned
+maintenance behavior, not independent-task generalization or official
+Terminal-Bench accuracy.
+
+Run the controller with an explicit cohort and content-addressed inputs:
+
+```powershell
+npm run eval:harbor-feedback -- `
+  --cohort <cohort.json> `
+  --state-root <isolated-state-root> `
+  --jobs-dir <harbor-jobs-root> `
+  --harbor <pinned-harbor.exe> `
+  --bundle <stateful-bundle.tar.gz> `
+  --bundle-sha256 <sha256> `
+  --auth <codex-auth.json> `
+  --python-path <stateful-eval-directory> `
+  --dataset <content-addressed-dataset> `
+  --job-prefix <unique-prefix> `
+  --attempts 5 `
+  --concurrency 8 `
+  --cwd <codex-checkout>
+```
+
+The controller writes a protocol manifest and one atomic controller record per
+valid warm attempt. Summarize only those records plus the cohort's pinned cold
+results:
+
+```powershell
+npm run eval:harbor-feedback-summary -- `
+  --cohort <cohort.json> `
+  --state-root <isolated-state-root> `
+  --jobs-dir <harbor-jobs-root> `
+  --attempts 5 `
+  --output <summary.json>
+```
+
+The summary includes exact result hashes, verifier checks, tokens, cache use,
+cost, duration, infrastructure retries, memory-write observations, and complete
+per-task reward trajectories. It exits nonzero when any expected attempt is
+missing unless `--allow-incomplete true` is supplied for live monitoring.
