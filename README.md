@@ -14,10 +14,6 @@
 
 </div>
 
-<p align="center">
-  <img src="./clients/stateful-codex/assets/setup-ready.png" alt="Stateful Codex project, thread, and workflow-mode setup" width="88%" />
-</p>
-
 Stateful Codex is an experimental fork of OpenAI Codex for complex work that
 outlives one context window. It treats the user-selected directory as a durable
 project, turns what the agent learns into queryable project intelligence, and
@@ -32,6 +28,34 @@ what the agent did.
 > Stateful Codex is a research preview. Its first complete product slice works
 > through the native CLI and local browser UI, but evaluation is still active.
 > The repository records regressions and unfavorable results alongside wins.
+
+## Evidence so far
+
+The first results are encouraging enough to justify deeper evaluation. They are
+measured signals from the current research system, not claims of an official
+leaderboard submission or a controlled causal advantage over ordinary Codex.
+
+| Evaluation | Encouraging result | Important limitation |
+| --- | --- | --- |
+| Terminal-Bench 2.1 one-attempt breadth screen | **70 of 89 distinct tasks passed (78.65%)**: 3/4 easy, 45/55 medium, and 22/30 hard. | This is directional pass-at-one evidence, not the published 445-trial protocol or an official leaderboard score. |
+| Feedback-conditioned persistent-state pilot | Across eight task families completed through five attempts, fifth-attempt cost was **22.0% lower** than cold cost in aggregate, average warm-attempt cost was **20.8% lower**, and final success was **7/8 versus 5/8 cold**. Among the five families that passed both cold and final, final cost fell **25.8%**. | This first protocol run had no repeated ordinary-control arm. Regressions occurred, two persistence mutations were missed, and `video-processing` failed all five attempts while becoming 12.8% more expensive. |
+| Six-question, two-project matched series | Read-bearing calls fell **20 -> 7**, unique raw-file reads **54 -> 29**, and follow-up uncached input plus output **97,693 -> 77,806** while all six answers and durable results passed manual semantic review. | Follow-up full tokens increased **381,853 -> 430,830**; including project maturation, Stateful remained more expensive over this short series. |
+| Mature-project selective retrieval | On three matched questions, Stateful used **5 read-bearing calls vs. 11** and reduced follow-up full tokens **19.41%** while verifying narrower source sets. | Uncached follow-up usage increased **27.90%**, and maturation-inclusive cost had not yet broken even. |
+
+The longitudinal pilot was intentionally frozen after 50 valid attempts so the
+next evaluation can test a different domain rather than spend the next budget
+repeating the same tasks. It repaired two of the three cold failures in the
+complete cohort, but it also exposed pass-to-fail regressions and a task that
+did not improve. The machine-readable 50-attempt ledger is published at
+[clients/stateful-codex/eval/results/terminal-bench-2-1-feedback-pilot-50-20260923.json](./clients/stateful-codex/eval/results/terminal-bench-2-1-feedback-pilot-50-20260923.json).
+
+The public Codex 0.144.1 Luna-max Terminal-Bench submission reports 75.73% over
+445 trials. Stateful Codex's 78.65% result across all 89 distinct tasks is an
+encouraging signal, but the protocols and binaries differ, so the figures are
+reported beside one another rather than treated as a controlled head-to-head.
+The complete methodology, costs, task mix, failures, infrastructure repairs,
+and negative findings are preserved in the
+[evaluation record](./STATEFUL_CODEX_EVALUATION.md).
 
 ## What changes
 
@@ -95,26 +119,6 @@ the CLI, TUI, generated SDKs, browser gateway, web client, and evaluation
 harnesses all consume those contracts. Ordinary Codex remains available when no
 Stateful mode is selected or the intelligence store cannot be used.
 
-## Evidence so far
-
-These are measured signals, not a claim that Stateful Codex has already won
-every workload or completed an official leaderboard submission.
-
-| Evaluation | Encouraging result | Important limitation |
-| --- | --- | --- |
-| Terminal-Bench 2.1 one-attempt breadth screen | **70 of 89 distinct tasks passed (78.65%)**: 3/4 easy, 45/55 medium, and 22/30 hard. | This is directional pass-at-one evidence, not the published 445-trial protocol or an official leaderboard score. |
-| Six-question, two-project matched series | Read-bearing calls fell **20 → 7**, unique raw-file reads **54 → 29**, and follow-up uncached input plus output **97,693 → 77,806** while all six answers and durable results passed manual semantic review. | Follow-up full tokens increased **381,853 → 430,830**; including project maturation, Stateful remained more expensive over this short series. |
-| Mature-project selective retrieval | On three matched questions, Stateful used **5 read-bearing calls vs. 11** and reduced follow-up full tokens **19.41%** while verifying narrower source sets. | Uncached follow-up usage increased **27.90%**, and maturation-inclusive cost had not yet broken even. |
-| Repeated-task feedback pilot | Early completed trajectories show cheaper later attempts, successful repair of some cold failures, and real reuse of prior findings and verifier outcomes. | The pilot is still incomplete; some tasks regress after passing, and `video-processing` remained both more expensive and incorrect. Final figures will be published only after the ledger is frozen. |
-
-The public Codex 0.144.1 Luna-max Terminal-Bench submission reports 75.73% over
-445 trials. Stateful Codex's 78.65% result across all 89 distinct tasks is an
-encouraging signal, but the protocols and binaries differ, so the figures are
-reported beside one another rather than treated as a controlled head-to-head.
-The complete methodology, costs, task mix, failures, infrastructure repairs,
-and negative findings are preserved in the
-[evaluation record](./STATEFUL_CODEX_EVALUATION.md).
-
 ## Try it
 
 Stateful Codex currently builds from source. Install the normal Codex
@@ -143,6 +147,10 @@ Then open `http://127.0.0.1:4173`. The first screen asks you to choose the
 project, whether to create/continue/fork the thread view, the workflow mode, and
 the desired outcome. The gateway binds only to loopback and launches the local
 branch CLI with ChatGPT authentication.
+
+<p align="center">
+  <img src="./clients/stateful-codex/assets/setup-ready.png" alt="Stateful Codex project, thread, and workflow-mode setup" width="88%" />
+</p>
 
 ## How to read this repository
 
