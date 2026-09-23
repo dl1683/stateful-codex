@@ -228,6 +228,7 @@ function startArgs(options) {
     `model_reasoning_effort=\"${options.reasoningEffort}\"`,
     ...compactionArgs(options.compaction),
     ...MEMORY_ISOLATION_ARGS,
+    ...platformSandboxArgs(),
     "--sandbox",
     "read-only",
     "-C",
@@ -250,6 +251,7 @@ function resumeArgs(options) {
     `model_reasoning_effort=\"${options.reasoningEffort}\"`,
     ...compactionArgs(options.compaction),
     ...MEMORY_ISOLATION_ARGS,
+    ...platformSandboxArgs(),
     "-c",
     "sandbox_mode=\"read-only\"",
   ];
@@ -270,6 +272,10 @@ function compactionArgs(compaction) {
     "-c",
     `model_auto_compact_token_limit=${compaction.autoCompactTokenLimit}`,
   ];
+}
+
+export function platformSandboxArgs(platform = process.platform) {
+  return platform === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : [];
 }
 
 function extractThreadId(output) {

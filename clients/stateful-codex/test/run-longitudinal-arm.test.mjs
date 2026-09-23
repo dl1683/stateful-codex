@@ -9,6 +9,7 @@ import { corpusHash } from "../eval/corpus-hash.mjs";
 import {
   authEnvironment,
   nextAttemptNumber,
+  platformSandboxArgs,
   prepareIsolatedCodexHome,
   unresolvedAttemptForCase,
 } from "../eval/run-longitudinal-arm.mjs";
@@ -65,6 +66,15 @@ test("isolates evaluation history while reusing the cached login", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("selects the Windows sandbox without changing other platforms", () => {
+  assert.deepEqual(platformSandboxArgs("win32"), [
+    "-c",
+    'windows.sandbox="unelevated"',
+  ]);
+  assert.deepEqual(platformSandboxArgs("linux"), []);
+  assert.deepEqual(platformSandboxArgs("darwin"), []);
 });
 
 test("applies a hash-pinned source intervention once and resumes idempotently", async () => {

@@ -42,6 +42,8 @@ hard-links only the existing `auth.json` from the configured authentication
 home, removes API-key variables, and refuses a pre-existing credential path
 that is not the same file. `--auth-home` and `--codex-home` may override those
 locations without changing the authentication mode.
+On Windows the runner explicitly selects the unelevated sandbox so an isolated
+home retains read-only command execution without inheriting user configuration.
 
 Question order is frozen before either arm is run. The sequence includes:
 
