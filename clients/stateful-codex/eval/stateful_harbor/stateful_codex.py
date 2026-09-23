@@ -32,6 +32,7 @@ class BundledCodex(Codex):
     _REMOTE_ARCHIVE = PurePosixPath("/tmp/stateful-codex-bundle.tar.gz")
     _REMOTE_PACKAGE = PurePosixPath("/opt/stateful-codex")
     _REMOTE_STATE_HOME = PurePosixPath("/tmp/stateful-codex-state")
+    _REMOTE_BASE_COMMIT = PurePosixPath("/tmp/stateful-codex-base-commit")
     stateful_mode: ClassVar[str | None] = None
 
     @staticmethod
@@ -175,6 +176,19 @@ class BundledCodex(Codex):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        base_commit = shlex.quote(self._REMOTE_BASE_COMMIT.as_posix())
+        try:
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    "if git -C /app rev-parse --is-inside-work-tree "
+                    ">/dev/null 2>&1; then "
+                    f"git -C /app rev-parse HEAD > {base_commit}; "
+                    "fi"
+                ),
+            )
+        except Exception:
+            self.logger.exception("Failed to record the benchmark base commit")
         started = time.monotonic()
         outcome = "completed"
         try:
@@ -208,15 +222,29 @@ class BundledCodex(Codex):
             sort_keys=True,
         )
         logs = shlex.quote(self.environment_logs_dir.as_posix())
+        state_home = shlex.quote(self._REMOTE_STATE_HOME.as_posix())
+        base_commit = shlex.quote(self._REMOTE_BASE_COMMIT.as_posix())
         try:
             await self.exec_as_agent(
                 environment,
                 command=(
                     f"mkdir -p {logs}; "
                     f"printf '%s\\n' {shlex.quote(metadata)} > {logs}/adapter.json; "
+                    f"if test -d {state_home}; then "
+                    f"rm -rf {logs}/stateful-state; "
+                    f"mkdir -p {logs}/stateful-state; "
+                    f"cp -a {state_home}/. {logs}/stateful-state/; "
+                    f"(cd {logs}/stateful-state && "
+                    "find . -type f -print0 | sort -z | "
+                    f"xargs -0 -r sha256sum) > {logs}/stateful-state.sha256; "
+                    "fi; "
                     f": > {logs}/final.patch; "
                     "if command -v git >/dev/null 2>&1 && "
                     "git -C /app rev-parse --is-inside-work-tree >/dev/null 2>&1; then "
+                    f"if test -s {base_commit}; then "
+                    f"git -C /app diff --binary --no-ext-diff "
+                    f'"$(cat {base_commit})"..HEAD >> {logs}/final.patch; '
+                    "fi; "
                     f"git -C /app diff --binary --no-ext-diff HEAD >> {logs}/final.patch; "
                     "git -C /app ls-files --others --exclude-standard | "
                     "while IFS= read -r file; do "
