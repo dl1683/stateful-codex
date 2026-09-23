@@ -78,11 +78,13 @@ score. Community leaderboard submissions are currently closed, so local runs
 are evidence, not official leaderboard entries.
 
 Each attempt preserves native Codex logs, an ATIF v1.7 trajectory, adapter
-metadata containing the bundle and Harbor hashes, and `final.patch` when the
-task workspace is a Git repository. `final.patch` includes committed and
-uncommitted changes relative to the trial's initial commit. The isolated SQLite
-state directory and its file checksums are also exported, allowing the
-blackboard, context map, run, and obligation records to be audited after the
-container is gone. The SQLite state home is outside the transient Codex session
-home, so state survives resume or multiple steps inside one trial. Harbor's
-fresh task container prevents state from crossing trial boundaries.
+metadata containing the bundle and Harbor hashes, the bundle's package manifest,
+and `final.patch` when the task workspace is a Git repository. `git-state.txt`
+records the initial and final commit IDs, while `final.patch` includes committed
+and uncommitted changes relative to the trial's initial commit. The isolated
+SQLite state directory and its stable relative-path checksum manifest are also
+exported, allowing the blackboard, context map, run, and obligation records to
+be audited after the container is gone. The SQLite state home is outside the
+transient Codex session home, so state survives resume or multiple steps inside
+one trial. Harbor's fresh task container prevents state from crossing trial
+boundaries.

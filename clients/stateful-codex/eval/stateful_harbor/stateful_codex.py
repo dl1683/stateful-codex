@@ -33,6 +33,7 @@ class BundledCodex(Codex):
     _REMOTE_PACKAGE = PurePosixPath("/opt/stateful-codex")
     _REMOTE_STATE_HOME = PurePosixPath("/tmp/stateful-codex-state")
     _REMOTE_BASE_COMMIT = PurePosixPath("/tmp/stateful-codex-base-commit")
+    _REMOTE_REPO_ROOT = PurePosixPath("/tmp/stateful-codex-repo-root")
     stateful_mode: ClassVar[str | None] = None
 
     @staticmethod
@@ -177,13 +178,16 @@ class BundledCodex(Codex):
         context: AgentContext,
     ) -> None:
         base_commit = shlex.quote(self._REMOTE_BASE_COMMIT.as_posix())
+        repo_root = shlex.quote(self._REMOTE_REPO_ROOT.as_posix())
         try:
             await self.exec_as_agent(
                 environment,
                 command=(
-                    "if git -C /app rev-parse --is-inside-work-tree "
+                    f"rm -f {base_commit} {repo_root}; "
+                    "if git rev-parse --is-inside-work-tree "
                     ">/dev/null 2>&1; then "
-                    f"git -C /app rev-parse HEAD > {base_commit}; "
+                    f"git rev-parse --show-toplevel > {repo_root}; "
+                    f"git rev-parse HEAD > {base_commit}; "
                     "fi"
                 ),
             )
@@ -224,12 +228,17 @@ class BundledCodex(Codex):
         logs = shlex.quote(self.environment_logs_dir.as_posix())
         state_home = shlex.quote(self._REMOTE_STATE_HOME.as_posix())
         base_commit = shlex.quote(self._REMOTE_BASE_COMMIT.as_posix())
+        repo_root = shlex.quote(self._REMOTE_REPO_ROOT.as_posix())
+        package = shlex.quote(self._REMOTE_PACKAGE.as_posix())
         try:
             await self.exec_as_agent(
                 environment,
                 command=(
                     f"mkdir -p {logs}; "
                     f"printf '%s\\n' {shlex.quote(metadata)} > {logs}/adapter.json; "
+                    f"if test -f {package}/codex-package.json; then "
+                    f"cp {package}/codex-package.json {logs}/codex-package.json; "
+                    "fi; "
                     f"if test -d {state_home}; then "
                     f"rm -rf {logs}/stateful-state; "
                     f"mkdir -p {logs}/stateful-state; "
@@ -239,18 +248,24 @@ class BundledCodex(Codex):
                     f"xargs -0 -r sha256sum) > {logs}/stateful-state.sha256; "
                     "fi; "
                     f": > {logs}/final.patch; "
-                    "if command -v git >/dev/null 2>&1 && "
-                    "git -C /app rev-parse --is-inside-work-tree >/dev/null 2>&1; then "
-                    f"if test -s {base_commit}; then "
-                    f"git -C /app diff --binary --no-ext-diff "
+                    f"if test -s {repo_root} && test -s {base_commit}; then "
+                    f'repo="$(cat {repo_root})"; '
+                    'if git -C "$repo" rev-parse --is-inside-work-tree '
+                    ">/dev/null 2>&1; then "
+                    f"printf 'baseCommit=%s\\nfinalCommit=%s\\nrepositoryRoot=%s\\n' "
+                    f'"$(cat {base_commit})" '
+                    '"$(git -C "$repo" rev-parse HEAD)" "$repo" '
+                    f"> {logs}/git-state.txt; "
+                    'git -C "$repo" diff --binary --no-ext-diff '
                     f'"$(cat {base_commit})"..HEAD >> {logs}/final.patch; '
-                    "fi; "
-                    f"git -C /app diff --binary --no-ext-diff HEAD >> {logs}/final.patch; "
-                    "git -C /app ls-files --others --exclude-standard | "
+                    'git -C "$repo" diff --binary --no-ext-diff HEAD '
+                    f">> {logs}/final.patch; "
+                    'git -C "$repo" ls-files --others --exclude-standard | '
                     "while IFS= read -r file; do "
-                    'git -C /app diff --binary --no-index -- /dev/null "$file" '
+                    'git -C "$repo" diff --binary --no-index -- /dev/null "$file" '
                     f">> {logs}/final.patch || test $? -eq 1; "
                     "done; "
+                    "fi; "
                     "fi"
                 ),
             )
