@@ -84,6 +84,17 @@ The current branch includes the first end-to-end product slice:
 - a real local browser client for setup, progress, steering, source evidence,
   findings, controls, recovery, and final results.
 
+### More than a system prompt
+
+The branch adds durable software boundaries rather than asking the model to
+pretend it has memory. Project intelligence has its own SQLite-backed crate and
+migrations; inference behavior is installed as a native extension; bounded
+state reaches the model through typed World State contributions; mutations use
+revision and idempotency contracts; app-server v2 owns the external API; and
+the CLI, TUI, generated SDKs, browser gateway, web client, and evaluation
+harnesses all consume those contracts. Ordinary Codex remains available when no
+Stateful mode is selected or the intelligence store cannot be used.
+
 ## Evidence so far
 
 These are measured signals, not a claim that Stateful Codex has already won
