@@ -50,7 +50,12 @@ fn source_verified_entries_require_unique_evidence() {
         Err(BlackboardError::VerifiedWithoutEvidence)
     );
 
-    value.evidence = vec![evidence("map-report"), evidence("map-report")];
+    let mut second_region = evidence("map-report");
+    second_region.line_range = Some(EvidenceLineRange { start: 12, end: 18 });
+    value.evidence = vec![evidence("map-report"), second_region];
+    assert_eq!(value.validate(), Ok(()));
+
+    value.evidence.push(evidence("map-report"));
     assert_eq!(
         value.validate(),
         Err(BlackboardError::DuplicateEvidenceLink)

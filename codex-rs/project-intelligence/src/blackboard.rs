@@ -435,7 +435,7 @@ fn validate_evidence(
     let mut unique = HashSet::with_capacity(evidence.len());
     if evidence
         .iter()
-        .any(|link| !unique.insert(link.context_map_entry_id.as_str()))
+        .any(|link| !unique.insert((link.context_map_entry_id.as_str(), link.line_range)))
     {
         return Err(BlackboardError::DuplicateEvidenceLink);
     }

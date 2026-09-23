@@ -195,6 +195,9 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
                 "evidence": [{
                     "relativePath": "facts.md",
                     "lineRange": {"start": 4, "end": 7}
+                }, {
+                    "relativePath": "facts.md",
+                    "lineRange": {"start": 12, "end": 15}
                 }]
             })),
             "turn-revise",
@@ -206,11 +209,18 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
     expected_value.confidence =
         ConfidenceScore::from_basis_points(9_500).expect("valid confidence");
     expected_value.verification = BlackboardVerification::SourceVerified;
-    expected_value.evidence = vec![BlackboardEvidenceLink {
-        context_map_entry_id: ContextMapEntryId::parse("map-facts").expect("valid map ID"),
-        source_fingerprint: fingerprint(),
-        line_range: Some(EvidenceLineRange { start: 4, end: 7 }),
-    }];
+    expected_value.evidence = vec![
+        BlackboardEvidenceLink {
+            context_map_entry_id: ContextMapEntryId::parse("map-facts").expect("valid map ID"),
+            source_fingerprint: fingerprint(),
+            line_range: Some(EvidenceLineRange { start: 4, end: 7 }),
+        },
+        BlackboardEvidenceLink {
+            context_map_entry_id: ContextMapEntryId::parse("map-facts").expect("valid map ID"),
+            source_fingerprint: fingerprint(),
+            line_range: Some(EvidenceLineRange { start: 12, end: 15 }),
+        },
+    ];
     expected_value.provenance.source_id = "turn-revise".to_string();
     assert_eq!(revised.value, expected_value);
 

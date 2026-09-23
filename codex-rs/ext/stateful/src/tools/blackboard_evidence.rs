@@ -28,7 +28,7 @@ pub(super) async fn resolve_evidence(
 ) -> Result<(Vec<BlackboardEvidenceLink>, Option<HierarchyNodeId>), FunctionCallError> {
     let store = services.context_map().await.map_err(respond)?;
     let mut links = Vec::with_capacity(arguments.len());
-    let mut seen_entries = HashSet::with_capacity(arguments.len());
+    let mut seen_locators = HashSet::with_capacity(arguments.len());
     let mut node_ids = HashSet::with_capacity(arguments.len());
     for argument in arguments {
         let line_range = argument.line_range;
@@ -88,7 +88,7 @@ pub(super) async fn resolve_evidence(
             )));
         }
         node_ids.insert(hit.entry.value.node_id.clone());
-        if seen_entries.insert(hit.entry.id.clone()) {
+        if seen_locators.insert((hit.entry.id.clone(), line_range)) {
             links.push(BlackboardEvidenceLink {
                 context_map_entry_id: hit.entry.id,
                 source_fingerprint: hit.entry.value.source_fingerprint,
