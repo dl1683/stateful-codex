@@ -15,6 +15,8 @@ use serde_json::json;
 
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
+use crate::completion::HistoricalFindingReference;
+use crate::completion::MAX_MATERIAL_HISTORICAL_FINDINGS;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
@@ -34,8 +36,16 @@ struct Arguments {
     result: Option<String>,
     root_revision: Option<u64>,
     material_root_findings: Option<Vec<String>>,
+    material_historical_findings: Option<Vec<HistoricalFindingArguments>>,
     completion_idempotency_key: Option<String>,
     final_obligation: Option<ObligationPacket>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HistoricalFindingArguments {
+    entry_id: String,
+    revision: u64,
 }
 
 pub(super) struct StatefulRunUpdateTool {
@@ -71,6 +81,7 @@ impl StatefulRunUpdateTool {
             result,
             root_revision,
             material_root_findings,
+            material_historical_findings,
             completion_idempotency_key,
             final_obligation,
         } = parse_arguments(&call)?;
@@ -109,6 +120,14 @@ impl StatefulRunUpdateTool {
                     format!("completed requires materialRootFindings; pass at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome, preserve additional conclusions in the final semantic obligation, or pass [] only after determining no root finding is material")
                 )
             })?;
+            let material_historical_findings = material_historical_findings
+                .unwrap_or_default()
+                .into_iter()
+                .map(|reference| HistoricalFindingReference {
+                    entry_id: reference.entry_id,
+                    revision: reference.revision,
+                })
+                .collect::<Vec<_>>();
             let root_revision = root_revision.ok_or_else(|| {
                 FunctionCallError::RespondToModel(
                     "completed requires rootRevision from the current project intelligence World State"
@@ -139,6 +158,7 @@ impl StatefulRunUpdateTool {
                 &final_obligation,
                 root_revision,
                 &material_root_findings,
+                &material_historical_findings,
             )
             .await?;
             let obligation = (
@@ -154,11 +174,12 @@ impl StatefulRunUpdateTool {
         } else {
             if material_root_findings.is_some()
                 || root_revision.is_some()
+                || material_historical_findings.is_some()
                 || completion_idempotency_key.is_some()
                 || final_obligation.is_some()
             {
                 return Err(FunctionCallError::RespondToModel(
-                    "rootRevision, materialRootFindings, completionIdempotencyKey, and finalObligation are only valid when status is completed".to_string(),
+                    "rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation are only valid when status is completed".to_string(),
                 ));
             }
             (None, None)
@@ -219,7 +240,7 @@ impl StatefulRunUpdateTool {
             "omittedChecklistItems": omitted_checklist_items,
             "submittedResult": submitted_result,
             "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
-                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Use finalAnswerChecklist only to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, also use finalObligation from this call."
+                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, also use finalObligation from this call."
             ),
         }))))
     }
@@ -233,7 +254,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: format!("Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed records finalObligation and the terminal result together in one atomic storage transaction: finish every blackboard, relationship, steering, and verification operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome; then supply completionIdempotencyKey, finalObligation, and the result in this single final Stateful mutation. The tool rejects changed run or root revisions before persistence and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
+            description: format!("Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed records finalObligation and the terminal result together in one atomic storage transaction: finish every blackboard, relationship, steering, and verification operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority current E aliases and at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact historical entry revisions directly material to the outcome; then supply completionIdempotencyKey, finalObligation, and the result in this single final Stateful mutation. Full source fingerprints in result or finalObligation must belong to a selected current or historical finding; the host renders selected evidence identifiers into the durable completion basis. The tool rejects changed run or root revisions before persistence and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -245,6 +266,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative after all durable writes and verification. The tool appends the structured completion basis."},
                     "rootRevision": {"type": "integer", "minimum": 0, "description": "Required for completed. Copy the project intelligence revision shown with the current root blackboard; completion fails before mutation if it changed."},
                     "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": format!("Required for completed. Select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases shown at rootRevision that are directly material to the requested outcome; preserve additional material conclusions in finalObligation. Use [] only after determining no root finding is material.")},
+                    "materialHistoricalFindings": {"type": "array", "items": {"type": "object", "properties": {"entryId": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}}, "required": ["entryId", "revision"], "additionalProperties": false}, "maxItems": MAX_MATERIAL_HISTORICAL_FINDINGS, "description": format!("Optional for completed. Select at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact superseded or tombstoned entry IDs and revisions returned by blackboard_query when historical evidence is material. The host renders their stored source fingerprints; do not copy opaque fingerprints manually.")},
                     "completionIdempotencyKey": {"type": "string", "description": "Required for completed. Reuse only when retrying this identical final obligation and terminal result."},
                     "finalObligation": super::obligation::obligation_packet_schema()
                 },

@@ -123,6 +123,117 @@ async fn selected_project_provides_shared_prompt_cache_affinity() -> Result<()> 
 }
 
 #[tokio::test]
+async fn completion_rejects_an_unselected_source_fingerprint_without_mutating_the_run() -> Result<()>
+{
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Completion provenance guard".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "completion-provenance-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: "Complete with exact provenance.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "completion-provenance-run".to_string(),
+            },
+        })
+        .await?;
+    let invented = format!("sha256:{}", "a".repeat(64));
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "invalid-completion",
+                    "stateful_run_update",
+                    &json!({
+                        "expectedRevision": 1,
+                        "status": "completed",
+                        "result": format!("The historical source was {invented}."),
+                        "rootRevision": 0,
+                        "materialRootFindings": [],
+                        "completionIdempotencyKey": "invented-provenance",
+                        "finalObligation": {
+                            "learning": [format!("Historical evidence used {invented}.")],
+                            "implication": ["The result would otherwise be complete."]
+                        }
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("invalid-completion-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message(
+                    "provenance-rejected",
+                    "The completion was rejected because its provenance was not selected.",
+                ),
+                responses::ev_completed("provenance-rejected-response"),
+            ]),
+        ],
+    )
+    .await;
+
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id,
+            input: vec![UserInput::Text {
+                text: "Finish with the historical source fingerprint.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 2);
+    let rejection = requests[1].function_call_output("invalid-completion");
+    assert!(rejection.to_string().contains("unknown source fingerprint"));
+    assert!(rejection.to_string().contains("materialHistoricalFindings"));
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(started.run.id),
+                thread_id: None,
+            },
+        })
+        .await?;
+    let run = read.run.expect("run remains readable after rejection");
+    assert_eq!(run.status, StatefulRunStatus::Running);
+    assert_eq!(run.result, None);
+    Ok(())
+}
+
+#[tokio::test]
 async fn stateful_run_preserves_explicit_mode_and_reconciles_live_controls() -> Result<()> {
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
