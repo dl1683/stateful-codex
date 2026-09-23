@@ -23,9 +23,14 @@ async function main() {
   const tasks = await prioritizeStartedTasks(cohort, options);
   const semaphore = new Semaphore(options.concurrency);
 
-  await Promise.all(
+  const results = await Promise.allSettled(
     tasks.map((entry) => runTaskSeries(entry, options, semaphore)),
   );
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    for (const failure of failures) console.error(failure.reason);
+    throw new Error(`${failures.length} task series failed`);
+  }
 }
 
 async function runTaskSeries(entry, options, semaphore) {
@@ -100,6 +105,7 @@ async function runValidAttempt({ entry, attempt, previousResult, options }) {
     await validateTrialIdentity(trial, entry.task, stateDir);
 
     if (!isPreAgentInfrastructureFailure(trial.result)) {
+      await access(path.join(trial.trialDir, "agent", "stateful-state.sha256"));
       const memoryMutationObserved = await observedBlackboardMutation(
         trial.trialDir,
       );
@@ -249,7 +255,6 @@ async function validateTrialIdentity(trial, task, stateDir) {
   if (stateMount?.source !== expectedSource || stateMount.type !== "bind") {
     throw new Error(`state mount mismatch for ${task}`);
   }
-  await access(path.join(trial.trialDir, "agent", "stateful-state.sha256"));
 }
 
 function isPreAgentInfrastructureFailure(result) {
