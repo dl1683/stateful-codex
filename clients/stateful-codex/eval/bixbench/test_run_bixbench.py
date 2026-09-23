@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from run_bixbench import grade_deterministic, normalized_answer, sha256_file
+from protocol import grade_deterministic, normalized_answer, sha256_file
 
 
 class BixBenchRunnerTests(unittest.TestCase):
