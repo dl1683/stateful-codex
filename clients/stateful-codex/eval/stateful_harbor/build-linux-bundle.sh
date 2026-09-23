@@ -122,6 +122,8 @@ printf '%s\n' \
 
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -C "$staging/package" -cf - . | gzip -n > "$archive"
-sha256sum "$archive" > "$archive.sha256"
+archive_digest="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+printf '%s  %s\n' "$archive_digest" "$(basename -- "$archive")" \
+  > "$archive.sha256"
 printf '%s\n' "$archive"
 printf '%s\n' "$archive.sha256"

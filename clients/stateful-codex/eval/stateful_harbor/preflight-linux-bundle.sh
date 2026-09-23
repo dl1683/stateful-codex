@@ -9,7 +9,14 @@ if [[ ! -f "$bundle" || ! -f "$sidecar" ]]; then
   echo "bundle and SHA-256 sidecar are required" >&2
   exit 1
 fi
-(cd -- "$(dirname -- "$bundle")" && sha256sum --check "$(basename -- "$sidecar")")
+expected_digest="$(cut -d ' ' -f 1 "$sidecar")"
+actual_digest="$(sha256sum "$bundle" | cut -d ' ' -f 1)"
+if [[ ! "$expected_digest" =~ ^[0-9a-f]{64}$ || \
+  "$actual_digest" != "$expected_digest" ]]; then
+  echo "bundle SHA-256 mismatch" >&2
+  exit 1
+fi
+printf '%s: OK\n' "$(basename -- "$bundle")"
 
 container="$(docker create --entrypoint sh "$task_image" -c '
   set -eu
