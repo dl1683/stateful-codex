@@ -10,7 +10,10 @@ if [[ ! -f "$bundle" || ! -f "$sidecar" ]]; then
   exit 1
 fi
 expected_digest="$(cut -d ' ' -f 1 "$sidecar")"
-actual_digest="$(sha256sum "$bundle" | cut -d ' ' -f 1)"
+actual_digest_line="$(sha256sum "$bundle")"
+# GNU sha256sum prefixes output with `\` when a Windows path needs escaping.
+actual_digest_line="${actual_digest_line#\\}"
+actual_digest="${actual_digest_line%% *}"
 if [[ ! "$expected_digest" =~ ^[0-9a-f]{64}$ || \
   "$actual_digest" != "$expected_digest" ]]; then
   echo "bundle SHA-256 mismatch" >&2
