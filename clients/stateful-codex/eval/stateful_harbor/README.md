@@ -22,8 +22,10 @@ bash clients/stateful-codex/eval/stateful_harbor/build-portable-linux-bundle.sh
 
 The script builds `codex` and `codex-code-mode-host`, creates a deterministic
 package under `clients/stateful-codex/eval/artifacts/`, and writes its SHA-256
-sidecar. Docker BuildKit caches the Rust and V8 inputs between builds. Binaries
-are deliberately not committed.
+sidecar. It packages the checksum-pinned Bullseye OpenSSL runtime beside thin
+launchers so newer task images do not need the older shared-library ABI. Docker
+BuildKit caches the Rust and V8 inputs between builds. Binaries are deliberately
+not committed.
 
 Before Harbor can invoke a model, run the archive in the exact task image:
 

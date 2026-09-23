@@ -25,7 +25,7 @@ trap 'rm -rf -- "$staging"' EXIT
 target="x86_64-unknown-linux-gnu"
 v8_profile="ptrcomp_sandbox_release"
 
-mkdir -p "$output_dir" "$staging/package/bin"
+mkdir -p "$output_dir" "$staging/package/bin" "$staging/package/lib"
 
 mapfile -t v8_versions < <(
   awk '
@@ -110,14 +110,35 @@ export RUSTY_V8_SRC_BINDING_PATH="$v8_dir/$v8_binding"
     -p codex-code-mode-host
 )
 
-install -m 0755 "$target_dir/release/codex" "$staging/package/bin/codex"
+install -m 0755 "$target_dir/release/codex" "$staging/package/bin/codex.real"
 install -m 0755 \
   "$target_dir/release/codex-code-mode-host" \
-  "$staging/package/bin/codex-code-mode-host"
-strip --strip-unneeded "$staging/package/bin/codex"
-strip --strip-unneeded "$staging/package/bin/codex-code-mode-host"
+  "$staging/package/bin/codex-code-mode-host.real"
+strip --strip-unneeded "$staging/package/bin/codex.real"
+strip --strip-unneeded "$staging/package/bin/codex-code-mode-host.real"
+
+for library in libssl.so.1.1 libcrypto.so.1.1; do
+  library_path="$(ldconfig -p | awk -v name="$library" '$1 == name { print $NF; exit }')"
+  if [[ -z "$library_path" ]]; then
+    echo "missing required runtime library: $library" >&2
+    exit 1
+  fi
+  cp -L -- "$library_path" "$staging/package/lib/$library"
+  chmod 0644 "$staging/package/lib/$library"
+done
+
+for executable in codex codex-code-mode-host; do
+  cat > "$staging/package/bin/$executable" <<EOF
+#!/bin/sh
+script_path="\$(readlink -f -- "\$0")"
+script_dir="\$(dirname -- "\$script_path")"
+export LD_LIBRARY_PATH="\$script_dir/../lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+exec "\$script_dir/$executable.real" "\$@"
+EOF
+  chmod 0755 "$staging/package/bin/$executable"
+done
 printf '%s\n' \
-  "{\"layoutVersion\":1,\"version\":\"0.0.0\",\"target\":\"x86_64-unknown-linux-gnu\",\"variant\":\"stateful-codex\",\"entrypoint\":\"bin/codex\",\"sourceCommit\":\"$commit\"}" \
+  "{\"layoutVersion\":1,\"version\":\"0.0.0\",\"target\":\"x86_64-unknown-linux-gnu\",\"variant\":\"stateful-codex\",\"entrypoint\":\"bin/codex\",\"sourceCommit\":\"$commit\",\"bundledRuntimeLibraries\":[\"libssl.so.1.1\",\"libcrypto.so.1.1\"]}" \
   > "$staging/package/codex-package.json"
 
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \

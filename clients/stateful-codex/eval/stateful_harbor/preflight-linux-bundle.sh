@@ -22,10 +22,11 @@ container="$(docker create --entrypoint sh "$task_image" -c '
   set -eu
   mkdir -p /tmp/stateful-codex-preflight
   tar -xzf /tmp/stateful-codex.tar.gz -C /tmp/stateful-codex-preflight
-  if ldd /tmp/stateful-codex-preflight/bin/codex | grep -F "not found"; then
+  export LD_LIBRARY_PATH=/tmp/stateful-codex-preflight/lib
+  if ldd /tmp/stateful-codex-preflight/bin/codex.real | grep -F "not found"; then
     exit 1
   fi
-  if ldd /tmp/stateful-codex-preflight/bin/codex-code-mode-host | grep -F "not found"; then
+  if ldd /tmp/stateful-codex-preflight/bin/codex-code-mode-host.real | grep -F "not found"; then
     exit 1
   fi
   mkdir -p /tmp/stateful-codex-preflight-links
