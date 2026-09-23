@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { finished } from "node:stream/promises";
@@ -45,6 +45,7 @@ async function main() {
   }
   const resultRoot = path.join(options.output, project.id, options.arm);
   await mkdir(resultRoot, { recursive: true });
+  await prepareIsolatedCodexHome(options.codexHome, options.authHome);
   const statePath = path.join(resultRoot, "run-state.json");
   const initialRevision = `sha256:${snapshot.corpus.sha256}`;
   const state = await readState(
@@ -57,7 +58,12 @@ async function main() {
   if (`sha256:${openingHash.sha256}` !== state.corpusRevision) {
     throw new Error(`corpus changed before ${project.id}/${options.arm}`);
   }
-  await assertChatGptLogin(options.codex, workspace, options.sqliteHome);
+  await assertChatGptLogin(
+    options.codex,
+    workspace,
+    options.sqliteHome,
+    options.codexHome,
+  );
 
   for (let index = state.nextCase; index < project.cases.length; index += 1) {
     const benchmarkCase = project.cases[index];
@@ -185,7 +191,7 @@ async function runTurn(options) {
   );
   const child = spawn(options.codex, args, {
     cwd: options.workspace,
-    env: authEnvironment(options.sqliteHome),
+    env: authEnvironment(options.sqliteHome, options.codexHome),
     windowsHide: true,
   });
   child.stdin.end();
@@ -279,8 +285,14 @@ function extractThreadId(output) {
   return null;
 }
 
-async function assertChatGptLogin(codex, cwd, sqliteHome) {
-  const result = await capture(codex, ["login", "status"], cwd, sqliteHome);
+async function assertChatGptLogin(codex, cwd, sqliteHome, codexHome) {
+  const result = await capture(
+    codex,
+    ["login", "status"],
+    cwd,
+    sqliteHome,
+    codexHome,
+  );
   if (
     result.exitCode !== 0 ||
     !`${result.stdout}\n${result.stderr}`.includes("Logged in using ChatGPT")
@@ -289,10 +301,10 @@ async function assertChatGptLogin(codex, cwd, sqliteHome) {
   }
 }
 
-async function capture(command, args, cwd, sqliteHome) {
+async function capture(command, args, cwd, sqliteHome, codexHome) {
   const child = spawn(command, args, {
     cwd,
-    env: authEnvironment(sqliteHome),
+    env: authEnvironment(sqliteHome, codexHome),
     windowsHide: true,
   });
   child.stdin.end();
@@ -307,11 +319,34 @@ async function capture(command, args, cwd, sqliteHome) {
   return { exitCode, stdout, stderr };
 }
 
-function authEnvironment(sqliteHome) {
+export async function prepareIsolatedCodexHome(codexHome, authHome) {
+  await mkdir(codexHome, { recursive: true });
+  const source = path.join(authHome, "auth.json");
+  const target = path.join(codexHome, "auth.json");
+  if (path.resolve(source) === path.resolve(target)) return;
+  try {
+    await link(source, target);
+  } catch (error) {
+    if (error.code !== "EEXIST") {
+      throw new Error(
+        `could not link cached ChatGPT credentials into isolated Codex home: ${error.message}`,
+      );
+    }
+    const [sourceStat, targetStat] = await Promise.all([stat(source), stat(target)]);
+    if (sourceStat.dev !== targetStat.dev || sourceStat.ino !== targetStat.ino) {
+      throw new Error(
+        "isolated Codex home contains an auth.json that is not linked to the configured auth home",
+      );
+    }
+  }
+}
+
+export function authEnvironment(sqliteHome, codexHome) {
   const environment = { ...process.env };
   delete environment.OPENAI_API_KEY;
   delete environment.CODEX_API_KEY;
   environment.CODEX_SQLITE_HOME = sqliteHome;
+  environment.CODEX_HOME = codexHome;
   return environment;
 }
 
@@ -372,6 +407,8 @@ function parseArgs(args) {
     else if (argument === "--output") options.output = value;
     else if (argument === "--codex") options.codex = value;
     else if (argument === "--sqlite-home") options.sqliteHome = value;
+    else if (argument === "--codex-home") options.codexHome = value;
+    else if (argument === "--auth-home") options.authHome = value;
     else throw new Error(`unknown argument: ${argument}`);
   }
   if (
@@ -383,7 +420,7 @@ function parseArgs(args) {
     !options.codex
   ) {
     throw new Error(
-      "usage: --manifest PATH --project ID --arm baseline|stateful --snapshot-root PATH --output PATH --codex PATH [--sqlite-home PATH]",
+      "usage: --manifest PATH --project ID --arm baseline|stateful --snapshot-root PATH --output PATH --codex PATH [--sqlite-home PATH] [--codex-home PATH] [--auth-home PATH]",
     );
   }
   for (const field of ["manifest", "snapshotRoot", "output", "codex"]) {
@@ -394,6 +431,12 @@ function parseArgs(args) {
       process.env.CODEX_SQLITE_HOME ??
       process.env.CODEX_HOME ??
       path.join(homedir(), ".codex"),
+  );
+  options.authHome = path.resolve(
+    options.authHome ?? process.env.CODEX_HOME ?? path.join(homedir(), ".codex"),
+  );
+  options.codexHome = path.resolve(
+    options.codexHome ?? path.join(options.sqliteHome, "eval-codex-home"),
   );
   return options;
 }

@@ -36,6 +36,12 @@ authentication is retained. This prevents project-specific notes from earlier
 unrelated sessions from supplying either arm with hidden prior state. Memory
 use and memory generation must both be disabled explicitly in the frozen
 manifest runner; removing API-key environment variables is not sufficient.
+The runner also assigns a dedicated `CODEX_HOME` beneath its SQLite directory,
+so unrelated local rollouts are neither indexed nor available for resume. It
+hard-links only the existing `auth.json` from the configured authentication
+home, removes API-key variables, and refuses a pre-existing credential path
+that is not the same file. `--auth-home` and `--codex-home` may override those
+locations without changing the authentication mode.
 
 Question order is frozen before either arm is run. The sequence includes:
 

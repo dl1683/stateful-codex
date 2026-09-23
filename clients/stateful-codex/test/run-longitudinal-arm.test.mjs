@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { corpusHash } from "../eval/corpus-hash.mjs";
 import {
+  authEnvironment,
   nextAttemptNumber,
+  prepareIsolatedCodexHome,
   unresolvedAttemptForCase,
 } from "../eval/run-longitudinal-arm.mjs";
 import {
@@ -37,6 +39,32 @@ test("requires reconciliation after a failed or interrupted attempt", () => {
   };
   assert.equal(unresolvedAttemptForCase(state, "q01"), failed);
   assert.equal(unresolvedAttemptForCase(state, "q00"), undefined);
+});
+
+test("isolates evaluation history while reusing the cached login", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "stateful-auth-home-"));
+  const authHome = path.join(root, "auth");
+  const codexHome = path.join(root, "isolated");
+  const sqliteHome = path.join(root, "sqlite");
+  try {
+    await mkdir(authHome);
+    await writeFile(path.join(authHome, "auth.json"), "cached login");
+    await prepareIsolatedCodexHome(codexHome, authHome);
+    const [source, target] = await Promise.all([
+      stat(path.join(authHome, "auth.json")),
+      stat(path.join(codexHome, "auth.json")),
+    ]);
+    assert.equal(source.dev, target.dev);
+    assert.equal(source.ino, target.ino);
+
+    const environment = authEnvironment(sqliteHome, codexHome);
+    assert.equal(environment.CODEX_HOME, codexHome);
+    assert.equal(environment.CODEX_SQLITE_HOME, sqliteHome);
+    assert.equal(environment.OPENAI_API_KEY, undefined);
+    assert.equal(environment.CODEX_API_KEY, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("applies a hash-pinned source intervention once and resumes idempotently", async () => {
