@@ -2376,3 +2376,78 @@ fresh snapshot paths so the completed dry-run Stateful project identity and
 state cannot carry forward. Every final result will therefore be collected
 after this correction; no favorable or unfavorable completed result was
 selected for inclusion.
+
+## Benchmarks SC-EVAL-024 and SC-EVAL-025: source revision and compaction diagnostics
+
+Status: mechanism diagnostics completed on 2026-09-23. Neither cohort is a
+protocol-valid comparative result because the required independent quality,
+source-audit, and state observations have not yet been supplied. Both arms,
+failed infrastructure attempts, and the two distinct compaction regimes remain
+preserved; one regime is not substituted for the other.
+
+SC-EVAL-024 used a 20,000-token total-context limit. Its final clean cohort is
+under `%LOCALAPPDATA%/Temp/stateful-source-canary-run-final-8421d388`, with the
+matched snapshot under `stateful-source-canary-snapshot-final-8421d388`.
+Ordinary thread `01a0cd05-8c21-7990-93a1-5e6727e82259` and Stateful thread
+`01a0cd05-8a7b-7603-8adc-f7055ac91c10` both answered all four diagnostic cases
+correctly. Stateful detected the changed policy, replaced the current threshold
+of 10 with 6, changed the decision from permitted to not permitted at the
+unchanged measured count of 8, and retained the old conclusion and source
+fingerprint as superseded history. Four separate terminal run/state artifacts
+were captured on the one continued thread.
+
+The total-context stress economics failed decisively. Ordinary Codex used
+229,285 total tokens, 41,637 uncached input plus output tokens, 15 model
+responses, one canonical compaction, and 179,756 ms. Stateful used 833,145 total
+tokens, 229,241 uncached input plus output tokens, 39 model responses, 16
+canonical compactions, and 1,007,707 ms. Canonical reconciliation separates
+Stateful's usage into 449,138 productive-inference tokens across 23 responses
+and 384,007 compaction tokens across 16 responses; the additional compaction
+cost explains about 60.3% of the 603,860-token gap. The fixed Stateful prefix
+began near the artificial limit, so post-compaction requests repeatedly reached
+the same total-context threshold. This is valid extreme-stress evidence, not a
+claim that the approximately 2.5 KiB root blackboard intrinsically causes that
+cost.
+
+That cohort exposed and preserved three correctness limitations. First, runs
+started on resumed threads claimed an Autonomous continuation against the
+previous run's last turn before the new explicit question arrived. Second, the
+initial project fragment after the hidden file replacement still labelled the
+old promoted evidence current; model-driven context-map refresh discovered and
+repaired it only after inference began. Third, the v1 launch finding cited
+`policy.md` lines 3-5 although its decisive threshold appeared on line 6. The
+answer was correct because the model had read the full file, but that persisted
+locator was not semantically sufficient. Historical entries also remain
+current-query-inaccessible, and their original source bytes are not retained
+after overwrite; the successful historical answer was helped by v2 restating
+the old threshold.
+
+Commit `c65993a196` binds Autonomous continuation eligibility to a turn that
+actually started while the same run was active. The resumed-exec integration
+test rejects an automatic-continuation instruction in the new explicit prompt.
+Commit `aae58b6512` makes new longitudinal run states pin their exact rollout
+path, and graders verify its session ID instead of guessing from a shared
+directory.
+
+SC-EVAL-025 then used the same frozen sources, questions, model, effort, login,
+memory isolation, and source intervention with a 20,000-token
+`body_after_prefix` limit. Its clean artifacts are under
+`%LOCALAPPDATA%/Temp/stateful-source-growth-run-897af904` and
+`stateful-source-growth-snapshot-897af904`. Ordinary thread
+`01a0cd2a-7895-7bf2-bfaf-5378018974ee` used 1,002,847 total tokens, 83,039
+uncached input plus output tokens, 39 responses, and 557,834 ms. Stateful thread
+`01a0cd2a-766c-7b33-9e9a-9453429cd40b` used 507,855 total tokens, 62,415
+uncached input plus output tokens, 17 responses, and 209,877 ms: reductions of
+49.36%, 24.84%, 56.41%, and 62.38%, respectively. Both arms answered all four
+cases correctly. Every Stateful question created its own completed run on the
+same thread, every state artifact reports zero continuations used, and both run
+states pin their exact dated rollout.
+
+Neither SC-EVAL-025 arm compacted. It therefore isolates a useful economics and
+lifecycle improvement but does not prove equal-pressure compaction continuity.
+A separately frozen lower incremental-growth threshold is needed if that
+specific mechanism is retested. Production-default economics also remain a
+separate lane. Automated raw-read counts from these Windows rollouts are lower
+bounds because the parser does not yet expand looped `type`, `find`, and
+`findstr` commands into per-file reads; no read-saving claim is made from those
+counts.
