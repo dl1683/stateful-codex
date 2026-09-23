@@ -13,6 +13,12 @@ const DURABLE_DIMENSIONS = [
   "uncertaintyPreservation",
   "futureUsability",
 ];
+const DURABLE_ARTIFACTS = [
+  "submittedNarrative",
+  "persistedRunResult",
+  "semanticObligation",
+  "projectIntelligence",
+];
 const SOURCE_COUNT_FIELDS = [
   "uniqueFilesRead",
   "exactRegionsRead",
@@ -22,6 +28,7 @@ const SOURCE_COUNT_FIELDS = [
 ];
 const STATE_COUNT_FIELDS = [
   "projectRevision",
+  "runRevision",
   "hierarchyNodes",
   "blackboardEntries",
   "contextMapEntries",
@@ -61,14 +68,16 @@ function validateQuality(quality, arm) {
     VISIBLE_DIMENSIONS,
   );
   if (arm === "stateful") {
-    validateScoreGroup(
-      missing,
-      quality.scores?.durableState,
-      quality.rationales?.durableState,
-      "quality.scores.durableState",
-      "quality.rationales.durableState",
-      DURABLE_DIMENSIONS,
-    );
+    for (const artifact of DURABLE_ARTIFACTS) {
+      validateScoreGroup(
+        missing,
+        quality.scores?.[artifact],
+        quality.rationales?.[artifact],
+        `quality.scores.${artifact}`,
+        `quality.rationales.${artifact}`,
+        DURABLE_DIMENSIONS,
+      );
+    }
   }
   return missing;
 }
@@ -90,6 +99,9 @@ function validateState(state) {
   const missing = [];
   requireString(missing, state.method, "state.method");
   requireCount(missing, state.observedAtMs, "state.observedAtMs");
+  if (!/^[0-9a-f]{64}$/i.test(state.snapshotSha256 ?? "")) {
+    missing.push("state.snapshotSha256");
+  }
   for (const field of STATE_COUNT_FIELDS) {
     requireCount(missing, state[field], `state.${field}`);
   }

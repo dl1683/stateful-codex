@@ -70,6 +70,13 @@ attributes records by turn ID. It reports:
   root entries, evidence routes, and rendered freshness; and
 - durable Stateful completion observed in the same turn.
 
+After every successful Stateful turn, the runner also exports a canonical
+`turn-NN-state.json` artifact from the same SQLite home. It contains the exact
+stored run result, obligation history, steering, hierarchy, context map,
+blackboard revision history, evidence links, and relationships. The run-state
+record pins its corpus revision, intelligence revision, run revision, and
+SHA-256 hash. A missing or changed export invalidates that turn.
+
 The evaluator rejects missing or incomplete turns, prompt/configuration drift,
 unattributed compactions, unreconciled usage, a missing Stateful project
 fragment, and missing durable completion. Cumulative session totals are never
@@ -109,7 +116,10 @@ each arm. Required top-level fields are configured in the frozen manifest.
             "contradictionAndFreshness": 4,
             "usefulness": 4
           },
-          "durableState": null
+          "submittedNarrative": null,
+          "persistedRunResult": null,
+          "semanticObligation": null,
+          "projectIntelligence": null
         },
         "rationales": {
           "visibleAnswer": {
@@ -120,7 +130,10 @@ each arm. Required top-level fields are configured in the frozen manifest.
             "contradictionAndFreshness": "Concise source-grounded rationale.",
             "usefulness": "Concise source-grounded rationale."
           },
-          "durableState": null
+          "submittedNarrative": null,
+          "persistedRunResult": null,
+          "semanticObligation": null,
+          "projectIntelligence": null
         }
       },
       "sourceAudit": {
@@ -139,11 +152,13 @@ each arm. Required top-level fields are configured in the frozen manifest.
 }
 ```
 
-For the Stateful arm, `quality.scores.durableState` is scored separately and
-`state` records the post-turn project revision and counts for hierarchy nodes,
-blackboard entries, context-map entries, relationships, root entries, stale
-records, and maintenance work. Ordinary Codex uses `null` for durable state and
-does not require the `state` field.
+For the Stateful arm, the submitted completion narrative, actual persisted run
+result, latest semantic obligation, and queryable project intelligence are
+graded as four separate artifacts. They must never appear beside the blinded
+A/B answers. `state` records the pinned artifact hash, post-turn project and run
+revisions, and counts for hierarchy nodes, blackboard entries, context-map
+entries, relationships, root entries, stale records, and maintenance work.
+Ordinary Codex does not require these artifact scores or the `state` field.
 
 Missing observations remain missing and make the comparison invalid. They are
 never reconstructed from answer prose or replaced with a literal term score.
@@ -164,10 +179,12 @@ Each dimension is scored from 0 to 4 against the exact source corpus:
 - `usefulness`: the result directly resolves the user's requested outcome and
   preserves the relevant boundary.
 
-Graders receive randomized arm labels, the prompt, source revision, and artifact
-being scored. They do not receive token counts or product-arm identity. Visible
-answers and Stateful durable records are graded as separate artifacts. Literal
-expected-concept and forbidden-phrase checks remain diagnostic only.
+Visible-answer graders receive randomized arm labels, the prompt, and source
+revision. They do not receive token counts, product-arm identity, submitted
+completion narratives, or persistent state. The private arm mapping must be in
+a directory disjoint from the public answer packets. Only after answer grades
+are sealed are the four Stateful artifacts prepared and graded independently.
+Literal expected-concept and forbidden-phrase checks remain diagnostic only.
 
 ## Reporting
 
@@ -195,3 +212,14 @@ npm run eval:longitudinal -- \
 Repeat `--pair` and `--observations` for each project in the frozen manifest.
 The process exits nonzero when the comparison contract or required measurements
 are incomplete; performance losses do not make a valid experiment invalid.
+
+Prepare answer and state grading through separate commands and directories:
+
+```text
+npm run eval:prepare-grading -- --manifest ... --result-root ... \
+  --snapshot-root ... --sessions-root ... --output PUBLIC_PACKETS \
+  --mapping-output PRIVATE_MAPPING --seed FROZEN_SEED
+
+npm run eval:prepare-state-grading -- --manifest ... --result-root ... \
+  --snapshot-root ... --sessions-root ... --output STATE_PACKETS
+```

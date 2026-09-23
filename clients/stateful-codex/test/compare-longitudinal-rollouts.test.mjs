@@ -23,6 +23,12 @@ function observation(withState) {
   const scores = (dimensions) => Object.fromEntries(dimensions.map((field) => [field, 4]));
   const rationales = (dimensions) =>
     Object.fromEntries(dimensions.map((field) => [field, `${field} rationale`]));
+  const durableArtifacts = [
+    "submittedNarrative",
+    "persistedRunResult",
+    "semanticObligation",
+    "projectIntelligence",
+  ];
   const quality = {
     blinded: true,
     rubricVersion: "v1",
@@ -32,11 +38,21 @@ function observation(withState) {
     ],
     scores: {
       visibleAnswer: scores(visibleDimensions),
-      durableState: withState ? scores(durableDimensions) : null,
+      ...Object.fromEntries(
+        durableArtifacts.map((artifact) => [
+          artifact,
+          withState ? scores(durableDimensions) : null,
+        ]),
+      ),
     },
     rationales: {
       visibleAnswer: rationales(visibleDimensions),
-      durableState: withState ? rationales(durableDimensions) : null,
+      ...Object.fromEntries(
+        durableArtifacts.map((artifact) => [
+          artifact,
+          withState ? rationales(durableDimensions) : null,
+        ]),
+      ),
     },
   };
   const sourceAudit = {
@@ -52,7 +68,9 @@ function observation(withState) {
   const state = {
     method: "sqlite-v1",
     observedAtMs: 1,
+    snapshotSha256: "1".repeat(64),
     projectRevision: 3,
+    runRevision: 2,
     hierarchyNodes: 2,
     blackboardEntries: 3,
     contextMapEntries: 1,

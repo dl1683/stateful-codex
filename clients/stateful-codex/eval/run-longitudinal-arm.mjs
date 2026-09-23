@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { finished } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 
 import { corpusHash } from "./corpus-hash.mjs";
+import { writeProjectStateArtifact } from "./export-project-state.mjs";
 
 const MEMORY_ISOLATION_ARGS = [
   "-c",
@@ -34,7 +36,7 @@ async function main() {
   if (initialHash.sha256 !== snapshot.corpus.sha256) {
     throw new Error(`corpus changed before ${project.id}/${options.arm}`);
   }
-  await assertChatGptLogin(options.codex, workspace);
+  await assertChatGptLogin(options.codex, workspace, options.sqliteHome);
 
   for (let index = state.nextCase; index < project.cases.length; index += 1) {
     const benchmarkCase = project.cases[index];
@@ -106,6 +108,32 @@ async function main() {
       await writeState(statePath, state);
       throw error;
     }
+    if (options.arm === "stateful") {
+      const stateArtifactPath = path.join(
+        resultRoot,
+        `turn-${String(index + 1).padStart(2, "0")}-state.json`,
+      );
+      let stateArtifact;
+      try {
+        stateArtifact = await writeProjectStateArtifact({
+          sqliteHome: options.sqliteHome,
+          threadId: state.threadId,
+          corpusRevision: turnRecord.corpusRevision,
+          output: stateArtifactPath,
+        });
+      } catch (error) {
+        finishAttempt(attempt, { status: "invalid", error, exitCode: output.exitCode });
+        await writeState(statePath, state);
+        throw error;
+      }
+      turnRecord.stateArtifact = {
+        path: stateArtifactPath,
+        snapshotSha256: stateArtifact.snapshotSha256,
+        capturedAtMs: stateArtifact.capturedAtMs,
+        intelligenceRevision: stateArtifact.intelligenceRevision,
+        runRevision: stateArtifact.run.revision,
+      };
+    }
     finishAttempt(attempt, { status: "completed", exitCode: output.exitCode });
     state.turns.push(turnRecord);
     state.nextCase = index + 1;
@@ -127,7 +155,7 @@ async function runTurn(options) {
   );
   const child = spawn(options.codex, args, {
     cwd: options.workspace,
-    env: authEnvironment(),
+    env: authEnvironment(options.sqliteHome),
     windowsHide: true,
   });
   child.stdin.end();
@@ -205,8 +233,8 @@ function extractThreadId(output) {
   return null;
 }
 
-async function assertChatGptLogin(codex, cwd) {
-  const result = await capture(codex, ["login", "status"], cwd);
+async function assertChatGptLogin(codex, cwd, sqliteHome) {
+  const result = await capture(codex, ["login", "status"], cwd, sqliteHome);
   if (
     result.exitCode !== 0 ||
     !`${result.stdout}\n${result.stderr}`.includes("Logged in using ChatGPT")
@@ -215,8 +243,12 @@ async function assertChatGptLogin(codex, cwd) {
   }
 }
 
-async function capture(command, args, cwd) {
-  const child = spawn(command, args, { cwd, env: authEnvironment(), windowsHide: true });
+async function capture(command, args, cwd, sqliteHome) {
+  const child = spawn(command, args, {
+    cwd,
+    env: authEnvironment(sqliteHome),
+    windowsHide: true,
+  });
   child.stdin.end();
   let stdout = "";
   let stderr = "";
@@ -229,10 +261,11 @@ async function capture(command, args, cwd) {
   return { exitCode, stdout, stderr };
 }
 
-function authEnvironment() {
+function authEnvironment(sqliteHome) {
   const environment = { ...process.env };
   delete environment.OPENAI_API_KEY;
   delete environment.CODEX_API_KEY;
+  environment.CODEX_SQLITE_HOME = sqliteHome;
   return environment;
 }
 
@@ -281,6 +314,7 @@ function parseArgs(args) {
     else if (argument === "--snapshot-root") options.snapshotRoot = value;
     else if (argument === "--output") options.output = value;
     else if (argument === "--codex") options.codex = value;
+    else if (argument === "--sqlite-home") options.sqliteHome = value;
     else throw new Error(`unknown argument: ${argument}`);
   }
   if (
@@ -292,12 +326,18 @@ function parseArgs(args) {
     !options.codex
   ) {
     throw new Error(
-      "usage: --manifest PATH --project ID --arm baseline|stateful --snapshot-root PATH --output PATH --codex PATH",
+      "usage: --manifest PATH --project ID --arm baseline|stateful --snapshot-root PATH --output PATH --codex PATH [--sqlite-home PATH]",
     );
   }
   for (const field of ["manifest", "snapshotRoot", "output", "codex"]) {
     options[field] = path.resolve(options[field]);
   }
+  options.sqliteHome = path.resolve(
+    options.sqliteHome ??
+      process.env.CODEX_SQLITE_HOME ??
+      process.env.CODEX_HOME ??
+      path.join(homedir(), ".codex"),
+  );
   return options;
 }
 

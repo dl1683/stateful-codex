@@ -691,6 +691,17 @@ work was answer completion, and used five responses, 109,325 full tokens, and
 but the workflow and economics regressed. This repeated procurement prompt is
 now frozen as a development case rather than tuned again.
 
+The six-project SC-EVAL-023 breadth screen is retained as directional evidence,
+not treated as a protocol-valid persistence result. Both blind graders preferred
+ordinary Codex on five projects; they disagreed on AGI Thesis. All twelve arms
+had zero compactions. The original auxiliary `S` object was the model-submitted
+completion narrative, not the persisted run result or project intelligence, and
+its placement beside A/B could reveal the Stateful answer. Those grades remain
+unaltered but must be labelled accordingly. Future runs create answer-only
+public packets with a disjoint private mapping, capture a hash-pinned SQLite
+state artifact after every Stateful turn, and grade the submitted narrative,
+persisted result, obligation, and project intelligence separately.
+
 Before the six-project breadth screen, the evaluator must become turn-aware.
 The present series comparator assumes one rollout per question and sums final
 cumulative usage; reusing a thread would double-count earlier turns, while
