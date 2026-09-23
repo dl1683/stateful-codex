@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 
 import { corpusHash } from "./corpus-hash.mjs";
 import { writeProjectStateArtifact } from "./export-project-state.mjs";
+import { findRolloutPath } from "./rollout-path.mjs";
 import {
   applyScheduledIntervention,
   validateInterventionSchedule,
@@ -129,6 +130,18 @@ async function main() {
       finishAttempt(attempt, { status: "failed", error, exitCode: output.exitCode });
       await writeState(statePath, state);
       throw error;
+    }
+    if (!state.rolloutPath) {
+      try {
+        state.rolloutPath = await findRolloutPath(
+          path.join(options.codexHome, "sessions"),
+          state.threadId,
+        );
+      } catch (error) {
+        finishAttempt(attempt, { status: "invalid", error, exitCode: output.exitCode });
+        await writeState(statePath, state);
+        throw error;
+      }
     }
     const currentHash = await corpusHash(workspace);
     if (`sha256:${currentHash.sha256}` !== state.corpusRevision) {
@@ -377,6 +390,7 @@ async function readState(statePath, project, arm, initialRevision) {
       project,
       arm,
       threadId: null,
+      rolloutPath: null,
       nextCase: 0,
       corpusRevision: initialRevision,
       appliedInterventions: [],

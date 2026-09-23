@@ -125,6 +125,11 @@ blackboard revision history, evidence links, and relationships. The run-state
 record pins its corpus revision, intelligence revision, run revision, and
 SHA-256 hash. A missing or changed export invalidates that turn.
 
+The runner also pins the exact append-only rollout path for each arm in
+`run-state.json`. Grading consumes that path and verifies its session ID rather
+than guessing from a shared session-directory listing. `--sessions-root` is an
+optional compatibility fallback only for older run states without this field.
+
 The evaluator rejects missing or incomplete turns, prompt/configuration drift,
 unattributed compactions, unreconciled usage, a missing Stateful project
 fragment, and missing durable completion. Cumulative session totals are never
@@ -265,9 +270,9 @@ Prepare answer and state grading through separate commands and directories:
 
 ```text
 npm run eval:prepare-grading -- --manifest ... --result-root ... \
-  --snapshot-root ... --sessions-root ... --output PUBLIC_PACKETS \
+  --snapshot-root ... --output PUBLIC_PACKETS \
   --mapping-output PRIVATE_MAPPING --seed FROZEN_SEED
 
 npm run eval:prepare-state-grading -- --manifest ... --result-root ... \
-  --snapshot-root ... --sessions-root ... --output STATE_PACKETS
+  --snapshot-root ... --output STATE_PACKETS
 ```

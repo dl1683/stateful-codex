@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { readEvents } from "./compare-rollouts.mjs";
+import { resolveRolloutPath } from "./rollout-path.mjs";
 import { stateArtifactHash } from "./export-project-state.mjs";
 import { summarizeLongitudinalEvents } from "./summarize-longitudinal-rollout.mjs";
 
@@ -27,7 +28,6 @@ const ARTIFACTS = [
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(await readFile(options.manifest, "utf8"));
-  const sessionFiles = await readdir(options.sessionsRoot);
   const gradingManifest = {
     rubricVersion: RUBRIC_VERSION,
     artifactSeparation: true,
@@ -42,11 +42,13 @@ async function main() {
         "utf8",
       ),
     );
-    const rolloutName = sessionFiles.find((name) => name.includes(runState.threadId));
-    if (!rolloutName) throw new Error(`missing Stateful rollout for ${project.id}`);
+    const rolloutPath = await resolveRolloutPath(runState, options.sessionsRoot);
     const summary = summarizeLongitudinalEvents(
-      await readEvents(path.join(options.sessionsRoot, rolloutName)),
+      await readEvents(rolloutPath),
     );
+    if (summary.sessionId !== runState.threadId) {
+      throw new Error(`Stateful rollout thread mismatch for ${project.id}`);
+    }
     if (summary.issues.length > 0 || summary.turns.length !== project.cases.length) {
       throw new Error(`invalid Stateful rollout for ${project.id}`);
     }
@@ -169,13 +171,14 @@ function parseArgs(args) {
     else if (argument === "--output") options.output = value;
     else throw new Error(`unknown argument: ${argument}`);
   }
-  const required = ["manifest", "resultRoot", "snapshotRoot", "sessionsRoot", "output"];
+  const required = ["manifest", "resultRoot", "snapshotRoot", "output"];
   if (required.some((field) => !options[field])) {
     throw new Error(
-      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --sessions-root PATH --output PATH",
+      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --output PATH [--sessions-root PATH]",
     );
   }
   for (const field of required) options[field] = path.resolve(options[field]);
+  if (options.sessionsRoot) options.sessionsRoot = path.resolve(options.sessionsRoot);
   return options;
 }
 

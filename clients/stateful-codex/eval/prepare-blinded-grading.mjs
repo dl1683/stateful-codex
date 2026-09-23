@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { readEvents } from "./compare-rollouts.mjs";
+import { resolveRolloutPath } from "./rollout-path.mjs";
 import { summarizeLongitudinalEvents } from "./summarize-longitudinal-rollout.mjs";
 
 const RUBRIC_VERSION = "stateful-longitudinal-v1";
@@ -61,7 +62,6 @@ function escapeRegExp(value) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const manifest = JSON.parse(await readFile(options.manifest, "utf8"));
-  const sessionFiles = await readdir(options.sessionsRoot);
   const mapping = {
     rubricVersion: RUBRIC_VERSION,
     seed: options.seed,
@@ -80,10 +80,11 @@ async function main() {
     for (const arm of ["baseline", "stateful"]) {
       const statePath = path.join(options.resultRoot, project.id, arm, "run-state.json");
       const state = JSON.parse(await readFile(statePath, "utf8"));
-      const rolloutName = sessionFiles.find((name) => name.includes(state.threadId));
-      if (!rolloutName) throw new Error(`missing rollout for ${project.id}/${arm}`);
-      const rolloutPath = path.join(options.sessionsRoot, rolloutName);
+      const rolloutPath = await resolveRolloutPath(state, options.sessionsRoot);
       const summary = summarizeLongitudinalEvents(await readEvents(rolloutPath));
+      if (summary.sessionId !== state.threadId) {
+        throw new Error(`rollout thread mismatch for ${project.id}/${arm}`);
+      }
       if (summary.issues.length > 0 || summary.turns.length !== project.cases.length) {
         throw new Error(`invalid rollout for ${project.id}/${arm}`);
       }
@@ -173,12 +174,13 @@ function parseArgs(args) {
   ];
   if (required.some((field) => !options[field])) {
     throw new Error(
-      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --sessions-root PATH --output PATH --mapping-output PATH --seed VALUE",
+      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --output PATH --mapping-output PATH --seed VALUE [--sessions-root PATH]",
     );
   }
   for (const field of required.filter((field) => field !== "seed")) {
     options[field] = path.resolve(options[field]);
   }
+  if (options.sessionsRoot) options.sessionsRoot = path.resolve(options.sessionsRoot);
   return options;
 }
 
