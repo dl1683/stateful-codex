@@ -5,6 +5,7 @@
   "scripts": {
     "eval": "node eval/compare-rollouts.mjs",
     "eval:export-state": "node --disable-warning=ExperimentalWarning eval/export-project-state.mjs",
+    "eval:harbor-feedback": "node eval/run-harbor-feedback-series.mjs",
     "eval:longitudinal": "node eval/compare-longitudinal-rollouts.mjs",
     "eval:prepare-grading": "node eval/prepare-blinded-grading.mjs",
     "eval:prepare-state-grading": "node --disable-warning=ExperimentalWarning eval/prepare-state-grading.mjs",
