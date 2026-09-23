@@ -35,7 +35,7 @@ async function main() {
 }
 
 async function runTaskSeries(entry, options, semaphore) {
-  let previousResult = await findColdResult(entry, options.jobsDir);
+  const resultHistory = [await findColdResult(entry, options.jobsDir)];
 
   for (let attempt = 2; attempt <= options.attempts; attempt += 1) {
     const completedJob = await readJsonIfPresent(
@@ -49,10 +49,10 @@ async function runTaskSeries(entry, options, semaphore) {
       const outcome = await runValidAttempt({
         entry,
         attempt,
-        previousResult,
+        resultHistory,
         options,
       });
-      previousResult = outcome.resultPath;
+      resultHistory.push(outcome.resultPath);
       await recordControllerOutcome(options, entry.task, attempt, outcome);
       continue;
     }
@@ -62,10 +62,10 @@ async function runTaskSeries(entry, options, semaphore) {
       const outcome = await runValidAttempt({
         entry,
         attempt,
-        previousResult,
+        resultHistory,
         options,
       });
-      previousResult = outcome.resultPath;
+      resultHistory.push(outcome.resultPath);
       await recordControllerOutcome(options, entry.task, attempt, outcome);
     } finally {
       release();
@@ -73,13 +73,13 @@ async function runTaskSeries(entry, options, semaphore) {
   }
 }
 
-async function runValidAttempt({ entry, attempt, previousResult, options }) {
+async function runValidAttempt({ entry, attempt, resultHistory, options }) {
   for (let infraRetry = 0; infraRetry <= MAX_INFRA_RETRIES; infraRetry += 1) {
     const suffix = infraRetry === 0 ? "" : `-infra-r${infraRetry}`;
     const jobName = `${options.jobPrefix}-${entry.task}-a${attempt}${suffix}`;
     const jobDir = path.join(options.jobsDir, jobName);
     const stateDir = path.join(options.stateRoot, entry.task, "feedback-state");
-    const feedback = await buildFeedback(previousResult, attempt - 1);
+    const feedback = await buildFeedbackHistory(resultHistory);
 
     const existingJobResult = await readJsonIfPresent(
       path.join(jobDir, "result.json"),
@@ -111,8 +111,8 @@ async function runValidAttempt({ entry, attempt, previousResult, options }) {
         trial.trialDir,
       );
       if (!memoryMutationObserved) {
-        throw new Error(
-          `${jobName} completed without a durable blackboard mutation; reconcile the outcome before continuing`,
+        console.error(
+          `[${entry.task}/attempt-${attempt}] no durable blackboard mutation; recording a persistence miss and continuing with cumulative outcome feedback`,
         );
       }
       return {
@@ -156,7 +156,8 @@ function launchHarbor({ task, jobName, stateDir, feedback, options }) {
     "Feedback-aware longitudinal Stateful study; this is not an official independent Terminal-Bench attempt.",
     feedback,
     "This authoritative outcome is part of the same project's work history.",
-    "At the start, reconcile it with existing project intelligence and supersede any contradicted claim.",
+    "At the start, reconcile the complete outcome history with existing project intelligence and supersede any contradicted claim.",
+    "Durable project memory must record the exact attempt outcomes and verifier evidence below; update one existing outcome-history entry when possible instead of creating duplicates.",
     "Reproduce the requested outcome in this fresh workspace without assuming prior workspace artifacts exist.",
     "Before completion, persist materially reusable successful mechanisms, failures or rejected approaches, verifier evidence, and lifecycle or uncertainty boundaries into project memory; do not merely report activity.",
   ].join(" ");
@@ -275,6 +276,17 @@ function isPreAgentInfrastructureFailure(result) {
   );
 }
 
+async function buildFeedbackHistory(resultPaths) {
+  const feedback = [];
+  for (let index = 0; index < resultPaths.length; index += 1) {
+    feedback.push(await buildFeedback(resultPaths[index], index + 1));
+  }
+  return `Authoritative outcome history: ${feedback.join(" ")}`.slice(
+    0,
+    MAX_FEEDBACK_CHARS,
+  );
+}
+
 async function buildFeedback(resultPath, attempt) {
   const result = JSON.parse(await readFile(resultPath, "utf8"));
   const reward = result.verifier_result?.rewards?.reward;
@@ -307,7 +319,7 @@ async function buildFeedback(resultPath, attempt) {
     }
   }
 
-  return parts.join(" ").slice(0, MAX_FEEDBACK_CHARS);
+  return parts.join(" ");
 }
 
 async function observedBlackboardMutation(trialDir) {
