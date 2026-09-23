@@ -28,8 +28,13 @@ container="$(docker create --entrypoint sh "$task_image" -c '
   if ldd /tmp/stateful-codex-preflight/bin/codex-code-mode-host | grep -F "not found"; then
     exit 1
   fi
-  /tmp/stateful-codex-preflight/bin/codex --version
-  /tmp/stateful-codex-preflight/bin/codex-code-mode-host --help >/dev/null
+  mkdir -p /tmp/stateful-codex-preflight-links
+  ln -s /tmp/stateful-codex-preflight/bin/codex \
+    /tmp/stateful-codex-preflight-links/codex
+  ln -s /tmp/stateful-codex-preflight/bin/codex-code-mode-host \
+    /tmp/stateful-codex-preflight-links/codex-code-mode-host
+  /tmp/stateful-codex-preflight-links/codex --version
+  /tmp/stateful-codex-preflight-links/codex-code-mode-host --help >/dev/null
   test -s /tmp/stateful-codex-preflight/codex-package.json
 ')"
 trap 'docker rm --force "$container" >/dev/null 2>&1 || true' EXIT
