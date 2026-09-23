@@ -13,6 +13,7 @@ import {
   applyScheduledIntervention,
   validateInterventionSchedule,
 } from "./source-intervention.mjs";
+import { validateStateEvidenceAssertions } from "./validate-state-evidence.mjs";
 
 const MEMORY_ISOLATION_ARGS = [
   "-c",
@@ -178,18 +179,23 @@ async function main() {
           corpusRevision: turnRecord.corpusRevision,
           output: stateArtifactPath,
         });
+        turnRecord.stateArtifact = {
+          path: stateArtifactPath,
+          snapshotSha256: stateArtifact.snapshotSha256,
+          capturedAtMs: stateArtifact.capturedAtMs,
+          intelligenceRevision: stateArtifact.intelligenceRevision,
+          runRevision: stateArtifact.run.revision,
+        };
+        turnRecord.stateEvidenceAssertions = await validateStateEvidenceAssertions({
+          state: stateArtifact,
+          benchmarkCase,
+          workspace,
+        });
       } catch (error) {
         finishAttempt(attempt, { status: "invalid", error, exitCode: output.exitCode });
         await writeState(statePath, state);
         throw error;
       }
-      turnRecord.stateArtifact = {
-        path: stateArtifactPath,
-        snapshotSha256: stateArtifact.snapshotSha256,
-        capturedAtMs: stateArtifact.capturedAtMs,
-        intelligenceRevision: stateArtifact.intelligenceRevision,
-        runRevision: stateArtifact.run.revision,
-      };
     }
     finishAttempt(attempt, { status: "completed", exitCode: output.exitCode });
     state.turns.push(turnRecord);

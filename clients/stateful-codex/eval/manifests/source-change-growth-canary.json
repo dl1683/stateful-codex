@@ -31,6 +31,9 @@
           "expectedConcepts": [
             {"name": "v1-threshold", "termGroups": [["10"], ["8"], ["permitted"]]}
           ],
+          "stateEvidenceAssertions": [
+            {"name": "v1-threshold-lines", "entryTermGroups": [["10"]], "sourceTermGroups": [["10 or fewer"]]}
+          ],
           "forbiddenPhrases": ["6 or fewer"]
         },
         {
@@ -52,6 +55,9 @@
           "expectedConcepts": [
             {"name": "v2-threshold", "termGroups": [["6"], ["8"], ["not permitted"]]},
             {"name": "supersession", "termGroups": [["replaces", "supersedes", "superseded"]]}
+          ],
+          "stateEvidenceAssertions": [
+            {"name": "v2-threshold-lines", "entryTermGroups": [["6"]], "sourceTermGroups": [["6 or fewer"]]}
           ],
           "forbiddenPhrases": ["launch is permitted"]
         },
