@@ -1,0 +1,3188 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-23T23:18:14.031Z",
+  "complete": false,
+  "expectedTasks": 15,
+  "expectedAttemptsPerTask": 5,
+  "completedAttempts": 50,
+  "missing": [
+    {
+      "task": "cobol-modernization",
+      "attempt": 2
+    },
+    {
+      "task": "cobol-modernization",
+      "attempt": 3
+    },
+    {
+      "task": "cobol-modernization",
+      "attempt": 4
+    },
+    {
+      "task": "cobol-modernization",
+      "attempt": 5
+    },
+    {
+      "task": "kv-store-grpc",
+      "attempt": 4
+    },
+    {
+      "task": "kv-store-grpc",
+      "attempt": 5
+    },
+    {
+      "task": "mteb-leaderboard",
+      "attempt": 3
+    },
+    {
+      "task": "mteb-leaderboard",
+      "attempt": 4
+    },
+    {
+      "task": "mteb-leaderboard",
+      "attempt": 5
+    },
+    {
+      "task": "query-optimize",
+      "attempt": 2
+    },
+    {
+      "task": "query-optimize",
+      "attempt": 3
+    },
+    {
+      "task": "query-optimize",
+      "attempt": 4
+    },
+    {
+      "task": "query-optimize",
+      "attempt": 5
+    },
+    {
+      "task": "reshard-c4-data",
+      "attempt": 2
+    },
+    {
+      "task": "reshard-c4-data",
+      "attempt": 3
+    },
+    {
+      "task": "reshard-c4-data",
+      "attempt": 4
+    },
+    {
+      "task": "reshard-c4-data",
+      "attempt": 5
+    },
+    {
+      "task": "rstan-to-pystan",
+      "attempt": 2
+    },
+    {
+      "task": "rstan-to-pystan",
+      "attempt": 3
+    },
+    {
+      "task": "rstan-to-pystan",
+      "attempt": 4
+    },
+    {
+      "task": "rstan-to-pystan",
+      "attempt": 5
+    },
+    {
+      "task": "sqlite-with-gcov",
+      "attempt": 2
+    },
+    {
+      "task": "sqlite-with-gcov",
+      "attempt": 3
+    },
+    {
+      "task": "sqlite-with-gcov",
+      "attempt": 4
+    },
+    {
+      "task": "sqlite-with-gcov",
+      "attempt": 5
+    }
+  ],
+  "aggregate": {
+    "attempt": null,
+    "records": 50,
+    "passes": 40,
+    "failures": 10,
+    "passRate": 0.8,
+    "inputTokens": 119928167,
+    "cachedInputTokens": 114207360,
+    "uncachedInputTokens": 5720807,
+    "outputTokens": 1414261,
+    "costUsd": 5.1268980399999995,
+    "agentSeconds": 35969.167,
+    "totalSeconds": 44945.759,
+    "persistenceMisses": 2,
+    "infrastructureRetries": 9
+  },
+  "byAttempt": [
+    {
+      "attempt": 1,
+      "records": 15,
+      "passes": 12,
+      "failures": 3,
+      "passRate": 0.8,
+      "inputTokens": 40093033,
+      "cachedInputTokens": 38253312,
+      "uncachedInputTokens": 1839721,
+      "outputTokens": 462134,
+      "costUsd": 1.6875712400000002,
+      "agentSeconds": 11091.431999999999,
+      "totalSeconds": 12959.147,
+      "persistenceMisses": 0,
+      "infrastructureRetries": 0
+    },
+    {
+      "attempt": 2,
+      "records": 10,
+      "passes": 8,
+      "failures": 2,
+      "passRate": 0.8,
+      "inputTokens": 26941518,
+      "cachedInputTokens": 25856512,
+      "uncachedInputTokens": 1085006,
+      "outputTokens": 270869,
+      "costUsd": 1.05917424,
+      "agentSeconds": 6988.57,
+      "totalSeconds": 9452.288,
+      "persistenceMisses": 0,
+      "infrastructureRetries": 0
+    },
+    {
+      "attempt": 3,
+      "records": 9,
+      "passes": 7,
+      "failures": 2,
+      "passRate": 0.7777777777777778,
+      "inputTokens": 17476847,
+      "cachedInputTokens": 16611584,
+      "uncachedInputTokens": 865263,
+      "outputTokens": 219150,
+      "costUsd": 0.76826428,
+      "agentSeconds": 5350.859,
+      "totalSeconds": 7846.507000000001,
+      "persistenceMisses": 0,
+      "infrastructureRetries": 8
+    },
+    {
+      "attempt": 4,
+      "records": 8,
+      "passes": 6,
+      "failures": 2,
+      "passRate": 0.75,
+      "inputTokens": 17043670,
+      "cachedInputTokens": 16150400,
+      "uncachedInputTokens": 893270,
+      "outputTokens": 242992,
+      "costUsd": 0.7932524000000001,
+      "agentSeconds": 5441.588,
+      "totalSeconds": 6472.296,
+      "persistenceMisses": 1,
+      "infrastructureRetries": 1
+    },
+    {
+      "attempt": 5,
+      "records": 8,
+      "passes": 7,
+      "failures": 1,
+      "passRate": 0.875,
+      "inputTokens": 18373099,
+      "cachedInputTokens": 17335552,
+      "uncachedInputTokens": 1037547,
+      "outputTokens": 219116,
+      "costUsd": 0.81863588,
+      "agentSeconds": 7096.718000000001,
+      "totalSeconds": 8215.521,
+      "persistenceMisses": 1,
+      "infrastructureRetries": 0
+    }
+  ],
+  "tasks": [
+    {
+      "task": "cobol-modernization",
+      "trajectory": {
+        "rewards": [
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 0,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.13345924,
+        "finalCostUsd": 0.13345924,
+        "finalToColdCostRatio": 1,
+        "lowestPassingCostUsd": 0.13345924
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "cobol-modernization",
+          "job": "sc-tb21-stateful-r1b1-30-pinned-ef3a1ff",
+          "trial": "cobol-modernization__JfmDL3r",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 3255245,
+          "cachedInputTokens": 3133952,
+          "uncachedInputTokens": 121293,
+          "outputTokens": 38768,
+          "costUsd": 0.13345924,
+          "agentSeconds": 838.658,
+          "totalSeconds": 891.31,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "a165934748050cb5adf79db5c05dbb17ca1dbb6273a08e1952034dbf7a19b8b6",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_required_files_exist",
+                "status": "passed",
+                "durationSeconds": 0.0007176399994932581,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_data_files_exist",
+                "status": "passed",
+                "durationSeconds": 0.0003179929990437813,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_program_output",
+                "status": "passed",
+                "durationSeconds": 0.07039598600385943,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "kv-store-grpc",
+      "trajectory": {
+        "rewards": [
+          1,
+          1,
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 2,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.023609920000000003,
+        "finalCostUsd": 0.044569439999999995,
+        "finalToColdCostRatio": 1.8877421016250793,
+        "lowestPassingCostUsd": 0.02344356
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "kv-store-grpc",
+          "job": "sc-tb21-stateful-full445-pinned-ef3a1ff",
+          "trial": "kv-store-grpc__tpWZjM3",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 331658,
+          "cachedInputTokens": 293376,
+          "uncachedInputTokens": 38282,
+          "outputTokens": 8405,
+          "costUsd": 0.023609920000000003,
+          "agentSeconds": 207.423,
+          "totalSeconds": 253.087,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "da837ace64a56dd2ff3694626700b9e42a3fb94b8b9c5e946ff42785009fc2be",
+          "verifier": {
+            "passed": 7,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_proto_file_creation",
+                "status": "passed",
+                "durationSeconds": 0.00037764499938930385,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_tools_installation",
+                "status": "passed",
+                "durationSeconds": 0.01975315299932845,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_protobuf_generation",
+                "status": "passed",
+                "durationSeconds": 0.00023878299725765828,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_server_file_creation",
+                "status": "passed",
+                "durationSeconds": 0.00024952300009317696,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_real_grpc_server_running",
+                "status": "passed",
+                "durationSeconds": 0.0003083629999309778,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_protocol_handshake",
+                "status": "passed",
+                "durationSeconds": 0.01575536100062891,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_server_functionality",
+                "status": "passed",
+                "durationSeconds": 0.002503400000932743,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "kv-store-grpc",
+          "job": "sc-tb21-feedback-v3-kv-store-grpc-a2",
+          "trial": "kv-store-grpc__Hk9cMEv",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 286221,
+          "cachedInputTokens": 258048,
+          "uncachedInputTokens": 28173,
+          "outputTokens": 10540,
+          "costUsd": 0.02344356,
+          "agentSeconds": 227.8,
+          "totalSeconds": 265.742,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "1a3e8cc64ab2db828433d8ac1b6b41533f2a7ba5913d01b2abdd900f2a2ea26c",
+          "verifier": {
+            "passed": 7,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_proto_file_creation",
+                "status": "passed",
+                "durationSeconds": 0.0005833659961353987,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_tools_installation",
+                "status": "passed",
+                "durationSeconds": 0.02974000299582258,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_protobuf_generation",
+                "status": "passed",
+                "durationSeconds": 0.0003462819950073026,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_server_file_creation",
+                "status": "passed",
+                "durationSeconds": 0.0003398690023459494,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_real_grpc_server_running",
+                "status": "passed",
+                "durationSeconds": 0.00043441299931146204,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_protocol_handshake",
+                "status": "passed",
+                "durationSeconds": 0.024509292998118326,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_server_functionality",
+                "status": "passed",
+                "durationSeconds": 0.0035424210072960705,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v2",
+          "task": "kv-store-grpc",
+          "job": "sc-tb21-feedback-v3-kv-store-grpc-a3",
+          "trial": "kv-store-grpc__Bri4VoL",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 649938,
+          "cachedInputTokens": 550912,
+          "uncachedInputTokens": 99026,
+          "outputTokens": 11455,
+          "costUsd": 0.044569439999999995,
+          "agentSeconds": 264.975,
+          "totalSeconds": 370.314,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "41513c0ba3fe202e878f4841284f09adba3080d2add8c6f66aa82a5a345606a4",
+          "verifier": {
+            "passed": 7,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_proto_file_creation",
+                "status": "passed",
+                "durationSeconds": 0.0006506390054710209,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_tools_installation",
+                "status": "passed",
+                "durationSeconds": 0.030221828994399402,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_protobuf_generation",
+                "status": "passed",
+                "durationSeconds": 0.0003617510083131492,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_server_file_creation",
+                "status": "passed",
+                "durationSeconds": 0.0010920059939962812,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_real_grpc_server_running",
+                "status": "passed",
+                "durationSeconds": 0.0010749600041890517,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_protocol_handshake",
+                "status": "passed",
+                "durationSeconds": 0.031358186999568716,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_grpc_server_functionality",
+                "status": "passed",
+                "durationSeconds": 0.007671077997656539,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "mteb-leaderboard",
+      "trajectory": {
+        "rewards": [
+          1,
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 1,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.06494816,
+        "finalCostUsd": 0.04925752,
+        "finalToColdCostRatio": 0.7584128634283095,
+        "lowestPassingCostUsd": 0.04925752
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "mteb-leaderboard",
+          "job": "sc-tb21-stateful-r1b2-30-pinned-ef3a1ff",
+          "trial": "mteb-leaderboard__xTZWm8t",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1737142,
+          "cachedInputTokens": 1654528,
+          "uncachedInputTokens": 82614,
+          "outputTokens": 12779,
+          "costUsd": 0.06494816,
+          "agentSeconds": 485.52,
+          "totalSeconds": 536.466,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "843a47ed9771708ce06a07d53275be110012dceafe6c2100d28c33b0cce79788",
+          "verifier": {
+            "passed": 2,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_result_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005442449983092956,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_data_matches",
+                "status": "passed",
+                "durationSeconds": 0.0004384780004329514,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "mteb-leaderboard",
+          "job": "sc-tb21-feedback-v3-mteb-leaderboard-a2",
+          "trial": "mteb-leaderboard__KeNAorQ",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1252004,
+          "cachedInputTokens": 1185536,
+          "uncachedInputTokens": 66468,
+          "outputTokens": 10211,
+          "costUsd": 0.04925752,
+          "agentSeconds": 355.096,
+          "totalSeconds": 403.832,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "891db2129bb09e3fd93f2042a48ced74b8bbe17fa8bb547ea1b948dc0def09be",
+          "verifier": {
+            "passed": 2,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_result_exists",
+                "status": "passed",
+                "durationSeconds": 0.0006691919988952577,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_data_matches",
+                "status": "passed",
+                "durationSeconds": 0.00043401600851211697,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "query-optimize",
+      "trajectory": {
+        "rewards": [
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 0,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.06616743999999998,
+        "finalCostUsd": 0.06616743999999998,
+        "finalToColdCostRatio": 1,
+        "lowestPassingCostUsd": 0.06616743999999998
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "query-optimize",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "query-optimize__TMveiuo",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1089590,
+          "cachedInputTokens": 1029632,
+          "uncachedInputTokens": 59958,
+          "outputTokens": 27986,
+          "costUsd": 0.06616743999999998,
+          "agentSeconds": 627.018,
+          "totalSeconds": 1026.654,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "85747b016cb484c03ad676cbd8b732a4b757f018ab37a353eec9fbb3ef4ff575",
+          "verifier": {
+            "passed": 6,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_compare_golden_vs_my_sql_query_correctness",
+                "status": "passed",
+                "durationSeconds": 356.1890407690007,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_check_for_db_modifications",
+                "status": "passed",
+                "durationSeconds": 0.0402190899985726,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_compare_golden_vs_solution_runtime",
+                "status": "passed",
+                "durationSeconds": 7.602266947997123,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_outputs_match_exactly",
+                "status": "passed",
+                "durationSeconds": 1.2807604460031143,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_solution_contains_single_sql_query",
+                "status": "passed",
+                "durationSeconds": 0.000997283001197502,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_solution_is_small",
+                "status": "passed",
+                "durationSeconds": 0.0002202689938712865,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "reshard-c4-data",
+      "trajectory": {
+        "rewards": [
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 0,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.13088299999999997,
+        "finalCostUsd": 0.13088299999999997,
+        "finalToColdCostRatio": 1,
+        "lowestPassingCostUsd": 0.13088299999999997
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "reshard-c4-data",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "reshard-c4-data__pdpYfjh",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 2513653,
+          "cachedInputTokens": 2375680,
+          "uncachedInputTokens": 137973,
+          "outputTokens": 46479,
+          "costUsd": 0.13088299999999997,
+          "agentSeconds": 1019.621,
+          "totalSeconds": 1129.919,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "5c8da36e2efa7e45bf5ad0a554080683f7dcc38cf83e0b86f2674fda1c4cb6df",
+          "verifier": {
+            "passed": 1,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_compress_decompress_workflow",
+                "status": "passed",
+                "durationSeconds": 70.20564981200368,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "rstan-to-pystan",
+      "trajectory": {
+        "rewards": [
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 0,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.14139068000000002,
+        "finalCostUsd": 0.14139068000000002,
+        "finalToColdCostRatio": 1,
+        "lowestPassingCostUsd": 0.14139068000000002
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "rstan-to-pystan",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "rstan-to-pystan__rvs2Kww",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 4633717,
+          "cachedInputTokens": 4496384,
+          "uncachedInputTokens": 137333,
+          "outputTokens": 19997,
+          "costUsd": 0.14139068000000002,
+          "agentSeconds": 675.947,
+          "totalSeconds": 722.586,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "aea1222082a6882031840cbe092e1ff2b2d71ff8c8ec0ef1a82e44ab2ade9569",
+          "verifier": {
+            "passed": 6,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_r_rstan_not_installed",
+                "status": "passed",
+                "durationSeconds": 0.0018370449979556724,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_output_files_exist",
+                "status": "passed",
+                "durationSeconds": 0.00031829599902266636,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_alpha_estimation_accuracy",
+                "status": "passed",
+                "durationSeconds": 0.0002620470004330855,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_sigma_estimation_accuracy",
+                "status": "passed",
+                "durationSeconds": 0.00021559899687417783,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_rho_estimation_accuracy",
+                "status": "passed",
+                "durationSeconds": 0.00023051599782775156,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_beta_estimation_accuracy",
+                "status": "passed",
+                "durationSeconds": 0.0002210220009146724,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "sqlite-with-gcov",
+      "trajectory": {
+        "rewards": [
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 0,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.07784016,
+        "finalCostUsd": 0.07784016,
+        "finalToColdCostRatio": 1,
+        "lowestPassingCostUsd": 0.07784016
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "sqlite-with-gcov",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "sqlite-with-gcov__KjaTuZg",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1989162,
+          "cachedInputTokens": 1888768,
+          "uncachedInputTokens": 100394,
+          "outputTokens": 16655,
+          "costUsd": 0.07784016,
+          "agentSeconds": 487.003,
+          "totalSeconds": 557.959,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "e4c0bf1b2c22d9a30fe7263a152610ff7e0a71e5323ac5ab421ee2188d9333cb",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_sqlite_compiled",
+                "status": "passed",
+                "durationSeconds": 0.003936681998311542,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_sqlite_in_path",
+                "status": "passed",
+                "durationSeconds": 0.003347571997437626,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_gcov_enabled",
+                "status": "passed",
+                "durationSeconds": 0.005846481999469688,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "vulnerable-secret",
+      "trajectory": {
+        "rewards": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 4,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.019225759999999998,
+        "finalCostUsd": 0.0188688,
+        "finalToColdCostRatio": 0.9814332437313273,
+        "lowestPassingCostUsd": 0.01583632
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "vulnerable-secret",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "vulnerable-secret__Yw2qmce",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 280528,
+          "cachedInputTokens": 228608,
+          "uncachedInputTokens": 51920,
+          "outputTokens": 3558,
+          "costUsd": 0.019225759999999998,
+          "agentSeconds": 93.141,
+          "totalSeconds": 164.323,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "3c1c6803e24f35d81f46c13e1d7a8906b253c255eb6706d94f2e6e380d63dc33",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_results_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.0003681289999803994,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_contains_secret_flag",
+                "status": "passed",
+                "durationSeconds": 0.0002446129983582068,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_format",
+                "status": "passed",
+                "durationSeconds": 0.00026968899692292325,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "vulnerable-secret",
+          "job": "sc-tb21-feedback-v3-vulnerable-secret-a2",
+          "trial": "vulnerable-secret__p26xNod",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 463242,
+          "cachedInputTokens": 405504,
+          "uncachedInputTokens": 57738,
+          "outputTokens": 8412,
+          "costUsd": 0.02975208,
+          "agentSeconds": 194.694,
+          "totalSeconds": 235.99,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "a359156e1ae5b2f8270cf76b444b319f340e4a8da97c4f9032eb952bed3535c3",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_results_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.0008413290051976219,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_contains_secret_flag",
+                "status": "passed",
+                "durationSeconds": 0.0006539579990203492,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_format",
+                "status": "passed",
+                "durationSeconds": 0.0005602679957519285,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "vulnerable-secret",
+          "job": "sc-tb21-feedback-v3-vulnerable-secret-a3-infra-r1",
+          "trial": "vulnerable-secret__njKCRxb",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 278203,
+          "cachedInputTokens": 241664,
+          "uncachedInputTokens": 36539,
+          "outputTokens": 6396,
+          "costUsd": 0.01981628,
+          "agentSeconds": 142.232,
+          "totalSeconds": 219.539,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 1,
+          "resultSha256": "8217677b4d921849c160f8212db4620430960145a269d5f8a661834ecb0bc3e6",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_results_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.00046795999514870346,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_contains_secret_flag",
+                "status": "passed",
+                "durationSeconds": 0.00030502000299748033,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_format",
+                "status": "passed",
+                "durationSeconds": 0.0002754160013864748,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "vulnerable-secret",
+          "job": "sc-tb21-feedback-v3-vulnerable-secret-a4",
+          "trial": "vulnerable-secret__GDkaoC2",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 219938,
+          "cachedInputTokens": 190976,
+          "uncachedInputTokens": 28962,
+          "outputTokens": 5187,
+          "costUsd": 0.01583632,
+          "agentSeconds": 118.422,
+          "totalSeconds": 154.654,
+          "memoryMutationObserved": false,
+          "infrastructureRetries": 0,
+          "resultSha256": "2aa81d1209435582a04202472970a3e48ccc29521d7563200fbede2c9a6d1270",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_results_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005896100046811625,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_contains_secret_flag",
+                "status": "passed",
+                "durationSeconds": 0.0004191800035187043,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_format",
+                "status": "passed",
+                "durationSeconds": 0.0004004180009360425,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v2",
+          "task": "vulnerable-secret",
+          "job": "sc-tb21-feedback-v3-vulnerable-secret-a5",
+          "trial": "vulnerable-secret__2YXpwKG",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 257664,
+          "cachedInputTokens": 218880,
+          "uncachedInputTokens": 38784,
+          "outputTokens": 5612,
+          "costUsd": 0.0188688,
+          "agentSeconds": 137.122,
+          "totalSeconds": 184.96,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "ab24b4190e1b57ee4c893d5ca387d757532e7375e57913ca40ecb62cf1411b57",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_results_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.002016646998526994,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_contains_secret_flag",
+                "status": "passed",
+                "durationSeconds": 0.00031216800562106073,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_results_file_format",
+                "status": "passed",
+                "durationSeconds": 0.0003329620012664236,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "winning-avg-corewars",
+      "trajectory": {
+        "rewards": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 4,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.11407524000000001,
+        "finalCostUsd": 0.02933856,
+        "finalToColdCostRatio": 0.2571860466828735,
+        "lowestPassingCostUsd": 0.017513999999999995
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "winning-avg-corewars",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "winning-avg-corewars__MDXFXgA",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 2905047,
+          "cachedInputTokens": 2788352,
+          "uncachedInputTokens": 116695,
+          "outputTokens": 29141,
+          "costUsd": 0.11407524000000001,
+          "agentSeconds": 909.954,
+          "totalSeconds": 944.164,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "13b60adc9ff857707012060a30f1cad30837823be2e971fd879ca42055f16cff",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_opponents_integrity",
+                "status": "passed",
+                "durationSeconds": 0.0005274120012472849,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_exists",
+                "status": "passed",
+                "durationSeconds": 0.00028152999584563076,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_performance",
+                "status": "passed",
+                "durationSeconds": 0.5803379919998406,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "winning-avg-corewars",
+          "job": "sc-tb21-feedback-v3-winning-avg-corewars-a2",
+          "trial": "winning-avg-corewars__jdhdygj",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 377053,
+          "cachedInputTokens": 336384,
+          "uncachedInputTokens": 40669,
+          "outputTokens": 5437,
+          "costUsd": 0.02138588,
+          "agentSeconds": 132.755,
+          "totalSeconds": 187.345,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "fb2dd7559f2898b06d13a982362d816a27f8b0ab34c4bd3d6b345e76209d2c20",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_opponents_integrity",
+                "status": "passed",
+                "durationSeconds": 0.0007122009919839911,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_exists",
+                "status": "passed",
+                "durationSeconds": 0.0003312050030217506,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_performance",
+                "status": "passed",
+                "durationSeconds": 0.5748200759990141,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "winning-avg-corewars",
+          "job": "sc-tb21-feedback-v3-winning-avg-corewars-a3",
+          "trial": "winning-avg-corewars__uktyEAP",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 322602,
+          "cachedInputTokens": 291840,
+          "uncachedInputTokens": 30762,
+          "outputTokens": 4604,
+          "costUsd": 0.017513999999999995,
+          "agentSeconds": 109.799,
+          "totalSeconds": 149.181,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "fff497f8bf77ab4efd437820b437f0b91ebb20738cf32c660ba10d2ff4d58e78",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_opponents_integrity",
+                "status": "passed",
+                "durationSeconds": 0.0006642459920840338,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_exists",
+                "status": "passed",
+                "durationSeconds": 0.00035093098995275795,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_performance",
+                "status": "passed",
+                "durationSeconds": 0.6384592759932275,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "winning-avg-corewars",
+          "job": "sc-tb21-feedback-v3-winning-avg-corewars-a4-infra-r1",
+          "trial": "winning-avg-corewars__7F6YZoV",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 471723,
+          "cachedInputTokens": 430336,
+          "uncachedInputTokens": 41387,
+          "outputTokens": 10039,
+          "costUsd": 0.02893092,
+          "agentSeconds": 212.486,
+          "totalSeconds": 270.974,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 1,
+          "resultSha256": "1bb9b47bb14650869c2c35ff31a482660bafda5ea13acf81d47221c4c25c7a55",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_opponents_integrity",
+                "status": "passed",
+                "durationSeconds": 0.0007514689932577312,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_exists",
+                "status": "passed",
+                "durationSeconds": 0.00032218600244959816,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_performance",
+                "status": "passed",
+                "durationSeconds": 0.5371539949992439,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "winning-avg-corewars",
+          "job": "sc-tb21-feedback-v3-winning-avg-corewars-a5",
+          "trial": "winning-avg-corewars__vzpNNzW",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 478392,
+          "cachedInputTokens": 416768,
+          "uncachedInputTokens": 61624,
+          "outputTokens": 7232,
+          "costUsd": 0.02933856,
+          "agentSeconds": 165.693,
+          "totalSeconds": 205.623,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "7c0120d950e59f52608a2d8ffa17a97bfa0b476c2ab776ea60e18465d7752dc7",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_opponents_integrity",
+                "status": "passed",
+                "durationSeconds": 0.0007927579936222173,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_exists",
+                "status": "passed",
+                "durationSeconds": 0.0003863889942294918,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_warrior_performance",
+                "status": "passed",
+                "durationSeconds": 0.6631488450002507,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "regex-chess",
+      "trajectory": {
+        "rewards": [
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 2,
+        "warmFailures": 2,
+        "passToFailTransitions": 2,
+        "failToPassTransitions": 2,
+        "coldCostUsd": 0.35120068000000004,
+        "finalCostUsd": 0.30750599999999995,
+        "finalToColdCostRatio": 0.8755848650406939,
+        "lowestPassingCostUsd": 0.29383516000000004
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "regex-chess",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "regex-chess__gCzHcb2",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 9977363,
+          "cachedInputTokens": 9652224,
+          "uncachedInputTokens": 325139,
+          "outputTokens": 77607,
+          "costUsd": 0.35120068000000004,
+          "agentSeconds": 1825.668,
+          "totalSeconds": 1962.705,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "f59e7de9938b9943ed5c21e38236fc547d025b9f7c5dfe28cce913c198252e42",
+          "verifier": {
+            "passed": 4,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_immortal_game",
+                "status": "passed",
+                "durationSeconds": 22.807098070999928,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_game_of_century",
+                "status": "passed",
+                "durationSeconds": 35.709223378995375,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_naroditsky_ivanchuk",
+                "status": "passed",
+                "durationSeconds": 35.96965404799994,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_not_long",
+                "status": "passed",
+                "durationSeconds": 0.005519671998627018,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "regex-chess",
+          "job": "sc-tb21-feedback-v3-regex-chess-a2",
+          "trial": "regex-chess__WYLPsoh",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 15002663,
+          "cachedInputTokens": 14590208,
+          "uncachedInputTokens": 412455,
+          "outputTokens": 72257,
+          "costUsd": 0.4610035599999999,
+          "agentSeconds": 2581.676,
+          "totalSeconds": 3485.568,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "42cda4bde638b917286b90e6e6c42ab0c93e5619f4d32d6d42589264fc55e51d",
+          "verifier": {
+            "passed": 3,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_immortal_game",
+                "status": "passed",
+                "durationSeconds": 195.3466178009985,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_game_of_century",
+                "status": "passed",
+                "durationSeconds": 363.69308449300297,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_naroditsky_ivanchuk",
+                "status": "failed",
+                "durationSeconds": 288.73426515400934,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "on.\"\"\"\n        our_moves = run_solution(fen)\n    \n        board = chess.Board(fen)\n        python_chess_moves = set()\n        for move in board.legal_moves:\n            if move.promotion and move.promotion != chess.QUEEN:\n                continue\n    \n            board_copy = board.copy()\n            board_copy.push(move)\n            python_chess_moves.add(\" \".join(board_copy.fen().split(\" \")[:-2]))\n    \n        print(f\"Position: {fen}, Our moves: {len(our_moves)}, Python-chess moves: {len(python_chess_moves)}\")\n    \n        for x in our_moves:\n>           assert x in python_chess_moves or x.rpartition(\" \")[0]+\" -\" in python_chess_moves, (\n                f\"Position: {fen}, Our move: {x} not found in Python-chess moves: {python_chess_moves}\"\n            )\nE           AssertionError: Position: r5k1/7p/1P1p4/1KpP2p1/4R3/1P3p2/7P/8 w - - 0 34, Our move: r5k1/7p/1PKp4/3P2p1/4R3/1P3p2/7P/8 b - - not found in Python-chess moves: {'r5k1/7p/1P1pR3/1KpP2p1/8/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/8/1P2Rp2/7P/8 b - -', 'r3R1k1/7p/1P1p4/1KpP2p1/8/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/7R/1P3p2/7P/8 b - -', 'r5k1/1P5p/3p4/1KpP2p1/4R3/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/2pP2p1/2K1R3/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/8/1P3p2/7P/4R3 b - -', 'r5k1/7p/1P1p4/1KpP2p1/R7/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpPR1p1/8/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/2R5/1P3p2/7P/8 b - -', 'r5k1/7p/1PKp4/2pP2p1/4R3/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/1R6/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/6R1/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/3R4/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/8/1P3p2/4R2P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/1P2R3/5p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/4R3/1P3p1P/8/8 b - -', 'r5k1/4R2p/1P1p4/1KpP2p1/8/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/5R2/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/4R2P/1P3p2/8/8 b - -'}\nE           assert ('r5k1/7p/1PKp4/3P2p1/4R3/1P3p2/7P/8 b - -' in {'r3R1k1/7p/1P1p4/1KpP2p1/8/1P3p2/7P/8 b - -', 'r5k1/1P5p/3p4/1KpP2p1/4R3/1P3p2/7P/8 b - -', 'r5k1/4R2p/1P1p4/1KpP2p1/...1P2R3/5p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/1R6/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/2R5/1P3p2/7P/8 b - -', ...} or ('r5k1/7p/1PKp4/3P2p1/4R3/1P3p2/7P/8 b -' + ' -') in {'r3R1k1/7p/1P1p4/1KpP2p1/8/1P3p2/7P/8 b - -', 'r5k1/1P5p/3p4/1KpP2p1/4R3/1P3p2/7P/8 b - -', 'r5k1/4R2p/1P1p4/1KpP2p1/...1P2R3/5p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/1R6/1P3p2/7P/8 b - -', 'r5k1/7p/1P1p4/1KpP2p1/2R5/1P3p2/7P/8 b - -', ...})\n\n/tests/test_outputs.py:35: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_not_long",
+                "status": "passed",
+                "durationSeconds": 0.004769006998685654,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "regex-chess",
+          "job": "sc-tb21-feedback-v3-regex-chess-a3",
+          "trial": "regex-chess__xYeayHA",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 8701799,
+          "cachedInputTokens": 8465408,
+          "uncachedInputTokens": 236391,
+          "outputTokens": 64374,
+          "costUsd": 0.29383516000000004,
+          "agentSeconds": 2021.148,
+          "totalSeconds": 3001.942,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "de26b5ae1a0e992d9a68adfa509b190b2cced64c993eba488089062c06bce281",
+          "verifier": {
+            "passed": 4,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_immortal_game",
+                "status": "passed",
+                "durationSeconds": 205.4271294049977,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_game_of_century",
+                "status": "passed",
+                "durationSeconds": 346.5007625490034,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_naroditsky_ivanchuk",
+                "status": "passed",
+                "durationSeconds": 382.97041269799956,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_not_long",
+                "status": "passed",
+                "durationSeconds": 0.011665657999401446,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "regex-chess",
+          "job": "sc-tb21-feedback-v3-regex-chess-a4",
+          "trial": "regex-chess__9KAQsCo",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 3325933,
+          "cachedInputTokens": 3198720,
+          "uncachedInputTokens": 127213,
+          "outputTokens": 51679,
+          "costUsd": 0.1514318,
+          "agentSeconds": 1150.452,
+          "totalSeconds": 1227.853,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "64b9e03d7e1773f92e34192add78102768f2d5ec1f9ef8e41c5491d22b7e26e2",
+          "verifier": {
+            "passed": 2,
+            "failed": 2,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_immortal_game",
+                "status": "passed",
+                "durationSeconds": 19.643163013002777,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_game_of_century",
+                "status": "failed",
+                "durationSeconds": 4.5050891950013465,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "bp/5np1/8/2PP4/5N2/PP2PPPP/RNBQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N1PN2/PP3PPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP1B2/2N2N2/PP2PPPP/R2QKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/2P5/3P4/2N2N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N5/PP2PPPP/R1BQKBNR b KQ -', 'rnbq1rk1/ppppppbp/5np1/3N4/2PP4/5N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N2/PP1KPPPP/R1BQ1B1R b - -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N2/PPQ1PPPP/R1B1KB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/1QN2N2/PP2PPPP/R1B1KB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N2/PP2PPPP/R1BQKBR1 b Q -', 'rnbq1rk1/ppppppbp/5np1/8/2PP3P/2N2N2/PP2PPP1/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/1N6/2PP4/5N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP2P1/2N2N2/PP2PP1P/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N2/PP1BPPPP/R2QKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/1PPP4/2N2N2/P3PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PPN3/5N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N2/PP1QPPPP/R1B1KB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/P1N2N2/1P2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/1PN2N2/P3PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/P1PP4/2N2N2/1P2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N5/PP1NPPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/3P4/2P5/2N2N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N1P/PP2PPP1/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/N1PP4/5N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/6N1/2PP4/2N5/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/6B1/2PP4/2N2N2/PP2PPPP/R2QKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/2PP4/2N1BN2/PP2PPPP/R2QKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/8/Q1PP4/2N2N2/PP2PPPP/R1B1KB1R b KQ -'}\nE           assert ('rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N2/PP1KPPPP/R1BQ1B1R w  -' in {'rnbq1rk1/ppppppbp/5np1/1N6/2PP4/5N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/2P5/3P4/2N2N2/PP2PPPP/R1BQKB1R...ppppbp/5np1/4N3/2PP4/2N5/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/6B1/2PP4/2N2N2/PP2PPPP/R2QKB1R b KQ -', ...} or ('rnbq1rk1/ppppppbp/5np1/8/2PP4/2N2N2/PP1KPPPP/R1BQ1B1R w ' + ' -') in {'rnbq1rk1/ppppppbp/5np1/1N6/2PP4/5N2/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/2P5/3P4/2N2N2/PP2PPPP/R1BQKB1R...ppppbp/5np1/4N3/2PP4/2N5/PP2PPPP/R1BQKB1R b KQ -', 'rnbq1rk1/ppppppbp/5np1/6B1/2PP4/2N2N2/PP2PPPP/R2QKB1R b KQ -', ...})\n\n/tests/test_outputs.py:35: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_naroditsky_ivanchuk",
+                "status": "failed",
+                "durationSeconds": 5.350586520995421,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "P3/4BP1N/PP4PP/RN1QKB1R b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP1Q2PP/RN2KBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/1Q2BP2/PP4PP/RN2KBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/5P2/PP4PP/RNBQKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/P1PPP3/4BP2/1P4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPPB2/5P2/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP1P1/4BP2/PP5P/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/4P3/2PP4/4BP2/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP2B1PP/RN1QK1NR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP4PP/RNQ1KBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/3BBP2/PP4PP/RN1QK1NR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/1P2BP2/P5PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/1PPPP3/4BP2/P5PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP2P/4BP2/PP4P1/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/P3BP2/1P4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP1K2PP/RN1Q1BNR b - -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BPP1/PP5P/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPPP2/4B3/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/5P2/PP1B2PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/2P5/3PP3/4BP2/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N1BP2/PP4PP/R2QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP2K1PP/RN1Q1BNR b - -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP2Q1PP/RN2KBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1npB/8/2PPP3/5P2/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/N3BP2/PP4PP/R2QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/Q1PPP3/4BP2/PP4PP/RN2KBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP2N1PP/RN1QKB1R b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/6B1/2PPP3/5P2/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/5P2/PP3BPP/RN1QKBNR b KQ -'}\nE           assert ('rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP1K2PP/RN1Q1BNR w  -' in {'rnbq1rk1/ppp1ppbp/3p1np1/2P5/3PP3/4BP2/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/3P4/2P1P3/4BP2/PP4PP/RN1QKB...p1ppbp/3p1np1/8/1PPPP3/4BP2/P5PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP1P1/4BP2/PP5P/RN1QKBNR b KQ -', ...} or ('rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/4BP2/PP1K2PP/RN1Q1BNR w ' + ' -') in {'rnbq1rk1/ppp1ppbp/3p1np1/2P5/3PP3/4BP2/PP4PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/3P4/2P1P3/4BP2/PP4PP/RN1QKB...p1ppbp/3p1np1/8/1PPPP3/4BP2/P5PP/RN1QKBNR b KQ -', 'rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP1P1/4BP2/PP5P/RN1QKBNR b KQ -', ...})\n\n/tests/test_outputs.py:35: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_not_long",
+                "status": "passed",
+                "durationSeconds": 0.006830817001173273,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "regex-chess",
+          "job": "sc-tb21-feedback-v3-regex-chess-a5",
+          "trial": "regex-chess__2dvuSRa",
+          "reward": 1,
+          "exceptionType": "AgentTimeoutError",
+          "inputTokens": 8597310,
+          "cachedInputTokens": 8226048,
+          "uncachedInputTokens": 371262,
+          "outputTokens": 56047,
+          "costUsd": 0.30750599999999995,
+          "agentSeconds": 3605.068,
+          "totalSeconds": 3842.994,
+          "memoryMutationObserved": false,
+          "infrastructureRetries": 0,
+          "resultSha256": "d0d0b992ca935aac31e41b1ac1d6cc7c516bf06025930b88be69555fff6788e5",
+          "verifier": {
+            "passed": 4,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_immortal_game",
+                "status": "passed",
+                "durationSeconds": 52.49427584399382,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_game_of_century",
+                "status": "passed",
+                "durationSeconds": 63.495751074995496,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_naroditsky_ivanchuk",
+                "status": "passed",
+                "durationSeconds": 57.41212335599266,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_not_long",
+                "status": "passed",
+                "durationSeconds": 0.0072422430021106265,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "sam-cell-seg",
+      "trajectory": {
+        "rewards": [
+          1,
+          1,
+          0,
+          1,
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 3,
+        "warmFailures": 1,
+        "passToFailTransitions": 1,
+        "failToPassTransitions": 1,
+        "coldCostUsd": 0.13599736,
+        "finalCostUsd": 0.10585967999999998,
+        "finalToColdCostRatio": 0.7783951100227238,
+        "lowestPassingCostUsd": 0.09777399999999999
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "sam-cell-seg",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "sam-cell-seg__oE4wEqA",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 2427788,
+          "cachedInputTokens": 2306048,
+          "uncachedInputTokens": 121740,
+          "outputTokens": 54607,
+          "costUsd": 0.13599736,
+          "agentSeconds": 1093.828,
+          "totalSeconds": 1399.576,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "80df75e3d42be826f6b1c8967129bc397bdd310d2924de46f06298163a587998",
+          "verifier": {
+            "passed": 9,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_python_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005312710018188227,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_run_script",
+                "status": "passed",
+                "durationSeconds": 181.55053358400255,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_output_exists",
+                "status": "passed",
+                "durationSeconds": 0.00031023400151752867,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_shape_cols",
+                "status": "passed",
+                "durationSeconds": 0.003095184001722373,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_masks_are_no_longer_rect",
+                "status": "passed",
+                "durationSeconds": 0.008315089005918708,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_mask_alignment",
+                "status": "passed",
+                "durationSeconds": 0.028088449995266274,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_polyline_overlaps",
+                "status": "passed",
+                "durationSeconds": 0.013530813001125352,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_single_contiguous_mask_per_cell",
+                "status": "passed",
+                "durationSeconds": 0.007949494000058621,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_coords_are_flat_lists",
+                "status": "passed",
+                "durationSeconds": 0.004104998999537202,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sam-cell-seg",
+          "job": "sc-tb21-feedback-v3-sam-cell-seg-a2",
+          "trial": "sam-cell-seg__cn4J4oD",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1753658,
+          "cachedInputTokens": 1651200,
+          "uncachedInputTokens": 102458,
+          "outputTokens": 36882,
+          "costUsd": 0.09777399999999999,
+          "agentSeconds": 807.093,
+          "totalSeconds": 1674.128,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "fdb860ca0b8a7dabe5c2a35e30d103d07cefaf4ba0dcec35757869b911ab2203",
+          "verifier": {
+            "passed": 9,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_python_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.0012026030017295852,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_run_script",
+                "status": "passed",
+                "durationSeconds": 766.8258179200056,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_output_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005894560090382583,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_shape_cols",
+                "status": "passed",
+                "durationSeconds": 0.00786269899981562,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_masks_are_no_longer_rect",
+                "status": "passed",
+                "durationSeconds": 0.027193595997232478,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_mask_alignment",
+                "status": "passed",
+                "durationSeconds": 0.07672719700349262,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_polyline_overlaps",
+                "status": "passed",
+                "durationSeconds": 0.04806985901086591,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_single_contiguous_mask_per_cell",
+                "status": "passed",
+                "durationSeconds": 0.021424781007226557,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_coords_are_flat_lists",
+                "status": "passed",
+                "durationSeconds": 0.013108303006447386,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sam-cell-seg",
+          "job": "sc-tb21-feedback-v3-sam-cell-seg-a3-infra-r1",
+          "trial": "sam-cell-seg__MNn3hYA",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 1438967,
+          "cachedInputTokens": 1352192,
+          "uncachedInputTokens": 86775,
+          "outputTokens": 24702,
+          "costUsd": 0.07404124,
+          "agentSeconds": 521.176,
+          "totalSeconds": 1272.357,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 1,
+          "resultSha256": "c952f55be87060f0455481ce5a7825c148cdc4e216991d754c08e36a25faf89d",
+          "verifier": {
+            "passed": 8,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_python_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.0006393820003722794,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_run_script",
+                "status": "passed",
+                "durationSeconds": 639.6599695870027,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_output_exists",
+                "status": "passed",
+                "durationSeconds": 0.0007890730048529804,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_shape_cols",
+                "status": "passed",
+                "durationSeconds": 0.01476849499886157,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_masks_are_no_longer_rect",
+                "status": "passed",
+                "durationSeconds": 0.016252137000265066,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_mask_alignment",
+                "status": "failed",
+                "durationSeconds": 0.050053786995704286,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "def test_mask_alignment():\n        '''Test that the predicted masks align reasonably with the masks generated\n         by solution.sh '''\n        out_df = _read_polylines_csv(\"/app/test_output.csv\")\n        correct_df = _read_polylines_csv(\"/app/correct_output.csv\")\n        for (_, row_out), (_, row_correct) in zip(out_df.iterrows(), correct_df.iterrows()):\n            points_out = list(zip(row_out['coords_x'], row_out['coords_y']))\n            points_correct = list(zip(row_correct['coords_x'], row_correct['coords_y']))\n            iou = calculate_iou(np.array(points_out), np.array(points_correct))\n>           assert iou >= 0.5, f\"IoU is too low: {iou}\"\nE           AssertionError: IoU is too low: 0.4813979706877114\nE           assert 0.4813979706877114 >= 0.5\n\n/tests/test_outputs.py:221: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_no_polyline_overlaps",
+                "status": "passed",
+                "durationSeconds": 0.03128198200283805,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_single_contiguous_mask_per_cell",
+                "status": "passed",
+                "durationSeconds": 0.017651611990004312,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_coords_are_flat_lists",
+                "status": "passed",
+                "durationSeconds": 0.007842416991479695,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sam-cell-seg",
+          "job": "sc-tb21-feedback-v3-sam-cell-seg-a4",
+          "trial": "sam-cell-seg__BEdaLrM",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 5119997,
+          "cachedInputTokens": 4839040,
+          "uncachedInputTokens": 280957,
+          "outputTokens": 57643,
+          "costUsd": 0.2221438,
+          "agentSeconds": 1259.321,
+          "totalSeconds": 1618.792,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "7172b41f75686baf5ab3c6b923933f51d220d2bb4bfd3b156e01e6ec1c49ecd8",
+          "verifier": {
+            "passed": 9,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_python_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.000441872987721581,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_run_script",
+                "status": "passed",
+                "durationSeconds": 270.25104583299253,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_output_exists",
+                "status": "passed",
+                "durationSeconds": 0.00045317300100577995,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_shape_cols",
+                "status": "passed",
+                "durationSeconds": 0.004615514997567516,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_masks_are_no_longer_rect",
+                "status": "passed",
+                "durationSeconds": 0.0065644920032355,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_mask_alignment",
+                "status": "passed",
+                "durationSeconds": 0.028815459008910693,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_polyline_overlaps",
+                "status": "passed",
+                "durationSeconds": 0.012850916005845647,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_single_contiguous_mask_per_cell",
+                "status": "passed",
+                "durationSeconds": 0.006467893996159546,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_coords_are_flat_lists",
+                "status": "passed",
+                "durationSeconds": 0.006656538003880996,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sam-cell-seg",
+          "job": "sc-tb21-feedback-v3-sam-cell-seg-a5",
+          "trial": "sam-cell-seg__QZFZPqw",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 2064060,
+          "cachedInputTokens": 1960704,
+          "uncachedInputTokens": 103356,
+          "outputTokens": 38312,
+          "costUsd": 0.10585967999999998,
+          "agentSeconds": 779.742,
+          "totalSeconds": 1112.299,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "f1a221a7cbd458e5cca561d0917fb93e2026fd061b2245621cf3213244585533",
+          "verifier": {
+            "passed": 9,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_python_file_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005458490049932152,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_run_script",
+                "status": "passed",
+                "durationSeconds": 242.70904303499265,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_output_exists",
+                "status": "passed",
+                "durationSeconds": 0.0011006379936588928,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_csv_shape_cols",
+                "status": "passed",
+                "durationSeconds": 0.013942645986389834,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_masks_are_no_longer_rect",
+                "status": "passed",
+                "durationSeconds": 0.011587613000301644,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_mask_alignment",
+                "status": "passed",
+                "durationSeconds": 0.036789378988032695,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_polyline_overlaps",
+                "status": "passed",
+                "durationSeconds": 0.014064848997804802,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_single_contiguous_mask_per_cell",
+                "status": "passed",
+                "durationSeconds": 0.008262018993264064,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_coords_are_flat_lists",
+                "status": "passed",
+                "durationSeconds": 0.010829860999365337,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "torch-tensor-parallelism",
+      "trajectory": {
+        "rewards": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "coldReward": 1,
+        "finalReward": 1,
+        "warmPasses": 4,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.046285480000000004,
+        "finalCostUsd": 0.03290911999999999,
+        "finalToColdCostRatio": 0.7110031050774452,
+        "lowestPassingCostUsd": 0.03290911999999999
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "torch-tensor-parallelism",
+          "job": "sc-tb21-stateful-full445-pinned-ef3a1ff",
+          "trial": "torch-tensor-parallelism__bjJhkCi",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 695903,
+          "cachedInputTokens": 626944,
+          "uncachedInputTokens": 68959,
+          "outputTokens": 16629,
+          "costUsd": 0.046285480000000004,
+          "agentSeconds": 348.98,
+          "totalSeconds": 708.761,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "f0857a275779dfc01517ec81e5d3d31952f7eb489c11fb18cd0b9b20ba53ff17",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_parallel_linear_exists",
+                "status": "passed",
+                "durationSeconds": 0.00036870399890176486,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_column_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 1.1216624799999408,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_row_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 1.0817581959981908,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "torch-tensor-parallelism",
+          "job": "sc-tb21-feedback-v3-torch-tensor-parallelism-a2",
+          "trial": "torch-tensor-parallelism__AqbePfX",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 660765,
+          "cachedInputTokens": 607488,
+          "uncachedInputTokens": 53277,
+          "outputTokens": 14782,
+          "costUsd": 0.04054356,
+          "agentSeconds": 313.464,
+          "totalSeconds": 648.062,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "04d27974c2169414f6d1b0a7597683480071a3b8bcb85c14ef1583df075e7970",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_parallel_linear_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005870620007044636,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_column_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 1.6900397909994354,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_row_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 1.7590388560056454,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "torch-tensor-parallelism",
+          "job": "sc-tb21-feedback-v3-torch-tensor-parallelism-a3-infra-r3",
+          "trial": "torch-tensor-parallelism__FTi3eRm",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 614860,
+          "cachedInputTokens": 568576,
+          "uncachedInputTokens": 46284,
+          "outputTokens": 13107,
+          "costUsd": 0.03635672,
+          "agentSeconds": 298.574,
+          "totalSeconds": 651.47,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 3,
+          "resultSha256": "80588243ab6c5e090cd713a49572e15fbfdeb9d4990ad1889e02ce607d6337ef",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_parallel_linear_exists",
+                "status": "passed",
+                "durationSeconds": 0.0009046749983099289,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_column_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 2.0524350330015295,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_row_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 2.101898517998052,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "torch-tensor-parallelism",
+          "job": "sc-tb21-feedback-v3-torch-tensor-parallelism-a4",
+          "trial": "torch-tensor-parallelism__WZQYv3K",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 539637,
+          "cachedInputTokens": 473856,
+          "uncachedInputTokens": 65781,
+          "outputTokens": 10380,
+          "costUsd": 0.03508932000000001,
+          "agentSeconds": 227.474,
+          "totalSeconds": 573.078,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "05631bc6233643d005b1f2f34652b06a4941b68fb88376083518cdfba014e14d",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_parallel_linear_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005066280064056627,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_column_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 2.2851372320001246,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_row_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 1.3216361349986983,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "torch-tensor-parallelism",
+          "job": "sc-tb21-feedback-v3-torch-tensor-parallelism-a5",
+          "trial": "torch-tensor-parallelism__W39Dbv4",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 499438,
+          "cachedInputTokens": 459776,
+          "uncachedInputTokens": 39662,
+          "outputTokens": 13151,
+          "costUsd": 0.03290911999999999,
+          "agentSeconds": 269.841,
+          "totalSeconds": 591.413,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "a9ff35ad1dca9d3715ba00110862731826b5b6ac49fa9d2c837f27541d364c59",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_parallel_linear_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005552590009756386,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_column_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 1.522809096997662,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_row_parallel_linear",
+                "status": "passed",
+                "durationSeconds": 1.5009716649947222,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "configure-git-webserver",
+      "trajectory": {
+        "rewards": [
+          0,
+          1,
+          1,
+          1,
+          1
+        ],
+        "coldReward": 0,
+        "finalReward": 1,
+        "warmPasses": 4,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 1,
+        "coldCostUsd": 0.12541168,
+        "finalCostUsd": 0.12350875999999995,
+        "finalToColdCostRatio": 0.9848266126408637,
+        "lowestPassingCostUsd": 0.07877160000000002
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "configure-git-webserver",
+          "job": "sc-tb21-stateful-r1b1-30-pinned-ef3a1ff",
+          "trial": "configure-git-webserver__rRskFKQ",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 3001232,
+          "cachedInputTokens": 2895104,
+          "uncachedInputTokens": 106128,
+          "outputTokens": 38570,
+          "costUsd": 0.12541168,
+          "agentSeconds": 873.34,
+          "totalSeconds": 933.875,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "806cd1c462a155a17448b9b322837066b96e0c7a9fe4f5e1db736ddc5cee8cf9",
+          "verifier": {
+            "passed": 0,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_hello_html_exists",
+                "status": "failed",
+                "durationSeconds": 4.978437632002169,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "def test_hello_html_exists():\n        \"\"\"Test that the hello.html file exists and contains the correct content.\"\"\"\n        result = subprocess.run([\"bash\", \"/tests/verify.sh\"], capture_output=True, text=True)\n    \n>       assert \"TEST PASSED\" in result.stdout, \"Did not pass test\"\nE       AssertionError: Did not pass test\nE       assert 'TEST PASSED' in 'Testing web server...\\nUsing curl to test web server...\\n❌ TEST FAILED: Web server returned HTTP 000\\nTest completed\\n'\nE        +  where 'Testing web server...\\nUsing curl to test web server...\\n❌ TEST FAILED: Web server returned HTTP 000\\nTest completed\\n' = CompletedProcess(args=['bash', '/tests/verify.sh'], returncode=0, stdout='Testing web server...\\nUsing curl to test we...tory (or any of the parent directories): .git\\nfatal: not a git repository (or any of the parent directories): .git\\n\").stdout\n\n/tests/test_outputs.py:13: AssertionError"
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "configure-git-webserver",
+          "job": "sc-tb21-feedback-v3-configure-git-webserver-a2",
+          "trial": "configure-git-webserver__QTffMWW",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 3113537,
+          "cachedInputTokens": 2989824,
+          "uncachedInputTokens": 123713,
+          "outputTokens": 37295,
+          "costUsd": 0.12929307999999998,
+          "agentSeconds": 827.786,
+          "totalSeconds": 884.888,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "0003554ce58dee7ca0fca1d4af38c5770f0c1c396ae67fcbc91f1ea0e7c32685",
+          "verifier": {
+            "passed": 1,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_hello_html_exists",
+                "status": "passed",
+                "durationSeconds": 5.86358274200029,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "configure-git-webserver",
+          "job": "sc-tb21-feedback-v3-configure-git-webserver-a3-infra-r1",
+          "trial": "configure-git-webserver__pvPmKqX",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1428540,
+          "cachedInputTokens": 1344000,
+          "uncachedInputTokens": 84540,
+          "outputTokens": 29153,
+          "costUsd": 0.07877160000000002,
+          "agentSeconds": 611.168,
+          "totalSeconds": 666.701,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 1,
+          "resultSha256": "ef3e0a1cc4eb9f890447e1555e0321aeefe109225a053eaf43e083a55ac3f473",
+          "verifier": {
+            "passed": 1,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_hello_html_exists",
+                "status": "passed",
+                "durationSeconds": 13.352861269006098,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "configure-git-webserver",
+          "job": "sc-tb21-feedback-v3-configure-git-webserver-a4",
+          "trial": "configure-git-webserver__dKkp9HR",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1462407,
+          "cachedInputTokens": 1355264,
+          "uncachedInputTokens": 107143,
+          "outputTokens": 25930,
+          "costUsd": 0.07964988,
+          "agentSeconds": 623.969,
+          "totalSeconds": 680.291,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "f74cf4e3af984722073c8c2bca5b510e22a09f61537e4ca6997142958dadde53",
+          "verifier": {
+            "passed": 1,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_hello_html_exists",
+                "status": "passed",
+                "durationSeconds": 12.24977378299809,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "configure-git-webserver",
+          "job": "sc-tb21-feedback-v3-configure-git-webserver-a5",
+          "trial": "configure-git-webserver__hSCmKrr",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 2311267,
+          "cachedInputTokens": 2120448,
+          "uncachedInputTokens": 190819,
+          "outputTokens": 35780,
+          "costUsd": 0.12350875999999995,
+          "agentSeconds": 767.991,
+          "totalSeconds": 816.498,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "23f802cde18a5f5c6fbe1db3e597535b20de30eabfef37d900ad8a5acf0328f6",
+          "verifier": {
+            "passed": 1,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_hello_html_exists",
+                "status": "passed",
+                "durationSeconds": 5.859977850006544,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "video-processing",
+      "trajectory": {
+        "rewards": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "coldReward": 0,
+        "finalReward": 0,
+        "warmPasses": 0,
+        "warmFailures": 4,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 0,
+        "coldCostUsd": 0.14217892000000001,
+        "finalCostUsd": 0.16036907999999997,
+        "finalToColdCostRatio": 1.127938515779976,
+        "lowestPassingCostUsd": null
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "video-processing",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "video-processing__AX6zCXs",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 3373691,
+          "cachedInputTokens": 3230976,
+          "uncachedInputTokens": 142715,
+          "outputTokens": 40847,
+          "costUsd": 0.14217892000000001,
+          "agentSeconds": 976.257,
+          "totalSeconds": 1046.057,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "d30940935c0592fc9fd243a4c3348106db6652e48ea739c2d3f2550e8f6903eb",
+          "verifier": {
+            "passed": 3,
+            "failed": 2,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_example_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0007286740001291037,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_test_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0003221890001441352,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_example_video",
+                "status": "failed",
+                "durationSeconds": 3.3929996599981678,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "r_video(\n        video_path,\n        takeoff_range=None,\n        landing_range=None,\n    ):\n        \"\"\"Helper for running jump_analyzer.py and validating outputs.\n    \n        Frame validation uses inclusive ranges only: provide (min_frame, max_frame)\n        for both takeoff_range and landing_range.\n        \"\"\"\n    \n        # Check that the video file exists before running the test\n        video_file = Path(video_path)\n        assert video_file.exists(), f\"Video file {video_path} does not exist\"\n    \n        # Run jump_analyzer.py on the specified video\n        result = subprocess.run(\n            [sys.executable, \"/app/jump_analyzer.py\", video_path],\n            capture_output=True,\n            text=True,\n            cwd=\"/app\",\n        )\n    \n        assert result.returncode == 0, (\n            f\"jump_analyzer.py failed with error: {result.stderr}\"\n        )\n    \n        # Check that output.toml was created\n        output_path = Path(\"/app/output.toml\")\n        assert output_path.exists(), \"output.toml was not created\"\n    \n        # Parse the TOML output\n        try:\n            data = toml.load(output_path)\n        except Exception as e:\n            assert False, f\"Failed to parse output.toml: {e}\"\n    \n        # Validate required fields exist\n        required_fields = [\n            \"jump_takeoff_frame_number\",\n            \"jump_land_frame_number\",\n        ]\n        for field in required_fields:\n            assert field in data, f\"Missing required field: {field}\"\n    \n        # Validate frame numbers using explicit inclusive ranges\n        actual_takeoff = data[\"jump_takeoff_frame_number\"]\n        actual_landing = data[\"jump_land_frame_number\"]\n    \n        assert takeoff_range is not None and landing_range is not None, (\n            \"Both takeoff_range and landing_range provided as inclusive (min, max) tuples\"\n        )\n    \n        takeoff_min, takeoff_max = takeoff_range\n        landing_min, landing_max = landing_range\n    \n        assert takeoff_min <= actual_takeoff <= takeoff_max, (\n            f\"Takeoff frame {actual_takeoff} not within inclusive range \"\n            f\"[{takeoff_min}, {takeoff_max}]\"\n        )\n    \n>       assert landing_min <= actual_landing <= landing_max, (\n            f\"Landing frame {actual_landing} not within inclusive range \"\n            f\"[{landing_min}, {landing_max}]\"\n        )\nE       AssertionError: Landing frame 61 not within inclusive range [62, 64]\nE       assert 62 <= 61\n\n/tests/test_outputs.py:73: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_test_video",
+                "status": "failed",
+                "durationSeconds": 8.069537577001029,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nvideo_path = '/tests/test_video.mp4', takeoff_range = (219, 223)\nlanding_range = (231, 234)\n\n    def _test_jump_analyzer_video(\n        video_path,\n        takeoff_range=None,\n        landing_range=None,\n    ):\n        \"\"\"Helper for running jump_analyzer.py and validating outputs.\n    \n        Frame validation uses inclusive ranges only: provide (min_frame, max_frame)\n        for both takeoff_range and landing_range.\n        \"\"\"\n    \n        # Check that the video file exists before running the test\n        video_file = Path(video_path)\n        assert video_file.exists(), f\"Video file {video_path} does not exist\"\n    \n        # Run jump_analyzer.py on the specified video\n        result = subprocess.run(\n            [sys.executable, \"/app/jump_analyzer.py\", video_path],\n            capture_output=True,\n            text=True,\n            cwd=\"/app\",\n        )\n    \n        assert result.returncode == 0, (\n            f\"jump_analyzer.py failed with error: {result.stderr}\"\n        )\n    \n        # Check that output.toml was created\n        output_path = Path(\"/app/output.toml\")\n        assert output_path.exists(), \"output.toml was not created\"\n    \n        # Parse the TOML output\n        try:\n            data = toml.load(output_path)\n        except Exception as e:\n            assert False, f\"Failed to parse output.toml: {e}\"\n    \n        # Validate required fields exist\n        required_fields = [\n            \"jump_takeoff_frame_number\",\n            \"jump_land_frame_number\",\n        ]\n        for field in required_fields:\n            assert field in data, f\"Missing required field: {field}\"\n    \n        # Validate frame numbers using explicit inclusive ranges\n        actual_takeoff = data[\"jump_takeoff_frame_number\"]\n        actual_landing = data[\"jump_land_frame_number\"]\n    \n        assert takeoff_range is not None and landing_range is not None, (\n            \"Both takeoff_range and landing_range provided as inclusive (min, max) tuples\"\n        )\n    \n        takeoff_min, takeoff_max = takeoff_range\n        landing_min, landing_max = landing_range\n    \n>       assert takeoff_min <= actual_takeoff <= takeoff_max, (\n            f\"Takeoff frame {actual_takeoff} not within inclusive range \"\n            f\"[{takeoff_min}, {takeoff_max}]\"\n        )\nE       AssertionError: Takeoff frame 216 not within inclusive range [219, 223]\nE       assert 219 <= 216\n\n/tests/test_outputs.py:68: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_imports",
+                "status": "passed",
+                "durationSeconds": 0.004706909003289184,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "video-processing",
+          "job": "sc-tb21-feedback-v3-video-processing-a2",
+          "trial": "video-processing__J4VY6v6",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 2679213,
+          "cachedInputTokens": 2559488,
+          "uncachedInputTokens": 119725,
+          "outputTokens": 45079,
+          "costUsd": 0.12922956000000002,
+          "agentSeconds": 946.209,
+          "totalSeconds": 1011.374,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "595137bd3adee017cd4b98f60fbdfe5b591607a8fda80750e8749431b5931d6e",
+          "verifier": {
+            "passed": 4,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_example_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0011903890044777654,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_test_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0008605420007370412,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_example_video",
+                "status": "passed",
+                "durationSeconds": 4.013231345998065,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_test_video",
+                "status": "failed",
+                "durationSeconds": 7.092342490010196,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nvideo_path = '/tests/test_video.mp4', takeoff_range = (219, 223)\nlanding_range = (231, 234)\n\n    def _test_jump_analyzer_video(\n        video_path,\n        takeoff_range=None,\n        landing_range=None,\n    ):\n        \"\"\"Helper for running jump_analyzer.py and validating outputs.\n    \n        Frame validation uses inclusive ranges only: provide (min_frame, max_frame)\n        for both takeoff_range and landing_range.\n        \"\"\"\n    \n        # Check that the video file exists before running the test\n        video_file = Path(video_path)\n        assert video_file.exists(), f\"Video file {video_path} does not exist\"\n    \n        # Run jump_analyzer.py on the specified video\n        result = subprocess.run(\n            [sys.executable, \"/app/jump_analyzer.py\", video_path],\n            capture_output=True,\n            text=True,\n            cwd=\"/app\",\n        )\n    \n        assert result.returncode == 0, (\n            f\"jump_analyzer.py failed with error: {result.stderr}\"\n        )\n    \n        # Check that output.toml was created\n        output_path = Path(\"/app/output.toml\")\n        assert output_path.exists(), \"output.toml was not created\"\n    \n        # Parse the TOML output\n        try:\n            data = toml.load(output_path)\n        except Exception as e:\n            assert False, f\"Failed to parse output.toml: {e}\"\n    \n        # Validate required fields exist\n        required_fields = [\n            \"jump_takeoff_frame_number\",\n            \"jump_land_frame_number\",\n        ]\n        for field in required_fields:\n            assert field in data, f\"Missing required field: {field}\"\n    \n        # Validate frame numbers using explicit inclusive ranges\n        actual_takeoff = data[\"jump_takeoff_frame_number\"]\n        actual_landing = data[\"jump_land_frame_number\"]\n    \n        assert takeoff_range is not None and landing_range is not None, (\n            \"Both takeoff_range and landing_range provided as inclusive (min, max) tuples\"\n        )\n    \n        takeoff_min, takeoff_max = takeoff_range\n        landing_min, landing_max = landing_range\n    \n>       assert takeoff_min <= actual_takeoff <= takeoff_max, (\n            f\"Takeoff frame {actual_takeoff} not within inclusive range \"\n            f\"[{takeoff_min}, {takeoff_max}]\"\n        )\nE       AssertionError: Takeoff frame 224 not within inclusive range [219, 223]\nE       assert 224 <= 223\n\n/tests/test_outputs.py:68: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_imports",
+                "status": "passed",
+                "durationSeconds": 0.009666249010479078,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "video-processing",
+          "job": "sc-tb21-feedback-v3-video-processing-a3-infra-r1",
+          "trial": "video-processing__E3DBP97",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 2678985,
+          "cachedInputTokens": 2516480,
+          "uncachedInputTokens": 162505,
+          "outputTokens": 39828,
+          "costUsd": 0.13062419999999997,
+          "agentSeconds": 850.406,
+          "totalSeconds": 926.733,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 1,
+          "resultSha256": "e2ad1bce37e1cf7b30dd0e5a0c7378c07f9318341b30b3e91878644488606333",
+          "verifier": {
+            "passed": 4,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_example_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0005202220054343343,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_test_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.00029881699447287247,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_example_video",
+                "status": "passed",
+                "durationSeconds": 2.727572728996165,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_test_video",
+                "status": "failed",
+                "durationSeconds": 6.285320540002431,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nvideo_path = '/tests/test_video.mp4', takeoff_range = (219, 223)\nlanding_range = (231, 234)\n\n    def _test_jump_analyzer_video(\n        video_path,\n        takeoff_range=None,\n        landing_range=None,\n    ):\n        \"\"\"Helper for running jump_analyzer.py and validating outputs.\n    \n        Frame validation uses inclusive ranges only: provide (min_frame, max_frame)\n        for both takeoff_range and landing_range.\n        \"\"\"\n    \n        # Check that the video file exists before running the test\n        video_file = Path(video_path)\n        assert video_file.exists(), f\"Video file {video_path} does not exist\"\n    \n        # Run jump_analyzer.py on the specified video\n        result = subprocess.run(\n            [sys.executable, \"/app/jump_analyzer.py\", video_path],\n            capture_output=True,\n            text=True,\n            cwd=\"/app\",\n        )\n    \n        assert result.returncode == 0, (\n            f\"jump_analyzer.py failed with error: {result.stderr}\"\n        )\n    \n        # Check that output.toml was created\n        output_path = Path(\"/app/output.toml\")\n        assert output_path.exists(), \"output.toml was not created\"\n    \n        # Parse the TOML output\n        try:\n            data = toml.load(output_path)\n        except Exception as e:\n            assert False, f\"Failed to parse output.toml: {e}\"\n    \n        # Validate required fields exist\n        required_fields = [\n            \"jump_takeoff_frame_number\",\n            \"jump_land_frame_number\",\n        ]\n        for field in required_fields:\n            assert field in data, f\"Missing required field: {field}\"\n    \n        # Validate frame numbers using explicit inclusive ranges\n        actual_takeoff = data[\"jump_takeoff_frame_number\"]\n        actual_landing = data[\"jump_land_frame_number\"]\n    \n        assert takeoff_range is not None and landing_range is not None, (\n            \"Both takeoff_range and landing_range provided as inclusive (min, max) tuples\"\n        )\n    \n        takeoff_min, takeoff_max = takeoff_range\n        landing_min, landing_max = landing_range\n    \n>       assert takeoff_min <= actual_takeoff <= takeoff_max, (\n            f\"Takeoff frame {actual_takeoff} not within inclusive range \"\n            f\"[{takeoff_min}, {takeoff_max}]\"\n        )\nE       AssertionError: Takeoff frame 0 not within inclusive range [219, 223]\nE       assert 219 <= 0\n\n/tests/test_outputs.py:68: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_imports",
+                "status": "passed",
+                "durationSeconds": 0.0035687310009961948,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "video-processing",
+          "job": "sc-tb21-feedback-v3-video-processing-a4",
+          "trial": "video-processing__PLKctEC",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 4028025,
+          "cachedInputTokens": 3877120,
+          "uncachedInputTokens": 150905,
+          "outputTokens": 44855,
+          "costUsd": 0.16154940000000004,
+          "agentSeconds": 1099.224,
+          "totalSeconds": 1152.889,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "67f320feaae6cba2458aa3f9ed3ef5b3e81cb3f35f6a35dc474341b91ff5f0ec",
+          "verifier": {
+            "passed": 4,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_example_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0006658449929091148,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_test_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.00039146999188233167,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_example_video",
+                "status": "passed",
+                "durationSeconds": 2.5115159729975858,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_test_video",
+                "status": "failed",
+                "durationSeconds": 5.552579205999791,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nvideo_path = '/tests/test_video.mp4', takeoff_range = (219, 223)\nlanding_range = (231, 234)\n\n    def _test_jump_analyzer_video(\n        video_path,\n        takeoff_range=None,\n        landing_range=None,\n    ):\n        \"\"\"Helper for running jump_analyzer.py and validating outputs.\n    \n        Frame validation uses inclusive ranges only: provide (min_frame, max_frame)\n        for both takeoff_range and landing_range.\n        \"\"\"\n    \n        # Check that the video file exists before running the test\n        video_file = Path(video_path)\n        assert video_file.exists(), f\"Video file {video_path} does not exist\"\n    \n        # Run jump_analyzer.py on the specified video\n        result = subprocess.run(\n            [sys.executable, \"/app/jump_analyzer.py\", video_path],\n            capture_output=True,\n            text=True,\n            cwd=\"/app\",\n        )\n    \n        assert result.returncode == 0, (\n            f\"jump_analyzer.py failed with error: {result.stderr}\"\n        )\n    \n        # Check that output.toml was created\n        output_path = Path(\"/app/output.toml\")\n        assert output_path.exists(), \"output.toml was not created\"\n    \n        # Parse the TOML output\n        try:\n            data = toml.load(output_path)\n        except Exception as e:\n            assert False, f\"Failed to parse output.toml: {e}\"\n    \n        # Validate required fields exist\n        required_fields = [\n            \"jump_takeoff_frame_number\",\n            \"jump_land_frame_number\",\n        ]\n        for field in required_fields:\n            assert field in data, f\"Missing required field: {field}\"\n    \n        # Validate frame numbers using explicit inclusive ranges\n        actual_takeoff = data[\"jump_takeoff_frame_number\"]\n        actual_landing = data[\"jump_land_frame_number\"]\n    \n        assert takeoff_range is not None and landing_range is not None, (\n            \"Both takeoff_range and landing_range provided as inclusive (min, max) tuples\"\n        )\n    \n        takeoff_min, takeoff_max = takeoff_range\n        landing_min, landing_max = landing_range\n    \n>       assert takeoff_min <= actual_takeoff <= takeoff_max, (\n            f\"Takeoff frame {actual_takeoff} not within inclusive range \"\n            f\"[{takeoff_min}, {takeoff_max}]\"\n        )\nE       AssertionError: Takeoff frame 233 not within inclusive range [219, 223]\nE       assert 233 <= 223\n\n/tests/test_outputs.py:68: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_imports",
+                "status": "passed",
+                "durationSeconds": 0.0037363720111898147,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "video-processing",
+          "job": "sc-tb21-feedback-v3-video-processing-a5",
+          "trial": "video-processing__gGgMxDD",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 3591507,
+          "cachedInputTokens": 3412224,
+          "uncachedInputTokens": 179283,
+          "outputTokens": 46890,
+          "costUsd": 0.16036907999999997,
+          "agentSeconds": 1048.881,
+          "totalSeconds": 1103.1,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "15ad901db5c9e8aa6281d44ff38ea72a26f7a940be7e3d443d0744769d2b1bfb",
+          "verifier": {
+            "passed": 4,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_example_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0006905330155859701,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_test_video_exists",
+                "status": "passed",
+                "durationSeconds": 0.0004478710034163669,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_example_video",
+                "status": "passed",
+                "durationSeconds": 2.8884524689929094,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_test_video",
+                "status": "failed",
+                "durationSeconds": 6.253653812003904,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nvideo_path = '/tests/test_video.mp4', takeoff_range = (219, 223)\nlanding_range = (231, 234)\n\n    def _test_jump_analyzer_video(\n        video_path,\n        takeoff_range=None,\n        landing_range=None,\n    ):\n        \"\"\"Helper for running jump_analyzer.py and validating outputs.\n    \n        Frame validation uses inclusive ranges only: provide (min_frame, max_frame)\n        for both takeoff_range and landing_range.\n        \"\"\"\n    \n        # Check that the video file exists before running the test\n        video_file = Path(video_path)\n        assert video_file.exists(), f\"Video file {video_path} does not exist\"\n    \n        # Run jump_analyzer.py on the specified video\n        result = subprocess.run(\n            [sys.executable, \"/app/jump_analyzer.py\", video_path],\n            capture_output=True,\n            text=True,\n            cwd=\"/app\",\n        )\n    \n        assert result.returncode == 0, (\n            f\"jump_analyzer.py failed with error: {result.stderr}\"\n        )\n    \n        # Check that output.toml was created\n        output_path = Path(\"/app/output.toml\")\n        assert output_path.exists(), \"output.toml was not created\"\n    \n        # Parse the TOML output\n        try:\n            data = toml.load(output_path)\n        except Exception as e:\n            assert False, f\"Failed to parse output.toml: {e}\"\n    \n        # Validate required fields exist\n        required_fields = [\n            \"jump_takeoff_frame_number\",\n            \"jump_land_frame_number\",\n        ]\n        for field in required_fields:\n            assert field in data, f\"Missing required field: {field}\"\n    \n        # Validate frame numbers using explicit inclusive ranges\n        actual_takeoff = data[\"jump_takeoff_frame_number\"]\n        actual_landing = data[\"jump_land_frame_number\"]\n    \n        assert takeoff_range is not None and landing_range is not None, (\n            \"Both takeoff_range and landing_range provided as inclusive (min, max) tuples\"\n        )\n    \n        takeoff_min, takeoff_max = takeoff_range\n        landing_min, landing_max = landing_range\n    \n>       assert takeoff_min <= actual_takeoff <= takeoff_max, (\n            f\"Takeoff frame {actual_takeoff} not within inclusive range \"\n            f\"[{takeoff_min}, {takeoff_max}]\"\n        )\nE       AssertionError: Takeoff frame 224 not within inclusive range [219, 223]\nE       assert 224 <= 223\n\n/tests/test_outputs.py:68: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_jump_analyzer_imports",
+                "status": "passed",
+                "durationSeconds": 0.004339991006418131,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "task": "sanitize-git-repo",
+      "trajectory": {
+        "rewards": [
+          0,
+          1,
+          1,
+          1,
+          1
+        ],
+        "coldReward": 0,
+        "finalReward": 1,
+        "warmPasses": 4,
+        "warmFailures": 0,
+        "passToFailTransitions": 0,
+        "failToPassTransitions": 1,
+        "coldCostUsd": 0.11489751999999998,
+        "finalCostUsd": 0.04027588,
+        "finalToColdCostRatio": 0.3505374180400065,
+        "lowestPassingCostUsd": 0.04027588
+      },
+      "attempts": [
+        {
+          "attempt": 1,
+          "protocol": "cold-independent",
+          "task": "sanitize-git-repo",
+          "job": "sc-tb21-stateful-r1b3-19-pinned-ef3a1ff",
+          "trial": "sanitize-git-repo__JqeUeUK",
+          "reward": 0,
+          "exceptionType": null,
+          "inputTokens": 1881314,
+          "cachedInputTokens": 1652736,
+          "uncachedInputTokens": 228578,
+          "outputTokens": 30106,
+          "costUsd": 0.11489751999999998,
+          "agentSeconds": 629.074,
+          "totalSeconds": 681.705,
+          "memoryMutationObserved": null,
+          "infrastructureRetries": 0,
+          "resultSha256": "ec52f610da767e8a9d4d8018d9340aa0ffef62cf8f599607bd6d04c4e5787dd0",
+          "verifier": {
+            "passed": 2,
+            "failed": 1,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_removal_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.0010112160052813124,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_correct_replacement_of_secret_information",
+                "status": "failed",
+                "durationSeconds": 0.005348286998923868,
+                "message": "The test failed in the call phase due to an assertion error",
+                "traceTail": "def test_correct_replacement_of_secret_information():\n        CONTAMINATED_PATHS = [\n            \"/app/dclm/ray_processing/ray_cluster.yaml\",\n            \"/app/dclm/ray_processing/process.py\",\n            \"/app/dclm/exp_data/datasets/tokenized/\"\n            \"rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json\",\n        ]\n        DECONTAMINATED_PATHS = [\n            Path(__file__).parent / \"ray_cluster.yaml\",\n            Path(__file__).parent / \"process.py\",\n            Path(__file__).parent\n            / (\"rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json\"),\n        ]\n    \n        for contaminated_path, decontaminated_path in zip(\n            CONTAMINATED_PATHS, DECONTAMINATED_PATHS\n        ):\n            with open(contaminated_path, \"r\") as file:\n                contaminated_text = file.read()\n    \n            with open(decontaminated_path, \"r\") as file:\n                decontaminated_text = file.read()\n    \n>           assert contaminated_text == decontaminated_text\nE           assert '{\\n    \"uuid...l\": null\\n}\\n' == '{\\n    \"uuid...aml\": null\\n}'\nE             \nE             Skipping 22205 identical leading characters in diff, use -v to show\nE               ml\": null\nE             - }\nE             + }\n\n/tests/test_outputs.py:57: AssertionError"
+              },
+              {
+                "name": "test_outputs.py::test_no_other_files_changed",
+                "status": "passed",
+                "durationSeconds": 0.013689683000848163,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 2,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sanitize-git-repo",
+          "job": "sc-tb21-feedback-v3-sanitize-git-repo-a2",
+          "trial": "sanitize-git-repo__KPySmDo",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1353162,
+          "cachedInputTokens": 1272832,
+          "uncachedInputTokens": 80330,
+          "outputTokens": 29974,
+          "costUsd": 0.07749144,
+          "agentSeconds": 601.997,
+          "totalSeconds": 655.359,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "c78f89b2c8b0951a16e9958cdf8afa94ca7ffae9dfdc2e73f0505f0b8a65fa48",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_removal_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.0007936169931781478,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_correct_replacement_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.000619959995674435,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_other_files_changed",
+                "status": "passed",
+                "durationSeconds": 0.011601521997363307,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 3,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sanitize-git-repo",
+          "job": "sc-tb21-feedback-v3-sanitize-git-repo-a3-infra-r1",
+          "trial": "sanitize-git-repo__S5Nap74",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1362953,
+          "cachedInputTokens": 1280512,
+          "uncachedInputTokens": 82441,
+          "outputTokens": 25531,
+          "costUsd": 0.07273563999999999,
+          "agentSeconds": 531.381,
+          "totalSeconds": 588.27,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 1,
+          "resultSha256": "70881c5044eea7a68092d38699c04c709f0e750e2ff8b9019a590ec5cf662827",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_removal_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.0006381000057444908,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_correct_replacement_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.0004873609941569157,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_other_files_changed",
+                "status": "passed",
+                "durationSeconds": 0.014151188006508164,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 4,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sanitize-git-repo",
+          "job": "sc-tb21-feedback-v3-sanitize-git-repo-a4",
+          "trial": "sanitize-git-repo__HXpY2nJ",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 1876010,
+          "cachedInputTokens": 1785088,
+          "uncachedInputTokens": 90922,
+          "outputTokens": 37279,
+          "costUsd": 0.09862096,
+          "agentSeconds": 750.24,
+          "totalSeconds": 793.765,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "6765c637424058cc5800456ce971e4a37d175c33bc2e666add36c01c1ed57db7",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_removal_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.000771364000684116,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_correct_replacement_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.0005178029969101772,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_other_files_changed",
+                "status": "passed",
+                "durationSeconds": 0.009243239001079928,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        },
+        {
+          "attempt": 5,
+          "protocol": "harbor-feedback-series-v1",
+          "task": "sanitize-git-repo",
+          "job": "sc-tb21-feedback-v3-sanitize-git-repo-a5",
+          "trial": "sanitize-git-repo__YyGoAk9",
+          "reward": 1,
+          "exceptionType": null,
+          "inputTokens": 573461,
+          "cachedInputTokens": 520704,
+          "uncachedInputTokens": 52757,
+          "outputTokens": 16092,
+          "costUsd": 0.04027588,
+          "agentSeconds": 322.38,
+          "totalSeconds": 358.634,
+          "memoryMutationObserved": true,
+          "infrastructureRetries": 0,
+          "resultSha256": "da6f311ac2970a057d9b06e6b7cbb296052569cdf9eec469bb00b2ed1671e794",
+          "verifier": {
+            "passed": 3,
+            "failed": 0,
+            "tests": [
+              {
+                "name": "test_outputs.py::test_removal_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.0010355909980717115,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_correct_replacement_of_secret_information",
+                "status": "passed",
+                "durationSeconds": 0.0006699310033582151,
+                "message": null,
+                "traceTail": null
+              },
+              {
+                "name": "test_outputs.py::test_no_other_files_changed",
+                "status": "passed",
+                "durationSeconds": 0.011102326992840972,
+                "message": null,
+                "traceTail": null
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
