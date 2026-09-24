@@ -250,6 +250,7 @@ codex exec \
     if not agent_started:
         result["grade"] = {
             "status": "invalid_infrastructure",
+            "official": False,
             "correct": None,
             "reason": "container did not reach the Codex invocation boundary",
         }
@@ -303,6 +304,7 @@ codex exec \
     if not result["integrityAudit"]["passed"]:
         result["grade"] = {
             "status": "invalid_protocol",
+            "official": False,
             "correct": None,
             "reason": "agent attempted prohibited benchmark-source access",
         }
@@ -347,6 +349,7 @@ def run_task_safely(question: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
             "taskId": question["question_id"],
             "grade": {
                 "status": "invalid_infrastructure",
+                "official": False,
                 "correct": None,
                 "reason": f"runner error: {error}",
             },
@@ -427,6 +430,7 @@ def main() -> None:
     run_manifest = {
         "schemaVersion": 1,
         "protocolVersion": PROTOCOL_VERSION,
+        "scoreKind": "local_metadata_verifier",
         "name": manifest["name"],
         "startedAt": datetime.now(UTC).isoformat(),
         "upstream": manifest["upstream"],

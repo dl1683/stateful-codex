@@ -21,11 +21,21 @@ class BixBenchRunnerTests(unittest.TestCase):
     def test_grades_string_and_range_modes(self) -> None:
         self.assertEqual(
             grade_deterministic("str_verifier", "12,000", "12000"),
-            {"status": "graded", "correct": True, "mode": "str_verifier"},
+            {
+                "status": "metadata_verifier",
+                "official": False,
+                "correct": True,
+                "mode": "str_verifier",
+            },
         )
         self.assertEqual(
             grade_deterministic("range_verifier", "(10.0, 11.0)", "10.5"),
-            {"status": "graded", "correct": True, "mode": "range_verifier"},
+            {
+                "status": "metadata_verifier",
+                "official": False,
+                "correct": True,
+                "mode": "range_verifier",
+            },
         )
 
     def test_hashes_artifact_bytes(self) -> None:
@@ -84,9 +94,9 @@ class BixBenchRunnerTests(unittest.TestCase):
         self.assertEqual(
             failed_agent_grade("agent timed out"),
             {
-                "status": "graded",
+                "status": "agent_failure",
+                "official": False,
                 "correct": False,
-                "mode": "agent_failure",
                 "reason": "agent timed out",
             },
         )

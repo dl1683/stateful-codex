@@ -25,25 +25,33 @@ def grade_deterministic(eval_mode: str, ideal: str, predicted: str) -> dict[str,
     if eval_mode == "str_verifier":
         clean = lambda value: re.sub(r"[^a-zA-Z0-9]", "", value).lower()
         correct = clean(predicted) == clean(ideal)
-        return {"status": "graded", "correct": correct, "mode": eval_mode}
+        return {
+            "status": "metadata_verifier",
+            "official": False,
+            "correct": correct,
+            "mode": eval_mode,
+        }
     if eval_mode == "range_verifier":
         lower, upper = ast.literal_eval(ideal)
         try:
             value = float(predicted)
         except ValueError:
             return {
-                "status": "graded",
+                "status": "metadata_verifier",
+                "official": False,
                 "correct": False,
                 "mode": eval_mode,
                 "reason": "answer is not a single number",
             }
         return {
-            "status": "graded",
+            "status": "metadata_verifier",
+            "official": False,
             "correct": lower <= value <= upper,
             "mode": eval_mode,
         }
     return {
-        "status": "requires_llm_grader",
+        "status": "requires_official_llm_grader",
+        "official": False,
         "correct": None,
         "mode": eval_mode,
     }

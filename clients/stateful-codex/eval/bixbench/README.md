@@ -6,8 +6,9 @@ and answer contract while replacing only the agent harness.
 
 The first gate is deliberately small: `smoke-bix18.json` selects one question
 from a 22 KB *P. aeruginosa* swarming-analysis capsule with a deterministic
-range verifier. Once that produces a valid executed notebook, structured final
-answer, isolated Stateful database, and grade, `bix18-deterministic.json`
+metadata range verifier. Once that produces a valid executed notebook,
+structured final answer, isolated Stateful database, and local verification,
+`bix18-deterministic.json`
 pre-registers all five independently state-isolated questions from that capsule
 before a broader sample. `breadth10-deterministic.json` then pre-registers one
 question from each of ten capsules: five range and five string verifiers across
@@ -93,5 +94,10 @@ Stateful run.
   correctness.
 - `llm_verifier` questions remain ungraded until an explicit judge protocol is
   selected. They are never silently scored with a substitute judge.
+- Exact/range results are labelled `local_metadata_verifier`. BixBench's
+  current official postprocessing uses an LLM judge for open answers, including
+  range questions, so these strict bare-answer checks are diagnostics rather
+  than official BixBench scores. The exported official-shaped trajectories can
+  be judged later under a pinned official protocol.
 - A future same-capsule persistent-state study must be labelled longitudinal;
   it cannot be mixed into the question-isolated BixBench score.

@@ -117,9 +117,9 @@ def audit_agent_log(log_path: Path) -> dict[str, Any]:
 
 def failed_agent_grade(reason: str) -> dict[str, Any]:
     return {
-        "status": "graded",
+        "status": "agent_failure",
+        "official": False,
         "correct": False,
-        "mode": "agent_failure",
         "reason": reason,
     }
 
