@@ -1077,3 +1077,25 @@ negative results; passing component tests alone is not product completion.
 - Do not hide fail-open behavior. A missing or corrupt intelligence store is
   visible, prevents evidence-backed readiness, and leaves ordinary Codex usable.
 - Keep a clean worktree at stage boundaries and record exact validation results.
+
+## Open design problem: trusted reuse and state-aware compaction (2026-09-24)
+
+This section states the problem and the ideal behavior only. The design is deliberately left open.
+
+Evidence: SC-EVAL-032 (the Pramana ten-question A/B), together with SC-EVAL-024/025.
+
+**Problems observed**
+
+1. **Stateful Codex re-reads what it already knows.** Over a ten-question session, ordinary Codex's per-question cost fell sharply, from about 1.5 M to about 0.4 M input tokens and from 26 to 2 requests. It answered later questions from what the thread had already established. Stateful Codex's cost did not fall. It stayed at 1–5 M tokens and 12–35 requests per question, and pulled 2.3× more tool output overall. Findings it had verified, and in many cases recorded with provenance, did not stop it from reading the same sources again.
+2. **Compaction throws away conclusions.** In every observed compaction in both arms, `retained_context.verified_answers` was empty and `user_messages_incomplete` was true. After compaction the thread lost what it had concluded and had to rebuild it by reading. Stateful compacted twice as often as ordinary, so it paid this cost twice as often.
+3. **Net effect: the product thesis is inverted.** The product intent says Stateful Codex should cut rereading and lifetime tokens, so a session should get cheaper as understanding accumulates. Here it got relatively more expensive, with no demonstrated quality gain in the graded questions so far.
+
+**Ideal behavior**
+
+- Understanding the system has verified, with exact provenance, is *used*. It is not re-derived from source. As long as the cited source is unchanged, the answer is built on the recorded understanding, and reading happens only where something is new, has changed, or matters enough to warrant a fresh check.
+- When the cited source changes, the system notices, re-verifies exactly what is affected, and supersedes the stale understanding explicitly. It never keeps trusting stale or unprovenanced claims. This is the SC-EVAL-024 revised-policy behavior, which must keep working.
+- Compaction loses no verified understanding. After compaction a thread continues from what it had concluded, not from a blank slate that must be re-read. Now that durable project state exists, compaction and state should work together rather than independently.
+- Over a long session on one project, per-turn cost falls, and by the later turns it is at or below ordinary Codex. Answer quality and change detection are no worse.
+- The rich root blackboard remains rich; the fix must not come from thinning it.
+
+**How success will be judged:** a matched rerun of SC-EVAL-032, plus a compaction-pressure rerun in the style of SC-EVAL-024.

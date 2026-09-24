@@ -3306,3 +3306,50 @@ required replayed `BIXBENCH_ANSWER=<answer>` marker matching the submitted
 structured answer and treats Codex JSONL usage as cumulative thread snapshots
 rather than summing them across turns. The published v1/v2 results predate
 those two controls and remain labelled accordingly.
+
+## Benchmark SC-EVAL-032: Pramana ten-question matched stateful/ordinary A/B
+
+Status: all 20 turns completed on 2026-09-24. Blind quality grading is in progress (4 of 10 graded at the time of writing); cost and mechanism observations are final.
+
+This was a qualitative probe requested by Devansh, not a protocol-valid longitudinal result. It used one project, one grader, and n=10.
+
+**Setup.** The corpus was the Pramana chip repository snapshot at commit `9c16fb73dc`, placed in isolated copies with per-turn corpus hashes. Each arm ran in one continuous thread (baseline `01a0d326-52f0-70c0-b61b-32244cf8ab36`, stateful `01a0d32b-e40e-72c2-b7f1-a6f1a4a04808`). Both arms used the default model at high effort, read-only, with memories disabled and a dedicated `CODEX_HOME`.
+
+The ten questions were the project's real open design decisions: the timing path, UART RX soundness, pinguard design, IMEM depth, bug hunting, certificate attack, the response-store SVA, the injection theorem, ABI integration, and strategy. They ran strictly sequentially and interleaved (q1 ordinary, q1 stateful, q2 …), alternating which arm went first. Artifacts are in `clients/stateful-codex/eval/results/pramana-ab-2026-09-24/`.
+
+**Economics (cumulative per arm):**
+
+| | Ordinary | Stateful |
+|---|---:|---:|
+| Input tokens | 12,139,665 | 24,157,501 (2.0×) |
+| Uncached input | 502,801 | 1,380,157 (2.7×) |
+| Output tokens (reasoning) | 103,118 (56,371) | 137,394 (81,513) |
+| Summed turn wall time | 2,643 s | 3,591 s |
+| Canonical compactions | 2 | 4 |
+| Tool-output characters returned | 1.12 M | 2.56 M (2.3×) |
+
+**Trajectory.** Ordinary per-question input fell from about 1.5 M to about 0.4 M by q9–q10, and its model requests per question fell from 26 to 2 on q9. It answered later questions from conversation memory. Stateful per-question input did not fall: it stayed at 1–5 M, with q5 at 5.2 M against 1.6 M for ordinary. Its requests stayed at 12–35 per question.
+
+**Mechanism.** Both arms stayed in their single thread, so resume and continuation worked. The gap has three observable sources:
+
+1. **Re-reading instead of reuse.** Stateful pulled 2.3× more tool output. It kept re-verifying source regions rather than relying on understanding it had already established in the thread or the blackboard.
+2. **Repeated project injection.** Thirty `<stateful_project>` developer messages totalled about 443 K characters over the thread. They were re-sent on every turn and after every compaction.
+3. **Compaction discards conclusions.** Every compaction in both arms recorded `retained_context.verified_answers = []` and `user_messages_incomplete: true`. The slot designed to carry verified conclusions across compaction was never populated. Stateful compacted twice as often, and each compaction replaced conversational understanding with the state injection, followed by fresh re-reading.
+
+**Quality (interim, blind Droid grading with the key unblinded afterwards):**
+
+| Query | Winner | Confidence |
+|---|---|---|
+| q1 | ordinary | high |
+| q2 | ordinary | medium |
+| q3 | stateful | medium |
+| q4 | ordinary | medium |
+
+q5–q10 are pending; this section will be updated.
+
+**Interpretation, bounded to this probe.** On a fast-changing repository with open-ended design questions, the state layer added cost and latency without a demonstrated quality gain. The root blackboard is not implicated as the primary cost; its injected size is small relative to the tool-output gap. This result must **not** be answered by thinning the rich root, per the product intent. The actionable problems are the trust and compaction ones:
+
+- verified, provenance-bound findings are not trusted in place of re-reads;
+- compaction does not retain verified conclusions.
+
+SC-EVAL-024 had already exposed a compaction-cost pathology under an artificial limit; this probe shows a related one under default limits.
