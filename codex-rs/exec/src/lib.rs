@@ -37,6 +37,9 @@ use codex_app_server_protocol::ReviewStartResponse;
 use codex_app_server_protocol::ReviewTarget as ApiReviewTarget;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::StatefulRunReadParams;
+use codex_app_server_protocol::StatefulRunReadResponse;
+use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::Thread as AppServerThread;
 use codex_app_server_protocol::ThreadForkParams;
@@ -981,6 +984,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             )
         }
     };
+    let follow_autonomous_continuations = stateful_mode == Some(StatefulModeCliArg::Autonomous);
     let stateful_startup = stateful_mode
         .map(|mode| {
             StatefulStartup::new(
@@ -1173,7 +1177,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         }
     });
 
-    let task_id = match initial_operation {
+    let mut task_id = match initial_operation {
         InitialOperation::ForkOnly => {
             request_shutdown(&client, &mut request_ids, &primary_thread_id_for_span)
                 .await
@@ -1262,6 +1266,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     // exit with a non-zero status for automation-friendly signaling.
     let mut error_seen = false;
     let mut interrupt_channel_open = true;
+    let mut awaiting_autonomous_turn = false;
+    let mut pending_autonomous_turn = None;
     let primary_thread_id_for_requests = primary_thread_id.to_string();
     loop {
         let server_event = tokio::select! {
@@ -1269,6 +1275,18 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 if maybe_interrupt.is_none() {
                     interrupt_channel_open = false;
                     continue;
+                }
+                if awaiting_autonomous_turn {
+                    if let Err(err) = request_shutdown(
+                        &client,
+                        &mut request_ids,
+                        &primary_thread_id_for_requests,
+                    )
+                    .await
+                    {
+                        warn!("thread/unsubscribe failed during shutdown: {err}");
+                    }
+                    break;
                 }
                 if let Err(err) = send_request_with_response::<TurnInterruptResponse>(
                     &client,
@@ -1300,6 +1318,27 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             }
             InProcessServerEvent::ServerNotification(notification) => {
                 let mut notification = *notification;
+                if follow_autonomous_continuations
+                    && let ServerNotification::TurnStarted(started) = &notification
+                    && started.thread_id == primary_thread_id_for_requests
+                    && started.turn.id != task_id
+                {
+                    if awaiting_autonomous_turn {
+                        task_id = started.turn.id.clone();
+                        awaiting_autonomous_turn = false;
+                    } else {
+                        pending_autonomous_turn = Some(started.clone());
+                        continue;
+                    }
+                }
+                let completed_autonomous_turn = matches!(
+                    &notification,
+                    ServerNotification::TurnCompleted(payload)
+                        if payload.thread_id == primary_thread_id_for_requests
+                            && payload.turn.id == task_id
+                            && payload.turn.status
+                                == codex_app_server_protocol::TurnStatus::Completed
+                );
                 if let ServerNotification::Error(payload) = &notification {
                     if payload.thread_id == primary_thread_id_for_requests
                         && payload.turn_id == task_id
@@ -1335,6 +1374,47 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     match event_processor.process_server_notification(notification) {
                         CodexStatus::Running => {}
                         CodexStatus::InitiateShutdown => {
+                            let autonomous_run_is_active = if follow_autonomous_continuations
+                                && completed_autonomous_turn
+                            {
+                                match send_request_with_response::<StatefulRunReadResponse>(
+                                    &client,
+                                    ClientRequest::StatefulRunRead {
+                                        request_id: request_ids.next(),
+                                        params: StatefulRunReadParams {
+                                            run_id: None,
+                                            thread_id: Some(primary_thread_id_for_requests.clone()),
+                                        },
+                                    },
+                                    "statefulRun/read",
+                                )
+                                .await
+                                {
+                                    Ok(response) => response.run.is_some_and(|run| {
+                                        run.mode == StatefulWorkflowMode::Autonomous
+                                            && run.status == StatefulRunStatus::Running
+                                    }),
+                                    Err(err) => {
+                                        warn!(
+                                            "statefulRun/read failed while following Autonomous run: {err}"
+                                        );
+                                        false
+                                    }
+                                }
+                            } else {
+                                false
+                            };
+                            if autonomous_run_is_active {
+                                if let Some(started) = pending_autonomous_turn.take() {
+                                    task_id = started.turn.id.clone();
+                                    let _ = event_processor.process_server_notification(
+                                        ServerNotification::TurnStarted(started),
+                                    );
+                                } else {
+                                    awaiting_autonomous_turn = true;
+                                }
+                                continue;
+                            }
                             if let Err(err) = request_shutdown(
                                 &client,
                                 &mut request_ids,
