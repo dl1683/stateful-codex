@@ -35,7 +35,9 @@ Required deliverables:
 4. Return one concise answer in the required JSON response. For a numerical
    question, the answer field must contain only the number, without units or
    explanatory prose. Put explanation in summary and evidence instead.
-5. Before finishing, reopen notebook.ipynb and verify that it is valid and that
+5. The final code cell must print exactly `BIXBENCH_ANSWER=<answer>`, using the
+   same answer string returned in JSON and the value computed by the notebook.
+6. Before finishing, reopen notebook.ipynb and verify that it is valid and that
    its recorded outputs support the answer.
 
 Do not search for or infer a benchmark answer key. Solve the question from the
@@ -164,3 +166,24 @@ def notebook_summary(path: Path) -> tuple[dict[str, Any], dict[str, int]]:
         "codeCells": len(code_cells),
         "codeCellsWithOutput": len(output_cells),
     }
+
+
+def notebook_answer_markers(notebook: dict[str, Any]) -> list[str]:
+    markers: list[str] = []
+    for cell in notebook.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+        for output in cell.get("outputs", []):
+            if output.get("output_type") != "stream":
+                continue
+            text = output.get("text", "")
+            if isinstance(text, list):
+                text = "".join(text)
+            if not isinstance(text, str):
+                continue
+            for line in text.splitlines():
+                if line.startswith("BIXBENCH_ANSWER="):
+                    markers.append(
+                        normalized_answer(line.removeprefix("BIXBENCH_ANSWER="))
+                    )
+    return markers

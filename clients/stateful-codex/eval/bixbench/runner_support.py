@@ -98,7 +98,7 @@ def workspace_manifest(root: Path) -> dict[str, Any]:
 
 
 def parse_usage(log_path: Path) -> dict[str, int] | None:
-    totals: dict[str, int] = {}
+    latest: dict[str, int] | None = None
     if not log_path.is_file():
         return None
     with log_path.open(encoding="utf-8", errors="replace") as file:
@@ -112,10 +112,12 @@ def parse_usage(log_path: Path) -> dict[str, int] | None:
             )
             if not isinstance(usage, dict):
                 continue
-            for key, value in usage.items():
-                if isinstance(value, int) and not isinstance(value, bool):
-                    totals[key] = totals.get(key, 0) + value
-    return totals or None
+            latest = {
+                key: value
+                for key, value in usage.items()
+                if isinstance(value, int) and not isinstance(value, bool)
+            }
+    return latest
 
 
 def audit_agent_log(log_path: Path) -> dict[str, Any]:

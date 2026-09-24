@@ -7,7 +7,12 @@ import uuid
 from contextlib import closing
 from pathlib import Path
 
-from protocol import notebook_summary, sha256_file
+from protocol import (
+    notebook_answer_markers,
+    notebook_summary,
+    normalized_answer,
+    sha256_file,
+)
 
 PROVIDER_FAILURE_MARKERS = (
     "401 unauthorized",
@@ -215,6 +220,7 @@ def reexecute_notebook(
     task_root: Path,
     image: str,
     timeout_seconds: int,
+    expected_answer: str,
 ) -> dict[str, object]:
     if not notebook.is_file():
         return {"status": "skipped", "reason": "notebook.ipynb is missing"}
@@ -280,14 +286,27 @@ def reexecute_notebook(
     }
     if not timed_out and exit_code == 0 and output.is_file():
         try:
-            _, stats = notebook_summary(output)
-            result.update(
-                {
-                    "status": "reproducible",
-                    "sha256": sha256_file(output),
-                    **stats,
-                }
-            )
+            executed, stats = notebook_summary(output)
+            markers = notebook_answer_markers(executed)
+            if len(markers) != 1:
+                result["reason"] = (
+                    "reexecuted notebook must print exactly one BIXBENCH_ANSWER marker"
+                )
+            elif markers[0] != normalized_answer(expected_answer):
+                result["reason"] = (
+                    "reexecuted notebook answer marker does not match "
+                    "the submitted structured answer"
+                )
+                result["answerMarker"] = markers[0]
+            else:
+                result.update(
+                    {
+                        "status": "reproducible",
+                        "sha256": sha256_file(output),
+                        "answerMarker": markers[0],
+                        **stats,
+                    }
+                )
         except (json.JSONDecodeError, TypeError, ValueError) as error:
             result["reason"] = f"reexecuted notebook is invalid: {error}"
     return result

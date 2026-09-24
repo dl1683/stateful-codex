@@ -1,9 +1,10 @@
 ARG BIXBENCH_BASE_IMAGE=stateful-bixbench-env:fhda-v1.5.0-amd64
 FROM ${BIXBENCH_BASE_IMAGE}
 
-# The base scientific environment comes from FutureHouse's pinned v1.5.0
-# Dockerfile. The compatible local runner also pins the Excel reader required
-# by capsules that contain .xlsx inputs.
+# Official-comparison builds should supply the environment rebuilt from
+# FutureHouse's pinned v1.5.0 Dockerfile. Directional runs may explicitly use a
+# compatible base and must record it as non-official. Pinning the Excel reader
+# here is redundant for the full upstream image but repairs truncated debug bases.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \

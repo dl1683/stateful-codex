@@ -38,7 +38,7 @@ from runner_support import (
 )
 
 BIXBENCH_REPOSITORY_URL = "https://huggingface.co/datasets/futurehouse/BixBench"
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 
 def docker_mount(source: Path, target: str, *, readonly: bool = False) -> list[str]:
@@ -226,9 +226,7 @@ codex exec \
                 "reason": provider_failure,
             }
         else:
-            result["grade"] = failed_agent_grade(
-                f"agent exited with code {exit_code}"
-            )
+            result["grade"] = failed_agent_grade(f"agent exited with code {exit_code}")
     elif not final_path.is_file():
         result["grade"] = failed_agent_grade(
             "agent produced no structured final answer"
@@ -278,11 +276,13 @@ codex exec \
             task_root,
             image,
             notebook_timeout_seconds,
+            result["answer"],
         )
         if result["notebook"]["status"] == "valid"
+        and isinstance(result.get("answer"), str)
         else {
             "status": "skipped",
-            "reason": "the submitted notebook is not valid",
+            "reason": "the submitted notebook or structured answer is not valid",
         }
     )
     result["statefulState"] = (

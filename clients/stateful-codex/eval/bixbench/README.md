@@ -1,8 +1,9 @@
 # BixBench evaluation adapter
 
 This adapter runs the native Stateful Codex CLI as a custom agent on BixBench
-v1.5. It preserves BixBench's question, capsule data, scientific environment,
-and answer contract while replacing only the agent harness.
+v1.5. It preserves BixBench's question, capsule data, and answer contract while
+replacing the agent harness. The completed local gates used a recorded
+debug-base-derived compatible environment, not BixBench's official image.
 
 The first gate is deliberately small: `smoke-bix18.json` selects one question
 from a 22 KB *P. aeruginosa* swarming-analysis capsule with a deterministic
@@ -35,9 +36,9 @@ original breadth denominator.
   `v1.5.0`, commit `953a6b13c5f8e15354525bca08636f620994f954`.
 
 FutureHouse's published `futurehouse/bixbench:aviary-notebook-env` manifest is
-currently ARM64-only. On an AMD64 host, rebuild the environment from its pinned
-Dockerfile rather than substituting a generic image. This is a source-pinned
-rebuild, not the byte-identical published image:
+currently ARM64-only. An official-comparison attempt on AMD64 should rebuild
+the environment from its pinned Dockerfile rather than substitute a generic
+image. This is a source-pinned rebuild, not the byte-identical published image:
 
 ```powershell
 git clone --branch v1.5.0 --depth 1 https://github.com/Future-House/data-analysis-crow.git <fhda-root>
@@ -51,11 +52,15 @@ docker build `
   clients/stateful-codex/eval/bixbench
 ```
 
-The derived compatible layer adds Git, ripgrep, jq, current CA certificates,
-and `openpyxl==3.1.5`. The Excel reader is explicit because the upstream AMD64
-source build cannot otherwise read `.xlsx` capsules. This is a practical local
-environment for directional evaluation, not the official byte-identical
-BixBench image; report results accordingly.
+The completed local gates did not finish that pinned rebuild. They used
+`stateful-bixbench-agent-debug:fhda-v1.5.0-amd64` (image ID
+`sha256:a07ae515ef9601d48f08bc50d00a6bed7d8f7269e123e1bbfad0b8c709fdb746`),
+which derives from upstream's truncated debug-base recipe. The protocol-v2
+repair layered `openpyxl==3.1.5` onto that image and produced image ID
+`sha256:2c5cc1f0c546e90732a2a7fed79f14839ed2565311d179f01c4de69c56a79072`.
+Upstream's full pinned Dockerfile already includes openpyxl; the missing reader
+was a limitation of the executed debug-base-derived image. These environments
+are useful for directional harness testing, not official environment claims.
 
 ## Run the smoke
 
@@ -105,12 +110,14 @@ Stateful run.
   count as incorrect. Failures before the Codex invocation boundary, detected
   provider/authentication outages, and positively identified container-engine
   disconnects are reported as invalid rather than incorrect.
-- Submitted notebooks are checked structurally, then replayed from the
+- Protocol-v3 submitted notebooks are checked structurally, then replayed from the
   untouched capsule inputs plus only the submitted notebook in the same image
-  with Docker networking disabled. Agent-created helper artifacts cannot make
-  a replay pass. Runtime package installation is an integrity violation; all
-  dependencies must already exist in the recorded image. Replay validity
-  remains separate from answer correctness.
+  with Docker networking disabled. The replay must print exactly one
+  `BIXBENCH_ANSWER=<answer>` marker matching the submitted structured answer.
+  Agent-created helper artifacts cannot make a replay pass. Runtime package
+  installation is an integrity violation; all dependencies must already exist
+  in the recorded image. Replay validity remains separate from answer
+  correctness. The published v1/v2 local gates predate the answer-marker rule.
 - Stateful runs retain both SQLite databases. The result records database
   integrity, terminal run status, continuation count, and hierarchy, context-map,
   blackboard, relationship, and obligation counts.

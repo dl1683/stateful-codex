@@ -5,6 +5,7 @@ import unittest
 import zipfile
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from artifact_validation import (
@@ -98,7 +99,7 @@ class BixBenchRunnerTests(unittest.TestCase):
                 "58bdfeb61cba4c3ca0a276b86e54c7ebadb30bded1e0de68838af234f8ffbb0a",
             )
 
-    def test_aggregates_usage_across_completed_turns(self) -> None:
+    def test_uses_latest_cumulative_usage_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "codex.jsonl"
             events = [
@@ -113,7 +114,7 @@ class BixBenchRunnerTests(unittest.TestCase):
                 },
             ]
             log.write_text("\n".join(map(json.dumps, events)), encoding="utf-8")
-            self.assertEqual(parse_usage(log), {"input_tokens": 17, "output_tokens": 5})
+            self.assertEqual(parse_usage(log), {"input_tokens": 7, "output_tokens": 3})
 
     def test_preprocesses_only_the_single_data_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -214,6 +215,7 @@ class BixBenchRunnerTests(unittest.TestCase):
                     task_root,
                     "test-image",
                     30,
+                    "1",
                 )
 
             self.assertEqual(result["status"], "failed")
@@ -221,6 +223,67 @@ class BixBenchRunnerTests(unittest.TestCase):
                 path.name for path in (task_root / "notebook-replay").iterdir()
             )
             self.assertEqual(replay_files, ["data.csv", "notebook.ipynb"])
+
+    def test_replay_requires_the_submitted_answer_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = root / "inputs"
+            inputs.mkdir()
+            notebook = root / "notebook.ipynb"
+            notebook.write_text("{}", encoding="utf-8")
+
+            def replay(expected_answer: str) -> dict[str, object]:
+                task_root = root / f"task-{expected_answer}"
+                (task_root / "logs").mkdir(parents=True)
+
+                def execute_notebook(*_args, **_kwargs):
+                    output = task_root / "notebook-replay" / "notebook.reexecuted.ipynb"
+                    output.write_text(
+                        json.dumps(
+                            {
+                                "nbformat": 4,
+                                "cells": [
+                                    {
+                                        "cell_type": "code",
+                                        "outputs": [
+                                            {
+                                                "output_type": "stream",
+                                                "text": ["BIXBENCH_ANSWER=2\n"],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    return SimpleNamespace(returncode=0)
+
+                with patch(
+                    "artifact_validation.subprocess.run", side_effect=execute_notebook
+                ):
+                    return reexecute_notebook(
+                        inputs,
+                        notebook,
+                        task_root,
+                        "test-image",
+                        30,
+                        expected_answer,
+                    )
+
+            matching = replay("2")
+            self.assertEqual(matching["status"], "reproducible")
+            self.assertEqual(matching["answerMarker"], "2")
+
+            result = replay("1")
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["answerMarker"], "2")
+            self.assertEqual(
+                result["reason"],
+                "reexecuted notebook answer marker does not match "
+                "the submitted structured answer",
+            )
 
     def test_classifies_provider_failures(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

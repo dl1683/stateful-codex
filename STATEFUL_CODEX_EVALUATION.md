@@ -3174,9 +3174,11 @@ experiment and cannot be merged into this result.
 
 The protocol pins the official BixBench repository, dataset revision, capsule
 archive hashes, and FutureHouse scientific-environment source revision. The
-published environment image is ARM64-only, so this AMD64 host rebuilds its
-unchanged pinned Dockerfile and records the resulting image ID plus the complete
-Conda/Pip inventory. The agent sees only the single capsule `Data` directory;
+published environment image is ARM64-only. The completed local gates on this
+AMD64 host used a recorded debug-base-derived compatible image rather than a
+completed rebuild of the unchanged pinned Dockerfile; the repair image added
+the pinned Excel reader to that same base. Both image IDs and complete package
+inventories were retained. The agent sees only the single capsule `Data` directory;
 reference notebooks, answer keys, distractors, Codex memories, live web search,
 and known benchmark-source hosts are excluded. Cached ChatGPT authentication is
 used with API-key environment variables removed.
@@ -3221,7 +3223,7 @@ technical control if a failure cannot otherwise be localized.
 ### Compatible local results
 
 These results are not official BixBench scores. They use the pinned tasks and
-capsule hashes, a source-compatible AMD64 scientific image, cached Codex login,
+capsule hashes, a debug-base-derived AMD64 compatible image, cached Codex login,
 Luna at maximum reasoning effort, fresh state per question, and local metadata
 verification. No ordinary-Codex arm was run. The compact machine-readable
 record is
@@ -3299,4 +3301,8 @@ capsule inputs plus only the submitted notebook, rejects runtime Pip/Conda/R
 package installation, pins the missing Excel reader in the explicitly
 compatible image, and separates known container-engine disconnects from agent
 failures. The two-task repair passed every operational check under this stronger
-protocol. The negative scientific answer remained negative.
+protocol. The negative scientific answer remained negative. Protocol v3 adds a
+required replayed `BIXBENCH_ANSWER=<answer>` marker matching the submitted
+structured answer and treats Codex JSONL usage as cumulative thread snapshots
+rather than summing them across turns. The published v1/v2 results predate
+those two controls and remain labelled accordingly.

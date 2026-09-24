@@ -8,7 +8,9 @@
     "Each question received a fresh workspace and fresh Stateful databases; these runs do not test compounding project memory.",
     "No matched ordinary-Codex arm was run, so the results do not establish a causal Stateful advantage.",
     "The local metadata verifier is stricter and less semantic than BixBench's official LLM judge.",
-    "The ten-task breadth selection was frozen before outcomes but is not a representative estimate of the complete benchmark."
+    "The ten-task breadth selection was frozen before outcomes but is not a representative estimate of the complete benchmark.",
+    "The executed environment was derived from upstream's truncated debug-base recipe, not a completed rebuild of its full pinned Dockerfile.",
+    "Protocol v1/v2 notebook replay established clean execution but did not yet require the replayed notebook to emit the submitted answer."
   ],
   "protocol": {
     "benchmarkRevision": "49311180bdacb324c596f2e07596c126f2004008",
@@ -24,7 +26,9 @@
     "stateScope": "question",
     "concurrency": 2,
     "agentTimeoutSeconds": 3600,
-    "bundleSha256": "a321910f2cae0ccfed8e3b412f4f3ef7a7ec22f62f683444655be6c76c6841ad"
+    "bundleSha256": "a321910f2cae0ccfed8e3b412f4f3ef7a7ec22f62f683444655be6c76c6841ad",
+    "executedEnvironment": "debug-base-derived-compatible-amd64",
+    "initialImageId": "sha256:a07ae515ef9601d48f08bc50d00a6bed7d8f7269e123e1bbfad0b8c709fdb746"
   },
   "gates": {
     "smoke": {
@@ -219,6 +223,10 @@
       "Runtime pip, Conda, mamba, R install.packages, and BiocManager installation commands are integrity violations.",
       "Known Docker-engine disconnects are classified as invalid infrastructure rather than agent failures.",
       "openpyxl 3.1.5 is pinned in the explicitly compatible non-official image."
+    ],
+    "protocolVersion3Controls": [
+      "Reexecuted notebooks must emit exactly one BIXBENCH_ANSWER marker matching the submitted structured answer.",
+      "Codex turn.completed usage is treated as a cumulative thread snapshot; the final snapshot is used instead of summing snapshots."
     ]
   }
 }
