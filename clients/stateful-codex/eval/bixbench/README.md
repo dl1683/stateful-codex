@@ -21,8 +21,9 @@ deterministically graded questions can be enabled before a broader sample.
   `v1.5.0`, commit `953a6b13c5f8e15354525bca08636f620994f954`.
 
 FutureHouse's published `futurehouse/bixbench:aviary-notebook-env` manifest is
-currently ARM64-only. On an AMD64 host, reproduce the same environment from its
-pinned Dockerfile rather than substituting a generic image:
+currently ARM64-only. On an AMD64 host, rebuild the environment from its pinned
+Dockerfile rather than substituting a generic image. This is a source-pinned
+rebuild, not the byte-identical published image:
 
 ```powershell
 git clone --branch v1.5.0 --depth 1 https://github.com/Future-House/data-analysis-crow.git <fhda-root>
@@ -59,15 +60,30 @@ forward an API key. Raw data, agent logs, executed notebook, exact trajectory,
 isolated Stateful database, token usage, hashes, and deterministic grade remain
 under the selected output directory.
 
+`--arm stateful` is the default. `--arm ordinary` runs the same question,
+container, model, prompt, and output contract without Stateful mode, permitting
+a matched control when one is explicitly useful; it is not required for every
+Stateful run.
+
 ## Integrity boundary
 
 - Standard runs use a fresh workspace and fresh Stateful database per question.
+- The agent sees only the contents of the capsule's single `Data` directory;
+  reference notebooks and other capsule files never enter its workspace.
 - Answer keys and distractors remain on the host and are never mounted into the
   agent container.
+- Cached and live web search, Codex memories, and known benchmark-source hosts
+  are disabled. The raw event log is also audited for prohibited search or
+  benchmark-source download attempts.
 - Capsule archives and metadata are downloaded from the pinned dataset revision
   and rejected unless their SHA-256 values match the manifest.
-- The machine-readable run manifest records the exact image ID, agent bundle,
-  model, effort, timeout, state scope, and task list before the model starts.
+- The machine-readable run and workspace manifests record the exact image ID,
+  agent bundle, prompt/schema hashes, input file hashes, model, effort, timeout,
+  state scope, and task list. Native rollout sessions are retained beside logs.
+- Agent timeouts, nonzero exits, and missing or malformed answers count as
+  incorrect. Only failures before the Codex invocation boundary are excluded as
+  infrastructure-invalid; notebook validity is reported separately from answer
+  correctness.
 - `llm_verifier` questions remain ungraded until an explicit judge protocol is
   selected. They are never silently scored with a substitute judge.
 - A future same-capsule persistent-state study must be labelled longitudinal;
