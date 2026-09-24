@@ -18,6 +18,12 @@ selected before outcomes for verifier/category coverage and an operationally
 manageable first-pass archive size (at most 10 MiB, rounded); this is a breadth
 gate, not a representative estimate of the complete benchmark.
 
+`repair2-deterministic.json` is not another breadth sample. It is a post-hoc
+operational repair check containing only the Excel task whose correct answer
+failed clean replay because `openpyxl` was absent and the CHIP task interrupted
+by a Docker engine `unexpected EOF`. Keep its results separate from the
+original breadth denominator.
+
 ## Pinned inputs
 
 - BixBench source: `FUture-House/BixBench` commit

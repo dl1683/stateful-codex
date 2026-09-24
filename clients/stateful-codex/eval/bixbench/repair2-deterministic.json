@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "bixbench-v1.5-posthoc-infrastructure-repair-two",
+  "stateScope": "question",
+  "upstream": {
+    "benchmarkRepository": "FUture-House/BixBench",
+    "benchmarkRevision": "49311180bdacb324c596f2e07596c126f2004008",
+    "environmentRepository": "Future-House/data-analysis-crow",
+    "environmentRevision": "953a6b13c5f8e15354525bca08636f620994f954"
+  },
+  "dataset": {
+    "repository": "futurehouse/BixBench",
+    "revision": "f8cc3bdcc6357c88b8c3648306522b9c422dc95a",
+    "metadataSha256": "0d1204dcdae7193a9132ced5a3502008f6b3b163debc1b65b2aa2d86cb132dc9"
+  },
+  "capsules": {
+    "CapsuleFolder-93f63fb8-b56c-4ad1-8d3b-d651e2107423.zip": "5ac4a82eb6aa71cfb8a283f6b6cd13da3419d9f14e9ce61db51d26a6ca98932a",
+    "CapsuleFolder-28a5984e-9061-4d6f-99a1-40f8753bc9f4.zip": "be410226ac353bf8afada3e1226f163d374a5d3ffb5ce33560ee312363ba16a2"
+  },
+  "tasks": [
+    "bix-51-q1",
+    "bix-39-q2"
+  ]
+}
