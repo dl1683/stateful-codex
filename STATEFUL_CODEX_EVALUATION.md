@@ -3309,7 +3309,7 @@ those two controls and remain labelled accordingly.
 
 ## Benchmark SC-EVAL-032: Pramana ten-question matched stateful/ordinary A/B
 
-Status: all 20 turns completed on 2026-09-24. Blind quality grading is in progress (4 of 10 graded at the time of writing); cost and mechanism observations are final.
+Status: completed on 2026-09-24. All 20 turns and the blind grading (two rounds) are finished.
 
 This was a qualitative probe requested by Devansh, not a protocol-valid longitudinal result. It used one project, one grader, and n=10.
 
@@ -3336,16 +3336,23 @@ The ten questions were the project's real open design decisions: the timing path
 2. **Repeated project injection.** Thirty `<stateful_project>` developer messages totalled about 443 K characters over the thread. They were re-sent on every turn and after every compaction.
 3. **Durable state did not adequately replace conversational conclusions after compaction.** Each compacted replacement contained one fresh Stateful project packet, so the root itself was rehydrated rather than duplicated. However, the project state held only 30 sparse entries after ten deep questions, while completed-run results and final obligations were not projected into later model context. The remaining conclusions depended on the provider's opaque compaction output, and the subsequent re-reading behavior shows that the installed state plus summary did not provide adequate working continuity. The observed empty `retained_context.verified_answers` is not evidence for this claim: that host-owned field records verified replies to `request_user_input` for Guardian authorization, not general project conclusions, and was expected to be empty in these autonomous read-only turns.
 
-**Quality (interim, blind Droid grading with the key unblinded afterwards):**
+**Quality (final: blind Droid grading on a read-only corpus copy, key unblinded afterwards).** Ordinary won 6 of 10 queries (q01, q02, q04, q06 and q10 with high confidence; q09 medium). Stateful won 4 (q05, q07 and q08 high; q03 medium). There were no ties. The summed 1–5 rubric scores were level: 208 ordinary, 210 stateful. Stateful scored higher on grounding (43 vs 39): its citations were exact where ordinary's line numbers were off by one. It also avoided overclaiming on q07 and q08.
 
-| Query | Winner | Confidence |
-|---|---|---|
-| q1 | ordinary | high |
-| q2 | ordinary | medium |
-| q3 | stateful | medium |
-| q4 | ordinary | medium |
+A first grading pass on a writable copy was contaminated by a formatter hook. It was preserved separately and regraded; every query had the same winner in both passes.
 
-q5–q10 are pending; this section will be updated.
+**Cost (API-equivalent list-price estimate: $4/M uncached input, $0.40/M cached, $20/M output).**
+
+| Arm | Estimate | Wall time |
+|---|---:|---:|
+| Ordinary | $9.02 | 46.0 min |
+| Stateful | $18.16 | 61.6 min |
+
+- From q01–05 to q06–10, ordinary's cost fell 48% ($5.93 → $3.09). Stateful's fell only 22% ($10.19 → $7.98), and its uncached input did not fall at all.
+- The stateful/ordinary cost ratio therefore rose from 1.72× to 2.58× over the session.
+
+**How state was actually used.** Reuse was passive. Earlier findings reached later turns only through the injected project summary, which grew from 2.9 KB to 22 KB. No explicit blackboard query returned an entry recorded in an earlier turn.
+
+In q06, a finding that was present in the stateful arm's injected summary (a real reset-synchronizer mismatch between the formal UART RX harness and the RTL) went unused. The ordinary arm carried the same finding forward from its own q02 answer and built the stronger attack with it. A continuous ordinary thread obtained much of the reuse for free.
 
 **Interpretation, bounded to this probe.** On a fast-changing repository with open-ended design questions, the state layer added cost and latency without a demonstrated quality gain. The root blackboard is not implicated as the primary cost; its injected size is small relative to the tool-output gap. This result must **not** be answered by thinning the rich root, per the product intent. The actionable problems are the trust and compaction ones:
 
