@@ -30,6 +30,7 @@ const REFRESH_TOOL_NAME: &str = "context_map_refresh";
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 20;
 const REFRESH_ROUTE_LIMIT: u32 = 20;
+const MAX_HEADLINE_BYTES: usize = 240;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -300,20 +301,32 @@ fn route_json(
             "stored context-map route is outside the selected project roots".to_string(),
         ));
     }
+    let description = hit.entry.value.description;
+    let headline = if description.len() <= MAX_HEADLINE_BYTES {
+        description
+    } else {
+        let marker = "…";
+        let mut boundary = MAX_HEADLINE_BYTES.saturating_sub(marker.len());
+        while !description.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        format!("{}{marker}", &description[..boundary])
+    };
+    let mut source = serde_json::Map::from_iter([(
+        "relativePath".to_string(),
+        json!(hit.source.relative_path.to_string()),
+    )]);
+    if project.roots.len() > 1 {
+        source.insert("projectRoot".to_string(), json!(hit.source.project_root));
+    }
+    if let Some(region_anchor) = hit.source.region_anchor {
+        source.insert("regionAnchor".to_string(), json!(region_anchor));
+    }
     Ok(json!({
-        "entryId": hit.entry.id.to_string(),
-        "nodeId": hit.entry.value.node_id.to_string(),
-        "sourceFingerprint": hit.entry.value.source_fingerprint.to_string(),
-        "description": hit.entry.value.description,
-        "routingTerms": hit.entry.value.routing_terms,
+        "headline": headline,
         "coverage": hit.entry.value.coverage,
         "freshness": freshness_name(hit.freshness),
-        "source": {
-            "projectRoot": hit.source.project_root,
-            "relativePath": hit.source.relative_path.to_string(),
-            "regionAnchor": hit.source.region_anchor,
-        },
-        "revision": hit.entry.revision,
+        "source": source,
     }))
 }
 

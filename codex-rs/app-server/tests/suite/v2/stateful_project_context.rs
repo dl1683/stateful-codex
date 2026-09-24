@@ -419,12 +419,22 @@ async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<
     assert_eq!(output["filesIndexed"], 2);
     assert_eq!(output["routesTruncated"], false);
     assert_eq!(output["routes"].as_array().map(Vec::len), Some(2));
-    assert_eq!(output["routes"][0]["source"]["relativePath"], "alpha.md");
-    assert_eq!(output["routes"][1]["source"]["relativePath"], "beta.md");
-    assert!(
-        output["routes"][0]["description"]
-            .as_str()
-            .is_some_and(|description| description.contains("# Alpha"))
+    assert_eq!(
+        output["routes"],
+        json!([
+            {
+                "headline": "alpha.md | # Alpha | first route",
+                "coverage": "complete",
+                "freshness": "current",
+                "source": {"relativePath": "alpha.md"},
+            },
+            {
+                "headline": "beta.md | # Beta | second route",
+                "coverage": "complete",
+                "freshness": "current",
+                "source": {"relativePath": "beta.md"},
+            },
+        ])
     );
     Ok(())
 }
