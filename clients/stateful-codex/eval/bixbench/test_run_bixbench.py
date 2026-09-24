@@ -48,6 +48,20 @@ class BixBenchRunnerTests(unittest.TestCase):
                 "correct": True,
                 "mode": "range_verifier",
                 "formatOnlyFailure": False,
+                "percentScaleEquivalent": False,
+            },
+        )
+
+    def test_flags_percent_scale_equivalence_without_changing_correctness(self) -> None:
+        self.assertEqual(
+            grade_deterministic("range_verifier", "(25, 30)", "0.290142"),
+            {
+                "status": "metadata_verifier",
+                "official": False,
+                "correct": False,
+                "mode": "range_verifier",
+                "formatOnlyFailure": False,
+                "percentScaleEquivalent": True,
             },
         )
 

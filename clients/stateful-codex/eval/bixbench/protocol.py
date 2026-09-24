@@ -131,6 +131,8 @@ def grade_deterministic(eval_mode: str, ideal: str, predicted: str) -> dict[str,
             "correct": lower <= value <= upper,
             "mode": eval_mode,
             "formatOnlyFailure": False,
+            "percentScaleEquivalent": not lower <= value <= upper
+            and (lower <= value * 100 <= upper or lower <= value / 100 <= upper),
         }
     return {
         "status": "requires_official_llm_grader",
