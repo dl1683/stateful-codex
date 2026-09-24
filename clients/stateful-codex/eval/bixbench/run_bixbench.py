@@ -9,11 +9,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from artifact_validation import (
+    classify_provider_failure,
+    inspect_stateful_state,
+    reexecute_notebook,
+)
 from protocol import (
     grade_deterministic,
     normalized_answer,
     notebook_summary,
+    prompt_for,
     sha256_file,
+    write_control_files,
 )
 from runner_support import (
     FORBIDDEN_NETWORK_HOSTS,
@@ -30,61 +37,6 @@ from runner_support import (
 
 BIXBENCH_REPOSITORY_URL = "https://huggingface.co/datasets/futurehouse/BixBench"
 PROTOCOL_VERSION = 1
-
-
-def prompt_for(question: dict[str, Any]) -> str:
-    return f"""You are the analysis agent in a BixBench v1.5 evaluation.
-
-The project directory /workspace contains the input data for exactly one
-bioinformatics question. Analyze the files directly and answer this question:
-
-<question>
-{question["question"]}
-</question>
-
-Required deliverables:
-1. Create /workspace/notebook.ipynb as a valid, executed Jupyter notebook.
-2. Use Python code cells, matching the official BixBench run configuration.
-   You may invoke installed R packages through rpy2 or a recorded subprocess
-   when scientifically appropriate. Preserve the code, tables, statistics, and
-   cell outputs needed for an independent reviewer to verify the answer.
-3. Inspect the data rigorously, check shapes and missing values, and state any
-   scientifically important assumptions in code comments and printed output.
-4. Return one concise answer in the required JSON response. For a numerical
-   question, the answer field must contain only the number, without units or
-   explanatory prose. Put explanation in summary and evidence instead.
-5. Before finishing, reopen notebook.ipynb and verify that it is valid and that
-   its recorded outputs support the answer.
-
-Do not search for or infer a benchmark answer key. Solve the question from the
-project data. Work autonomously until both the notebook and answer are complete.
-"""
-
-
-def write_control_files(control_dir: Path, question: dict[str, Any]) -> dict[str, str]:
-    control_dir.mkdir(parents=True)
-    prompt_path = control_dir / "prompt.txt"
-    prompt_path.write_text(prompt_for(question), encoding="utf-8")
-    schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["answer", "summary", "evidence"],
-        "properties": {
-            "answer": {"type": "string"},
-            "summary": {"type": "string"},
-            "evidence": {
-                "type": "array",
-                "maxItems": 5,
-                "items": {"type": "string"},
-            },
-        },
-    }
-    schema_path = control_dir / "final.schema.json"
-    schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
-    return {
-        "promptSha256": sha256_file(prompt_path),
-        "schemaSha256": sha256_file(schema_path),
-    }
 
 
 def docker_mount(source: Path, target: str, *, readonly: bool = False) -> list[str]:
@@ -117,6 +69,7 @@ def run_task(
     effort: str,
     arm: str,
     timeout_seconds: int,
+    notebook_timeout_seconds: int,
 ) -> dict[str, Any]:
     task_id = question["question_id"]
     task_root = run_root / "tasks" / task_id
@@ -194,9 +147,10 @@ codex exec \
     started = time.monotonic()
     timed_out = False
     exit_code = None
-    with (logs / "container.stdout").open("wb") as stdout, (
-        logs / "container.stderr"
-    ).open("wb") as stderr:
+    with (
+        (logs / "container.stdout").open("wb") as stdout,
+        (logs / "container.stderr").open("wb") as stderr,
+    ):
         try:
             completed = subprocess.run(
                 command,
@@ -249,7 +203,19 @@ codex exec \
     elif timed_out:
         result["grade"] = failed_agent_grade("agent timed out")
     elif exit_code != 0:
-        result["grade"] = failed_agent_grade(f"agent exited with code {exit_code}")
+        provider_failure = classify_provider_failure(
+            logs / "codex.stderr", logs / "codex.jsonl"
+        )
+        result["grade"] = (
+            {
+                "status": "invalid_provider",
+                "official": False,
+                "correct": None,
+                "reason": provider_failure,
+            }
+            if provider_failure
+            else failed_agent_grade(f"agent exited with code {exit_code}")
+        )
     elif not final_path.is_file():
         result["grade"] = failed_agent_grade(
             "agent produced no structured final answer"
@@ -292,6 +258,24 @@ codex exec \
             "status": "missing",
             "reason": "agent produced no notebook.ipynb",
         }
+    result["notebookReplay"] = (
+        reexecute_notebook(
+            workspace,
+            task_root,
+            image,
+            notebook_timeout_seconds,
+        )
+        if result["notebook"]["status"] == "valid"
+        else {
+            "status": "skipped",
+            "reason": "the submitted notebook is not valid",
+        }
+    )
+    result["statefulState"] = (
+        inspect_stateful_state(state)
+        if arm == "stateful"
+        else {"status": "not_applicable", "valid": None}
+    )
 
     if not result["integrityAudit"]["passed"]:
         result["grade"] = {
@@ -369,6 +353,7 @@ def main() -> None:
     parser.add_argument("--effort", default="max")
     parser.add_argument("--arm", choices=("ordinary", "stateful"), default="stateful")
     parser.add_argument("--timeout-seconds", type=int, default=3600)
+    parser.add_argument("--notebook-timeout-seconds", type=int, default=900)
     parser.add_argument("--concurrency", type=int, default=1)
     args = parser.parse_args()
 
@@ -383,6 +368,8 @@ def main() -> None:
         raise FileNotFoundError("Codex auth.json was not found")
     if args.concurrency < 1:
         raise ValueError("--concurrency must be positive")
+    if args.notebook_timeout_seconds < 1:
+        raise ValueError("--notebook-timeout-seconds must be positive")
 
     args.output_dir.mkdir(parents=True, exist_ok=False)
     cache_dir = args.cache_dir or args.output_dir / "cache"
@@ -426,6 +413,7 @@ def main() -> None:
     harness_root = Path(__file__).resolve().parent
     harness_files = (
         "Dockerfile.agent",
+        "artifact_validation.py",
         "protocol.py",
         "run_bixbench.py",
         "runner_support.py",
@@ -453,6 +441,7 @@ def main() -> None:
         "effort": args.effort,
         "arm": args.arm,
         "timeoutSeconds": args.timeout_seconds,
+        "notebookTimeoutSeconds": args.notebook_timeout_seconds,
         "concurrency": args.concurrency,
     }
     (run_root / "run-manifest.json").write_text(
@@ -476,6 +465,7 @@ def main() -> None:
                 effort=args.effort,
                 arm=args.arm,
                 timeout_seconds=args.timeout_seconds,
+                notebook_timeout_seconds=args.notebook_timeout_seconds,
             ): question["question_id"]
             for question in selected
         }
@@ -495,6 +485,13 @@ def main() -> None:
         ),
         "ungraded": sum(
             result.get("grade", {}).get("correct") is None for result in results
+        ),
+        "reproducibleNotebooks": sum(
+            result.get("notebookReplay", {}).get("status") == "reproducible"
+            for result in results
+        ),
+        "completedStatefulRuns": sum(
+            result.get("statefulState", {}).get("valid") is True for result in results
         ),
     }
     (run_root / "summary.json").write_text(

@@ -1,9 +1,12 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
+from artifact_validation import classify_provider_failure, inspect_stateful_state
 from protocol import grade_deterministic, normalized_answer, sha256_file
 from runner_support import (
     audit_agent_log,
@@ -35,6 +38,18 @@ class BixBenchRunnerTests(unittest.TestCase):
                 "official": False,
                 "correct": True,
                 "mode": "range_verifier",
+                "formatOnlyFailure": False,
+            },
+        )
+        self.assertEqual(
+            grade_deterministic("range_verifier", "(12000, 13000)", "12,500"),
+            {
+                "status": "metadata_verifier",
+                "official": False,
+                "correct": False,
+                "mode": "range_verifier",
+                "reason": "answer is not a single number",
+                "formatOnlyFailure": True,
             },
         )
 
@@ -118,6 +133,89 @@ class BixBenchRunnerTests(unittest.TestCase):
                 {
                     "passed": False,
                     "findings": ["line 1: benchmark-source network access"],
+                },
+            )
+
+    def test_classifies_provider_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "codex.stderr"
+            stderr.write_text("request failed: 429 Too Many Requests", encoding="utf-8")
+            self.assertEqual(
+                classify_provider_failure(stderr),
+                "provider or authentication failure: too many requests",
+            )
+
+    def test_inspects_terminal_stateful_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            runtime_path = state_dir / "stateful_runtime_1.sqlite"
+            with closing(sqlite3.connect(runtime_path)) as runtime:
+                runtime.executescript(
+                    """
+                    CREATE TABLE stateful_runs (
+                        id TEXT, project_id TEXT, mode TEXT, status TEXT,
+                        revision INTEGER, strategy_revision INTEGER, result TEXT,
+                        continuations_used INTEGER, updated_at_ms INTEGER
+                    );
+                    CREATE TABLE stateful_obligations (id TEXT);
+                    INSERT INTO stateful_runs VALUES
+                        ('run-1', 'project-1', 'autonomous', 'completed',
+                         3, 2, 'done', 0, 1);
+                    INSERT INTO stateful_obligations VALUES ('obligation-1');
+                    """
+                )
+            intelligence_path = state_dir / "project_intelligence_1.sqlite"
+            with closing(sqlite3.connect(intelligence_path)) as intelligence:
+                intelligence.executescript(
+                    """
+                    CREATE TABLE hierarchy_nodes (id TEXT, project_id TEXT);
+                    CREATE TABLE context_map_entries (id TEXT, project_id TEXT);
+                    CREATE TABLE blackboard_entries (id TEXT, project_id TEXT);
+                    CREATE TABLE blackboard_relations (id TEXT, project_id TEXT);
+                    INSERT INTO hierarchy_nodes VALUES ('node-1', 'project-1');
+                    INSERT INTO context_map_entries VALUES ('map-1', 'project-1');
+                    INSERT INTO blackboard_entries VALUES ('entry-1', 'project-1');
+                    """
+                )
+            self.assertEqual(
+                inspect_stateful_state(state_dir),
+                {
+                    "status": "valid",
+                    "valid": True,
+                    "databases": {
+                        "runtime": {
+                            "exists": True,
+                            "integrity": ["ok"],
+                            "files": {
+                                runtime_path.name: sha256_file(runtime_path),
+                            },
+                        },
+                        "projectIntelligence": {
+                            "exists": True,
+                            "integrity": ["ok"],
+                            "files": {
+                                intelligence_path.name: sha256_file(intelligence_path),
+                            },
+                        },
+                    },
+                    "run": {
+                        "id": "run-1",
+                        "project_id": "project-1",
+                        "mode": "autonomous",
+                        "status": "completed",
+                        "revision": 3,
+                        "strategy_revision": 2,
+                        "result": "done",
+                        "continuations_used": 0,
+                    },
+                    "counts": {
+                        "runs": 1,
+                        "obligations": 1,
+                        "hierarchyNodes": 1,
+                        "contextMapEntries": 1,
+                        "blackboardEntries": 1,
+                        "blackboardRelations": 0,
+                    },
                 },
             )
 

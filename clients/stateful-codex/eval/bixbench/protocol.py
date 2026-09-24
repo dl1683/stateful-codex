@@ -14,10 +14,78 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def prompt_for(question: dict[str, Any]) -> str:
+    return f"""You are the analysis agent in a BixBench v1.5 evaluation.
+
+The project directory /workspace contains the input data for exactly one
+bioinformatics question. Analyze the files directly and answer this question:
+
+<question>
+{question["question"]}
+</question>
+
+Required deliverables:
+1. Create /workspace/notebook.ipynb as a valid, executed Jupyter notebook.
+2. Use Python code cells, matching the official BixBench run configuration.
+   You may invoke installed R packages through rpy2 or a recorded subprocess
+   when scientifically appropriate. Preserve the code, tables, statistics, and
+   cell outputs needed for an independent reviewer to verify the answer.
+3. Inspect the data rigorously, check shapes and missing values, and state any
+   scientifically important assumptions in code comments and printed output.
+4. Return one concise answer in the required JSON response. For a numerical
+   question, the answer field must contain only the number, without units or
+   explanatory prose. Put explanation in summary and evidence instead.
+5. Before finishing, reopen notebook.ipynb and verify that it is valid and that
+   its recorded outputs support the answer.
+
+Do not search for or infer a benchmark answer key. Solve the question from the
+project data. Work autonomously until both the notebook and answer are complete.
+"""
+
+
+def write_control_files(control_dir: Path, question: dict[str, Any]) -> dict[str, str]:
+    control_dir.mkdir(parents=True)
+    prompt_path = control_dir / "prompt.txt"
+    prompt_path.write_text(prompt_for(question), encoding="utf-8")
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["answer", "summary", "evidence"],
+        "properties": {
+            "answer": {"type": "string"},
+            "summary": {"type": "string"},
+            "evidence": {
+                "type": "array",
+                "maxItems": 5,
+                "items": {"type": "string"},
+            },
+        },
+    }
+    schema_path = control_dir / "final.schema.json"
+    schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
+    return {
+        "promptSha256": sha256_file(prompt_path),
+        "schemaSha256": sha256_file(schema_path),
+    }
+
+
 def normalized_answer(value: Any) -> str:
     answer = str(value).strip()
     match = re.fullmatch(r"<answer>\s*(.*?)\s*</answer>", answer, re.DOTALL)
     return match.group(1).strip() if match else answer
+
+
+def lenient_numeric_answer(value: str) -> float | None:
+    match = re.fullmatch(
+        r"\s*([+-]?(?:\d[\d,]*\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(?:%|[A-Za-z][A-Za-z0-9/^_-]*)?\s*",
+        value,
+    )
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
 
 
 def grade_deterministic(eval_mode: str, ideal: str, predicted: str) -> dict[str, Any]:
@@ -36,18 +104,22 @@ def grade_deterministic(eval_mode: str, ideal: str, predicted: str) -> dict[str,
         try:
             value = float(predicted)
         except ValueError:
+            lenient_value = lenient_numeric_answer(predicted)
             return {
                 "status": "metadata_verifier",
                 "official": False,
                 "correct": False,
                 "mode": eval_mode,
                 "reason": "answer is not a single number",
+                "formatOnlyFailure": lenient_value is not None
+                and lower <= lenient_value <= upper,
             }
         return {
             "status": "metadata_verifier",
             "official": False,
             "correct": lower <= value <= upper,
             "mode": eval_mode,
+            "formatOnlyFailure": False,
         }
     return {
         "status": "requires_official_llm_grader",

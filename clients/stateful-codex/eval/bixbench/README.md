@@ -94,9 +94,14 @@ Stateful run.
   effort, timeout, state scope, and task list. Native rollout sessions are
   retained beside logs.
 - Agent timeouts, nonzero exits, and missing or malformed answers count as
-  incorrect. Only failures before the Codex invocation boundary are excluded as
-  infrastructure-invalid; notebook validity is reported separately from answer
-  correctness.
+  incorrect. Only failures before the Codex invocation boundary and detected
+  provider/authentication outages are reported as invalid rather than incorrect.
+- Submitted notebooks are checked structurally, then replayed from a copied
+  workspace in the same image with Docker networking disabled. Replay validity
+  remains separate from answer correctness.
+- Stateful runs retain both SQLite databases. The result records database
+  integrity, terminal run status, continuation count, and hierarchy, context-map,
+  blackboard, relationship, and obligation counts.
 - `llm_verifier` questions remain ungraded until an explicit judge protocol is
   selected. They are never silently scored with a substitute judge.
 - Exact/range results are labelled `local_metadata_verifier`. BixBench's
