@@ -423,6 +423,13 @@ def main() -> None:
     (run_root / "environment-manifest.json").write_text(
         json.dumps(environment, indent=2), encoding="utf-8"
     )
+    harness_root = Path(__file__).resolve().parent
+    harness_files = (
+        "Dockerfile.agent",
+        "protocol.py",
+        "run_bixbench.py",
+        "runner_support.py",
+    )
     run_manifest = {
         "schemaVersion": 1,
         "protocolVersion": PROTOCOL_VERSION,
@@ -438,6 +445,10 @@ def main() -> None:
         "imageId": image_id,
         "environmentManifestSha256": environment["sha256"],
         "bundleSha256": args.bundle_sha256,
+        "selectionManifestSha256": sha256_file(args.manifest),
+        "harnessSha256": {
+            name: sha256_file(harness_root / name) for name in harness_files
+        },
         "model": args.model,
         "effort": args.effort,
         "arm": args.arm,
