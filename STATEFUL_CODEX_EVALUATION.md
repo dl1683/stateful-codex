@@ -3334,7 +3334,7 @@ The ten questions were the project's real open design decisions: the timing path
 
 1. **Re-reading instead of reuse.** Stateful pulled 2.3× more tool output. It kept re-verifying source regions rather than relying on understanding it had already established in the thread or the blackboard.
 2. **Repeated project injection.** Thirty `<stateful_project>` developer messages totalled about 443 K characters over the thread. They were re-sent on every turn and after every compaction.
-3. **Compaction discards conclusions.** Every compaction in both arms recorded `retained_context.verified_answers = []` and `user_messages_incomplete: true`. The slot designed to carry verified conclusions across compaction was never populated. Stateful compacted twice as often, and each compaction replaced conversational understanding with the state injection, followed by fresh re-reading.
+3. **Durable state did not adequately replace conversational conclusions after compaction.** Each compacted replacement contained one fresh Stateful project packet, so the root itself was rehydrated rather than duplicated. However, the project state held only 30 sparse entries after ten deep questions, while completed-run results and final obligations were not projected into later model context. The remaining conclusions depended on the provider's opaque compaction output, and the subsequent re-reading behavior shows that the installed state plus summary did not provide adequate working continuity. The observed empty `retained_context.verified_answers` is not evidence for this claim: that host-owned field records verified replies to `request_user_input` for Guardian authorization, not general project conclusions, and was expected to be empty in these autonomous read-only turns.
 
 **Quality (interim, blind Droid grading with the key unblinded afterwards):**
 
@@ -3350,6 +3350,6 @@ q5–q10 are pending; this section will be updated.
 **Interpretation, bounded to this probe.** On a fast-changing repository with open-ended design questions, the state layer added cost and latency without a demonstrated quality gain. The root blackboard is not implicated as the primary cost; its injected size is small relative to the tool-output gap. This result must **not** be answered by thinning the rich root, per the product intent. The actionable problems are the trust and compaction ones:
 
 - verified, provenance-bound findings are not trusted in place of re-reads;
-- compaction does not retain verified conclusions.
+- durable state plus the compacted replacement does not yet preserve enough prior conclusions to prevent rebuild reading.
 
 SC-EVAL-024 had already exposed a compaction-cost pathology under an artificial limit; this probe shows a related one under default limits.
