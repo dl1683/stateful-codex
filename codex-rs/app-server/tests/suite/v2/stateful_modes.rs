@@ -78,11 +78,18 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                 responses::ev_assistant_message("autonomous-done", "Investigation complete."),
                 responses::ev_completed("autonomous-done-response"),
             ]),
+            responses::sse(vec![
+                responses::ev_assistant_message(
+                    "next-question-done",
+                    "I continued from the durable prior outcome.",
+                ),
+                responses::ev_completed("next-question-done-response"),
+            ]),
         ],
     )
     .await;
 
-    start_turn(&mut server, thread_id, "Begin the investigation.").await?;
+    start_turn(&mut server, thread_id.clone(), "Begin the investigation.").await?;
     let mut revisions = Vec::new();
     for _ in 0..3 {
         revisions.push(
@@ -104,12 +111,25 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
             .is_some()
     );
     let _: TurnCompletedNotification = server.read_notification("turn/completed").await?;
+    start_turn(
+        &mut server,
+        thread_id,
+        "Continue with the next project question.",
+    )
+    .await?;
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     assert!(requests[1].body_contains_text("Continue Autonomous Stateful run"));
     assert!(requests[1].body_contains_text(
         "do not repeat completed work or reopen unchanged host-audited sourceVerified evidence"
     ));
+    assert!(requests[3].body_contains_text("Recent completed project outcomes"));
+    assert!(
+        requests[3].body_contains_text(
+            "The unattended investigation reached its evidence-grounded result."
+        )
+    );
+    assert!(requests[3].body_contains_text("The run can now complete without user intervention."));
     Ok(())
 }
 

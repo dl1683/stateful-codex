@@ -3,6 +3,7 @@
 mod autonomy;
 mod completion;
 mod events;
+mod outcome_world_state;
 mod root_blackboard;
 mod run_world_state;
 mod services;
@@ -28,6 +29,8 @@ use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
 
+use crate::outcome_world_state::ProjectOutcomesStatus;
+use crate::outcome_world_state::project_outcomes_world_state_section;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
@@ -150,6 +153,9 @@ impl ContextContributor for StatefulExtension {
                 }
             };
             let mut sections = vec![project_world_state_section(status)];
+            if let Some(outcomes) = self.project_outcomes(selected.project_id()).await {
+                sections.push(project_outcomes_world_state_section(outcomes));
+            }
             if let Some(run_status) = self
                 .run_world_state(selected.project_id(), &input.thread_id.to_string())
                 .await
@@ -162,6 +168,43 @@ impl ContextContributor for StatefulExtension {
 }
 
 impl StatefulExtension {
+    async fn project_outcomes(&self, project_id: &str) -> Option<ProjectOutcomesStatus> {
+        const MAX_OUTCOMES: usize = 5;
+
+        let services = self.services.as_ref()?;
+        let store = match services.runtime().await {
+            Ok(store) => store,
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to open Stateful outcome store");
+                return Some(ProjectOutcomesStatus::Unavailable {
+                    project_id: project_id.to_string(),
+                });
+            }
+        };
+        let mut outcomes = match store
+            .recent_completed_outcomes(project_id, (MAX_OUTCOMES + 1) as u32)
+            .await
+        {
+            Ok(outcomes) => outcomes,
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to load recent Stateful outcomes");
+                return Some(ProjectOutcomesStatus::Unavailable {
+                    project_id: project_id.to_string(),
+                });
+            }
+        };
+        if outcomes.is_empty() {
+            return None;
+        }
+        let has_more = outcomes.len() > MAX_OUTCOMES;
+        outcomes.truncate(MAX_OUTCOMES);
+        Some(ProjectOutcomesStatus::Available {
+            project_id: project_id.to_string(),
+            outcomes,
+            has_more,
+        })
+    }
+
     async fn root_blackboard(
         &self,
         project: &codex_thread_store::StoredProject,
