@@ -30,7 +30,7 @@ use crate::root_blackboard::render_root_blackboard;
 use crate::services::ProjectIntelligenceServices;
 
 #[tokio::test]
-async fn changed_promoted_source_is_stale_before_the_first_model_response() {
+async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
     let state_home = TempDir::new().expect("temporary state home");
     let project_root = TempDir::new().expect("temporary project root");
     let source_path = project_root.path().join("policy.md");
@@ -68,7 +68,34 @@ async fn changed_promoted_source_is_stale_before_the_first_model_response() {
         .await
         .expect("project lookup")
         .expect("project node");
-    services
+    let extension = StatefulExtension {
+        projects: Arc::new(InMemoryThreadStore::default()),
+        services: Some(services),
+        event_sink: None,
+        autonomous: None,
+    };
+    let project = StoredProject {
+        id: "project-1".to_string(),
+        name: "Policy".to_string(),
+        roots: vec![StoredProjectRoot {
+            path: project_root.path().display().to_string(),
+        }],
+        metadata: Default::default(),
+        position: 0,
+        created_at_ms: 1,
+        updated_at_ms: 1,
+        recency_at_ms: None,
+    };
+    let turn_store = ExtensionData::new("turn-2");
+    let empty_status = extension.root_blackboard(&project, &turn_store).await;
+    let RootBlackboardStatus::Available(_) = &empty_status else {
+        panic!("root blackboard should be available");
+    };
+
+    extension
+        .services
+        .as_ref()
+        .expect("project intelligence services")
         .blackboard()
         .await
         .expect("blackboard")
@@ -91,36 +118,25 @@ async fn changed_promoted_source_is_stale_before_the_first_model_response() {
                 }],
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
-                    source_id: "turn-1".to_string(),
+                    source_id: "turn-2".to_string(),
                 },
             },
         )
         .await
         .expect("create promoted knowledge");
+    let promoted_status = extension.root_blackboard(&project, &turn_store).await;
+    let RootBlackboardStatus::Available(_) = &promoted_status else {
+        panic!("root blackboard should be available");
+    };
+    let mut initial_render = String::new();
+    render_root_blackboard(&mut initial_render, &promoted_status);
+    assert!(initial_render.contains("verification=sourceVerified"));
+    assert!(initial_render.contains("evidence=current"));
+    assert!(initial_render.contains("policy.md (current)"));
 
     std::fs::write(&source_path, "# Policy\nThreshold: 6\n").expect("replace source");
-    let extension = StatefulExtension {
-        projects: Arc::new(InMemoryThreadStore::default()),
-        services: Some(services),
-        event_sink: None,
-        autonomous: None,
-    };
-    let project = StoredProject {
-        id: "project-1".to_string(),
-        name: "Policy".to_string(),
-        roots: vec![StoredProjectRoot {
-            path: project_root.path().display().to_string(),
-        }],
-        metadata: Default::default(),
-        position: 0,
-        created_at_ms: 1,
-        updated_at_ms: 1,
-        recency_at_ms: None,
-    };
-    let status = extension
-        .root_blackboard(&project, &ExtensionData::new("turn-2"))
-        .await;
-    let RootBlackboardStatus::Available(_) = &status else {
+    let changed_status = extension.root_blackboard(&project, &turn_store).await;
+    let RootBlackboardStatus::Available(_) = &changed_status else {
         panic!("root blackboard should be available");
     };
     let persisted = extension
@@ -141,7 +157,7 @@ async fn changed_promoted_source_is_stale_before_the_first_model_response() {
         BlackboardEvidenceFreshness::Stale
     );
     let mut rendered = String::new();
-    render_root_blackboard(&mut rendered, &status);
+    render_root_blackboard(&mut rendered, &changed_status);
     assert!(rendered.contains("verification=stale"));
     assert!(rendered.contains("evidence=stale"));
     assert!(rendered.contains("policy.md (stale)"));

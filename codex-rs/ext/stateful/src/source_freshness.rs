@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::ContextMapFreshness;
@@ -32,6 +33,92 @@ pub(super) enum SourceAuditStatus {
 pub(super) struct RootEvidenceAudit {
     pub(super) project_id: String,
     pub(super) statuses: HashMap<ContextMapEntryId, SourceAuditStatus>,
+    pub(super) cache_key: Option<RootEvidenceAuditCacheKey>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct RootEvidenceAuditCacheKey {
+    sources: Vec<RootEvidenceAuditCacheSource>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RootEvidenceAuditCacheSource {
+    context_map_entry_id: ContextMapEntryId,
+    project_root: String,
+    relative_path: String,
+    source_fingerprint: SourceFingerprint,
+    filesystem_state: RootEvidenceFilesystemState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RootEvidenceFilesystemState {
+    Present {
+        canonical_path: PathBuf,
+        bytes: u64,
+        modified: SystemTime,
+    },
+    Missing,
+}
+
+pub(super) async fn root_evidence_audit_cache_key(
+    project_roots: &[PathBuf],
+    evidence_routes: &HashMap<ContextMapEntryId, ContextMapHit>,
+) -> Option<RootEvidenceAuditCacheKey> {
+    let project_roots = project_roots.to_vec();
+    let mut sources = evidence_routes
+        .iter()
+        .map(|(entry_id, hit)| {
+            (
+                entry_id.clone(),
+                hit.source.project_root.clone(),
+                hit.source.relative_path.to_string(),
+                hit.entry.value.source_fingerprint.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    sources.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+    tokio::task::spawn_blocking(move || {
+        let sources = sources
+            .into_iter()
+            .map(
+                |(context_map_entry_id, project_root, relative_path, source_fingerprint)| {
+                    let configured_root = project_roots
+                        .iter()
+                        .find(|root| root.as_os_str() == Path::new(&project_root).as_os_str())?;
+                    let canonical_root = std::fs::canonicalize(configured_root).ok()?;
+                    let source_path = canonical_root.join(&relative_path);
+                    let filesystem_state = match std::fs::canonicalize(&source_path) {
+                        Ok(canonical_path) => {
+                            if !canonical_path.starts_with(&canonical_root) {
+                                return None;
+                            }
+                            let metadata = std::fs::metadata(&canonical_path).ok()?;
+                            RootEvidenceFilesystemState::Present {
+                                canonical_path,
+                                bytes: metadata.len(),
+                                modified: metadata.modified().ok()?,
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            RootEvidenceFilesystemState::Missing
+                        }
+                        Err(_) => return None,
+                    };
+                    Some(RootEvidenceAuditCacheSource {
+                        context_map_entry_id,
+                        project_root,
+                        relative_path,
+                        source_fingerprint,
+                        filesystem_state,
+                    })
+                },
+            )
+            .collect::<Option<Vec<_>>>()?;
+        Some(RootEvidenceAuditCacheKey { sources })
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 pub(super) async fn audit_root_evidence(
@@ -39,8 +126,8 @@ pub(super) async fn audit_root_evidence(
     project_id: &str,
     project_roots: &[PathBuf],
     entry_ids: impl IntoIterator<Item = ContextMapEntryId>,
+    cache_key: Option<RootEvidenceAuditCacheKey>,
 ) -> RootEvidenceAudit {
-    let mut unique = HashSet::new();
     let mut statuses = HashMap::new();
     let mut audited_bytes = 0_u64;
     let context_map = match services.context_map().await {
@@ -50,6 +137,7 @@ pub(super) async fn audit_root_evidence(
             return RootEvidenceAudit {
                 project_id: project_id.to_string(),
                 statuses,
+                cache_key,
             };
         }
     };
@@ -60,15 +148,19 @@ pub(super) async fn audit_root_evidence(
             return RootEvidenceAudit {
                 project_id: project_id.to_string(),
                 statuses,
+                cache_key,
             };
         }
     };
 
-    for entry_id in entry_ids {
-        if !unique.insert(entry_id.clone()) {
-            continue;
-        }
-        if unique.len() > MAX_AUDITED_SOURCES {
+    let mut entry_ids = entry_ids
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    entry_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    for (index, entry_id) in entry_ids.into_iter().enumerate() {
+        if index >= MAX_AUDITED_SOURCES {
             statuses.insert(entry_id, SourceAuditStatus::Unchecked);
             continue;
         }
@@ -101,6 +193,7 @@ pub(super) async fn audit_root_evidence(
     RootEvidenceAudit {
         project_id: project_id.to_string(),
         statuses,
+        cache_key,
     }
 }
 

@@ -35,6 +35,7 @@ use crate::run_world_state::run_world_state_section;
 use crate::services::ProjectIntelligenceServices;
 use crate::source_freshness::RootEvidenceAudit;
 use crate::source_freshness::audit_root_evidence;
+use crate::source_freshness::root_evidence_audit_cache_key;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
@@ -194,32 +195,13 @@ impl StatefulExtension {
                             evidence_audit: Some(RootEvidenceAudit {
                                 project_id: project_id.to_string(),
                                 statuses: Default::default(),
+                                cache_key: None,
                             }),
                         });
                     }
                 };
-                let evidence_ids = projection
-                    .data
-                    .iter()
-                    .flat_map(|hit| &hit.entry.value.evidence)
-                    .map(|evidence| evidence.context_map_entry_id.clone())
-                    .collect::<Vec<_>>();
-                let evidence_audit = match turn_store.get::<RootEvidenceAudit>() {
-                    Some(audit) if audit.project_id == *project_id => audit,
-                    _ => {
-                        let roots = project
-                            .roots
-                            .iter()
-                            .map(|root| std::path::PathBuf::from(&root.path))
-                            .collect::<Vec<_>>();
-                        let audit = Arc::new(
-                            audit_root_evidence(services, project_id, &roots, evidence_ids).await,
-                        );
-                        turn_store.insert((*audit).clone());
-                        audit
-                    }
-                };
                 let mut evidence_routes = std::collections::HashMap::new();
+                let mut complete_evidence_routes = true;
                 for evidence in projection
                     .data
                     .iter()
@@ -235,15 +217,57 @@ impl StatefulExtension {
                         Ok(Some(hit)) => {
                             evidence_routes.insert(evidence.context_map_entry_id.clone(), hit);
                         }
-                        Ok(None) => {}
-                        Err(error) => tracing::warn!(
-                            %project_id,
-                            context_map_entry_id = %evidence.context_map_entry_id,
-                            %error,
-                            "failed to resolve a root evidence route"
-                        ),
+                        Ok(None) => complete_evidence_routes = false,
+                        Err(error) => {
+                            complete_evidence_routes = false;
+                            tracing::warn!(
+                                %project_id,
+                                context_map_entry_id = %evidence.context_map_entry_id,
+                                %error,
+                                "failed to resolve a root evidence route"
+                            );
+                        }
                     }
                 }
+                let evidence_ids = projection
+                    .data
+                    .iter()
+                    .flat_map(|hit| &hit.entry.value.evidence)
+                    .map(|evidence| evidence.context_map_entry_id.clone())
+                    .collect::<Vec<_>>();
+                let roots = project
+                    .roots
+                    .iter()
+                    .map(|root| std::path::PathBuf::from(&root.path))
+                    .collect::<Vec<_>>();
+                let audit_cache_key = if complete_evidence_routes {
+                    root_evidence_audit_cache_key(&roots, &evidence_routes).await
+                } else {
+                    None
+                };
+                let evidence_audit = match turn_store.get::<RootEvidenceAudit>() {
+                    Some(audit)
+                        if audit.project_id == *project_id
+                            && audit_cache_key.is_some()
+                            && audit.cache_key.as_ref() == audit_cache_key.as_ref() =>
+                    {
+                        audit
+                    }
+                    _ => {
+                        let audit = Arc::new(
+                            audit_root_evidence(
+                                services,
+                                project_id,
+                                &roots,
+                                evidence_ids,
+                                audit_cache_key,
+                            )
+                            .await,
+                        );
+                        turn_store.insert((*audit).clone());
+                        audit
+                    }
+                };
                 RootBlackboardStatus::Available(ResolvedRootBlackboard {
                     projection,
                     evidence_routes,
