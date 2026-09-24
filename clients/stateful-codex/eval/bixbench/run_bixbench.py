@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from artifact_validation import (
+    assess_operational_validity,
     classify_provider_failure,
     inspect_stateful_state,
     reexecute_notebook,
@@ -285,6 +286,10 @@ codex exec \
             "reason": "agent attempted prohibited benchmark-source access",
         }
 
+    result["operationalValidity"] = assess_operational_validity(
+        result, stateful=arm == "stateful"
+    )
+
     if final is not None:
         trajectory = {
             "problem_id": task_id,
@@ -477,14 +482,36 @@ def main() -> None:
         **run_manifest,
         "completedAt": datetime.now(UTC).isoformat(),
         "results": results,
-        "passed": sum(
-            result.get("grade", {}).get("correct") is True for result in results
+        "localVerifierCorrect": sum(
+            result.get("grade", {}).get("status") == "metadata_verifier"
+            and result.get("grade", {}).get("correct") is True
+            for result in results
         ),
-        "failed": sum(
-            result.get("grade", {}).get("correct") is False for result in results
+        "localVerifierIncorrect": sum(
+            result.get("grade", {}).get("status") == "metadata_verifier"
+            and result.get("grade", {}).get("correct") is False
+            for result in results
         ),
-        "ungraded": sum(
-            result.get("grade", {}).get("correct") is None for result in results
+        "requiresOfficialGrading": sum(
+            result.get("grade", {}).get("status")
+            == "requires_official_llm_grader"
+            for result in results
+        ),
+        "agentFailures": sum(
+            result.get("grade", {}).get("status") == "agent_failure"
+            for result in results
+        ),
+        "invalidRuns": sum(
+            str(result.get("grade", {}).get("status", "")).startswith("invalid_")
+            for result in results
+        ),
+        "operationallyValid": sum(
+            result.get("operationalValidity", {}).get("valid") is True
+            for result in results
+        ),
+        "operationallyInvalid": sum(
+            result.get("operationalValidity", {}).get("valid") is False
+            for result in results
         ),
         "reproducibleNotebooks": sum(
             result.get("notebookReplay", {}).get("status") == "reproducible"

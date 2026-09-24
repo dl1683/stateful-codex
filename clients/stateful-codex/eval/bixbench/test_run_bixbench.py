@@ -6,7 +6,11 @@ import zipfile
 from contextlib import closing
 from pathlib import Path
 
-from artifact_validation import classify_provider_failure, inspect_stateful_state
+from artifact_validation import (
+    assess_operational_validity,
+    classify_provider_failure,
+    inspect_stateful_state,
+)
 from protocol import grade_deterministic, normalized_answer, sha256_file
 from runner_support import (
     audit_agent_log,
@@ -144,6 +148,45 @@ class BixBenchRunnerTests(unittest.TestCase):
                 classify_provider_failure(stderr),
                 "provider or authentication failure: too many requests",
             )
+
+    def test_assesses_operational_validity_separately_from_correctness(self) -> None:
+        result = {
+            "agentStarted": True,
+            "timedOut": False,
+            "exitCode": 0,
+            "answer": "wrong but parseable",
+            "notebook": {"status": "valid"},
+            "notebookReplay": {"status": "reproducible"},
+            "integrityAudit": {"passed": True},
+            "imageId": "sha256:image",
+            "bundleSha256": "bundle",
+            "workspaceManifestSha256": "workspace",
+            "control": {"promptSha256": "prompt"},
+            "statefulState": {"valid": True},
+        }
+        self.assertEqual(
+            assess_operational_validity(result, stateful=True),
+            {
+                "valid": True,
+                "checks": {
+                    "agentCompleted": True,
+                    "structuredAnswer": True,
+                    "submittedNotebook": True,
+                    "offlineNotebookReplay": True,
+                    "protocolAudit": True,
+                    "artifactHashes": True,
+                    "terminalStatefulRun": True,
+                },
+                "failures": [],
+            },
+        )
+
+        result["notebookReplay"] = {"status": "failed"}
+        result["statefulState"] = {"valid": False}
+        self.assertEqual(
+            assess_operational_validity(result, stateful=True)["failures"],
+            ["offlineNotebookReplay", "terminalStatefulRun"],
+        )
 
     def test_inspects_terminal_stateful_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

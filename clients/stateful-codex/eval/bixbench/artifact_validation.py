@@ -23,6 +23,44 @@ PROVIDER_FAILURE_MARKERS = (
 )
 
 
+def assess_operational_validity(
+    result: dict[str, object], *, stateful: bool
+) -> dict[str, object]:
+    notebook = result.get("notebook")
+    notebook_replay = result.get("notebookReplay")
+    integrity_audit = result.get("integrityAudit")
+    control = result.get("control")
+    stateful_state = result.get("statefulState")
+    checks = {
+        "agentCompleted": result.get("agentStarted") is True
+        and result.get("timedOut") is False
+        and result.get("exitCode") == 0,
+        "structuredAnswer": isinstance(result.get("answer"), str),
+        "submittedNotebook": isinstance(notebook, dict)
+        and notebook.get("status") == "valid",
+        "offlineNotebookReplay": isinstance(notebook_replay, dict)
+        and notebook_replay.get("status") == "reproducible",
+        "protocolAudit": isinstance(integrity_audit, dict)
+        and integrity_audit.get("passed") is True,
+        "artifactHashes": all(
+            isinstance(result.get(key), str) and bool(result[key])
+            for key in ("imageId", "bundleSha256", "workspaceManifestSha256")
+        )
+        and isinstance(control, dict)
+        and bool(control),
+        "terminalStatefulRun": isinstance(stateful_state, dict)
+        and stateful_state.get("valid") is True
+        if stateful
+        else True,
+    }
+    failures = [name for name, passed in checks.items() if not passed]
+    return {
+        "valid": not failures,
+        "checks": checks,
+        "failures": failures,
+    }
+
+
 def classify_provider_failure(*paths: Path) -> str | None:
     text = "\n".join(
         path.read_text(encoding="utf-8", errors="replace")[-2_000_000:]

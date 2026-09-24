@@ -109,5 +109,11 @@ Stateful run.
   range questions, so these strict bare-answer checks are diagnostics rather
   than official BixBench scores. The exported official-shaped trajectories can
   be judged later under a pinned official protocol.
+- Result summaries keep local answer correctness separate from operational
+  validity. A run is operationally valid only when Codex completes, returns the
+  structured answer, submits a valid notebook, passes offline replay and the
+  protocol audit, records its hashes, and (for the Stateful arm) leaves a
+  terminal integrity-valid durable run. A correct local answer cannot hide a
+  broken or irreproducible run.
 - A future same-capsule persistent-state study must be labelled longitudinal;
   it cannot be mixed into the question-isolated BixBench score.

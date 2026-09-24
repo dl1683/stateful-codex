@@ -3185,6 +3185,8 @@ both integrity-valid Stateful databases, and a terminal `completed` run. Local
 answer correctness is reported independently; an incorrect but operationally
 valid smoke triggers diagnosis before expansion rather than being relabelled as
 infrastructure failure.
+The adapter reports these as separate `operationalValidity` and local-verifier
+fields; aggregate correctness never masks a broken notebook or durable run.
 
 Primary reported measures are local metadata-verifier correctness, notebook
 reproducibility, durable run completion, full and uncached tokens, wall time,
