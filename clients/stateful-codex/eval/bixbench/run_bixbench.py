@@ -280,9 +280,10 @@ codex exec \
 
     if not result["integrityAudit"]["passed"]:
         result["grade"] = {
-            "status": "invalid_protocol",
+            "status": "agent_failure",
             "official": False,
-            "correct": None,
+            "correct": False,
+            "failureKind": "protocol_violation",
             "reason": "agent attempted prohibited benchmark-source access",
         }
 
@@ -493,8 +494,7 @@ def main() -> None:
             for result in results
         ),
         "requiresOfficialGrading": sum(
-            result.get("grade", {}).get("status")
-            == "requires_official_llm_grader"
+            result.get("grade", {}).get("status") == "requires_official_llm_grader"
             for result in results
         ),
         "agentFailures": sum(

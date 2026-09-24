@@ -104,11 +104,14 @@ Stateful run.
   blackboard, relationship, and obligation counts.
 - `llm_verifier` questions remain ungraded until an explicit judge protocol is
   selected. They are never silently scored with a substitute judge.
-- Exact/range results are labelled `local_metadata_verifier`. BixBench's
+- String/range results are labelled `local_metadata_verifier`. The string
+  diagnostic preserves upstream's punctuation-insensitive normalized match but
+  rejects numeric sign or punctuation collisions that would change the value.
+  BixBench's
   current official postprocessing uses an LLM judge for open answers, including
-  range questions, so these strict bare-answer checks are diagnostics rather
-  than official BixBench scores. The exported official-shaped trajectories can
-  be judged later under a pinned official protocol.
+  range questions, so these local checks are diagnostics rather than official
+  BixBench scores. The exported official-shaped trajectories can be judged
+  later under a pinned official protocol.
 - Result summaries keep local answer correctness separate from operational
   validity. A run is operationally valid only when Codex completes, returns the
   structured answer, submits a valid notebook, passes offline replay and the

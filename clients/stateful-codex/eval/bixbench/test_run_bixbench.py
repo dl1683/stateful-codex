@@ -33,6 +33,8 @@ class BixBenchRunnerTests(unittest.TestCase):
                 "official": False,
                 "correct": True,
                 "mode": "str_verifier",
+                "upstreamNormalizedMatch": True,
+                "normalizationCollision": False,
             },
         )
         self.assertEqual(
@@ -43,6 +45,19 @@ class BixBenchRunnerTests(unittest.TestCase):
                 "correct": True,
                 "mode": "range_verifier",
                 "formatOnlyFailure": False,
+            },
+        )
+
+    def test_rejects_numeric_collisions_in_upstream_string_normalization(self) -> None:
+        self.assertEqual(
+            grade_deterministic("str_verifier", "-0.5", "0.5"),
+            {
+                "status": "metadata_verifier",
+                "official": False,
+                "correct": False,
+                "mode": "str_verifier",
+                "upstreamNormalizedMatch": True,
+                "normalizationCollision": True,
             },
         )
         self.assertEqual(

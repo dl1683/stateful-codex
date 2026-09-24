@@ -3191,7 +3191,7 @@ fields; aggregate correctness never masks a broken notebook or durable run.
 Primary reported measures are local metadata-verifier correctness, notebook
 reproducibility, durable run completion, full and uncached tokens, wall time,
 and persisted hierarchy/context-map/blackboard/relationship/obligation counts.
-Exact/range metadata checks are diagnostic and are not called official
+String/range metadata checks are diagnostic and are not called official
 BixBench scores because current official open-answer postprocessing uses an LLM
 judge. Official-shaped records are retained for later scoring under a separately
 pinned judge protocol. Published BixBench aggregates may provide context but

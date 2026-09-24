@@ -91,13 +91,24 @@ def lenient_numeric_answer(value: str) -> float | None:
 def grade_deterministic(eval_mode: str, ideal: str, predicted: str) -> dict[str, Any]:
     predicted = normalized_answer(predicted)
     if eval_mode == "str_verifier":
-        clean = lambda value: re.sub(r"[^a-zA-Z0-9]", "", value).lower()
-        correct = clean(predicted) == clean(ideal)
+        cleaned_predicted = re.sub(r"[^a-zA-Z0-9]", "", predicted).lower()
+        cleaned_ideal = re.sub(r"[^a-zA-Z0-9]", "", ideal).lower()
+        upstream_match = cleaned_predicted == cleaned_ideal
+        ideal_number = lenient_numeric_answer(ideal)
+        predicted_number = lenient_numeric_answer(predicted)
+        normalization_collision = (
+            upstream_match
+            and ideal_number is not None
+            and predicted_number is not None
+            and ideal_number != predicted_number
+        )
         return {
             "status": "metadata_verifier",
             "official": False,
-            "correct": correct,
+            "correct": upstream_match and not normalization_collision,
             "mode": eval_mode,
+            "upstreamNormalizedMatch": upstream_match,
+            "normalizationCollision": normalization_collision,
         }
     if eval_mode == "range_verifier":
         lower, upper = ast.literal_eval(ideal)
