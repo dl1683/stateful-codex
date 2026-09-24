@@ -133,7 +133,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions relevant to a question. Use returned routes to verify consequential claims against source.".to_string(),
+            description: "Locate exact project files or anchored regions only when established project intelligence lacks required detail, reports stale/unchecked evidence or a conflict, exact source wording or format is needed, or the user requests fresh verification. Current host-audited sourceVerified root knowledge does not require a confirming source read.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

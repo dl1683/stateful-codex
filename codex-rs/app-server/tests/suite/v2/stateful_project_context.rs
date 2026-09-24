@@ -553,6 +553,13 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
     assert!(requests[0].body_contains_text("blackboard_relate"));
     assert!(requests[0].body_contains_text("context_map_refresh"));
+    assert!(
+        requests[0]
+            .body_contains_text("use them as established premises and do not reopen those sources")
+    );
+    assert!(requests[0].body_contains_text(
+        "Current host-audited sourceVerified root knowledge does not require a confirming source read"
+    ));
     let batch_output: serde_json::Value = serde_json::from_str(
         &requests[1]
             .function_call_output_text("record-call")

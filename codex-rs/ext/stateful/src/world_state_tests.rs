@@ -80,18 +80,17 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("verify only the smallest decisive source set")
-    );
-    assert!(rendered.body().contains("use evidence_read"));
-    assert!(
-        rendered
-            .body()
-            .contains("Bound exact verification to the requested outcome")
+            .contains("use them as established premises and do not reopen those sources")
     );
     assert!(
         rendered
             .body()
-            .contains("do not turn a question about one criterion")
+            .contains("when evidence is stale, unavailable, or uncheckedThisTurn")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("do not turn one criterion or decision dimension")
     );
     assert!(
         rendered
