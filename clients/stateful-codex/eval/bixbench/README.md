@@ -88,8 +88,9 @@ Stateful run.
 - Capsule archives and metadata are downloaded from the pinned dataset revision
   and rejected unless their SHA-256 values match the manifest.
 - The machine-readable run and workspace manifests record the exact image ID,
-  agent bundle, prompt/schema hashes, input file hashes, model, effort, timeout,
-  state scope, and task list. Native rollout sessions are retained beside logs.
+  full Conda/Pip environment inventory and hash, agent bundle, prompt/schema
+  hashes, input file hashes, model, effort, timeout, state scope, and task list.
+  Native rollout sessions are retained beside logs.
 - Agent timeouts, nonzero exits, and missing or malformed answers count as
   incorrect. Only failures before the Codex invocation boundary are excluded as
   infrastructure-invalid; notebook validity is reported separately from answer

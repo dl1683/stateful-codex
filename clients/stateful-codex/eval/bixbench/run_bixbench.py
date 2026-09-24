@@ -3,7 +3,6 @@ import json
 import shutil
 import subprocess
 import time
-import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
@@ -19,8 +18,11 @@ from protocol import (
 from runner_support import (
     FORBIDDEN_NETWORK_HOSTS,
     audit_agent_log,
+    download_verified,
     failed_agent_grade,
+    inspect_environment,
     inspect_image,
+    load_jsonl,
     parse_usage,
     preprocess_capsule,
     workspace_manifest,
@@ -28,26 +30,6 @@ from runner_support import (
 
 BIXBENCH_REPOSITORY_URL = "https://huggingface.co/datasets/futurehouse/BixBench"
 PROTOCOL_VERSION = 1
-
-
-def download_verified(url: str, destination: Path, expected_sha256: str) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.is_file() and sha256_file(destination) == expected_sha256:
-        return
-    temporary = destination.with_suffix(f"{destination.suffix}.download")
-    urllib.request.urlretrieve(url, temporary)
-    actual = sha256_file(temporary)
-    if actual != expected_sha256:
-        temporary.unlink(missing_ok=True)
-        raise ValueError(
-            f"downloaded artifact hash {actual} does not match {expected_sha256}"
-        )
-    temporary.replace(destination)
-
-
-def load_jsonl(path: Path) -> list[dict[str, Any]]:
-    with path.open(encoding="utf-8") as file:
-        return [json.loads(line) for line in file if line.strip()]
 
 
 def prompt_for(question: dict[str, Any]) -> str:
@@ -426,7 +408,11 @@ def main() -> None:
         selected.append(question)
 
     image_id = inspect_image(args.image)
+    environment = inspect_environment(args.image)
     run_root = args.output_dir
+    (run_root / "environment-manifest.json").write_text(
+        json.dumps(environment, indent=2), encoding="utf-8"
+    )
     run_manifest = {
         "schemaVersion": 1,
         "protocolVersion": PROTOCOL_VERSION,
@@ -440,6 +426,7 @@ def main() -> None:
         "stateScope": "question",
         "image": args.image,
         "imageId": image_id,
+        "environmentManifestSha256": environment["sha256"],
         "bundleSha256": args.bundle_sha256,
         "model": args.model,
         "effort": args.effort,

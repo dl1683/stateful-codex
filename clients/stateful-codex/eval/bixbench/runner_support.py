@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,26 @@ FORBIDDEN_NETWORK_HOSTS = (
     "github.com",
     "raw.githubusercontent.com",
 )
+
+
+def download_verified(url: str, destination: Path, expected_sha256: str) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and sha256_file(destination) == expected_sha256:
+        return
+    temporary = destination.with_suffix(f"{destination.suffix}.download")
+    urllib.request.urlretrieve(url, temporary)
+    actual = sha256_file(temporary)
+    if actual != expected_sha256:
+        temporary.unlink(missing_ok=True)
+        raise ValueError(
+            f"downloaded artifact hash {actual} does not match {expected_sha256}"
+        )
+    temporary.replace(destination)
+
+
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    with path.open(encoding="utf-8") as file:
+        return [json.loads(line) for line in file if line.strip()]
 
 
 def preprocess_capsule(archive: Path, destination: Path) -> None:
@@ -132,3 +153,34 @@ def inspect_image(image: str) -> str:
         text=True,
     )
     return completed.stdout.strip()
+
+
+def inspect_environment(image: str) -> dict[str, Any]:
+    script = """
+import json
+import platform
+import subprocess
+
+def output(*command):
+    return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT).strip()
+
+print(json.dumps({
+    "platform": platform.platform(),
+    "python": platform.python_version(),
+    "r": output("R", "--version").splitlines()[0],
+    "condaPackages": json.loads(output("conda", "list", "--json")),
+    "pipFreeze": output("python", "-m", "pip", "freeze").splitlines(),
+}, sort_keys=True))
+"""
+    completed = subprocess.run(
+        ["docker", "run", "--rm", image, "python", "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    inventory = json.loads(completed.stdout)
+    encoded = json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()
+    return {
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "inventory": inventory,
+    }
