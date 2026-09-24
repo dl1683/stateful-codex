@@ -194,12 +194,21 @@ codex exec \
     started = time.monotonic()
     timed_out = False
     exit_code = None
-    try:
-        completed = subprocess.run(command, timeout=timeout_seconds, check=False)
-        exit_code = completed.returncode
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        remove_container(container_name)
+    with (logs / "container.stdout").open("wb") as stdout, (
+        logs / "container.stderr"
+    ).open("wb") as stderr:
+        try:
+            completed = subprocess.run(
+                command,
+                timeout=timeout_seconds,
+                check=False,
+                stdout=stdout,
+                stderr=stderr,
+            )
+            exit_code = completed.returncode
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            remove_container(container_name)
     duration = time.monotonic() - started
 
     result: dict[str, Any] = {
