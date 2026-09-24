@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "name": "bixbench-v1.5-ten-capsule-deterministic-breadth",
+  "stateScope": "question",
+  "upstream": {
+    "benchmarkRepository": "FUture-House/BixBench",
+    "benchmarkRevision": "49311180bdacb324c596f2e07596c126f2004008",
+    "environmentRepository": "Future-House/data-analysis-crow",
+    "environmentRevision": "953a6b13c5f8e15354525bca08636f620994f954"
+  },
+  "dataset": {
+    "repository": "futurehouse/BixBench",
+    "revision": "f8cc3bdcc6357c88b8c3648306522b9c422dc95a",
+    "metadataSha256": "0d1204dcdae7193a9132ced5a3502008f6b3b163debc1b65b2aa2d86cb132dc9"
+  },
+  "capsules": {
+    "CapsuleFolder-d59734d2-a3e0-462a-a5fd-c8ddc11392b8.zip": "e4eaba8d25a8071d570c00edd33aab8b8353da1153f4ed27f45cac6048600afa",
+    "CapsuleFolder-8c64b1fa-fdcc-41e2-be8d-2f0c8d5faaa1.zip": "c2eeb8fcc08e8f51be5f14442a846b40fecc8b9ca41f014e55876678d6865018",
+    "CapsuleFolder-3d4eb7bb-4fbc-4300-b79a-3eba7a6221bc.zip": "f74fe31f31b3a38c5267e5188be4b9031244103de481b71e2a7db0730170a780",
+    "CapsuleFolder-93f63fb8-b56c-4ad1-8d3b-d651e2107423.zip": "5ac4a82eb6aa71cfb8a283f6b6cd13da3419d9f14e9ce61db51d26a6ca98932a",
+    "CapsuleFolder-4dceea58-7d66-4576-bfc6-88c026d5b7a9.zip": "ff943e5ee02eeb8668aa9d4abb1028d6cd28ad20be7f746aa37325e344557d7f",
+    "CapsuleFolder-308d53bf-1513-4a09-913b-3a1112f94e7b.zip": "3be8fc94f2e7d340b3ba7cd66ec4348d04872a916337f0fd1e6b636fba8595e0",
+    "CapsuleFolder-b8c485ff-d146-4162-9403-9593c8847cfe.zip": "4ce70867ab4b7783b20ffa11b597ff9ef7ee6bd4f7c86e03fcb4c3d8f0a2466b",
+    "CapsuleFolder-33b801bb-9b47-4a0a-9314-05325c82fde7.zip": "4bf05c02fe92794999bb032746918652e22d5e09359981422ece081664df585b",
+    "CapsuleFolder-0f14ffa7-f02a-4d20-8142-dfc404195e56.zip": "99ac192ec10786c81791b5b098d1efa9652ee47e7c624a6b7b0a8fe749ce62f2",
+    "CapsuleFolder-28a5984e-9061-4d6f-99a1-40f8753bc9f4.zip": "be410226ac353bf8afada3e1226f163d374a5d3ffb5ce33560ee312363ba16a2"
+  },
+  "tasks": [
+    "bix-18-q1",
+    "bix-19-q1",
+    "bix-30-q1",
+    "bix-51-q1",
+    "bix-52-q1",
+    "bix-53-q3",
+    "bix-29-q1",
+    "bix-1-q1",
+    "bix-27-q2",
+    "bix-39-q2"
+  ]
+}

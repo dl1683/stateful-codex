@@ -9,7 +9,13 @@ from a 22 KB *P. aeruginosa* swarming-analysis capsule with a deterministic
 range verifier. Once that produces a valid executed notebook, structured final
 answer, isolated Stateful database, and grade, `bix18-deterministic.json`
 pre-registers all five independently state-isolated questions from that capsule
-before a broader sample.
+before a broader sample. `breadth10-deterministic.json` then pre-registers one
+question from each of ten capsules: five range and five string verifiers across
+imaging, transcriptomics, epigenomics, sequence analysis, clinical modelling,
+network biology, machine learning, and genomic-variant analysis. Capsules were
+selected before outcomes for verifier/category coverage and an operationally
+manageable first-pass archive size (at most 10 MiB, rounded); this is a breadth
+gate, not a representative estimate of the complete benchmark.
 
 ## Pinned inputs
 
