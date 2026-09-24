@@ -517,6 +517,22 @@ async fn update_run_in_transaction(
             to: update.status,
         });
     }
+    if update.status == StatefulRunStatus::Completed {
+        let unresolved = sqlx::query_as::<_, (String, String)>(
+            "SELECT id, status FROM stateful_steering
+             WHERE run_id = ? AND status IN ('submitted', 'acknowledged')
+             ORDER BY created_at_ms, id LIMIT 1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&mut *connection)
+        .await?;
+        if let Some((steering_id, status)) = unresolved {
+            return Err(StatefulRunStoreError::UnresolvedSteering {
+                steering_id,
+                status,
+            });
+        }
+    }
     let expected_revision = i64::try_from(update.expected_revision)
         .map_err(|_| StatefulRunStoreError::CountOverflow)?;
     let strategy_changed = current.strategy != update.strategy;
@@ -829,6 +845,10 @@ pub enum StatefulRunStoreError {
     CompletionStatusRequired,
     #[error("completion obligation does not belong to the completed run")]
     ObligationRunMismatch,
+    #[error(
+        "cannot complete while steering instruction {steering_id} is {status}; apply or reject every unresolved steering instruction before completion"
+    )]
+    UnresolvedSteering { steering_id: String, status: String },
     #[error("steering ID was already used for different content: {0}")]
     SteeringIdentityConflict(String),
     #[error("steering instruction not found: {0}")]

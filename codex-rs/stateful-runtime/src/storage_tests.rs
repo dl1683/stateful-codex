@@ -15,6 +15,8 @@ use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunUpdate;
 use crate::SteeringId;
+use crate::SteeringStatus;
+use crate::SteeringUpdate;
 use crate::WorkflowMode;
 
 use super::StatefulRunStore;
@@ -370,6 +372,130 @@ async fn final_obligation_and_completion_commit_atomically() {
             .expect("final obligation loads"),
         Some(obligation)
     );
+}
+
+#[tokio::test]
+async fn completion_rejects_unresolved_steering_without_mutating_the_run() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let store = StatefulRunStore::open(&sqlite).await.expect("store opens");
+    let run_id = StatefulRunId::parse("steered-completion-run").expect("valid run ID");
+    let created = store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["steered-completion-thread".to_string()],
+                goal: "Incorporate user steering before completion.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+        )
+        .await
+        .expect("run inserts");
+    let steering_id = SteeringId::parse("unresolved-steering").expect("valid steering ID");
+    let submitted = store
+        .submit_steering(
+            steering_id.clone(),
+            NewSteeringInstruction {
+                project_id: "project-1".to_string(),
+                run_id: run_id.clone(),
+                input: "Verify the decisive source before finishing.".to_string(),
+                affected_obligation_ids: Vec::new(),
+            },
+        )
+        .await
+        .expect("steering inserts");
+    let completion_update = StatefulRunUpdate {
+        expected_revision: created.revision,
+        status: StatefulRunStatus::Completed,
+        strategy: None,
+        result: Some("The investigation is complete.".to_string()),
+    };
+    let final_obligation = NewObligation {
+        project_id: "project-1".to_string(),
+        run_id: run_id.clone(),
+        packet: ObligationPacket {
+            learning: vec!["The final conclusion is source verified.".to_string()],
+            ..Default::default()
+        },
+        provenance_source_id: "completion-turn".to_string(),
+    };
+
+    for (status, status_name) in [
+        (SteeringStatus::Submitted, "submitted"),
+        (SteeringStatus::Acknowledged, "acknowledged"),
+    ] {
+        let error = store
+            .complete_run_with_obligation(
+                &run_id,
+                completion_update.clone(),
+                "guarded-final-obligation".to_string(),
+                final_obligation.clone(),
+            )
+            .await
+            .expect_err("unresolved steering rejects completion");
+        assert_eq!(
+            error.to_string(),
+            StatefulRunStoreError::UnresolvedSteering {
+                steering_id: steering_id.to_string(),
+                status: status_name.to_string(),
+            }
+            .to_string()
+        );
+        assert_eq!(
+            store.get_run(&run_id).await.expect("run loads"),
+            Some(created.clone())
+        );
+        assert_eq!(
+            store
+                .latest_obligation(&run_id)
+                .await
+                .expect("obligation query succeeds"),
+            None
+        );
+        if status == SteeringStatus::Submitted {
+            store
+                .update_steering(
+                    &steering_id,
+                    SteeringUpdate {
+                        expected_revision: submitted.revision,
+                        status: SteeringStatus::Acknowledged,
+                        resulting_strategy_revision: None,
+                        reason: None,
+                    },
+                )
+                .await
+                .expect("steering acknowledges");
+        }
+    }
+
+    store
+        .update_steering(
+            &steering_id,
+            SteeringUpdate {
+                expected_revision: submitted.revision + 1,
+                status: SteeringStatus::Rejected,
+                resulting_strategy_revision: None,
+                reason: Some("The source was already verified exactly.".to_string()),
+            },
+        )
+        .await
+        .expect("steering resolves");
+    let (completed, obligation) = store
+        .complete_run_with_obligation(
+            &run_id,
+            completion_update,
+            "guarded-final-obligation".to_string(),
+            final_obligation.clone(),
+        )
+        .await
+        .expect("resolved steering permits completion");
+    assert_eq!(completed.status, StatefulRunStatus::Completed);
+    assert_eq!(obligation.value, final_obligation);
 }
 
 #[tokio::test]
