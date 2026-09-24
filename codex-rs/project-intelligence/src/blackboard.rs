@@ -21,6 +21,7 @@ const MAX_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
 const MAX_QUERY_BYTES: usize = 1_024;
 const MAX_QUERY_RESULTS: u32 = 50;
 const MAX_ROOT_ENTRIES: u32 = 256;
+const MAX_ROUTE_KNOWLEDGE_ENTRIES: usize = 20;
 const MAX_RELATION_NOTE_BYTES: usize = 2_048;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -364,6 +365,34 @@ impl BlackboardQuery {
 pub struct BlackboardQueryResult {
     pub data: Vec<BlackboardHit>,
     pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlackboardRouteKnowledgeQuery {
+    pub project_id: String,
+    pub context_map_entry_ids: Vec<ContextMapEntryId>,
+}
+
+impl BlackboardRouteKnowledgeQuery {
+    pub fn validate(&self) -> Result<(), BlackboardError> {
+        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
+            .map_err(|()| BlackboardError::InvalidProjectId)?;
+        let unique = self.context_map_entry_ids.iter().collect::<HashSet<_>>();
+        if self.context_map_entry_ids.is_empty()
+            || self.context_map_entry_ids.len() > MAX_ROUTE_KNOWLEDGE_ENTRIES
+            || unique.len() != self.context_map_entry_ids.len()
+        {
+            return Err(BlackboardError::InvalidQuery);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlackboardRouteKnowledge {
+    pub context_map_entry_id: ContextMapEntryId,
+    pub active_entries: u32,
+    pub root_entries: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

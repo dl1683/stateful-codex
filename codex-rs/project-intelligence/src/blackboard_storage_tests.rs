@@ -12,6 +12,8 @@ use crate::BlackboardQuery;
 use crate::BlackboardQueryResult;
 use crate::BlackboardRelationId;
 use crate::BlackboardRelationKind;
+use crate::BlackboardRouteKnowledge;
+use crate::BlackboardRouteKnowledgeQuery;
 use crate::ContextMapCoverage;
 use crate::ContextMapEntryUpdate;
 use crate::ContextMapStore;
@@ -151,6 +153,22 @@ async fn blackboard_persistence_is_idempotent_and_rejects_stale_evidence() {
         blackboard.create_entry(created.id.clone(), conflict).await,
         Err(BlackboardStoreError::EntryIdentityConflict(id)) if id == created.id.as_str()
     ));
+    assert_eq!(
+        blackboard
+            .route_knowledge(BlackboardRouteKnowledgeQuery {
+                project_id: "project-1".to_string(),
+                context_map_entry_ids: vec![
+                    ContextMapEntryId::parse("map-readme").expect("valid map ID"),
+                ],
+            })
+            .await
+            .expect("route knowledge loads"),
+        vec![BlackboardRouteKnowledge {
+            context_map_entry_id: ContextMapEntryId::parse("map-readme").expect("valid map ID"),
+            active_entries: 1,
+            root_entries: 1,
+        }]
+    );
     drop(blackboard);
     let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
     let reopened = BlackboardStore::open(&sqlite)

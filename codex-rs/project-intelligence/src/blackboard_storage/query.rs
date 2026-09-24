@@ -1,4 +1,6 @@
 use sqlx::FromRow;
+use sqlx::QueryBuilder;
+use sqlx::Sqlite;
 use sqlx::SqliteConnection;
 
 use crate::BlackboardEntryId;
@@ -8,6 +10,9 @@ use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
 use crate::BlackboardQuery;
 use crate::BlackboardQueryResult;
+use crate::BlackboardRouteKnowledge;
+use crate::BlackboardRouteKnowledgeQuery;
+use crate::ContextMapEntryId;
 use crate::RootBlackboardProjection;
 use crate::RootBlackboardQuery;
 use crate::search::literal_prefix_expression;
@@ -25,7 +30,61 @@ struct RootEntryCounts {
     candidates: i64,
 }
 
+#[derive(FromRow)]
+struct StoredRouteKnowledge {
+    context_map_entry_id: String,
+    active_entries: i64,
+    root_entries: i64,
+}
+
 impl BlackboardStore {
+    pub async fn route_knowledge(
+        &self,
+        query: BlackboardRouteKnowledgeQuery,
+    ) -> Result<Vec<BlackboardRouteKnowledge>, BlackboardStoreError> {
+        query.validate()?;
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT link.context_map_entry_id,
+                    COUNT(DISTINCT entry.id) AS active_entries,
+                    COUNT(DISTINCT CASE WHEN revision.root_promotion = 'promoted'
+                        THEN entry.id END) AS root_entries
+             FROM blackboard_evidence_links AS link
+             JOIN blackboard_entries AS entry ON entry.id = link.entry_id
+             JOIN blackboard_entry_revisions AS revision
+               ON revision.entry_id = entry.id
+              AND revision.revision = entry.revision
+              AND revision.revision = link.revision
+             WHERE entry.project_id = ",
+        );
+        builder.push_bind(&query.project_id);
+        builder.push(" AND revision.state = 'active' AND link.context_map_entry_id IN (");
+        let mut separated = builder.separated(", ");
+        for entry_id in &query.context_map_entry_ids {
+            separated.push_bind(entry_id.as_str());
+        }
+        separated.push_unseparated(") GROUP BY link.context_map_entry_id");
+        let rows = builder
+            .build_query_as::<StoredRouteKnowledge>()
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(BlackboardRouteKnowledge {
+                    context_map_entry_id: ContextMapEntryId::parse(
+                        row.context_map_entry_id.clone(),
+                    )
+                    .map_err(|_| {
+                        BlackboardStoreError::CorruptEntry(row.context_map_entry_id.clone())
+                    })?,
+                    active_entries: u32::try_from(row.active_entries)
+                        .map_err(|_| BlackboardStoreError::CountOverflow)?,
+                    root_entries: u32::try_from(row.root_entries)
+                        .map_err(|_| BlackboardStoreError::CountOverflow)?,
+                })
+            })
+            .collect()
+    }
+
     pub async fn query(
         &self,
         query: BlackboardQuery,

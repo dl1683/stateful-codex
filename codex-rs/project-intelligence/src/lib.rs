@@ -29,6 +29,8 @@ pub use blackboard::BlackboardQueryResult;
 pub use blackboard::BlackboardRelation;
 pub use blackboard::BlackboardRelationId;
 pub use blackboard::BlackboardRelationKind;
+pub use blackboard::BlackboardRouteKnowledge;
+pub use blackboard::BlackboardRouteKnowledgeQuery;
 pub use blackboard::BlackboardStructuredValue;
 pub use blackboard::BlackboardVerification;
 pub use blackboard::ConfidenceScore;
