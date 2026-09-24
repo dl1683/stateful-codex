@@ -418,6 +418,7 @@ async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<
     )?;
     assert_eq!(output["filesIndexed"], 2);
     assert_eq!(output["routesTruncated"], false);
+    assert_eq!(output["knowledgeCoverageAvailable"], true);
     assert_eq!(output["routes"].as_array().map(Vec::len), Some(2));
     assert_eq!(
         output["routes"],
@@ -544,6 +545,14 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
                 responses::ev_completed("query-response"),
             ]),
             responses::sse(vec![
+                responses::ev_function_call(
+                    "context-query-call",
+                    "context_map_query",
+                    &json!({"text": "decision"}).to_string(),
+                ),
+                responses::ev_completed("context-query-response"),
+            ]),
+            responses::sse(vec![
                 responses::ev_assistant_message("done-message", "Done"),
                 responses::ev_completed("done-response"),
             ]),
@@ -559,7 +568,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     run_turn(&mut server, &started.thread.id).await?;
 
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
     assert!(requests[0].body_contains_text("blackboard_relate"));
     assert!(requests[0].body_contains_text("context_map_refresh"));
@@ -605,6 +614,16 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
             "sourceFingerprint": route.entry.value.source_fingerprint.to_string(),
             "lineRange": {"start": 2, "end": 3},
         })
+    );
+    let context_output: serde_json::Value = serde_json::from_str(
+        &requests[3]
+            .function_call_output_text("context-query-call")
+            .expect("context-map output should be text"),
+    )?;
+    assert_eq!(context_output["knowledgeCoverageAvailable"], true);
+    assert_eq!(
+        context_output["data"][0]["knownKnowledge"],
+        json!({"rootEntries": 1, "deeperEntries": 0})
     );
     Ok(())
 }

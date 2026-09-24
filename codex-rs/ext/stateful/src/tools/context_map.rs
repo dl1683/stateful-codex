@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -9,6 +10,9 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_project_intelligence::BlackboardRouteKnowledge;
+use codex_project_intelligence::BlackboardRouteKnowledgeQuery;
+use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapHit;
 use codex_project_intelligence::ContextMapListQuery;
@@ -90,10 +94,13 @@ impl ContextMapQueryTool {
             .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let may_have_more = hits.len() == limit as usize;
+        let (knowledge, knowledge_coverage_available) =
+            route_knowledge(&self.services, &self.project_id, &hits).await;
         let mut data = Vec::new();
         let mut truncated = false;
         for hit in hits {
-            let item = route_json(hit, &project)?;
+            let known = knowledge.get(&hit.entry.id);
+            let item = route_json(hit, &project, known)?;
             data.push(item);
             if !fits_response(
                 &json!({
@@ -101,6 +108,7 @@ impl ContextMapQueryTool {
                     "data": &data,
                     "truncated": truncated,
                     "mayHaveMore": may_have_more,
+                    "knowledgeCoverageAvailable": knowledge_coverage_available,
                 }),
                 byte_budget,
             ) {
@@ -114,6 +122,7 @@ impl ContextMapQueryTool {
             "data": data,
             "truncated": truncated,
             "mayHaveMore": may_have_more,
+            "knowledgeCoverageAvailable": knowledge_coverage_available,
         }))))
     }
 }
@@ -134,7 +143,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions only when established project intelligence lacks required detail, reports stale/unchecked evidence or a conflict, exact source wording or format is needed, or the user requests fresh verification. Current host-audited sourceVerified root knowledge does not require a confirming source read.".to_string(),
+            description: "Locate exact project files or anchored regions only when established project intelligence lacks required detail, reports stale/unchecked evidence or a conflict, exact source wording or format is needed, or the user requests fresh verification. Current host-audited sourceVerified root knowledge does not require a confirming source read. When a route reports knownKnowledge, use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -221,10 +230,13 @@ impl ContextMapRefreshTool {
             .await
             .map_err(respond)?;
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let (knowledge, knowledge_coverage_available) =
+            route_knowledge(&self.services, &self.project_id, &routes).await;
         let mut data = Vec::new();
         let mut routes_truncated = routes.len() == REFRESH_ROUTE_LIMIT as usize;
         for hit in routes {
-            let item = route_json(hit, &project)?;
+            let known = knowledge.get(&hit.entry.id);
+            let item = route_json(hit, &project, known)?;
             data.push(item);
             if !fits_response(
                 &json!({
@@ -235,6 +247,7 @@ impl ContextMapRefreshTool {
                     "truncated": report.truncated,
                     "routes": &data,
                     "routesTruncated": routes_truncated,
+                    "knowledgeCoverageAvailable": knowledge_coverage_available,
                 }),
                 byte_budget,
             ) {
@@ -251,6 +264,7 @@ impl ContextMapRefreshTool {
             "truncated": report.truncated,
             "routes": data,
             "routesTruncated": routes_truncated,
+            "knowledgeCoverageAvailable": knowledge_coverage_available,
         }))))
     }
 }
@@ -291,6 +305,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
 fn route_json(
     hit: ContextMapHit,
     project: &codex_thread_store::StoredProject,
+    knowledge: Option<&BlackboardRouteKnowledge>,
 ) -> Result<serde_json::Value, FunctionCallError> {
     if !project
         .roots
@@ -322,12 +337,55 @@ fn route_json(
     if let Some(region_anchor) = hit.source.region_anchor {
         source.insert("regionAnchor".to_string(), json!(region_anchor));
     }
-    Ok(json!({
+    let mut route = json!({
         "headline": headline,
         "coverage": hit.entry.value.coverage,
         "freshness": freshness_name(hit.freshness),
         "source": source,
-    }))
+    });
+    if let Some(knowledge) = knowledge.filter(|knowledge| knowledge.active_entries > 0) {
+        route["knownKnowledge"] = json!({
+            "rootEntries": knowledge.root_entries,
+            "deeperEntries": knowledge.active_entries.saturating_sub(knowledge.root_entries),
+        });
+    }
+    Ok(route)
+}
+
+async fn route_knowledge(
+    services: &ProjectIntelligenceServices,
+    project_id: &str,
+    hits: &[ContextMapHit],
+) -> (HashMap<ContextMapEntryId, BlackboardRouteKnowledge>, bool) {
+    if hits.is_empty() {
+        return (HashMap::new(), true);
+    }
+    let store = match services.blackboard().await {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(%project_id, %error, "failed to open route knowledge store");
+            return (HashMap::new(), false);
+        }
+    };
+    match store
+        .route_knowledge(BlackboardRouteKnowledgeQuery {
+            project_id: project_id.to_string(),
+            context_map_entry_ids: hits.iter().map(|hit| hit.entry.id.clone()).collect(),
+        })
+        .await
+    {
+        Ok(knowledge) => (
+            knowledge
+                .into_iter()
+                .map(|knowledge| (knowledge.context_map_entry_id.clone(), knowledge))
+                .collect(),
+            true,
+        ),
+        Err(error) => {
+            tracing::warn!(%project_id, %error, "failed to load route knowledge coverage");
+            (HashMap::new(), false)
+        }
+    }
 }
 
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
