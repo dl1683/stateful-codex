@@ -3143,3 +3143,56 @@ same project-intelligence mechanisms generalize beyond software execution. The
 first gate is a custom-harness compatibility and scoring smoke; a larger run is
 allowed only after task isolation, artifact capture, and evaluator integrity
 are demonstrated.
+
+## Benchmark SC-EVAL-031: BixBench custom-harness gate
+
+Status: pre-registered on 2026-09-23 before any BixBench model call.
+
+This evaluation tests whether the Stateful Codex harness can perform auditable
+scientific-data work under BixBench v1.5. It does not test longitudinal memory:
+every scored question receives a fresh workspace and fresh Stateful databases.
+Any later same-capsule persistent-state study is a separately labelled product
+experiment and cannot be merged into this result.
+
+The protocol pins the official BixBench repository, dataset revision, capsule
+archive hashes, and FutureHouse scientific-environment source revision. The
+published environment image is ARM64-only, so this AMD64 host rebuilds its
+unchanged pinned Dockerfile and records the resulting image ID plus the complete
+Conda/Pip inventory. The agent sees only the single capsule `Data` directory;
+reference notebooks, answer keys, distractors, Codex memories, live web search,
+and known benchmark-source hosts are excluded. Cached ChatGPT authentication is
+used with API-key environment variables removed.
+
+The frozen execution sequence is:
+
+1. One Stateful smoke on `bix-18-q1`, Luna at maximum reasoning effort,
+   concurrency one, and a one-hour agent timeout.
+2. If the smoke is operationally valid, the five preregistered Bix-18 questions
+   run question-isolated with concurrency two.
+3. If that expansion retains valid artifacts, the preregistered breadth gate
+   runs one question from each of ten distinct capsules with concurrency two.
+
+There is one attempt per task. A detected provider/authentication outage or a
+failure before the Codex invocation boundary is invalid and may be repeated
+once in the same arm. Agent timeout, nonzero agent exit, missing/malformed final
+answer, or prohibited benchmark-source access is a recorded failure. Tasks are
+never substituted after outcomes are known.
+
+The smoke is operationally valid only if it retains a parseable structured
+answer, a structurally valid submitted notebook, an offline network-disabled
+replay of that notebook, intact protocol audit, complete usage/artifact hashes,
+both integrity-valid Stateful databases, and a terminal `completed` run. Local
+answer correctness is reported independently; an incorrect but operationally
+valid smoke triggers diagnosis before expansion rather than being relabelled as
+infrastructure failure.
+
+Primary reported measures are local metadata-verifier correctness, notebook
+reproducibility, durable run completion, full and uncached tokens, wall time,
+and persisted hierarchy/context-map/blackboard/relationship/obligation counts.
+Exact/range metadata checks are diagnostic and are not called official
+BixBench scores because current official open-answer postprocessing uses an LLM
+judge. Official-shaped records are retained for later scoring under a separately
+pinned judge protocol. Published BixBench aggregates may provide context but
+are not treated as matched controls. An ordinary Codex arm is not required for
+this operational smoke; one may be added only as an explicitly labelled
+technical control if a failure cannot otherwise be localized.
