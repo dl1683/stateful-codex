@@ -64,9 +64,11 @@ py -3.12 clients/stateful-codex/eval/bixbench/run_bixbench.py `
 ```
 
 The runner uses the normal cached `~/.codex/auth.json`; it does not accept or
-forward an API key. Raw data, agent logs, executed notebook, exact trajectory,
-isolated Stateful database, token usage, hashes, and deterministic grade remain
-under the selected output directory.
+forward an API key. Raw data, agent logs, executed notebook, an official
+postprocessing-shaped record, isolated Stateful database, token usage, hashes,
+and local verifier result remain under the selected output directory. Native
+Codex JSONL is retained as the action/event evidence; it is not mislabelled as
+BixBench's Aviary trajectory format.
 
 `--arm stateful` is the default. `--arm ordinary` runs the same question,
 container, model, prompt, and output contract without Stateful mode, permitting
