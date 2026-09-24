@@ -13,6 +13,7 @@ pub use run::StatefulObligation;
 pub use run::StatefulRun;
 pub use run::StatefulRunId;
 pub use run::StatefulRunModeUpdate;
+pub use run::StatefulRunOutcome;
 pub use run::StatefulRunStatus;
 pub use run::StatefulRunUpdate;
 pub use run::WorkflowMode;

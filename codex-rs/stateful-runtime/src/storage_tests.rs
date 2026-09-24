@@ -389,14 +389,24 @@ async fn final_obligation_and_completion_commit_atomically() {
     assert_eq!(obligation.value, final_obligation);
     assert_eq!(
         store.get_run(&run_id).await.expect("completed run loads"),
-        Some(completed)
+        Some(completed.clone())
     );
     assert_eq!(
         store
             .latest_obligation(&run_id)
             .await
             .expect("final obligation loads"),
-        Some(obligation)
+        Some(obligation.clone())
+    );
+    assert_eq!(
+        store
+            .recent_completed_outcomes("project-1", /*max_results*/ 5)
+            .await
+            .expect("recent completed outcomes load"),
+        vec![crate::StatefulRunOutcome {
+            run: completed,
+            final_obligation: Some(obligation),
+        }]
     );
 }
 

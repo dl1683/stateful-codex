@@ -94,8 +94,7 @@ pub struct NewStatefulRun {
 
 impl NewStatefulRun {
     pub fn validate(&self) -> Result<(), StatefulRunError> {
-        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
-            .map_err(|()| StatefulRunError::InvalidProjectId)?;
+        validate_project_id(&self.project_id)?;
         if self.thread_ids.is_empty() || self.thread_ids.len() > MAX_THREAD_IDS {
             return Err(StatefulRunError::InvalidThreadIds);
         }
@@ -120,6 +119,12 @@ pub struct StatefulRun {
     pub revision: u64,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StatefulRunOutcome {
+    pub run: StatefulRun,
+    pub final_obligation: Option<StatefulObligation>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -205,12 +210,15 @@ pub struct NewObligation {
 
 impl NewObligation {
     pub fn validate(&self) -> Result<(), StatefulRunError> {
-        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
-            .map_err(|()| StatefulRunError::InvalidProjectId)?;
+        validate_project_id(&self.project_id)?;
         validate_identity(&self.provenance_source_id, MAX_ID_BYTES)
             .map_err(|()| StatefulRunError::InvalidProvenance)?;
         self.packet.validate()
     }
+}
+
+pub(crate) fn validate_project_id(value: &str) -> Result<(), StatefulRunError> {
+    validate_identity(value, MAX_PROJECT_ID_BYTES).map_err(|()| StatefulRunError::InvalidProjectId)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

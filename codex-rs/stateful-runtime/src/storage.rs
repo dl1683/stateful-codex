@@ -16,10 +16,12 @@ use crate::StatefulObligation;
 use crate::StatefulRun;
 use crate::StatefulRunId;
 use crate::StatefulRunModeUpdate;
+use crate::StatefulRunOutcome;
 use crate::StatefulRunStatus;
 use crate::StatefulRunUpdate;
 use crate::WorkflowMode;
 use crate::run::StatefulRunError;
+use crate::run::validate_project_id;
 
 const DATABASE_NAME: &str = "stateful_runtime_1.sqlite";
 const INITIAL_REVISION: i64 = 1;
@@ -154,6 +156,38 @@ impl StatefulRunStore {
             return Ok(None);
         };
         self.get_run(&StatefulRunId::parse(raw_id)?).await
+    }
+
+    pub async fn recent_completed_outcomes(
+        &self,
+        project_id: &str,
+        max_results: u32,
+    ) -> Result<Vec<StatefulRunOutcome>, StatefulRunStoreError> {
+        validate_project_id(project_id)?;
+        validate_list_limit(max_results)?;
+        let raw_ids = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM stateful_runs
+             WHERE project_id = ? AND status = 'completed'
+             ORDER BY updated_at_ms DESC, id DESC LIMIT ?",
+        )
+        .bind(project_id)
+        .bind(i64::from(max_results))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut outcomes = Vec::with_capacity(raw_ids.len());
+        for raw_id in raw_ids {
+            let run_id = StatefulRunId::parse(raw_id)?;
+            let run = self
+                .get_run(&run_id)
+                .await?
+                .ok_or_else(|| StatefulRunStoreError::RunNotFound(run_id.to_string()))?;
+            let final_obligation = self.latest_obligation(&run_id).await?;
+            outcomes.push(StatefulRunOutcome {
+                run,
+                final_obligation,
+            });
+        }
+        Ok(outcomes)
     }
 
     pub async fn update_run(
