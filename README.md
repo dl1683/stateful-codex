@@ -42,6 +42,7 @@ leaderboard submission or a controlled causal advantage over ordinary Codex.
 | Six-question, two-project matched series | Read-bearing calls fell **20 -> 7**, unique raw-file reads **54 -> 29**, and follow-up uncached input plus output **97,693 -> 77,806** while all six answers and durable results passed manual semantic review. | Follow-up full tokens increased **381,853 -> 430,830**; including project maturation, Stateful remained more expensive over this short series. |
 | Mature-project selective retrieval | On three matched questions, Stateful used **5 read-bearing calls vs. 11** and reduced follow-up full tokens **19.41%** while verifying narrower source sets. | Uncached follow-up usage increased **27.90%**, and maturation-inclusive cost had not yet broken even. |
 | Six-project cold breadth screen | Both blind graders preferred ordinary Codex on **5 of 6** projects and disagreed on the sixth. | Directional only: all arms had zero compactions, and an auxiliary Stateful narrative could disclose the treatment arm. The grades are preserved, but no causal quality claim is made. |
+| BixBench v1.5-compatible scientific gate | The five-question capsule gate produced **4/5 local passes with 5/5 valid notebooks**; the ten-capsule breadth gate produced **3/10 local matches but only 2/10 both correct and operationally valid**. A protocol-v2 repair made the correct Excel result reproducible and confirmed the interrupted CHIP task as a substantive miss. | Non-official compatible environment, no ordinary control, question-isolated state, and several prompts omit reference-workflow choices. Protocol-v1 replay was weaker than the repaired v2 boundary. |
 
 The longitudinal pilot was intentionally frozen after 50 valid attempts so the
 next evaluation can test a different domain rather than spend the next budget
@@ -57,6 +58,11 @@ reported beside one another rather than treated as a controlled head-to-head.
 The complete methodology, costs, task mix, failures, infrastructure repairs,
 and negative findings are preserved in the
 [evaluation record](./STATEFUL_CODEX_EVALUATION.md).
+
+The BixBench-compatible run is intentionally reported as mixed evidence, not a
+leaderboard claim. Its compact task-level answers, hashes, operational failures,
+repair controls, and scientific-workflow diagnoses are published in
+[the BixBench result record](./clients/stateful-codex/eval/results/bixbench-v1-5-compatible-gates-20260924.json).
 
 ## What changes
 

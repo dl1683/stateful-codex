@@ -3163,7 +3163,8 @@ are demonstrated.
 
 ## Benchmark SC-EVAL-031: BixBench custom-harness gate
 
-Status: pre-registered on 2026-09-23 before any BixBench model call.
+Status: pre-registered on 2026-09-23 before any BixBench model call; compatible
+local gates completed on 2026-09-24.
 
 This evaluation tests whether the Stateful Codex harness can perform auditable
 scientific-data work under BixBench v1.5. It does not test longitudinal memory:
@@ -3189,9 +3190,10 @@ The frozen execution sequence is:
 3. If that expansion retains valid artifacts, the preregistered breadth gate
    runs one question from each of ten distinct capsules with concurrency two.
 
-There is one attempt per task. A detected provider/authentication outage or a
-failure before the Codex invocation boundary is invalid and may be repeated
-once in the same arm. Agent timeout, nonzero agent exit, missing/malformed final
+There is one attempt per task. A detected provider/authentication outage, a
+failure before the Codex invocation boundary, or a positively identified
+container-engine disconnect is invalid and may be repeated once in the same
+arm. Agent timeout, an ordinary nonzero agent exit, a missing/malformed final
 answer, or prohibited benchmark-source access is a recorded failure. Tasks are
 never substituted after outcomes are known.
 
@@ -3215,3 +3217,86 @@ pinned judge protocol. Published BixBench aggregates may provide context but
 are not treated as matched controls. An ordinary Codex arm is not required for
 this operational smoke; one may be added only as an explicitly labelled
 technical control if a failure cannot otherwise be localized.
+
+### Compatible local results
+
+These results are not official BixBench scores. They use the pinned tasks and
+capsule hashes, a source-compatible AMD64 scientific image, cached Codex login,
+Luna at maximum reasoning effort, fresh state per question, and local metadata
+verification. No ordinary-Codex arm was run. The compact machine-readable
+record is
+`clients/stateful-codex/eval/results/bixbench-v1-5-compatible-gates-20260924.json`.
+
+The first smoke passed its local verifier, notebook replay, protocol audit, and
+durable completion checks. The five-question single-capsule gate then produced
+four local passes and five operationally valid, replayable notebooks. Its only
+local miss was `0.2901422004` against a `25-30` range: the calculation is
+29.01422004 percent, so this remains a local-verifier miss but is diagnosed as
+a percent-scale response mismatch rather than a different analysis.
+
+The frozen ten-capsule breadth gate was materially weaker:
+
+| Measure | Result |
+| --- | ---: |
+| Local metadata-verifier correct | 3 / 10 |
+| Operationally valid | 7 / 10 |
+| Correct and operationally valid | 2 / 10 |
+| Reproducible notebooks under protocol v1 | 7 / 10 |
+| Completed durable Stateful runs | 9 / 10 |
+| Input tokens | 13,901,862 |
+| Cached input tokens | 12,906,240 |
+| Uncached input tokens | 995,622 |
+| Output tokens | 231,374 |
+| Wall time at concurrency two | 4,137.134 seconds |
+
+The three locally correct answers were `bix-18-q1`, `bix-19-q1`, and
+`bix-51-q1`. The first two were fully valid. `bix-51-q1` installed `openpyxl`
+inside the agent container, so its correct notebook failed clean replay in the
+original image. The protocol-v2 repair image pins `openpyxl==3.1.5`; the post-hoc
+control reproduced the same answer (`0.3952158855`) from pristine inputs with
+network-disabled replay and no runtime installation.
+
+The original `bix-39-q2` process ended with Docker exit 125 and
+`error waiting for container: unexpected EOF` after Codex had started. Review
+of container stderr makes this an infrastructure-invalid run, not an answer
+failure. Its isolated protocol-v2 replacement completed and replayed cleanly
+but answered `3` against metadata `2.5`. The notebook treated the exome
+workbooks as already exon-filtered; the reference workflow additionally removes
+intronic, intergenic, and UTR sequence-ontology rows. The replacement therefore
+confirms a real analysis-interpretation miss after the infrastructure defect is
+removed.
+
+The other misses are not one homogeneous failure class:
+
+- `bix-30-q1` omitted the reference workflow's log2 transform and exclusions
+  of P_3 and C_18, producing 36% rather than 28%.
+- `bix-29-q1` used a different severity field, cohort, and interaction model,
+  producing 1.25699 rather than the reference model's approximately 1.633.
+- `bix-1-q1` used a condition-only DESeq2 model and a different enrichment
+  universe; the reference removes two samples, models sex plus condition, and
+  uses the supplied Gencode universe.
+- `bix-27-q2` clustered all 222 expression columns while the reference first
+  reduces to 178 matched subjects and reports 173 stable assignments.
+- `bix-52-q1` reported W/chromosome-1 density; the inverse is approximately
+  0.658 and falls in the reference range, while the question does not name the
+  numerator explicitly.
+- `bix-53-q3` used all six samples and the prompt's raw-p threshold, while the
+  reference uses a four-sample analysis and an adjusted-p threshold despite the
+  question saying `p<0.05`. Its submitted notebook also depended on live gene
+  mapping and enrichment services, so offline replay failed.
+
+Several tasks therefore depend on workflow choices not fully stated in the
+question, including sample exclusions, cohort alignment, numerator direction,
+covariates, enrichment universe, and even raw versus adjusted p-value. That
+does not convert the local misses into passes. It does mean this small local
+metadata score should be read as a diagnostic of reference-workflow recovery,
+scientific assumption handling, and artifact reproducibility rather than a
+clean estimate of general scientific reasoning quality.
+
+Protocol v1 also replayed notebooks from the post-agent workspace and did not
+reject runtime package installation. Protocol v2 now replays from untouched
+capsule inputs plus only the submitted notebook, rejects runtime Pip/Conda/R
+package installation, pins the missing Excel reader in the explicitly
+compatible image, and separates known container-engine disconnects from agent
+failures. The two-task repair passed every operational check under this stronger
+protocol. The negative scientific answer remained negative.

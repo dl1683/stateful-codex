@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-24",
+  "status": "completed-compatible-directional-diagnostic",
+  "official": false,
+  "claimBoundary": [
+    "These are local BixBench v1.5-compatible diagnostics, not official BixBench scores.",
+    "Each question received a fresh workspace and fresh Stateful databases; these runs do not test compounding project memory.",
+    "No matched ordinary-Codex arm was run, so the results do not establish a causal Stateful advantage.",
+    "The local metadata verifier is stricter and less semantic than BixBench's official LLM judge.",
+    "The ten-task breadth selection was frozen before outcomes but is not a representative estimate of the complete benchmark."
+  ],
+  "protocol": {
+    "benchmarkRevision": "49311180bdacb324c596f2e07596c126f2004008",
+    "datasetRevision": "f8cc3bdcc6357c88b8c3648306522b9c422dc95a",
+    "datasetMetadataSha256": "0d1204dcdae7193a9132ced5a3502008f6b3b163debc1b65b2aa2d86cb132dc9",
+    "environmentSourceRevision": "953a6b13c5f8e15354525bca08636f620994f954",
+    "model": "gpt-5.6-luna",
+    "reasoningEffort": "max",
+    "authentication": "cached-codex-login",
+    "apiKeyEnvironmentRemoved": true,
+    "arm": "stateful",
+    "mode": "autonomous",
+    "stateScope": "question",
+    "concurrency": 2,
+    "agentTimeoutSeconds": 3600,
+    "bundleSha256": "a321910f2cae0ccfed8e3b412f4f3ef7a7ec22f62f683444655be6c76c6841ad"
+  },
+  "gates": {
+    "smoke": {
+      "tasks": 1,
+      "localVerifierCorrect": 1,
+      "operationallyValid": 1,
+      "reproducibleNotebooks": 1,
+      "inputTokens": 472197,
+      "cachedInputTokens": 423680,
+      "outputTokens": 12828,
+      "summarySha256": "3eb7e48845aaf58e4b4dbd9e4b3d46596897908e98f5e32730c3a06de85050a8",
+      "runManifestSha256": "f07a5c43139d071029c0c96d9cb5ee14409b024149c5b98cd46f89ef171f50e3"
+    },
+    "singleCapsuleFive": {
+      "tasks": 5,
+      "localVerifierCorrect": 4,
+      "operationallyValid": 5,
+      "reproducibleNotebooks": 5,
+      "inputTokens": 1661712,
+      "cachedInputTokens": 1389568,
+      "outputTokens": 44371,
+      "summarySha256": "31dbd9e41e70dbbf6097c58eac415c69134abb43055b3dffc6ae3c626b185457",
+      "runManifestSha256": "f745c7cfe59e96b2f990fbc782889e0486f962efb740707e0fa036a493c0d3bf",
+      "importantQualification": "The sole local miss returned 0.2901422004 for a reference range of 25-30. The underlying calculation equals 29.01422004 percent, so this is a percent-scale answer mismatch, not a different numerical analysis. It remains locally incorrect."
+    },
+    "tenCapsuleBreadth": {
+      "tasks": 10,
+      "rawLocalVerifierCorrect": 3,
+      "rawLocalVerifierIncorrect": 6,
+      "rawAgentFailures": 1,
+      "auditedInfrastructureInvalid": 1,
+      "operationallyValid": 7,
+      "operationallyInvalid": 3,
+      "correctAndOperationallyValid": 2,
+      "reproducibleNotebooks": 7,
+      "completedStatefulRuns": 9,
+      "inputTokens": 13901862,
+      "cachedInputTokens": 12906240,
+      "uncachedInputTokens": 995622,
+      "outputTokens": 231374,
+      "reasoningOutputTokens": 111611,
+      "wallSeconds": 4137.134,
+      "sumTaskSeconds": 7540.591,
+      "stateCounts": {
+        "hierarchyNodes": 46,
+        "contextMapEntries": 28,
+        "blackboardEntries": 21,
+        "blackboardRelations": 11,
+        "obligations": 21
+      },
+      "summarySha256": "4bad2dee2fb7d0525c1887845ff0a37b4a2f6050ce6b364b904c72cc8f615b20",
+      "runManifestSha256": "faa5ae23e43f1b14f11b6fc14321bb9cc5d2bcfbc70066480e954f4e0dcd4cc7",
+      "environmentFileSha256": "6f70cce2bdb6fa08b9270c4162e1e2a0de1e6a6c45cacf0985753c716a29a0fc"
+    }
+  },
+  "breadthTasks": [
+    {
+      "taskId": "bix-18-q1",
+      "answer": "0.076",
+      "localCorrect": true,
+      "operationallyValid": true,
+      "notebookReplay": "reproducible",
+      "diagnosis": "Clean imaging-analysis success."
+    },
+    {
+      "taskId": "bix-19-q1",
+      "answer": "337",
+      "localCorrect": true,
+      "operationallyValid": true,
+      "notebookReplay": "reproducible",
+      "diagnosis": "Clean effect-size and power-analysis success."
+    },
+    {
+      "taskId": "bix-30-q1",
+      "answer": "36.00",
+      "ideal": "28%",
+      "localCorrect": false,
+      "operationallyValid": true,
+      "notebookReplay": "reproducible",
+      "diagnosis": "Used all raw groups with Welch tests. The reference workflow log2-transforms and excludes P_3 and C_18 before testing, producing 49 of 175 or 28 percent."
+    },
+    {
+      "taskId": "bix-51-q1",
+      "answer": "0.395215885535",
+      "localCorrect": true,
+      "operationallyValid": false,
+      "notebookReplay": "failed",
+      "diagnosis": "The answer was correct, but the agent installed missing openpyxl at runtime. Clean replay in the original image therefore failed. Protocol v2 and the repair image resolve this environment defect."
+    },
+    {
+      "taskId": "bix-52-q1",
+      "answer": "1.5199304278127952",
+      "ideal": "0.47-0.67",
+      "localCorrect": false,
+      "operationallyValid": true,
+      "notebookReplay": "reproducible",
+      "diagnosis": "The computed counts and chromosome lengths were internally consistent, but the agent reported W/chromosome-1. The inverse is approximately 0.658 and falls in the reference range; the prompt does not explicitly name the numerator."
+    },
+    {
+      "taskId": "bix-53-q3",
+      "answer": "20",
+      "ideal": "22/64",
+      "localCorrect": false,
+      "operationallyValid": false,
+      "notebookReplay": "failed",
+      "diagnosis": "The workflow used all six samples and the prompt's raw p-value threshold, plus live MyGene and Enrichr services. The reference notebook uses a four-sample analysis and an adjusted-p threshold despite the prompt saying p<0.05. Offline replay failed because the submitted notebook depended on network APIs."
+    },
+    {
+      "taskId": "bix-29-q1",
+      "answer": "1.25699",
+      "ideal": "1.62-1.65",
+      "localCorrect": false,
+      "operationallyValid": true,
+      "notebookReplay": "reproducible",
+      "diagnosis": "The agent used highest-score severity, a different cohort, and broader interaction terms. The reference uses maximum AESEV, MHONGO counts, categorical exposure fields, and only the medical-history-by-treatment interaction, yielding about 1.633."
+    },
+    {
+      "taskId": "bix-1-q1",
+      "answer": "0.0013",
+      "ideal": "0.0002",
+      "localCorrect": false,
+      "operationallyValid": true,
+      "notebookReplay": "reproducible",
+      "diagnosis": "The agent selected a condition-only DESeq2 model and a different identifier/background universe. The reference removes two samples, models sex plus condition, and uses the supplied Gencode universe before enrichGO and simplify."
+    },
+    {
+      "taskId": "bix-27-q2",
+      "answer": "219",
+      "ideal": "160-180",
+      "localCorrect": false,
+      "operationallyValid": true,
+      "notebookReplay": "reproducible",
+      "diagnosis": "The agent clustered all 222 expression columns. The reference first reduces to 178 matched subjects and reports 173 stable assignments; transformation, randomization, and consensus details are also underspecified in the question."
+    },
+    {
+      "taskId": "bix-39-q2",
+      "answer": null,
+      "localCorrect": null,
+      "operationallyValid": false,
+      "notebookReplay": "skipped",
+      "diagnosis": "Docker returned exit 125 with 'error waiting for container: unexpected EOF' after the agent had started. This is audited as invalid container infrastructure, not an answer failure. The isolated replacement result is recorded below."
+    }
+  ],
+  "posthocRepair": {
+    "selection": [
+      "bix-51-q1",
+      "bix-39-q2"
+    ],
+    "reason": "Confirm the pinned Excel dependency and replace the Docker-interrupted task without altering the original breadth record.",
+    "protocolVersion": 2,
+    "imageId": "sha256:2c5cc1f0c546e90732a2a7fed79f14839ed2565311d179f01c4de69c56a79072",
+    "environmentManifestSha256": "e50a66deb910df51acacf9ffa1892155f9ebfe357dfd4add2ed9193e9ddf281b",
+    "tasks": 2,
+    "localVerifierCorrect": 1,
+    "localVerifierIncorrect": 1,
+    "operationallyValid": 2,
+    "reproducibleNotebooks": 2,
+    "inputTokens": 3104449,
+    "cachedInputTokens": 2902272,
+    "uncachedInputTokens": 202177,
+    "outputTokens": 49265,
+    "reasoningOutputTokens": 24297,
+    "wallSeconds": 1051.792,
+    "results": [
+      {
+        "taskId": "bix-51-q1",
+        "answer": "0.3952158855",
+        "localCorrect": true,
+        "operationallyValid": true,
+        "notebookReplay": "reproducible"
+      },
+      {
+        "taskId": "bix-39-q2",
+        "answer": "3",
+        "ideal": "2.5",
+        "localCorrect": false,
+        "operationallyValid": true,
+        "notebookReplay": "reproducible",
+        "diagnosis": "The agent treated the exome workbooks as already exon-filtered. The reference additionally removes intronic, intergenic, and UTR sequence-ontology rows before counting; this analysis miss survives the infrastructure repair."
+      }
+    ],
+    "summarySha256": "9c56cb48db40a1fe3746c405014649d4fbb612ba1a826df3a05a32aa0db4e1c0",
+    "runManifestSha256": "11db1324c60667e59f8115b45faf422b0005eca9e50c42accd9c4db7ba335838",
+    "environmentFileSha256": "6361078fac6fa7b886c0860514ace87cbd278db801b829dc2f8e89e5ac1e569a"
+  },
+  "protocolEvolution": {
+    "breadthProtocolVersion": 1,
+    "breadthLimitation": "Protocol v1 replayed from the post-agent workspace and did not reject runtime package installation. The seven replay successes therefore have weaker isolation than protocol v2.",
+    "repairProtocolVersion": 2,
+    "repairImprovements": [
+      "Notebook replay starts from untouched capsule inputs plus only the submitted notebook.",
+      "Runtime pip, Conda, mamba, R install.packages, and BiocManager installation commands are integrity violations.",
+      "Known Docker-engine disconnects are classified as invalid infrastructure rather than agent failures.",
+      "openpyxl 3.1.5 is pinned in the explicitly compatible non-official image."
+    ]
+  }
+}
