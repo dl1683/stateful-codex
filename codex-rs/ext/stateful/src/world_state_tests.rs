@@ -11,6 +11,7 @@ use super::MAX_BODY_BYTES;
 use super::MAX_ESTIMATED_TOKENS;
 use super::ProjectIntelligenceStatus;
 use super::project_world_state_section;
+use super::semantic_fingerprint;
 use crate::SelectedProject;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
@@ -136,6 +137,49 @@ fn unchanged_snapshot_does_not_repeat_project_context() {
             .render_diff(PreviousWorldStateSection::Known(&snapshot))
             .is_none()
     );
+}
+
+#[test]
+fn invisible_project_metadata_change_does_not_repeat_project_context() {
+    let previous_project = project("Research", Vec::new());
+    let mut current_project = previous_project.clone();
+    current_project.updated_at_ms += 1;
+    let previous = project_world_state_section(available(previous_project));
+    let current = project_world_state_section(available(current_project));
+
+    assert!(
+        current
+            .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+            .is_none()
+    );
+}
+
+#[test]
+fn unknown_legacy_snapshot_renders_the_full_current_packet() {
+    let current = project_world_state_section(available(project("Research", Vec::new())));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Unknown)
+        .expect("unknown legacy state must be replaced with current project intelligence");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project>", "</stateful_project>")
+    );
+    assert!(rendered.body().contains("Project intelligence revision: 0"));
+}
+
+#[test]
+fn transient_audit_label_does_not_change_semantic_fingerprint() {
+    let audited = "verification=sourceVerified evidence=current S1 (current)";
+    let unaudited = "verification=sourceVerified evidence=uncheckedThisTurn S1 (uncheckedThisTurn)";
+    let stale = "verification=stale evidence=stale S1 (stale)";
+
+    assert_eq!(
+        semantic_fingerprint(audited),
+        semantic_fingerprint(unaudited)
+    );
+    assert_ne!(semantic_fingerprint(audited), semantic_fingerprint(stale));
 }
 
 #[test]

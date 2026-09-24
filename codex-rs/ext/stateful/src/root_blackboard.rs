@@ -254,9 +254,10 @@ fn render_hit(
         .join(",");
     let evidence_freshness = rendered_evidence_freshness(hit, evidence_audit);
     let effective_verification = match (value.verification, evidence_freshness) {
-        (BlackboardVerification::SourceVerified, RenderedEvidenceFreshness::Current) => {
-            BlackboardVerification::SourceVerified
-        }
+        (
+            BlackboardVerification::SourceVerified,
+            RenderedEvidenceFreshness::Current | RenderedEvidenceFreshness::Unchecked,
+        ) => BlackboardVerification::SourceVerified,
         (BlackboardVerification::SourceVerified, _) => BlackboardVerification::Stale,
         (verification, _) => verification,
     };

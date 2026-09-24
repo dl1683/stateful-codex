@@ -157,12 +157,13 @@ pub(super) fn project_world_state_section(
     WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
             PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
-            PreviousWorldStateSection::Unknown => None,
             PreviousWorldStateSection::Known(previous)
                 if previous.get("semanticFingerprint")
-                    == snapshot.get("semanticFingerprint")
-                    && previous.get("rootRevision") != snapshot.get("rootRevision") =>
+                    == snapshot.get("semanticFingerprint") =>
             {
+                if previous.get("rootRevision") == snapshot.get("rootRevision") {
+                    return None;
+                }
                 let previous_revision = previous
                     .get("rootRevision")
                     .and_then(Value::as_u64)
@@ -179,7 +180,9 @@ pub(super) fn project_world_state_section(
                     ),
                 ))
             }
-            PreviousWorldStateSection::Absent | PreviousWorldStateSection::Known(_) => {
+            PreviousWorldStateSection::Absent
+            | PreviousWorldStateSection::Unknown
+            | PreviousWorldStateSection::Known(_) => {
                 Some(RenderedWorldStateFragment::new(
                     "developer",
                     (START_MARKER, END_MARKER),
@@ -202,7 +205,8 @@ fn semantic_fingerprint(body: &str) -> String {
         if line.starts_with("Project intelligence revision: ") {
             hasher.update(b"Project intelligence revision: <current>\n");
         } else {
-            hasher.update(line.as_bytes());
+            let stable_line = line.replace("uncheckedThisTurn", "current");
+            hasher.update(stable_line.as_bytes());
             hasher.update(b"\n");
         }
     }
