@@ -7,8 +7,9 @@ and answer contract while replacing only the agent harness.
 The first gate is deliberately small: `smoke-bix18.json` selects one question
 from a 22 KB *P. aeruginosa* swarming-analysis capsule with a deterministic
 range verifier. Once that produces a valid executed notebook, structured final
-answer, isolated Stateful database, and grade, the same capsule's other four
-deterministically graded questions can be enabled before a broader sample.
+answer, isolated Stateful database, and grade, `bix18-deterministic.json`
+pre-registers all five independently state-isolated questions from that capsule
+before a broader sample.
 
 ## Pinned inputs
 
