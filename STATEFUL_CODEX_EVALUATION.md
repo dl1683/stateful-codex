@@ -2319,7 +2319,8 @@ valid observations. No six-project result has been run or claimed yet.
 
 ## Benchmark SC-EVAL-023: six-project breadth screen
 
-Status: pre-registered before any model arm was run on 2026-09-22.
+Status: completed and retained as directional evidence; the cohort was
+pre-registered before any model arm was run on 2026-09-22.
 
 The cohort is selected by workload coverage rather than expected outcome:
 
@@ -2351,8 +2352,7 @@ environment variables removed, Luna at high reasoning effort, read-only source
 permissions, and one continuous thread per project. Stateful uses explicit
 Autonomous mode. A run is operationally valid only if it completes, preserves
 the corpus, exposes project state, commits its durable result, and yields the
-required blinded quality, source-audit, and state observations. No result is
-recorded yet.
+required blinded quality, source-audit, and state observations.
 
 ### Pre-cohort isolation correction
 
@@ -2376,6 +2376,23 @@ fresh snapshot paths so the completed dry-run Stateful project identity and
 state cannot carry forward. Every final result will therefore be collected
 after this correction; no favorable or unfavorable completed result was
 selected for inclusion.
+
+### Directional outcome
+
+The completed six-project screen is retained as unfavorable directional
+evidence, not as a protocol-valid persistence comparison. Both blind graders
+preferred ordinary Codex on five projects and disagreed on AGI Thesis. All
+twelve arms had zero compactions, so the screen did not test survival through
+compaction or the value of mature accumulated state.
+
+The original grading packet also placed an auxiliary `S` object beside the
+blinded A/B answers. That object was the model-submitted Stateful completion
+narrative rather than the persisted run result or project intelligence, and
+its placement could disclose which answer was Stateful. The recorded grades
+remain unchanged, but no causal quality claim is made from them. A valid rerun
+must use answer-only public packets with a disjoint private arm mapping, retain
+hash-pinned SQLite artifacts after every Stateful turn, and grade the submitted
+answer, persisted result, obligations, and project intelligence separately.
 
 ## Benchmarks SC-EVAL-024 and SC-EVAL-025: source revision and compaction diagnostics
 

@@ -35,12 +35,13 @@ The first results are encouraging enough to justify deeper evaluation. They are
 measured signals from the current research system, not claims of an official
 leaderboard submission or a controlled causal advantage over ordinary Codex.
 
-| Evaluation | Encouraging result | Important limitation |
+| Evaluation | Observed result | Important limitation |
 | --- | --- | --- |
 | Terminal-Bench 2.1 one-attempt breadth screen | **70 of 89 distinct tasks passed (78.65%)**: 3/4 easy, 45/55 medium, and 22/30 hard. | This is directional pass-at-one evidence, not the published 445-trial protocol or an official leaderboard score. |
 | Feedback-conditioned persistent-state pilot | Across eight task families completed through five attempts, fifth-attempt cost was **22.0% lower** than cold cost in aggregate, average warm-attempt cost was **20.8% lower**, and final success was **7/8 versus 5/8 cold**. Among the five families that passed both cold and final, final cost fell **25.8%**. | This first protocol run had no repeated ordinary-control arm. Regressions occurred, two persistence mutations were missed, and `video-processing` failed all five attempts while becoming 12.8% more expensive. |
 | Six-question, two-project matched series | Read-bearing calls fell **20 -> 7**, unique raw-file reads **54 -> 29**, and follow-up uncached input plus output **97,693 -> 77,806** while all six answers and durable results passed manual semantic review. | Follow-up full tokens increased **381,853 -> 430,830**; including project maturation, Stateful remained more expensive over this short series. |
 | Mature-project selective retrieval | On three matched questions, Stateful used **5 read-bearing calls vs. 11** and reduced follow-up full tokens **19.41%** while verifying narrower source sets. | Uncached follow-up usage increased **27.90%**, and maturation-inclusive cost had not yet broken even. |
+| Six-project cold breadth screen | Both blind graders preferred ordinary Codex on **5 of 6** projects and disagreed on the sixth. | Directional only: all arms had zero compactions, and an auxiliary Stateful narrative could disclose the treatment arm. The grades are preserved, but no causal quality claim is made. |
 
 The longitudinal pilot was intentionally frozen after 50 valid attempts so the
 next evaluation can test a different domain rather than spend the next budget
