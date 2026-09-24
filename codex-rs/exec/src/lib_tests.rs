@@ -80,6 +80,23 @@ fn exec_default_stderr_filter_suppresses_otel_self_diagnostics() {
 }
 
 #[test]
+fn only_running_autonomous_runs_are_followed() {
+    let mut run = sample_stateful_run();
+    assert_eq!(
+        running_autonomous_run_id(Some(run.clone())),
+        Some(run.id.clone())
+    );
+
+    run.status = StatefulRunStatus::Blocked;
+    assert_eq!(running_autonomous_run_id(Some(run.clone())), None);
+
+    run.status = StatefulRunStatus::Running;
+    run.mode = StatefulWorkflowMode::Collaborative;
+    assert_eq!(running_autonomous_run_id(Some(run)), None);
+    assert_eq!(running_autonomous_run_id(None), None);
+}
+
+#[test]
 fn exec_root_span_can_be_parented_from_trace_context() {
     let subscriber = test_tracing_subscriber();
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -895,5 +912,27 @@ fn sample_thread_start_response() -> ThreadStartResponse {
         active_permission_profile: None,
         reasoning_effort: None,
         multi_agent_mode: Default::default(),
+    }
+}
+
+fn sample_stateful_run() -> codex_app_server_protocol::StatefulRun {
+    codex_app_server_protocol::StatefulRun {
+        id: "run-1".to_string(),
+        project_id: "project-1".to_string(),
+        thread_ids: vec!["thread-1".to_string()],
+        goal: "Complete the project".to_string(),
+        mode: StatefulWorkflowMode::Autonomous,
+        budget: codex_app_server_protocol::StatefulRunBudget {
+            max_continuations: 24,
+            max_elapsed_seconds: 14_400,
+        },
+        continuations_used: 1,
+        status: StatefulRunStatus::Running,
+        strategy: None,
+        strategy_revision: 0,
+        result: None,
+        revision: 2,
+        created_at: 1,
+        updated_at: 2,
     }
 }

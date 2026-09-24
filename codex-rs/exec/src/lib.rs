@@ -164,6 +164,7 @@ use std::io::IsTerminal;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 use supports_color::Stream;
 use tokio::sync::mpsc;
 use tracing::Instrument;
@@ -181,6 +182,14 @@ use crate::event_processor::EventProcessor;
 
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
 const EXEC_DEFAULT_LOG_FILTER: &str = "error,opentelemetry_sdk=off,opentelemetry_otlp=off";
+const AUTONOMOUS_FOLLOW_TIMEOUT: Duration = Duration::from_secs(150);
+
+enum AutonomousWaitState {
+    TurnStarted(Box<TurnStartedNotification>),
+    Running,
+    Terminal(StatefulRunStatus),
+    Missing,
+}
 
 enum InitialOperation {
     ForkOnly,
@@ -1267,6 +1276,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let mut error_seen = false;
     let mut interrupt_channel_open = true;
     let mut awaiting_autonomous_turn = false;
+    let mut awaited_autonomous_run_id = None;
+    let mut autonomous_follow_deadline = None;
     let mut pending_autonomous_turn = None;
     let primary_thread_id_for_requests = primary_thread_id.to_string();
     loop {
@@ -1306,6 +1317,62 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 continue;
             }
             maybe_event = client.next_event() => maybe_event,
+            _ = async {
+                match autonomous_follow_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                let Some(run_id) = awaited_autonomous_run_id.as_deref() else {
+                    continue;
+                };
+                match reconcile_autonomous_wait(
+                    &client,
+                    &mut request_ids,
+                    &primary_thread_id_for_requests,
+                    &task_id,
+                    run_id,
+                )
+                .await
+                {
+                    Ok(AutonomousWaitState::TurnStarted(started)) => {
+                        task_id = started.turn.id.clone();
+                        awaiting_autonomous_turn = false;
+                        awaited_autonomous_run_id = None;
+                        autonomous_follow_deadline = None;
+                        let _ = event_processor.process_server_notification(
+                            ServerNotification::TurnStarted(*started),
+                        );
+                        continue;
+                    }
+                    Ok(AutonomousWaitState::Terminal(status)) => {
+                        error_seen |= status != StatefulRunStatus::Completed;
+                        warn!(?status, %run_id, "Autonomous run ended while exec awaited its continuation");
+                    }
+                    Ok(AutonomousWaitState::Running) => {
+                        error_seen = true;
+                        warn!(%run_id, "Autonomous run did not start its continuation before the follow deadline");
+                    }
+                    Ok(AutonomousWaitState::Missing) => {
+                        error_seen = true;
+                        warn!(%run_id, "Autonomous run disappeared while exec awaited its continuation");
+                    }
+                    Err(err) => {
+                        error_seen = true;
+                        warn!(%run_id, "failed to reconcile stalled Autonomous run: {err}");
+                    }
+                }
+                if let Err(err) = request_shutdown(
+                    &client,
+                    &mut request_ids,
+                    &primary_thread_id_for_requests,
+                )
+                .await
+                {
+                    warn!("thread/unsubscribe failed during shutdown: {err}");
+                }
+                break;
+            }
         };
 
         let Some(server_event) = server_event else {
@@ -1326,9 +1393,49 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     if awaiting_autonomous_turn {
                         task_id = started.turn.id.clone();
                         awaiting_autonomous_turn = false;
+                        awaited_autonomous_run_id = None;
+                        autonomous_follow_deadline = None;
                     } else {
                         pending_autonomous_turn = Some(started.clone());
                         continue;
+                    }
+                }
+                if follow_autonomous_continuations
+                    && awaiting_autonomous_turn
+                    && let ServerNotification::StatefulRunUpdated(updated) = &notification
+                    && awaited_autonomous_run_id.as_deref() == Some(updated.run_id.as_str())
+                {
+                    let run = match read_stateful_run(
+                        &client,
+                        &mut request_ids,
+                        StatefulRunLookup::Run(&updated.run_id),
+                    )
+                    .await
+                    {
+                        Ok(run) => run,
+                        Err(err) => {
+                            warn!(
+                                "statefulRun/read failed while checking an Autonomous run update: {err}"
+                            );
+                            error_seen = true;
+                            None
+                        }
+                    };
+                    if running_autonomous_run_id(run.clone()).is_none() {
+                        if let Some(run) = run {
+                            error_seen |= run.status != StatefulRunStatus::Completed;
+                            warn!(status = ?run.status, run_id = %run.id, "Autonomous run ended while exec awaited its continuation");
+                        }
+                        if let Err(err) = request_shutdown(
+                            &client,
+                            &mut request_ids,
+                            &primary_thread_id_for_requests,
+                        )
+                        .await
+                        {
+                            warn!("thread/unsubscribe failed during shutdown: {err}");
+                        }
+                        break;
                     }
                 }
                 let completed_autonomous_turn = matches!(
@@ -1374,45 +1481,53 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     match event_processor.process_server_notification(notification) {
                         CodexStatus::Running => {}
                         CodexStatus::InitiateShutdown => {
-                            let autonomous_run_is_active = if follow_autonomous_continuations
+                            if follow_autonomous_continuations
+                                && completed_autonomous_turn
+                                && let Some(started) = pending_autonomous_turn.take()
+                            {
+                                task_id = started.turn.id.clone();
+                                let _ = event_processor.process_server_notification(
+                                    ServerNotification::TurnStarted(started),
+                                );
+                                continue;
+                            }
+                            let autonomous_run_id = if follow_autonomous_continuations
                                 && completed_autonomous_turn
                             {
-                                match send_request_with_response::<StatefulRunReadResponse>(
+                                match read_stateful_run(
                                     &client,
-                                    ClientRequest::StatefulRunRead {
-                                        request_id: request_ids.next(),
-                                        params: StatefulRunReadParams {
-                                            run_id: None,
-                                            thread_id: Some(primary_thread_id_for_requests.clone()),
-                                        },
-                                    },
-                                    "statefulRun/read",
+                                    &mut request_ids,
+                                    StatefulRunLookup::Thread(&primary_thread_id_for_requests),
                                 )
                                 .await
                                 {
-                                    Ok(response) => response.run.is_some_and(|run| {
-                                        run.mode == StatefulWorkflowMode::Autonomous
-                                            && run.status == StatefulRunStatus::Running
-                                    }),
+                                    Ok(Some(run))
+                                        if run.mode == StatefulWorkflowMode::Autonomous
+                                            && run.status == StatefulRunStatus::Running =>
+                                    {
+                                        Some(run.id)
+                                    }
+                                    Ok(Some(run)) => {
+                                        error_seen |= run.status != StatefulRunStatus::Completed;
+                                        None
+                                    }
+                                    Ok(None) => None,
                                     Err(err) => {
+                                        error_seen = true;
                                         warn!(
                                             "statefulRun/read failed while following Autonomous run: {err}"
                                         );
-                                        false
+                                        None
                                     }
                                 }
                             } else {
-                                false
+                                None
                             };
-                            if autonomous_run_is_active {
-                                if let Some(started) = pending_autonomous_turn.take() {
-                                    task_id = started.turn.id.clone();
-                                    let _ = event_processor.process_server_notification(
-                                        ServerNotification::TurnStarted(started),
-                                    );
-                                } else {
-                                    awaiting_autonomous_turn = true;
-                                }
+                            if let Some(run_id) = autonomous_run_id {
+                                awaiting_autonomous_turn = true;
+                                awaited_autonomous_run_id = Some(run_id);
+                                autonomous_follow_deadline =
+                                    Some(tokio::time::Instant::now() + AUTONOMOUS_FOLLOW_TIMEOUT);
                                 continue;
                             }
                             if let Err(err) = request_shutdown(
@@ -1433,6 +1548,47 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                 let message = lagged_event_warning_message(skipped);
                 warn!("{message}");
                 event_processor.process_warning(message);
+                if awaiting_autonomous_turn
+                    && let Some(run_id) = awaited_autonomous_run_id.as_deref()
+                {
+                    match reconcile_autonomous_wait(
+                        &client,
+                        &mut request_ids,
+                        &primary_thread_id_for_requests,
+                        &task_id,
+                        run_id,
+                    )
+                    .await
+                    {
+                        Ok(AutonomousWaitState::TurnStarted(started)) => {
+                            task_id = started.turn.id.clone();
+                            awaiting_autonomous_turn = false;
+                            awaited_autonomous_run_id = None;
+                            autonomous_follow_deadline = None;
+                            let _ = event_processor.process_server_notification(
+                                ServerNotification::TurnStarted(*started),
+                            );
+                        }
+                        Ok(AutonomousWaitState::Terminal(status)) => {
+                            error_seen |= status != StatefulRunStatus::Completed;
+                            warn!(?status, %run_id, "Autonomous run ended after exec event loss");
+                            if let Err(err) = request_shutdown(
+                                &client,
+                                &mut request_ids,
+                                &primary_thread_id_for_requests,
+                            )
+                            .await
+                            {
+                                warn!("thread/unsubscribe failed during shutdown: {err}");
+                            }
+                            break;
+                        }
+                        Ok(AutonomousWaitState::Running | AutonomousWaitState::Missing) => {}
+                        Err(err) => {
+                            warn!(%run_id, "failed to reconcile Autonomous run after event loss: {err}")
+                        }
+                    }
+                }
             }
         }
     }
@@ -1446,6 +1602,84 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+enum StatefulRunLookup<'a> {
+    Run(&'a str),
+    Thread(&'a str),
+}
+
+async fn read_stateful_run(
+    client: &InProcessAppServerClient,
+    request_ids: &mut RequestIdSequencer,
+    lookup: StatefulRunLookup<'_>,
+) -> Result<Option<codex_app_server_protocol::StatefulRun>, String> {
+    let (run_id, thread_id) = match lookup {
+        StatefulRunLookup::Run(run_id) => (Some(run_id.to_string()), None),
+        StatefulRunLookup::Thread(thread_id) => (None, Some(thread_id.to_string())),
+    };
+    send_request_with_response::<StatefulRunReadResponse>(
+        client,
+        ClientRequest::StatefulRunRead {
+            request_id: request_ids.next(),
+            params: StatefulRunReadParams { run_id, thread_id },
+        },
+        "statefulRun/read",
+    )
+    .await
+    .map(|response| response.run)
+}
+
+async fn reconcile_autonomous_wait(
+    client: &InProcessAppServerClient,
+    request_ids: &mut RequestIdSequencer,
+    thread_id: &str,
+    current_turn_id: &str,
+    run_id: &str,
+) -> Result<AutonomousWaitState, String> {
+    let response = send_request_with_response::<ThreadReadResponse>(
+        client,
+        ClientRequest::ThreadRead {
+            request_id: request_ids.next(),
+            params: ThreadReadParams {
+                thread_id: thread_id.to_string(),
+                include_turns: true,
+            },
+        },
+        "thread/read",
+    )
+    .await?;
+    if let Some(turn) = response.thread.turns.iter().rev().find(|turn| {
+        turn.id != current_turn_id
+            && turn.status == codex_app_server_protocol::TurnStatus::InProgress
+    }) {
+        return Ok(AutonomousWaitState::TurnStarted(Box::new(
+            TurnStartedNotification {
+                thread_id: thread_id.to_string(),
+                turn: turn.clone(),
+            },
+        )));
+    }
+
+    match read_stateful_run(client, request_ids, StatefulRunLookup::Run(run_id)).await? {
+        Some(run)
+            if run.mode == StatefulWorkflowMode::Autonomous
+                && run.status == StatefulRunStatus::Running =>
+        {
+            Ok(AutonomousWaitState::Running)
+        }
+        Some(run) => Ok(AutonomousWaitState::Terminal(run.status)),
+        None => Ok(AutonomousWaitState::Missing),
+    }
+}
+
+fn running_autonomous_run_id(
+    run: Option<codex_app_server_protocol::StatefulRun>,
+) -> Option<String> {
+    run.filter(|run| {
+        run.mode == StatefulWorkflowMode::Autonomous && run.status == StatefulRunStatus::Running
+    })
+    .map(|run| run.id)
 }
 
 async fn start_thread(
