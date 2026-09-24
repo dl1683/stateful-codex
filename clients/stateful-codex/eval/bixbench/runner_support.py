@@ -120,10 +120,27 @@ def parse_usage(log_path: Path) -> dict[str, int] | None:
 
 def audit_agent_log(log_path: Path) -> dict[str, Any]:
     findings: list[str] = []
+    environment_mutations = (
+        "pip install",
+        "pip3 install",
+        "conda install",
+        "mamba install",
+        "install.packages(",
+        "biocmanager::install(",
+    )
     if log_path.is_file():
         with log_path.open(encoding="utf-8", errors="replace") as file:
             for line_number, line in enumerate(file, start=1):
                 lowered = line.lower()
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    event = {}
+                item = event.get("item")
+                command = event.get("command")
+                if not isinstance(command, str) and isinstance(item, dict):
+                    command = item.get("command")
+                command = command.lower() if isinstance(command, str) else ""
                 if "web_search_call" in lowered:
                     findings.append(f"line {line_number}: web search event")
                 if any(host in lowered for host in FORBIDDEN_NETWORK_HOSTS) and any(
@@ -133,6 +150,8 @@ def audit_agent_log(log_path: Path) -> dict[str, Any]:
                     findings.append(
                         f"line {line_number}: benchmark-source network access"
                     )
+                if any(mutation in command for mutation in environment_mutations):
+                    findings.append(f"line {line_number}: runtime environment mutation")
     return {"passed": not findings, "findings": findings}
 
 

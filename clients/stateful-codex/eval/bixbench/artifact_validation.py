@@ -187,17 +187,18 @@ def _inspect_stateful_state(state_dir: Path) -> dict[str, object]:
 
 
 def reexecute_notebook(
-    workspace: Path,
+    input_workspace: Path,
+    notebook: Path,
     task_root: Path,
     image: str,
     timeout_seconds: int,
 ) -> dict[str, object]:
-    notebook = workspace / "notebook.ipynb"
     if not notebook.is_file():
         return {"status": "skipped", "reason": "notebook.ipynb is missing"}
 
     replay = task_root / "notebook-replay"
-    shutil.copytree(workspace, replay)
+    shutil.copytree(input_workspace, replay)
+    shutil.copy2(notebook, replay / "notebook.ipynb")
     container_name = f"stateful-bixbench-replay-{uuid.uuid4().hex[:12]}"
     output = replay / "notebook.reexecuted.ipynb"
     command = [

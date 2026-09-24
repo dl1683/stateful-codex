@@ -37,7 +37,7 @@ from runner_support import (
 )
 
 BIXBENCH_REPOSITORY_URL = "https://huggingface.co/datasets/futurehouse/BixBench"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 
 def docker_mount(source: Path, target: str, *, readonly: bool = False) -> list[str]:
@@ -261,7 +261,8 @@ codex exec \
         }
     result["notebookReplay"] = (
         reexecute_notebook(
-            workspace,
+            capsule_root,
+            notebook_path,
             task_root,
             image,
             notebook_timeout_seconds,

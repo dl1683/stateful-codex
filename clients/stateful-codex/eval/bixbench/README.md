@@ -96,8 +96,11 @@ Stateful run.
 - Agent timeouts, nonzero exits, and missing or malformed answers count as
   incorrect. Only failures before the Codex invocation boundary and detected
   provider/authentication outages are reported as invalid rather than incorrect.
-- Submitted notebooks are checked structurally, then replayed from a copied
-  workspace in the same image with Docker networking disabled. Replay validity
+- Submitted notebooks are checked structurally, then replayed from the
+  untouched capsule inputs plus only the submitted notebook in the same image
+  with Docker networking disabled. Agent-created helper artifacts cannot make
+  a replay pass. Runtime package installation is an integrity violation; all
+  dependencies must already exist in the recorded image. Replay validity
   remains separate from answer correctness.
 - Stateful runs retain both SQLite databases. The result records database
   integrity, terminal run status, continuation count, and hierarchy, context-map,

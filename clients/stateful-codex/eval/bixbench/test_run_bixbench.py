@@ -5,11 +5,13 @@ import unittest
 import zipfile
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from artifact_validation import (
     assess_operational_validity,
     classify_provider_failure,
     inspect_stateful_state,
+    reexecute_notebook,
 )
 from protocol import grade_deterministic, normalized_answer, sha256_file
 from runner_support import (
@@ -154,6 +156,56 @@ class BixBenchRunnerTests(unittest.TestCase):
                     "findings": ["line 1: benchmark-source network access"],
                 },
             )
+
+    def test_flags_runtime_environment_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "codex.jsonl"
+            log.write_text(
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "command": "python -m pip install openpyxl -q",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                audit_agent_log(log),
+                {
+                    "passed": False,
+                    "findings": ["line 1: runtime environment mutation"],
+                },
+            )
+
+    def test_replays_from_pristine_inputs_plus_submitted_notebook(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = root / "inputs"
+            inputs.mkdir()
+            (inputs / "data.csv").write_text("value\n1\n", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            notebook = workspace / "notebook.ipynb"
+            notebook.write_text("{}", encoding="utf-8")
+            (workspace / "agent-helper.csv").write_text("secret", encoding="utf-8")
+            task_root = root / "task"
+            (task_root / "logs").mkdir(parents=True)
+
+            with patch("artifact_validation.subprocess.run") as run:
+                run.return_value.returncode = 1
+                result = reexecute_notebook(
+                    inputs,
+                    notebook,
+                    task_root,
+                    "test-image",
+                    30,
+                )
+
+            self.assertEqual(result["status"], "failed")
+            replay_files = sorted(
+                path.name for path in (task_root / "notebook-replay").iterdir()
+            )
+            self.assertEqual(replay_files, ["data.csv", "notebook.ipynb"])
 
     def test_classifies_provider_failures(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
