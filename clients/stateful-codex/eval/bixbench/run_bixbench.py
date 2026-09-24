@@ -44,9 +44,10 @@ bioinformatics question. Analyze the files directly and answer this question:
 
 Required deliverables:
 1. Create /workspace/notebook.ipynb as a valid, executed Jupyter notebook.
-2. Use the scientific language and installed packages best suited to the task.
-   Preserve the code, tables, statistics, and cell outputs needed for an
-   independent reviewer to verify the answer.
+2. Use Python code cells, matching the official BixBench run configuration.
+   You may invoke installed R packages through rpy2 or a recorded subprocess
+   when scientifically appropriate. Preserve the code, tables, statistics, and
+   cell outputs needed for an independent reviewer to verify the answer.
 3. Inspect the data rigorously, check shapes and missing values, and state any
    scientifically important assumptions in code comments and printed output.
 4. Return one concise answer in the required JSON response. For a numerical
