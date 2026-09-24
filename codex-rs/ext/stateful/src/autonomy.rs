@@ -27,8 +27,15 @@ pub struct AutonomousContinuationRequest {
     pub previous_turn_id: String,
 }
 
+/// Host disposition after attempting to submit one claimed continuation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AutonomousContinuationOutcome {
+    Started,
+    YieldedToNewerTurn,
+}
+
 pub type AutonomousContinuationFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<AutonomousContinuationOutcome, String>> + Send + 'a>>;
 
 /// Host boundary used by the Stateful supervisor to start a model turn.
 ///
@@ -117,14 +124,17 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
                 let autonomous = autonomous.clone();
                 let event_sink = self.event_sink.clone();
                 tokio::spawn(async move {
-                    tokio::time::sleep(recovery_delay(lease_expires_at_ms)).await;
-                    let _ = attempt_continuation(
-                        &services,
-                        &autonomous,
-                        event_sink.as_deref(),
-                        &request,
-                    )
-                    .await;
+                    let mut retry_at_ms = Some(lease_expires_at_ms);
+                    while let Some(lease_expires_at_ms) = retry_at_ms {
+                        tokio::time::sleep(recovery_delay(lease_expires_at_ms)).await;
+                        retry_at_ms = attempt_continuation(
+                            &services,
+                            &autonomous,
+                            event_sink.as_deref(),
+                            &request,
+                        )
+                        .await;
+                    }
                 });
             }
         })
@@ -208,7 +218,7 @@ async fn attempt_continuation(
             lease_expires_at_ms,
         }) => {
             emit_run_updated(event_sink, &run);
-            if let Err(error) = autonomous
+            match autonomous
                 .sink
                 .continue_run(AutonomousContinuationRequest {
                     thread_id: request.thread_id.clone(),
@@ -217,10 +227,30 @@ async fn attempt_continuation(
                 })
                 .await
             {
-                tracing::warn!(run_id = %run.id, %error, "failed to submit Autonomous continuation");
-                return Some(lease_expires_at_ms);
+                Ok(AutonomousContinuationOutcome::Started) => None,
+                Ok(AutonomousContinuationOutcome::YieldedToNewerTurn) => {
+                    match store
+                        .abandon_autonomous_continuation(
+                            &run.id,
+                            &autonomous.owner_id,
+                            &request.previous_turn_id,
+                        )
+                        .await
+                    {
+                        Ok(Some(run)) => emit_run_updated(event_sink, &run),
+                        Ok(None) => {}
+                        Err(error) => {
+                            tracing::warn!(run_id = %run.id, %error, "failed to release superseded Autonomous continuation");
+                            return Some(lease_expires_at_ms);
+                        }
+                    }
+                    None
+                }
+                Err(error) => {
+                    tracing::warn!(run_id = %run.id, %error, "failed to submit Autonomous continuation");
+                    Some(lease_expires_at_ms)
+                }
             }
-            None
         }
         Ok(AutonomousClaimOutcome::BudgetExhausted(run)) => {
             emit_run_updated(event_sink, &run);

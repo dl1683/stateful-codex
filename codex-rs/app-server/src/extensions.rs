@@ -12,6 +12,7 @@ use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadGoalUpdatedNotification;
 use codex_app_server_protocol::ThreadQueueChangedNotification;
 use codex_app_server_protocol::WarningNotification;
+use codex_core::NotSubmittedReason;
 use codex_core::ThreadManager;
 use codex_core::TurnInput;
 use codex_core::TurnInputRequest;
@@ -38,6 +39,7 @@ use codex_queue_extension::QueuedItemService;
 use codex_rollout::state_db::StateDbHandle;
 use codex_stateful_extension::AutonomousContinuation;
 use codex_stateful_extension::AutonomousContinuationFuture;
+use codex_stateful_extension::AutonomousContinuationOutcome;
 use codex_stateful_extension::AutonomousContinuationRequest;
 use codex_stateful_extension::AutonomousContinuationSink;
 use codex_stateful_extension::BlackboardEntityKind;
@@ -204,11 +206,24 @@ impl AutonomousContinuationSink for AppServerAutonomousContinuationSink {
                 .await
                 .map_err(|error| error.to_string())?
             {
-                TurnInputSubmission::Started { .. } => Ok(()),
-                TurnInputSubmission::NotSubmitted { reason } => {
+                TurnInputSubmission::Started { .. } => Ok(AutonomousContinuationOutcome::Started),
+                TurnInputSubmission::NotSubmitted {
+                    reason:
+                        reason @ (NotSubmittedReason::Superseded
+                        | NotSubmittedReason::NotIdle
+                        | NotSubmittedReason::PendingTriggerTurn),
+                } => {
                     tracing::debug!(%thread_id, ?reason, "Autonomous continuation was superseded");
-                    Ok(())
+                    Ok(AutonomousContinuationOutcome::YieldedToNewerTurn)
                 }
+                TurnInputSubmission::NotSubmitted {
+                    reason: NotSubmittedReason::ServerDraining,
+                } => {
+                    Err("server is draining; Autonomous continuation was not submitted".to_string())
+                }
+                TurnInputSubmission::NotSubmitted { reason } => Err(format!(
+                    "unexpected Autonomous continuation rejection: {reason:?}"
+                )),
                 TurnInputSubmission::Steered { .. } => {
                     unreachable!("Autonomous continuation cannot steer")
                 }

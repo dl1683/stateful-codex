@@ -41,6 +41,7 @@ use crate::world_state::project_world_state_section;
 
 pub use autonomy::AutonomousContinuation;
 pub use autonomy::AutonomousContinuationFuture;
+pub use autonomy::AutonomousContinuationOutcome;
 pub use autonomy::AutonomousContinuationRequest;
 pub use autonomy::AutonomousContinuationSink;
 pub use events::BlackboardEntityKind;

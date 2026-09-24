@@ -402,6 +402,75 @@ impl StatefulRunStore {
         })
     }
 
+    pub async fn abandon_autonomous_continuation(
+        &self,
+        id: &StatefulRunId,
+        owner_id: &str,
+        previous_turn_id: &str,
+    ) -> Result<Option<StatefulRun>, StatefulRunStoreError> {
+        validate_record_id(owner_id)?;
+        validate_record_id(previous_turn_id)?;
+
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let claim_exists = sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM stateful_run_leases AS lease
+             JOIN stateful_run_continuations AS continuation
+               ON continuation.run_id = lease.run_id
+              AND continuation.previous_turn_id = lease.previous_turn_id
+             WHERE lease.run_id = ? AND lease.owner_id = ?
+               AND lease.previous_turn_id = ?",
+        )
+        .bind(id.as_str())
+        .bind(owner_id)
+        .bind(previous_turn_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .is_some();
+        if !claim_exists {
+            transaction.commit().await?;
+            return Ok(None);
+        }
+
+        let continuation_rows = sqlx::query(
+            "DELETE FROM stateful_run_continuations
+             WHERE run_id = ? AND previous_turn_id = ?",
+        )
+        .bind(id.as_str())
+        .bind(previous_turn_id)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        let lease_rows = sqlx::query(
+            "DELETE FROM stateful_run_leases
+             WHERE run_id = ? AND owner_id = ? AND previous_turn_id = ?",
+        )
+        .bind(id.as_str())
+        .bind(owner_id)
+        .bind(previous_turn_id)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        let run_rows = sqlx::query(
+            "UPDATE stateful_runs
+             SET continuations_used = continuations_used - 1,
+                 revision = revision + 1, updated_at_ms = ?
+             WHERE id = ? AND continuations_used > 0",
+        )
+        .bind(unix_timestamp_millis()?)
+        .bind(id.as_str())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if continuation_rows != 1 || lease_rows != 1 || run_rows != 1 {
+            return Err(StatefulRunStoreError::CorruptCount);
+        }
+        let run = load_run(&mut transaction, id)
+            .await?
+            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+        transaction.commit().await?;
+        Ok(Some(run))
+    }
+
     pub async fn autonomous_recovery_state(
         &self,
         id: &StatefulRunId,

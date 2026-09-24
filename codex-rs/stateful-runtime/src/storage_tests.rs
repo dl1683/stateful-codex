@@ -187,6 +187,32 @@ async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {
             .expect("duplicate claim checks"),
         AutonomousClaimOutcome::AlreadyClaimed
     );
+    let abandoned = reopened
+        .abandon_autonomous_continuation(&autonomous_id, "process-1", "turn-auto-1")
+        .await
+        .expect("unused continuation claim is abandoned")
+        .expect("matching claim exists");
+    assert_eq!(abandoned.continuations_used, 0);
+    assert!(matches!(
+        reopened
+            .claim_autonomous_continuation(
+                &autonomous_id,
+                AutonomousClaimRequest {
+                    owner_id: "process-1".to_string(),
+                    previous_turn_id: "turn-auto-1".to_string(),
+                    lease_duration_ms: 120_000,
+                },
+            )
+            .await
+            .expect("abandoned continuation can be reclaimed"),
+        AutonomousClaimOutcome::Claimed {
+            run: StatefulRun {
+                continuations_used: 1,
+                ..
+            },
+            ..
+        }
+    ));
     let exhausted = reopened
         .claim_autonomous_continuation(
             &autonomous_id,
