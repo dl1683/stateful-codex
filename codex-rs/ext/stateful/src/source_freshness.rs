@@ -153,12 +153,9 @@ pub(super) async fn audit_root_evidence(
         }
     };
 
-    let mut entry_ids = entry_ids
-        .into_iter()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    entry_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    let mut entry_ids = entry_ids.into_iter().collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    entry_ids.retain(|entry_id| seen.insert(entry_id.clone()));
     for (index, entry_id) in entry_ids.into_iter().enumerate() {
         if index >= MAX_AUDITED_SOURCES {
             statuses.insert(entry_id, SourceAuditStatus::Unchecked);

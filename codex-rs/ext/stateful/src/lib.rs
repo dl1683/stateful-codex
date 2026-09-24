@@ -245,13 +245,14 @@ impl StatefulExtension {
                 } else {
                     None
                 };
-                let evidence_audit = match turn_store.get::<RootEvidenceAudit>() {
+                let (evidence_audit, audit_recomputed) = match turn_store.get::<RootEvidenceAudit>()
+                {
                     Some(audit)
                         if audit.project_id == *project_id
                             && audit_cache_key.is_some()
                             && audit.cache_key.as_ref() == audit_cache_key.as_ref() =>
                     {
-                        audit
+                        (audit, false)
                     }
                     _ => {
                         let audit = Arc::new(
@@ -265,8 +266,29 @@ impl StatefulExtension {
                             .await,
                         );
                         turn_store.insert((*audit).clone());
-                        audit
+                        (audit, true)
                     }
+                };
+                let projection = if audit_recomputed {
+                    match store
+                        .root_projection(RootBlackboardQuery {
+                            project_id: project_id.to_string(),
+                            max_entries: 256,
+                        })
+                        .await
+                    {
+                        Ok(projection) => projection,
+                        Err(error) => {
+                            tracing::warn!(
+                                %project_id,
+                                %error,
+                                "failed to reload Stateful root blackboard after source audit"
+                            );
+                            return RootBlackboardStatus::Unavailable;
+                        }
+                    }
+                } else {
+                    projection
                 };
                 RootBlackboardStatus::Available(ResolvedRootBlackboard {
                     projection,

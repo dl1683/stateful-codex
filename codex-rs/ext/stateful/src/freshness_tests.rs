@@ -133,8 +133,19 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
     assert!(initial_render.contains("verification=sourceVerified"));
     assert!(initial_render.contains("evidence=current"));
     assert!(initial_render.contains("policy.md (current)"));
+    let initial_audit = turn_store
+        .get::<crate::source_freshness::RootEvidenceAudit>()
+        .expect("cached evidence audit");
+    let unchanged_status = extension.root_blackboard(&project, &turn_store).await;
+    let RootBlackboardStatus::Available(_) = &unchanged_status else {
+        panic!("unchanged root blackboard should be available");
+    };
+    let unchanged_audit = turn_store
+        .get::<crate::source_freshness::RootEvidenceAudit>()
+        .expect("reused evidence audit");
+    assert!(Arc::ptr_eq(&initial_audit, &unchanged_audit));
 
-    std::fs::write(&source_path, "# Policy\nThreshold: 6\n").expect("replace source");
+    std::fs::write(&source_path, "# Policy\nThreshold: 06\n").expect("replace source");
     let changed_status = extension.root_blackboard(&project, &turn_store).await;
     let RootBlackboardStatus::Available(_) = &changed_status else {
         panic!("root blackboard should be available");
@@ -161,4 +172,8 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
     assert!(rendered.contains("verification=stale"));
     assert!(rendered.contains("evidence=stale"));
     assert!(rendered.contains("policy.md (stale)"));
+    let persisted_revision = persisted.revision;
+    assert!(rendered.contains(&format!(
+        "Project intelligence revision: {persisted_revision}"
+    )));
 }
