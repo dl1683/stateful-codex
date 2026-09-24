@@ -1,14 +1,16 @@
 ARG BIXBENCH_BASE_IMAGE=stateful-bixbench-env:fhda-v1.5.0-amd64
 FROM ${BIXBENCH_BASE_IMAGE}
 
-# The scientific environment is inherited unchanged from FutureHouse's pinned
-# v1.5.0 Dockerfile. These are only the shell utilities the Codex harness uses.
+# The base scientific environment comes from FutureHouse's pinned v1.5.0
+# Dockerfile. The compatible local runner also pins the Excel reader required
+# by capsules that contain .xlsx inputs.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         git \
         jq \
         ripgrep && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    python -m pip install --no-cache-dir openpyxl==3.1.5
 
 WORKDIR /workspace

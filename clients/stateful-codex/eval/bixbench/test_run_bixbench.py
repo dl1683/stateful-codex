@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from artifact_validation import (
     assess_operational_validity,
+    classify_container_infrastructure_failure,
     classify_provider_failure,
     inspect_stateful_state,
     reexecute_notebook,
@@ -214,6 +215,18 @@ class BixBenchRunnerTests(unittest.TestCase):
             self.assertEqual(
                 classify_provider_failure(stderr),
                 "provider or authentication failure: too many requests",
+            )
+
+    def test_classifies_container_engine_disconnects(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "container.stderr"
+            stderr.write_text(
+                'level=error msg="error waiting for container: unexpected EOF"',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                classify_container_infrastructure_failure(stderr),
+                "container infrastructure failure: error waiting for container: unexpected eof",
             )
 
     def test_assesses_operational_validity_separately_from_correctness(self) -> None:

@@ -22,6 +22,12 @@ PROVIDER_FAILURE_MARKERS = (
     "gateway timeout",
 )
 
+CONTAINER_INFRASTRUCTURE_FAILURE_MARKERS = (
+    "error waiting for container: unexpected eof",
+    "cannot connect to the docker daemon",
+    "the docker daemon is not running",
+)
+
 
 def assess_operational_validity(
     result: dict[str, object], *, stateful: bool
@@ -71,6 +77,23 @@ def classify_provider_failure(*paths: Path) -> str | None:
         (marker for marker in PROVIDER_FAILURE_MARKERS if marker in text), None
     )
     return f"provider or authentication failure: {marker}" if marker else None
+
+
+def classify_container_infrastructure_failure(*paths: Path) -> str | None:
+    text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")[-2_000_000:]
+        for path in paths
+        if path.is_file()
+    ).lower()
+    marker = next(
+        (
+            marker
+            for marker in CONTAINER_INFRASTRUCTURE_FAILURE_MARKERS
+            if marker in text
+        ),
+        None,
+    )
+    return f"container infrastructure failure: {marker}" if marker else None
 
 
 def inspect_stateful_state(state_dir: Path) -> dict[str, object]:

@@ -11,6 +11,7 @@ from typing import Any
 
 from artifact_validation import (
     assess_operational_validity,
+    classify_container_infrastructure_failure,
     classify_provider_failure,
     inspect_stateful_state,
     reexecute_notebook,
@@ -204,19 +205,30 @@ codex exec \
     elif timed_out:
         result["grade"] = failed_agent_grade("agent timed out")
     elif exit_code != 0:
+        infrastructure_failure = classify_container_infrastructure_failure(
+            logs / "container.stderr", logs / "container.stdout"
+        )
         provider_failure = classify_provider_failure(
             logs / "codex.stderr", logs / "codex.jsonl"
         )
-        result["grade"] = (
-            {
+        if infrastructure_failure:
+            result["grade"] = {
+                "status": "invalid_infrastructure",
+                "official": False,
+                "correct": None,
+                "reason": infrastructure_failure,
+            }
+        elif provider_failure:
+            result["grade"] = {
                 "status": "invalid_provider",
                 "official": False,
                 "correct": None,
                 "reason": provider_failure,
             }
-            if provider_failure
-            else failed_agent_grade(f"agent exited with code {exit_code}")
-        )
+        else:
+            result["grade"] = failed_agent_grade(
+                f"agent exited with code {exit_code}"
+            )
     elif not final_path.is_file():
         result["grade"] = failed_agent_grade(
             "agent produced no structured final answer"

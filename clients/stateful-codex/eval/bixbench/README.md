@@ -45,9 +45,11 @@ docker build `
   clients/stateful-codex/eval/bixbench
 ```
 
-The derived layer adds only Git, ripgrep, jq, and current CA certificates. It
-does not change the pinned Python, R, Bioconductor, or command-line scientific
-packages.
+The derived compatible layer adds Git, ripgrep, jq, current CA certificates,
+and `openpyxl==3.1.5`. The Excel reader is explicit because the upstream AMD64
+source build cannot otherwise read `.xlsx` capsules. This is a practical local
+environment for directional evaluation, not the official byte-identical
+BixBench image; report results accordingly.
 
 ## Run the smoke
 
@@ -93,9 +95,10 @@ Stateful run.
   hashes, harness and selection-manifest hashes, input file hashes, model,
   effort, timeout, state scope, and task list. Native rollout sessions are
   retained beside logs.
-- Agent timeouts, nonzero exits, and missing or malformed answers count as
-  incorrect. Only failures before the Codex invocation boundary and detected
-  provider/authentication outages are reported as invalid rather than incorrect.
+- Agent timeouts, ordinary nonzero exits, and missing or malformed answers
+  count as incorrect. Failures before the Codex invocation boundary, detected
+  provider/authentication outages, and positively identified container-engine
+  disconnects are reported as invalid rather than incorrect.
 - Submitted notebooks are checked structurally, then replayed from the
   untouched capsule inputs plus only the submitted notebook in the same image
   with Docker networking disabled. Agent-created helper artifacts cannot make
