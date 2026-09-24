@@ -168,7 +168,7 @@ print(json.dumps({
     "platform": platform.platform(),
     "python": platform.python_version(),
     "r": output("R", "--version").splitlines()[0],
-    "condaPackages": json.loads(output("conda", "list", "--json")),
+    "condaPackages": json.loads(output("mamba", "list", "--json")),
     "pipFreeze": output("python", "-m", "pip", "freeze").splitlines(),
 }, sort_keys=True))
 """
