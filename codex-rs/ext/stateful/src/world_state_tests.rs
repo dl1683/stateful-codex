@@ -29,16 +29,24 @@ fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
 }
 
 fn available(project: StoredProject) -> ProjectIntelligenceStatus {
+    available_at_revision(project, /*revision*/ 0, /*candidate_entries*/ 2)
+}
+
+fn available_at_revision(
+    project: StoredProject,
+    revision: u64,
+    candidate_entries: u64,
+) -> ProjectIntelligenceStatus {
     let project_id = project.id.clone();
     ProjectIntelligenceStatus::Available {
         project: Box::new(project),
         root_blackboard: Box::new(RootBlackboardStatus::Available(ResolvedRootBlackboard {
             projection: RootBlackboardProjection {
                 project_id,
-                revision: 0,
+                revision,
                 data: Vec::new(),
                 omitted_entries: 0,
-                candidate_entries: 2,
+                candidate_entries,
             },
             evidence_routes: Default::default(),
             evidence_audit: None,
@@ -127,6 +135,67 @@ fn unchanged_snapshot_does_not_repeat_project_context() {
         section
             .render_diff(PreviousWorldStateSection::Known(&snapshot))
             .is_none()
+    );
+}
+
+#[test]
+fn revision_only_change_renders_a_compact_update() {
+    let previous = project_world_state_section(available_at_revision(
+        project("Research", Vec::new()),
+        /*revision*/ 7,
+        /*candidate_entries*/ 2,
+    ));
+    let current = project_world_state_section(available_at_revision(
+        project("Research", Vec::new()),
+        /*revision*/ 11,
+        /*candidate_entries*/ 2,
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("the completion revision must be updated");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project_update>", "</stateful_project_update>")
+    );
+    assert_eq!(
+        rendered.body(),
+        "Project intelligence revision advanced from 7 to 11. The model-visible root blackboard knowledge and source routes are unchanged. Use rootRevision 11 for completion; retain the existing root packet for reasoning and routing."
+    );
+    assert!(!rendered.body().contains("Project roots:"));
+}
+
+#[test]
+fn semantic_root_change_renders_the_full_current_packet() {
+    let previous = project_world_state_section(available_at_revision(
+        project("Research", Vec::new()),
+        /*revision*/ 7,
+        /*candidate_entries*/ 2,
+    ));
+    let current = project_world_state_section(available_at_revision(
+        project("Research", Vec::new()),
+        /*revision*/ 11,
+        /*candidate_entries*/ 3,
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("changed root knowledge must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project>", "</stateful_project>")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("Project intelligence revision: 11")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("3 active candidate entries await an explicit project-relevance decision")
     );
 }
 

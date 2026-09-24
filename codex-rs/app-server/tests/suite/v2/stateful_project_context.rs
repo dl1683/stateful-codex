@@ -87,6 +87,39 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
     run_turn(&mut server, &started.thread.id).await?;
     assert_latest_request_has_project(&responses, &created.project.id).await?;
 
+    let hierarchy =
+        HierarchyStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs())).await?;
+    hierarchy
+        .create_node(
+            HierarchyNodeId::parse(format!("root-node-{}", created.project.id))?,
+            NewHierarchyNode {
+                project_id: created.project.id.clone(),
+                parent_id: Some(HierarchyNodeId::parse(format!(
+                    "project-node-{}",
+                    created.project.id
+                ))?),
+                kind: NodeKind::Directory,
+                project_root: Some(project_root.path().display().to_string()),
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
+    run_turn(&mut server, &started.thread.id).await?;
+    let requests = responses.received_requests().await.unwrap_or_default();
+    let body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("model request should be recorded")
+        .body_json::<serde_json::Value>()?
+        .to_string();
+    assert!(body.contains("<stateful_project_update>"));
+    assert!(
+        body.contains("model-visible root blackboard knowledge and source routes are unchanged")
+    );
+
     let compact_request = server
         .send_thread_compact_start_request(ThreadCompactStartParams {
             thread_id: started.thread.id.clone(),

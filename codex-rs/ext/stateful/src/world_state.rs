@@ -2,6 +2,7 @@ use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_thread_store::StoredProject;
+use serde_json::Map;
 use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
@@ -12,6 +13,8 @@ use crate::root_blackboard::render_root_blackboard;
 const WORLD_STATE_ID: &str = "stateful_project";
 const START_MARKER: &str = "<stateful_project>";
 const END_MARKER: &str = "</stateful_project>";
+const UPDATE_START_MARKER: &str = "<stateful_project_update>";
+const UPDATE_END_MARKER: &str = "</stateful_project_update>";
 pub(super) const MAX_BODY_BYTES: usize = 24 * 1024;
 pub(super) const MAX_ESTIMATED_TOKENS: usize = 8 * 1024;
 const MAX_PROJECT_ROOT_BYTES: usize = 4 * 1024;
@@ -64,6 +67,26 @@ impl ProjectIntelligenceStatus {
             }
         }
         format!("{:x}", hasher.finalize())
+    }
+
+    fn snapshot(&self, body: &str) -> Value {
+        let mut snapshot = Map::new();
+        snapshot.insert("fingerprint".to_string(), Value::String(self.fingerprint()));
+        snapshot.insert(
+            "semanticFingerprint".to_string(),
+            Value::String(semantic_fingerprint(body)),
+        );
+        if let Self::Available {
+            root_blackboard, ..
+        } = self
+            && let RootBlackboardStatus::Available(root) = root_blackboard.as_ref()
+        {
+            snapshot.insert(
+                "rootRevision".to_string(),
+                Value::from(root.projection.revision),
+            );
+        }
+        Value::Object(snapshot)
     }
 
     fn render(&self) -> String {
@@ -128,13 +151,34 @@ impl ProjectIntelligenceStatus {
 pub(super) fn project_world_state_section(
     status: ProjectIntelligenceStatus,
 ) -> WorldStateSectionContribution {
-    let fingerprint = Value::String(status.fingerprint());
     let body = status.render();
+    let snapshot = status.snapshot(&body);
     let project_id = status.project_id().to_string();
-    WorldStateSectionContribution::new(WORLD_STATE_ID, fingerprint.clone(), move |previous| {
+    WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
-            PreviousWorldStateSection::Known(previous) if previous == &fingerprint => None,
+            PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
             PreviousWorldStateSection::Unknown => None,
+            PreviousWorldStateSection::Known(previous)
+                if previous.get("semanticFingerprint")
+                    == snapshot.get("semanticFingerprint")
+                    && previous.get("rootRevision") != snapshot.get("rootRevision") =>
+            {
+                let previous_revision = previous
+                    .get("rootRevision")
+                    .and_then(Value::as_u64)
+                    .map_or_else(|| "unknown".to_string(), |revision| revision.to_string());
+                let current_revision = snapshot
+                    .get("rootRevision")
+                    .and_then(Value::as_u64)
+                    .map_or_else(|| "unknown".to_string(), |revision| revision.to_string());
+                Some(RenderedWorldStateFragment::new(
+                    "developer",
+                    (UPDATE_START_MARKER, UPDATE_END_MARKER),
+                    format!(
+                        "Project intelligence revision advanced from {previous_revision} to {current_revision}. The model-visible root blackboard knowledge and source routes are unchanged. Use rootRevision {current_revision} for completion; retain the existing root packet for reasoning and routing."
+                    ),
+                ))
+            }
             PreviousWorldStateSection::Absent | PreviousWorldStateSection::Known(_) => {
                 Some(RenderedWorldStateFragment::new(
                     "developer",
@@ -149,6 +193,20 @@ pub(super) fn project_world_state_section(
         move |role, text| is_project_fragment(role, text, &project_id)
     })
     .with_retained_fragment_matcher(move |role, text| is_project_fragment(role, text, &project_id))
+}
+
+fn semantic_fingerprint(body: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"codex-stateful-project-semantic-v1\0");
+    for line in body.lines() {
+        if line.starts_with("Project intelligence revision: ") {
+            hasher.update(b"Project intelligence revision: <current>\n");
+        } else {
+            hasher.update(line.as_bytes());
+            hasher.update(b"\n");
+        }
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 pub(super) fn hash_component(hasher: &mut Sha256, value: &str) {
