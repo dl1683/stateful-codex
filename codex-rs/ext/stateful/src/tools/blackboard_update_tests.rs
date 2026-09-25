@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardEvidenceLink;
@@ -19,9 +22,12 @@ use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::RootPromotion;
 use codex_project_intelligence::SourceFingerprint;
 use codex_state::SqliteConfig;
+use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use sha2::Digest;
+use sha2::Sha256;
 use tempfile::TempDir;
 
 use super::BlackboardUpdateTool;
@@ -29,9 +35,11 @@ use super::MutationArguments;
 use crate::services::ProjectIntelligenceServices;
 
 const PROJECT_ID: &str = "project-1";
+const FACTS: &[u8] = b"Decisive project facts.\n";
 
 fn fingerprint() -> SourceFingerprint {
-    SourceFingerprint::parse("sha256:current").expect("valid fingerprint")
+    SourceFingerprint::parse(format!("sha256:{:x}", Sha256::digest(FACTS)))
+        .expect("valid fingerprint")
 }
 
 async fn fixture() -> (
@@ -39,8 +47,13 @@ async fn fixture() -> (
     BlackboardUpdateTool,
     BlackboardEntryId,
     BlackboardEntryId,
+    PathBuf,
 ) {
     let temp_dir = TempDir::new().expect("tempdir created");
+    let project_root = temp_dir.path().join("workspace");
+    std::fs::create_dir(&project_root).expect("project root created");
+    std::fs::write(project_root.join("facts.md"), FACTS).expect("source written");
+    let project_root_text = project_root.display().to_string();
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(temp_dir.path().abs()));
     let project_node_id = HierarchyNodeId::parse("node-project").expect("valid node ID");
@@ -73,7 +86,7 @@ async fn fixture() -> (
                 project_id: PROJECT_ID.to_string(),
                 parent_id: Some(project_node_id.clone()),
                 kind: NodeKind::Directory,
-                project_root: Some("C:\\workspace".to_string()),
+                project_root: Some(project_root_text.clone()),
                 relative_path: ProjectRelativePath::root(),
                 region_anchor: None,
                 source_fingerprint: Some(fingerprint()),
@@ -92,7 +105,7 @@ async fn fixture() -> (
                 project_id: PROJECT_ID.to_string(),
                 parent_id: Some(root_node_id),
                 kind: NodeKind::File,
-                project_root: Some("C:\\workspace".to_string()),
+                project_root: Some(project_root_text),
                 relative_path: ProjectRelativePath::parse("facts.md").expect("valid path"),
                 region_anchor: None,
                 source_fingerprint: Some(fingerprint()),
@@ -155,8 +168,13 @@ async fn fixture() -> (
         )
         .await
         .expect("successor inserts");
-    let tool = BlackboardUpdateTool::new(PROJECT_ID.to_string(), services, None);
-    (temp_dir, tool, entry_id, successor_id)
+    let tool = BlackboardUpdateTool::new(
+        PROJECT_ID.to_string(),
+        services,
+        Arc::new(InMemoryThreadStore::default()),
+        None,
+    );
+    (temp_dir, tool, entry_id, successor_id, project_root)
 }
 
 fn mutation(value: serde_json::Value) -> MutationArguments {
@@ -165,7 +183,7 @@ fn mutation(value: serde_json::Value) -> MutationArguments {
 
 #[tokio::test]
 async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
-    let (_temp_dir, tool, entry_id, successor_id) = fixture().await;
+    let (_temp_dir, tool, entry_id, successor_id, project_root) = fixture().await;
     let promoted = tool
         .apply_mutation(
             mutation(json!({
@@ -175,6 +193,7 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
                 "rootPromotion": "promoted"
             })),
             "turn-promote",
+            std::slice::from_ref(&project_root),
         )
         .await
         .expect("candidate promotes");
@@ -201,6 +220,7 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
                 }]
             })),
             "turn-revise",
+            std::slice::from_ref(&project_root),
         )
         .await
         .expect("entry revises");
@@ -233,6 +253,7 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
                 "rootPromotion": "candidate"
             })),
             "turn-stale",
+            std::slice::from_ref(&project_root),
         )
         .await
         .expect_err("stale revision fails");
@@ -247,6 +268,7 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
                 "successorEntryId": successor_id
             })),
             "turn-supersede",
+            std::slice::from_ref(&project_root),
         )
         .await
         .expect("entry supersedes");
@@ -263,6 +285,7 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
                 "expectedRevision": 1
             })),
             "turn-retire",
+            std::slice::from_ref(&project_root),
         )
         .await
         .expect("successor retires");

@@ -21,6 +21,7 @@ use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::RootPromotion;
+use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -104,6 +105,7 @@ impl MutationArguments {
 pub(super) struct BlackboardUpdateTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
@@ -111,11 +113,13 @@ impl BlackboardUpdateTool {
     pub(super) fn new(
         project_id: String,
         services: ProjectIntelligenceServices,
+        projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
             services,
+            projects,
             event_sink,
         }
     }
@@ -141,10 +145,39 @@ impl BlackboardUpdateTool {
         }
         let mut updated = 0usize;
         let mut results = Vec::with_capacity(mutations.len());
+        let revises_evidence = mutations.iter().any(|mutation| {
+            matches!(
+                mutation,
+                MutationArguments::Revise {
+                    evidence: Some(_),
+                    ..
+                }
+            )
+        });
+        let project_roots = if revises_evidence {
+            self.projects
+                .read_project(self.project_id.clone())
+                .await
+                .map_err(respond)?
+                .ok_or_else(|| {
+                    FunctionCallError::RespondToModel(
+                        "selected project no longer exists".to_string(),
+                    )
+                })?
+                .roots
+                .into_iter()
+                .map(|root| std::path::PathBuf::from(root.path))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         for (index, mutation) in mutations.into_iter().enumerate() {
             let action = mutation.action_name();
             let entry_id = mutation.entry_id().to_string();
-            match self.apply_mutation(mutation, &call.call_id).await {
+            match self
+                .apply_mutation(mutation, &call.call_id, &project_roots)
+                .await
+            {
                 Ok(entry) => {
                     updated += 1;
                     results.push(json!({
@@ -177,6 +210,7 @@ impl BlackboardUpdateTool {
         &self,
         mutation: MutationArguments,
         source_id: &str,
+        project_roots: &[std::path::PathBuf],
     ) -> Result<BlackboardEntry, FunctionCallError> {
         let id = BlackboardEntryId::parse(mutation.entry_id()).map_err(respond)?;
         let store = self.services.blackboard().await.map_err(respond)?;
@@ -262,9 +296,10 @@ impl BlackboardUpdateTool {
                 update.importance = importance.unwrap_or(update.importance);
                 update.root_promotion = root_promotion.unwrap_or(update.root_promotion);
                 if let Some(evidence) = evidence {
-                    update.evidence = resolve_evidence(&self.project_id, &self.services, evidence)
-                        .await?
-                        .0;
+                    update.evidence =
+                        resolve_evidence(&self.project_id, &self.services, project_roots, evidence)
+                            .await?
+                            .0;
                 }
             }
             MutationArguments::Supersede {

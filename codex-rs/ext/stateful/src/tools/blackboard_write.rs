@@ -25,6 +25,7 @@ use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
 use codex_project_intelligence::RootPromotion;
+use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -83,6 +84,7 @@ struct BatchRecordArguments {
 pub(super) struct BlackboardRecordTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
@@ -90,11 +92,13 @@ impl BlackboardRecordTool {
     pub(super) fn new(
         project_id: String,
         services: ProjectIntelligenceServices,
+        projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
             services,
+            projects,
             event_sink,
         }
     }
@@ -104,7 +108,14 @@ impl BlackboardRecordTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: RecordArguments = parse_arguments(&call)?;
-        let entry = self.record(arguments, &call.call_id).await?;
+        let project_roots = if arguments.evidence.is_empty() {
+            Vec::new()
+        } else {
+            self.project_roots().await?
+        };
+        let entry = self
+            .record(arguments, &call.call_id, &project_roots)
+            .await?;
         Ok(Box::new(JsonToolOutput::new(json!({
             "entryId": entry.id.to_string(),
             "revision": entry.revision,
@@ -116,6 +127,7 @@ impl BlackboardRecordTool {
         &self,
         arguments: RecordArguments,
         source_id: &str,
+        project_roots: &[std::path::PathBuf],
     ) -> Result<BlackboardEntry, FunctionCallError> {
         let RecordArguments {
             idempotency_key,
@@ -130,7 +142,7 @@ impl BlackboardRecordTool {
             evidence,
         } = arguments;
         let (evidence, inferred_node_id) =
-            resolve_evidence(&self.project_id, &self.services, evidence).await?;
+            resolve_evidence(&self.project_id, &self.services, project_roots, evidence).await?;
         let node_id = match node_id {
             Some(node_id) => HierarchyNodeId::parse(node_id).map_err(respond)?,
             None => match inferred_node_id {
@@ -192,6 +204,23 @@ impl BlackboardRecordTool {
         }
         Ok(entry)
     }
+
+    async fn project_roots(&self) -> Result<Vec<std::path::PathBuf>, FunctionCallError> {
+        self.projects
+            .read_project(self.project_id.clone())
+            .await
+            .map_err(respond)?
+            .ok_or_else(|| {
+                FunctionCallError::RespondToModel("selected project no longer exists".to_string())
+            })
+            .map(|project| {
+                project
+                    .roots
+                    .into_iter()
+                    .map(|root| std::path::PathBuf::from(root.path))
+                    .collect()
+            })
+    }
 }
 
 impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
@@ -232,12 +261,14 @@ impl BlackboardBatchRecordTool {
     pub(super) fn new(
         project_id: String,
         services: ProjectIntelligenceServices,
+        projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             recorder: BlackboardRecordTool::new(
                 project_id.clone(),
                 services.clone(),
+                projects,
                 event_sink.clone(),
             ),
             relator: BlackboardRelateTool::new(project_id, services, event_sink),
@@ -271,9 +302,18 @@ impl BlackboardBatchRecordTool {
         let mut results = Vec::with_capacity(records.len());
         let mut entry_ids = HashMap::with_capacity(records.len());
         let mut recorded = 0usize;
+        let project_roots = if records.iter().all(|record| record.evidence.is_empty()) {
+            Vec::new()
+        } else {
+            self.recorder.project_roots().await?
+        };
         for (index, record) in records.into_iter().enumerate() {
             let record_key = record.idempotency_key.clone();
-            match self.recorder.record(record, &call.call_id).await {
+            match self
+                .recorder
+                .record(record, &call.call_id, &project_roots)
+                .await
+            {
                 Ok(entry) => {
                     recorded += 1;
                     entry_ids.insert(record_key, entry.id.clone());

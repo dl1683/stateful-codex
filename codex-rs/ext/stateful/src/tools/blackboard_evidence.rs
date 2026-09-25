@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use codex_extension_api::FunctionCallError;
 use codex_project_intelligence::BlackboardEvidenceLink;
@@ -11,6 +12,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
+use crate::source_freshness::audited_context_freshness;
+use crate::source_freshness::observe_evidence;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -24,6 +27,7 @@ pub(super) struct EvidenceArguments {
 pub(super) async fn resolve_evidence(
     project_id: &str,
     services: &ProjectIntelligenceServices,
+    project_roots: &[PathBuf],
     arguments: Vec<EvidenceArguments>,
 ) -> Result<(Vec<BlackboardEvidenceLink>, Option<HierarchyNodeId>), FunctionCallError> {
     let store = services.context_map().await.map_err(respond)?;
@@ -96,6 +100,42 @@ pub(super) async fn resolve_evidence(
             });
         }
     }
+    if !links.is_empty() {
+        let audit = observe_evidence(
+            services,
+            project_id,
+            project_roots,
+            links.iter().map(|link| link.context_map_entry_id.clone()),
+        )
+        .await;
+        for link in &links {
+            match audited_context_freshness(
+                &audit,
+                &link.context_map_entry_id,
+                ContextMapFreshness::Current,
+            ) {
+                Some(ContextMapFreshness::Current) => {}
+                Some(ContextMapFreshness::Stale) => {
+                    return Err(FunctionCallError::RespondToModel(format!(
+                        "blackboard evidence source changed: {}; call evidence_read to refresh and reread it before recording knowledge",
+                        link.context_map_entry_id
+                    )));
+                }
+                Some(ContextMapFreshness::SourceUnavailable) => {
+                    return Err(FunctionCallError::RespondToModel(format!(
+                        "blackboard evidence source is unavailable: {}",
+                        link.context_map_entry_id
+                    )));
+                }
+                None => {
+                    return Err(FunctionCallError::RespondToModel(format!(
+                        "blackboard evidence could not be checked within the live freshness bound: {}; reread a smaller current source before recording source-verified knowledge",
+                        link.context_map_entry_id
+                    )));
+                }
+            }
+        }
+    }
     let inferred_node_id = if node_ids.len() == 1 {
         node_ids.into_iter().next()
     } else {
@@ -137,3 +177,7 @@ pub(super) fn evidence_schema() -> serde_json::Value {
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
 }
+
+#[cfg(test)]
+#[path = "blackboard_evidence_tests.rs"]
+mod tests;
