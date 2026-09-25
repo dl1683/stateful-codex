@@ -24,6 +24,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
+use crate::source_freshness::audited_context_freshness;
+use crate::source_freshness::observe_evidence;
 
 use super::MAX_RESPONSE_BYTES;
 use super::fits_response;
@@ -96,11 +98,25 @@ impl ContextMapQueryTool {
         let may_have_more = hits.len() == limit as usize;
         let (knowledge, knowledge_coverage_available) =
             route_knowledge(&self.services, &self.project_id, &hits).await;
+        let roots = project
+            .roots
+            .iter()
+            .map(|root| PathBuf::from(&root.path))
+            .collect::<Vec<_>>();
+        let evidence_audit = observe_evidence(
+            &self.services,
+            &self.project_id,
+            &roots,
+            hits.iter().map(|hit| hit.entry.id.clone()),
+        )
+        .await;
         let mut data = Vec::new();
         let mut truncated = false;
         for hit in hits {
             let known = knowledge.get(&hit.entry.id);
-            let item = route_json(hit, &project, known)?;
+            let freshness =
+                audited_context_freshness(&evidence_audit, &hit.entry.id, hit.freshness);
+            let item = route_json(hit, &project, known, freshness)?;
             data.push(item);
             if !fits_response(
                 &json!({
@@ -143,7 +159,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. sourceVerified plus current means the cited bytes still match their stored fingerprints, not that the host proved the entry's inference. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
+            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are routing metadata, not evidence. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -236,7 +252,8 @@ impl ContextMapRefreshTool {
         let mut routes_truncated = routes.len() == REFRESH_ROUTE_LIMIT as usize;
         for hit in routes {
             let known = knowledge.get(&hit.entry.id);
-            let item = route_json(hit, &project, known)?;
+            let freshness = Some(hit.freshness);
+            let item = route_json(hit, &project, known, freshness)?;
             data.push(item);
             if !fits_response(
                 &json!({
@@ -306,6 +323,7 @@ fn route_json(
     hit: ContextMapHit,
     project: &codex_thread_store::StoredProject,
     knowledge: Option<&BlackboardRouteKnowledge>,
+    freshness: Option<ContextMapFreshness>,
 ) -> Result<serde_json::Value, FunctionCallError> {
     if !project
         .roots
@@ -340,7 +358,8 @@ fn route_json(
     let mut route = json!({
         "headline": headline,
         "coverage": hit.entry.value.coverage,
-        "freshness": freshness_name(hit.freshness),
+        "freshness": freshness.map(freshness_name).unwrap_or("uncheckedThisTurn"),
+        "storedFreshness": freshness_name(hit.freshness),
         "source": source,
     });
     if let Some(knowledge) = knowledge.filter(|knowledge| knowledge.active_entries > 0) {

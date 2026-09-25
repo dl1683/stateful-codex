@@ -8,6 +8,7 @@ use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::HierarchySourceUpdate;
 use codex_project_intelligence::HierarchyStore;
@@ -27,6 +28,7 @@ use super::AuditedEvidenceFreshness;
 use super::SourceAuditStatus;
 use super::SourceCheck;
 use super::audited_blackboard_freshness;
+use super::audited_context_freshness;
 use super::audited_verification;
 use super::observe_evidence;
 use super::reconcile_source_state;
@@ -193,6 +195,10 @@ async fn deeper_knowledge_observation_detects_changed_bytes_without_mutating_sta
     let freshness = audited_blackboard_freshness(&result.data[0], Some(&audit));
 
     assert_eq!(freshness, AuditedEvidenceFreshness::Stale);
+    assert_eq!(
+        audited_context_freshness(&audit, &context_hit.entry.id, ContextMapFreshness::Current,),
+        Some(ContextMapFreshness::Stale)
+    );
     assert_eq!(
         audited_verification(result.data[0].entry.value.verification, freshness),
         BlackboardVerification::Stale
