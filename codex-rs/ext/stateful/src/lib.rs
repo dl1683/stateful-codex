@@ -4,6 +4,7 @@ mod autonomy;
 mod completion;
 mod events;
 mod outcome_world_state;
+mod reuse_candidates;
 mod root_blackboard;
 mod run_world_state;
 mod services;
@@ -23,6 +24,8 @@ use codex_extension_api::PromptCacheAffinity;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolContributor;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::TurnInputContext;
+use codex_extension_api::TurnInputContributor;
 use codex_extension_api::WorldStateContributionInput;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::RootBlackboardQuery;
@@ -31,6 +34,7 @@ use codex_thread_store::ThreadStore;
 
 use crate::outcome_world_state::ProjectOutcomesStatus;
 use crate::outcome_world_state::project_outcomes_world_state_section;
+use crate::reuse_candidates::reuse_candidate_slate;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
@@ -163,6 +167,43 @@ impl ContextContributor for StatefulExtension {
                 sections.push(run_world_state_section(run_status));
             }
             sections
+        })
+    }
+}
+
+impl TurnInputContributor for StatefulExtension {
+    fn contribute<'a>(
+        &'a self,
+        input: TurnInputContext<'a>,
+        _extension_metrics: Option<Arc<dyn codex_extension_api::ExtensionMetrics>>,
+        _session_store: &'a ExtensionData,
+        thread_store: &'a ExtensionData,
+        _turn_store: &'a ExtensionData,
+    ) -> ExtensionFuture<'a, Vec<Box<dyn codex_extension_api::ContextualUserFragment + Send>>> {
+        Box::pin(async move {
+            let (Some(selected), Some(services)) = (
+                thread_store.get::<SelectedProject>(),
+                self.services.as_ref(),
+            ) else {
+                return Vec::new();
+            };
+            match reuse_candidate_slate(selected.project_id(), services, &input.user_input).await {
+                Ok(Some(slate)) => {
+                    vec![Box::new(slate)
+                        as Box<
+                            dyn codex_extension_api::ContextualUserFragment + Send,
+                        >]
+                }
+                Ok(None) => Vec::new(),
+                Err(error) => {
+                    tracing::warn!(
+                        project_id = selected.project_id(),
+                        %error,
+                        "failed to resolve Stateful reuse candidates"
+                    );
+                    Vec::new()
+                }
+            }
         })
     }
 }
@@ -461,6 +502,7 @@ pub fn install<C: Sync>(
         autonomous,
     });
     registry.prompt_contributor(extension.clone());
+    registry.turn_input_contributor(extension.clone());
     registry.tool_contributor(extension.clone());
     registry.tool_policy_contributor(extension.clone());
     registry.turn_lifecycle_contributor(extension.clone());

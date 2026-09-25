@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 codex-extension-api = { workspace = true }
 codex-project-intelligence = { workspace = true }
+codex-protocol = { workspace = true }
 codex-state = { workspace = true }
 codex-stateful-runtime = { workspace = true }
 codex-thread-store = { workspace = true }
