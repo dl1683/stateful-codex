@@ -134,14 +134,14 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
     assert!(initial_render.contains("evidence=current"));
     assert!(initial_render.contains("policy.md (current)"));
     let initial_audit = turn_store
-        .get::<crate::source_freshness::RootEvidenceAudit>()
+        .get::<crate::source_freshness::EvidenceAudit>()
         .expect("cached evidence audit");
     let unchanged_status = extension.root_blackboard(&project, &turn_store).await;
     let RootBlackboardStatus::Available(_) = &unchanged_status else {
         panic!("unchanged root blackboard should be available");
     };
     let unchanged_audit = turn_store
-        .get::<crate::source_freshness::RootEvidenceAudit>()
+        .get::<crate::source_freshness::EvidenceAudit>()
         .expect("reused evidence audit");
     assert!(Arc::ptr_eq(&initial_audit, &unchanged_audit));
 

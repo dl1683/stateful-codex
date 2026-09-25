@@ -18,9 +18,18 @@ use sha2::Sha256;
 
 use crate::services::ProjectIntelligenceServices;
 
+mod blackboard;
+
+pub(crate) use blackboard::AuditedEvidenceFreshness;
+pub(crate) use blackboard::audited_blackboard_freshness;
+pub(crate) use blackboard::audited_verification;
+
 const MAX_AUDITED_SOURCES: usize = 256;
 const MAX_AUDITED_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_AUDITED_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_OBSERVED_SOURCES: usize = 32;
+const MAX_OBSERVED_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_TOTAL_OBSERVED_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SourceAuditStatus {
@@ -31,7 +40,7 @@ pub(super) enum SourceAuditStatus {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct RootEvidenceAudit {
+pub(super) struct EvidenceAudit {
     pub(super) project_id: String,
     pub(super) statuses: HashMap<ContextMapEntryId, SourceAuditStatus>,
     pub(super) cache_key: Option<RootEvidenceAuditCacheKey>,
@@ -128,14 +137,14 @@ pub(super) async fn audit_root_evidence(
     project_roots: &[PathBuf],
     entry_ids: impl IntoIterator<Item = ContextMapEntryId>,
     cache_key: Option<RootEvidenceAuditCacheKey>,
-) -> RootEvidenceAudit {
+) -> EvidenceAudit {
     let mut statuses = HashMap::new();
     let mut audited_bytes = 0_u64;
     let context_map = match services.context_map().await {
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to open context map for source audit");
-            return RootEvidenceAudit {
+            return EvidenceAudit {
                 project_id: project_id.to_string(),
                 statuses,
                 cache_key,
@@ -146,7 +155,7 @@ pub(super) async fn audit_root_evidence(
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to open hierarchy for source audit");
-            return RootEvidenceAudit {
+            return EvidenceAudit {
                 project_id: project_id.to_string(),
                 statuses,
                 cache_key,
@@ -200,7 +209,13 @@ pub(super) async fn audit_root_evidence(
             }
         };
         let remaining_bytes = MAX_TOTAL_AUDITED_BYTES.saturating_sub(audited_bytes);
-        let check = check_source(project_roots, &hit, remaining_bytes).await;
+        let check = check_source(
+            project_roots,
+            &hit,
+            remaining_bytes,
+            MAX_AUDITED_SOURCE_BYTES,
+        )
+        .await;
         if let SourceCheck::Fingerprint(_, bytes) = &check {
             audited_bytes = audited_bytes.saturating_add(*bytes);
         }
@@ -208,10 +223,89 @@ pub(super) async fn audit_root_evidence(
         statuses.insert(entry_id, status);
     }
 
-    RootEvidenceAudit {
+    EvidenceAudit {
         project_id: project_id.to_string(),
         statuses,
         cache_key,
+    }
+}
+
+pub(super) async fn observe_evidence(
+    services: &ProjectIntelligenceServices,
+    project_id: &str,
+    project_roots: &[PathBuf],
+    entry_ids: impl IntoIterator<Item = ContextMapEntryId>,
+) -> EvidenceAudit {
+    let mut statuses = HashMap::new();
+    let mut observed_bytes = 0_u64;
+    let context_map = match services.context_map().await {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(%project_id, %error, "failed to open context map for source observation");
+            return EvidenceAudit {
+                project_id: project_id.to_string(),
+                statuses,
+                cache_key: None,
+            };
+        }
+    };
+    let mut entry_ids = entry_ids.into_iter().collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    entry_ids.retain(|entry_id| seen.insert(entry_id.clone()));
+    for (index, entry_id) in entry_ids.into_iter().enumerate() {
+        if index >= MAX_OBSERVED_SOURCES {
+            statuses.insert(entry_id, SourceAuditStatus::Unchecked);
+            continue;
+        }
+        let hit = match context_map.get_hit(project_id, &entry_id).await {
+            Ok(Some(hit)) => hit,
+            Ok(None) => {
+                statuses.insert(entry_id, SourceAuditStatus::Unchecked);
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    %project_id,
+                    context_map_entry_id = %entry_id,
+                    %error,
+                    "failed to load source route for source observation"
+                );
+                statuses.insert(entry_id, SourceAuditStatus::Unchecked);
+                continue;
+            }
+        };
+        let status = match hit.freshness {
+            ContextMapFreshness::Stale => SourceAuditStatus::Stale,
+            ContextMapFreshness::SourceUnavailable => SourceAuditStatus::SourceUnavailable,
+            ContextMapFreshness::Current => {
+                let remaining_bytes = MAX_TOTAL_OBSERVED_BYTES.saturating_sub(observed_bytes);
+                match check_source(
+                    project_roots,
+                    &hit,
+                    remaining_bytes,
+                    MAX_OBSERVED_SOURCE_BYTES,
+                )
+                .await
+                {
+                    SourceCheck::Fingerprint(fingerprint, bytes) => {
+                        observed_bytes = observed_bytes.saturating_add(bytes);
+                        if fingerprint == hit.entry.value.source_fingerprint {
+                            SourceAuditStatus::Current
+                        } else {
+                            SourceAuditStatus::Stale
+                        }
+                    }
+                    SourceCheck::Missing => SourceAuditStatus::SourceUnavailable,
+                    SourceCheck::Unchecked => SourceAuditStatus::Unchecked,
+                }
+            }
+        };
+        statuses.insert(entry_id, status);
+    }
+    EvidenceAudit {
+        project_id: project_id.to_string(),
+        statuses,
+        cache_key: None,
     }
 }
 
@@ -225,6 +319,7 @@ async fn check_source(
     project_roots: &[PathBuf],
     hit: &ContextMapHit,
     remaining_bytes: u64,
+    maximum_source_bytes: u64,
 ) -> SourceCheck {
     let Some(configured_root) = project_roots
         .iter()
@@ -235,7 +330,11 @@ async fn check_source(
     let root = configured_root.clone();
     let relative_path = hit.source.relative_path.to_string();
     match tokio::task::spawn_blocking(move || {
-        fingerprint_source(&root, &relative_path, remaining_bytes)
+        fingerprint_source(
+            &root,
+            &relative_path,
+            remaining_bytes.min(maximum_source_bytes),
+        )
     })
     .await
     {
@@ -314,7 +413,7 @@ enum SourceCheckError {
 fn fingerprint_source(
     configured_root: &Path,
     relative_path: &str,
-    remaining_bytes: u64,
+    maximum_bytes: u64,
 ) -> Result<(SourceFingerprint, u64), SourceCheckError> {
     let root = std::fs::canonicalize(configured_root).map_err(classify_io_error)?;
     let source = std::fs::canonicalize(root.join(relative_path)).map_err(classify_io_error)?;
@@ -322,7 +421,6 @@ fn fingerprint_source(
         return Err(SourceCheckError::Unchecked);
     }
     let mut file = File::open(source).map_err(classify_io_error)?;
-    let maximum_bytes = remaining_bytes.min(MAX_AUDITED_SOURCE_BYTES);
     if maximum_bytes == 0 || file.metadata().map_err(classify_io_error)?.len() > maximum_bytes {
         return Err(SourceCheckError::Unchecked);
     }
@@ -356,7 +454,7 @@ fn classify_io_error(error: std::io::Error) -> SourceCheckError {
 }
 
 pub(super) fn audited_context_freshness(
-    audit: &RootEvidenceAudit,
+    audit: &EvidenceAudit,
     entry_id: &ContextMapEntryId,
     stored: ContextMapFreshness,
 ) -> Option<ContextMapFreshness> {

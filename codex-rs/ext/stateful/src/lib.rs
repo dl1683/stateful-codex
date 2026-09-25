@@ -36,7 +36,7 @@ use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
 use crate::run_world_state::run_world_state_section;
 use crate::services::ProjectIntelligenceServices;
-use crate::source_freshness::RootEvidenceAudit;
+use crate::source_freshness::EvidenceAudit;
 use crate::source_freshness::audit_root_evidence;
 use crate::source_freshness::root_evidence_audit_cache_key;
 use crate::world_state::ProjectIntelligenceStatus;
@@ -236,7 +236,7 @@ impl StatefulExtension {
                         return RootBlackboardStatus::Available(ResolvedRootBlackboard {
                             projection,
                             evidence_routes: Default::default(),
-                            evidence_audit: Some(RootEvidenceAudit {
+                            evidence_audit: Some(EvidenceAudit {
                                 project_id: project_id.to_string(),
                                 statuses: Default::default(),
                                 cache_key: None,
@@ -289,8 +289,7 @@ impl StatefulExtension {
                 } else {
                     None
                 };
-                let (evidence_audit, audit_recomputed) = match turn_store.get::<RootEvidenceAudit>()
-                {
+                let (evidence_audit, audit_recomputed) = match turn_store.get::<EvidenceAudit>() {
                     Some(audit)
                         if audit.project_id == *project_id
                             && audit_cache_key.is_some()

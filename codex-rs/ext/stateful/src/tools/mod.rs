@@ -34,6 +34,7 @@ pub(super) fn project_intelligence_tools(
         Arc::new(blackboard::BlackboardQueryTool::new(
             project_id.clone(),
             services.clone(),
+            projects.clone(),
         )),
         Arc::new(blackboard_write::BlackboardRecordTool::new(
             project_id.clone(),

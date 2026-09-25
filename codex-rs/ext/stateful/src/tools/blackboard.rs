@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use codex_extension_api::FunctionCallError;
 use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
@@ -10,10 +13,14 @@ use codex_project_intelligence::BlackboardEntryScope;
 use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::RootPromotion;
+use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
+use crate::source_freshness::audited_blackboard_freshness;
+use crate::source_freshness::audited_verification;
+use crate::source_freshness::observe_evidence;
 
 use super::MAX_RESPONSE_BYTES;
 use super::fits_response;
@@ -36,13 +43,19 @@ struct QueryArguments {
 pub(super) struct BlackboardQueryTool {
     project_id: String,
     services: ProjectIntelligenceServices,
+    projects: Arc<dyn ThreadStore>,
 }
 
 impl BlackboardQueryTool {
-    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        services: ProjectIntelligenceServices,
+        projects: Arc<dyn ThreadStore>,
+    ) -> Self {
         Self {
             project_id,
             services,
+            projects,
         }
     }
 
@@ -74,10 +87,40 @@ impl BlackboardQueryTool {
             })
             .await
             .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+        let evidence_ids = result
+            .data
+            .iter()
+            .flat_map(|hit| &hit.entry.value.evidence)
+            .map(|evidence| evidence.context_map_entry_id.clone())
+            .collect::<Vec<_>>();
+        let evidence_audit = if evidence_ids.is_empty() {
+            None
+        } else {
+            let roots = match self.projects.read_project(self.project_id.clone()).await {
+                Ok(Some(project)) => project
+                    .roots
+                    .iter()
+                    .map(|root| PathBuf::from(&root.path))
+                    .collect::<Vec<_>>(),
+                Ok(None) => Vec::new(),
+                Err(error) => {
+                    tracing::warn!(
+                        project_id = %self.project_id,
+                        %error,
+                        "failed to resolve project roots for blackboard source observation"
+                    );
+                    Vec::new()
+                }
+            };
+            Some(observe_evidence(&self.services, &self.project_id, &roots, evidence_ids).await)
+        };
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let mut data = Vec::new();
         let mut truncated = result.truncated;
         for hit in result.data {
+            let evidence_freshness = audited_blackboard_freshness(&hit, evidence_audit.as_ref());
+            let effective_verification =
+                audited_verification(hit.entry.value.verification, evidence_freshness);
             let item = json!({
                 "entryId": hit.entry.id.to_string(),
                 "nodeId": hit.entry.value.node_id.to_string(),
@@ -89,8 +132,9 @@ impl BlackboardQueryTool {
                 "structuredValue": hit.entry.value.structured_value,
                 "confidenceBasisPoints": hit.entry.value.confidence.basis_points(),
                 "declaredVerification": hit.entry.value.verification,
-                "effectiveVerification": hit.effective_verification,
-                "evidenceFreshness": hit.evidence_freshness,
+                "effectiveVerification": effective_verification,
+                "evidenceFreshness": evidence_freshness,
+                "storedEvidenceFreshness": hit.evidence_freshness,
                 "importance": hit.entry.value.importance,
                 "rootPromotion": hit.entry.value.root_promotion,
                 "evidence": hit.entry.value.evidence.into_iter().map(|link| json!({
@@ -140,7 +184,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Active knowledge is the default. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review candidate knowledge deliberately, and omit text only when intentionally enumerating a bounded set.".to_string(),
+            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Source-linked results are byte-checked against the selected project without mutating project state; evidenceFreshness is the effective observation and storedEvidenceFreshness is the persisted index state. Reuse sourceVerified knowledge only when evidenceFreshness=current. Active knowledge is the default. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review candidate knowledge deliberately, and omit text only when intentionally enumerating a bounded set.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

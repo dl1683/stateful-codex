@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use codex_project_intelligence::BlackboardEvidenceFreshness;
 use codex_project_intelligence::BlackboardHit;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
@@ -15,8 +14,11 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
-use crate::source_freshness::RootEvidenceAudit;
+use crate::source_freshness::AuditedEvidenceFreshness;
+use crate::source_freshness::EvidenceAudit;
+use crate::source_freshness::audited_blackboard_freshness;
 use crate::source_freshness::audited_context_freshness;
+use crate::source_freshness::audited_verification;
 use crate::world_state::append_line;
 use crate::world_state::hash_component;
 use crate::world_state::try_append_line;
@@ -34,7 +36,7 @@ pub(super) enum RootBlackboardStatus {
 pub(super) struct ResolvedRootBlackboard {
     pub(super) projection: RootBlackboardProjection,
     pub(super) evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
-    pub(super) evidence_audit: Option<RootEvidenceAudit>,
+    pub(super) evidence_audit: Option<EvidenceAudit>,
 }
 
 impl RootBlackboardStatus {
@@ -206,7 +208,7 @@ fn render_hit(
     hit: &BlackboardHit,
     entry_aliases: &HashMap<String, String>,
     evidence_aliases: &HashMap<ContextMapEntryId, String>,
-    evidence_audit: Option<&RootEvidenceAudit>,
+    evidence_audit: Option<&EvidenceAudit>,
 ) -> String {
     let entry = &hit.entry;
     let value = &entry.value;
@@ -252,15 +254,8 @@ fn render_hit(
         })
         .collect::<Vec<_>>()
         .join(",");
-    let evidence_freshness = rendered_evidence_freshness(hit, evidence_audit);
-    let effective_verification = match (value.verification, evidence_freshness) {
-        (
-            BlackboardVerification::SourceVerified,
-            RenderedEvidenceFreshness::Current | RenderedEvidenceFreshness::Unchecked,
-        ) => BlackboardVerification::SourceVerified,
-        (BlackboardVerification::SourceVerified, _) => BlackboardVerification::Stale,
-        (verification, _) => verification,
-    };
+    let evidence_freshness = audited_blackboard_freshness(hit, evidence_audit);
+    let effective_verification = audited_verification(value.verification, evidence_freshness);
     let mut line = format!(
         "- {alias} [{} {}; verification={}; declared={}; evidence={}; confidence={}; provenance={}] content={}{} sources=[{}] relations=[{}]",
         importance_name(value.importance),
@@ -284,60 +279,13 @@ fn render_hit(
     line
 }
 
-#[derive(Clone, Copy)]
-enum RenderedEvidenceFreshness {
-    NotApplicable,
-    Current,
-    Stale,
-    SourceUnavailable,
-    Unchecked,
-}
-
-fn rendered_evidence_freshness(
-    hit: &BlackboardHit,
-    audit: Option<&RootEvidenceAudit>,
-) -> RenderedEvidenceFreshness {
-    let stored = match hit.evidence_freshness {
-        BlackboardEvidenceFreshness::NotApplicable => RenderedEvidenceFreshness::NotApplicable,
-        BlackboardEvidenceFreshness::Current => RenderedEvidenceFreshness::Current,
-        BlackboardEvidenceFreshness::Stale => RenderedEvidenceFreshness::Stale,
-        BlackboardEvidenceFreshness::SourceUnavailable => {
-            RenderedEvidenceFreshness::SourceUnavailable
-        }
-    };
-    if !matches!(stored, RenderedEvidenceFreshness::Current) {
-        return stored;
-    }
-    let Some(audit) = audit else {
-        return stored;
-    };
-    let mut result = RenderedEvidenceFreshness::Current;
-    for evidence in &hit.entry.value.evidence {
-        match audit.statuses.get(&evidence.context_map_entry_id) {
-            Some(crate::source_freshness::SourceAuditStatus::Current) => {}
-            Some(crate::source_freshness::SourceAuditStatus::Stale) => {
-                result = RenderedEvidenceFreshness::Stale;
-            }
-            Some(crate::source_freshness::SourceAuditStatus::SourceUnavailable) => {
-                return RenderedEvidenceFreshness::SourceUnavailable;
-            }
-            Some(crate::source_freshness::SourceAuditStatus::Unchecked) | None => {
-                if matches!(result, RenderedEvidenceFreshness::Current) {
-                    result = RenderedEvidenceFreshness::Unchecked;
-                }
-            }
-        }
-    }
-    result
-}
-
-fn rendered_freshness_name(freshness: RenderedEvidenceFreshness) -> &'static str {
+fn rendered_freshness_name(freshness: AuditedEvidenceFreshness) -> &'static str {
     match freshness {
-        RenderedEvidenceFreshness::NotApplicable => "notApplicable",
-        RenderedEvidenceFreshness::Current => "current",
-        RenderedEvidenceFreshness::Stale => "stale",
-        RenderedEvidenceFreshness::SourceUnavailable => "sourceUnavailable",
-        RenderedEvidenceFreshness::Unchecked => "uncheckedThisTurn",
+        AuditedEvidenceFreshness::NotApplicable => "notApplicable",
+        AuditedEvidenceFreshness::Current => "current",
+        AuditedEvidenceFreshness::Stale => "stale",
+        AuditedEvidenceFreshness::SourceUnavailable => "sourceUnavailable",
+        AuditedEvidenceFreshness::UncheckedThisTurn => "uncheckedThisTurn",
     }
 }
 
