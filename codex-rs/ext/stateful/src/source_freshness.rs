@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapHit;
+use codex_project_intelligence::HierarchyNode;
 use codex_project_intelligence::HierarchySourceUpdate;
 use codex_project_intelligence::NodeLifecycle;
 use codex_project_intelligence::SourceFingerprint;
@@ -178,12 +179,32 @@ pub(super) async fn audit_root_evidence(
                 continue;
             }
         };
+        let node = match hierarchy
+            .get_node(project_id, &hit.entry.value.node_id)
+            .await
+        {
+            Ok(Some(node)) => node,
+            Ok(None) => {
+                statuses.insert(entry_id, SourceAuditStatus::Unchecked);
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    %project_id,
+                    node_id = %hit.entry.value.node_id,
+                    %error,
+                    "failed to load source node for freshness audit"
+                );
+                statuses.insert(entry_id, SourceAuditStatus::Unchecked);
+                continue;
+            }
+        };
         let remaining_bytes = MAX_TOTAL_AUDITED_BYTES.saturating_sub(audited_bytes);
         let check = check_source(project_roots, &hit, remaining_bytes).await;
         if let SourceCheck::Fingerprint(_, bytes) = &check {
             audited_bytes = audited_bytes.saturating_add(*bytes);
         }
-        let status = reconcile_source_state(project_id, hierarchy, &hit, check).await;
+        let status = reconcile_source_state(project_id, hierarchy, &hit, &node, check).await;
         statuses.insert(entry_id, status);
     }
 
@@ -228,6 +249,7 @@ async fn reconcile_source_state(
     project_id: &str,
     hierarchy: &codex_project_intelligence::HierarchyStore,
     hit: &ContextMapHit,
+    node: &HierarchyNode,
     check: SourceCheck,
 ) -> SourceAuditStatus {
     let (status, lifecycle, fingerprint) = match check {
@@ -252,24 +274,11 @@ async fn reconcile_source_state(
         ),
         SourceCheck::Unchecked => return SourceAuditStatus::Unchecked,
     };
-    let node = match hierarchy
-        .get_node(project_id, &hit.entry.value.node_id)
-        .await
-    {
-        Ok(Some(node)) => node,
-        Ok(None) => return SourceAuditStatus::Unchecked,
-        Err(error) => {
-            tracing::warn!(
-                %project_id,
-                node_id = %hit.entry.value.node_id,
-                %error,
-                "failed to load source node for freshness audit"
-            );
-            return SourceAuditStatus::Unchecked;
-        }
-    };
     let fingerprint = fingerprint.or(node.value.source_fingerprint.clone());
-    if node.lifecycle == lifecycle && node.value.source_fingerprint == fingerprint {
+    if node.value.source_fingerprint == fingerprint
+        && (node.lifecycle == lifecycle
+            || status == SourceAuditStatus::Stale && node.lifecycle == NodeLifecycle::Active)
+    {
         return status;
     }
     match hierarchy
@@ -292,7 +301,7 @@ async fn reconcile_source_state(
                 %error,
                 "failed to persist source freshness audit"
             );
-            SourceAuditStatus::Unchecked
+            status
         }
     }
 }
@@ -361,3 +370,7 @@ pub(super) fn audited_context_freshness(
         },
     }
 }
+
+#[cfg(test)]
+#[path = "source_freshness_tests.rs"]
+mod tests;
