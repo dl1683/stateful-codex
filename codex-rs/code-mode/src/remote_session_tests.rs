@@ -32,7 +32,12 @@ fn missing_host_error_limits_the_displayed_path_to_512_bytes() {
 
     assert_eq!(
         error.to_string(),
-        format!("failed to spawn code-mode host ...{expected_suffix}: host unavailable")
+        format!(
+            "failed to spawn code-mode host ...{expected_suffix}: host unavailable. \
+             Install `codex-code-mode-host` beside Codex. When building from source, build both \
+             binaries with the same Cargo profile, for example \
+             `cargo build --release -p codex-cli -p codex-code-mode-host`."
+        )
     );
 }
 
@@ -47,7 +52,13 @@ fn missing_host_error_preserves_utf8_boundaries_when_truncating_the_path() {
     .to_string();
     let displayed_path = error
         .strip_prefix("failed to spawn code-mode host ")
-        .and_then(|message| message.strip_suffix(": host unavailable"))
+        .and_then(|message| {
+            message.strip_suffix(
+                ": host unavailable. Install `codex-code-mode-host` beside Codex. When building \
+                 from source, build both binaries with the same Cargo profile, for example \
+                 `cargo build --release -p codex-cli -p codex-code-mode-host`.",
+            )
+        })
         .expect("missing-host error should contain the displayed host path");
 
     assert!(displayed_path.starts_with("..."));
@@ -68,6 +79,7 @@ async fn provider_returns_missing_host_error() {
         .expect("missing host should fail");
 
     assert!(error.contains("failed to spawn code-mode host codex-code-mode-host-does-not-exist"));
+    assert!(error.contains("cargo build --release -p codex-cli -p codex-code-mode-host"));
 }
 
 #[tokio::test]

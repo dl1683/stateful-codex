@@ -61,6 +61,11 @@ const DEFAULT_HOST_WAIT_TRANSPORT_TIMEOUT: Duration = Duration::from_secs(60);
 // while preserving the executable-bearing suffix needed to diagnose failures.
 const MAX_DISPLAYED_HOST_PROGRAM_BYTES: usize = 512;
 const TRUNCATED_HOST_PROGRAM_PREFIX: &str = "...";
+const MISSING_HOST_RECOVERY: &str = concat!(
+    "Install `codex-code-mode-host` beside Codex. When building from source, build both ",
+    "binaries with the same Cargo profile, for example ",
+    "`cargo build --release -p codex-cli -p codex-code-mode-host`."
+);
 
 pub(super) enum ConnectionError {
     Spawn {
@@ -79,23 +84,27 @@ impl fmt::Display for ConnectionError {
             } => {
                 let host_program = host_program.to_string_lossy();
                 if host_program.len() <= MAX_DISPLAYED_HOST_PROGRAM_BYTES {
-                    return write!(
+                    write!(
                         formatter,
                         "failed to spawn code-mode host {host_program}: {error}"
-                    );
-                }
+                    )?;
+                } else {
+                    let mut suffix_start = host_program.len()
+                        - (MAX_DISPLAYED_HOST_PROGRAM_BYTES - TRUNCATED_HOST_PROGRAM_PREFIX.len());
+                    while !host_program.is_char_boundary(suffix_start) {
+                        suffix_start += 1;
+                    }
 
-                let mut suffix_start = host_program.len()
-                    - (MAX_DISPLAYED_HOST_PROGRAM_BYTES - TRUNCATED_HOST_PROGRAM_PREFIX.len());
-                while !host_program.is_char_boundary(suffix_start) {
-                    suffix_start += 1;
+                    write!(
+                        formatter,
+                        "failed to spawn code-mode host {TRUNCATED_HOST_PROGRAM_PREFIX}{}: {error}",
+                        &host_program[suffix_start..]
+                    )?;
                 }
-
-                write!(
-                    formatter,
-                    "failed to spawn code-mode host {TRUNCATED_HOST_PROGRAM_PREFIX}{}: {error}",
-                    &host_program[suffix_start..]
-                )
+                if error.kind() == io::ErrorKind::NotFound {
+                    write!(formatter, ". {MISSING_HOST_RECOVERY}")?;
+                }
+                Ok(())
             }
             Self::Other(message) => formatter.write_str(message),
         }
