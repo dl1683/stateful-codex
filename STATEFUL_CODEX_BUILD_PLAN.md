@@ -1099,3 +1099,84 @@ Evidence: SC-EVAL-032 (the Pramana ten-question A/B), together with SC-EVAL-024/
 - The rich root blackboard remains rich; the fix must not come from thinning it.
 
 **How success will be judged:** a matched rerun of SC-EVAL-032, plus a compaction-pressure rerun in the style of SC-EVAL-024.
+
+## Current highest priority: make accumulated intelligence change the trajectory
+
+The SC-EVAL-032 regressions and issues #15, #16, and #17 are one coupled
+product problem, not three independent feature requests. Until this loop works,
+new UI surface, broader benchmarks, and richer prompt packets are secondary:
+
+```text
+source work
+  -> precise semantic capture
+  -> durable continuity across turns, threads, and compaction
+  -> active retrieval when the captured understanding matters
+  -> exact region routing for genuinely missing or consequential detail
+  -> source-authority and freshness checks at the point of use
+  -> less rereading, fewer requests, and better grounded decisions over time
+```
+
+Every proposed mechanism must be evaluated against the whole loop. A routing
+improvement is incomplete if the verified result is not captured for reuse. A
+reuse cue is harmful if state is sparse, stale, or expensive to inject. A
+freshness mechanism is insufficient if it detects change but cannot propagate
+or recover from it. Passing component tests is necessary, but the product gate
+is a better longitudinal work trajectory.
+
+### Evidence that constrains the design
+
+- SC-EVAL-032 used 2.0x the input tokens, 2.7x the uncached input, and 2.3x the
+  tool-output characters of ordinary Codex while quality was effectively level.
+  The stateful/ordinary cost ratio worsened from 1.72x in q01-q05 to 2.58x in
+  q06-q10. Any default feature that adds context or requests therefore needs a
+  concrete displacement theory: what reread, model request, or lost conclusion
+  will it eliminate?
+- Forty of 81 later evidence reads overlapped an earlier read, but promoted
+  findings covered only part of that repeated evidence. This separates two
+  problems: capture enough material understanding from completed work, then
+  make that understanding usable without pretending every repeated range is
+  semantically redundant.
+- The q06 reset mismatch was already present but was not used. This is an active
+  retrieval and decision-salience failure, not a missing-source failure.
+- The q10 routed-result fact was absent from state and undiscoverable through the
+  old file-level context representation. This is a coverage and exact-routing
+  failure, not something completed outcomes or root re-ranking can invent.
+- Fast-moving projects make whole-file fingerprints obsolete quickly. Freshness
+  must be checked where understanding shapes work, but unchanged cited bytes
+  alone are not sufficient authority: an edited qualifier elsewhere can change
+  their meaning. The rejected range-rebinding experiment is a permanent warning
+  against equating byte equality with semantic validity.
+- Completed outcomes now provide bounded, deterministic continuity and have a
+  positive q06 counterfactual. They complement the rich root; they do not justify
+  widening the always-loaded packet without measured benefit.
+
+### Near-term execution order
+
+1. Finish and falsify bounded exact-region routing. It must recover the frozen
+   q10 PLAN and SCORECARD facts, preserve route diversity and lifecycle truth,
+   expose a typed range directly consumable by `evidence_read`, preserve the
+   parent file's blackboard-knowledge signal, and stay within measured indexing
+   time and size limits.
+2. Improve semantic capture from completed source work. Determine which material
+   conclusions, failures, decisions, and open questions remain only in raw reads
+   or conversational history, then record them at the correct project/file/region
+   level without creating a transcript dump.
+3. Make reuse explicit and revision-consistent. The model should receive or query
+   relevant captured conclusions before deciding to reread, while unchanged
+   root knowledge remains authoritative and source changes fail closed until
+   model-visible re-verification occurs.
+4. Connect freshness propagation to normal work. Incremental refresh must update
+   routes and invalidate affected understanding under concurrent edits without
+   depending on weekly maintenance. Weekly maintenance remains responsible for
+   consolidation, contradiction discovery, cross-source linking, and pruning.
+5. Run small frozen mechanism gates before another expensive benchmark. Use
+   q06 for stored-but-unused knowledge, q10 for missing-detail routing, a changed-
+   authority canary for freshness, and a compaction canary for continuity. Only
+   after those pass should a matched longitudinal rerun test the combined system.
+
+For every gate, record answer quality, repeated source ranges, input and uncached
+tokens, model requests, tool-output volume, wall time, state writes/queries, and
+whether the decisive prior conclusion was actually used. Operational failures
+such as unavailable shell or code-mode host remain release blockers because they
+can invalidate the observed trajectory, but fixing them is not evidence that the
+project-intelligence loop itself improved.
