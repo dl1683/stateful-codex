@@ -178,7 +178,6 @@ async fn fixture() -> (
             source_fingerprint: fingerprint(),
             line_range: Some(EvidenceLineRange { start: 1, end: 1 }),
         },
-        FACTS,
     );
     let tool = BlackboardUpdateTool::new(
         PROJECT_ID.to_string(),
