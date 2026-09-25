@@ -124,10 +124,11 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
     }
     let fingerprint =
         SourceFingerprint::parse(format!("sha256:{}", hex_digest(hasher.finalize())))?;
+    let exact_text = !excerpt.contains(&0) && std::str::from_utf8(&excerpt).is_ok();
     let text = (!excerpt.contains(&0)).then(|| String::from_utf8_lossy(&excerpt).into_owned());
-    let description = describe_file(&relative_path, text.as_deref());
+    let (description, description_complete) = describe_file(&relative_path, text.as_deref());
     let routing_terms = routing_terms(&relative_path, text.as_deref());
-    let coverage = if text.is_some() && total_bytes <= EXCERPT_BYTES as u64 {
+    let coverage = if exact_text && total_bytes <= EXCERPT_BYTES as u64 && description_complete {
         ContextMapCoverage::Complete
     } else {
         ContextMapCoverage::Partial
@@ -142,26 +143,25 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
     })
 }
 
-fn describe_file(relative_path: &str, text: Option<&str>) -> String {
+fn describe_file(relative_path: &str, text: Option<&str>) -> (String, bool) {
     let mut description = relative_path.to_string();
     let Some(text) = text else {
         description.push_str(" (binary file)");
-        return description;
+        return (description, false);
     };
-    for line in text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .take(3)
-    {
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    for line in lines.by_ref().take(3) {
         let remaining = MAX_DESCRIPTION_BYTES.saturating_sub(description.len() + 3);
         if remaining == 0 {
-            break;
+            return (description, false);
         }
         description.push_str(" | ");
         description.push_str(truncate_utf8(line, remaining));
+        if line.len() > remaining {
+            return (description, false);
+        }
     }
-    description
+    (description, lines.next().is_none())
 }
 
 fn routing_terms(relative_path: &str, text: Option<&str>) -> Vec<String> {
@@ -212,3 +212,7 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
     }
     &value[..end]
 }
+
+#[cfg(test)]
+#[path = "scan_tests.rs"]
+mod tests;
