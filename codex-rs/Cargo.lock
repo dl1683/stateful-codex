@@ -4710,7 +4710,6 @@ version = "0.0.0"
 dependencies = [
  "codex-extension-api",
  "codex-project-intelligence",
- "codex-protocol",
  "codex-state",
  "codex-stateful-runtime",
  "codex-thread-store",
