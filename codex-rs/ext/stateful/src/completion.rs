@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 use std::fmt::Write;
+use std::path::PathBuf;
 
 use codex_extension_api::FunctionCallError;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryState;
-use codex_project_intelligence::BlackboardEvidenceFreshness;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::RootBlackboardQuery;
@@ -13,6 +13,10 @@ use serde_json::Value;
 use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
+use crate::source_freshness::AuditedEvidenceFreshness;
+use crate::source_freshness::audited_blackboard_freshness;
+use crate::source_freshness::audited_verification;
+use crate::source_freshness::observe_evidence;
 
 const MAX_FINAL_CHECKLIST_ITEMS: usize = 16;
 const MAX_FINAL_CHECKLIST_ITEM_BYTES: usize = 640;
@@ -30,6 +34,16 @@ pub(crate) struct CompletionRecord {
     pub(crate) omitted_checklist_items: usize,
 }
 
+pub(crate) struct CompletionRequest<'a> {
+    pub(crate) project_id: &'a str,
+    pub(crate) project_roots: &'a [PathBuf],
+    pub(crate) result: &'a str,
+    pub(crate) packet: &'a ObligationPacket,
+    pub(crate) root_revision: u64,
+    pub(crate) material_root_findings: &'a [String],
+    pub(crate) material_historical_findings: &'a [HistoricalFindingReference],
+}
+
 struct ChecklistItem {
     category: &'static str,
     text: String,
@@ -41,14 +55,18 @@ struct MaterialChecklist {
 }
 
 pub(crate) async fn prepare_completion(
-    project_id: &str,
     services: &ProjectIntelligenceServices,
-    result: &str,
-    packet: &ObligationPacket,
-    root_revision: u64,
-    material_root_findings: &[String],
-    material_historical_findings: &[HistoricalFindingReference],
+    request: CompletionRequest<'_>,
 ) -> Result<CompletionRecord, FunctionCallError> {
+    let CompletionRequest {
+        project_id,
+        project_roots,
+        result,
+        packet,
+        root_revision,
+        material_root_findings,
+        material_historical_findings,
+    } = request;
     if material_root_findings.len() > MAX_MATERIAL_ROOT_FINDINGS {
         return Err(respond(format!(
             "materialRootFindings accepts at most {MAX_MATERIAL_ROOT_FINDINGS} root aliases; select the highest-priority findings directly material to the outcome and preserve the remainder in the final semantic obligation"
@@ -70,9 +88,14 @@ pub(crate) async fn prepare_completion(
         )));
     }
 
-    let mut material =
-        material_root_checklist(project_id, services, root_revision, material_root_findings)
-            .await?;
+    let mut material = material_root_checklist(
+        project_id,
+        services,
+        project_roots,
+        root_revision,
+        material_root_findings,
+    )
+    .await?;
     let historical =
         material_historical_checklist(project_id, services, material_historical_findings).await?;
     material.items.extend(historical.items);
@@ -125,6 +148,7 @@ pub(crate) async fn prepare_completion(
 async fn material_root_checklist(
     project_id: &str,
     services: &ProjectIntelligenceServices,
+    project_roots: &[PathBuf],
     expected_root_revision: u64,
     requested_references: &[String],
 ) -> Result<MaterialChecklist, FunctionCallError> {
@@ -144,32 +168,57 @@ async fn material_root_checklist(
             projection.revision
         )));
     }
-    let context_map = services.context_map().await.map_err(respond)?;
-    let mut material = MaterialChecklist {
-        items: Vec::with_capacity(requested_references.len()),
-        source_fingerprints: HashSet::new(),
-    };
+    let mut selected = Vec::with_capacity(requested_references.len());
     for reference in requested_references {
         let Some(raw_index) = reference.strip_prefix('E') else {
-            return Err(respond(format!(
-                "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
-            )));
+            return Err(invalid_root_alias(reference, expected_root_revision));
         };
         let Ok(index) = raw_index.parse::<usize>() else {
-            return Err(respond(format!(
-                "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
-            )));
+            return Err(invalid_root_alias(reference, expected_root_revision));
         };
         if index == 0 || raw_index.starts_with('0') {
-            return Err(respond(format!(
-                "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
-            )));
+            return Err(invalid_root_alias(reference, expected_root_revision));
         }
         let Some(hit) = projection.data.get(index - 1) else {
             return Err(respond(format!(
                 "unknown material root finding alias {reference} at root revision {expected_root_revision}"
             )));
         };
+        selected.push((reference, hit));
+    }
+    let evidence_audit = if selected.is_empty() {
+        None
+    } else {
+        Some(
+            observe_evidence(
+                services,
+                project_id,
+                project_roots,
+                selected
+                    .iter()
+                    .flat_map(|(_, hit)| &hit.entry.value.evidence)
+                    .map(|evidence| evidence.context_map_entry_id.clone()),
+            )
+            .await,
+        )
+    };
+    let context_map = services.context_map().await.map_err(respond)?;
+    let mut material = MaterialChecklist {
+        items: Vec::with_capacity(requested_references.len()),
+        source_fingerprints: HashSet::new(),
+    };
+    for (reference, hit) in selected {
+        let evidence_freshness = audited_blackboard_freshness(hit, evidence_audit.as_ref());
+        if hit.entry.value.verification == BlackboardVerification::SourceVerified
+            && evidence_freshness != AuditedEvidenceFreshness::Current
+        {
+            return Err(respond(format!(
+                "material root finding {reference} evidence is {}; read current evidence and revise or supersede the finding before completing",
+                freshness_name(evidence_freshness)
+            )));
+        }
+        let effective_verification =
+            audited_verification(hit.entry.value.verification, evidence_freshness);
         let mut sources = Vec::new();
         for evidence in &hit.entry.value.evidence {
             material
@@ -204,13 +253,19 @@ async fn material_root_checklist(
             text: bounded_item(&format!(
                 "{reference} [{}; verification={}; evidence={}] {}{sources}",
                 importance_name(hit.entry.value.importance),
-                verification_name(hit.effective_verification),
-                freshness_name(hit.evidence_freshness),
+                verification_name(effective_verification),
+                freshness_name(evidence_freshness),
                 hit.entry.value.content,
             )),
         });
     }
     Ok(material)
+}
+
+fn invalid_root_alias(reference: &str, expected_root_revision: u64) -> FunctionCallError {
+    respond(format!(
+        "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
+    ))
 }
 
 async fn material_historical_checklist(
@@ -379,12 +434,13 @@ fn verification_name(verification: BlackboardVerification) -> &'static str {
     }
 }
 
-fn freshness_name(freshness: BlackboardEvidenceFreshness) -> &'static str {
+fn freshness_name(freshness: AuditedEvidenceFreshness) -> &'static str {
     match freshness {
-        BlackboardEvidenceFreshness::NotApplicable => "notApplicable",
-        BlackboardEvidenceFreshness::Current => "current",
-        BlackboardEvidenceFreshness::Stale => "stale",
-        BlackboardEvidenceFreshness::SourceUnavailable => "sourceUnavailable",
+        AuditedEvidenceFreshness::NotApplicable => "notApplicable",
+        AuditedEvidenceFreshness::Current => "current",
+        AuditedEvidenceFreshness::Stale => "stale",
+        AuditedEvidenceFreshness::SourceUnavailable => "sourceUnavailable",
+        AuditedEvidenceFreshness::UncheckedThisTurn => "uncheckedThisTurn",
     }
 }
 

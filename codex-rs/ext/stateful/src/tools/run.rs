@@ -10,11 +10,13 @@ use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulRunUpdate;
+use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
+use crate::completion::CompletionRequest;
 use crate::completion::HistoricalFindingReference;
 use crate::completion::MAX_MATERIAL_HISTORICAL_FINDINGS;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
@@ -52,6 +54,7 @@ pub(super) struct StatefulRunUpdateTool {
     project_id: String,
     thread_id: String,
     services: ProjectIntelligenceServices,
+    projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
@@ -60,12 +63,14 @@ impl StatefulRunUpdateTool {
         project_id: String,
         thread_id: String,
         services: ProjectIntelligenceServices,
+        projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
             thread_id,
             services,
+            projects,
             event_sink,
         }
     }
@@ -151,14 +156,32 @@ impl StatefulRunUpdateTool {
                         .to_string(),
                 )
             })?;
+            let project = self
+                .projects
+                .read_project(self.project_id.clone())
+                .await
+                .map_err(respond)?
+                .ok_or_else(|| {
+                    FunctionCallError::RespondToModel(
+                        "selected project no longer exists".to_string(),
+                    )
+                })?;
+            let project_roots = project
+                .roots
+                .iter()
+                .map(|root| std::path::PathBuf::from(&root.path))
+                .collect::<Vec<_>>();
             let completion = prepare_completion(
-                &self.project_id,
                 &self.services,
-                result,
-                &final_obligation,
-                root_revision,
-                &material_root_findings,
-                &material_historical_findings,
+                CompletionRequest {
+                    project_id: &self.project_id,
+                    project_roots: &project_roots,
+                    result,
+                    packet: &final_obligation,
+                    root_revision,
+                    material_root_findings: &material_root_findings,
+                    material_historical_findings: &material_historical_findings,
+                },
             )
             .await?;
             let obligation = (

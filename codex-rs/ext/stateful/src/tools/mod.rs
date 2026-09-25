@@ -69,7 +69,7 @@ pub(super) fn project_intelligence_tools(
         Arc::new(evidence::EvidenceReadTool::new(
             project_id.clone(),
             services.clone(),
-            projects,
+            projects.clone(),
         )),
     ];
     tools.extend([
@@ -83,6 +83,7 @@ pub(super) fn project_intelligence_tools(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
+            projects,
             event_sink.clone(),
         )),
         Arc::new(steering::SteeringQueryTool::new(

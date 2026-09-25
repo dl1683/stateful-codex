@@ -16,6 +16,8 @@ use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewContextMapEntry;
 use codex_project_intelligence::NewHierarchyNode;
 use codex_project_intelligence::NodeKind;
+use codex_project_intelligence::ProjectIndexRequest;
+use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_project_intelligence::RootPromotion;
@@ -26,6 +28,7 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
+use super::CompletionRequest;
 use super::HistoricalFindingReference;
 use super::prepare_completion;
 use super::sha256_references;
@@ -216,16 +219,19 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
     };
 
     let completion = prepare_completion(
-        PROJECT_ID,
         &services,
-        &format!("Recovered prior evidence {SOURCE_FINGERPRINT}."),
-        &packet,
-        root_revision,
-        &[],
-        &[HistoricalFindingReference {
-            entry_id: entry_id.to_string(),
-            revision: historical.revision,
-        }],
+        CompletionRequest {
+            project_id: PROJECT_ID,
+            project_roots: &[],
+            result: &format!("Recovered prior evidence {SOURCE_FINGERPRINT}."),
+            packet: &packet,
+            root_revision,
+            material_root_findings: &[],
+            material_historical_findings: &[HistoricalFindingReference {
+                entry_id: entry_id.to_string(),
+                revision: historical.revision,
+            }],
+        },
     )
     .await
     .expect("selected historical finding completes");
@@ -233,4 +239,97 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
     assert!(completion.result.contains(SOURCE_FINGERPRINT));
     assert!(completion.result.contains("facts.md:L4-L7"));
     assert_eq!(completion.checklist[0]["category"], "historicalFinding");
+}
+
+#[tokio::test]
+async fn completion_rejects_material_root_finding_changed_after_world_state_audit() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    let source_path = project_root.path().join("policy.md");
+    std::fs::write(&source_path, "threshold=10\n").expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    ProjectIndexer::new(
+        services.hierarchy().await.expect("hierarchy").clone(),
+        services.context_map().await.expect("context map").clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: PROJECT_ID.to_string(),
+        roots: vec![project_root.path().to_path_buf()],
+    })
+    .await
+    .expect("index source");
+    let context_hit = services
+        .context_map()
+        .await
+        .expect("context map")
+        .file_hits_for_path(
+            PROJECT_ID,
+            &ProjectRelativePath::parse("policy.md").expect("relative path"),
+        )
+        .await
+        .expect("source lookup")
+        .into_iter()
+        .next()
+        .expect("indexed source");
+    let blackboard = services.blackboard().await.expect("blackboard");
+    blackboard
+        .create_entry(
+            BlackboardEntryId::parse("current-threshold").expect("entry ID"),
+            NewBlackboardEntry {
+                project_id: PROJECT_ID.to_string(),
+                node_id: context_hit.entry.value.node_id,
+                kind: BlackboardKind::Number,
+                content: "The policy threshold is 10.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(10_000).expect("confidence"),
+                verification: BlackboardVerification::SourceVerified,
+                importance: BlackboardImportance::High,
+                root_promotion: RootPromotion::Promoted,
+                evidence: vec![BlackboardEvidenceLink {
+                    context_map_entry_id: context_hit.entry.id,
+                    source_fingerprint: context_hit.entry.value.source_fingerprint,
+                    line_range: None,
+                }],
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "turn-1".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("create root knowledge");
+    let root_revision = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: PROJECT_ID.to_string(),
+            max_entries: 256,
+        })
+        .await
+        .expect("root projection")
+        .revision;
+    std::fs::write(&source_path, "threshold=60\n").expect("change source");
+
+    let result = prepare_completion(
+        &services,
+        CompletionRequest {
+            project_id: PROJECT_ID,
+            project_roots: &[project_root.path().to_path_buf()],
+            result: "Threshold remains 10.",
+            packet: &ObligationPacket {
+                learning: vec!["The threshold controls the decision.".to_string()],
+                ..Default::default()
+            },
+            root_revision,
+            material_root_findings: &["E1".to_string()],
+            material_historical_findings: &[],
+        },
+    )
+    .await;
+    let Err(error) = result else {
+        panic!("changed material evidence must block completion");
+    };
+
+    assert!(error.to_string().contains(
+        "material root finding E1 evidence is stale; read current evidence and revise or supersede"
+    ));
 }
