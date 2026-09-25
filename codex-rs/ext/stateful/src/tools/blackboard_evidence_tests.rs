@@ -6,6 +6,7 @@ use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
+use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::EvidenceArguments;
@@ -55,6 +56,7 @@ async fn reindexed_source_cannot_certify_an_earlier_read() {
             source_fingerprint: context_hit.entry.value.source_fingerprint.clone(),
             line_range: Some(EvidenceLineRange { start: 1, end: 1 }),
         },
+        b"threshold=10\n",
     );
     assert!(
         services
@@ -96,7 +98,103 @@ async fn reindexed_source_cannot_certify_an_earlier_read() {
     assert!(
         error
             .to_string()
-            .contains("blackboard evidence source changed after it was read")
+            .contains("blackboard evidence cited range changed after it was read")
     );
     assert!(error.to_string().contains("call evidence_read"));
+}
+
+#[tokio::test]
+async fn reindexed_source_rebinds_a_receipt_when_the_cited_range_is_unchanged() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    let source_path = project_root.path().join("policy.md");
+    std::fs::write(&source_path, "# Policy\nthreshold=10\n").expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let indexer = ProjectIndexer::new(
+        services.hierarchy().await.expect("hierarchy").clone(),
+        services.context_map().await.expect("context map").clone(),
+    );
+    indexer
+        .refresh(ProjectIndexRequest {
+            project_id: PROJECT_ID.to_string(),
+            roots: vec![project_root.path().to_path_buf()],
+        })
+        .await
+        .expect("index source");
+    let original = services
+        .context_map()
+        .await
+        .expect("context map")
+        .file_hits_for_path(
+            PROJECT_ID,
+            &ProjectRelativePath::parse("policy.md").expect("relative path"),
+        )
+        .await
+        .expect("source lookup")
+        .into_iter()
+        .next()
+        .expect("indexed source");
+    let line_range = EvidenceLineRange { start: 2, end: 2 };
+    let receipt_id = services.read_receipts().issue(
+        PROJECT_ID,
+        THREAD_ID,
+        "read-call-1",
+        BlackboardEvidenceLink {
+            context_map_entry_id: original.entry.id.clone(),
+            source_fingerprint: original.entry.value.source_fingerprint,
+            line_range: Some(line_range),
+        },
+        b"threshold=10\n",
+    );
+    std::fs::write(&source_path, "# Revised policy\nthreshold=10\n").expect("change heading");
+    indexer
+        .refresh_file(ProjectIndexFileRequest {
+            project_id: PROJECT_ID.to_string(),
+            project_root: project_root.path().to_path_buf(),
+            relative_path: ProjectRelativePath::parse("policy.md").expect("relative path"),
+        })
+        .await
+        .expect("refresh changed source");
+    let current = services
+        .context_map()
+        .await
+        .expect("context map")
+        .file_hits_for_path(
+            PROJECT_ID,
+            &ProjectRelativePath::parse("policy.md").expect("relative path"),
+        )
+        .await
+        .expect("source lookup")
+        .into_iter()
+        .next()
+        .expect("indexed source");
+
+    let (links, inferred_node_id) = resolve_evidence(
+        PROJECT_ID,
+        THREAD_ID,
+        &services,
+        &[project_root.path().to_path_buf()],
+        vec![EvidenceArguments {
+            read_receipt_id: Some(receipt_id),
+            context_map_entry_id: None,
+            relative_path: None,
+            project_root: None,
+            line_range: None,
+        }],
+    )
+    .await
+    .expect("unchanged cited bytes rebind to the current source");
+
+    assert_eq!(
+        (links, inferred_node_id),
+        (
+            vec![BlackboardEvidenceLink {
+                context_map_entry_id: current.entry.id,
+                source_fingerprint: current.entry.value.source_fingerprint,
+                line_range: Some(line_range),
+            }],
+            Some(current.entry.value.node_id),
+        )
+    );
 }

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use codex_extension_api::FunctionCallError;
 use codex_project_intelligence::BlackboardEvidenceLink;
 use codex_project_intelligence::ContextMapFreshness;
+use codex_project_intelligence::EvidenceReadRequest;
+use codex_project_intelligence::EvidenceReader;
 use codex_project_intelligence::HierarchyNodeId;
 use serde::Deserialize;
 use serde_json::json;
@@ -65,7 +67,7 @@ pub(super) async fn resolve_evidence(
                         .to_string(),
                 )
             })?;
-        let link = receipt.evidence;
+        let mut link = receipt.evidence.clone();
         let hit = store
             .get_hit(project_id, &link.context_map_entry_id)
             .await
@@ -83,10 +85,44 @@ pub(super) async fn resolve_evidence(
             )));
         }
         if hit.entry.value.source_fingerprint != link.source_fingerprint {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "blackboard evidence source changed after it was read: {}; call evidence_read again before recording knowledge",
-                hit.entry.id
-            )));
+            let Some(line_range) = link.line_range else {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "blackboard evidence source changed after it was read: {}; call evidence_read again before recording knowledge",
+                    hit.entry.id
+                )));
+            };
+            let reread = EvidenceReader::new(store.clone())
+                .read(EvidenceReadRequest {
+                    project_id: project_id.to_string(),
+                    project_roots: project_roots.to_vec(),
+                    project_root: Some(PathBuf::from(&hit.source.project_root)),
+                    relative_path: hit.source.relative_path.clone(),
+                    line_range: Some(line_range),
+                    max_bytes: receipt.comparison_byte_limit(),
+                })
+                .await
+                .map_err(|_| {
+                    FunctionCallError::RespondToModel(format!(
+                        "blackboard evidence source changed after it was read: {}; call evidence_read again before recording knowledge",
+                        hit.entry.id
+                    ))
+                })?;
+            let returned_range = match (reread.first_line, reread.last_line) {
+                (Some(start), Some(end)) => {
+                    Some(codex_project_intelligence::EvidenceLineRange { start, end })
+                }
+                _ => None,
+            };
+            if reread.truncated
+                || returned_range != Some(line_range)
+                || !receipt.matches_content(reread.content.as_bytes())
+            {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "blackboard evidence cited range changed after it was read: {}; call evidence_read again before recording knowledge",
+                    hit.entry.id
+                )));
+            }
+            link.source_fingerprint = reread.hit.entry.value.source_fingerprint;
         }
         node_ids.insert(hit.entry.value.node_id.clone());
         if seen_locators.insert((link.context_map_entry_id.clone(), link.line_range)) {

@@ -128,6 +128,7 @@ impl EvidenceReadTool {
                     source_fingerprint: result.hit.entry.value.source_fingerprint.clone(),
                     line_range: Some(line_range),
                 },
+                result.content.as_bytes(),
             );
             json!({"readReceiptId": receipt_id})
         });

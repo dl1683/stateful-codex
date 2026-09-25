@@ -12,6 +12,18 @@ const MAX_READ_RECEIPTS: usize = 1_024;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct EvidenceReadReceipt {
     pub(super) evidence: BlackboardEvidenceLink,
+    content_digest: [u8; 32],
+    content_bytes: u32,
+}
+
+impl EvidenceReadReceipt {
+    pub(super) fn comparison_byte_limit(&self) -> u32 {
+        self.content_bytes.saturating_add(1)
+    }
+
+    pub(super) fn matches_content(&self, content: &[u8]) -> bool {
+        self.content_digest == Sha256::digest(content).as_slice()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -39,6 +51,7 @@ impl EvidenceReadReceipts {
         thread_id: &str,
         source_call_id: &str,
         evidence: BlackboardEvidenceLink,
+        content: &[u8],
     ) -> String {
         let mut state = self
             .state
@@ -57,6 +70,9 @@ impl EvidenceReadReceipts {
         hasher.update(evidence.context_map_entry_id.as_str().as_bytes());
         hasher.update([0]);
         hasher.update(evidence.source_fingerprint.as_str().as_bytes());
+        let content_digest: [u8; 32] = Sha256::digest(content).into();
+        hasher.update([0]);
+        hasher.update(content_digest);
         let receipt_id = format!("stateful-read-{:x}", hasher.finalize());
 
         while state.receipts.len() >= MAX_READ_RECEIPTS {
@@ -71,7 +87,11 @@ impl EvidenceReadReceipts {
             StoredReceipt {
                 project_id: project_id.to_string(),
                 thread_id: thread_id.to_string(),
-                receipt: EvidenceReadReceipt { evidence },
+                receipt: EvidenceReadReceipt {
+                    evidence,
+                    content_digest,
+                    content_bytes: u32::try_from(content.len()).unwrap_or(u32::MAX),
+                },
             },
         );
         receipt_id

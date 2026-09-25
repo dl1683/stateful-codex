@@ -486,7 +486,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     assert_eq!(refreshed.files_indexed, 1);
     let context_store =
         ContextMapStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs())).await?;
-    let route = context_store
+    let original_route = context_store
         .file_hits_for_path(
             &created.project.id,
             &ProjectRelativePath::parse("decision.md")?,
@@ -518,7 +518,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     .await;
     let started = server
         .start_thread(ThreadStartParams {
-            project_id: Some(created.project.id),
+            project_id: Some(created.project.id.clone()),
             ..Default::default()
         })
         .await?;
@@ -532,6 +532,30 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
         .as_str()
         .expect("complete evidence read should return a receipt")
         .to_string();
+    std::fs::write(
+        project_root.path().join("decision.md"),
+        "# Revised decision\nDurable project state should route back to this exact source.\nThe exact source version must remain bound to the learned conclusion.\n",
+    )?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    let route = context_store
+        .file_hits_for_path(
+            &created.project.id,
+            &ProjectRelativePath::parse("decision.md")?,
+        )
+        .await?
+        .pop()
+        .expect("refreshed source route should exist");
+    assert_ne!(
+        original_route.entry.value.source_fingerprint,
+        route.entry.value.source_fingerprint
+    );
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
