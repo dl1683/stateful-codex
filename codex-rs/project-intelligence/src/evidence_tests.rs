@@ -6,6 +6,8 @@ use tempfile::TempDir;
 use super::*;
 use crate::ContextMapStore;
 use crate::HierarchyStore;
+use crate::ProjectIndexFileRequest;
+use crate::ProjectIndexReport;
 use crate::ProjectIndexRequest;
 use crate::ProjectIndexer;
 
@@ -75,4 +77,37 @@ async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
         .await
         .expect_err("changed source must not support evidence");
     assert!(matches!(error, EvidenceReadError::SourceChanged));
+
+    let report = ProjectIndexer::new(
+        HierarchyStore::open(&sqlite).await.expect("hierarchy"),
+        reader.context_map.clone(),
+    )
+    .refresh_file(ProjectIndexFileRequest {
+        project_id: "project-1".to_string(),
+        project_root: root.path().to_path_buf(),
+        relative_path: ProjectRelativePath::parse("evidence.txt").expect("relative path"),
+    })
+    .await
+    .expect("refresh changed source");
+    assert_eq!(
+        report,
+        ProjectIndexReport {
+            files_indexed: 1,
+            files_skipped: 0,
+            missing_files: 0,
+            truncated: false,
+        }
+    );
+    let refreshed = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            project_root: None,
+            relative_path: ProjectRelativePath::parse("evidence.txt").expect("relative path"),
+            line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            max_bytes: 64,
+        })
+        .await
+        .expect("read refreshed source");
+    assert_eq!(refreshed.content, "changed\ngamma\n");
 }

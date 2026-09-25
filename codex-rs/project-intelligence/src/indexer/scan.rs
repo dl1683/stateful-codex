@@ -9,6 +9,7 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::ContextMapCoverage;
+use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
 
 use super::ProjectIndexerError;
@@ -81,6 +82,21 @@ pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexer
         files_skipped,
         truncated,
     })
+}
+
+pub(super) fn scan_project_file(
+    root: &Path,
+    relative_path: &ProjectRelativePath,
+) -> Result<ScannedFile, ProjectIndexerError> {
+    let canonical_root = std::fs::canonicalize(root)?;
+    let path = root.join(relative_path.as_str());
+    let canonical_path = std::fs::canonicalize(&path)?;
+    if !canonical_path.starts_with(&canonical_root)
+        || !std::fs::metadata(&canonical_path)?.is_file()
+    {
+        return Err(ProjectIndexerError::InvalidRoot);
+    }
+    scan_file(root, &path)
 }
 
 fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerError> {

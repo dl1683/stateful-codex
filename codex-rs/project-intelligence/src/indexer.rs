@@ -12,6 +12,7 @@ mod scan;
 
 use scan::ScannedFile;
 use scan::normalized_relative_path;
+use scan::scan_project_file;
 use scan::scan_roots;
 
 use crate::ContextMapEntryId;
@@ -34,6 +35,13 @@ use crate::SourceFingerprint;
 pub struct ProjectIndexRequest {
     pub project_id: String,
     pub roots: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectIndexFileRequest {
+    pub project_id: String,
+    pub project_root: PathBuf,
+    pub relative_path: ProjectRelativePath,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -154,6 +162,83 @@ impl ProjectIndexer {
             }
         }
         Ok(report)
+    }
+
+    pub async fn refresh_file(
+        &self,
+        request: ProjectIndexFileRequest,
+    ) -> Result<ProjectIndexReport, ProjectIndexerError> {
+        validate_file_request(&request)?;
+        let project_id = request.project_id;
+        let project_root = request.project_root;
+        let relative_path = request.relative_path;
+        let scan_root = project_root.clone();
+        let scan_path = relative_path.clone();
+        let file = tokio::task::spawn_blocking(move || scan_project_file(&scan_root, &scan_path))
+            .await
+            .map_err(ProjectIndexerError::ScanTask)??;
+        let project_node_id = stable_id("project", &[&project_id])?;
+        self.hierarchy
+            .create_node(
+                project_node_id.clone(),
+                NewHierarchyNode {
+                    project_id: project_id.clone(),
+                    parent_id: None,
+                    kind: NodeKind::Project,
+                    project_root: None,
+                    relative_path: ProjectRelativePath::root(),
+                    region_anchor: None,
+                    source_fingerprint: None,
+                },
+            )
+            .await?;
+        let project_root = project_root.display().to_string();
+        let root_id = stable_id("root", &[&project_id, &project_root])?;
+        self.hierarchy
+            .create_node(
+                root_id.clone(),
+                NewHierarchyNode {
+                    project_id: project_id.clone(),
+                    parent_id: Some(project_node_id),
+                    kind: NodeKind::Directory,
+                    project_root: Some(project_root.clone()),
+                    relative_path: ProjectRelativePath::root(),
+                    region_anchor: None,
+                    source_fingerprint: None,
+                },
+            )
+            .await?;
+        let mut directory_nodes = HashMap::new();
+        let parent_id = self
+            .ensure_parent_directories(
+                &project_id,
+                &project_root,
+                &root_id,
+                relative_path.as_str(),
+                &mut directory_nodes,
+            )
+            .await?;
+        let file_id = stable_id(
+            "file",
+            &[&project_id, &project_root, relative_path.as_str()],
+        )?;
+        self.upsert_file_node(
+            &project_id,
+            &file_id,
+            parent_id,
+            &project_root,
+            relative_path,
+            file.fingerprint.clone(),
+        )
+        .await?;
+        self.upsert_context_entry(&project_id, &file_id, file)
+            .await?;
+        Ok(ProjectIndexReport {
+            files_indexed: 1,
+            files_skipped: 0,
+            missing_files: 0,
+            truncated: false,
+        })
     }
 
     async fn ensure_parent_directories(
@@ -345,6 +430,16 @@ fn validate_request(request: &ProjectIndexRequest) -> Result<(), ProjectIndexerE
         return Err(ProjectIndexerError::InvalidRequest);
     }
     if request.roots.iter().any(|root| !root.is_absolute()) {
+        return Err(ProjectIndexerError::InvalidRoot);
+    }
+    Ok(())
+}
+
+fn validate_file_request(request: &ProjectIndexFileRequest) -> Result<(), ProjectIndexerError> {
+    if request.project_id.is_empty() || request.relative_path.is_root() {
+        return Err(ProjectIndexerError::InvalidRequest);
+    }
+    if !request.project_root.is_absolute() {
         return Err(ProjectIndexerError::InvalidRoot);
     }
     Ok(())

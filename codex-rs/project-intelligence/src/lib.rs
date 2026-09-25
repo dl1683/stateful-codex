@@ -69,6 +69,7 @@ pub use hierarchy::NodeLifecycle;
 pub use hierarchy::ProjectRelativePath;
 pub use hierarchy::RegionAnchor;
 pub use hierarchy::SourceFingerprint;
+pub use indexer::ProjectIndexFileRequest;
 pub use indexer::ProjectIndexReport;
 pub use indexer::ProjectIndexRequest;
 pub use indexer::ProjectIndexer;
