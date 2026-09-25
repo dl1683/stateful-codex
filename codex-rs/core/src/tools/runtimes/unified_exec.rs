@@ -24,7 +24,7 @@ use crate::tools::runtimes::RuntimePathPrepends;
 use crate::tools::runtimes::apply_zsh_fork_path_prepend;
 use crate::tools::runtimes::exec_env_for_sandbox_permissions;
 use crate::tools::runtimes::maybe_wrap_shell_lc_with_snapshot;
-use crate::tools::runtimes::prepare_powershell_command_for_elevated_windows_sandbox;
+use crate::tools::runtimes::prepare_powershell_command_for_windows_sandbox;
 use crate::tools::runtimes::zsh_fork;
 use crate::tools::sandboxing::Approvable;
 use crate::tools::sandboxing::ApprovalAction;
@@ -567,7 +567,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
         {
             network.restore_and_disable_brokered_credentials(&mut env, &mut command);
         }
-        let command = prepare_powershell_command_for_elevated_windows_sandbox(
+        let command = prepare_powershell_command_for_windows_sandbox(
             &command,
             Some(&req.shell_type),
             attempt.sandbox_requested,

@@ -132,7 +132,7 @@ fn file_exists(path: &std::path::Path) -> Option<PathBuf> {
     }
 }
 
-// Store PowerShell can be inaccessible to the elevated sandbox account;
+// Store PowerShell can be inaccessible to Windows sandbox processes;
 // WindowsApps also contains valid Codex frameworks.
 fn is_inaccessible_windows_apps_powershell_path(path: &std::path::Path) -> bool {
     path.as_os_str()
@@ -280,12 +280,12 @@ fn get_powershell_shell() -> Option<DetectedShell> {
     })
 }
 
-/// Returns a replacement only when shell_path targets Store PowerShell and
-/// an elevated sandbox-compatible PowerShell executable can be discovered.
+/// Returns a replacement only when shell_path targets Store PowerShell and a
+/// Windows sandbox-compatible PowerShell executable can be discovered.
 ///
-/// The caller owns the elevated-sandbox policy decision. Normal shell discovery
+/// The caller owns the Windows sandbox policy decision. Normal shell discovery
 /// intentionally keeps the user's ordered PATH selection unchanged.
-pub fn fallback_powershell_shell_for_elevated_windows_sandbox(
+pub fn fallback_powershell_shell_for_windows_sandbox(
     shell_path: &std::path::Path,
 ) -> Option<DetectedShell> {
     if !cfg!(windows) || !targets_inaccessible_windows_apps_powershell(shell_path) {
