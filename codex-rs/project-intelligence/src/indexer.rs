@@ -8,8 +8,11 @@ use sha2::Digest;
 use sha2::Sha256;
 use thiserror::Error;
 
+mod regions;
 mod scan;
 
+use regions::mark_file_regions_missing;
+use regions::sync_file_regions;
 use scan::ScannedFile;
 use scan::normalized_relative_path;
 use scan::scan_project_file;
@@ -142,8 +145,9 @@ impl ProjectIndexer {
                 file.fingerprint.clone(),
             )
             .await?;
-            self.upsert_context_entry(&project_id, &file_id, file)
+            self.upsert_context_entry(&project_id, &file_id, &file)
                 .await?;
+            sync_file_regions(self, &project_id, &file_id, &file).await?;
             seen_files.insert(file_id);
         }
 
@@ -231,8 +235,9 @@ impl ProjectIndexer {
             file.fingerprint.clone(),
         )
         .await?;
-        self.upsert_context_entry(&project_id, &file_id, file)
+        self.upsert_context_entry(&project_id, &file_id, &file)
             .await?;
+        sync_file_regions(self, &project_id, &file_id, &file).await?;
         Ok(ProjectIndexReport {
             files_indexed: 1,
             files_skipped: 0,
@@ -339,7 +344,7 @@ impl ProjectIndexer {
         &self,
         project_id: &str,
         file_id: &HierarchyNodeId,
-        file: ScannedFile,
+        file: &ScannedFile,
     ) -> Result<(), ProjectIndexerError> {
         let raw_id = stable_id_text(
             "context",
@@ -349,9 +354,9 @@ impl ProjectIndexer {
         let value = NewContextMapEntry {
             project_id: project_id.to_string(),
             node_id: file_id.clone(),
-            source_fingerprint: file.fingerprint,
-            description: file.description,
-            routing_terms: file.routing_terms,
+            source_fingerprint: file.fingerprint.clone(),
+            description: file.description.clone(),
+            routing_terms: file.routing_terms.clone(),
             coverage: file.coverage,
         };
         let Some(existing) = self.context_map.get_entry(project_id, &id).await? else {
@@ -410,6 +415,7 @@ impl ProjectIndexer {
         project_id: &str,
         file: HierarchyNode,
     ) -> Result<(), ProjectIndexerError> {
+        mark_file_regions_missing(self, project_id, &file.id).await?;
         self.hierarchy
             .update_source_state(
                 project_id,
@@ -492,3 +498,7 @@ pub enum ProjectIndexerError {
     #[error("project index scan task failed: {0}")]
     ScanTask(tokio::task::JoinError),
 }
+
+#[cfg(test)]
+#[path = "indexer_tests.rs"]
+mod tests;

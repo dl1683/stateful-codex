@@ -14,6 +14,9 @@ use crate::SourceFingerprint;
 
 use super::ProjectIndexerError;
 use super::hex_digest;
+use super::regions::MAX_PROJECT_REGIONS;
+use super::regions::ScannedRegion;
+use super::regions::scan_regions;
 
 const MAX_FILES: usize = 20_000;
 const EXCERPT_BYTES: usize = 64 * 1024;
@@ -34,12 +37,14 @@ pub(super) struct ScannedFile {
     pub(super) description: String,
     pub(super) routing_terms: Vec<String>,
     pub(super) coverage: ContextMapCoverage,
+    pub(super) regions: Vec<ScannedRegion>,
 }
 
 pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexerError> {
     let mut files = Vec::new();
     let mut files_skipped = 0_u64;
     let mut truncated = false;
+    let mut regions_scanned = 0_usize;
     for root in roots {
         let mut builder = WalkBuilder::new(root);
         builder
@@ -69,7 +74,17 @@ pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexer
                 break;
             }
             match scan_file(root, entry.path()) {
-                Ok(file) => files.push(file),
+                Ok(file)
+                    if regions_scanned.saturating_add(file.regions.len())
+                        <= MAX_PROJECT_REGIONS =>
+                {
+                    regions_scanned += file.regions.len();
+                    files.push(file);
+                }
+                Ok(_) => {
+                    truncated = true;
+                    break;
+                }
                 Err(_) => files_skipped = files_skipped.saturating_add(1),
             }
         }
@@ -128,7 +143,16 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
     let text = (!excerpt.contains(&0)).then(|| String::from_utf8_lossy(&excerpt).into_owned());
     let (description, description_complete) = describe_file(&relative_path, text.as_deref());
     let routing_terms = routing_terms(&relative_path, text.as_deref());
-    let coverage = if exact_text && total_bytes <= EXCERPT_BYTES as u64 && description_complete {
+    let (regions, regions_truncated) = scan_regions(&relative_path, text.as_deref(), exact_text);
+    let coverage = if exact_text
+        && total_bytes <= EXCERPT_BYTES as u64
+        && (description_complete
+            || (!regions_truncated
+                && !regions.is_empty()
+                && regions
+                    .iter()
+                    .all(|region| region.coverage == ContextMapCoverage::Complete)))
+    {
         ContextMapCoverage::Complete
     } else {
         ContextMapCoverage::Partial
@@ -140,6 +164,7 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
         description,
         routing_terms,
         coverage,
+        regions,
     })
 }
 
