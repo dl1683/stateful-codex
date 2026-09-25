@@ -214,6 +214,12 @@ enum StdinPromptBehavior {
     OptionalAppend,
 }
 
+#[derive(Clone, Copy)]
+enum PositionalPromptStdin {
+    AppendIfPiped,
+    Ignore,
+}
+
 struct RequestIdSequencer {
     next: i64,
 }
@@ -973,7 +979,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             }
         }
         (None, root_prompt, imgs) => {
-            let prompt_text = resolve_root_prompt(root_prompt);
+            let positional_prompt_stdin = if stateful_mode.is_some() {
+                PositionalPromptStdin::Ignore
+            } else {
+                PositionalPromptStdin::AppendIfPiped
+            };
+            let prompt_text = resolve_root_prompt(root_prompt, positional_prompt_stdin);
             let mut items: Vec<UserInput> = imgs
                 .into_iter()
                 .map(|path| UserInput::LocalImage { path, detail: None })
@@ -2700,15 +2711,23 @@ fn resolve_prompt(prompt_arg: Option<String>) -> String {
     }
 }
 
-fn resolve_root_prompt(prompt_arg: Option<String>) -> String {
+fn resolve_root_prompt(
+    prompt_arg: Option<String>,
+    positional_prompt_stdin: PositionalPromptStdin,
+) -> String {
     match prompt_arg {
-        Some(prompt) if prompt != "-" => {
-            if let Some(stdin_text) = read_prompt_from_stdin(StdinPromptBehavior::OptionalAppend) {
-                prompt_with_stdin_context(&prompt, &stdin_text)
-            } else {
-                prompt
+        Some(prompt) if prompt != "-" => match positional_prompt_stdin {
+            PositionalPromptStdin::AppendIfPiped => {
+                if let Some(stdin_text) =
+                    read_prompt_from_stdin(StdinPromptBehavior::OptionalAppend)
+                {
+                    prompt_with_stdin_context(&prompt, &stdin_text)
+                } else {
+                    prompt
+                }
             }
-        }
+            PositionalPromptStdin::Ignore => prompt,
+        },
         maybe_dash => resolve_prompt(maybe_dash),
     }
 }

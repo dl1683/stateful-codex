@@ -1,8 +1,64 @@
 #![allow(clippy::expect_used)]
 
+use std::process::Stdio;
+use std::time::Duration;
+
+use anyhow::Context;
 use core_test_support::responses;
 use core_test_support::test_codex_exec::test_codex_exec;
 use pretty_assertions::assert_eq;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_stateful_with_positional_prompt_does_not_wait_for_open_stdin() -> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    let response_mock = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("response-1"),
+            responses::ev_assistant_message("message-1", "done"),
+            responses::ev_completed("response-1"),
+        ]),
+    )
+    .await;
+    let prompt = "Investigate without reading ambient stdin";
+
+    let mut command = test.cmd_with_server(&server);
+    command
+        .arg("--stateful")
+        .arg("collaborative")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg(prompt);
+    let mut child_command = tokio::process::Command::new(command.get_program());
+    child_command
+        .args(command.get_args())
+        .envs(
+            command
+                .get_envs()
+                .filter_map(|(key, value)| value.map(|value| (key, value))),
+        )
+        .current_dir(test.cwd_path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = child_command.spawn()?;
+    let _open_stdin = child.stdin.take().expect("stdin should be piped");
+    let output = tokio::time::timeout(Duration::from_secs(/*secs*/ 90), child.wait_with_output())
+        .await
+        .context("Stateful exec should not wait for ambient stdin to close")??;
+
+    assert!(
+        output.status.success(),
+        "Stateful exec failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let request = response_mock.single_request();
+    assert!(request.has_message_with_input_texts("user", |texts| texts == [prompt.to_string()]));
+    Ok(())
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_stateful_starts_the_run_before_the_first_model_request() -> anyhow::Result<()> {
