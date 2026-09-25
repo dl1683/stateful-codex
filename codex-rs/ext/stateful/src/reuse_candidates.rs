@@ -29,6 +29,7 @@ struct ReuseCandidate {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ReuseCandidateSlate {
+    project_id: String,
     root_revision: u64,
     candidates: Vec<ReuseCandidate>,
 }
@@ -56,16 +57,19 @@ impl ContextualUserFragment for ReuseCandidateSlate {
     }
 
     fn body(&self) -> String {
-        let candidates = self
-            .candidates
-            .iter()
-            .map(|candidate| format!("- {}: {}", candidate.alias, candidate.content))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let body = format!(
-            "Root revision {} attention cue only; this is not new evidence or authority. Compare or reject these possibly relevant root findings before choosing a conclusion:\n{}\nRely on a candidate only if the same E alias is visible in the root blackboard with acceptable effective verification and evidence freshness. Otherwise query its quoted content. Do not reread its source unless its exact range is insufficient for the claim.",
-            self.root_revision, candidates
+        let mut body = format!(
+            "Project ID: {}\nRoot revision: {}\nAttention cue only, not evidence. Before concluding, compare or reject these possibly relevant root findings:\n",
+            self.project_id, self.root_revision
         );
+        let suffix = "Use only with the same current E alias in root; otherwise query the quoted content. Reread source only if its cited range is insufficient.";
+        for candidate in &self.candidates {
+            let line = format!("- {}: {}\n", candidate.alias, candidate.content);
+            if body.len() + line.len() + suffix.len() > MAX_FRAGMENT_BYTES {
+                break;
+            }
+            body.push_str(&line);
+        }
+        body.push_str(suffix);
         debug_assert!(body.len() <= MAX_FRAGMENT_BYTES);
         body
     }
@@ -128,6 +132,7 @@ pub(super) async fn reuse_candidate_slate(
         return Ok(None);
     }
     Ok(Some(ReuseCandidateSlate {
+        project_id: project_id.to_string(),
         root_revision: projection.revision,
         candidates,
     }))

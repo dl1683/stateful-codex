@@ -163,8 +163,28 @@ async fn slate_combines_lexical_matches_with_one_high_priority_failure() {
     );
     let body = slate.body();
     assert!(body.len() <= MAX_FRAGMENT_BYTES);
-    assert!(body.contains("attention cue only"));
+    assert!(body.contains("Attention cue only"));
+    assert!(body.contains("Project ID: project-1"));
     assert!(body.contains("E1"));
+}
+
+#[test]
+fn slate_body_preserves_maximum_project_identity_within_its_hard_bound() {
+    let project_id = "p".repeat(512);
+    let slate = super::ReuseCandidateSlate {
+        project_id: project_id.clone(),
+        root_revision: u64::MAX,
+        candidates: (1..=4)
+            .map(|index| ReuseCandidate {
+                alias: format!("E{index}"),
+                content: "x".repeat(96),
+            })
+            .collect(),
+    };
+
+    let body = slate.body();
+    assert!(body.len() <= MAX_FRAGMENT_BYTES);
+    assert!(body.contains(&format!("Project ID: {project_id}")));
 }
 
 #[test]
