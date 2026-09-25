@@ -38,18 +38,21 @@ pub(super) fn project_intelligence_tools(
         )),
         Arc::new(blackboard_write::BlackboardRecordTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             projects.clone(),
             event_sink.clone(),
         )),
         Arc::new(blackboard_write::BlackboardBatchRecordTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             projects.clone(),
             event_sink.clone(),
         )),
         Arc::new(blackboard_update::BlackboardUpdateTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             projects.clone(),
             event_sink.clone(),
@@ -71,6 +74,7 @@ pub(super) fn project_intelligence_tools(
         )),
         Arc::new(evidence::EvidenceReadTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             projects.clone(),
         )),

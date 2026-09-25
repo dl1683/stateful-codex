@@ -83,6 +83,7 @@ struct BatchRecordArguments {
 
 pub(super) struct BlackboardRecordTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
@@ -91,12 +92,14 @@ pub(super) struct BlackboardRecordTool {
 impl BlackboardRecordTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             projects,
             event_sink,
@@ -141,8 +144,14 @@ impl BlackboardRecordTool {
             root_promotion,
             evidence,
         } = arguments;
-        let (evidence, inferred_node_id) =
-            resolve_evidence(&self.project_id, &self.services, project_roots, evidence).await?;
+        let (evidence, inferred_node_id) = resolve_evidence(
+            &self.project_id,
+            &self.thread_id,
+            &self.services,
+            project_roots,
+            evidence,
+        )
+        .await?;
         let node_id = match node_id {
             Some(node_id) => HierarchyNodeId::parse(node_id).map_err(respond)?,
             None => match inferred_node_id {
@@ -231,7 +240,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires current context-map evidence routes and records that the model reviewed those bytes as support; it does not mean the host proved the inference. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence so the locator covers the exact reviewed wording. A shell result alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
+            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&record_schema())
@@ -260,6 +269,7 @@ pub(super) struct BlackboardBatchRecordTool {
 impl BlackboardBatchRecordTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
@@ -267,6 +277,7 @@ impl BlackboardBatchRecordTool {
         Self {
             recorder: BlackboardRecordTool::new(
                 project_id.clone(),
+                thread_id,
                 services.clone(),
                 projects,
                 event_sink.clone(),

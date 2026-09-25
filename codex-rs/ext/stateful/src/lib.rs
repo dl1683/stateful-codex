@@ -4,6 +4,7 @@ mod autonomy;
 mod completion;
 mod events;
 mod outcome_world_state;
+mod read_receipts;
 mod root_blackboard;
 mod run_world_state;
 mod services;

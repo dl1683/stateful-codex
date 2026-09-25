@@ -48,6 +48,7 @@ async fn fixture() -> (
     BlackboardEntryId,
     BlackboardEntryId,
     PathBuf,
+    String,
 ) {
     let temp_dir = TempDir::new().expect("tempdir created");
     let project_root = temp_dir.path().join("workspace");
@@ -168,13 +169,31 @@ async fn fixture() -> (
         )
         .await
         .expect("successor inserts");
+    let receipt_id = services.read_receipts().issue(
+        PROJECT_ID,
+        "thread-1",
+        "read-call-1",
+        BlackboardEvidenceLink {
+            context_map_entry_id: ContextMapEntryId::parse("map-facts").expect("valid map ID"),
+            source_fingerprint: fingerprint(),
+            line_range: Some(EvidenceLineRange { start: 1, end: 1 }),
+        },
+    );
     let tool = BlackboardUpdateTool::new(
         PROJECT_ID.to_string(),
+        "thread-1".to_string(),
         services,
         Arc::new(InMemoryThreadStore::default()),
         None,
     );
-    (temp_dir, tool, entry_id, successor_id, project_root)
+    (
+        temp_dir,
+        tool,
+        entry_id,
+        successor_id,
+        project_root,
+        receipt_id,
+    )
 }
 
 fn mutation(value: serde_json::Value) -> MutationArguments {
@@ -183,7 +202,7 @@ fn mutation(value: serde_json::Value) -> MutationArguments {
 
 #[tokio::test]
 async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
-    let (_temp_dir, tool, entry_id, successor_id, project_root) = fixture().await;
+    let (_temp_dir, tool, entry_id, successor_id, project_root, receipt_id) = fixture().await;
     let promoted = tool
         .apply_mutation(
             mutation(json!({
@@ -212,11 +231,7 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
                 "confidenceBasisPoints": 9500,
                 "verification": "sourceVerified",
                 "evidence": [{
-                    "relativePath": "facts.md",
-                    "lineRange": {"start": 4, "end": 7}
-                }, {
-                    "relativePath": "facts.md",
-                    "lineRange": {"start": 12, "end": 15}
+                    "readReceiptId": receipt_id
                 }]
             })),
             "turn-revise",
@@ -229,20 +244,32 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
     expected_value.confidence =
         ConfidenceScore::from_basis_points(9_500).expect("valid confidence");
     expected_value.verification = BlackboardVerification::SourceVerified;
-    expected_value.evidence = vec![
-        BlackboardEvidenceLink {
-            context_map_entry_id: ContextMapEntryId::parse("map-facts").expect("valid map ID"),
-            source_fingerprint: fingerprint(),
-            line_range: Some(EvidenceLineRange { start: 4, end: 7 }),
-        },
-        BlackboardEvidenceLink {
-            context_map_entry_id: ContextMapEntryId::parse("map-facts").expect("valid map ID"),
-            source_fingerprint: fingerprint(),
-            line_range: Some(EvidenceLineRange { start: 12, end: 15 }),
-        },
-    ];
+    expected_value.evidence = vec![BlackboardEvidenceLink {
+        context_map_entry_id: ContextMapEntryId::parse("map-facts").expect("valid map ID"),
+        source_fingerprint: fingerprint(),
+        line_range: Some(EvidenceLineRange { start: 1, end: 1 }),
+    }];
     expected_value.provenance.source_id = "turn-revise".to_string();
     assert_eq!(revised.value, expected_value);
+
+    let unreceipted_error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "revise",
+                "entryId": entry_id,
+                "expectedRevision": 3,
+                "content": "A different source-verified conclusion."
+            })),
+            "turn-unreceipted",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("source-verified meaning requires a fresh receipt");
+    assert!(
+        unreceipted_error
+            .to_string()
+            .contains("fresh evidence_read")
+    );
 
     let stale_error = tool
         .apply_mutation(

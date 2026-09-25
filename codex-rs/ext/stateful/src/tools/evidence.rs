@@ -9,6 +9,7 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_project_intelligence::BlackboardEvidenceLink;
 use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::EvidenceLineRange;
 use codex_project_intelligence::EvidenceReadError;
@@ -50,6 +51,7 @@ struct LineRangeArguments {
 
 pub(super) struct EvidenceReadTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
 }
@@ -57,11 +59,13 @@ pub(super) struct EvidenceReadTool {
 impl EvidenceReadTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             projects,
         }
@@ -111,17 +115,21 @@ impl EvidenceReadTool {
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let context_map_entry_id = result.hit.entry.id.to_string();
         let returned_line_range = match (result.first_line, result.last_line) {
-            (Some(start), Some(end)) if !result.truncated => Some(json!({
-                "start": start,
-                "end": end,
-            })),
+            (Some(start), Some(end)) if !result.truncated => Some(EvidenceLineRange { start, end }),
             _ => None,
         };
-        let blackboard_evidence = returned_line_range.as_ref().map(|line_range| {
-            json!({
-                "contextMapEntryId": context_map_entry_id,
-                "lineRange": line_range,
-            })
+        let blackboard_evidence = returned_line_range.map(|line_range| {
+            let receipt_id = self.services.read_receipts().issue(
+                &self.project_id,
+                &self.thread_id,
+                &call.call_id,
+                BlackboardEvidenceLink {
+                    context_map_entry_id: result.hit.entry.id.clone(),
+                    source_fingerprint: result.hit.entry.value.source_fingerprint.clone(),
+                    line_range: Some(line_range),
+                },
+            );
+            json!({"readReceiptId": receipt_id})
         });
         let mut content = result.content;
         let original_bytes = content.len();
@@ -271,7 +279,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read a fingerprint-verified exact source or line range through the selected project's context map. When root blackboard evidence already names a source and lines, prefer this focused tool over a context-map search or broad shell read. Request only the smallest line range whose wording can change the answer. A changed indexed file is refreshed once and reread; sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that object unchanged into a blackboard record's evidence array so the persisted locator exactly matches the verified text. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
+            description: "Read a fingerprint-verified exact source or line range through the selected project's context map. When root blackboard evidence already names a source and lines, prefer this focused tool over a context-map search or broad shell read. Request only the smallest line range whose wording can change the answer. A changed indexed file is refreshed once and reread; sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

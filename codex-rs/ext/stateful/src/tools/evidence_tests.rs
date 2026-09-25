@@ -34,6 +34,7 @@ async fn changed_source_is_incrementally_refreshed_and_reread_once() {
     std::fs::write(&source_path, "# Policy\nThreshold: 60\n").expect("change source");
     let tool = EvidenceReadTool::new(
         "project-1".to_string(),
+        "thread-1".to_string(),
         services,
         Arc::new(InMemoryThreadStore::default()),
     );

@@ -349,6 +349,11 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
     assert_eq!(output["truncated"], false);
     assert_eq!(output["maxBytesApplied"], 12_288);
     assert_eq!(output["maxBytesClamped"], true);
+    assert!(
+        output["blackboardEvidence"]["readReceiptId"]
+            .as_str()
+            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+    );
     Ok(())
 }
 
@@ -447,7 +452,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     let project_root = TempDir::new()?;
     std::fs::write(
         project_root.path().join("decision.md"),
-        "Durable project state should route back to this exact source.\n",
+        "# Decision\nDurable project state should route back to this exact source.\nThe exact source version must remain bound to the learned conclusion.\n",
     )?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
@@ -489,6 +494,44 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
         .await?
         .pop()
         .expect("refreshed source route should exist");
+    let evidence_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "evidence-call",
+                    "evidence_read",
+                    &json!({
+                        "relativePath": "decision.md",
+                        "lineRange": {"start": 2, "end": 3}
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("evidence-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("evidence-done-message", "Evidence reviewed"),
+                responses::ev_completed("evidence-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+    run_turn(&mut server, &started.thread.id).await?;
+    let evidence_output: serde_json::Value = serde_json::from_str(
+        &evidence_log
+            .function_call_output_text("evidence-call")
+            .expect("evidence output should be text"),
+    )?;
+    let read_receipt_id = evidence_output["blackboardEvidence"]["readReceiptId"]
+        .as_str()
+        .expect("complete evidence read should return a receipt")
+        .to_string();
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -507,8 +550,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
                                 "importance": "high",
                                 "rootPromotion": "promoted",
                                 "evidence": [{
-                                    "relativePath": "decision.md",
-                                    "lineRange": {"start": 2, "end": 3}
+                                    "readReceiptId": read_receipt_id
                                 }]
                             },
                             {
@@ -559,12 +601,6 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
         ],
     )
     .await;
-    let started = server
-        .start_thread(ThreadStartParams {
-            project_id: Some(created.project.id),
-            ..Default::default()
-        })
-        .await?;
     run_turn(&mut server, &started.thread.id).await?;
 
     let requests = response_log.requests();
@@ -572,13 +608,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
     assert!(requests[0].body_contains_text("blackboard_relate"));
     assert!(requests[0].body_contains_text("context_map_refresh"));
-    assert!(
-        requests[0]
-            .body_contains_text("use them as established premises and do not reopen those sources")
-    );
-    assert!(requests[0].body_contains_text(
-        "Current host-audited sourceVerified root knowledge does not require a confirming source read"
-    ));
+    assert!(requests[0].body_contains_text("readReceiptId"));
     let batch_output: serde_json::Value = serde_json::from_str(
         &requests[1]
             .function_call_output_text("record-call")

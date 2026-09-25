@@ -104,6 +104,7 @@ impl MutationArguments {
 
 pub(super) struct BlackboardUpdateTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
@@ -112,12 +113,14 @@ pub(super) struct BlackboardUpdateTool {
 impl BlackboardUpdateTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             projects,
             event_sink,
@@ -280,6 +283,24 @@ impl BlackboardUpdateTool {
                         "revise must change at least one field".to_string(),
                     ));
                 }
+                let source_meaning_changed = kind.is_some_and(|kind| kind != update.kind)
+                    || content
+                        .as_ref()
+                        .is_some_and(|content| content != &update.content)
+                    || structured_value
+                        .as_ref()
+                        .is_some_and(|value| Some(value) != update.structured_value.as_ref())
+                    || (clear_structured_value && update.structured_value.is_some());
+                let revised_verification = verification.unwrap_or(update.verification);
+                if revised_verification == BlackboardVerification::SourceVerified
+                    && source_meaning_changed
+                    && evidence.is_none()
+                {
+                    return Err(FunctionCallError::RespondToModel(
+                        "changing source-verified meaning requires fresh evidence_read receipts"
+                            .to_string(),
+                    ));
+                }
                 update.expected_revision = expected_revision;
                 update.kind = kind.unwrap_or(update.kind);
                 update.content = content.unwrap_or(update.content);
@@ -292,14 +313,19 @@ impl BlackboardUpdateTool {
                     update.confidence =
                         ConfidenceScore::from_basis_points(confidence).map_err(respond)?;
                 }
-                update.verification = verification.unwrap_or(update.verification);
+                update.verification = revised_verification;
                 update.importance = importance.unwrap_or(update.importance);
                 update.root_promotion = root_promotion.unwrap_or(update.root_promotion);
                 if let Some(evidence) = evidence {
-                    update.evidence =
-                        resolve_evidence(&self.project_id, &self.services, project_roots, evidence)
-                            .await?
-                            .0;
+                    update.evidence = resolve_evidence(
+                        &self.project_id,
+                        &self.thread_id,
+                        &self.services,
+                        project_roots,
+                        evidence,
+                    )
+                    .await?
+                    .0;
                 }
             }
             MutationArguments::Supersede {
@@ -344,7 +370,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, or evidence changes. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. Each entry may appear once and each result succeeds or fails independently."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, or evidence changes. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. Each entry may appear once and each result succeeds or fails independently."
             ),
             strict: false,
             defer_loading: None,
