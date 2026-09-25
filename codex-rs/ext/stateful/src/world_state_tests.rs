@@ -80,13 +80,21 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("use them as established premises and do not reopen those sources")
+            .contains("the host rechecked that the cited source bytes still match")
     );
     assert!(
         rendered
             .body()
-            .contains("when evidence is stale, unavailable, or uncheckedThisTurn")
+            .contains("It did not prove that those bytes entail the entry")
     );
+    assert!(
+        rendered
+            .body()
+            .contains("Reuse these entries without routine rereading")
+    );
+    assert!(rendered.body().contains(
+        "compare only those candidates against the requested scope and evidence endpoint"
+    ));
     assert!(
         rendered
             .body()
@@ -95,13 +103,19 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("Do not query deeper state, search by every known filename")
+            .contains("search by every known filename, or reread the corpus")
     );
     assert!(
         rendered
             .body()
             .contains("do not persist cheap-to-recompute inventories")
     );
+    assert!(
+        rendered
+            .body()
+            .contains("Preserve decision-changing contrasts, exact values, qualifiers")
+    );
+    assert!(!rendered.body().contains("established premises"));
     assert!(rendered.body().contains("bounded batch tool"));
     assert!(
         rendered

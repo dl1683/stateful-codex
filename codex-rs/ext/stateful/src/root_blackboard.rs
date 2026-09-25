@@ -129,7 +129,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
     append_line(
         output,
         &format!(
-            "Treat sourceVerified entries with evidence=current as established premises already audited by the host this turn; cite their E and S handles without reopening raw source. Re-read only stale, unavailable, or unchecked evidence, missing detail, exact wording/format/code, active conflicts or material uncertainty, or a user's explicit verification request. Use focused deeper-blackboard or context-map queries only when root knowledge or its routes are insufficient. At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve any additional material conclusions in the final semantic obligation; use an empty alias list only after determining that no root finding is material. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
+            "At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve any additional material conclusions in the final semantic obligation; use an empty alias list only after determining that no root finding is material. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
         ),
     );
 }

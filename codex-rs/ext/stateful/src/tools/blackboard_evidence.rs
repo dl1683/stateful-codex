@@ -107,7 +107,7 @@ pub(super) async fn resolve_evidence(
 pub(super) fn evidence_schema() -> serde_json::Value {
     json!({
         "type": "array",
-        "description": "Current context-map routes supporting sourceVerified knowledge. Prefer copying the blackboardEvidence object returned by evidence_read unchanged; it contains the exact route and complete returned line range. Otherwise each item must use exactly one route identity: relativePath (plus projectRoot only when paths collide) or contextMapEntryId for an anchored/exact route. Never send both. IDs and fingerprints are resolved and checked by the tool.",
+        "description": "Current context-map routes linked to sourceVerified knowledge. Prefer copying the blackboardEvidence object returned by evidence_read unchanged; it contains the exact route and complete returned line range. Otherwise each item must use exactly one route identity: relativePath (plus projectRoot only when paths collide) or contextMapEntryId for an anchored/exact route. Never send both. IDs and fingerprints are resolved and checked by the tool; semantic entailment is still the model's responsibility.",
         "items": {
             "type": "object",
             "properties": {

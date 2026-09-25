@@ -143,7 +143,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions only when established project intelligence lacks required detail, reports stale/unchecked evidence or a conflict, exact source wording or format is needed, or the user requests fresh verification. Current host-audited sourceVerified root knowledge does not require a confirming source read. When a route reports knownKnowledge, use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
+            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. sourceVerified plus current means the cited bytes still match their stored fingerprints, not that the host proved the entry's inference. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

@@ -344,7 +344,11 @@ fn update_schema() -> serde_json::Value {
     revise_properties["clearStructuredValue"] = json!({"type": "boolean"});
     revise_properties["confidenceBasisPoints"] =
         json!({"type": "integer", "minimum": 0, "maximum": 10000});
-    revise_properties["verification"] = json!({"type": "string", "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"]});
+    revise_properties["verification"] = json!({
+        "type": "string",
+        "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"],
+        "description": "sourceVerified records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession."
+    });
     revise_properties["importance"] =
         json!({"type": "string", "enum": ["critical", "high", "normal", "low"]});
     revise_properties["rootPromotion"] =
