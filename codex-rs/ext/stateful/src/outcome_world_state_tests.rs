@@ -149,3 +149,48 @@ fn long_outcomes_are_truncated_on_utf8_boundaries() {
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
     assert!(std::str::from_utf8(rendered.body().as_bytes()).is_ok());
 }
+
+#[test]
+fn verbose_learning_cannot_hide_uncertainty_or_blockers() {
+    let mut prior = outcome(
+        "run-balanced",
+        "Continue from a complex investigation.",
+        "Several conclusions are reusable, with one uncertainty and blocker.",
+        "placeholder",
+    );
+    let packet = &mut prior
+        .final_obligation
+        .as_mut()
+        .expect("final obligation")
+        .value
+        .packet;
+    packet.learning = (1..=8)
+        .map(|index| format!("Learned conclusion {index}."))
+        .collect();
+    packet.implication.clear();
+    packet.uncertainty = vec!["The controlling authority is still uncertain.".to_string()];
+    packet.blockers = vec!["The signed amendment is not available.".to_string()];
+
+    let rendered = project_outcomes_world_state_section(available(vec![prior]))
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("recent outcome should render");
+
+    assert!(rendered.body().contains("Learned: Learned conclusion 1."));
+    assert!(
+        rendered
+            .body()
+            .contains("Uncertainty: The controlling authority is still uncertain.")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("Blocker: The signed amendment is not available.")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("Prior final obligation shortened by the bounded view.")
+    );
+    assert!(!rendered.body().contains("Learned conclusion 5."));
+    assert!(rendered.body().len() <= MAX_BODY_BYTES);
+}

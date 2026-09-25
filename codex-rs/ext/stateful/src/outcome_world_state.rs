@@ -178,32 +178,48 @@ fn render_outcome(output: &mut String, outcome: &StatefulRunOutcome) {
 }
 
 fn render_packet(output: &mut String, packet: &ObligationPacket) {
-    let mut rendered = 0;
-    for (label, items) in [
+    let categories = [
         ("Learned", &packet.learning),
         ("Implication", &packet.implication),
         ("Strategy", &packet.strategy),
         ("Changed", &packet.changed),
         ("Uncertainty", &packet.uncertainty),
         ("Blocker", &packet.blockers),
-    ] {
-        for item in items {
-            if rendered == MAX_PACKET_ITEMS {
+    ];
+    let total_items = categories
+        .iter()
+        .map(|(_, items)| items.len())
+        .sum::<usize>();
+    let mut rendered = 0;
+    let mut item_index = 0;
+    while rendered < MAX_PACKET_ITEMS {
+        let mut found_item = false;
+        for (label, items) in &categories {
+            if let Some(item) = items.get(item_index) {
                 line(
                     output,
-                    "  Prior final obligation shortened by the bounded view.",
+                    &format!(
+                        "  {label}: {}",
+                        bounded_single_line(item, MAX_PACKET_ITEM_BYTES)
+                    ),
                 );
-                return;
+                rendered += 1;
+                found_item = true;
+                if rendered == MAX_PACKET_ITEMS {
+                    break;
+                }
             }
-            line(
-                output,
-                &format!(
-                    "  {label}: {}",
-                    bounded_single_line(item, MAX_PACKET_ITEM_BYTES)
-                ),
-            );
-            rendered += 1;
         }
+        if !found_item {
+            break;
+        }
+        item_index += 1;
+    }
+    if rendered < total_items {
+        line(
+            output,
+            "  Prior final obligation shortened by the bounded view.",
+        );
     }
 }
 

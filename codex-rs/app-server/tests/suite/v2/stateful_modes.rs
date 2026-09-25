@@ -66,8 +66,19 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                         "materialRootFindings": [],
                         "completionIdempotencyKey": "autonomous-result",
                         "finalObligation": {
-                            "learning": ["The unattended investigation reached its evidence-grounded result."],
-                            "implication": ["The run can now complete without user intervention."]
+                            "learning": [
+                                "The unattended investigation reached its evidence-grounded result.",
+                                "Supporting learning 2.",
+                                "Supporting learning 3.",
+                                "Supporting learning 4.",
+                                "Supporting learning 5.",
+                                "Supporting learning 6.",
+                                "Supporting learning 7.",
+                                "Supporting learning 8."
+                            ],
+                            "implication": ["The run can now complete without user intervention."],
+                            "uncertainty": ["The external dependency remains uncertain."],
+                            "blockers": ["The signed approval is still unavailable."]
                         }
                     })
                     .to_string(),
@@ -130,6 +141,10 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
         )
     );
     assert!(requests[3].body_contains_text("The run can now complete without user intervention."));
+    assert!(
+        requests[3].body_contains_text("Uncertainty: The external dependency remains uncertain.")
+    );
+    assert!(requests[3].body_contains_text("Blocker: The signed approval is still unavailable."));
     Ok(())
 }
 
