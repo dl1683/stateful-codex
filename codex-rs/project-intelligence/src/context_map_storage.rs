@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use codex_state::SqliteConfig;
 use sqlx::FromRow;
 use sqlx::SqliteConnection;
@@ -28,7 +31,17 @@ use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
 const INITIAL_REVISION: i64 = 1;
+const MAX_QUERY_HITS_PER_SOURCE: usize = 3;
+const MAX_REGIONS_PER_SOURCE: u32 = 64;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
+#[derive(FromRow)]
+struct SearchCandidate {
+    id: String,
+    project_root: String,
+    relative_path: String,
+    kind: String,
+}
 
 #[derive(Clone)]
 pub struct ContextMapStore {
@@ -149,21 +162,53 @@ impl ContextMapStore {
     ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
         query.validate()?;
         let expression = search_expression(&query.text)?;
-        let limit = i64::from(query.max_results);
+        let candidate_limit = i64::from(
+            query
+                .max_results
+                .saturating_mul(MAX_REGIONS_PER_SOURCE.saturating_add(1)),
+        );
         let mut connection = self.pool.acquire().await?;
-        let entry_ids = sqlx::query_scalar::<_, String>(
-            "SELECT entry.id
+        let candidates = sqlx::query_as::<_, SearchCandidate>(
+            "SELECT entry.id, node.project_root, node.relative_path, node.kind
              FROM context_map_search AS search
              JOIN context_map_entries AS entry ON entry.rowid = search.rowid
+             JOIN hierarchy_nodes AS node ON node.id = entry.node_id
              WHERE context_map_search MATCH ? AND entry.project_id = ?
              ORDER BY bm25(context_map_search), entry.id
              LIMIT ?",
         )
         .bind(expression)
         .bind(&query.project_id)
-        .bind(limit)
+        .bind(candidate_limit)
         .fetch_all(&mut *connection)
         .await?;
+        let sources_with_regions = candidates
+            .iter()
+            .filter(|candidate| candidate.kind == "region")
+            .map(SearchCandidate::source_key)
+            .collect::<HashSet<_>>();
+        let max_results =
+            usize::try_from(query.max_results).map_err(|_| ContextMapError::InvalidQuery)?;
+        let mut source_hits = HashMap::new();
+        let mut entry_ids = Vec::with_capacity(max_results);
+        for candidate in candidates {
+            if !matches!(candidate.kind.as_str(), "file" | "region") {
+                return Err(ContextMapStoreError::CorruptEntry(candidate.id));
+            }
+            let source_key = candidate.source_key();
+            if candidate.kind == "file" && sources_with_regions.contains(&source_key) {
+                continue;
+            }
+            let hits = source_hits.entry(source_key).or_insert(0_usize);
+            if *hits == MAX_QUERY_HITS_PER_SOURCE {
+                continue;
+            }
+            *hits += 1;
+            entry_ids.push(candidate.id);
+            if entry_ids.len() == max_results {
+                break;
+            }
+        }
         let mut hits = Vec::with_capacity(entry_ids.len());
         for raw_id in entry_ids {
             let id = ContextMapEntryId::parse(&raw_id)
@@ -283,6 +328,12 @@ impl ContextMapStore {
             .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
         transaction.commit().await?;
         Ok(entry)
+    }
+}
+
+impl SearchCandidate {
+    fn source_key(&self) -> (String, String) {
+        (self.project_root.clone(), self.relative_path.clone())
     }
 }
 

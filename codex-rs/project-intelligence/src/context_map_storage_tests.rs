@@ -9,6 +9,7 @@ use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;
 use crate::NewHierarchyNode;
 use crate::ProjectRelativePath;
+use crate::RegionAnchor;
 
 fn fingerprint(value: &str) -> SourceFingerprint {
     SourceFingerprint::parse(value).expect("valid fingerprint")
@@ -219,6 +220,116 @@ async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
             source: readme_source(),
             freshness: ContextMapFreshness::Stale,
         }]
+    );
+}
+
+#[tokio::test]
+async fn query_prefers_bounded_regions_without_one_source_crowding_results() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    let file = create_file(&hierarchy).await;
+    let mut file_entry = new_entry("sha256:abc");
+    file_entry.description = "shared route file summary".to_string();
+    file_entry.routing_terms = vec!["shared".to_string(), "route".to_string()];
+    context_map
+        .create_entry(
+            ContextMapEntryId::parse("map-readme").expect("valid entry ID"),
+            file_entry,
+        )
+        .await
+        .expect("file route should insert");
+
+    for index in 0..4 {
+        let node_id =
+            HierarchyNodeId::parse(format!("node-region-{index}")).expect("valid region ID");
+        let locator = format!("{}-{}", index * 10 + 1, index * 10 + 10);
+        hierarchy
+            .create_node(
+                node_id.clone(),
+                NewHierarchyNode {
+                    project_id: "project-1".to_string(),
+                    parent_id: Some(file.id.clone()),
+                    kind: NodeKind::Region,
+                    project_root: Some("C:\\workspace".to_string()),
+                    relative_path: ProjectRelativePath::parse("README.md").expect("valid path"),
+                    region_anchor: Some(RegionAnchor::new("lines", locator).expect("valid anchor")),
+                    source_fingerprint: Some(fingerprint("sha256:abc")),
+                },
+            )
+            .await
+            .expect("region should insert");
+        context_map
+            .create_entry(
+                ContextMapEntryId::parse(format!("map-region-{index}")).expect("valid entry ID"),
+                NewContextMapEntry {
+                    project_id: "project-1".to_string(),
+                    node_id,
+                    source_fingerprint: fingerprint("sha256:abc"),
+                    description: format!("shared route region {index}"),
+                    routing_terms: vec!["shared".to_string(), "route".to_string()],
+                    coverage: ContextMapCoverage::Complete,
+                },
+            )
+            .await
+            .expect("region route should insert");
+    }
+
+    let other_file_id = HierarchyNodeId::parse("node-other-file").expect("valid file ID");
+    hierarchy
+        .create_node(
+            other_file_id.clone(),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(HierarchyNodeId::parse("node-root").expect("valid root ID")),
+                kind: NodeKind::File,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("OTHER.md").expect("valid path"),
+                region_anchor: None,
+                source_fingerprint: Some(fingerprint("sha256:other")),
+            },
+        )
+        .await
+        .expect("other file should insert");
+    context_map
+        .create_entry(
+            ContextMapEntryId::parse("map-other").expect("valid entry ID"),
+            NewContextMapEntry {
+                project_id: "project-1".to_string(),
+                node_id: other_file_id,
+                source_fingerprint: fingerprint("sha256:other"),
+                description: "shared route other file".to_string(),
+                routing_terms: vec!["shared".to_string(), "route".to_string()],
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("other route should insert");
+
+    let hits = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "shared route".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("query should succeed");
+    assert_eq!(hits.len(), 4);
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.source.relative_path.as_str() == "README.md")
+            .count(),
+        3
+    );
+    assert!(
+        hits.iter()
+            .filter(|hit| hit.source.relative_path.as_str() == "README.md")
+            .all(|hit| hit.source.region_anchor.is_some())
+    );
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| hit.source.relative_path.as_str() == "OTHER.md")
+            .count(),
+        1
     );
 }
 
