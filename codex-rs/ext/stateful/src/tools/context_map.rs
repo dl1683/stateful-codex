@@ -19,6 +19,7 @@ use codex_project_intelligence::ContextMapListQuery;
 use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
+use codex_project_intelligence::RegionAnchor;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
@@ -36,7 +37,7 @@ const REFRESH_TOOL_NAME: &str = "context_map_refresh";
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 20;
 const REFRESH_ROUTE_LIMIT: u32 = 20;
-const MAX_HEADLINE_BYTES: usize = 240;
+const MAX_HEADLINE_BYTES: usize = 512;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -159,7 +160,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are routing metadata, not evidence. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
+            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are routing metadata, not evidence. Pass a returned source.lineRange unchanged to evidence_read for exact verification. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -353,6 +354,9 @@ fn route_json(
         source.insert("projectRoot".to_string(), json!(hit.source.project_root));
     }
     if let Some(region_anchor) = hit.source.region_anchor {
+        if let Some(line_range) = line_range_json(&region_anchor) {
+            source.insert("lineRange".to_string(), line_range);
+        }
         source.insert("regionAnchor".to_string(), json!(region_anchor));
     }
     let mut route = json!({
@@ -369,6 +373,16 @@ fn route_json(
         });
     }
     Ok(route)
+}
+
+fn line_range_json(anchor: &RegionAnchor) -> Option<serde_json::Value> {
+    if anchor.scheme != "lines" {
+        return None;
+    }
+    let (start, end) = anchor.locator.split_once('-')?;
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    (start > 0 && end >= start).then(|| json!({"start": start, "end": end}))
 }
 
 async fn route_knowledge(

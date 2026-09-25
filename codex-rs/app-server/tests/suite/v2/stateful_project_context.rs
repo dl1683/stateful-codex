@@ -358,6 +358,132 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
 }
 
 #[tokio::test]
+async fn model_can_verify_the_exact_line_range_returned_by_context_routing() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let context_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "context-call",
+                    "context_map_query",
+                    &json!({"text": "decisive_route_fact"}).to_string(),
+                ),
+                responses::ev_completed("context-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("context-done-message", "Route found"),
+                responses::ev_completed("context-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    let source = (1..=70)
+        .map(|line| {
+            if line == 70 {
+                "decisive_route_fact".to_string()
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(project_root.path().join("facts.md"), source)?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Region routing project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-region-routing-project".to_string(),
+            },
+        })
+        .await?;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+    let context_requests = context_log.requests();
+    let context_output: serde_json::Value = serde_json::from_str(
+        &context_requests[1]
+            .function_call_output_text("context-call")
+            .expect("context output should be text"),
+    )?;
+    let route = &context_output["data"][0]["source"];
+    assert_eq!(route["relativePath"], "facts.md");
+    assert_eq!(route["lineRange"], json!({"start": 65, "end": 70}));
+
+    let evidence_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "evidence-call",
+                    "evidence_read",
+                    &json!({
+                        "relativePath": route["relativePath"],
+                        "lineRange": route["lineRange"]
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("evidence-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("evidence-done-message", "Evidence verified"),
+                responses::ev_completed("evidence-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let evidence_output: serde_json::Value = serde_json::from_str(
+        &evidence_log
+            .function_call_output_text("evidence-call")
+            .expect("evidence output should be text"),
+    )?;
+    assert_eq!(evidence_output["firstLine"], 65);
+    assert_eq!(evidence_output["lastLine"], 70);
+    assert_eq!(evidence_output["truncated"], false);
+    assert!(
+        evidence_output["content"]
+            .as_str()
+            .is_some_and(|content| content.ends_with("decisive_route_fact"))
+    );
+    assert!(
+        evidence_output["blackboardEvidence"]["readReceiptId"]
+            .as_str()
+            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let response_log = responses::mount_sse_sequence(
