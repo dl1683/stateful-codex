@@ -5,6 +5,8 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use codex_app_server::INVALID_PARAMS_ERROR_CODE;
+use codex_app_server_protocol::BlackboardConfirmParams;
+use codex_app_server_protocol::BlackboardConfirmResponse;
 use codex_app_server_protocol::BlackboardEntityKind;
 use codex_app_server_protocol::BlackboardEntryState;
 use codex_app_server_protocol::BlackboardEvidenceFreshness;
@@ -174,6 +176,29 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
             },
         })
         .await?;
+    let confirmed: BlackboardConfirmResponse = server
+        .request(|request_id| ClientRequest::BlackboardConfirm {
+            request_id,
+            params: BlackboardConfirmParams {
+                project_id: created.project.id.clone(),
+                entry_id: instruction.entry.id.clone(),
+                expected_revision: instruction.entry.revision,
+            },
+        })
+        .await?;
+    let mut expected_confirmation = instruction.entry;
+    expected_confirmation.verification = BlackboardVerification::UserConfirmed;
+    expected_confirmation.provenance = BlackboardProvenance {
+        kind: BlackboardProvenanceKind::User,
+        source_id: format!(
+            "blackboard-confirm:{}:{}",
+            expected_confirmation.id, expected_confirmation.revision
+        ),
+    };
+    expected_confirmation.revision += 1;
+    expected_confirmation.updated_at = confirmed.entry.updated_at;
+    assert_eq!(confirmed.entry, expected_confirmation);
+    let instruction = confirmed;
     let decision_params = BlackboardUpsertParams {
         project_id: created.project.id.clone(),
         entry_id: "decision-1".to_string(),
@@ -288,7 +313,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
     );
 
     let mut notifications = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..5 {
         notifications.push(
             server
                 .read_notification::<BlackboardUpdatedNotification>("blackboard/updated")
@@ -303,6 +328,12 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 BlackboardEntityKind::Entry,
                 "instruction-1",
                 1
+            ),
+            notification(
+                &created.project.id,
+                BlackboardEntityKind::Entry,
+                "instruction-1",
+                2
             ),
             notification(
                 &created.project.id,

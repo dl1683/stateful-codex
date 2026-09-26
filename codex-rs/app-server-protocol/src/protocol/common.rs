@@ -831,6 +831,12 @@ client_request_definitions! {
         serialization: global("project-intelligence"),
         response: v2::BlackboardUpsertResponse,
     },
+    #[experimental("blackboard/confirm")]
+    BlackboardConfirm => "blackboard/confirm" {
+        params: v2::BlackboardConfirmParams,
+        serialization: global("project-intelligence"),
+        response: v2::BlackboardConfirmResponse,
+    },
     #[experimental("blackboard/relate")]
     BlackboardRelate => "blackboard/relate" {
         params: v2::BlackboardRelateParams,

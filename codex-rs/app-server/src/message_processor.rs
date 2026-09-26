@@ -1538,6 +1538,9 @@ impl MessageProcessor {
             ClientRequest::BlackboardUpsert { params, .. } => {
                 self.blackboard_processor.upsert(params).await
             }
+            ClientRequest::BlackboardConfirm { params, .. } => {
+                self.blackboard_processor.confirm(params).await
+            }
             ClientRequest::BlackboardRelate { params, .. } => {
                 self.blackboard_processor.relate(params).await
             }

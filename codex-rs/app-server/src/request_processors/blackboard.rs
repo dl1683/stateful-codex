@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use codex_app_server_protocol::BlackboardConfirmParams;
+use codex_app_server_protocol::BlackboardConfirmResponse;
 use codex_app_server_protocol::BlackboardEntryState as ApiEntryState;
 use codex_app_server_protocol::BlackboardQueryParams;
 use codex_app_server_protocol::BlackboardQueryResponse;
@@ -14,11 +16,14 @@ use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryScope;
 use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardEntryUpdate;
+use codex_project_intelligence::BlackboardProvenance;
+use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::BlackboardRelationId;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardStructuredValue;
+use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::HierarchyStore;
@@ -237,6 +242,65 @@ impl BlackboardRequestProcessor {
         Ok(Some(
             BlackboardRelateResponse {
                 relation: api_relation(relation),
+            }
+            .into(),
+        ))
+    }
+
+    pub(crate) async fn confirm(
+        &self,
+        params: BlackboardConfirmParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        self.require_project(&params.project_id).await?;
+        let entry_id = BlackboardEntryId::parse(params.entry_id)
+            .map_err(|error| invalid_params(error.to_string()))?;
+        let store = self.store().await?;
+        let current = store
+            .get_entry(&params.project_id, &entry_id)
+            .await
+            .map_err(blackboard_error)?
+            .ok_or_else(|| invalid_params(format!("blackboard entry not found: {entry_id}")))?;
+        if current.state != BlackboardEntryState::Active {
+            return Err(invalid_params(
+                "only active blackboard knowledge can be user-confirmed",
+            ));
+        }
+        let entry = store
+            .update_entry(
+                &params.project_id,
+                &entry_id,
+                BlackboardEntryUpdate {
+                    expected_revision: params.expected_revision,
+                    kind: current.value.kind,
+                    content: current.value.content,
+                    structured_value: current.value.structured_value,
+                    confidence: current.value.confidence,
+                    verification: BlackboardVerification::UserConfirmed,
+                    importance: current.value.importance,
+                    root_promotion: current.value.root_promotion,
+                    evidence: current.value.evidence,
+                    state: current.state,
+                    superseded_by: current.superseded_by,
+                    provenance: BlackboardProvenance {
+                        kind: BlackboardProvenanceKind::User,
+                        source_id: format!(
+                            "blackboard-confirm:{}:{}",
+                            entry_id, params.expected_revision
+                        ),
+                    },
+                },
+            )
+            .await
+            .map_err(blackboard_error)?;
+        self.event_sink.emit(StatefulEvent::BlackboardUpdated {
+            project_id: entry.value.project_id.clone(),
+            entity_kind: BlackboardEntityKind::Entry,
+            entity_id: entry.id.to_string(),
+            revision: entry.revision,
+        });
+        Ok(Some(
+            BlackboardConfirmResponse {
+                entry: api_entry(entry),
             }
             .into(),
         ))

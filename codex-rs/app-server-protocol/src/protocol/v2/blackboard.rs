@@ -63,6 +63,23 @@ pub struct BlackboardUpsertResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+pub struct BlackboardConfirmParams {
+    pub project_id: String,
+    pub entry_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct BlackboardConfirmResponse {
+    pub entry: BlackboardEntry,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
 pub struct BlackboardRelateParams {
     pub project_id: String,
     pub relation_id: String,
