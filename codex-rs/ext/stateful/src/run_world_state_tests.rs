@@ -82,6 +82,11 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
+            .contains("historicalFinding from blackboard_update_batch")
+    );
+    assert!(
+        rendered
+            .body()
             .contains("every intermediate update requires meaningful semantic change")
     );
     assert!(

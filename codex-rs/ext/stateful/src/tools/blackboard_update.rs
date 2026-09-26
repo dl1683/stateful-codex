@@ -183,15 +183,7 @@ impl BlackboardUpdateTool {
             {
                 Ok(entry) => {
                     updated += 1;
-                    results.push(json!({
-                        "index": index,
-                        "action": action,
-                        "entryId": entry.id.to_string(),
-                        "revision": entry.revision,
-                        "state": entry.state,
-                        "rootPromotion": entry.value.root_promotion,
-                        "updated": true,
-                    }));
+                    results.push(successful_update_result(index, action, &entry));
                 }
                 Err(error) => results.push(json!({
                     "index": index,
@@ -370,7 +362,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, or evidence changes. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. Each entry may appear once and each result succeeds or fails independently."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, or evidence changes. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. A successful supersede or retire result includes historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
             ),
             strict: false,
             defer_loading: None,
@@ -391,6 +383,32 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
     {
         Box::pin(self.handle_call(call))
     }
+}
+
+fn successful_update_result(
+    index: usize,
+    action: &str,
+    entry: &BlackboardEntry,
+) -> serde_json::Value {
+    let mut result = json!({
+        "index": index,
+        "action": action,
+        "entryId": entry.id.to_string(),
+        "revision": entry.revision,
+        "state": entry.state,
+        "rootPromotion": entry.value.root_promotion,
+        "updated": true,
+    });
+    if matches!(
+        entry.state,
+        BlackboardEntryState::Superseded | BlackboardEntryState::Tombstoned
+    ) {
+        result["historicalFinding"] = json!({
+            "entryId": entry.id.to_string(),
+            "revision": entry.revision,
+        });
+    }
+    result
 }
 
 fn update_schema() -> serde_json::Value {
