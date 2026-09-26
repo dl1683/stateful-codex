@@ -658,6 +658,18 @@ were outside the project. This makes the token totals conservative and prevents
 treating them as a clean benchmark; it does not create an alternative second-
 thread source path because that thread performed no filesystem read.
 
+Third independent thread `01a0dec6-c7cc-7603-86d5-61988c48dbdf` removed the
+evaluation-specific instruction to persist a continuity meta-finding. It reused
+current E1, made no filesystem or context-map call, and needed only one
+`stateful_run_update` completion call across two model requests. The turn used
+50,457 total tokens, 11,417 uncached input plus output, 2,554 bytes of tool
+output, and 17.1 seconds. Versus the cold first turn, total tokens fell 66.16%
+and uncached input plus output fell 60.34%. This control falsifies the suspected
+need for record/query/promote during ordinary fresh-thread reuse; those calls in
+the prior turn followed its explicit evaluation prompt. The result is still a
+tiny repeated-answer control over already-rich state, not representative
+project-lifetime proof.
+
 The canary also preserves its limitations. The second prompt explicitly asked
 the model to persist a continuity conclusion, causing a record/query/promote
 sequence that ordinary answer reuse should not need. Failed pre-runs with
@@ -677,10 +689,6 @@ Do not launch another broad benchmark yet. Close these small gates first:
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
    from the small local fixture.
-2. **Continuity efficiency.** Remove avoidable persistence round trips when a
-   fresh thread can answer directly from adequate current root knowledge, then
-   verify the behavior without an evaluation-specific request to record a
-   meta-finding.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
 and uncached tokens, model requests, tool-output volume, wall time, state writes
@@ -688,11 +696,9 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Use the completed canary to tighten the ordinary reuse path before another broad
-benchmark. Determine why a fresh-thread answer that already had adequate current
-root knowledge spent three calls recording, querying, and promoting a
-meta-continuity fact, and prevent equivalent low-value persistence without
-weakening reusable project learning. Separately, collect the new scan and
-publication diagnostics on the next suitable real repository refresh, including
-database size and routes used versus indexed; do not infer issue #19's cause
-from this tiny fixture.
+Collect the new scan and publication diagnostics on the next suitable real
+repository refresh, including database size and routes used versus indexed. Do
+not infer issue #19's cause from the tiny continuity fixture or launch a broad
+benchmark merely to obtain this measurement. Until suitable compute is
+available, continue small source-grounded mechanism probes against the open
+issues rather than speculatively rewriting the indexer.

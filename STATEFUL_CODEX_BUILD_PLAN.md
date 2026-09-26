@@ -1276,9 +1276,9 @@ The fresh turn therefore avoided the prior source range and reduced uncached
 input plus output by 47.64%, despite recording an evaluation-specific continuity
 finding before completion. This two-turn fixture is encouraging mechanism and
 directional cost evidence only; it is not representative longitudinal proof.
-The second turn's record/query/promote sequence also shows that meta-findings can
-consume avoidable state round trips when the requested answer is already
-available in current root knowledge.
+The second turn's record/query/promote sequence shows the cost of explicitly
+requesting an evaluation meta-finding; it does not by itself establish product
+overhead.
 
 The first fixture refresh indexed four diagnostic stdout/stderr artifacts
 because those files were initially redirected inside the selected directory;
@@ -1287,6 +1287,18 @@ thread's logs were written outside the project. That contamination makes the
 token measurements conservative and unsuitable as a clean benchmark, but it
 does not supply the second thread with an alternative file-read path because
 the second thread made no filesystem read.
+
+A third independent control thread,
+`01a0dec6-c7cc-7603-86d5-61988c48dbdf`, removed the instruction to persist a
+continuity meta-finding. It answered from current E1, performed no filesystem or
+context-map call, and used only one `stateful_run_update` completion call. The
+turn required two model requests, 50,457 total tokens, 11,417 uncached input
+plus output, 2,554 bytes of tool output, and 17.1 seconds. Relative to the cold
+first turn, total tokens fell 66.16% and uncached input plus output fell 60.34%.
+This falsifies the hypothesis that normal fresh-thread reuse inherently needs
+the earlier record/query/promote sequence. It remains a tiny repeated-answer
+control over already-rich state, not representative proof of project-lifetime
+savings.
 
 Two requested model aliases failed before inference because ChatGPT-account
 Codex rejected `gpt-6-luna` and `gpt-6-sol`; those attempts are authentication
