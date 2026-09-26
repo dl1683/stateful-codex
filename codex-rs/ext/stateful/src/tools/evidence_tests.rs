@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use codex_project_intelligence::EvidenceLineRange;
+use codex_project_intelligence::EvidenceReadLocator;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
@@ -43,9 +44,11 @@ async fn changed_source_is_incrementally_refreshed_and_reread_once() {
     let (refreshed, source_refreshed) = tool
         .read_with_refresh(
             vec![project_root.path().to_path_buf()],
-            None,
-            relative_path.clone(),
-            Some(EvidenceLineRange { start: 2, end: 2 }),
+            EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path: relative_path.clone(),
+                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
+            },
             1024,
         )
         .await
@@ -56,9 +59,11 @@ async fn changed_source_is_incrementally_refreshed_and_reread_once() {
     let (unchanged, source_refreshed) = tool
         .read_with_refresh(
             vec![project_root.path().to_path_buf()],
-            None,
-            relative_path,
-            Some(EvidenceLineRange { start: 2, end: 2 }),
+            EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path,
+                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
+            },
             1024,
         )
         .await

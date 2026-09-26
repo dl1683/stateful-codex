@@ -10,15 +10,19 @@ use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::BlackboardEvidenceLink;
+use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::EvidenceLineRange;
 use codex_project_intelligence::EvidenceReadError;
+use codex_project_intelligence::EvidenceReadLocator;
 use codex_project_intelligence::EvidenceReadRequest;
 use codex_project_intelligence::EvidenceReadResult;
 use codex_project_intelligence::EvidenceReader;
+use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::ProjectIndexFileRequest;
 use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
+use codex_project_intelligence::SourceFingerprint;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
@@ -36,10 +40,19 @@ const MAX_BYTES: u32 = 12 * 1024;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EvidenceArguments {
-    relative_path: String,
+    evidence_route: Option<EvidenceRouteArguments>,
+    relative_path: Option<String>,
     project_root: Option<String>,
     line_range: Option<LineRangeArguments>,
     max_bytes: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EvidenceRouteArguments {
+    context_map_entry_id: String,
+    source_fingerprint: String,
+    line_range: Option<LineRangeArguments>,
 }
 
 #[derive(Deserialize)]
@@ -96,20 +109,38 @@ impl EvidenceReadTool {
             .iter()
             .map(|root| PathBuf::from(&root.path))
             .collect::<Vec<_>>();
-        let project_root = arguments.project_root.map(PathBuf::from);
-        let relative_path = ProjectRelativePath::parse(arguments.relative_path).map_err(respond)?;
-        let line_range = arguments.line_range.map(|range| EvidenceLineRange {
-            start: range.start,
-            end: range.end,
-        });
+        let locator = match (arguments.evidence_route, arguments.relative_path) {
+            (Some(route), None)
+                if arguments.project_root.is_none() && arguments.line_range.is_none() =>
+            {
+                EvidenceReadLocator::ContextMapRoute(EvidenceRoute {
+                    context_map_entry_id: ContextMapEntryId::parse(route.context_map_entry_id)
+                        .map_err(respond)?,
+                    source_fingerprint: SourceFingerprint::parse(route.source_fingerprint)
+                        .map_err(respond)?,
+                    line_range: route.line_range.map(|range| EvidenceLineRange {
+                        start: range.start,
+                        end: range.end,
+                    }),
+                })
+            }
+            (None, Some(relative_path)) => EvidenceReadLocator::Source {
+                project_root: arguments.project_root.map(PathBuf::from),
+                relative_path: ProjectRelativePath::parse(relative_path).map_err(respond)?,
+                line_range: arguments.line_range.map(|range| EvidenceLineRange {
+                    start: range.start,
+                    end: range.end,
+                }),
+            },
+            _ => {
+                return Err(FunctionCallError::RespondToModel(
+                    "provide either evidenceRoute unchanged or relativePath with optional source bounds"
+                        .to_string(),
+                ));
+            }
+        };
         let (result, source_refreshed) = self
-            .read_with_refresh(
-                project_roots,
-                project_root,
-                relative_path,
-                line_range,
-                max_bytes,
-            )
+            .read_with_refresh(project_roots, locator, max_bytes)
             .await?;
 
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
@@ -187,27 +218,34 @@ impl EvidenceReadTool {
     async fn read_with_refresh(
         &self,
         project_roots: Vec<PathBuf>,
-        project_root: Option<PathBuf>,
-        relative_path: ProjectRelativePath,
-        line_range: Option<EvidenceLineRange>,
+        locator: EvidenceReadLocator,
         max_bytes: u32,
     ) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
         let reader =
             EvidenceReader::new(self.services.context_map().await.map_err(respond)?.clone());
+        let refresh_source = match &locator {
+            EvidenceReadLocator::Source {
+                project_root,
+                relative_path,
+                ..
+            } => Some((project_root.clone(), relative_path.clone())),
+            EvidenceReadLocator::ContextMapRoute(_) => None,
+        };
         let request = EvidenceReadRequest {
             project_id: self.project_id.clone(),
             project_roots: project_roots.clone(),
-            project_root: project_root.clone(),
-            relative_path: relative_path.clone(),
-            line_range,
+            locator,
             max_bytes,
         };
         match reader.read(request.clone()).await {
             Ok(result) => Ok((result, false)),
             Err(
-                EvidenceReadError::SourceChanged
-                | EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Stale),
+                error @ (EvidenceReadError::SourceChanged
+                | EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Stale)),
             ) => {
+                let Some((project_root, relative_path)) = refresh_source else {
+                    return Err(respond(error));
+                };
                 let project_root = self
                     .refresh_root(&project_roots, project_root.as_ref(), &relative_path)
                     .await?;
@@ -279,12 +317,31 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read a fingerprint-verified exact source or line range through the selected project's context map. When root blackboard evidence already names a source and lines, prefer this focused tool over a context-map search or broad shell read. Request only the smallest line range whose wording can change the answer. A changed indexed file is refreshed once and reread; sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
+            description: "Read fingerprint-verified exact source evidence. Prefer a current evidenceRoute returned by context_map_query and copy it unchanged; that guarded route fails closed if its source or range changed and is never refreshed into new coordinates. When root blackboard evidence already names a source and lines, relativePath plus a narrow lineRange remains available and refreshes a changed file once. sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
+                    "evidenceRoute": {
+                        "type": "object",
+                        "description": "Current guarded route returned by context_map_query. Copy every field unchanged and do not combine it with relativePath, projectRoot, or lineRange.",
+                        "properties": {
+                            "contextMapEntryId": {"type": "string"},
+                            "sourceFingerprint": {"type": "string"},
+                            "lineRange": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                    "start": {"type": "integer", "minimum": 1},
+                                    "end": {"type": "integer", "minimum": 1}
+                                },
+                                "required": ["start", "end"],
+                                "additionalProperties": false
+                            }
+                        },
+                        "required": ["contextMapEntryId", "sourceFingerprint", "lineRange"],
+                        "additionalProperties": false
+                    },
                     "relativePath": {"type": "string", "description": "Project-relative path shown by the root blackboard or context map."},
                     "projectRoot": {"type": "string", "description": "Required only when the same relative path exists under multiple selected roots."},
                     "lineRange": {
@@ -299,7 +356,6 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
                     },
                     "maxBytes": {"type": "integer", "minimum": 1, "maximum": MAX_BYTES}
                 },
-                "required": ["relativePath"],
                 "additionalProperties": false
             }))
             .unwrap_or_else(|error| unreachable!("invalid static evidence read schema: {error}")),

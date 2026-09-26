@@ -124,6 +124,47 @@ impl ContextMapStore {
         load_hit(&mut connection, project_id, id).await
     }
 
+    pub async fn get_guarded_hit(
+        &self,
+        project_id: &str,
+        id: &ContextMapEntryId,
+        expected_fingerprint: &SourceFingerprint,
+    ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
+        let mut connection = self.pool.acquire().await?;
+        let Some(hit) = load_hit(&mut connection, project_id, id).await? else {
+            return Ok(None);
+        };
+        if &hit.entry.value.source_fingerprint != expected_fingerprint {
+            return Err(ContextMapStoreError::SourceNotCurrent(
+                ContextMapFreshness::Stale,
+            ));
+        }
+        if hit.source.region_anchor.is_some() {
+            let current: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*)
+                 FROM context_map_entries AS entry
+                 JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+                 JOIN hierarchy_nodes AS parent
+                   ON parent.id = node.parent_id AND parent.project_id = node.project_id
+                 WHERE entry.project_id = ? AND entry.id = ?
+                   AND node.kind = 'region' AND node.lifecycle = 'active'
+                   AND node.source_fingerprint = entry.source_fingerprint
+                   AND parent.kind = 'file' AND parent.lifecycle = 'active'
+                   AND parent.source_fingerprint = entry.source_fingerprint",
+            )
+            .bind(project_id)
+            .bind(id.as_str())
+            .fetch_one(&mut *connection)
+            .await?;
+            if current != 1 {
+                return Err(ContextMapStoreError::SourceNotCurrent(
+                    ContextMapFreshness::Stale,
+                ));
+            }
+        }
+        Ok(Some(hit))
+    }
+
     pub async fn file_hits_for_path(
         &self,
         project_id: &str,

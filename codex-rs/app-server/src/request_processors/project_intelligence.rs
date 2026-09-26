@@ -21,6 +21,7 @@ use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::ContextMapStoreError;
 use codex_project_intelligence::EvidenceLineRange as InternalEvidenceLineRange;
+use codex_project_intelligence::EvidenceReadLocator as InternalEvidenceReadLocator;
 use codex_project_intelligence::EvidenceReadRequest as InternalEvidenceReadRequest;
 use codex_project_intelligence::EvidenceReader;
 use codex_project_intelligence::HierarchyNode;
@@ -163,12 +164,14 @@ impl ProjectIntelligenceRequestProcessor {
                         .iter()
                         .map(|root| PathBuf::from(&root.path))
                         .collect(),
-                    project_root: Some(PathBuf::from(&hit.source.project_root)),
-                    relative_path: hit.source.relative_path.clone(),
-                    line_range: Some(InternalEvidenceLineRange {
-                        start: line_range.start,
-                        end: line_range.end,
-                    }),
+                    locator: InternalEvidenceReadLocator::Source {
+                        project_root: Some(PathBuf::from(&hit.source.project_root)),
+                        relative_path: hit.source.relative_path.clone(),
+                        line_range: Some(InternalEvidenceLineRange {
+                            start: line_range.start,
+                            end: line_range.end,
+                        }),
+                    },
                     max_bytes,
                 })
                 .await

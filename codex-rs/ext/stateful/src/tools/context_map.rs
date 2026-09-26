@@ -17,6 +17,7 @@ use codex_project_intelligence::ContextMapFreshness;
 use codex_project_intelligence::ContextMapHit;
 use codex_project_intelligence::ContextMapListQuery;
 use codex_project_intelligence::ContextMapQuery;
+use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
 use codex_thread_store::ThreadStore;
@@ -159,7 +160,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are routing metadata, not evidence. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
+            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are routing metadata, not evidence. Pass a current evidenceRoute unchanged to evidence_read; it is bound to the returned source revision and exact range. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -334,6 +335,10 @@ fn route_json(
             "stored context-map route is outside the selected project roots".to_string(),
         ));
     }
+    let evidence_route = (freshness == Some(ContextMapFreshness::Current))
+        .then(|| EvidenceRoute::from_hit(&hit))
+        .transpose()
+        .map_err(respond)?;
     let description = hit.entry.value.description;
     let headline = if description.len() <= MAX_HEADLINE_BYTES {
         description
@@ -362,6 +367,9 @@ fn route_json(
         "storedFreshness": freshness_name(hit.freshness),
         "source": source,
     });
+    if let Some(evidence_route) = evidence_route {
+        route["evidenceRoute"] = json!(evidence_route);
+    }
     if let Some(knowledge) = knowledge.filter(|knowledge| knowledge.active_entries > 0) {
         route["knownKnowledge"] = json!({
             "rootEntries": knowledge.root_entries,

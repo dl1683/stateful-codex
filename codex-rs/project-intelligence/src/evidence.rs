@@ -8,11 +8,13 @@ use sha2::Digest;
 use sha2::Sha256;
 use thiserror::Error;
 
+use crate::ContextMapEntryId;
 use crate::ContextMapFreshness;
 use crate::ContextMapHit;
 use crate::ContextMapStore;
 use crate::ContextMapStoreError;
 use crate::ProjectRelativePath;
+use crate::SourceFingerprint;
 
 pub const MAX_EVIDENCE_READ_BYTES: u32 = 64 * 1024;
 const MAX_LINE_SPAN: u64 = 2_000;
@@ -37,10 +39,42 @@ impl EvidenceLineRange {
 pub struct EvidenceReadRequest {
     pub project_id: String,
     pub project_roots: Vec<PathBuf>,
-    pub project_root: Option<PathBuf>,
-    pub relative_path: ProjectRelativePath,
-    pub line_range: Option<EvidenceLineRange>,
+    pub locator: EvidenceReadLocator,
     pub max_bytes: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EvidenceReadLocator {
+    Source {
+        project_root: Option<PathBuf>,
+        relative_path: ProjectRelativePath,
+        line_range: Option<EvidenceLineRange>,
+    },
+    ContextMapRoute(EvidenceRoute),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceRoute {
+    pub context_map_entry_id: ContextMapEntryId,
+    pub source_fingerprint: SourceFingerprint,
+    pub line_range: Option<EvidenceLineRange>,
+}
+
+impl EvidenceRoute {
+    pub fn from_hit(hit: &ContextMapHit) -> Result<Self, EvidenceReadError> {
+        let line_range = hit
+            .source
+            .region_anchor
+            .as_ref()
+            .map(parse_line_anchor)
+            .transpose()?;
+        Ok(Self {
+            context_map_entry_id: hit.entry.id.clone(),
+            source_fingerprint: hit.entry.value.source_fingerprint.clone(),
+            line_range,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -75,21 +109,45 @@ impl EvidenceReader {
             .iter()
             .map(|root| root.display().to_string())
             .collect::<Vec<_>>();
-        let requested_root = request
-            .project_root
-            .as_ref()
-            .map(|root| root.display().to_string());
+        let (mut hits, requested_root, requested_path, line_range) = match &request.locator {
+            EvidenceReadLocator::Source {
+                project_root,
+                relative_path,
+                line_range,
+            } => {
+                let requested_root = project_root.as_ref().map(|root| root.display().to_string());
+                let hits = self
+                    .context_map
+                    .file_hits_for_path(&request.project_id, relative_path)
+                    .await?;
+                (hits, requested_root, relative_path.to_string(), *line_range)
+            }
+            EvidenceReadLocator::ContextMapRoute(route) => {
+                let hit = self
+                    .context_map
+                    .get_guarded_hit(
+                        &request.project_id,
+                        &route.context_map_entry_id,
+                        &route.source_fingerprint,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        EvidenceReadError::RouteNotFound(route.context_map_entry_id.to_string())
+                    })?;
+                if EvidenceRoute::from_hit(&hit)? != *route {
+                    return Err(EvidenceReadError::RouteChanged);
+                }
+                let requested_path = hit.source.relative_path.to_string();
+                (vec![hit], None, requested_path, route.line_range)
+            }
+        };
         if requested_root
             .as_ref()
             .is_some_and(|root| !allowed_roots.contains(root))
         {
             return Err(EvidenceReadError::RootOutsideProject);
         }
-
-        let mut hits = self
-            .context_map
-            .file_hits_for_path(&request.project_id, &request.relative_path)
-            .await?
+        hits = hits
             .into_iter()
             .filter(|hit| allowed_roots.contains(&hit.source.project_root))
             .filter(|hit| {
@@ -99,18 +157,14 @@ impl EvidenceReader {
             })
             .collect::<Vec<_>>();
         if hits.is_empty() {
-            return Err(EvidenceReadError::SourceNotIndexed(
-                request.relative_path.to_string(),
-            ));
+            return Err(EvidenceReadError::SourceNotIndexed(requested_path));
         }
         if hits.len() > 1 {
-            return Err(EvidenceReadError::AmbiguousSource(
-                request.relative_path.to_string(),
-            ));
+            return Err(EvidenceReadError::AmbiguousSource(requested_path));
         }
-        let hit = hits.pop().ok_or_else(|| {
-            EvidenceReadError::SourceNotIndexed(request.relative_path.to_string())
-        })?;
+        let hit = hits
+            .pop()
+            .ok_or_else(|| EvidenceReadError::SourceNotIndexed(requested_path))?;
         if hit.freshness != ContextMapFreshness::Current {
             return Err(EvidenceReadError::SourceNotCurrent(hit.freshness));
         }
@@ -122,7 +176,6 @@ impl EvidenceReader {
         }
         let max_bytes =
             usize::try_from(request.max_bytes).map_err(|_| EvidenceReadError::InvalidRequest)?;
-        let line_range = request.line_range;
         let read = tokio::task::spawn_blocking(move || read_source(source, line_range, max_bytes))
             .await??;
         if read.fingerprint != hit.entry.value.source_fingerprint.as_str() {
@@ -151,10 +204,38 @@ fn validate_request(request: &EvidenceReadRequest) -> Result<(), EvidenceReadErr
     {
         return Err(EvidenceReadError::InvalidRequest);
     }
-    if request.line_range.is_some_and(|range| !range.is_valid()) {
+    let line_range = match &request.locator {
+        EvidenceReadLocator::Source { line_range, .. } => *line_range,
+        EvidenceReadLocator::ContextMapRoute(route) => route.line_range,
+    };
+    if line_range.is_some_and(|range| !range.is_valid()) {
         return Err(EvidenceReadError::InvalidLineRange);
     }
     Ok(())
+}
+
+fn parse_line_anchor(anchor: &crate::RegionAnchor) -> Result<EvidenceLineRange, EvidenceReadError> {
+    if anchor.scheme != "lines" {
+        return Err(EvidenceReadError::UnsupportedRegionAnchor(
+            anchor.scheme.clone(),
+        ));
+    }
+    let (start, end) = anchor
+        .locator
+        .split_once('-')
+        .ok_or(EvidenceReadError::InvalidRegionAnchor)?;
+    let range = EvidenceLineRange {
+        start: start
+            .parse()
+            .map_err(|_| EvidenceReadError::InvalidRegionAnchor)?,
+        end: end
+            .parse()
+            .map_err(|_| EvidenceReadError::InvalidRegionAnchor)?,
+    };
+    range
+        .is_valid()
+        .then_some(range)
+        .ok_or(EvidenceReadError::InvalidRegionAnchor)
 }
 
 struct SourceRead {
@@ -252,6 +333,14 @@ pub enum EvidenceReadError {
     RootOutsideProject,
     #[error("source is not indexed in the selected project: {0}")]
     SourceNotIndexed(String),
+    #[error("context-map evidence route was not found: {0}")]
+    RouteNotFound(String),
+    #[error("context-map evidence route changed; query the context map again")]
+    RouteChanged,
+    #[error("context-map region anchor is malformed")]
+    InvalidRegionAnchor,
+    #[error("context-map region anchor is not supported for evidence reads: {0}")]
+    UnsupportedRegionAnchor(String),
     #[error("source path exists in multiple project roots; provide projectRoot: {0}")]
     AmbiguousSource(String),
     #[error("source route is not current: {0:?}")]

@@ -42,9 +42,11 @@ async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
         .read(EvidenceReadRequest {
             project_id: "project-1".to_string(),
             project_roots: vec![root.path().to_path_buf()],
-            project_root: None,
-            relative_path: relative_path.clone(),
-            line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            locator: EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path: relative_path.clone(),
+                line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            },
             max_bytes: 64,
         })
         .await
@@ -69,9 +71,11 @@ async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
         .read(EvidenceReadRequest {
             project_id: "project-1".to_string(),
             project_roots: vec![root.path().to_path_buf()],
-            project_root: None,
-            relative_path,
-            line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            locator: EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path,
+                line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            },
             max_bytes: 64,
         })
         .await
@@ -102,12 +106,110 @@ async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
         .read(EvidenceReadRequest {
             project_id: "project-1".to_string(),
             project_roots: vec![root.path().to_path_buf()],
-            project_root: None,
-            relative_path: ProjectRelativePath::parse("evidence.txt").expect("relative path"),
-            line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            locator: EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path: ProjectRelativePath::parse("evidence.txt").expect("relative path"),
+                line_range: Some(EvidenceLineRange { start: 2, end: 3 }),
+            },
             max_bytes: 64,
         })
         .await
         .expect("read refreshed source");
     assert_eq!(refreshed.content, "changed\ngamma\n");
+}
+
+#[tokio::test]
+async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    let source = root.path().join("facts.txt");
+    let initial = (1..=70)
+        .map(|line| {
+            if line == 70 {
+                "decisive_route_fact".to_string()
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&source, &initial).expect("write fixture");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(
+        HierarchyStore::open(&sqlite).await.expect("hierarchy"),
+        context_map.clone(),
+    );
+    indexer
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("index project");
+    let hit = context_map
+        .query(crate::ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "decisive_route_fact".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("query route")
+        .into_iter()
+        .next()
+        .expect("decisive region");
+    let route = EvidenceRoute::from_hit(&hit).expect("guarded evidence route");
+    let reader = EvidenceReader::new(context_map.clone());
+    let request = EvidenceReadRequest {
+        project_id: "project-1".to_string(),
+        project_roots: vec![root.path().to_path_buf()],
+        locator: EvidenceReadLocator::ContextMapRoute(route.clone()),
+        max_bytes: 1024,
+    };
+    let read = reader
+        .read(request.clone())
+        .await
+        .expect("current route should read");
+    assert!(read.content.ends_with("decisive_route_fact"));
+
+    std::fs::write(&source, format!("inserted\n{initial}")).expect("shift source coordinates");
+    assert!(matches!(
+        reader.read(request.clone()).await,
+        Err(EvidenceReadError::SourceChanged)
+    ));
+
+    indexer
+        .refresh_file(ProjectIndexFileRequest {
+            project_id: "project-1".to_string(),
+            project_root: root.path().to_path_buf(),
+            relative_path: ProjectRelativePath::parse("facts.txt").expect("relative path"),
+        })
+        .await
+        .expect("refresh shifted source");
+    assert!(reader.read(request).await.is_err());
+
+    let current_hit = context_map
+        .query(crate::ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "decisive_route_fact".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("query current route")
+        .into_iter()
+        .next()
+        .expect("current decisive region");
+    let current = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(
+                EvidenceRoute::from_hit(&current_hit).expect("current guarded route"),
+            ),
+            max_bytes: 1024,
+        })
+        .await
+        .expect("requeried route should read");
+    assert!(current.content.ends_with("decisive_route_fact"));
+    assert_eq!(current.last_line, Some(71));
 }
