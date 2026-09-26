@@ -40,8 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Last pushed head before this handoff update: `b47e85b470`
-  (`fix(stateful): read exact region evidence`).
+- Latest implementation head before this handoff update: `b85c1dbe64`
+  (`fix(stateful): preserve knowledge across source routes`).
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -708,14 +708,51 @@ counterexample. It does not prove semantic ranking quality, representative
 large-corpus latency, or lower token cost, so issue #17 remains a broader
 trajectory gate rather than a closed product claim.
 
+Commit `b85c1dbe64` closes the exact file-to-region knowledge handoff identified
+in issue #17. Before the change, context-map search suppressed a matching file
+route when it returned a child region, while `route_knowledge` counted only
+blackboard evidence attached to the returned route ID. A source-verified finding
+cited to the file therefore produced no `knownKnowledge` signal on its child
+region. The new deterministic regression failed with an empty result before the
+change.
+
+Route knowledge now treats a file and its direct region children as one physical
+source family at the storage boundary. Each returned route receives counts for
+active findings linked anywhere in that family; `COUNT(DISTINCT entry.id)` keeps
+multi-route evidence from inflating the count, and the hierarchy file identity
+prevents cross-file leakage. Exact-route callers retain the same result shape.
+
+The regression passes, all 42 project-intelligence tests pass, and the affected
+app-server integration passes after reading and recording evidence from a file
+route, then receiving the finding's promoted-knowledge signal on a distinct
+child-region result without a second `evidence_read` call. Scoped Clippy and
+formatting also pass. This proves the storage and model-tool handoff and a
+deterministic no-reread trajectory. It does not prove that an unconstrained live
+model will reliably use the signal, that retrieval ranking is broadly adequate,
+or that lifetime cost falls on representative work.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Real index-cost attribution.** The next suitable repository refresh must
+1. **Real World State audit transition.** Capture the next model request when an
+   unchanged root revision moves from `current` to `uncheckedThisTurn`. Prove
+   source-verified, non-source-verified, and catalog-only visibility before
+   changing the fingerprint logic.
+2. **Persistent refresh health.** Separate complete file inventory from partial
+   region coverage, preserve skipped-file and truncation state across restart,
+   retry incomplete startup work, and reject an older refresh publisher after a
+   newer generation completes.
+3. **Selective completion capture.** Prove whether a material conclusion can
+   disappear after the five-outcome window when completion recorded no reusable
+   blackboard learning. Do not solve this by enlarging the always-loaded packet.
+4. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
    from the small local fixture.
+5. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
+   unique sources, route use, knowledge reuse, rereads, model requests, tokens,
+   tool output, and wall time before another matched longitudinal rerun.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
 and uncached tokens, model requests, tool-output volume, wall time, state writes
@@ -723,9 +760,9 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Collect the new scan and publication diagnostics on the next suitable real
-repository refresh, including database size and routes used versus indexed. Do
-not infer issue #19's cause from the tiny continuity fixture or launch a broad
-benchmark merely to obtain this measurement. Until suitable compute is
-available, continue small source-grounded mechanism probes against the open
-issues rather than speculatively rewriting the indexer.
+Run the bounded World State audit-transition integration first. If an actual
+next model request suppresses a material freshness downgrade, fix that exact
+render/fingerprint path; if it does not, record the falsification and proceed to
+persistent refresh health. Collect issue #19 diagnostics only on the next
+suitable real refresh, and do not launch a broad benchmark merely to obtain the
+measurement.

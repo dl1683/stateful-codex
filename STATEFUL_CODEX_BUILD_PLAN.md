@@ -1341,3 +1341,27 @@ skipped test, and both affected app-server integrations passed. Scoped Clippy
 and formatting passed. This gate validates bounded diversity and truthful
 continuation signaling only; ranking relevance, large-corpus latency, route
 usage, and downstream token savings still require measurement.
+
+### Implementation checkpoint: file-to-region knowledge continuity (2026-09-26)
+
+Commit `b85c1dbe64` closes the source-family knowledge handoff in near-term step
+1. Context-map search intentionally suppresses a file route when a matching
+child region is available, but the old `route_knowledge` query counted only
+blackboard evidence attached to the exact returned entry ID. A file-cited
+finding was therefore invisible in the child region's model-visible
+`knownKnowledge` signal.
+
+The storage query now maps each requested file or region to its hierarchy file
+identity and aggregates active knowledge across that file and its direct region
+children. Counts are distinct by blackboard entry, so evidence attached to more
+than one route in the family cannot inflate coverage, and no agent-layer special
+case is required.
+
+A deterministic regression first reproduced the defect: a source-verified,
+promoted finding cited to the file yielded no knowledge for its child region.
+After the fix, that regression passes; all 42 project-intelligence tests pass;
+and the affected app-server integration passes with a distinct file read and
+child-region query while making no second evidence-read call. Scoped Clippy and
+formatting pass. This establishes the mechanism and the tool trajectory, not an
+unconstrained-model or representative cost result. General ranking, live reuse
+frequency, and the SC-EVAL-032 longitudinal gate remain open.
