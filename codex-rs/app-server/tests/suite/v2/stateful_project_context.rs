@@ -44,6 +44,15 @@ use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::RootPromotion;
 use codex_project_intelligence::SourceFingerprint;
 use codex_state::SqliteConfig;
+use codex_stateful_runtime::NewObligation;
+use codex_stateful_runtime::NewStatefulRun;
+use codex_stateful_runtime::ObligationPacket;
+use codex_stateful_runtime::RunBudget;
+use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStatus;
+use codex_stateful_runtime::StatefulRunStore;
+use codex_stateful_runtime::StatefulRunUpdate;
+use codex_stateful_runtime::WorkflowMode;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
@@ -173,6 +182,115 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
         .body_json::<serde_json::Value>()?
         .to_string();
     assert!(!body.contains("<stateful_project>"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_history() -> Result<()>
+{
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Cross-thread continuity".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "cross-thread-continuity-project".to_string(),
+            },
+        })
+        .await?;
+    let first = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: first.thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "FIRST_THREAD_PRIVATE_TRANSCRIPT_MARKER".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    let store = StatefulRunStore::open(&sqlite).await?;
+    let run_id = StatefulRunId::parse("cross-thread-completed-run")?;
+    let run = store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: created.project.id.clone(),
+                thread_ids: vec![first.thread.id],
+                goal: "Determine the deployment gate.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+        )
+        .await?;
+    store
+        .complete_run_with_obligation(
+            &run_id,
+            StatefulRunUpdate {
+                expected_revision: run.revision,
+                status: StatefulRunStatus::Completed,
+                strategy: Some("Reuse the verified checksum decision.".to_string()),
+                result: Some(
+                    "The deployment gate is green only after checksum verification.".to_string(),
+                ),
+            },
+            "cross-thread-final-obligation".to_string(),
+            NewObligation {
+                project_id: created.project.id.clone(),
+                run_id: run_id.clone(),
+                packet: ObligationPacket {
+                    learning: vec![
+                        "Checksum verification is the decisive deployment condition.".to_string(),
+                    ],
+                    implication: vec![
+                        "Later work should start from the verified deployment gate.".to_string(),
+                    ],
+                    ..Default::default()
+                },
+                provenance_source_id: "first-thread-completion".to_string(),
+            },
+        )
+        .await?;
+
+    let second = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    run_turn(&mut server, &second.thread.id).await?;
+    let requests = responses.received_requests().await.unwrap_or_default();
+    let body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("fresh-thread model request should be recorded")
+        .body_json::<serde_json::Value>()?
+        .to_string();
+    assert!(body.contains("<stateful_project_outcomes>"));
+    assert!(body.contains("The deployment gate is green only after checksum verification."));
+    assert!(body.contains("Checksum verification is the decisive deployment condition."));
+    assert!(!body.contains("FIRST_THREAD_PRIVATE_TRANSCRIPT_MARKER"));
     Ok(())
 }
 
