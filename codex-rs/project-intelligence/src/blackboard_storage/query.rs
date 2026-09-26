@@ -240,7 +240,7 @@ impl BlackboardStore {
         query: RootBlackboardQuery,
     ) -> Result<RootBlackboardProjection, BlackboardStoreError> {
         query.validate()?;
-        let mut connection = self.pool.acquire().await?;
+        let mut transaction = self.pool.begin().await?;
         let counts = sqlx::query_as::<_, RootEntryCounts>(
             "SELECT
                 COALESCE(SUM(CASE WHEN revision.root_promotion = 'promoted' THEN 1 ELSE 0 END), 0)
@@ -253,7 +253,7 @@ impl BlackboardStore {
              WHERE entry.project_id = ? AND revision.state = 'active'",
         )
         .bind(&query.project_id)
-        .fetch_one(&mut *connection)
+        .fetch_one(&mut *transaction)
         .await?;
         let entry_ids = sqlx::query_scalar::<_, String>(
             "SELECT entry.id
@@ -269,19 +269,20 @@ impl BlackboardStore {
         )
         .bind(&query.project_id)
         .bind(i64::from(query.max_entries))
-        .fetch_all(&mut *connection)
+        .fetch_all(&mut *transaction)
         .await?;
         let mut data = Vec::with_capacity(entry_ids.len());
         for raw_id in entry_ids {
-            data.push(load_hit(&mut connection, &query.project_id, raw_id).await?);
+            data.push(load_hit(&mut transaction, &query.project_id, raw_id).await?);
         }
         let revision = sqlx::query_scalar::<_, i64>(
             "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
         )
         .bind(&query.project_id)
-        .fetch_optional(&mut *connection)
+        .fetch_optional(&mut *transaction)
         .await?
         .unwrap_or_default();
+        transaction.commit().await?;
         Ok(RootBlackboardProjection {
             project_id: query.project_id,
             revision: u64::try_from(revision)
