@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryState;
+use codex_project_intelligence::BlackboardEntryUpdate;
 use codex_project_intelligence::BlackboardEvidenceLink;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
@@ -317,4 +318,94 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
         .await
         .expect("successor retires");
     assert_eq!(retired.state, BlackboardEntryState::Tombstoned);
+}
+
+#[tokio::test]
+async fn model_must_downgrade_before_changing_user_confirmed_meaning() {
+    let (_temp_dir, tool, entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
+    let store = tool.services.blackboard().await.expect("blackboard opens");
+    let current = store
+        .get_entry(PROJECT_ID, &entry_id)
+        .await
+        .expect("entry lookup succeeds")
+        .expect("fixture entry exists");
+    let confirmed = store
+        .update_entry(
+            PROJECT_ID,
+            &entry_id,
+            BlackboardEntryUpdate {
+                expected_revision: current.revision,
+                kind: current.value.kind,
+                content: current.value.content,
+                structured_value: current.value.structured_value,
+                confidence: current.value.confidence,
+                verification: BlackboardVerification::UserConfirmed,
+                importance: current.value.importance,
+                root_promotion: current.value.root_promotion,
+                evidence: current.value.evidence,
+                state: BlackboardEntryState::Active,
+                superseded_by: None,
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "host-user-action".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("host confirmation seeds the legacy entry");
+
+    let retained_grade_error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "revise",
+                "entryId": entry_id,
+                "expectedRevision": confirmed.revision,
+                "content": "The model changed the confirmed meaning."
+            })),
+            "turn-model-change",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("confirmed meaning cannot change without downgrade");
+    assert_eq!(
+        retained_grade_error.to_string(),
+        "changing user-confirmed meaning requires a new host-observed user action or an explicit verification downgrade"
+    );
+
+    let downgraded = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "revise",
+                "entryId": entry_id,
+                "expectedRevision": confirmed.revision,
+                "content": "The model changed the meaning after downgrading it.",
+                "verification": "unverified"
+            })),
+            "turn-model-downgrade",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect("explicit downgrade permits a model-authored revision");
+    assert_eq!(
+        (downgraded.revision, downgraded.value.verification),
+        (confirmed.revision + 1, BlackboardVerification::Unverified)
+    );
+
+    let self_award_error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "revise",
+                "entryId": entry_id,
+                "expectedRevision": downgraded.revision,
+                "verification": "userConfirmed"
+            })),
+            "turn-self-award",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("model cannot award user confirmation");
+    assert_eq!(
+        self_award_error.to_string(),
+        "userConfirmed is issued only from a host-observed user action and cannot be selected by the model"
+    );
 }

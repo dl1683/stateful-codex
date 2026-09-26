@@ -255,6 +255,12 @@ impl BlackboardUpdateTool {
                 evidence,
                 ..
             } => {
+                if verification == Some(BlackboardVerification::UserConfirmed) {
+                    return Err(FunctionCallError::RespondToModel(
+                        "userConfirmed is issued only from a host-observed user action and cannot be selected by the model"
+                            .to_string(),
+                    ));
+                }
                 if structured_value.is_some() && clear_structured_value {
                     return Err(FunctionCallError::RespondToModel(
                         "structuredValue and clearStructuredValue cannot be used together"
@@ -284,6 +290,14 @@ impl BlackboardUpdateTool {
                         .is_some_and(|value| Some(value) != update.structured_value.as_ref())
                     || (clear_structured_value && update.structured_value.is_some());
                 let revised_verification = verification.unwrap_or(update.verification);
+                if revised_verification == BlackboardVerification::UserConfirmed
+                    && source_meaning_changed
+                {
+                    return Err(FunctionCallError::RespondToModel(
+                        "changing user-confirmed meaning requires a new host-observed user action or an explicit verification downgrade"
+                            .to_string(),
+                    ));
+                }
                 if revised_verification == BlackboardVerification::SourceVerified
                     && source_meaning_changed
                     && evidence.is_none()
@@ -362,7 +376,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, or evidence changes. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. A successful supersede or retire result includes historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, or evidence changes. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. userConfirmed is host-issued from an explicit user action and cannot be selected here; changing confirmed meaning requires a new user action or an explicit downgrade. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. A successful supersede or retire result includes historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
             ),
             strict: false,
             defer_loading: None,
@@ -425,8 +439,8 @@ fn update_schema() -> serde_json::Value {
         json!({"type": "integer", "minimum": 0, "maximum": 10000});
     revise_properties["verification"] = json!({
         "type": "string",
-        "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"],
-        "description": "sourceVerified records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession."
+        "enum": ["unverified", "sourceVerified", "disputed", "stale"],
+        "description": "sourceVerified records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool."
     });
     revise_properties["importance"] =
         json!({"type": "string", "enum": ["critical", "high", "normal", "low"]});

@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
+use codex_app_server_protocol::BlackboardQueryParams;
+use codex_app_server_protocol::BlackboardQueryResponse;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ContextMapRefreshParams;
 use codex_app_server_protocol::ContextMapRefreshResponse;
@@ -154,6 +156,133 @@ async fn model_receives_current_historical_selection_after_superseding_knowledge
         })
     );
     assert_eq!(update_output["results"][0]["state"], "superseded");
+    Ok(())
+}
+
+#[tokio::test]
+async fn model_cannot_self_award_user_confirmed_knowledge() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "User confirmation boundary".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "user-confirmation-boundary".to_string(),
+            },
+        })
+        .await?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+
+    let record_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "record-confirmation",
+                    "blackboard_record_batch",
+                    &json!({
+                        "records": [
+                            {
+                                "idempotencyKey": "forged-confirmation",
+                                "kind": "instruction",
+                                "content": "The user did not confirm this instruction.",
+                                "confidenceBasisPoints": 10_000,
+                                "verification": "userConfirmed",
+                                "importance": "critical",
+                                "rootPromotion": "promoted"
+                            },
+                            {
+                                "idempotencyKey": "agent-observation",
+                                "kind": "note",
+                                "content": "The model may still record ordinary knowledge.",
+                                "confidenceBasisPoints": 8_000,
+                                "verification": "unverified",
+                                "importance": "normal",
+                                "rootPromotion": "notPromoted"
+                            }
+                        ]
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("record-confirmation-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("record-confirmation-done", "Boundary checked"),
+                responses::ev_completed("record-confirmation-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let output: serde_json::Value = serde_json::from_str(
+        &record_log
+            .function_call_output_text("record-confirmation")
+            .expect("record output should be text"),
+    )?;
+    assert_eq!(output["recorded"], 1);
+    assert_eq!(output["failed"], 1);
+    assert_eq!(output["results"][0]["recorded"], false);
+    assert_eq!(
+        output["results"][0]["error"],
+        "userConfirmed is issued only from a host-observed user action and cannot be selected by the model"
+    );
+    assert_eq!(output["results"][1]["recorded"], true);
+
+    let first_request = record_log.requests()[0].body_json();
+    let batch_tool = first_request["tools"]
+        .as_array()
+        .expect("tools should be an array")
+        .iter()
+        .find(|tool| tool["name"] == "blackboard_record_batch")
+        .expect("blackboard record batch tool should be available");
+    assert_eq!(
+        batch_tool["parameters"]["properties"]["records"]["items"]["properties"]["verification"]["enum"],
+        json!(["unverified", "sourceVerified", "disputed", "stale"])
+    );
+
+    let knowledge: BlackboardQueryResponse = server
+        .request(|request_id| ClientRequest::BlackboardQuery {
+            request_id,
+            params: BlackboardQueryParams {
+                project_id: created.project.id,
+                text: None,
+                within_node_id: None,
+                limit: Some(10),
+            },
+        })
+        .await?;
+    assert_eq!(knowledge.data.len(), 1);
+    assert_eq!(
+        knowledge.data[0].entry.content,
+        "The model may still record ordinary knowledge."
+    );
     Ok(())
 }
 

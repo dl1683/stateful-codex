@@ -144,6 +144,12 @@ impl BlackboardRecordTool {
             root_promotion,
             evidence,
         } = arguments;
+        if verification == BlackboardVerification::UserConfirmed {
+            return Err(FunctionCallError::RespondToModel(
+                "userConfirmed is issued only from a host-observed user action and cannot be selected by the model"
+                    .to_string(),
+            ));
+        }
         let (evidence, inferred_node_id) = resolve_evidence(
             &self.project_id,
             &self.thread_id,
@@ -240,7 +246,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
+            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&record_schema())
@@ -471,7 +477,7 @@ fn record_schema() -> serde_json::Value {
             "content": {"type": "string"},
             "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false},
             "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
-            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "userConfirmed", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links. It records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession."},
+            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links. It records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
             "evidence": evidence_schema()

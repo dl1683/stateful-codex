@@ -80,10 +80,20 @@ impl BlackboardRequestProcessor {
         params: BlackboardUpsertParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.require_project(&params.project_id).await?;
-        if params.verification == ApiBlackboardVerification::SourceVerified {
-            return Err(invalid_params(
-                "blackboard/upsert cannot persist sourceVerified knowledge without a host-issued read receipt",
-            ));
+        match params.verification {
+            ApiBlackboardVerification::SourceVerified => {
+                return Err(invalid_params(
+                    "blackboard/upsert cannot persist sourceVerified knowledge without a host-issued read receipt",
+                ));
+            }
+            ApiBlackboardVerification::UserConfirmed => {
+                return Err(invalid_params(
+                    "blackboard/upsert cannot persist userConfirmed knowledge without a host-observed user action",
+                ));
+            }
+            ApiBlackboardVerification::Unverified
+            | ApiBlackboardVerification::Disputed
+            | ApiBlackboardVerification::Stale => {}
         }
         let entry_id = BlackboardEntryId::parse(params.entry_id)
             .map_err(|error| invalid_params(error.to_string()))?;
