@@ -1511,3 +1511,22 @@ bytes, model-request counts, compactions, authoritative dollar cost, or
 cross-run trends. `duration_ms` is tracked turn time, and the headless aggregate
 sums that time across continuations. These boundaries must remain visible when
 the first live JSONL result is interpreted.
+
+The first live debug-CLI reconciliation passed immediately after the commit.
+A collaborative Luna run on the licensing fixture completed in 34.801 seconds
+with 134,782 input tokens, 97,536 cached input tokens, and 1,352 output tokens.
+Its terminal JSON reported one completed turn; five World State samples; 65 root
+entries across those samples; ten evidence routes, all current; ten unique
+physical sources; 4,837 source bytes hashed; three successful Stateful calls;
+one evidence read; one obligation write; one run update; and two selected
+material findings. The raw rollout independently contained exactly three code-
+mode calls to `evidence_read`, `obligation_update`, and `stateful_run_update`,
+with aliases `E4` and `E7` selected at completion. The answer correctly applied
+the executed amendment's six-percent royalty effective 2026-03-01.
+
+This closes the first live machine-readable reconciliation gate on one small
+fixture. It does not establish lower cost or representative attribution quality.
+The run also surfaced two duplicate headless error items for ignored legacy user
+configuration keys; they did not affect execution or the empty stderr stream,
+but they are output noise to remove separately rather than hide in the
+attribution result.

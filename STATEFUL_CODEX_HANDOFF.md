@@ -840,11 +840,13 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Run one minimal controlled headless fixture through the committed issue #24
-slice and reconcile its terminal `stateful_attribution` object against the
-rollout and deterministic tool calls. Then extend the same bounded record with
-already observable request, token, all-tool, tool-output, and compaction totals,
-plus live progress; do not fabricate dollar cost when the provider and applied
-price are unavailable. Collect issue #19 diagnostics only on the next suitable
-real refresh, and do not launch a broad benchmark merely to obtain either
-measurement.
+The minimal controlled headless fixture now reconciles: its terminal
+`stateful_attribution` object reported three successful Stateful calls and two
+material findings, matching the rollout's `evidence_read`, `obligation_update`,
+and `stateful_run_update` calls and selected aliases `E4`/`E7`. Next, extend the
+same bounded record with already observable request, token, all-tool,
+tool-output, and compaction totals plus live progress; do not fabricate dollar
+cost when the provider and applied price are unavailable. Remove the duplicate
+ignored-config warnings from headless item output as a separate hygiene fix.
+Collect issue #19 diagnostics only on the next suitable real refresh, and do
+not launch a broad benchmark merely to obtain either measurement.
