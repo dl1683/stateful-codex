@@ -73,6 +73,8 @@ use codex_exec::PatchApplyStatus;
 use codex_exec::PatchChangeKind;
 use codex_exec::ReasoningItem;
 use codex_exec::StatefulAttribution;
+use codex_exec::StatefulAttributionEvent;
+use codex_exec::StatefulTurnStatus;
 use codex_exec::ThreadErrorEvent;
 use codex_exec::ThreadEvent;
 use codex_exec::ThreadItemDetails;
@@ -81,6 +83,7 @@ use codex_exec::TodoItem;
 use codex_exec::TodoListItem;
 use codex_exec::TurnCompletedEvent;
 use codex_exec::TurnFailedEvent;
+use codex_exec::TurnProgressEvent;
 use codex_exec::TurnStartedEvent;
 use codex_exec::Usage;
 use codex_exec::WebSearchItem;
@@ -1341,7 +1344,20 @@ fn token_usage_update_is_emitted_on_turn_completion() {
     assert_eq!(
         usage_update,
         CollectedThreadEvents {
-            events: Vec::new(),
+            events: vec![ThreadEvent::TurnProgress(TurnProgressEvent {
+                elapsed_ms: 0,
+                usage: Usage {
+                    input_tokens: 10,
+                    cached_input_tokens: 3,
+                    cache_write_input_tokens: 4,
+                    output_tokens: 29,
+                    reasoning_output_tokens: 7,
+                },
+                completed_model_responses: 0,
+                compactions: 0,
+                model_tool_calls: 0,
+                tool_output_bytes: 0,
+            })],
             status: CodexStatus::Running,
         }
     );
@@ -1382,7 +1398,9 @@ fn token_usage_update_is_emitted_on_turn_completion() {
 #[test]
 fn stateful_attribution_is_aggregated_into_turn_completion() {
     let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
-    for (turn_id, root_entries_loaded) in [("turn-1", 3), ("turn-2", 2)] {
+    for (index, (turn_id, root_entries_loaded)) in
+        [("turn-1", 3), ("turn-2", 2)].into_iter().enumerate()
+    {
         let collected =
             processor.collect_thread_events(ServerNotification::StatefulAttributionCompleted(
                 StatefulAttributionCompletedNotification {
@@ -1403,7 +1421,19 @@ fn stateful_attribution_is_aggregated_into_turn_completion() {
         assert_eq!(
             collected,
             CollectedThreadEvents {
-                events: Vec::new(),
+                events: vec![ThreadEvent::StatefulAttribution(StatefulAttributionEvent {
+                    turn_status: StatefulTurnStatus::Completed,
+                    attribution: StatefulAttribution {
+                        turns: index as u64 + 1,
+                        completed_turns: index as u64 + 1,
+                        duration_ms: (index as u64 + 1) * 10,
+                        root_entries_loaded: if index == 0 { 3 } else { 5 },
+                        stateful_tool_calls: (index as u64 + 1) * 2,
+                        knowledge_query_calls: index as u64 + 1,
+                        material_findings_reused: index as u64 + 1,
+                        ..Default::default()
+                    },
+                },)],
                 status: CodexStatus::Running,
             }
         );

@@ -20,6 +20,8 @@ use owo_colors::Style;
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 use crate::event_processor::handle_last_message;
+use crate::exec_events::Usage;
+use crate::stateful_attribution::StatefulAttributionAccumulator;
 
 pub(crate) struct EventProcessorWithHumanOutput {
     bold: Style,
@@ -37,6 +39,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
     final_message_rendered: bool,
     emit_final_message_on_shutdown: bool,
     last_total_token_usage: Option<ThreadTokenUsage>,
+    stateful_attribution: StatefulAttributionAccumulator,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -62,6 +65,7 @@ impl EventProcessorWithHumanOutput {
             final_message_rendered: false,
             emit_final_message_on_shutdown: false,
             last_total_token_usage: None,
+            stateful_attribution: StatefulAttributionAccumulator::default(),
         }
     }
 
@@ -303,7 +307,79 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             }
             ServerNotification::ModelVerification(_) => CodexStatus::Running,
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
+                let changed = self.last_total_token_usage.as_ref().is_none_or(|previous| {
+                    previous.total.total_tokens != notification.token_usage.total.total_tokens
+                        || previous.total.cached_input_tokens
+                            != notification.token_usage.total.cached_input_tokens
+                        || previous.total.output_tokens
+                            != notification.token_usage.total.output_tokens
+                });
                 self.last_total_token_usage = Some(notification.token_usage);
+                if changed
+                    && let Some(usage) = self.last_total_token_usage.as_ref()
+                    && usage.total.total_tokens > 0
+                {
+                    let progress = self.stateful_attribution.progress(Usage {
+                        input_tokens: usage.total.input_tokens,
+                        cached_input_tokens: usage.total.cached_input_tokens,
+                        cache_write_input_tokens: usage.total.cache_write_input_tokens,
+                        output_tokens: usage.total.output_tokens,
+                        reasoning_output_tokens: usage.total.reasoning_output_tokens,
+                    });
+                    eprintln!(
+                        "{} elapsed {}s · input {} ({} cached) · output {} · {} model responses · {} tools",
+                        "progress:".style(self.dimmed),
+                        progress.elapsed_ms / 1_000,
+                        format_with_separators(progress.usage.input_tokens),
+                        format_with_separators(progress.usage.cached_input_tokens),
+                        format_with_separators(progress.usage.output_tokens),
+                        progress.completed_model_responses,
+                        progress.model_tool_calls,
+                    );
+                }
+                CodexStatus::Running
+            }
+            ServerNotification::RawResponseCompleted(_) => {
+                self.stateful_attribution.record_model_response();
+                CodexStatus::Running
+            }
+            ServerNotification::RawResponseItemCompleted(notification) => {
+                self.stateful_attribution
+                    .record_response_item(&notification.item);
+                CodexStatus::Running
+            }
+            ServerNotification::ContextCompacted(_) => {
+                self.stateful_attribution.record_compaction();
+                CodexStatus::Running
+            }
+            ServerNotification::StatefulAttributionCompleted(notification) => {
+                let counters = &notification.counters;
+                let status = match notification.status {
+                    codex_app_server_protocol::StatefulAttributionStatus::Completed => "completed",
+                    codex_app_server_protocol::StatefulAttributionStatus::Failed => "failed",
+                    codex_app_server_protocol::StatefulAttributionStatus::Aborted => "aborted",
+                };
+                let writes = counters.blackboard_write_calls
+                    + counters.obligation_write_calls
+                    + counters.run_update_calls
+                    + counters.steering_write_calls;
+                eprintln!(
+                    "{} {status} in {}ms · {} root entries · {}/{} routes current · {} stale · {} reads · {} writes · {} findings reused",
+                    "stateful:".style(self.cyan).style(self.bold),
+                    notification.duration_ms,
+                    counters.root_entries_loaded,
+                    counters.root_evidence_routes_current,
+                    counters.root_evidence_routes_checked,
+                    counters.root_evidence_routes_stale,
+                    counters.knowledge_query_calls
+                        + counters.route_query_calls
+                        + counters.evidence_read_calls
+                        + counters.steering_query_calls,
+                    writes,
+                    counters.material_findings_reused,
+                );
+                self.stateful_attribution
+                    .record_stateful_turn(&notification);
                 CodexStatus::Running
             }
             ServerNotification::TurnCompleted(notification) => match notification.turn.status {
@@ -369,7 +445,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
                 CodexStatus::Running
             }
-            ServerNotification::TurnStarted(_) => CodexStatus::Running,
+            ServerNotification::TurnStarted(_) => {
+                self.stateful_attribution.start_invocation();
+                CodexStatus::Running
+            }
             _ => CodexStatus::Running,
         }
     }

@@ -5,6 +5,8 @@ use codex_app_server_protocol::StatefulAttributionStatus;
 use codex_protocol::models::ResponseItem;
 
 use crate::exec_events::StatefulAttribution;
+use crate::exec_events::TurnProgressEvent;
+use crate::exec_events::Usage;
 
 #[derive(Debug, Default)]
 pub(crate) struct StatefulAttributionAccumulator {
@@ -136,6 +138,20 @@ impl StatefulAttributionAccumulator {
         attribution.model_image_generation_calls = self.model_image_generation_calls;
         attribution.tool_output_bytes = self.tool_output_bytes;
         Some(attribution)
+    }
+
+    pub(crate) fn progress(&self, usage: Usage) -> TurnProgressEvent {
+        TurnProgressEvent {
+            elapsed_ms: self
+                .invocation_started_at
+                .map(|started_at| started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+                .unwrap_or_default(),
+            usage,
+            completed_model_responses: self.completed_model_responses,
+            compactions: self.compactions,
+            model_tool_calls: self.model_tool_calls,
+            tool_output_bytes: self.tool_output_bytes,
+        }
     }
 }
 

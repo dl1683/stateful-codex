@@ -16,6 +16,9 @@ pub enum ThreadEvent {
     /// A turn encompasses all events that happen while agent is processing the prompt.
     #[serde(rename = "turn.started")]
     TurnStarted(TurnStartedEvent),
+    /// Emits a cumulative, in-flight resource snapshot while the turn is running.
+    #[serde(rename = "turn.progress")]
+    TurnProgress(TurnProgressEvent),
     /// Emitted when a turn is completed. Typically right after the assistant's response.
     #[serde(rename = "turn.completed")]
     TurnCompleted(TurnCompletedEvent),
@@ -31,6 +34,9 @@ pub enum ThreadEvent {
     /// Signals that an item has reached a terminal state—either success or failure.
     #[serde(rename = "item.completed")]
     ItemCompleted(ItemCompletedEvent),
+    /// Emits cumulative Stateful contribution after one Stateful turn stops.
+    #[serde(rename = "stateful.attribution")]
+    StatefulAttribution(StatefulAttributionEvent),
     /// Represents an unrecoverable error emitted directly by the event stream.
     #[serde(rename = "error")]
     Error(ThreadErrorEvent),
@@ -45,6 +51,16 @@ pub struct ThreadStartedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, Default)]
 
 pub struct TurnStartedEvent {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+pub struct TurnProgressEvent {
+    pub elapsed_ms: u64,
+    pub usage: Usage,
+    pub completed_model_responses: u64,
+    pub compactions: u64,
+    pub model_tool_calls: u64,
+    pub tool_output_bytes: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct TurnCompletedEvent {
@@ -94,6 +110,20 @@ pub struct StatefulAttribution {
     pub run_update_calls: u64,
     pub steering_write_calls: u64,
     pub material_findings_reused: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum StatefulTurnStatus {
+    Completed,
+    Failed,
+    Aborted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+pub struct StatefulAttributionEvent {
+    pub turn_status: StatefulTurnStatus,
+    pub attribution: StatefulAttribution,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

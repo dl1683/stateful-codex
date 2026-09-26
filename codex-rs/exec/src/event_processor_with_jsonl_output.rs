@@ -43,6 +43,8 @@ use crate::exec_events::McpToolCallStatus as ExecMcpToolCallStatus;
 use crate::exec_events::PatchApplyStatus as ExecPatchApplyStatus;
 use crate::exec_events::PatchChangeKind as ExecPatchChangeKind;
 use crate::exec_events::ReasoningItem;
+use crate::exec_events::StatefulAttributionEvent;
+use crate::exec_events::StatefulTurnStatus;
 use crate::exec_events::ThreadErrorEvent;
 use crate::exec_events::ThreadEvent;
 use crate::exec_events::ThreadItem as ExecThreadItem;
@@ -510,7 +512,25 @@ impl EventProcessorWithJsonOutput {
             }
             ServerNotification::ModelVerification(_) => CodexStatus::Running,
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
+                let changed = self.last_total_token_usage.as_ref().is_none_or(|previous| {
+                    previous.total.total_tokens != notification.token_usage.total.total_tokens
+                        || previous.total.cached_input_tokens
+                            != notification.token_usage.total.cached_input_tokens
+                        || previous.total.output_tokens
+                            != notification.token_usage.total.output_tokens
+                });
                 self.last_total_token_usage = Some(notification.token_usage);
+                if changed
+                    && self
+                        .last_total_token_usage
+                        .as_ref()
+                        .is_some_and(|usage| usage.total.total_tokens > 0)
+                {
+                    events.push(ThreadEvent::TurnProgress(
+                        self.stateful_attribution
+                            .progress(self.usage_from_last_total()),
+                    ));
+                }
                 CodexStatus::Running
             }
             ServerNotification::RawResponseCompleted(_) => {
@@ -527,8 +547,25 @@ impl EventProcessorWithJsonOutput {
                 CodexStatus::Running
             }
             ServerNotification::StatefulAttributionCompleted(notification) => {
+                let turn_status = match notification.status {
+                    codex_app_server_protocol::StatefulAttributionStatus::Completed => {
+                        StatefulTurnStatus::Completed
+                    }
+                    codex_app_server_protocol::StatefulAttributionStatus::Failed => {
+                        StatefulTurnStatus::Failed
+                    }
+                    codex_app_server_protocol::StatefulAttributionStatus::Aborted => {
+                        StatefulTurnStatus::Aborted
+                    }
+                };
                 self.stateful_attribution
                     .record_stateful_turn(&notification);
+                if let Some(attribution) = self.stateful_attribution.snapshot() {
+                    events.push(ThreadEvent::StatefulAttribution(StatefulAttributionEvent {
+                        turn_status,
+                        attribution,
+                    }));
+                }
                 CodexStatus::Running
             }
             ServerNotification::TurnCompleted(notification) => {
