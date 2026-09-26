@@ -77,6 +77,7 @@ pub use indexer::ProjectIndexRequest;
 pub use indexer::ProjectIndexer;
 pub use indexer::ProjectIndexerError;
 pub use status::ProjectIntelligenceStatus;
+pub use storage::HierarchyRegionSourceUpdate;
 pub use storage::HierarchySourceUpdate;
 pub use storage::HierarchyStore;
 pub use storage::HierarchyStoreError;

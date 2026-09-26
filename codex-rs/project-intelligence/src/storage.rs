@@ -34,6 +34,14 @@ pub struct HierarchySourceUpdate {
     pub source_fingerprint: Option<SourceFingerprint>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HierarchyRegionSourceUpdate {
+    pub expected_revision: u64,
+    pub lifecycle: NodeLifecycle,
+    pub region_anchor: RegionAnchor,
+    pub source_fingerprint: SourceFingerprint,
+}
+
 impl HierarchyStore {
     pub async fn open(sqlite: &SqliteConfig) -> Result<Self, HierarchyStoreError> {
         tokio::fs::create_dir_all(sqlite.home()).await?;
@@ -199,6 +207,58 @@ impl HierarchyStore {
                 .as_ref()
                 .map(SourceFingerprint::as_str),
         )
+        .bind(lifecycle_name(update.lifecycle))
+        .bind(unix_timestamp_millis()?)
+        .bind(project_id)
+        .bind(id.as_str())
+        .bind(expected_revision)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if updated != 1 {
+            return Err(HierarchyStoreError::ConcurrentMutation);
+        }
+        let node = load_node(&mut transaction, project_id, id)
+            .await?
+            .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))?;
+        transaction.commit().await?;
+        Ok(node)
+    }
+
+    pub async fn update_region_source(
+        &self,
+        project_id: &str,
+        id: &HierarchyNodeId,
+        update: HierarchyRegionSourceUpdate,
+    ) -> Result<HierarchyNode, HierarchyStoreError> {
+        let expected_revision = i64::try_from(update.expected_revision)
+            .map_err(|_| HierarchyStoreError::RevisionOverflow)?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current = load_node(&mut transaction, project_id, id)
+            .await?
+            .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))?;
+        if current.revision != update.expected_revision {
+            return Err(HierarchyStoreError::RevisionConflict {
+                expected: update.expected_revision,
+                actual: current.revision,
+            });
+        }
+        if current.value.kind != NodeKind::Region {
+            return Err(HierarchyStoreError::ExpectedRegion(id.to_string()));
+        }
+        let mut proposed_value = current.value;
+        proposed_value.region_anchor = Some(update.region_anchor.clone());
+        proposed_value.source_fingerprint = Some(update.source_fingerprint.clone());
+        proposed_value.validate()?;
+        let updated = sqlx::query(
+            "UPDATE hierarchy_nodes
+             SET anchor_scheme = ?, anchor_locator = ?, source_fingerprint = ?,
+                 lifecycle = ?, revision = revision + 1, updated_at_ms = ?
+             WHERE project_id = ? AND id = ? AND revision = ?",
+        )
+        .bind(&update.region_anchor.scheme)
+        .bind(&update.region_anchor.locator)
+        .bind(update.source_fingerprint.as_str())
         .bind(lifecycle_name(update.lifecycle))
         .bind(unix_timestamp_millis()?)
         .bind(project_id)
@@ -410,6 +470,8 @@ pub enum HierarchyStoreError {
     InvalidParent { parent: String, kind: NodeKind },
     #[error("hierarchy node not found: {0}")]
     NodeNotFound(String),
+    #[error("hierarchy node is not a region: {0}")]
+    ExpectedRegion(String),
     #[error("hierarchy node ID was already used for different content: {0}")]
     NodeIdentityConflict(String),
     #[error("hierarchy revision conflict: expected {expected}, found {actual}")]

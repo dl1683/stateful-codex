@@ -4,6 +4,7 @@ use crate::ContextMapCoverage;
 use crate::ContextMapEntryId;
 use crate::ContextMapEntryUpdate;
 use crate::HierarchyNodeId;
+use crate::HierarchyRegionSourceUpdate;
 use crate::HierarchySourceUpdate;
 use crate::NewContextMapEntry;
 use crate::NewHierarchyNode;
@@ -42,35 +43,42 @@ pub(super) fn scan_regions(
         return (Vec::new(), false);
     };
     let lines = text.lines().collect::<Vec<_>>();
-    let truncated = lines.len() > LINES_PER_REGION * MAX_REGIONS_PER_FILE;
     let mut regions = Vec::new();
     let mut heading = None;
-    for (index, chunk) in lines
-        .chunks(LINES_PER_REGION)
-        .take(MAX_REGIONS_PER_FILE)
-        .enumerate()
-    {
-        let start_line = index * LINES_PER_REGION + 1;
-        let end_line = start_line + chunk.len().saturating_sub(1);
+    let mut line_index = 0;
+    while line_index < lines.len() && regions.len() < MAX_REGIONS_PER_FILE {
+        let start_line = line_index + 1;
         let inherited_heading = heading;
-        heading = chunk
+        let maximum_end = (line_index + LINES_PER_REGION).min(lines.len());
+        let mut end_index = line_index;
+        let mut description = String::new();
+        while end_index < maximum_end {
+            let candidate = describe_region(
+                relative_path,
+                start_line,
+                end_index + 1,
+                inherited_heading,
+                &lines[line_index..=end_index],
+            );
+            if candidate.len() > MAX_REGION_DESCRIPTION_BYTES && end_index > line_index {
+                break;
+            }
+            description = candidate;
+            end_index += 1;
+            if description.len() > MAX_REGION_DESCRIPTION_BYTES {
+                break;
+            }
+        }
+        let complete = exact_text && description.len() <= MAX_REGION_DESCRIPTION_BYTES;
+        description.truncate(description.floor_char_boundary(MAX_REGION_DESCRIPTION_BYTES));
+        heading = lines[line_index..end_index]
             .iter()
             .rev()
             .find_map(|line| line.trim().starts_with('#').then(|| line.trim()))
             .or(heading);
-        let locator = format!("{start_line}-{end_line}");
-        let mut description = format!("{relative_path}:{locator}");
-        if let Some(heading) = inherited_heading {
-            description.push_str(" | ");
-            description.push_str(heading);
-        }
-        description.push_str(" | ");
-        description.push_str(&chunk.join("\n"));
-        let complete = exact_text && description.len() <= MAX_REGION_DESCRIPTION_BYTES;
-        description.truncate(description.floor_char_boundary(MAX_REGION_DESCRIPTION_BYTES));
         regions.push(ScannedRegion {
             start_line,
-            end_line,
+            end_line: end_index,
             routing_terms: routing_terms(relative_path, inherited_heading),
             description,
             coverage: if complete {
@@ -79,8 +87,26 @@ pub(super) fn scan_regions(
                 ContextMapCoverage::Partial
             },
         });
+        line_index = end_index;
     }
-    (regions, truncated)
+    (regions, line_index < lines.len())
+}
+
+fn describe_region(
+    relative_path: &str,
+    start_line: usize,
+    end_line: usize,
+    inherited_heading: Option<&str>,
+    lines: &[&str],
+) -> String {
+    let mut description = format!("{relative_path}:{start_line}-{end_line}");
+    if let Some(heading) = inherited_heading {
+        description.push_str(" | ");
+        description.push_str(heading);
+    }
+    description.push_str(" | ");
+    description.push_str(&lines.join("\n"));
+    description
 }
 
 pub(super) async fn sync_file_regions(
@@ -90,19 +116,15 @@ pub(super) async fn sync_file_regions(
     file: &ScannedFile,
 ) -> Result<(), ProjectIndexerError> {
     let mut seen = HashSet::with_capacity(file.regions.len());
-    for region in &file.regions {
+    for (cell_index, region) in file.regions.iter().enumerate() {
         let locator = format!("{}-{}", region.start_line, region.end_line);
+        let cell = cell_index.to_string();
         let region_id = stable_id(
             "region",
-            &[
-                project_id,
-                &file.project_root,
-                &file.relative_path,
-                &locator,
-            ],
+            &[project_id, &file.project_root, &file.relative_path, &cell],
         )?;
         upsert_region_node(indexer, project_id, file_id, file, &region_id, &locator).await?;
-        upsert_region_context(indexer, project_id, file, region, &region_id, &locator).await?;
+        upsert_region_context(indexer, project_id, file, region, &region_id, &cell).await?;
         seen.insert(region_id);
     }
     for child in indexer.hierarchy.list_children(project_id, file_id).await? {
@@ -175,23 +197,27 @@ async fn upsert_region_node(
             .await?;
         return Ok(());
     };
+    let current_anchor = value.region_anchor.clone();
     let mut identity = value;
+    identity.region_anchor = existing.value.region_anchor.clone();
     identity.source_fingerprint = existing.value.source_fingerprint.clone();
     if existing.value != identity {
         return Err(ProjectIndexerError::IdentityConflict(region_id.to_string()));
     }
-    if existing.lifecycle != NodeLifecycle::Active
+    if existing.value.region_anchor.as_ref() != current_anchor.as_ref()
+        || existing.lifecycle != NodeLifecycle::Active
         || existing.value.source_fingerprint.as_ref() != Some(&file.fingerprint)
     {
         indexer
             .hierarchy
-            .update_source_state(
+            .update_region_source(
                 project_id,
                 region_id,
-                HierarchySourceUpdate {
+                HierarchyRegionSourceUpdate {
                     expected_revision: existing.revision,
                     lifecycle: NodeLifecycle::Active,
-                    source_fingerprint: Some(file.fingerprint.clone()),
+                    region_anchor: RegionAnchor::new("lines", locator)?,
+                    source_fingerprint: file.fingerprint.clone(),
                 },
             )
             .await?;
@@ -205,7 +231,7 @@ async fn upsert_region_context(
     file: &ScannedFile,
     region: &ScannedRegion,
     region_id: &HierarchyNodeId,
-    locator: &str,
+    cell: &str,
 ) -> Result<(), ProjectIndexerError> {
     let id = ContextMapEntryId::parse(stable_id_text(
         "context",
@@ -213,8 +239,8 @@ async fn upsert_region_context(
             project_id,
             &file.project_root,
             &file.relative_path,
-            "lines",
-            locator,
+            "cell",
+            cell,
         ],
     ))?;
     let value = NewContextMapEntry {

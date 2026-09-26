@@ -82,6 +82,38 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
         indexed_regions
     );
 
+    let mut grown = (1..=71)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>();
+    grown[69] = "decisive_route_fact".to_string();
+    fs::write(&source, grown.join("\n")).expect("source should grow");
+    indexer
+        .refresh_file(ProjectIndexFileRequest {
+            project_id: "project-1".to_string(),
+            project_root: root.path().to_path_buf(),
+            relative_path: ProjectRelativePath::parse("facts.md").expect("relative path"),
+        })
+        .await
+        .expect("grown source should refresh");
+    let grown_regions = hierarchy
+        .list_children("project-1", &file_id)
+        .await
+        .expect("grown regions should load");
+    assert_eq!(
+        grown_regions
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<Vec<_>>(),
+        indexed_regions
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        grown_regions[1].value.region_anchor,
+        Some(RegionAnchor::new("lines", "65-71").expect("valid anchor"))
+    );
+
     fs::write(&source, "short\nsource\n").expect("source should shrink");
     indexer
         .refresh_file(ProjectIndexFileRequest {
@@ -95,6 +127,7 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
         .list_children("project-1", &file_id)
         .await
         .expect("shrunk regions should load");
+    assert_eq!(shrunk_regions.len(), 2,);
     assert_eq!(
         shrunk_regions
             .iter()
@@ -110,7 +143,7 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
             .iter()
             .filter(|node| node.lifecycle == NodeLifecycle::Missing)
             .count(),
-        2
+        1
     );
 
     fs::remove_file(source).expect("source should delete");
