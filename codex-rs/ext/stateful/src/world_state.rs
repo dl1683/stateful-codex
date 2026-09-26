@@ -205,8 +205,7 @@ fn semantic_fingerprint(body: &str) -> String {
         if line.starts_with("Project intelligence revision: ") {
             hasher.update(b"Project intelligence revision: <current>\n");
         } else {
-            let stable_line = line.replace("uncheckedThisTurn", "current");
-            hasher.update(stable_line.as_bytes());
+            hasher.update(line.as_bytes());
             hasher.update(b"\n");
         }
     }

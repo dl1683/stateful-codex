@@ -183,12 +183,12 @@ fn unknown_legacy_snapshot_renders_the_full_current_packet() {
 }
 
 #[test]
-fn transient_audit_label_does_not_change_semantic_fingerprint() {
-    let audited = "verification=sourceVerified evidence=current S1 (current)";
-    let unaudited = "verification=sourceVerified evidence=uncheckedThisTurn S1 (uncheckedThisTurn)";
+fn unchecked_audit_label_changes_semantic_fingerprint() {
+    let audited = "verification=userConfirmed evidence=current S1 (current)";
+    let unaudited = "verification=userConfirmed evidence=uncheckedThisTurn S1 (uncheckedThisTurn)";
     let stale = "verification=stale evidence=stale S1 (stale)";
 
-    assert_eq!(
+    assert_ne!(
         semantic_fingerprint(audited),
         semantic_fingerprint(unaudited)
     );

@@ -187,6 +187,81 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
 }
 
 #[tokio::test]
+async fn unchecked_user_confirmed_evidence_replaces_the_current_packet() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Freshness Project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-freshness-project".to_string(),
+            },
+        })
+        .await?;
+    seed_root_blackboard(codex_home.path(), &created.project.id).await?;
+    seed_context_map(
+        codex_home.path(),
+        &created.project.id,
+        project_root.path(),
+        BlackboardVerification::UserConfirmed,
+    )
+    .await?;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+    let requests = responses.received_requests().await.unwrap_or_default();
+    let initial_body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("initial model request should be recorded")
+        .body_json::<serde_json::Value>()?
+        .to_string();
+    assert!(
+        initial_body
+            .contains("verification=userConfirmed; declared=userConfirmed; evidence=current")
+    );
+    assert!(initial_body.contains("README.md (current)"));
+
+    std::fs::remove_file(project_root.path().join("README.md"))?;
+    std::fs::create_dir(project_root.path().join("README.md"))?;
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let requests = responses.received_requests().await.unwrap_or_default();
+    let current_body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("current model request should be recorded")
+        .body_json::<serde_json::Value>()?
+        .to_string();
+    assert!(current_body.contains(
+        "verification=userConfirmed; declared=userConfirmed; evidence=uncheckedThisTurn"
+    ));
+    assert!(current_body.contains("README.md (uncheckedThisTurn)"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_history() -> Result<()>
 {
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
@@ -351,7 +426,13 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
         })
         .await?;
     seed_root_blackboard(codex_home.path(), &created.project.id).await?;
-    seed_context_map(codex_home.path(), &created.project.id, project_root.path()).await?;
+    seed_context_map(
+        codex_home.path(),
+        &created.project.id,
+        project_root.path(),
+        BlackboardVerification::SourceVerified,
+    )
+    .await?;
     let started = server
         .start_thread(ThreadStartParams {
             project_id: Some(created.project.id.clone()),
@@ -367,7 +448,9 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     assert!(requests[0].body_contains_text("context_map_query"));
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
     assert!(requests[0].body_contains_text("README.md (current)"));
-    assert!(requests[0].body_contains_text("smallest decisive source set"));
+    assert!(
+        requests[0].body_contains_text("compare only those candidates against the requested scope")
+    );
     let blackboard_output = requests[1]
         .function_call_output("blackboard-call")
         .to_string();
@@ -1108,6 +1191,7 @@ async fn seed_context_map(
     codex_home: &std::path::Path,
     project_id: &str,
     project_root: &std::path::Path,
+    verification: BlackboardVerification,
 ) -> Result<()> {
     let source = b"# Project\n\nOperator setup and project instructions.\n";
     std::fs::write(project_root.join("README.md"), source)?;
@@ -1173,7 +1257,7 @@ async fn seed_context_map(
                 content: "README contains the current operator instructions.".to_string(),
                 structured_value: None,
                 confidence: ConfidenceScore::from_basis_points(9_000)?,
-                verification: BlackboardVerification::SourceVerified,
+                verification,
                 importance: BlackboardImportance::High,
                 root_promotion: RootPromotion::Promoted,
                 evidence: vec![BlackboardEvidenceLink {
