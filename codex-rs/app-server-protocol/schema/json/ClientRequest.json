@@ -272,6 +272,23 @@
       ],
       "type": "string"
     },
+    "BlackboardPremiseLink": {
+      "properties": {
+        "entryId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entryId",
+        "revision"
+      ],
+      "type": "object"
+    },
     "BlackboardProvenance": {
       "properties": {
         "kind": {

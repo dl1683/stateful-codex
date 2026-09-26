@@ -5,9 +5,10 @@ import type { BlackboardEntryState } from "./BlackboardEntryState";
 import type { BlackboardEvidenceLink } from "./BlackboardEvidenceLink";
 import type { BlackboardImportance } from "./BlackboardImportance";
 import type { BlackboardKind } from "./BlackboardKind";
+import type { BlackboardPremiseLink } from "./BlackboardPremiseLink";
 import type { BlackboardProvenance } from "./BlackboardProvenance";
 import type { BlackboardRootPromotion } from "./BlackboardRootPromotion";
 import type { BlackboardStructuredValue } from "./BlackboardStructuredValue";
 import type { BlackboardVerification } from "./BlackboardVerification";
 
-export type BlackboardEntry = { id: string, projectId: string, nodeId: string, kind: BlackboardKind, content: string, structuredValue: BlackboardStructuredValue | null, confidenceBasisPoints: number, verification: BlackboardVerification, importance: BlackboardImportance, rootPromotion: BlackboardRootPromotion, evidence: Array<BlackboardEvidenceLink>, provenance: BlackboardProvenance, state: BlackboardEntryState, supersededBy: string | null, revision: number, createdAt: number, updatedAt: number, };
+export type BlackboardEntry = { id: string, projectId: string, nodeId: string, kind: BlackboardKind, content: string, structuredValue: BlackboardStructuredValue | null, confidenceBasisPoints: number, verification: BlackboardVerification, importance: BlackboardImportance, rootPromotion: BlackboardRootPromotion, evidence: Array<BlackboardEvidenceLink>, premises: Array<BlackboardPremiseLink>, provenance: BlackboardProvenance, state: BlackboardEntryState, supersededBy: string | null, revision: number, createdAt: number, updatedAt: number, };

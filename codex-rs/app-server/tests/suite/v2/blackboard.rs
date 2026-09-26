@@ -12,6 +12,8 @@ use codex_app_server_protocol::BlackboardEntryState;
 use codex_app_server_protocol::BlackboardEvidenceFreshness;
 use codex_app_server_protocol::BlackboardImportance;
 use codex_app_server_protocol::BlackboardKind;
+use codex_app_server_protocol::BlackboardPremiseFreshness;
+use codex_app_server_protocol::BlackboardPremiseLink;
 use codex_app_server_protocol::BlackboardProvenance;
 use codex_app_server_protocol::BlackboardProvenanceKind;
 use codex_app_server_protocol::BlackboardQueryHit;
@@ -167,6 +169,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 importance: BlackboardImportance::Critical,
                 root_promotion: BlackboardRootPromotion::Promoted,
                 evidence: Vec::new(),
+                premises: None,
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::User,
                     source_id: "turn-user-1".to_string(),
@@ -199,6 +202,106 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
     expected_confirmation.updated_at = confirmed.entry.updated_at;
     assert_eq!(confirmed.entry, expected_confirmation);
     let instruction = confirmed;
+    let premise_link = BlackboardPremiseLink {
+        entry_id: instruction.entry.id.clone(),
+        revision: instruction.entry.revision,
+    };
+    let derived: BlackboardUpsertResponse = server
+        .request(|request_id| ClientRequest::BlackboardUpsert {
+            request_id,
+            params: BlackboardUpsertParams {
+                project_id: created.project.id.clone(),
+                entry_id: "derived-1".to_string(),
+                expected_revision: None,
+                node_id: Some(indexed_route.node_id.clone()),
+                kind: BlackboardKind::Decision,
+                content: "The shared-memory design follows from the project-boundary instruction."
+                    .to_string(),
+                structured_value: None,
+                confidence_basis_points: 9_000,
+                verification: BlackboardVerification::Unverified,
+                importance: BlackboardImportance::High,
+                root_promotion: BlackboardRootPromotion::Promoted,
+                evidence: Vec::new(),
+                premises: Some(vec![premise_link.clone()]),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "turn-agent-derived".to_string(),
+                },
+                state: None,
+                superseded_by: None,
+            },
+        })
+        .await?;
+    assert_eq!(derived.entry.premises, vec![premise_link]);
+    let current_derived: BlackboardQueryResponse = server
+        .request(|request_id| ClientRequest::BlackboardQuery {
+            request_id,
+            params: BlackboardQueryParams {
+                project_id: created.project.id.clone(),
+                text: Some("shared-memory design follows".to_string()),
+                within_node_id: None,
+                limit: Some(10),
+            },
+        })
+        .await?;
+    assert_eq!(
+        (
+            current_derived.data[0].premise_freshness,
+            current_derived.data[0].effective_verification,
+        ),
+        (
+            BlackboardPremiseFreshness::Current,
+            BlackboardVerification::Unverified,
+        )
+    );
+    let _downgraded: BlackboardUpsertResponse = server
+        .request(|request_id| ClientRequest::BlackboardUpsert {
+            request_id,
+            params: BlackboardUpsertParams {
+                project_id: created.project.id.clone(),
+                entry_id: instruction.entry.id.clone(),
+                expected_revision: Some(instruction.entry.revision),
+                node_id: None,
+                kind: instruction.entry.kind,
+                content: instruction.entry.content.clone(),
+                structured_value: instruction.entry.structured_value.clone(),
+                confidence_basis_points: instruction.entry.confidence_basis_points,
+                verification: BlackboardVerification::Unverified,
+                importance: instruction.entry.importance,
+                root_promotion: instruction.entry.root_promotion,
+                evidence: instruction.entry.evidence.clone(),
+                premises: None,
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "turn-user-reconsidered".to_string(),
+                },
+                state: Some(BlackboardEntryState::Active),
+                superseded_by: None,
+            },
+        })
+        .await?;
+    let stale_derived: BlackboardQueryResponse = server
+        .request(|request_id| ClientRequest::BlackboardQuery {
+            request_id,
+            params: BlackboardQueryParams {
+                project_id: created.project.id.clone(),
+                text: Some("shared-memory design follows".to_string()),
+                within_node_id: None,
+                limit: Some(10),
+            },
+        })
+        .await?;
+    assert_eq!(
+        (
+            stale_derived.data[0].premise_freshness,
+            stale_derived.data[0].effective_verification,
+        ),
+        (
+            BlackboardPremiseFreshness::Stale,
+            BlackboardVerification::Stale,
+        )
+    );
     let decision_params = BlackboardUpsertParams {
         project_id: created.project.id.clone(),
         entry_id: "decision-1".to_string(),
@@ -212,6 +315,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
         importance: BlackboardImportance::High,
         root_promotion: BlackboardRootPromotion::Candidate,
         evidence: Vec::new(),
+        premises: None,
         provenance: BlackboardProvenance {
             kind: BlackboardProvenanceKind::Agent,
             source_id: "turn-agent-1".to_string(),
@@ -306,6 +410,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 entry: updated.entry.clone(),
                 relations: vec![related.relation.clone()],
                 evidence_freshness: BlackboardEvidenceFreshness::NotApplicable,
+                premise_freshness: BlackboardPremiseFreshness::NotApplicable,
                 effective_verification: BlackboardVerification::Unverified,
             }],
             truncated: false,
@@ -313,7 +418,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
     );
 
     let mut notifications = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..7 {
         notifications.push(
             server
                 .read_notification::<BlackboardUpdatedNotification>("blackboard/updated")
@@ -334,6 +439,18 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 BlackboardEntityKind::Entry,
                 "instruction-1",
                 2
+            ),
+            notification(
+                &created.project.id,
+                BlackboardEntityKind::Entry,
+                "derived-1",
+                1
+            ),
+            notification(
+                &created.project.id,
+                BlackboardEntityKind::Entry,
+                "instruction-1",
+                3
             ),
             notification(
                 &created.project.id,

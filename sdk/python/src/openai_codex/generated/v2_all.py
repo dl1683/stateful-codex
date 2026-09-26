@@ -475,6 +475,21 @@ class BlackboardKind(Enum):
     note = "note"
 
 
+class BlackboardPremiseFreshness(Enum):
+    not_applicable = "notApplicable"
+    current = "current"
+    stale = "stale"
+    source_unavailable = "sourceUnavailable"
+
+
+class BlackboardPremiseLink(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    entry_id: Annotated[str, Field(alias="entryId")]
+    revision: Annotated[int, Field(ge=0)]
+
+
 class BlackboardProvenanceKind(Enum):
     user = "user"
     agent = "agent"
@@ -10696,6 +10711,7 @@ class BlackboardEntry(BaseModel):
     importance: BlackboardImportance
     kind: BlackboardKind
     node_id: Annotated[str, Field(alias="nodeId")]
+    premises: list[BlackboardPremiseLink]
     project_id: Annotated[str, Field(alias="projectId")]
     provenance: BlackboardProvenance
     revision: Annotated[int, Field(ge=0)]
@@ -10716,6 +10732,7 @@ class BlackboardQueryHit(BaseModel):
     effective_verification: Annotated[BlackboardVerification, Field(alias="effectiveVerification")]
     entry: BlackboardEntry
     evidence_freshness: Annotated[BlackboardEvidenceFreshness, Field(alias="evidenceFreshness")]
+    premise_freshness: Annotated[BlackboardPremiseFreshness, Field(alias="premiseFreshness")]
     relations: list[BlackboardRelation]
 
 

@@ -46,6 +46,8 @@ pub struct BlackboardUpsertParams {
     pub importance: BlackboardImportance,
     pub root_promotion: BlackboardRootPromotion,
     pub evidence: Vec<BlackboardEvidenceLink>,
+    #[ts(optional = nullable)]
+    pub premises: Option<Vec<BlackboardPremiseLink>>,
     pub provenance: BlackboardProvenance,
     #[ts(optional = nullable)]
     pub state: Option<BlackboardEntryState>,
@@ -111,6 +113,7 @@ pub struct BlackboardQueryHit {
     pub entry: BlackboardEntry,
     pub relations: Vec<BlackboardRelation>,
     pub evidence_freshness: BlackboardEvidenceFreshness,
+    pub premise_freshness: BlackboardPremiseFreshness,
     pub effective_verification: BlackboardVerification,
 }
 
@@ -129,6 +132,7 @@ pub struct BlackboardEntry {
     pub importance: BlackboardImportance,
     pub root_promotion: BlackboardRootPromotion,
     pub evidence: Vec<BlackboardEvidenceLink>,
+    pub premises: Vec<BlackboardPremiseLink>,
     pub provenance: BlackboardProvenance,
     pub state: BlackboardEntryState,
     pub superseded_by: Option<String>,
@@ -175,6 +179,15 @@ pub struct BlackboardEvidenceLink {
     pub context_map_entry_id: String,
     pub source_fingerprint: String,
     pub line_range: Option<EvidenceLineRange>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct BlackboardPremiseLink {
+    pub entry_id: String,
+    #[ts(type = "number")]
+    pub revision: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -246,6 +259,12 @@ string_enum!(BlackboardRelationKind {
     RelatedTo
 });
 string_enum!(BlackboardEvidenceFreshness {
+    NotApplicable,
+    Current,
+    Stale,
+    SourceUnavailable,
+});
+string_enum!(BlackboardPremiseFreshness {
     NotApplicable,
     Current,
     Stale,

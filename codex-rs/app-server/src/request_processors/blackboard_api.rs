@@ -4,6 +4,8 @@ use codex_app_server_protocol::BlackboardEvidenceFreshness as ApiEvidenceFreshne
 use codex_app_server_protocol::BlackboardEvidenceLink as ApiEvidenceLink;
 use codex_app_server_protocol::BlackboardImportance as ApiImportance;
 use codex_app_server_protocol::BlackboardKind as ApiKind;
+use codex_app_server_protocol::BlackboardPremiseFreshness as ApiPremiseFreshness;
+use codex_app_server_protocol::BlackboardPremiseLink as ApiPremiseLink;
 use codex_app_server_protocol::BlackboardProvenance as ApiProvenance;
 use codex_app_server_protocol::BlackboardProvenanceKind as ApiProvenanceKind;
 use codex_app_server_protocol::BlackboardQueryHit as ApiHit;
@@ -21,6 +23,8 @@ use codex_project_intelligence::BlackboardEvidenceLink;
 use codex_project_intelligence::BlackboardHit;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
+use codex_project_intelligence::BlackboardPremiseFreshness;
+use codex_project_intelligence::BlackboardPremiseLink;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardRelation;
@@ -38,6 +42,7 @@ pub(super) fn api_hit(hit: BlackboardHit) -> ApiHit {
         entry: api_entry(hit.entry),
         relations: hit.relations.into_iter().map(api_relation).collect(),
         evidence_freshness: api_evidence_freshness(hit.evidence_freshness),
+        premise_freshness: api_premise_freshness(hit.premise_freshness),
         effective_verification: api_verification(hit.effective_verification),
     }
 }
@@ -71,6 +76,15 @@ pub(super) fn api_entry(entry: BlackboardEntry) -> ApiEntry {
                     start: range.start,
                     end: range.end,
                 }),
+            })
+            .collect(),
+        premises: entry
+            .value
+            .premises
+            .into_iter()
+            .map(|link| ApiPremiseLink {
+                entry_id: link.entry_id.to_string(),
+                revision: link.revision,
             })
             .collect(),
         provenance: api_provenance(entry.value.provenance),
@@ -176,6 +190,15 @@ fn api_evidence_freshness(value: BlackboardEvidenceFreshness) -> ApiEvidenceFres
     }
 }
 
+fn api_premise_freshness(value: BlackboardPremiseFreshness) -> ApiPremiseFreshness {
+    match value {
+        BlackboardPremiseFreshness::NotApplicable => ApiPremiseFreshness::NotApplicable,
+        BlackboardPremiseFreshness::Current => ApiPremiseFreshness::Current,
+        BlackboardPremiseFreshness::Stale => ApiPremiseFreshness::Stale,
+        BlackboardPremiseFreshness::SourceUnavailable => ApiPremiseFreshness::SourceUnavailable,
+    }
+}
+
 pub(super) fn internal_evidence(
     value: Vec<ApiEvidenceLink>,
 ) -> Result<Vec<BlackboardEvidenceLink>, JSONRPCErrorError> {
@@ -206,6 +229,21 @@ pub(super) fn internal_provenance(value: ApiProvenance) -> BlackboardProvenance 
         },
         source_id: value.source_id,
     }
+}
+
+pub(super) fn internal_premises(
+    value: Vec<ApiPremiseLink>,
+) -> Result<Vec<BlackboardPremiseLink>, JSONRPCErrorError> {
+    value
+        .into_iter()
+        .map(|link| {
+            Ok(BlackboardPremiseLink {
+                entry_id: codex_project_intelligence::BlackboardEntryId::parse(link.entry_id)
+                    .map_err(|error| invalid_params(error.to_string()))?,
+                revision: link.revision,
+            })
+        })
+        .collect()
 }
 
 pub(super) fn internal_kind(value: ApiKind) -> BlackboardKind {

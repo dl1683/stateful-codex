@@ -8137,6 +8137,12 @@
           "nodeId": {
             "type": "string"
           },
+          "premises": {
+            "items": {
+              "$ref": "#/definitions/v2/BlackboardPremiseLink"
+            },
+            "type": "array"
+          },
           "projectId": {
             "type": "string"
           },
@@ -8187,6 +8193,7 @@
           "importance",
           "kind",
           "nodeId",
+          "premises",
           "projectId",
           "provenance",
           "revision",
@@ -8265,6 +8272,32 @@
         ],
         "type": "string"
       },
+      "BlackboardPremiseFreshness": {
+        "enum": [
+          "notApplicable",
+          "current",
+          "stale",
+          "sourceUnavailable"
+        ],
+        "type": "string"
+      },
+      "BlackboardPremiseLink": {
+        "properties": {
+          "entryId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entryId",
+          "revision"
+        ],
+        "type": "object"
+      },
       "BlackboardProvenance": {
         "properties": {
           "kind": {
@@ -8300,6 +8333,9 @@
           "evidenceFreshness": {
             "$ref": "#/definitions/v2/BlackboardEvidenceFreshness"
           },
+          "premiseFreshness": {
+            "$ref": "#/definitions/v2/BlackboardPremiseFreshness"
+          },
           "relations": {
             "items": {
               "$ref": "#/definitions/v2/BlackboardRelation"
@@ -8311,6 +8347,7 @@
           "effectiveVerification",
           "entry",
           "evidenceFreshness",
+          "premiseFreshness",
           "relations"
         ],
         "type": "object"

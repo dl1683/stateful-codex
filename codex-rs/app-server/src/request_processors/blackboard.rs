@@ -44,6 +44,7 @@ use super::blackboard_api::api_relation;
 use super::blackboard_api::internal_evidence;
 use super::blackboard_api::internal_importance;
 use super::blackboard_api::internal_kind;
+use super::blackboard_api::internal_premises;
 use super::blackboard_api::internal_provenance;
 use super::blackboard_api::internal_relation_kind;
 use super::blackboard_api::internal_root_promotion;
@@ -111,6 +112,7 @@ impl BlackboardRequestProcessor {
                 unit: value.unit,
             });
         let evidence = internal_evidence(params.evidence)?;
+        let premises = params.premises.map(internal_premises).transpose()?;
         let provenance = internal_provenance(params.provenance);
         let store = self.store().await?;
         let entry = match params.expected_revision {
@@ -153,7 +155,7 @@ impl BlackboardRequestProcessor {
                             importance: internal_importance(params.importance),
                             root_promotion: internal_root_promotion(params.root_promotion),
                             evidence,
-                            premises: Vec::new(),
+                            premises: premises.unwrap_or_default(),
                             provenance,
                         },
                     )
@@ -165,6 +167,20 @@ impl BlackboardRequestProcessor {
                         "an existing entry cannot move to another node",
                     ));
                 }
+                let premises = match premises {
+                    Some(premises) => premises,
+                    None => {
+                        store
+                            .get_entry(&params.project_id, &entry_id)
+                            .await
+                            .map_err(blackboard_error)?
+                            .ok_or_else(|| {
+                                invalid_params(format!("blackboard entry not found: {entry_id}"))
+                            })?
+                            .value
+                            .premises
+                    }
+                };
                 store
                     .update_entry(
                         &params.project_id,
@@ -179,7 +195,7 @@ impl BlackboardRequestProcessor {
                             importance: internal_importance(params.importance),
                             root_promotion: internal_root_promotion(params.root_promotion),
                             evidence,
-                            premises: Vec::new(),
+                            premises,
                             state: params
                                 .state
                                 .map_or(BlackboardEntryState::Active, internal_state),

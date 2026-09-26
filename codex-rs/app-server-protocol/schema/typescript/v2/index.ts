@@ -57,6 +57,8 @@ export type { BlackboardEvidenceFreshness } from "./BlackboardEvidenceFreshness"
 export type { BlackboardEvidenceLink } from "./BlackboardEvidenceLink";
 export type { BlackboardImportance } from "./BlackboardImportance";
 export type { BlackboardKind } from "./BlackboardKind";
+export type { BlackboardPremiseFreshness } from "./BlackboardPremiseFreshness";
+export type { BlackboardPremiseLink } from "./BlackboardPremiseLink";
 export type { BlackboardProvenance } from "./BlackboardProvenance";
 export type { BlackboardProvenanceKind } from "./BlackboardProvenanceKind";
 export type { BlackboardQueryHit } from "./BlackboardQueryHit";
