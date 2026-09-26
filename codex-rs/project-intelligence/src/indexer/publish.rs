@@ -18,6 +18,7 @@ use crate::storage::unix_timestamp_millis;
 
 use super::ProjectIndexer;
 use super::ProjectIndexerError;
+use super::PublicationFence;
 use super::scan::ScannedFile;
 use super::stable_id;
 use super::stable_id_text;
@@ -30,6 +31,7 @@ pub(super) async fn publish_file(
     file_id: &HierarchyNodeId,
     parent_id: HierarchyNodeId,
     file: &ScannedFile,
+    fence: PublicationFence,
 ) -> Result<(), ProjectIndexerError> {
     let relative_path = ProjectRelativePath::parse(&file.relative_path)?;
     let file_node = NewHierarchyNode {
@@ -54,6 +56,9 @@ pub(super) async fn publish_file(
         coverage: file.coverage,
     };
     let mut transaction = indexer.context_map.begin_immediate().await?;
+    if let PublicationFence::FullRefresh(generation) = fence {
+        super::generation::require_current(&mut transaction, project_id, generation).await?;
+    }
     upsert_indexed_node(&mut transaction, file_id, file_node).await?;
     upsert_indexed_entry(&mut transaction, &file_context_id, file_context).await?;
 
@@ -109,8 +114,12 @@ pub(super) async fn mark_file_missing(
     indexer: &ProjectIndexer,
     project_id: &str,
     file_id: &HierarchyNodeId,
+    fence: PublicationFence,
 ) -> Result<(), ProjectIndexerError> {
     let mut transaction = indexer.context_map.begin_immediate().await?;
+    if let PublicationFence::FullRefresh(generation) = fence {
+        super::generation::require_current(&mut transaction, project_id, generation).await?;
+    }
     let file = load_node(&mut transaction, project_id, file_id)
         .await?
         .ok_or_else(|| ProjectIndexerError::SourceNotIndexed(file_id.to_string()))?;

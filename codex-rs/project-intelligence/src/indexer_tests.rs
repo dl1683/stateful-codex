@@ -247,6 +247,7 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
                 conflicting_region("facts.md:1-1 | duplicate_anchor"),
             ],
         },
+        PublicationFence::Targeted,
     )
     .await;
     assert!(failed.is_err());
@@ -330,9 +331,12 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
     .expect("a file read failure should produce an incomplete scan");
     assert!(!failed_scan.inventory_complete);
     assert_eq!(failed_scan.files_skipped, 1);
+    let failed_generation = super::generation::claim(&indexer, "project-1")
+        .await
+        .expect("failed refresh should claim a generation");
 
     let report = indexer
-        .publish_refresh(request.clone(), failed_scan)
+        .publish_refresh(request.clone(), failed_scan, failed_generation)
         .await
         .expect("incomplete inventory should publish without deletion reconciliation");
     assert_eq!(
@@ -350,7 +354,7 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
         }
     );
     indexer
-        .record_refresh_status("project-1", &report)
+        .record_refresh_status("project-1", &report, failed_generation)
         .await
         .expect("incomplete refresh health should persist");
     let refresh = HierarchyStore::open(&sqlite)
@@ -418,6 +422,87 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
             })
             .await
             .expect("recovered source query should succeed")
+            .data
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn older_paused_refresh_cannot_publish_after_newer_refresh_completes() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    let source = root.path().join("facts.md");
+    fs::write(&source, "older_refresh_fact\n").expect("older source fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let older_indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let newer_indexer = ProjectIndexer::new(
+        HierarchyStore::open(&sqlite)
+            .await
+            .expect("second hierarchy store"),
+        ContextMapStore::open(&sqlite)
+            .await
+            .expect("second context map store"),
+    );
+    let request = ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    };
+
+    let older_generation = super::generation::claim(&older_indexer, "project-1")
+        .await
+        .expect("older refresh should claim a generation");
+    let older_scan = super::scan::scan_roots(&request.roots).expect("older scan should complete");
+
+    fs::write(&source, "newer_refresh_fact\n").expect("newer source fixture should write");
+    newer_indexer
+        .refresh(request.clone())
+        .await
+        .expect("newer refresh should complete");
+    let completed_status = hierarchy
+        .project_intelligence_status("project-1")
+        .await
+        .expect("newer project status should load")
+        .last_refresh
+        .expect("newer refresh status should persist");
+
+    let stale = older_indexer
+        .publish_refresh(request, older_scan, older_generation)
+        .await
+        .expect_err("older publisher should be rejected");
+    assert!(matches!(stale, ProjectIndexerError::SupersededRefresh));
+    assert_eq!(
+        hierarchy
+            .project_intelligence_status("project-1")
+            .await
+            .expect("project status should reload")
+            .last_refresh
+            .expect("newer refresh status should remain"),
+        completed_status
+    );
+    assert!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "older_refresh_fact".to_string(),
+                max_results: 10,
+            })
+            .await
+            .expect("older route query should succeed")
+            .data
+            .is_empty()
+    );
+    assert_eq!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "newer_refresh_fact".to_string(),
+                max_results: 10,
+            })
+            .await
+            .expect("newer route query should succeed")
             .data
             .len(),
         1

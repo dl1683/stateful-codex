@@ -60,47 +60,8 @@ impl HierarchyStore {
         id: HierarchyNodeId,
         value: NewHierarchyNode,
     ) -> Result<HierarchyNode, HierarchyStoreError> {
-        value.validate()?;
-        let now = unix_timestamp_millis()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if let Some(existing) = load_node_by_id(&mut transaction, &id).await? {
-            if existing.value != value {
-                return Err(HierarchyStoreError::NodeIdentityConflict(id.to_string()));
-            }
-            transaction.commit().await?;
-            return Ok(existing);
-        }
-        validate_parent(&mut transaction, &value).await?;
-        sqlx::query(
-            "INSERT INTO hierarchy_nodes (
-                id, project_id, parent_id, kind, project_root, relative_path,
-                anchor_scheme, anchor_locator, source_fingerprint, lifecycle,
-                revision, created_at_ms, updated_at_ms
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(id.as_str())
-        .bind(&value.project_id)
-        .bind(value.parent_id.as_ref().map(HierarchyNodeId::as_str))
-        .bind(kind_name(value.kind))
-        .bind(&value.project_root)
-        .bind(value.relative_path.as_str())
-        .bind(value.region_anchor.as_ref().map(|anchor| &anchor.scheme))
-        .bind(value.region_anchor.as_ref().map(|anchor| &anchor.locator))
-        .bind(
-            value
-                .source_fingerprint
-                .as_ref()
-                .map(SourceFingerprint::as_str),
-        )
-        .bind(lifecycle_name(NodeLifecycle::Active))
-        .bind(INITIAL_REVISION)
-        .bind(now)
-        .bind(now)
-        .execute(&mut *transaction)
-        .await?;
-        let node = load_node(&mut transaction, &value.project_id, &id)
-            .await?
-            .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))?;
+        let node = create_node_in_transaction(&mut transaction, &id, value).await?;
         transaction.commit().await?;
         Ok(node)
     }
@@ -276,6 +237,52 @@ impl HierarchyStore {
         transaction.commit().await?;
         Ok(node)
     }
+}
+
+pub(crate) async fn create_node_in_transaction(
+    connection: &mut SqliteConnection,
+    id: &HierarchyNodeId,
+    value: NewHierarchyNode,
+) -> Result<HierarchyNode, HierarchyStoreError> {
+    value.validate()?;
+    let now = unix_timestamp_millis()?;
+    if let Some(existing) = load_node_by_id(connection, id).await? {
+        if existing.value != value {
+            return Err(HierarchyStoreError::NodeIdentityConflict(id.to_string()));
+        }
+        return Ok(existing);
+    }
+    validate_parent(connection, &value).await?;
+    sqlx::query(
+        "INSERT INTO hierarchy_nodes (
+            id, project_id, parent_id, kind, project_root, relative_path,
+            anchor_scheme, anchor_locator, source_fingerprint, lifecycle,
+            revision, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id.as_str())
+    .bind(&value.project_id)
+    .bind(value.parent_id.as_ref().map(HierarchyNodeId::as_str))
+    .bind(kind_name(value.kind))
+    .bind(&value.project_root)
+    .bind(value.relative_path.as_str())
+    .bind(value.region_anchor.as_ref().map(|anchor| &anchor.scheme))
+    .bind(value.region_anchor.as_ref().map(|anchor| &anchor.locator))
+    .bind(
+        value
+            .source_fingerprint
+            .as_ref()
+            .map(SourceFingerprint::as_str),
+    )
+    .bind(lifecycle_name(NodeLifecycle::Active))
+    .bind(INITIAL_REVISION)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *connection)
+    .await?;
+    load_node(connection, &value.project_id, id)
+        .await?
+        .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))
 }
 
 #[derive(FromRow)]
