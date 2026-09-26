@@ -681,6 +681,33 @@ commits; rebuilding the current branch was blocked before linking by the `v8`
 current-source coverage and the older-binary live trajectory are therefore
 separate evidence. The live run did not exercise the new index phase fields.
 
+Commit `fb3b60a55a` closes a bounded route-diversity failure from issue #17.
+The prior context-map query stopped after collecting `limit * 16` queryable
+candidates, so one busy top-level directory could consume the candidate set
+before directory diversity was applied. A deterministic counterexample with
+160 matching files under `reviews/` and the decisive 161st match under `docs/`
+failed before the change: the `docs/guide.md` route was absent.
+
+Context-map search now performs one bounded FTS read of up to
+`max_results * 16 * 16` candidates plus one exhaustion-probe row inside the
+existing read transaction, then applies source and top-level-directory caps.
+The storage result carries an exact `truncated` signal: it is true when another
+diversified result exists or when the bounded candidate scan did not exhaust
+the search. The model tool maps that signal to `mayHaveMore`, and the
+experimental v2 `contextMap/query` response exposes it directly instead of
+guessing from `data.len() == limit`.
+
+The 160-plus-one regression now returns the decisive `docs/guide.md` route and
+reports `truncated: false` when the search is exhausted; a three-result query
+reports `truncated: true`. All 41 project-intelligence tests, all 27 Stateful
+extension tests, all 310 app-server-protocol tests with one skipped test, and
+the two affected app-server integrations passed. Scoped Clippy and formatting
+also passed; only the pre-existing root-blackboard large-enum warning remains.
+This proves bounded diversity and truthful exhaustion reporting for the frozen
+counterexample. It does not prove semantic ranking quality, representative
+large-corpus latency, or lower token cost, so issue #17 remains a broader
+trajectory gate rather than a closed product claim.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:

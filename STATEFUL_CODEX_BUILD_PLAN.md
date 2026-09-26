@@ -1316,3 +1316,28 @@ whether the decisive prior conclusion was actually used. Operational failures
 such as unavailable shell or code-mode host remain release blockers because they
 can invalidate the observed trajectory, but fixing them is not evidence that the
 project-intelligence loop itself improved.
+
+### Implementation checkpoint: bounded route diversity and exact truncation (2026-09-26)
+
+Commit `fb3b60a55a` closes a concrete issue #17 counterexample without claiming
+general retrieval quality. The old query collected only `limit * 16` queryable
+candidates before applying diversity caps. With 160 matching files in one
+top-level directory and the decisive 161st match in another directory, that
+early stop hid the decisive route.
+
+The query now scans one bounded FTS candidate window in the same read
+transaction, reserves one additional row to determine whether that window
+exhausted the search, and applies source and top-level-directory caps before
+materializing hits. `ContextMapQueryResult` carries `truncated`; the model tool
+uses it for `mayHaveMore`, and the experimental v2 query response exposes the
+same field. The storage layer therefore distinguishes an exactly full but
+exhausted result from a genuinely incomplete result.
+
+The deterministic 160-plus-one regression now returns `docs/guide.md`; the
+exhausted ten-result request reports `truncated: false`, while a three-result
+request reports `truncated: true`. Project-intelligence passed 41/41, the
+Stateful extension passed 27/27, app-server protocol passed 310/310 with one
+skipped test, and both affected app-server integrations passed. Scoped Clippy
+and formatting passed. This gate validates bounded diversity and truthful
+continuation signaling only; ranking relevance, large-corpus latency, route
+usage, and downstream token savings still require measurement.
