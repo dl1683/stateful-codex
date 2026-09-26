@@ -183,8 +183,8 @@ async fn completion_rejects_an_unselected_source_fingerprint_without_mutating_th
                         "materialRootFindings": [],
                         "completionIdempotencyKey": "invented-provenance",
                         "finalObligation": {
-                            "learning": [format!("Historical evidence used {invented}.")],
-                            "implication": ["The result would otherwise be complete."]
+                            "implication": ["The result would otherwise be complete."],
+                            "uncertainty": [format!("Historical evidence used {invented} without a selected provenance record.")]
                         }
                     })
                     .to_string(),

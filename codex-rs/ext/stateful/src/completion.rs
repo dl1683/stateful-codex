@@ -89,6 +89,14 @@ pub(crate) async fn prepare_completion(
             "materialHistoricalFindings accepts at most {MAX_MATERIAL_HISTORICAL_FINDINGS} entries"
         )));
     }
+    if !packet.learning.is_empty()
+        && material_root_findings.is_empty()
+        && material_historical_findings.is_empty()
+    {
+        return Err(respond(
+            "finalObligation.learning contains reusable project knowledge, but completion selected no blackboard finding; record and promote the smallest durable conclusion, then retry with its current root alias in materialRootFindings, or select an exact historical entry revision in materialHistoricalFindings",
+        ));
+    }
 
     let mut material = material_root_checklist(
         project_id,

@@ -94,8 +94,8 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
                         "materialRootFindings": [],
                         "completionIdempotencyKey": "premature-final",
                         "finalObligation": {
-                            "learning": ["The work produced a final result."],
-                            "implication": ["The result would otherwise be ready to use."]
+                            "implication": ["The result would otherwise be ready to use."],
+                            "uncertainty": ["The submitted user direction remains unresolved."]
                         }
                     })
                     .to_string(),
@@ -130,6 +130,135 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
     assert!(rejection.to_string().contains(&submitted.steering.id));
     assert!(rejection.to_string().contains("is submitted"));
     assert!(rejection.to_string().contains("apply or reject"));
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(started.run.id.clone()),
+                thread_id: None,
+            },
+        })
+        .await?;
+    assert_eq!(
+        read.run.expect("run remains readable").status,
+        StatefulRunStatus::Running
+    );
+    let obligations: ObligationListResponse = server
+        .request(|request_id| ClientRequest::ObligationList {
+            request_id,
+            params: ObligationListParams {
+                run_id: started.run.id,
+                cursor: None,
+                limit: Some(10),
+            },
+        })
+        .await?;
+    assert_eq!(obligations.data, Vec::new());
+    Ok(())
+}
+
+#[tokio::test]
+async fn model_cannot_complete_with_reusable_learning_absent_from_the_blackboard() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Completion learning guard".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "completion-learning-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: "Preserve the reusable conclusion.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "completion-learning-run".to_string(),
+            },
+        })
+        .await?;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "uncaptured-learning",
+                    "stateful_run_update",
+                    &json!({
+                        "expectedRevision": started.run.revision,
+                        "status": "completed",
+                        "result": "The decisive threshold is six.",
+                        "rootRevision": 0,
+                        "materialRootFindings": [],
+                        "completionIdempotencyKey": "uncaptured-learning-final",
+                        "finalObligation": {
+                            "learning": ["The decisive threshold is six."],
+                            "implication": ["Later work must apply that threshold."]
+                        }
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("uncaptured-learning-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message(
+                    "learning-capture-required",
+                    "I must record the reusable conclusion before completion.",
+                ),
+                responses::ev_completed("learning-capture-required-response"),
+            ]),
+        ],
+    )
+    .await;
+
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id,
+            input: vec![UserInput::Text {
+                text: "Finish and retain what you learned.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 2);
+    let rejection = requests[1].function_call_output("uncaptured-learning");
+    assert!(
+        rejection
+            .to_string()
+            .contains("completion selected no blackboard finding")
+    );
+    assert!(
+        rejection
+            .to_string()
+            .contains("record and promote the smallest durable conclusion")
+    );
     let read: StatefulRunReadResponse = server
         .request(|request_id| ClientRequest::StatefulRunRead {
             request_id,

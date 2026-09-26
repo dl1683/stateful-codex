@@ -133,7 +133,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
     append_line(
         output,
         &format!(
-            "At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve any additional material conclusions in the final semantic obligation; use an empty alias list only after determining that no root finding is material. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
+            "At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, first ensure at least one selected current root or exact historical finding preserves that reusable learning; use an empty alias list only when the run produced no reusable project learning. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
         ),
     );
 }
