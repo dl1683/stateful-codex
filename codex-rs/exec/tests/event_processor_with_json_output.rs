@@ -5,6 +5,7 @@ use codex_app_server_protocol::CollabAgentToolCallStatus as ApiCollabAgentToolCa
 use codex_app_server_protocol::CommandAction;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus as ApiCommandExecutionStatus;
+use codex_app_server_protocol::ContextCompactedNotification;
 use codex_app_server_protocol::ErrorNotification;
 use codex_app_server_protocol::FileUpdateChange as ApiFileUpdateChange;
 use codex_app_server_protocol::ItemCompletedNotification;
@@ -14,6 +15,8 @@ use codex_app_server_protocol::McpToolCallResult;
 use codex_app_server_protocol::McpToolCallStatus as ApiMcpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus as ApiPatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind as ApiPatchChangeKind;
+use codex_app_server_protocol::RawResponseCompletedNotification;
+use codex_app_server_protocol::RawResponseItemCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::StatefulAttributionCompletedNotification;
 use codex_app_server_protocol::StatefulAttributionCounters;
@@ -33,7 +36,9 @@ use codex_app_server_protocol::WebSearchAction as ApiWebSearchAction;
 use codex_app_server_protocol::WebSearchItem as ApiWebSearchItem;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::SessionConfiguredEvent;
@@ -1403,6 +1408,70 @@ fn stateful_attribution_is_aggregated_into_turn_completion() {
             }
         );
     }
+    for response_id in ["response-1", "response-2"] {
+        let collected = processor.collect_thread_events(ServerNotification::RawResponseCompleted(
+            RawResponseCompletedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-2".to_string(),
+                response_id: response_id.to_string(),
+                usage: None,
+                usage_metadata: None,
+            },
+        ));
+        assert_eq!(
+            collected,
+            CollectedThreadEvents {
+                events: Vec::new(),
+                status: CodexStatus::Running,
+            }
+        );
+    }
+    for item in [
+        ResponseItem::CustomToolCall {
+            id: None,
+            status: Some("completed".to_string()),
+            call_id: "call-1".to_string(),
+            name: "exec".to_string(),
+            namespace: None,
+            input: "text(true);".to_string(),
+            internal_chat_message_metadata_passthrough: None,
+        },
+        ResponseItem::CustomToolCallOutput {
+            id: None,
+            call_id: "call-1".to_string(),
+            name: Some("exec".to_string()),
+            output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            internal_chat_message_metadata_passthrough: None,
+        },
+    ] {
+        let collected = processor.collect_thread_events(
+            ServerNotification::RawResponseItemCompleted(RawResponseItemCompletedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-2".to_string(),
+                item,
+            }),
+        );
+        assert_eq!(
+            collected,
+            CollectedThreadEvents {
+                events: Vec::new(),
+                status: CodexStatus::Running,
+            }
+        );
+    }
+    let compacted = processor.collect_thread_events(ServerNotification::ContextCompacted(
+        ContextCompactedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-2".to_string(),
+        },
+    ));
+    assert_eq!(
+        compacted,
+        CollectedThreadEvents {
+            events: Vec::new(),
+            status: CodexStatus::Running,
+        }
+    );
 
     let completed = processor.collect_thread_events(ServerNotification::TurnCompleted(
         TurnCompletedNotification {
@@ -1427,6 +1496,11 @@ fn stateful_attribution_is_aggregated_into_turn_completion() {
                 stateful_attribution: Some(StatefulAttribution {
                     turns: 2,
                     completed_turns: 2,
+                    completed_model_responses: 2,
+                    compactions: 1,
+                    model_tool_calls: 1,
+                    model_custom_tool_calls: 1,
+                    tool_output_bytes: 4,
                     duration_ms: 20,
                     root_entries_loaded: 5,
                     stateful_tool_calls: 4,

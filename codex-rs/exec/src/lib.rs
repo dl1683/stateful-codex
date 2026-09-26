@@ -2046,6 +2046,15 @@ fn should_process_notification(
         ServerNotification::ThreadTokenUsageUpdated(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }
+        ServerNotification::RawResponseCompleted(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
+        ServerNotification::RawResponseItemCompleted(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
+        ServerNotification::ContextCompacted(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
         ServerNotification::StatefulAttributionCompleted(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }

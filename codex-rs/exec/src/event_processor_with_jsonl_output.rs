@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use codex_app_server_protocol::CollabAgentTool;
 use codex_app_server_protocol::CollabAgentToolCallStatus;
@@ -15,6 +16,7 @@ use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::WebSearchAction as ApiWebSearchAction;
 use codex_core::config::Config;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use serde_json::json;
@@ -67,6 +69,17 @@ pub struct EventProcessorWithJsonOutput {
     final_message: Option<String>,
     emit_final_message_on_shutdown: bool,
     stateful_attribution: Option<StatefulAttribution>,
+    invocation_started_at: Option<Instant>,
+    completed_model_responses: u64,
+    compactions: u64,
+    model_tool_calls: u64,
+    model_shell_tool_calls: u64,
+    model_function_tool_calls: u64,
+    model_custom_tool_calls: u64,
+    model_tool_search_calls: u64,
+    model_web_search_calls: u64,
+    model_image_generation_calls: u64,
+    tool_output_bytes: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +106,17 @@ impl EventProcessorWithJsonOutput {
             final_message: None,
             emit_final_message_on_shutdown: false,
             stateful_attribution: None,
+            invocation_started_at: None,
+            completed_model_responses: 0,
+            compactions: 0,
+            model_tool_calls: 0,
+            model_shell_tool_calls: 0,
+            model_function_tool_calls: 0,
+            model_custom_tool_calls: 0,
+            model_tool_search_calls: 0,
+            model_web_search_calls: 0,
+            model_image_generation_calls: 0,
+            tool_output_bytes: 0,
         }
     }
 
@@ -128,6 +152,75 @@ impl EventProcessorWithJsonOutput {
             cache_write_input_tokens: usage.total.cache_write_input_tokens,
             output_tokens: usage.total.output_tokens,
             reasoning_output_tokens: usage.total.reasoning_output_tokens,
+        }
+    }
+
+    fn completed_stateful_attribution(&self) -> Option<StatefulAttribution> {
+        let mut attribution = self.stateful_attribution.clone()?;
+        attribution.invocation_duration_ms = self
+            .invocation_started_at
+            .map(|started_at| started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+            .unwrap_or_default();
+        attribution.completed_model_responses = self.completed_model_responses;
+        attribution.compactions = self.compactions;
+        attribution.model_tool_calls = self.model_tool_calls;
+        attribution.model_shell_tool_calls = self.model_shell_tool_calls;
+        attribution.model_function_tool_calls = self.model_function_tool_calls;
+        attribution.model_custom_tool_calls = self.model_custom_tool_calls;
+        attribution.model_tool_search_calls = self.model_tool_search_calls;
+        attribution.model_web_search_calls = self.model_web_search_calls;
+        attribution.model_image_generation_calls = self.model_image_generation_calls;
+        attribution.tool_output_bytes = self.tool_output_bytes;
+        Some(attribution)
+    }
+
+    fn record_raw_response_item(&mut self, item: &ResponseItem) {
+        match item {
+            ResponseItem::LocalShellCall { .. } => {
+                self.model_tool_calls += 1;
+                self.model_shell_tool_calls += 1;
+            }
+            ResponseItem::FunctionCall { .. } => {
+                self.model_tool_calls += 1;
+                self.model_function_tool_calls += 1;
+            }
+            ResponseItem::CustomToolCall { .. } => {
+                self.model_tool_calls += 1;
+                self.model_custom_tool_calls += 1;
+            }
+            ResponseItem::ToolSearchCall { .. } => {
+                self.model_tool_calls += 1;
+                self.model_tool_search_calls += 1;
+            }
+            ResponseItem::WebSearchCall { .. } => {
+                self.model_tool_calls += 1;
+                self.model_web_search_calls += 1;
+            }
+            ResponseItem::ImageGenerationCall { result, .. } => {
+                self.model_tool_calls += 1;
+                self.model_image_generation_calls += 1;
+                self.tool_output_bytes += result.len() as u64;
+            }
+            ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. } => {
+                self.tool_output_bytes += serde_json::to_vec(output)
+                    .map(|output| output.len() as u64)
+                    .unwrap_or_default();
+            }
+            ResponseItem::ToolSearchOutput { tools, .. } => {
+                self.tool_output_bytes += serde_json::to_vec(tools)
+                    .map(|output| output.len() as u64)
+                    .unwrap_or_default();
+            }
+            ResponseItem::AdditionalTools { .. }
+            | ResponseItem::Message { .. }
+            | ResponseItem::AgentMessage { .. }
+            | ResponseItem::Reasoning { .. }
+            | ResponseItem::Compaction { .. }
+            | ResponseItem::ConfigurationUpdate { .. }
+            | ResponseItem::CompactionTrigger {}
+            | ResponseItem::ContextCompaction { .. }
+            | ResponseItem::Other => {}
         }
     }
 
@@ -513,6 +606,18 @@ impl EventProcessorWithJsonOutput {
                 self.last_total_token_usage = Some(notification.token_usage);
                 CodexStatus::Running
             }
+            ServerNotification::RawResponseCompleted(_) => {
+                self.completed_model_responses += 1;
+                CodexStatus::Running
+            }
+            ServerNotification::RawResponseItemCompleted(notification) => {
+                self.record_raw_response_item(&notification.item);
+                CodexStatus::Running
+            }
+            ServerNotification::ContextCompacted(_) => {
+                self.compactions += 1;
+                CodexStatus::Running
+            }
             ServerNotification::StatefulAttributionCompleted(notification) => {
                 let attribution = self
                     .stateful_attribution
@@ -578,7 +683,7 @@ impl EventProcessorWithJsonOutput {
                         self.emit_final_message_on_shutdown = true;
                         events.push(ThreadEvent::TurnCompleted(TurnCompletedEvent {
                             usage: self.usage_from_last_total(),
-                            stateful_attribution: self.stateful_attribution.clone(),
+                            stateful_attribution: self.completed_stateful_attribution(),
                         }));
                         CodexStatus::InitiateShutdown
                     }
@@ -639,6 +744,7 @@ impl EventProcessorWithJsonOutput {
                 CodexStatus::Running
             }
             ServerNotification::TurnStarted(_) => {
+                self.invocation_started_at.get_or_insert_with(Instant::now);
                 events.push(ThreadEvent::TurnStarted(TurnStartedEvent {}));
                 CodexStatus::Running
             }
