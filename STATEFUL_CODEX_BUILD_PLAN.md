@@ -1223,6 +1223,15 @@ scoped Clippy and formatting. The next gate is interrupted refresh: a transient
 scan/read failure must preserve the last complete published generation instead
 of reconciling an unread file as missing.
 
+Commit `dc51e7b320` completes that canary. An injected `PermissionDenied` read
+produces an incomplete inventory, the normal publication phase reports the
+skipped file without missing-file reconciliation, and the last complete
+hierarchy/context-map generation remains unchanged, current, and queryable. All
+41 project-intelligence tests passed, followed by scoped Clippy and formatting.
+The next action is a small controlled profile of scan/region construction versus
+SQLite publication; do not optimize the 25,096-region Pramana result until the
+dominant scaling mechanism is measured.
+
 For every gate, record answer quality, repeated source ranges, input and uncached
 tokens, model requests, tool-output volume, wall time, state writes/queries, and
 whether the decisive prior conclusion was actually used. Operational failures

@@ -587,6 +587,19 @@ project-intelligence tests passed, followed by scoped Clippy and formatting.
 This proves the storage snapshot boundary, not application-level freshness of
 the indexed data.
 
+Commit `dc51e7b320` closes the queued interrupted-refresh canary without adding
+a second refresh state machine. The existing scanner already marks an inventory
+incomplete after any walk or file-read error, and missing-file reconciliation
+runs only for a complete inventory. The new deterministic test injects a
+`PermissionDenied` file read through that scanner, obtains one skipped file and
+an incomplete/truncated inventory, then runs the normal publication phase. It
+proves no file is marked missing, the previously published hierarchy node is
+unchanged, and the last complete route remains current and queryable. All 41
+project-intelligence tests passed, followed by scoped Clippy and formatting.
+This protects the last published generation from a transient unread file; it
+does not make a genuinely deleted file distinguishable from every host-specific
+filesystem anomaly outside the scanner's error contract.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
@@ -595,13 +608,11 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Interrupted refresh.** Add a deterministic canary for transient scan/read
-   failure so reconciliation cannot silently mark an unread file missing.
-2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+1. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
    a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
-3. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+2. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
 
@@ -611,11 +622,12 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. Add the smallest deterministic interrupted-refresh
-canary: a transient scan or read failure must preserve the last complete
-published generation and must not reconcile an unread file as missing. Reuse
-the existing generation/publication boundary rather than adding a second state
-machine. After that gate, inspect the measured publication profile before
-choosing an indexing optimization. The premise and retrieval-snapshot
-mechanisms are implemented; the product claim that they reduce rereading and
-cost remains deliberately open until a small model replay uses them.
+Do not rerun the model yet. Profile the existing publication path on small,
+controlled fixtures before changing it: separate scan/region construction from
+SQLite file/region/context-map publication, count statements or equivalent
+work per file and region, and identify the dominant scaling term behind issue
+#19. Optimize only a measured mechanism and preserve per-file atomicity,
+stable identities, and exact-region search behavior. The premise,
+retrieval-snapshot, and interrupted-refresh mechanisms are implemented; their
+combined model/cost effect remains deliberately open until a small replay uses
+them.
