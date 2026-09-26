@@ -5145,6 +5145,41 @@ class SpendControlLimitSnapshot(BaseModel):
     used: str
 
 
+class StatefulAttributionCounters(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    blackboard_write_calls: Annotated[int, Field(alias="blackboardWriteCalls", ge=0)]
+    context_refresh_calls: Annotated[int, Field(alias="contextRefreshCalls", ge=0)]
+    evidence_read_calls: Annotated[int, Field(alias="evidenceReadCalls", ge=0)]
+    failed_stateful_tool_calls: Annotated[int, Field(alias="failedStatefulToolCalls", ge=0)]
+    knowledge_query_calls: Annotated[int, Field(alias="knowledgeQueryCalls", ge=0)]
+    material_findings_reused: Annotated[int, Field(alias="materialFindingsReused", ge=0)]
+    obligation_write_calls: Annotated[int, Field(alias="obligationWriteCalls", ge=0)]
+    root_entries_loaded: Annotated[int, Field(alias="rootEntriesLoaded", ge=0)]
+    root_evidence_routes_checked: Annotated[int, Field(alias="rootEvidenceRoutesChecked", ge=0)]
+    root_evidence_routes_current: Annotated[int, Field(alias="rootEvidenceRoutesCurrent", ge=0)]
+    root_evidence_routes_stale: Annotated[int, Field(alias="rootEvidenceRoutesStale", ge=0)]
+    root_evidence_routes_unavailable: Annotated[
+        int, Field(alias="rootEvidenceRoutesUnavailable", ge=0)
+    ]
+    root_evidence_routes_unchecked: Annotated[int, Field(alias="rootEvidenceRoutesUnchecked", ge=0)]
+    root_source_bytes_hashed: Annotated[int, Field(alias="rootSourceBytesHashed", ge=0)]
+    root_unique_sources_observed: Annotated[int, Field(alias="rootUniqueSourcesObserved", ge=0)]
+    route_query_calls: Annotated[int, Field(alias="routeQueryCalls", ge=0)]
+    run_update_calls: Annotated[int, Field(alias="runUpdateCalls", ge=0)]
+    stateful_tool_calls: Annotated[int, Field(alias="statefulToolCalls", ge=0)]
+    steering_query_calls: Annotated[int, Field(alias="steeringQueryCalls", ge=0)]
+    steering_write_calls: Annotated[int, Field(alias="steeringWriteCalls", ge=0)]
+    world_state_samples: Annotated[int, Field(alias="worldStateSamples", ge=0)]
+
+
+class StatefulAttributionStatus(Enum):
+    completed = "completed"
+    failed = "failed"
+    aborted = "aborted"
+
+
 class StatefulObligationPacket(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9888,6 +9923,18 @@ class SkillsListResponse(BaseModel):
     data: list[SkillsListEntry]
 
 
+class StatefulAttributionCompletedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    counters: StatefulAttributionCounters
+    duration_ms: Annotated[int, Field(alias="durationMs", ge=0)]
+    project_id: Annotated[str, Field(alias="projectId")]
+    status: StatefulAttributionStatus
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class StatefulObligation(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11391,6 +11438,24 @@ class ThreadGoalUpdatedServerNotification(BaseModel):
         Literal["thread/goal/updated"], Field(title="Thread/goal/updatedNotificationMethod")
     ]
     params: ThreadGoalUpdatedNotification
+
+
+class StatefulAttributionCompletedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["statefulAttribution/completed"],
+        Field(title="StatefulAttribution/completedNotificationMethod"),
+    ]
+    params: StatefulAttributionCompletedNotification
 
 
 class ThreadSettingsUpdatedServerNotification(BaseModel):
@@ -13141,6 +13206,7 @@ class ServerNotification(
         | ObligationUpdatedServerNotification
         | SteeringUpdatedServerNotification
         | BlackboardUpdatedServerNotification
+        | StatefulAttributionCompletedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
@@ -13233,6 +13299,7 @@ class ServerNotification(
         | ObligationUpdatedServerNotification
         | SteeringUpdatedServerNotification
         | BlackboardUpdatedServerNotification
+        | StatefulAttributionCompletedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification

@@ -4910,6 +4910,26 @@
           "properties": {
             "method": {
               "enum": [
+                "statefulAttribution/completed"
+              ],
+              "title": "StatefulAttribution/completedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/StatefulAttributionCompletedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "StatefulAttribution/completedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/project/updated"
               ],
               "title": "Thread/project/updatedNotificationMethod",
@@ -21072,6 +21092,182 @@
           "used"
         ],
         "type": "object"
+      },
+      "StatefulAttributionCompletedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "counters": {
+            "$ref": "#/definitions/v2/StatefulAttributionCounters"
+          },
+          "durationMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/definitions/v2/StatefulAttributionStatus"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "counters",
+          "durationMs",
+          "projectId",
+          "status",
+          "threadId",
+          "turnId"
+        ],
+        "title": "StatefulAttributionCompletedNotification",
+        "type": "object"
+      },
+      "StatefulAttributionCounters": {
+        "properties": {
+          "blackboardWriteCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "contextRefreshCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "evidenceReadCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "failedStatefulToolCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "knowledgeQueryCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "materialFindingsReused": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "obligationWriteCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootEntriesLoaded": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootEvidenceRoutesChecked": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootEvidenceRoutesCurrent": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootEvidenceRoutesStale": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootEvidenceRoutesUnavailable": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootEvidenceRoutesUnchecked": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootSourceBytesHashed": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rootUniqueSourcesObserved": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "routeQueryCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "runUpdateCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "statefulToolCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "steeringQueryCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "steeringWriteCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "worldStateSamples": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "blackboardWriteCalls",
+          "contextRefreshCalls",
+          "evidenceReadCalls",
+          "failedStatefulToolCalls",
+          "knowledgeQueryCalls",
+          "materialFindingsReused",
+          "obligationWriteCalls",
+          "rootEntriesLoaded",
+          "rootEvidenceRoutesChecked",
+          "rootEvidenceRoutesCurrent",
+          "rootEvidenceRoutesStale",
+          "rootEvidenceRoutesUnavailable",
+          "rootEvidenceRoutesUnchecked",
+          "rootSourceBytesHashed",
+          "rootUniqueSourcesObserved",
+          "routeQueryCalls",
+          "runUpdateCalls",
+          "statefulToolCalls",
+          "steeringQueryCalls",
+          "steeringWriteCalls",
+          "worldStateSamples"
+        ],
+        "type": "object"
+      },
+      "StatefulAttributionStatus": {
+        "enum": [
+          "completed",
+          "failed",
+          "aborted"
+        ],
+        "type": "string"
       },
       "StatefulObligation": {
         "properties": {

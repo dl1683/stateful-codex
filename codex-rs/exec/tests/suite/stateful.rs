@@ -174,7 +174,7 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
                 responses::ev_custom_tool_call(
                     "complete-autonomous-run",
                     "exec",
-                    r#"const result = await tools.stateful_run_update({expectedRevision: 2, status: "completed", result: "The autonomous investigation is complete.", rootRevision: 0, materialRootFindings: [], completionIdempotencyKey: "autonomous-final", finalObligation: {learning: ["The autonomous investigation reached its result."], implication: ["No further continuation is required."]}}); text(JSON.stringify(result));"#,
+                    r#"const result = await tools.stateful_run_update({expectedRevision: 2, status: "completed", result: "The autonomous investigation is complete.", rootRevision: 0, materialRootFindings: [], completionIdempotencyKey: "autonomous-final", finalObligation: {learning: [], implication: ["No further continuation is required."]}}); text(JSON.stringify(result));"#,
                 ),
                 responses::ev_completed("response-2"),
             ]),

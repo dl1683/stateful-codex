@@ -320,3 +320,73 @@ pub struct SteeringUpdatedNotification {
     pub revision: u64,
     pub cursor: String,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulAttributionStatus {
+    Completed,
+    Failed,
+    Aborted,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulAttributionCounters {
+    #[ts(type = "number")]
+    pub world_state_samples: u64,
+    #[ts(type = "number")]
+    pub root_entries_loaded: u64,
+    #[ts(type = "number")]
+    pub root_evidence_routes_checked: u64,
+    #[ts(type = "number")]
+    pub root_evidence_routes_current: u64,
+    #[ts(type = "number")]
+    pub root_evidence_routes_stale: u64,
+    #[ts(type = "number")]
+    pub root_evidence_routes_unavailable: u64,
+    #[ts(type = "number")]
+    pub root_evidence_routes_unchecked: u64,
+    #[ts(type = "number")]
+    pub root_unique_sources_observed: u64,
+    #[ts(type = "number")]
+    pub root_source_bytes_hashed: u64,
+    #[ts(type = "number")]
+    pub stateful_tool_calls: u64,
+    #[ts(type = "number")]
+    pub failed_stateful_tool_calls: u64,
+    #[ts(type = "number")]
+    pub knowledge_query_calls: u64,
+    #[ts(type = "number")]
+    pub route_query_calls: u64,
+    #[ts(type = "number")]
+    pub evidence_read_calls: u64,
+    #[ts(type = "number")]
+    pub steering_query_calls: u64,
+    #[ts(type = "number")]
+    pub blackboard_write_calls: u64,
+    #[ts(type = "number")]
+    pub context_refresh_calls: u64,
+    #[ts(type = "number")]
+    pub obligation_write_calls: u64,
+    #[ts(type = "number")]
+    pub run_update_calls: u64,
+    #[ts(type = "number")]
+    pub steering_write_calls: u64,
+    #[ts(type = "number")]
+    pub material_findings_reused: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulAttributionCompletedNotification {
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub status: StatefulAttributionStatus,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub counters: StatefulAttributionCounters,
+}

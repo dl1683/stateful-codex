@@ -43,6 +43,7 @@ use crate::exec_events::McpToolCallStatus as ExecMcpToolCallStatus;
 use crate::exec_events::PatchApplyStatus as ExecPatchApplyStatus;
 use crate::exec_events::PatchChangeKind as ExecPatchChangeKind;
 use crate::exec_events::ReasoningItem;
+use crate::exec_events::StatefulAttribution;
 use crate::exec_events::ThreadErrorEvent;
 use crate::exec_events::ThreadEvent;
 use crate::exec_events::ThreadItem as ExecThreadItem;
@@ -65,6 +66,7 @@ pub struct EventProcessorWithJsonOutput {
     last_critical_error: Option<ThreadErrorEvent>,
     final_message: Option<String>,
     emit_final_message_on_shutdown: bool,
+    stateful_attribution: Option<StatefulAttribution>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +92,7 @@ impl EventProcessorWithJsonOutput {
             last_critical_error: None,
             final_message: None,
             emit_final_message_on_shutdown: false,
+            stateful_attribution: None,
         }
     }
 
@@ -510,6 +513,49 @@ impl EventProcessorWithJsonOutput {
                 self.last_total_token_usage = Some(notification.token_usage);
                 CodexStatus::Running
             }
+            ServerNotification::StatefulAttributionCompleted(notification) => {
+                let attribution = self
+                    .stateful_attribution
+                    .get_or_insert_with(StatefulAttribution::default);
+                attribution.turns += 1;
+                match notification.status {
+                    codex_app_server_protocol::StatefulAttributionStatus::Completed => {
+                        attribution.completed_turns += 1;
+                    }
+                    codex_app_server_protocol::StatefulAttributionStatus::Failed => {
+                        attribution.failed_turns += 1;
+                    }
+                    codex_app_server_protocol::StatefulAttributionStatus::Aborted => {
+                        attribution.aborted_turns += 1;
+                    }
+                }
+                attribution.duration_ms += notification.duration_ms;
+                let counters = notification.counters;
+                attribution.world_state_samples += counters.world_state_samples;
+                attribution.root_entries_loaded += counters.root_entries_loaded;
+                attribution.root_evidence_routes_checked += counters.root_evidence_routes_checked;
+                attribution.root_evidence_routes_current += counters.root_evidence_routes_current;
+                attribution.root_evidence_routes_stale += counters.root_evidence_routes_stale;
+                attribution.root_evidence_routes_unavailable +=
+                    counters.root_evidence_routes_unavailable;
+                attribution.root_evidence_routes_unchecked +=
+                    counters.root_evidence_routes_unchecked;
+                attribution.root_unique_sources_observed += counters.root_unique_sources_observed;
+                attribution.root_source_bytes_hashed += counters.root_source_bytes_hashed;
+                attribution.stateful_tool_calls += counters.stateful_tool_calls;
+                attribution.failed_stateful_tool_calls += counters.failed_stateful_tool_calls;
+                attribution.knowledge_query_calls += counters.knowledge_query_calls;
+                attribution.route_query_calls += counters.route_query_calls;
+                attribution.evidence_read_calls += counters.evidence_read_calls;
+                attribution.steering_query_calls += counters.steering_query_calls;
+                attribution.blackboard_write_calls += counters.blackboard_write_calls;
+                attribution.context_refresh_calls += counters.context_refresh_calls;
+                attribution.obligation_write_calls += counters.obligation_write_calls;
+                attribution.run_update_calls += counters.run_update_calls;
+                attribution.steering_write_calls += counters.steering_write_calls;
+                attribution.material_findings_reused += counters.material_findings_reused;
+                CodexStatus::Running
+            }
             ServerNotification::TurnCompleted(notification) => {
                 if let Some(running) = self.running_todo_list.take() {
                     events.push(ThreadEvent::ItemCompleted(ItemCompletedEvent {
@@ -532,6 +578,7 @@ impl EventProcessorWithJsonOutput {
                         self.emit_final_message_on_shutdown = true;
                         events.push(ThreadEvent::TurnCompleted(TurnCompletedEvent {
                             usage: self.usage_from_last_total(),
+                            stateful_attribution: self.stateful_attribution.clone(),
                         }));
                         CodexStatus::InitiateShutdown
                     }

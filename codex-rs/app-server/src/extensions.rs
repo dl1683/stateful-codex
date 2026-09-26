@@ -6,6 +6,9 @@ use codex_analytics::AnalyticsEventsClient;
 use codex_app_server_protocol::BlackboardUpdatedNotification;
 use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::StatefulAttributionCompletedNotification;
+use codex_app_server_protocol::StatefulAttributionCounters;
+use codex_app_server_protocol::StatefulAttributionStatus;
 use codex_app_server_protocol::StatefulRunUpdatedNotification;
 use codex_app_server_protocol::SteeringUpdatedNotification;
 use codex_app_server_protocol::ThreadGoal;
@@ -298,6 +301,60 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                 steering_id,
                 revision,
             }),
+            StatefulEvent::AttributionCompleted { summary } => {
+                ServerNotification::StatefulAttributionCompleted(
+                    StatefulAttributionCompletedNotification {
+                        project_id: summary.project_id,
+                        thread_id: summary.thread_id,
+                        turn_id: summary.turn_id,
+                        status: match summary.status {
+                            codex_stateful_extension::StatefulAttributionStatus::Completed => {
+                                StatefulAttributionStatus::Completed
+                            }
+                            codex_stateful_extension::StatefulAttributionStatus::Failed => {
+                                StatefulAttributionStatus::Failed
+                            }
+                            codex_stateful_extension::StatefulAttributionStatus::Aborted => {
+                                StatefulAttributionStatus::Aborted
+                            }
+                        },
+                        duration_ms: summary.duration_ms,
+                        counters: StatefulAttributionCounters {
+                            world_state_samples: summary.counters.world_state_samples,
+                            root_entries_loaded: summary.counters.root_entries_loaded,
+                            root_evidence_routes_checked: summary
+                                .counters
+                                .root_evidence_routes_checked,
+                            root_evidence_routes_current: summary
+                                .counters
+                                .root_evidence_routes_current,
+                            root_evidence_routes_stale: summary.counters.root_evidence_routes_stale,
+                            root_evidence_routes_unavailable: summary
+                                .counters
+                                .root_evidence_routes_unavailable,
+                            root_evidence_routes_unchecked: summary
+                                .counters
+                                .root_evidence_routes_unchecked,
+                            root_unique_sources_observed: summary
+                                .counters
+                                .root_unique_sources_observed,
+                            root_source_bytes_hashed: summary.counters.root_source_bytes_hashed,
+                            stateful_tool_calls: summary.counters.stateful_tool_calls,
+                            failed_stateful_tool_calls: summary.counters.failed_stateful_tool_calls,
+                            knowledge_query_calls: summary.counters.knowledge_query_calls,
+                            route_query_calls: summary.counters.route_query_calls,
+                            evidence_read_calls: summary.counters.evidence_read_calls,
+                            steering_query_calls: summary.counters.steering_query_calls,
+                            blackboard_write_calls: summary.counters.blackboard_write_calls,
+                            context_refresh_calls: summary.counters.context_refresh_calls,
+                            obligation_write_calls: summary.counters.obligation_write_calls,
+                            run_update_calls: summary.counters.run_update_calls,
+                            steering_write_calls: summary.counters.steering_write_calls,
+                            material_findings_reused: summary.counters.material_findings_reused,
+                        },
+                    },
+                )
+            }
         };
         let outgoing = Arc::clone(&self.outgoing);
         tokio::spawn(async move {

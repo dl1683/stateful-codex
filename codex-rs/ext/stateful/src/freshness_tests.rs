@@ -73,6 +73,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         services: Some(services),
         event_sink: None,
         autonomous: None,
+        attribution: Default::default(),
     };
     let project = StoredProject {
         id: "project-1".to_string(),
@@ -87,7 +88,9 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         recency_at_ms: None,
     };
     let turn_store = ExtensionData::new("turn-2");
-    let empty_status = extension.root_blackboard(&project, &turn_store).await;
+    let empty_status = extension
+        .root_blackboard(&project, "turn-1", &turn_store)
+        .await;
     let RootBlackboardStatus::Available(_) = &empty_status else {
         panic!("root blackboard should be available");
     };
@@ -125,7 +128,9 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         )
         .await
         .expect("create promoted knowledge");
-    let promoted_status = extension.root_blackboard(&project, &turn_store).await;
+    let promoted_status = extension
+        .root_blackboard(&project, "turn-1", &turn_store)
+        .await;
     let RootBlackboardStatus::Available(_) = &promoted_status else {
         panic!("root blackboard should be available");
     };
@@ -137,7 +142,9 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
     let initial_audit = turn_store
         .get::<crate::source_freshness::EvidenceAudit>()
         .expect("cached evidence audit");
-    let unchanged_status = extension.root_blackboard(&project, &turn_store).await;
+    let unchanged_status = extension
+        .root_blackboard(&project, "turn-1", &turn_store)
+        .await;
     let RootBlackboardStatus::Available(_) = &unchanged_status else {
         panic!("unchanged root blackboard should be available");
     };
@@ -147,7 +154,9 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
     assert!(Arc::ptr_eq(&initial_audit, &unchanged_audit));
 
     std::fs::write(&source_path, "# Policy\nThreshold: 06\n").expect("replace source");
-    let changed_status = extension.root_blackboard(&project, &turn_store).await;
+    let changed_status = extension
+        .root_blackboard(&project, "turn-1", &turn_store)
+        .await;
     let RootBlackboardStatus::Available(_) = &changed_status else {
         panic!("root blackboard should be available");
     };

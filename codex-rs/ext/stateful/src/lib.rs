@@ -1,5 +1,6 @@
 //! Project-scoped Stateful Codex integration.
 
+mod attribution;
 mod autonomy;
 mod completion;
 mod events;
@@ -44,6 +45,9 @@ use crate::source_freshness::root_evidence_audit_cache_key;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
+pub use attribution::StatefulAttributionCounters;
+pub use attribution::StatefulAttributionStatus;
+pub use attribution::StatefulAttributionSummary;
 pub use autonomy::AutonomousContinuation;
 pub use autonomy::AutonomousContinuationFuture;
 pub use autonomy::AutonomousContinuationOutcome;
@@ -117,6 +121,7 @@ struct StatefulExtension {
     services: Option<ProjectIntelligenceServices>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     autonomous: Option<AutonomousContinuation>,
+    attribution: attribution::StatefulAttributionTracker,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -134,7 +139,9 @@ impl ContextContributor for StatefulExtension {
                 .await
             {
                 Ok(Some(project)) => {
-                    let root_blackboard = self.root_blackboard(&project, input.turn_store).await;
+                    let root_blackboard = self
+                        .root_blackboard(&project, input.turn_id, input.turn_store)
+                        .await;
                     let last_refresh = self.project_refresh_status(&project.id).await;
                     ProjectIntelligenceStatus::Available {
                         project: Box::new(project),
@@ -230,6 +237,7 @@ impl StatefulExtension {
     async fn root_blackboard(
         &self,
         project: &codex_thread_store::StoredProject,
+        turn_id: &str,
         turn_store: &ExtensionData,
     ) -> RootBlackboardStatus {
         let project_id = &project.id;
@@ -255,6 +263,12 @@ impl StatefulExtension {
                     Ok(context_map) => context_map,
                     Err(error) => {
                         tracing::warn!(%project_id, %error, "failed to resolve root evidence routes");
+                        self.attribution.record_world_state(
+                            turn_id,
+                            projection.data.len(),
+                            /*audit*/ None,
+                            /*audit_recomputed*/ false,
+                        );
                         return RootBlackboardStatus::Available(ResolvedRootBlackboard {
                             projection,
                             evidence_routes: Default::default(),
@@ -262,6 +276,8 @@ impl StatefulExtension {
                                 project_id: project_id.to_string(),
                                 statuses: Default::default(),
                                 cache_key: None,
+                                hashed_bytes: 0,
+                                observed_sources: 0,
                             }),
                         });
                     }
@@ -364,6 +380,12 @@ impl StatefulExtension {
                 } else {
                     projection
                 };
+                self.attribution.record_world_state(
+                    turn_id,
+                    projection.data.len(),
+                    Some(&evidence_audit),
+                    audit_recomputed,
+                );
                 RootBlackboardStatus::Available(ResolvedRootBlackboard {
                     projection,
                     evidence_routes,
@@ -490,9 +512,11 @@ pub fn install<C: Sync>(
         services: sqlite.map(ProjectIntelligenceServices::new),
         event_sink,
         autonomous,
+        attribution: attribution::StatefulAttributionTracker::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());
+    registry.tool_lifecycle_contributor(extension.clone());
     registry.tool_policy_contributor(extension.clone());
     registry.turn_lifecycle_contributor(extension.clone());
     registry.thread_lifecycle_contributor(extension);

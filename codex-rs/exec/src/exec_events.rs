@@ -49,6 +49,40 @@ pub struct TurnStartedEvent {}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct TurnCompletedEvent {
     pub usage: Usage,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stateful_attribution: Option<StatefulAttribution>,
+}
+
+/// Cumulative Stateful contribution observed by this headless invocation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS, Default)]
+pub struct StatefulAttribution {
+    pub turns: u64,
+    pub completed_turns: u64,
+    pub failed_turns: u64,
+    pub aborted_turns: u64,
+    pub duration_ms: u64,
+    pub world_state_samples: u64,
+    pub root_entries_loaded: u64,
+    pub root_evidence_routes_checked: u64,
+    pub root_evidence_routes_current: u64,
+    pub root_evidence_routes_stale: u64,
+    pub root_evidence_routes_unavailable: u64,
+    pub root_evidence_routes_unchecked: u64,
+    pub root_unique_sources_observed: u64,
+    pub root_source_bytes_hashed: u64,
+    pub stateful_tool_calls: u64,
+    pub failed_stateful_tool_calls: u64,
+    pub knowledge_query_calls: u64,
+    pub route_query_calls: u64,
+    pub evidence_read_calls: u64,
+    pub steering_query_calls: u64,
+    pub blackboard_write_calls: u64,
+    pub context_refresh_calls: u64,
+    pub obligation_write_calls: u64,
+    pub run_update_calls: u64,
+    pub steering_write_calls: u64,
+    pub material_findings_reused: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

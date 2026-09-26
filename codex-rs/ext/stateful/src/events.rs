@@ -1,4 +1,6 @@
-/// Durable Stateful mutation that clients should reread from the app-server API.
+use crate::StatefulAttributionSummary;
+
+/// Stateful mutation hint or bounded turn-attribution result for product clients.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StatefulEvent {
     BlackboardUpdated {
@@ -23,6 +25,9 @@ pub enum StatefulEvent {
         run_id: String,
         steering_id: String,
         revision: u64,
+    },
+    AttributionCompleted {
+        summary: StatefulAttributionSummary,
     },
 }
 

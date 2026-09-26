@@ -46,6 +46,33 @@ pub(super) struct EvidenceAudit {
     pub(super) project_id: String,
     pub(super) statuses: HashMap<ContextMapEntryId, SourceAuditStatus>,
     pub(super) cache_key: Option<RootEvidenceAuditCacheKey>,
+    pub(super) hashed_bytes: u64,
+    pub(super) observed_sources: u64,
+}
+
+impl EvidenceAudit {
+    pub(super) fn current_count(&self) -> u64 {
+        self.count_status(SourceAuditStatus::Current)
+    }
+
+    pub(super) fn stale_count(&self) -> u64 {
+        self.count_status(SourceAuditStatus::Stale)
+    }
+
+    pub(super) fn unavailable_count(&self) -> u64 {
+        self.count_status(SourceAuditStatus::SourceUnavailable)
+    }
+
+    pub(super) fn unchecked_count(&self) -> u64 {
+        self.count_status(SourceAuditStatus::Unchecked)
+    }
+
+    fn count_status(&self, status: SourceAuditStatus) -> u64 {
+        self.statuses
+            .values()
+            .filter(|value| **value == status)
+            .count() as u64
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -193,6 +220,8 @@ pub(super) async fn audit_root_evidence(
                 project_id: project_id.to_string(),
                 statuses,
                 cache_key,
+                hashed_bytes: 0,
+                observed_sources: 0,
             };
         }
     };
@@ -204,6 +233,8 @@ pub(super) async fn audit_root_evidence(
                 project_id: project_id.to_string(),
                 statuses,
                 cache_key,
+                hashed_bytes: 0,
+                observed_sources: 0,
             };
         }
     };
@@ -269,6 +300,8 @@ pub(super) async fn audit_root_evidence(
         project_id: project_id.to_string(),
         statuses,
         cache_key,
+        hashed_bytes: source_checks.hashed_bytes,
+        observed_sources: source_checks.checks.len() as u64,
     }
 }
 
@@ -288,6 +321,8 @@ pub(super) async fn observe_evidence(
                 project_id: project_id.to_string(),
                 statuses,
                 cache_key: None,
+                hashed_bytes: 0,
+                observed_sources: 0,
             };
         }
     };
@@ -347,6 +382,8 @@ pub(super) async fn observe_evidence(
         project_id: project_id.to_string(),
         statuses,
         cache_key: None,
+        hashed_bytes: source_checks.hashed_bytes,
+        observed_sources: source_checks.checks.len() as u64,
     }
 }
 

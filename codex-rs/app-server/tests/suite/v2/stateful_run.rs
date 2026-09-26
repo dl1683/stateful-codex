@@ -8,6 +8,9 @@ use codex_app_server_protocol::ObligationListResponse;
 use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::StatefulAttributionCompletedNotification;
+use codex_app_server_protocol::StatefulAttributionCounters;
+use codex_app_server_protocol::StatefulAttributionStatus;
 use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunPauseParams;
 use codex_app_server_protocol::StatefulRunPauseResponse;
@@ -204,7 +207,7 @@ async fn completion_rejects_an_unselected_source_fingerprint_without_mutating_th
 
     server
         .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.thread.id,
+            thread_id: thread.thread.id.clone(),
             input: vec![UserInput::Text {
                 text: "Finish with the historical source fingerprint.".to_string(),
                 text_elements: Vec::new(),
@@ -558,7 +561,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
 
     server
         .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.thread.id,
+            thread_id: thread.thread.id.clone(),
             input: vec![UserInput::Text {
                 text: "Continue and incorporate my steering.".to_string(),
                 text_elements: Vec::new(),
@@ -598,12 +601,34 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
         );
     }
     assert_eq!(last_run_event.expect("completed run event").revision, 3);
+    let attribution: StatefulAttributionCompletedNotification = server
+        .read_notification("statefulAttribution/completed")
+        .await?;
+    assert_eq!(attribution.project_id, started.run.project_id);
+    assert_eq!(attribution.thread_id, thread.thread.id);
+    assert_eq!(attribution.status, StatefulAttributionStatus::Completed);
+    assert!(attribution.duration_ms > 0);
+    assert!(attribution.counters.world_state_samples > 0);
+    assert!(attribution.counters.root_entries_loaded > 0);
+    assert_eq!(
+        attribution.counters,
+        StatefulAttributionCounters {
+            world_state_samples: attribution.counters.world_state_samples,
+            root_entries_loaded: attribution.counters.root_entries_loaded,
+            stateful_tool_calls: 4,
+            obligation_write_calls: 1,
+            run_update_calls: 1,
+            steering_write_calls: 2,
+            material_findings_reused: 1,
+            ..Default::default()
+        }
+    );
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 5);
     assert!(requests[0].body_contains_text("<stateful_run>"));
     assert!(requests[0].body_contains_text(
-        "do not turn a question about one criterion or decision dimension into an overall project determination"
+        "do not turn one criterion or decision dimension into an overall project determination"
     ));
     assert!(requests[0].body_contains_text("removes the active-run binding"));
     assert!(requests[0].body_contains_text("final Stateful mutation"));

@@ -15,6 +15,9 @@ use codex_app_server_protocol::McpToolCallStatus as ApiMcpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus as ApiPatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind as ApiPatchChangeKind;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::StatefulAttributionCompletedNotification;
+use codex_app_server_protocol::StatefulAttributionCounters;
+use codex_app_server_protocol::StatefulAttributionStatus;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TokenUsageBreakdown;
@@ -64,6 +67,7 @@ use codex_exec::McpToolCallStatus;
 use codex_exec::PatchApplyStatus;
 use codex_exec::PatchChangeKind;
 use codex_exec::ReasoningItem;
+use codex_exec::StatefulAttribution;
 use codex_exec::ThreadErrorEvent;
 use codex_exec::ThreadEvent;
 use codex_exec::ThreadItemDetails;
@@ -1229,6 +1233,7 @@ fn plan_update_emits_started_then_updated_then_completed() {
                 }),
                 ThreadEvent::TurnCompleted(TurnCompletedEvent {
                     usage: Usage::default(),
+                    stateful_attribution: None,
                 }),
             ],
             status: CodexStatus::InitiateShutdown,
@@ -1362,6 +1367,73 @@ fn token_usage_update_is_emitted_on_turn_completion() {
                     output_tokens: 29,
                     reasoning_output_tokens: 7,
                 },
+                stateful_attribution: None,
+            })],
+            status: CodexStatus::InitiateShutdown,
+        }
+    );
+}
+
+#[test]
+fn stateful_attribution_is_aggregated_into_turn_completion() {
+    let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
+    for (turn_id, root_entries_loaded) in [("turn-1", 3), ("turn-2", 2)] {
+        let collected =
+            processor.collect_thread_events(ServerNotification::StatefulAttributionCompleted(
+                StatefulAttributionCompletedNotification {
+                    project_id: "project-1".to_string(),
+                    thread_id: "thread-1".to_string(),
+                    turn_id: turn_id.to_string(),
+                    status: StatefulAttributionStatus::Completed,
+                    duration_ms: 10,
+                    counters: StatefulAttributionCounters {
+                        root_entries_loaded,
+                        stateful_tool_calls: 2,
+                        knowledge_query_calls: 1,
+                        material_findings_reused: 1,
+                        ..Default::default()
+                    },
+                },
+            ));
+        assert_eq!(
+            collected,
+            CollectedThreadEvents {
+                events: Vec::new(),
+                status: CodexStatus::Running,
+            }
+        );
+    }
+
+    let completed = processor.collect_thread_events(ServerNotification::TurnCompleted(
+        TurnCompletedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: Turn {
+                id: "turn-2".to_string(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                items: Vec::new(),
+                status: TurnStatus::Completed,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            },
+        },
+    ));
+    assert_eq!(
+        completed,
+        CollectedThreadEvents {
+            events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                stateful_attribution: Some(StatefulAttribution {
+                    turns: 2,
+                    completed_turns: 2,
+                    duration_ms: 20,
+                    root_entries_loaded: 5,
+                    stateful_tool_calls: 4,
+                    knowledge_query_calls: 2,
+                    material_findings_reused: 2,
+                    ..Default::default()
+                }),
             })],
             status: CodexStatus::InitiateShutdown,
         }
@@ -1400,6 +1472,7 @@ fn turn_completion_recovers_final_message_from_turn_items() {
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
         }
@@ -1497,6 +1570,7 @@ fn turn_completion_reconciles_started_items_from_turn_items() {
                 }),
                 ThreadEvent::TurnCompleted(TurnCompletedEvent {
                     usage: Usage::default(),
+                    stateful_attribution: None,
                 }),
             ],
             status: CodexStatus::InitiateShutdown,
@@ -1551,6 +1625,7 @@ fn turn_completion_overwrites_stale_final_message_from_turn_items() {
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
         }
@@ -1598,6 +1673,7 @@ fn turn_completion_preserves_streamed_final_message_when_turn_items_are_empty() 
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
         }
@@ -1681,6 +1757,7 @@ fn turn_completion_falls_back_to_final_plan_text() {
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
         }

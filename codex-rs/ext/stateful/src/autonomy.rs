@@ -7,17 +7,24 @@ use codex_extension_api::ThreadIdleCause;
 use codex_extension_api::ThreadIdleInput;
 use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::ThreadReadyInput;
+use codex_extension_api::TurnAbortInput;
+use codex_extension_api::TurnErrorInput;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
+use codex_extension_api::TurnStopInput;
 use codex_stateful_runtime::AutonomousClaimOutcome;
 use codex_stateful_runtime::AutonomousClaimRequest;
 use codex_stateful_runtime::StatefulRunId;
 
 use crate::SelectedProject;
 use crate::SelectedThread;
+use crate::StatefulAttributionStatus;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::StatefulExtension;
+use crate::attribution::begin_turn_attribution;
+use crate::attribution::fail_turn_attribution;
+use crate::attribution::finish_turn_attribution;
 
 /// One host request to continue a claimed Autonomous run on its thread.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -144,6 +151,7 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
 impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
+            begin_turn_attribution(self, input.turn_id, input.thread_store);
             let (Some(selected), Some(thread), Some(services)) = (
                 input.thread_store.get::<SelectedProject>(),
                 input.thread_store.get::<SelectedThread>(),
@@ -179,6 +187,24 @@ impl TurnLifecycleContributor for StatefulExtension {
                     );
                 }
             }
+        })
+    }
+
+    fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {
+        Box::pin(async move {
+            finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Completed);
+        })
+    }
+
+    fn on_turn_abort<'a>(&'a self, input: TurnAbortInput<'a>) -> ExtensionFuture<'a, ()> {
+        Box::pin(async move {
+            finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
+        })
+    }
+
+    fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
+        Box::pin(async move {
+            fail_turn_attribution(self, input.turn_id);
         })
     }
 }

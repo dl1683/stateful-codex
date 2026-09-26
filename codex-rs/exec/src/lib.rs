@@ -145,6 +145,7 @@ pub use exec_events::McpToolCallStatus;
 pub use exec_events::PatchApplyStatus;
 pub use exec_events::PatchChangeKind;
 pub use exec_events::ReasoningItem;
+pub use exec_events::StatefulAttribution;
 pub use exec_events::ThreadErrorEvent;
 pub use exec_events::ThreadEvent;
 pub use exec_events::ThreadItem as ExecThreadItem;
@@ -2043,6 +2044,9 @@ fn should_process_notification(
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }
         ServerNotification::ThreadTokenUsageUpdated(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
+        ServerNotification::StatefulAttributionCompleted(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }
         ServerNotification::TurnCompleted(notification) => {

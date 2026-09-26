@@ -2041,6 +2041,8 @@ server_notification_definitions! {
     SteeringUpdated => "steering/updated" (v2::SteeringUpdatedNotification),
     #[experimental("blackboard/updated")]
     BlackboardUpdated => "blackboard/updated" (v2::BlackboardUpdatedNotification),
+    #[experimental("statefulAttribution/completed")]
+    StatefulAttributionCompleted => "statefulAttribution/completed" (v2::StatefulAttributionCompletedNotification),
     #[experimental("thread/project/updated")]
     ThreadProjectUpdated => "thread/project/updated" (v2::ThreadProjectUpdatedNotification),
     #[experimental("thread/environment/connected")]
