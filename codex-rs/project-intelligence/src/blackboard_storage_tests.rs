@@ -3,6 +3,8 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
+use super::query::load_hit;
+use super::query::query_entry_ids;
 use super::*;
 use crate::BlackboardEntryScope;
 use crate::BlackboardEntryUpdate;
@@ -139,6 +141,56 @@ async fn fixture(temp_dir: &TempDir) -> (HierarchyStore, BlackboardStore, Blackb
         .await
         .expect("blackboard entry inserts");
     (hierarchy, blackboard, entry, file.revision)
+}
+
+#[tokio::test]
+async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (hierarchy, blackboard, entry, file_revision) = fixture(&temp_dir).await;
+    let query = BlackboardQuery {
+        project_id: "project-1".to_string(),
+        text: Some("project purpose".to_string()),
+        within_node: None,
+        root_promotion: None,
+        entry_scope: BlackboardEntryScope::Active,
+        max_results: 10,
+    };
+    let mut reader = blackboard.pool.begin().await.expect("reader begins");
+    let entry_ids = query_entry_ids(&mut reader, &query, 11)
+        .await
+        .expect("candidate IDs load");
+    assert_eq!(entry_ids, vec![entry.id.to_string()]);
+
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &HierarchyNodeId::parse("node-file").expect("valid node ID"),
+            HierarchySourceUpdate {
+                expected_revision: file_revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:changed")),
+            },
+        )
+        .await
+        .expect("concurrent source update commits");
+
+    let snapshot_hit = load_hit(&mut reader, "project-1", entry_ids[0].clone())
+        .await
+        .expect("candidate materializes from the reader snapshot");
+    assert_eq!(
+        snapshot_hit.evidence_freshness,
+        BlackboardEvidenceFreshness::Current
+    );
+    reader.commit().await.expect("reader commits");
+
+    let current = blackboard
+        .query(query)
+        .await
+        .expect("current query succeeds");
+    assert_eq!(
+        current.data[0].evidence_freshness,
+        BlackboardEvidenceFreshness::Stale
+    );
 }
 
 #[tokio::test]

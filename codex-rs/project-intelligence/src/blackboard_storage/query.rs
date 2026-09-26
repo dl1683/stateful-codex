@@ -264,22 +264,23 @@ impl BlackboardStore {
         query: BlackboardQuery,
     ) -> Result<BlackboardQueryResult, BlackboardStoreError> {
         query.validate()?;
-        let mut connection = self.pool.acquire().await?;
+        let mut transaction = self.pool.begin().await?;
         if let Some(node_id) = query.within_node.as_ref()
-            && load_node(&mut connection, &query.project_id, node_id)
+            && load_node(&mut transaction, &query.project_id, node_id)
                 .await?
                 .is_none()
         {
             return Err(BlackboardStoreError::NodeNotFound(node_id.to_string()));
         }
         let limit = i64::from(query.max_results) + 1;
-        let entry_ids = query_entry_ids(&mut connection, &query, limit).await?;
+        let entry_ids = query_entry_ids(&mut transaction, &query, limit).await?;
         let truncated = entry_ids.len() > query.max_results as usize;
         let entry_ids = entry_ids.into_iter().take(query.max_results as usize);
         let mut data = Vec::with_capacity(query.max_results as usize);
         for raw_id in entry_ids {
-            data.push(load_hit(&mut connection, &query.project_id, raw_id).await?);
+            data.push(load_hit(&mut transaction, &query.project_id, raw_id).await?);
         }
+        transaction.commit().await?;
         Ok(BlackboardQueryResult { data, truncated })
     }
 
@@ -345,7 +346,7 @@ impl BlackboardStore {
     }
 }
 
-async fn query_entry_ids(
+pub(super) async fn query_entry_ids(
     connection: &mut SqliteConnection,
     query: &BlackboardQuery,
     limit: i64,
@@ -477,7 +478,7 @@ fn entry_scope_name(scope: BlackboardEntryScope) -> &'static str {
     }
 }
 
-async fn load_hit(
+pub(super) async fn load_hit(
     connection: &mut SqliteConnection,
     project_id: &str,
     raw_id: String,

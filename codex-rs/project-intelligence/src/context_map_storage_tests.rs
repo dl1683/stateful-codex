@@ -228,6 +228,63 @@ async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
 }
 
 #[tokio::test]
+async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    let file = create_file(&hierarchy).await;
+    let entry = context_map
+        .create_entry(
+            ContextMapEntryId::parse("map-readme").expect("valid entry ID"),
+            new_entry("sha256:abc"),
+        )
+        .await
+        .expect("context-map entry should insert");
+    let mut reader = context_map.pool.begin().await.expect("reader begins");
+    let candidate_ids = sqlx::query_scalar::<_, String>(
+        "SELECT entry.id
+         FROM context_map_search AS search
+         JOIN context_map_entries AS entry ON entry.rowid = search.rowid
+         WHERE context_map_search MATCH ? AND entry.project_id = ?",
+    )
+    .bind("\"purpose\"*")
+    .bind("project-1")
+    .fetch_all(&mut *reader)
+    .await
+    .expect("candidate IDs load");
+    assert_eq!(candidate_ids, vec![entry.id.to_string()]);
+
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &file.id,
+            HierarchySourceUpdate {
+                expected_revision: file.revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:changed")),
+            },
+        )
+        .await
+        .expect("concurrent source update commits");
+
+    let snapshot_hit = load_hit(&mut reader, "project-1", &entry.id)
+        .await
+        .expect("candidate materializes")
+        .expect("candidate remains visible");
+    assert_eq!(snapshot_hit.freshness, ContextMapFreshness::Current);
+    reader.commit().await.expect("reader commits");
+
+    let current = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "purpose".to_string(),
+            max_results: 5,
+        })
+        .await
+        .expect("current query succeeds");
+    assert_eq!(current[0].freshness, ContextMapFreshness::Stale);
+}
+
+#[tokio::test]
 async fn query_prefers_bounded_regions_without_one_source_crowding_results() {
     let temp_dir = TempDir::new().expect("tempdir should be created");
     let (hierarchy, context_map) = stores(&temp_dir).await;

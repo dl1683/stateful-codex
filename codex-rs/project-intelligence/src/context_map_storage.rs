@@ -127,8 +127,10 @@ impl ContextMapStore {
         project_id: &str,
         id: &ContextMapEntryId,
     ) -> Result<Option<ContextMapEntry>, ContextMapStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        load_entry(&mut connection, project_id, id).await
+        let mut transaction = self.pool.begin().await?;
+        let entry = load_entry(&mut transaction, project_id, id).await?;
+        transaction.commit().await?;
+        Ok(entry)
     }
 
     pub async fn get_hit(
@@ -136,8 +138,10 @@ impl ContextMapStore {
         project_id: &str,
         id: &ContextMapEntryId,
     ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        load_hit(&mut connection, project_id, id).await
+        let mut transaction = self.pool.begin().await?;
+        let hit = load_hit(&mut transaction, project_id, id).await?;
+        transaction.commit().await?;
+        Ok(hit)
     }
 
     pub async fn get_guarded_hit(
@@ -146,8 +150,10 @@ impl ContextMapStore {
         id: &ContextMapEntryId,
         expected_fingerprint: &SourceFingerprint,
     ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        let Some(hit) = load_hit(&mut connection, project_id, id).await? else {
+        let mut transaction = self.pool.begin().await?;
+        let hit = load_hit(&mut transaction, project_id, id).await?;
+        let Some(hit) = hit else {
+            transaction.commit().await?;
             return Ok(None);
         };
         if &hit.entry.value.source_fingerprint != expected_fingerprint {
@@ -170,7 +176,7 @@ impl ContextMapStore {
             )
             .bind(project_id)
             .bind(id.as_str())
-            .fetch_one(&mut *connection)
+            .fetch_one(&mut *transaction)
             .await?;
             if current != 1 {
                 return Err(ContextMapStoreError::SourceNotCurrent(
@@ -178,6 +184,7 @@ impl ContextMapStore {
                 ));
             }
         }
+        transaction.commit().await?;
         Ok(Some(hit))
     }
 
@@ -186,7 +193,7 @@ impl ContextMapStore {
         project_id: &str,
         relative_path: &ProjectRelativePath,
     ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
-        let mut connection = self.pool.acquire().await?;
+        let mut transaction = self.pool.begin().await?;
         let raw_ids = sqlx::query_scalar::<_, String>(
             "SELECT entry.id
              FROM context_map_entries AS entry
@@ -198,18 +205,19 @@ impl ContextMapStore {
         .bind(project_id)
         .bind(project_id)
         .bind(relative_path.as_str())
-        .fetch_all(&mut *connection)
+        .fetch_all(&mut *transaction)
         .await?;
         let mut hits = Vec::with_capacity(raw_ids.len());
         for raw_id in raw_ids {
             let id = ContextMapEntryId::parse(&raw_id)
                 .map_err(|_| ContextMapStoreError::CorruptEntry(raw_id))?;
             hits.push(
-                load_hit(&mut connection, project_id, &id)
+                load_hit(&mut transaction, project_id, &id)
                     .await?
                     .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?,
             );
         }
+        transaction.commit().await?;
         Ok(hits)
     }
 
@@ -224,7 +232,7 @@ impl ContextMapStore {
         let candidate_scan_limit = candidate_target.saturating_mul(MAX_CANDIDATE_PAGES);
         let candidate_target =
             usize::try_from(candidate_target).map_err(|_| ContextMapError::InvalidQuery)?;
-        let mut connection = self.pool.acquire().await?;
+        let mut transaction = self.pool.begin().await?;
         let mut candidates = Vec::new();
         let mut offset = 0_i64;
         while candidates.len() < candidate_target && offset < candidate_scan_limit {
@@ -257,7 +265,7 @@ impl ContextMapStore {
             .bind(page_limit)
             .bind(offset)
             .bind(&query.project_id)
-            .fetch_all(&mut *connection)
+            .fetch_all(&mut *transaction)
             .await?;
             let page_len = i64::try_from(page.len()).unwrap_or(i64::MAX);
             offset = offset.saturating_add(page_len);
@@ -316,11 +324,12 @@ impl ContextMapStore {
             let id = ContextMapEntryId::parse(&raw_id)
                 .map_err(|_| ContextMapStoreError::CorruptEntry(raw_id))?;
             hits.push(
-                load_hit(&mut connection, &query.project_id, &id)
+                load_hit(&mut transaction, &query.project_id, &id)
                     .await?
                     .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?,
             );
         }
+        transaction.commit().await?;
         Ok(hits)
     }
 
@@ -330,7 +339,7 @@ impl ContextMapStore {
     ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
         query.validate()?;
         let limit = i64::from(query.max_results);
-        let mut connection = self.pool.acquire().await?;
+        let mut transaction = self.pool.begin().await?;
         let entry_ids = sqlx::query_scalar::<_, String>(
             "SELECT entry.id
              FROM context_map_entries AS entry
@@ -343,18 +352,19 @@ impl ContextMapStore {
         .bind(&query.project_id)
         .bind(&query.project_id)
         .bind(limit)
-        .fetch_all(&mut *connection)
+        .fetch_all(&mut *transaction)
         .await?;
         let mut hits = Vec::with_capacity(entry_ids.len());
         for raw_id in entry_ids {
             let id = ContextMapEntryId::parse(&raw_id)
                 .map_err(|_| ContextMapStoreError::CorruptEntry(raw_id))?;
             hits.push(
-                load_hit(&mut connection, &query.project_id, &id)
+                load_hit(&mut transaction, &query.project_id, &id)
                     .await?
                     .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?,
             );
         }
+        transaction.commit().await?;
         Ok(hits)
     }
 
