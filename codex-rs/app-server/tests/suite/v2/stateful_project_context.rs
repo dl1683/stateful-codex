@@ -358,6 +358,183 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
 }
 
 #[tokio::test]
+async fn model_guarded_route_rejects_shifted_source_until_requeried() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    let source_path = project_root.path().join("facts.md");
+    let source = (1..=70)
+        .map(|line| {
+            if line == 70 {
+                "decisive_route_fact".to_string()
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&source_path, &source)?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Guarded region project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-guarded-region-project".to_string(),
+            },
+        })
+        .await?;
+    let project_id = created.project.id;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: project_id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.clone()),
+            ..Default::default()
+        })
+        .await?;
+
+    let first_query = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "first-query",
+                    "context_map_query",
+                    &json!({"text": "decisive_route_fact"}).to_string(),
+                ),
+                responses::ev_completed("first-query-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("first-query-done", "Route found"),
+                responses::ev_completed("first-query-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let first_output: serde_json::Value = serde_json::from_str(
+        &first_query
+            .function_call_output_text("first-query")
+            .expect("context output should be text"),
+    )?;
+    let stale_route = first_output["data"][0]["evidenceRoute"].clone();
+    assert_eq!(stale_route["lineRange"], json!({"start": 65, "end": 70}));
+
+    std::fs::write(&source_path, format!("inserted\n{source}"))?;
+    let stale_read = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "stale-read",
+                    "evidence_read",
+                    &json!({"evidenceRoute": stale_route}).to_string(),
+                ),
+                responses::ev_completed("stale-read-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("stale-read-done", "Route was stale"),
+                responses::ev_completed("stale-read-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let stale_output = stale_read
+        .function_call_output_text("stale-read")
+        .expect("stale read output should be text");
+    assert!(stale_output.contains("source changed after indexing"));
+    assert!(!stale_output.contains("stateful-read-"));
+
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: project_id.clone(),
+            },
+        })
+        .await?;
+    let current_query = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "current-query",
+                    "context_map_query",
+                    &json!({"text": "decisive_route_fact"}).to_string(),
+                ),
+                responses::ev_completed("current-query-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("current-query-done", "Current route found"),
+                responses::ev_completed("current-query-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let current_output: serde_json::Value = serde_json::from_str(
+        &current_query
+            .function_call_output_text("current-query")
+            .expect("current context output should be text"),
+    )?;
+    let current_route = current_output["data"][0]["evidenceRoute"].clone();
+    assert_eq!(current_route["lineRange"], json!({"start": 65, "end": 71}));
+
+    let current_read = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "current-read",
+                    "evidence_read",
+                    &json!({"evidenceRoute": current_route}).to_string(),
+                ),
+                responses::ev_completed("current-read-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("current-read-done", "Evidence verified"),
+                responses::ev_completed("current-read-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let read_output: serde_json::Value = serde_json::from_str(
+        &current_read
+            .function_call_output_text("current-read")
+            .expect("current read output should be text"),
+    )?;
+    assert_eq!(read_output["lastLine"], 71);
+    assert_eq!(read_output["truncated"], false);
+    assert!(
+        read_output["blackboardEvidence"]["readReceiptId"]
+            .as_str()
+            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let response_log = responses::mount_sse_sequence(
@@ -426,22 +603,26 @@ async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<
     assert_eq!(output["knowledgeCoverageAvailable"], true);
     assert_eq!(output["routes"].as_array().map(Vec::len), Some(2));
     assert_eq!(
-        output["routes"],
-        json!([
-            {
-                "headline": "alpha.md | # Alpha | first route",
-                "coverage": "complete",
-                "freshness": "current",
-                "source": {"relativePath": "alpha.md"},
-            },
-            {
-                "headline": "beta.md | # Beta | second route",
-                "coverage": "complete",
-                "freshness": "current",
-                "source": {"relativePath": "beta.md"},
-            },
-        ])
+        output["routes"][0]["headline"],
+        "alpha.md | # Alpha | first route"
     );
+    assert_eq!(
+        output["routes"][1]["headline"],
+        "beta.md | # Beta | second route"
+    );
+    for route in output["routes"]
+        .as_array()
+        .expect("routes should be an array")
+    {
+        assert_eq!(route["coverage"], "complete");
+        assert_eq!(route["freshness"], "current");
+        assert!(
+            route["evidenceRoute"]["sourceFingerprint"]
+                .as_str()
+                .is_some_and(|fingerprint| fingerprint.starts_with("sha256:"))
+        );
+        assert!(route["evidenceRoute"]["lineRange"].is_null());
+    }
     Ok(())
 }
 

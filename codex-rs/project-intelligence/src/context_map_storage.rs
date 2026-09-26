@@ -288,7 +288,7 @@ impl ContextMapStore {
              FROM context_map_entries AS entry
              JOIN hierarchy_nodes AS node ON node.id = entry.node_id
              WHERE entry.project_id = ? AND node.project_id = ?
-               AND node.lifecycle = 'active'
+               AND node.kind = 'file' AND node.lifecycle = 'active'
              ORDER BY node.project_root, node.relative_path, entry.id
              LIMIT ?",
         )
