@@ -364,6 +364,41 @@ replay now reports revision 25 at turn start, 26 at first response, and 35 at
 completion, with all prior hierarchy, context-map, and blackboard records
 retained.
 
+A response-by-response decomposition of the frozen repair trajectory identified
+two concrete tool-contract costs:
+
+- The first context-map query already isolated `amendment.md` as stale and the
+  other three controlling sources as current, but a stale hit did not expose a
+  copyable refresh locator. The model queried again and then reread all four
+  sources even though only the amendment had changed.
+- `blackboard_update_batch` returned the old decision at its new superseded
+  revision 2, but completion instructions allowed historical selections only
+  from `blackboard_query`. The model first submitted the obsolete revision 1,
+  was rejected, queried the same historical entry again, compacted, and retried
+  completion with revision 2.
+
+Two bounded fixes are now pushed:
+
+- `f2fbe0a390` adds `refreshInput` to stale context-map hits. It is directly
+  consumable by `evidence_read`, refreshes only the changed file, withholds the
+  invalid guarded route, and tells the model to reuse adequate current
+  knowledge rather than reread it. The Stateful extension suite passed 24/24;
+  an app-server integration proves the stale route exposes the refresh input
+  while the shifted guarded route remains rejected.
+- `74bc2e949b` makes successful supersede/retire mutations return a copyable
+  `historicalFinding` at the new revision. Run World State and completion tool
+  instructions now direct the model to use that result without another query.
+  The Stateful extension suite passed 24/24, and a real app-server tool
+  integration proves superseding revision 1 returns the exact historical
+  selection at revision 2. Scoped Clippy and formatting passed; the pre-existing
+  `RootBlackboardStatus` large-enum warning remains.
+
+These changes give a six-call direct repair path in place of the frozen
+nine-call path: one route query, one changed-source read, one affected-knowledge
+query, one coherent record batch, one lifecycle update, and one completion.
+That is a displacement theory, not a measured cost result. No new model run has
+yet shown that Luna follows the shorter path.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
@@ -372,10 +407,13 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Repair efficiency and dependent-state cleanup.** Use the frozen
-   changed-authority trajectory to determine why a one-file authority change
-   required 14 responses and nine tool calls, and make stale dependent entries
-   easier to identify and repair without unsafe host-side semantic guesses.
+1. **Semantic reuse at persistence and dependent-state cleanup.** The frozen
+   repair reread unchanged sources partly because a new source-verified decision
+   can cite only fresh read receipts, not current source-verified blackboard
+   premises. It also left a stale draft-status fact active after superseding the
+   root decision. Design a bounded way to enumerate every entry dependent on a
+   changed route and preserve honest derived provenance without copying source
+   verification onto an inference the model did not verify from source.
 2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim.
@@ -391,12 +429,12 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Study the frozen changed-authority rollout before adding another model run.
-Identify which responses and tool round trips were required for legitimate
-freshness repair, which were caused by weak state/query ergonomics, and why the
-revision-checked supersession required a retry. Prefer a small general product
-improvement that helps the model enumerate and repair stale dependents; do not
-encode domain-specific authority semantics in the host. Then replay or add a
-deterministic integration test before spending on another behavioral canary.
-Do not launch a broad benchmark until correction is both safe and reasonably
-direct.
+Do not rerun the model yet. First design the smallest honest dependency contract
+for derived knowledge. It should let the model find all active entries whose
+evidence includes a changed route, distinguish direct source verification from
+reasoning based on current verified premises, and supersede or revise affected
+claims without rereading unchanged sources. Do not let the host infer semantic
+authority or automatically supersede claims. Falsify the contract with the
+frozen amendment case and an unchanged-source premise before implementing it;
+then cover the chosen tool path deterministically. Only after that should a
+small Luna replay test whether the repair trajectory actually becomes shorter.
