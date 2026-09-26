@@ -454,6 +454,16 @@ syntactic-call reread counts must be regenerated before reuse; no protected
 result was modified. This is a telemetry repair, not evidence that any repeat
 was unnecessary or that Stateful is cheaper.
 
+The first recurring Droid review also found that root projection assembled
+counts, selected entry IDs, per-entry data, and the reported project revision
+through separate autocommit reads. A concurrent mutation could therefore pair
+aliases from one snapshot with the revision of another. `c4067d433b` now builds
+the complete root projection in one SQLite read transaction, matching the
+snapshot boundary used by affected-source enumeration. The focused
+project-intelligence suite passed 37/37, scoped Clippy passed, and formatting
+passed. GitHub issue #20 is closed. This removes the source-confirmed mixing
+mechanism; it does not claim that a mixed projection was observed in a real run.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
