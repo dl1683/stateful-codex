@@ -1177,6 +1177,42 @@ is a better longitudinal work trajectory.
    authority canary for freshness, and a compaction canary for continuity. Only
    after those pass should a matched longitudinal rerun test the combined system.
 
+### Implementation checkpoint: revision-pinned semantic premises (2026-09-26)
+
+Commits `b37d91d360`, `cae829c436`, and `00e61132de` implement the bounded
+premise layer required by steps 2–4 above. A blackboard revision may now name at
+most 16 exact revisions of active `sourceVerified` or `userConfirmed` entries
+whose meaning it used. This is semantic provenance, not a second kind of source
+citation: premises never count as direct evidence and never elevate the derived
+entry's declared verification. They are deliberately separate from the older
+unversioned `dependsOn` navigation relation.
+
+Storage evaluates premise freshness recursively against the exact referenced
+revisions. A source change can therefore make an unchanged-source conclusion
+effectively stale and include it in changed-source dependent enumeration without
+asking the host to decide whether the conclusion remains semantically true. The
+model still makes that decision and explicitly revises, supersedes, retires, or
+retains the finding. Record/update tools audit direct and transitive premise
+evidence against live filesystem bytes before accepting reuse. Root context,
+query output, completion checks, and the experimental app-server v2 API expose
+the provenance and downgrade. The generic API operates on transactionally stored
+index state; it does not claim to re-read source bytes on each query.
+
+The deterministic mechanism gates passed: 38 project-intelligence tests, 27
+Stateful extension tests, 310 app-server-protocol tests with one skipped test,
+and the targeted public app-server integration. Scoped Clippy and formatting
+also passed. This does not establish that Luna will use the premise path, that
+the path reduces requests or tokens, or that answer quality improves. Those
+remain model-trajectory measurements, not conclusions inferred from component
+tests.
+
+The next smallest correctness gate is one-snapshot ordinary retrieval. Root
+projection and affected-source enumeration already select and materialize in a
+single SQLite read transaction, but ordinary blackboard search and context-map
+multi-hit reads still cross autocommit statement boundaries. Make those reads
+transaction-consistent and falsify candidate/hit mixing under a concurrent
+mutation before the interrupted-refresh canary or another model run.
+
 For every gate, record answer quality, repeated source ranges, input and uncached
 tokens, model requests, tool-output volume, wall time, state writes/queries, and
 whether the decisive prior conclusion was actually used. Operational failures

@@ -530,6 +530,49 @@ Stateful extension tests passed, followed by scoped Clippy and formatting. This
 does not solve refresh/index publication cost or cross-call hashing, so GitHub
 issue #19 remains open.
 
+Three commits now close the next deterministic authority gap. `b37d91d360`
+adds bounded semantic-premise links from one blackboard entry revision to exact
+revisions of other entries. Premises are not ordinary `dependsOn` navigation
+relations, do not count as direct source evidence, and never promote a derived
+entry to `sourceVerified`. They preserve which trusted findings a conclusion
+actually depended on. Storage rejects self-links, missing, inactive, stale, or
+non-current premise revisions. Freshness walks the revision-pinned dependency
+graph, and changed-source enumeration recursively includes current conclusions
+whose unchanged direct source depends on an affected premise. The focused
+regression proves that a changed amendment makes an unchanged-source conclusion
+stale and discoverable while its direct citation remains current.
+
+`cae829c436` makes that contract usable by the model. Record and update tools
+accept at most 16 exact `{entryId, revision}` premises. Before reuse they audit
+the premise's direct and transitive source-verified evidence against live
+filesystem bytes, rather than trusting only the last indexed fingerprint. Root
+context and blackboard queries expose premise identity and freshness, and
+completion fails closed when a material root finding has stale, unavailable, or
+unchecked premise support. Updates preserve premise provenance when omitted;
+confirmed meaning still requires an explicit downgrade before it can change.
+All 27 Stateful extension tests and all 38 project-intelligence tests passed.
+
+`00e61132de` exposes premise provenance through the experimental app-server v2
+blackboard API and regenerated Rust, TypeScript, Python, and schema artifacts.
+The public integration covers a current user-confirmed premise, a dependent
+derived entry, the premise's later revision/downgrade, and the resulting stale
+premise/effective-verification response. All 310 app-server-protocol tests
+passed with one skipped test, and the targeted app-server integration passed.
+Scoped Clippy and formatting passed for all affected crates. The generic API
+reports and validates the transactionally stored project-intelligence state;
+only the model-facing record/update/completion paths have project roots and
+therefore perform the stronger live-filesystem audit. Do not describe a generic
+API query as proof that source bytes were re-read at query time.
+
+The recurring review's latest decision was written against `b37d91d360` because
+its local shell could not start. Its main falsification target—premise authority
+across storage, model query/root/completion, and the public API—is now covered by
+the commits and tests above. Its still-valid next criticism is that ordinary
+blackboard and context-map queries select candidates and materialize hits across
+multiple autocommit reads. Root projection and affected-source enumeration
+already use one read transaction; ordinary retrieval must receive the same
+snapshot guarantee before concurrent refresh behavior is trusted.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
@@ -538,23 +581,17 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Derived premise provenance.** Direct source-citation enumeration is now
-   implemented, but the frozen repair also needs honest reuse of current
-   source-verified blackboard premises. Design bounded revision-pinned premise
-   references that distinguish a derived conclusion from direct source
-   verification and let changed-premise dependents be enumerated without the
-   host making semantic authority decisions.
-2. **Ordinary retrieval snapshots.** Root projection and affected-source pages
+1. **Ordinary retrieval snapshots.** Root projection and affected-source pages
    have transaction-consistent snapshots. Audit and, where necessary, give
    ordinary blackboard and context-map queries the same consistency guarantee
    before relying on them during concurrent refresh or mutation.
-3. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
    a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
-4. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+3. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
-5. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+4. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
 
@@ -564,12 +601,12 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. The user-confirmation authority invariant is now
-closed. Design the smallest honest revision-pinned dependency contract for
-derived knowledge and test it with the changed-amendment case plus an
-unchanged-source premise. In parallel, apply the recurring review's cheap
-deterministic challenges to repeated physical-source hashing and truthful
-context-map query metadata; do not weaken fingerprint checks or sourceVerified
-semantics merely to reduce cost. Only after those deterministic contracts
-survive review should a small Luna replay test whether the repair trajectory
-actually becomes shorter.
+Do not rerun the model yet. Give ordinary blackboard retrieval, context-map
+search, context-map project listing, and multi-hit path lookup one coherent
+SQLite read snapshot, then add a deterministic concurrent-mutation regression
+that would expose candidate/hit mixing. Keep single-statement reads simple and
+do not add coordination machinery merely to make the test convenient. After
+that gate, test interrupted refresh behavior before spending on another Luna
+trajectory. The premise mechanism is now implemented; the product claim that it
+reduces rereading and cost remains deliberately open until a small model replay
+uses it.
