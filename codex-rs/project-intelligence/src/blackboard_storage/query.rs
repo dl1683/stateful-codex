@@ -10,6 +10,7 @@ use crate::BlackboardEvidenceDependentsQuery;
 use crate::BlackboardEvidenceDependentsResult;
 use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
+use crate::BlackboardPremiseFreshness;
 use crate::BlackboardQuery;
 use crate::BlackboardQueryResult;
 use crate::BlackboardRouteKnowledge;
@@ -92,7 +93,7 @@ impl BlackboardStore {
         }
         let limit = i64::from(query.max_results) + 1;
         let mut builder = QueryBuilder::<Sqlite>::new(
-            "WITH changed_sources AS (
+            "WITH RECURSIVE changed_sources AS (
                SELECT DISTINCT source.project_root, source.relative_path
                FROM context_map_entries AS seed
                JOIN hierarchy_nodes AS source
@@ -107,25 +108,37 @@ impl BlackboardStore {
         }
         separated.push_unseparated(
             ")
+             ),
+             affected_revisions(entry_id, revision) AS (
+               SELECT DISTINCT link.entry_id, link.revision
+               FROM blackboard_evidence_links AS link
+               JOIN context_map_entries AS evidence ON evidence.id = link.context_map_entry_id
+               JOIN hierarchy_nodes AS evidence_source
+                 ON evidence_source.id = evidence.node_id
+                AND evidence_source.project_id = evidence.project_id
+               JOIN changed_sources AS changed
+                 ON changed.project_root = evidence_source.project_root
+                AND changed.relative_path = evidence_source.relative_path
+               WHERE evidence.project_id = ",
+        );
+        builder.push_bind(&query.project_id);
+        builder.push(
+            " UNION
+               SELECT owner.entry_id, owner.revision
+               FROM blackboard_premise_links AS owner
+               JOIN affected_revisions AS affected
+                 ON affected.entry_id = owner.premise_entry_id
+                AND affected.revision = owner.premise_revision
              )
              SELECT DISTINCT entry.id
-             FROM blackboard_evidence_links AS link
-             JOIN context_map_entries AS evidence ON evidence.id = link.context_map_entry_id
-             JOIN hierarchy_nodes AS evidence_source
-               ON evidence_source.id = evidence.node_id
-              AND evidence_source.project_id = evidence.project_id
-             JOIN changed_sources AS changed
-               ON changed.project_root = evidence_source.project_root
-              AND changed.relative_path = evidence_source.relative_path
-             JOIN blackboard_entries AS entry ON entry.id = link.entry_id
+             FROM affected_revisions AS affected
+             JOIN blackboard_entries AS entry ON entry.id = affected.entry_id
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id
               AND revision.revision = entry.revision
-              AND revision.revision = link.revision
+              AND revision.revision = affected.revision
              WHERE entry.project_id = ",
         );
-        builder.push_bind(&query.project_id);
-        builder.push(" AND evidence.project_id = ");
         builder.push_bind(&query.project_id);
         builder.push(" AND CASE ");
         builder.push_bind(entry_scope_name(query.entry_scope));
@@ -154,7 +167,10 @@ impl BlackboardStore {
                 .await?
                 .ok_or_else(|| BlackboardStoreError::EntryNotFound(raw_id))?;
             let freshness = load_evidence_freshness(&mut transaction, &entry).await?;
-            data.push(BlackboardHit::new(entry, freshness));
+            let premise_freshness = load_premise_freshness(&mut transaction, &entry).await?;
+            data.push(
+                BlackboardHit::new(entry, freshness).with_premise_freshness(premise_freshness),
+            );
         }
         transaction.commit().await?;
         Ok(BlackboardEvidenceDependentsResult {
@@ -440,8 +456,11 @@ async fn load_hit(
         .await?
         .ok_or_else(|| BlackboardStoreError::EntryNotFound(raw_id))?;
     let freshness = load_evidence_freshness(connection, &entry).await?;
+    let premise_freshness = load_premise_freshness(connection, &entry).await?;
     let relations = load_relations_for_entry(connection, project_id, &entry.id, 256).await?;
-    Ok(BlackboardHit::new(entry, freshness).with_relations(relations))
+    Ok(BlackboardHit::new(entry, freshness)
+        .with_premise_freshness(premise_freshness)
+        .with_relations(relations))
 }
 
 #[derive(FromRow)]
@@ -451,7 +470,7 @@ struct EvidenceCounts {
     unavailable: i64,
 }
 
-async fn load_evidence_freshness(
+pub(super) async fn load_evidence_freshness(
     connection: &mut SqliteConnection,
     entry: &crate::BlackboardEntry,
 ) -> Result<BlackboardEvidenceFreshness, BlackboardStoreError> {
@@ -480,5 +499,75 @@ async fn load_evidence_freshness(
         BlackboardEvidenceFreshness::Stale
     } else {
         BlackboardEvidenceFreshness::Current
+    })
+}
+
+#[derive(FromRow)]
+struct PremiseCounts {
+    total: i64,
+    stale: i64,
+    unavailable: i64,
+}
+
+pub(super) async fn load_premise_freshness(
+    connection: &mut SqliteConnection,
+    entry: &crate::BlackboardEntry,
+) -> Result<BlackboardPremiseFreshness, BlackboardStoreError> {
+    let counts = sqlx::query_as::<_, PremiseCounts>(
+        "WITH RECURSIVE premise_tree(entry_id, revision) AS (
+           SELECT premise_entry_id, premise_revision
+           FROM blackboard_premise_links
+           WHERE entry_id = ? AND revision = ?
+           UNION
+           SELECT link.premise_entry_id, link.premise_revision
+           FROM blackboard_premise_links AS link
+           JOIN premise_tree AS owner
+             ON owner.entry_id = link.entry_id AND owner.revision = link.revision
+         )
+         SELECT COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN current.id IS NULL
+                    OR current.revision <> premise_tree.revision
+                    OR revision.state <> 'active'
+                    OR revision.verification NOT IN ('source_verified', 'user_confirmed')
+                    OR (revision.verification = 'source_verified' AND EXISTS (
+                        SELECT 1
+                        FROM blackboard_evidence_links AS evidence_link
+                        JOIN context_map_entries AS evidence
+                          ON evidence.id = evidence_link.context_map_entry_id
+                        JOIN hierarchy_nodes AS source ON source.id = evidence.node_id
+                        WHERE evidence_link.entry_id = premise_tree.entry_id
+                          AND evidence_link.revision = premise_tree.revision
+                          AND (source.lifecycle = 'replaced'
+                            OR evidence.source_fingerprint <> evidence_link.source_fingerprint
+                            OR source.source_fingerprint <> evidence_link.source_fingerprint)
+                    )) THEN 1 ELSE 0 END), 0) AS stale,
+                COALESCE(SUM(CASE WHEN revision.verification = 'source_verified' AND EXISTS (
+                    SELECT 1
+                    FROM blackboard_evidence_links AS evidence_link
+                    JOIN context_map_entries AS evidence
+                      ON evidence.id = evidence_link.context_map_entry_id
+                    JOIN hierarchy_nodes AS source ON source.id = evidence.node_id
+                    WHERE evidence_link.entry_id = premise_tree.entry_id
+                      AND evidence_link.revision = premise_tree.revision
+                      AND source.lifecycle = 'missing'
+                ) THEN 1 ELSE 0 END), 0) AS unavailable
+         FROM premise_tree
+         LEFT JOIN blackboard_entries AS current ON current.id = premise_tree.entry_id
+         LEFT JOIN blackboard_entry_revisions AS revision
+           ON revision.entry_id = premise_tree.entry_id
+          AND revision.revision = premise_tree.revision",
+    )
+    .bind(entry.id.as_str())
+    .bind(i64::try_from(entry.revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?)
+    .fetch_one(connection)
+    .await?;
+    Ok(if counts.total == 0 {
+        BlackboardPremiseFreshness::NotApplicable
+    } else if counts.unavailable > 0 {
+        BlackboardPremiseFreshness::SourceUnavailable
+    } else if counts.stale > 0 {
+        BlackboardPremiseFreshness::Stale
+    } else {
+        BlackboardPremiseFreshness::Current
     })
 }

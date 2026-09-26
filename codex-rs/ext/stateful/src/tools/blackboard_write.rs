@@ -201,6 +201,7 @@ impl BlackboardRecordTool {
                     importance,
                     root_promotion,
                     evidence,
+                    premises: Vec::new(),
                     provenance: BlackboardProvenance {
                         kind: BlackboardProvenanceKind::Agent,
                         source_id: source_id.to_string(),

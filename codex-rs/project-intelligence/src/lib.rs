@@ -24,6 +24,8 @@ pub use blackboard::BlackboardEvidenceLink;
 pub use blackboard::BlackboardHit;
 pub use blackboard::BlackboardImportance;
 pub use blackboard::BlackboardKind;
+pub use blackboard::BlackboardPremiseFreshness;
+pub use blackboard::BlackboardPremiseLink;
 pub use blackboard::BlackboardProvenance;
 pub use blackboard::BlackboardProvenanceKind;
 pub use blackboard::BlackboardQuery;

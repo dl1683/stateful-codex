@@ -16,6 +16,7 @@ const MAX_CONTENT_BYTES: usize = 4_096;
 const MAX_STRUCTURED_VALUE_BYTES: usize = 2_048;
 const MAX_UNIT_BYTES: usize = 128;
 const MAX_EVIDENCE_LINKS: usize = 32;
+const MAX_PREMISE_LINKS: usize = 16;
 const MAX_PROVENANCE_SOURCE_BYTES: usize = 512;
 const MAX_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
 const MAX_QUERY_BYTES: usize = 1_024;
@@ -178,6 +179,13 @@ pub struct BlackboardEvidenceLink {
     pub line_range: Option<EvidenceLineRange>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlackboardPremiseLink {
+    pub entry_id: BlackboardEntryId,
+    pub revision: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlackboardProvenance {
@@ -238,6 +246,7 @@ pub struct NewBlackboardEntry {
     pub importance: BlackboardImportance,
     pub root_promotion: RootPromotion,
     pub evidence: Vec<BlackboardEvidenceLink>,
+    pub premises: Vec<BlackboardPremiseLink>,
     pub provenance: BlackboardProvenance,
 }
 
@@ -249,6 +258,7 @@ impl NewBlackboardEntry {
         validate_structured_value(self.structured_value.as_ref())?;
         validate_confidence(self.confidence)?;
         validate_evidence(self.verification, &self.evidence)?;
+        validate_premises(&self.premises)?;
         validate_provenance(&self.provenance)
     }
 }
@@ -264,6 +274,7 @@ pub struct BlackboardEntryUpdate {
     pub importance: BlackboardImportance,
     pub root_promotion: RootPromotion,
     pub evidence: Vec<BlackboardEvidenceLink>,
+    pub premises: Vec<BlackboardPremiseLink>,
     pub state: BlackboardEntryState,
     pub superseded_by: Option<BlackboardEntryId>,
     pub provenance: BlackboardProvenance,
@@ -275,6 +286,7 @@ impl BlackboardEntryUpdate {
         validate_structured_value(self.structured_value.as_ref())?;
         validate_confidence(self.confidence)?;
         validate_evidence(self.verification, &self.evidence)?;
+        validate_premises(&self.premises)?;
         validate_provenance(&self.provenance)?;
         match (self.state, &self.superseded_by) {
             (BlackboardEntryState::Superseded, Some(successor)) if successor != entry_id => Ok(()),
@@ -304,11 +316,21 @@ pub enum BlackboardEvidenceFreshness {
     SourceUnavailable,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BlackboardPremiseFreshness {
+    NotApplicable,
+    Current,
+    Stale,
+    SourceUnavailable,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlackboardHit {
     pub entry: BlackboardEntry,
     pub relations: Vec<BlackboardRelation>,
     pub evidence_freshness: BlackboardEvidenceFreshness,
+    pub premise_freshness: BlackboardPremiseFreshness,
     pub effective_verification: BlackboardVerification,
 }
 
@@ -325,8 +347,23 @@ impl BlackboardHit {
             entry,
             relations: Vec::new(),
             evidence_freshness,
+            premise_freshness: BlackboardPremiseFreshness::NotApplicable,
             effective_verification,
         }
+    }
+
+    pub(crate) fn with_premise_freshness(
+        mut self,
+        premise_freshness: BlackboardPremiseFreshness,
+    ) -> Self {
+        self.premise_freshness = premise_freshness;
+        if matches!(
+            premise_freshness,
+            BlackboardPremiseFreshness::Stale | BlackboardPremiseFreshness::SourceUnavailable
+        ) {
+            self.effective_verification = BlackboardVerification::Stale;
+        }
+        self
     }
 
     pub(crate) fn with_relations(mut self, relations: Vec<BlackboardRelation>) -> Self {
@@ -524,6 +561,20 @@ fn validate_evidence(
     Ok(())
 }
 
+fn validate_premises(premises: &[BlackboardPremiseLink]) -> Result<(), BlackboardError> {
+    if premises.len() > MAX_PREMISE_LINKS {
+        return Err(BlackboardError::TooManyPremiseLinks);
+    }
+    let mut unique = HashSet::with_capacity(premises.len());
+    if premises
+        .iter()
+        .any(|link| link.revision == 0 || !unique.insert(link.entry_id.as_str()))
+    {
+        return Err(BlackboardError::InvalidPremiseLink);
+    }
+    Ok(())
+}
+
 fn validate_provenance(value: &BlackboardProvenance) -> Result<(), BlackboardError> {
     if value.source_id.is_empty()
         || value.source_id.len() > MAX_PROVENANCE_SOURCE_BYTES
@@ -564,6 +615,10 @@ pub enum BlackboardError {
     DuplicateEvidenceLink,
     #[error("source-verified blackboard entries require evidence")]
     VerifiedWithoutEvidence,
+    #[error("blackboard entry has too many premise links")]
+    TooManyPremiseLinks,
+    #[error("blackboard premise links require a positive revision and unique entry IDs")]
+    InvalidPremiseLink,
     #[error(
         "blackboard evidence line ranges must be positive, ordered, and span at most 2000 lines"
     )]

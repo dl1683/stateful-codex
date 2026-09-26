@@ -959,6 +959,7 @@ async fn seed_root_blackboard(codex_home: &std::path::Path, project_id: &str) ->
                 importance: BlackboardImportance::Critical,
                 root_promotion: RootPromotion::Promoted,
                 evidence: Vec::new(),
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::User,
                     source_id: "integration-fixture".to_string(),
@@ -1046,6 +1047,7 @@ async fn seed_context_map(
                     source_fingerprint,
                     line_range: None,
                 }],
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::User,
                     source_id: "integration-fixture".to_string(),

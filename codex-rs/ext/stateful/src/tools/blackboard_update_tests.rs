@@ -145,6 +145,7 @@ async fn fixture() -> (
         importance: BlackboardImportance::High,
         root_promotion: RootPromotion::Candidate,
         evidence: Vec::new(),
+        premises: Vec::new(),
         provenance: BlackboardProvenance {
             kind: BlackboardProvenanceKind::Agent,
             source_id: "turn-create".to_string(),
@@ -343,6 +344,7 @@ async fn model_must_downgrade_before_changing_user_confirmed_meaning() {
                 importance: current.value.importance,
                 root_promotion: current.value.root_promotion,
                 evidence: current.value.evidence,
+                premises: current.value.premises,
                 state: BlackboardEntryState::Active,
                 superseded_by: None,
                 provenance: BlackboardProvenance {

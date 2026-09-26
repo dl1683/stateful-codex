@@ -153,6 +153,7 @@ impl BlackboardRequestProcessor {
                             importance: internal_importance(params.importance),
                             root_promotion: internal_root_promotion(params.root_promotion),
                             evidence,
+                            premises: Vec::new(),
                             provenance,
                         },
                     )
@@ -178,6 +179,7 @@ impl BlackboardRequestProcessor {
                             importance: internal_importance(params.importance),
                             root_promotion: internal_root_promotion(params.root_promotion),
                             evidence,
+                            premises: Vec::new(),
                             state: params
                                 .state
                                 .map_or(BlackboardEntryState::Active, internal_state),
@@ -281,6 +283,7 @@ impl BlackboardRequestProcessor {
                     importance: current.value.importance,
                     root_promotion: current.value.root_promotion,
                     evidence: current.value.evidence,
+                    premises: current.value.premises,
                     state: current.state,
                     superseded_by: current.superseded_by,
                     provenance: BlackboardProvenance {

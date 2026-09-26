@@ -116,6 +116,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
                     source_fingerprint: context_hit.entry.value.source_fingerprint,
                     line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
                 }],
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
                     source_id: "turn-2".to_string(),

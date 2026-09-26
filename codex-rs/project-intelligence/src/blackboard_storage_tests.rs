@@ -10,6 +10,8 @@ use crate::BlackboardEvidenceDependentsQuery;
 use crate::BlackboardEvidenceDependentsResult;
 use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
+use crate::BlackboardPremiseFreshness;
+use crate::BlackboardPremiseLink;
 use crate::BlackboardQuery;
 use crate::BlackboardQueryResult;
 use crate::BlackboardRelationId;
@@ -127,6 +129,7 @@ async fn fixture(temp_dir: &TempDir) -> (HierarchyStore, BlackboardStore, Blackb
                     source_fingerprint: fingerprint("sha256:abc"),
                     line_range: Some(EvidenceLineRange { start: 2, end: 4 }),
                 }],
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
                     source_id: "turn-1".to_string(),
@@ -299,6 +302,161 @@ async fn blackboard_persistence_is_idempotent_and_rejects_stale_evidence() {
 }
 
 #[tokio::test]
+async fn changed_premises_stale_unchanged_source_conclusions_and_are_enumerated() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (hierarchy, blackboard, premise, changed_file_revision) = fixture(&temp_dir).await;
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let context_map = ContextMapStore::open(&sqlite)
+        .await
+        .expect("context map opens");
+    let unchanged_file_id = HierarchyNodeId::parse("node-unchanged").expect("valid node ID");
+    hierarchy
+        .create_node(
+            unchanged_file_id.clone(),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(HierarchyNodeId::parse("node-root").expect("valid node ID")),
+                kind: NodeKind::File,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("analysis.md").expect("valid path"),
+                region_anchor: None,
+                source_fingerprint: Some(fingerprint("sha256:unchanged")),
+            },
+        )
+        .await
+        .expect("unchanged source node inserts");
+    let unchanged_route = ContextMapEntryId::parse("map-analysis").expect("valid map ID");
+    context_map
+        .create_entry(
+            unchanged_route.clone(),
+            NewContextMapEntry {
+                project_id: "project-1".to_string(),
+                node_id: unchanged_file_id,
+                source_fingerprint: fingerprint("sha256:unchanged"),
+                description: "Analysis derived from the controlling amendment.".to_string(),
+                routing_terms: vec!["analysis".to_string()],
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("unchanged context-map entry inserts");
+    let derived_id = BlackboardEntryId::parse("derived-analysis").expect("valid entry ID");
+    let derived = blackboard
+        .create_entry(
+            derived_id.clone(),
+            NewBlackboardEntry {
+                project_id: "project-1".to_string(),
+                node_id: HierarchyNodeId::parse("node-project").expect("valid node ID"),
+                kind: BlackboardKind::Decision,
+                content:
+                    "The unchanged analysis remains valid only if the amendment premise holds."
+                        .to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(9_000).expect("valid confidence"),
+                verification: BlackboardVerification::SourceVerified,
+                importance: BlackboardImportance::Critical,
+                root_promotion: RootPromotion::Promoted,
+                evidence: vec![BlackboardEvidenceLink {
+                    context_map_entry_id: unchanged_route,
+                    source_fingerprint: fingerprint("sha256:unchanged"),
+                    line_range: None,
+                }],
+                premises: vec![BlackboardPremiseLink {
+                    entry_id: premise.id.clone(),
+                    revision: premise.revision,
+                }],
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "turn-derived".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("derived conclusion inserts");
+    let initial = blackboard
+        .query(BlackboardQuery {
+            project_id: "project-1".to_string(),
+            text: Some("unchanged analysis remains valid".to_string()),
+            within_node: None,
+            root_promotion: None,
+            entry_scope: BlackboardEntryScope::Active,
+            max_results: 10,
+        })
+        .await
+        .expect("derived conclusion loads");
+    assert_eq!(
+        (
+            &initial.data[0].entry,
+            initial.data[0].evidence_freshness,
+            initial.data[0].premise_freshness,
+            initial.data[0].effective_verification,
+        ),
+        (
+            &derived,
+            BlackboardEvidenceFreshness::Current,
+            BlackboardPremiseFreshness::Current,
+            BlackboardVerification::SourceVerified,
+        )
+    );
+
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &HierarchyNodeId::parse("node-file").expect("valid node ID"),
+            HierarchySourceUpdate {
+                expected_revision: changed_file_revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:amended")),
+            },
+        )
+        .await
+        .expect("controlling source changes");
+    let affected = blackboard
+        .evidence_dependents(BlackboardEvidenceDependentsQuery {
+            project_id: "project-1".to_string(),
+            context_map_entry_ids: vec![
+                ContextMapEntryId::parse("map-readme").expect("valid map ID"),
+            ],
+            entry_scope: BlackboardEntryScope::Active,
+            expected_project_revision: None,
+            after_entry_id: None,
+            max_results: 10,
+        })
+        .await
+        .expect("changed-premise dependents load");
+    let derived_hit = affected
+        .data
+        .iter()
+        .find(|hit| hit.entry.id == derived_id)
+        .expect("derived dependent is enumerated");
+    assert_eq!(
+        (
+            derived_hit.evidence_freshness,
+            derived_hit.premise_freshness,
+            derived_hit.effective_verification,
+        ),
+        (
+            BlackboardEvidenceFreshness::Current,
+            BlackboardPremiseFreshness::Stale,
+            BlackboardVerification::Stale,
+        )
+    );
+    assert_eq!(affected.data.len(), 2);
+
+    let mut rejected = derived.value;
+    rejected.content = "A second conclusion tries to reuse the stale premise.".to_string();
+    assert!(matches!(
+        blackboard
+            .create_entry(
+                BlackboardEntryId::parse("derived-stale").expect("valid entry ID"),
+                rejected,
+            )
+            .await,
+        Err(BlackboardStoreError::PremiseNotTrusted(id)) if id == premise.id.as_str()
+    ));
+}
+
+#[tokio::test]
 async fn guarded_updates_supersede_entries_without_rewriting_identity() {
     let temp_dir = TempDir::new().expect("tempdir created");
     let (_hierarchy, blackboard, created, _file_revision) = fixture(&temp_dir).await;
@@ -322,6 +480,7 @@ async fn guarded_updates_supersede_entries_without_rewriting_identity() {
         importance: created.value.importance,
         root_promotion: RootPromotion::NotPromoted,
         evidence: created.value.evidence.clone(),
+        premises: created.value.premises.clone(),
         state: BlackboardEntryState::Superseded,
         superseded_by: Some(successor_id.clone()),
         provenance: BlackboardProvenance {
@@ -448,6 +607,7 @@ async fn stale_evidence_can_be_demoted_superseded_and_retired_without_rewriting_
                 importance: created.value.importance,
                 root_promotion: RootPromotion::NotPromoted,
                 evidence: historical_evidence.clone(),
+                premises: created.value.premises.clone(),
                 state: BlackboardEntryState::Active,
                 superseded_by: None,
                 provenance: BlackboardProvenance {
@@ -488,6 +648,7 @@ async fn stale_evidence_can_be_demoted_superseded_and_retired_without_rewriting_
                 importance: demoted.value.importance,
                 root_promotion: demoted.value.root_promotion,
                 evidence: demoted.value.evidence.clone(),
+                premises: demoted.value.premises.clone(),
                 state: BlackboardEntryState::Superseded,
                 superseded_by: Some(successor_id.clone()),
                 provenance: BlackboardProvenance {
@@ -525,6 +686,7 @@ async fn stale_evidence_can_be_demoted_superseded_and_retired_without_rewriting_
                 importance: retired.value.importance,
                 root_promotion: RootPromotion::NotPromoted,
                 evidence: retired.value.evidence,
+                premises: retired.value.premises,
                 state: BlackboardEntryState::Tombstoned,
                 superseded_by: None,
                 provenance: BlackboardProvenance {

@@ -25,6 +25,7 @@ fn entry() -> NewBlackboardEntry {
         importance: BlackboardImportance::High,
         root_promotion: RootPromotion::Candidate,
         evidence: vec![evidence("map-report")],
+        premises: Vec::new(),
         provenance: BlackboardProvenance {
             kind: BlackboardProvenanceKind::Agent,
             source_id: "turn-1".to_string(),
@@ -113,6 +114,7 @@ fn supersession_requires_a_distinct_successor() {
         importance: value.importance,
         root_promotion: RootPromotion::Promoted,
         evidence: value.evidence,
+        premises: value.premises,
         state: BlackboardEntryState::Superseded,
         superseded_by: Some(BlackboardEntryId::parse("entry-2").expect("valid successor")),
         provenance: BlackboardProvenance {

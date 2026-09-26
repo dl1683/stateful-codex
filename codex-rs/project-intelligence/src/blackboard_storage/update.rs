@@ -9,6 +9,7 @@ use super::BlackboardStoreError;
 use super::load_entry;
 use super::unix_timestamp_millis;
 use super::validate_evidence;
+use super::validate_premises;
 use super::write_revision;
 
 impl BlackboardStore {
@@ -58,6 +59,7 @@ impl BlackboardStore {
             importance: update.importance,
             root_promotion: update.root_promotion,
             evidence: update.evidence,
+            premises: update.premises,
             provenance: update.provenance,
         };
         value.validate()?;
@@ -67,12 +69,25 @@ impl BlackboardStore {
                     value.verification,
                     crate::BlackboardVerification::Disputed | crate::BlackboardVerification::Stale
                 ));
+        let preserves_historical_premises = value.premises == current.value.premises
+            && (update.state != BlackboardEntryState::Active
+                || matches!(
+                    value.verification,
+                    crate::BlackboardVerification::Disputed | crate::BlackboardVerification::Stale
+                ));
         if update.state != BlackboardEntryState::Active && value.evidence != current.value.evidence
         {
             return Err(BlackboardStoreError::HistoricalEvidenceChanged);
         }
+        if update.state != BlackboardEntryState::Active && value.premises != current.value.premises
+        {
+            return Err(BlackboardStoreError::HistoricalPremisesChanged);
+        }
         if !preserves_historical_evidence {
             validate_evidence(&mut transaction, &value).await?;
+        }
+        if !preserves_historical_premises {
+            validate_premises(&mut transaction, id, &value).await?;
         }
         let now = unix_timestamp_millis()?;
         let rows_affected = sqlx::query(

@@ -232,6 +232,7 @@ async fn deeper_knowledge_observation_detects_changed_bytes_without_mutating_sta
                     source_fingerprint: context_hit.entry.value.source_fingerprint,
                     line_range: None,
                 }],
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
                     source_id: "turn-1".to_string(),

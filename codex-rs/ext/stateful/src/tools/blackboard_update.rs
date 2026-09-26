@@ -226,6 +226,7 @@ impl BlackboardUpdateTool {
             importance: current.value.importance,
             root_promotion: current.value.root_promotion,
             evidence: current.value.evidence,
+            premises: current.value.premises,
             state: BlackboardEntryState::Active,
             superseded_by: None,
             provenance: BlackboardProvenance {

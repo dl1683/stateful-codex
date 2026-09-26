@@ -148,6 +148,7 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
                 importance: BlackboardImportance::High,
                 root_promotion: RootPromotion::Candidate,
                 evidence: evidence.clone(),
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
                     source_id: "turn-old".to_string(),
@@ -171,6 +172,7 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
                 importance: BlackboardImportance::High,
                 root_promotion: RootPromotion::Candidate,
                 evidence: Vec::new(),
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
                     source_id: "turn-new".to_string(),
@@ -193,6 +195,7 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
                 importance: BlackboardImportance::High,
                 root_promotion: RootPromotion::Candidate,
                 evidence,
+                premises: Vec::new(),
                 state: BlackboardEntryState::Superseded,
                 superseded_by: Some(successor_id),
                 provenance: BlackboardProvenance {
@@ -291,6 +294,7 @@ async fn completion_rejects_material_root_finding_changed_after_world_state_audi
                     source_fingerprint: context_hit.entry.value.source_fingerprint,
                     line_range: None,
                 }],
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::Agent,
                     source_id: "turn-1".to_string(),

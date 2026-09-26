@@ -427,6 +427,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                 importance: BlackboardImportance::Critical,
                 root_promotion: RootPromotion::Promoted,
                 evidence: Vec::new(),
+                premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::User,
                     source_id: "completion-integration-fixture".to_string(),

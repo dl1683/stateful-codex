@@ -12,6 +12,7 @@ use crate::BlackboardError;
 use crate::BlackboardEvidenceLink;
 use crate::BlackboardImportance;
 use crate::BlackboardKind;
+use crate::BlackboardPremiseLink;
 use crate::BlackboardProvenance;
 use crate::BlackboardProvenanceKind;
 use crate::BlackboardStructuredValue;
@@ -73,6 +74,7 @@ impl BlackboardStore {
             .await?
             .ok_or_else(|| BlackboardStoreError::NodeNotFound(value.node_id.to_string()))?;
         validate_evidence(&mut transaction, &value).await?;
+        validate_premises(&mut transaction, &id, &value).await?;
         sqlx::query(
             "INSERT INTO blackboard_entries (
                 id, project_id, node_id, revision, created_at_ms, updated_at_ms
@@ -144,6 +146,12 @@ struct StoredEvidenceLink {
 }
 
 #[derive(FromRow)]
+struct StoredPremiseLink {
+    premise_entry_id: String,
+    premise_revision: i64,
+}
+
+#[derive(FromRow)]
 struct StoredEvidenceSource {
     project_id: String,
     source_fingerprint: String,
@@ -182,7 +190,7 @@ async fn load_entry(
     )
     .bind(&stored.id)
     .bind(stored.revision)
-    .fetch_all(connection)
+    .fetch_all(&mut *connection)
     .await?
     .into_iter()
     .map(|link| {
@@ -208,6 +216,25 @@ async fn load_entry(
         })
     })
     .collect::<Result<Vec<_>, BlackboardStoreError>>()?;
+    let premises = sqlx::query_as::<_, StoredPremiseLink>(
+        "SELECT premise_entry_id, premise_revision
+         FROM blackboard_premise_links
+         WHERE entry_id = ? AND revision = ?
+         ORDER BY position",
+    )
+    .bind(&stored.id)
+    .bind(stored.revision)
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .map(|link| {
+        Ok(BlackboardPremiseLink {
+            entry_id: parse_stored(BlackboardEntryId::parse(link.premise_entry_id), &stored.id)?,
+            revision: u64::try_from(link.premise_revision)
+                .map_err(|_| BlackboardStoreError::CorruptEntry(stored.id.clone()))?,
+        })
+    })
+    .collect::<Result<Vec<_>, BlackboardStoreError>>()?;
     let revision = u64::try_from(stored.revision)
         .map_err(|_| BlackboardStoreError::CorruptEntry(stored.id.clone()))?;
     let confidence = u16::try_from(stored.confidence_basis_points)
@@ -230,6 +257,7 @@ async fn load_entry(
         importance: parse_importance(&stored.importance)?,
         root_promotion: parse_promotion(&stored.root_promotion)?,
         evidence,
+        premises,
         provenance: BlackboardProvenance {
             kind: parse_provenance(&stored.provenance_kind)?,
             source_id: stored.provenance_source_id,
@@ -304,6 +332,47 @@ async fn validate_evidence(
     Ok(())
 }
 
+async fn validate_premises(
+    connection: &mut SqliteConnection,
+    entry_id: &BlackboardEntryId,
+    value: &NewBlackboardEntry,
+) -> Result<(), BlackboardStoreError> {
+    for link in &value.premises {
+        if &link.entry_id == entry_id {
+            return Err(BlackboardStoreError::SelfPremise(entry_id.to_string()));
+        }
+        let premise = load_entry(connection, &value.project_id, &link.entry_id)
+            .await?
+            .ok_or_else(|| BlackboardStoreError::PremiseNotFound(link.entry_id.to_string()))?;
+        if premise.revision != link.revision {
+            return Err(BlackboardStoreError::PremiseRevisionConflict {
+                entry_id: link.entry_id.to_string(),
+                expected: link.revision,
+                actual: premise.revision,
+            });
+        }
+        if premise.state != BlackboardEntryState::Active {
+            return Err(BlackboardStoreError::PremiseNotActive(
+                link.entry_id.to_string(),
+            ));
+        }
+        let evidence_freshness = query::load_evidence_freshness(connection, &premise).await?;
+        let premise_freshness = query::load_premise_freshness(connection, &premise).await?;
+        let hit = crate::BlackboardHit::new(premise, evidence_freshness)
+            .with_premise_freshness(premise_freshness);
+        if !matches!(
+            hit.effective_verification,
+            crate::BlackboardVerification::SourceVerified
+                | crate::BlackboardVerification::UserConfirmed
+        ) {
+            return Err(BlackboardStoreError::PremiseNotTrusted(
+                link.entry_id.to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 async fn write_revision(
     connection: &mut SqliteConnection,
     id: &BlackboardEntryId,
@@ -366,6 +435,20 @@ async fn write_revision(
                 .transpose()
                 .map_err(|_| BlackboardStoreError::PositionOverflow)?,
         )
+        .execute(&mut *connection)
+        .await?;
+    }
+    for (position, link) in value.premises.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO blackboard_premise_links (
+                entry_id, revision, position, premise_entry_id, premise_revision
+             ) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id.as_str())
+        .bind(revision)
+        .bind(i64::try_from(position).map_err(|_| BlackboardStoreError::PositionOverflow)?)
+        .bind(link.entry_id.as_str())
+        .bind(i64::try_from(link.revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?)
         .execute(&mut *connection)
         .await?;
     }
@@ -459,8 +542,26 @@ pub enum BlackboardStoreError {
     EvidenceFingerprintMismatch,
     #[error("blackboard evidence source is not current")]
     EvidenceNotCurrent,
+    #[error("blackboard entry cannot depend on itself: {0}")]
+    SelfPremise(String),
+    #[error("blackboard premise entry was not found in this project: {0}")]
+    PremiseNotFound(String),
+    #[error(
+        "blackboard premise revision conflict for {entry_id}: expected {expected}, found {actual}"
+    )]
+    PremiseRevisionConflict {
+        entry_id: String,
+        expected: u64,
+        actual: u64,
+    },
+    #[error("blackboard premise is no longer active: {0}")]
+    PremiseNotActive(String),
+    #[error("blackboard premise is not currently source-verified or user-confirmed: {0}")]
+    PremiseNotTrusted(String),
     #[error("terminal blackboard revisions must preserve their historical evidence")]
     HistoricalEvidenceChanged,
+    #[error("terminal blackboard revisions must preserve their historical premises")]
+    HistoricalPremisesChanged,
     #[error("blackboard evidence position overflow")]
     PositionOverflow,
     #[error("blackboard revision overflow")]
