@@ -60,6 +60,49 @@ struct RootEvidenceAuditCacheSource {
     filesystem_state: RootEvidenceFilesystemState,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct IndexedSourceLocation {
+    project_root: String,
+    relative_path: String,
+}
+
+impl From<&ContextMapHit> for IndexedSourceLocation {
+    fn from(hit: &ContextMapHit) -> Self {
+        Self {
+            project_root: hit.source.project_root.clone(),
+            relative_path: hit.source.relative_path.to_string(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct SourceCheckCache {
+    checks: HashMap<IndexedSourceLocation, SourceCheck>,
+    hashed_bytes: u64,
+}
+
+impl SourceCheckCache {
+    async fn check(
+        &mut self,
+        project_roots: &[PathBuf],
+        hit: &ContextMapHit,
+        maximum_total_bytes: u64,
+        maximum_source_bytes: u64,
+    ) -> SourceCheck {
+        let location = IndexedSourceLocation::from(hit);
+        if let Some(check) = self.checks.get(&location) {
+            return check.clone();
+        }
+        let remaining_bytes = maximum_total_bytes.saturating_sub(self.hashed_bytes);
+        let check = check_source(project_roots, hit, remaining_bytes, maximum_source_bytes).await;
+        if let SourceCheck::Fingerprint(_, bytes) = &check {
+            self.hashed_bytes = self.hashed_bytes.saturating_add(*bytes);
+        }
+        self.checks.insert(location, check.clone());
+        check
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RootEvidenceFilesystemState {
     Present {
@@ -139,7 +182,7 @@ pub(super) async fn audit_root_evidence(
     cache_key: Option<RootEvidenceAuditCacheKey>,
 ) -> EvidenceAudit {
     let mut statuses = HashMap::new();
-    let mut audited_bytes = 0_u64;
+    let mut source_checks = SourceCheckCache::default();
     let context_map = match services.context_map().await {
         Ok(store) => store,
         Err(error) => {
@@ -208,17 +251,14 @@ pub(super) async fn audit_root_evidence(
                 continue;
             }
         };
-        let remaining_bytes = MAX_TOTAL_AUDITED_BYTES.saturating_sub(audited_bytes);
-        let check = check_source(
-            project_roots,
-            &hit,
-            remaining_bytes,
-            MAX_AUDITED_SOURCE_BYTES,
-        )
-        .await;
-        if let SourceCheck::Fingerprint(_, bytes) = &check {
-            audited_bytes = audited_bytes.saturating_add(*bytes);
-        }
+        let check = source_checks
+            .check(
+                project_roots,
+                &hit,
+                MAX_TOTAL_AUDITED_BYTES,
+                MAX_AUDITED_SOURCE_BYTES,
+            )
+            .await;
         let status = reconcile_source_state(project_id, hierarchy, &hit, &node, check).await;
         statuses.insert(entry_id, status);
     }
@@ -237,7 +277,7 @@ pub(super) async fn observe_evidence(
     entry_ids: impl IntoIterator<Item = ContextMapEntryId>,
 ) -> EvidenceAudit {
     let mut statuses = HashMap::new();
-    let mut observed_bytes = 0_u64;
+    let mut source_checks = SourceCheckCache::default();
     let context_map = match services.context_map().await {
         Ok(store) => store,
         Err(error) => {
@@ -278,17 +318,16 @@ pub(super) async fn observe_evidence(
             ContextMapFreshness::Stale => SourceAuditStatus::Stale,
             ContextMapFreshness::SourceUnavailable => SourceAuditStatus::SourceUnavailable,
             ContextMapFreshness::Current => {
-                let remaining_bytes = MAX_TOTAL_OBSERVED_BYTES.saturating_sub(observed_bytes);
-                match check_source(
-                    project_roots,
-                    &hit,
-                    remaining_bytes,
-                    MAX_OBSERVED_SOURCE_BYTES,
-                )
-                .await
+                match source_checks
+                    .check(
+                        project_roots,
+                        &hit,
+                        MAX_TOTAL_OBSERVED_BYTES,
+                        MAX_OBSERVED_SOURCE_BYTES,
+                    )
+                    .await
                 {
-                    SourceCheck::Fingerprint(fingerprint, bytes) => {
-                        observed_bytes = observed_bytes.saturating_add(bytes);
+                    SourceCheck::Fingerprint(fingerprint, _) => {
                         if fingerprint == hit.entry.value.source_fingerprint {
                             SourceAuditStatus::Current
                         } else {
@@ -309,6 +348,7 @@ pub(super) async fn observe_evidence(
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum SourceCheck {
     Fingerprint(SourceFingerprint, u64),
     Missing,

@@ -9,6 +9,7 @@ use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::ContextMapFreshness;
+use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::HierarchySourceUpdate;
 use codex_project_intelligence::HierarchyStore;
@@ -25,14 +26,94 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::AuditedEvidenceFreshness;
+use super::MAX_AUDITED_SOURCE_BYTES;
+use super::MAX_TOTAL_AUDITED_BYTES;
 use super::SourceAuditStatus;
 use super::SourceCheck;
+use super::SourceCheckCache;
 use super::audited_blackboard_freshness;
 use super::audited_context_freshness;
 use super::audited_verification;
 use super::observe_evidence;
 use super::reconcile_source_state;
 use crate::services::ProjectIntelligenceServices;
+
+#[tokio::test]
+async fn file_and_region_routes_share_one_physical_source_check() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    let source_text = (1..=70)
+        .map(|line| {
+            if line == 70 {
+                "decisive_route_fact".to_string()
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(project_root.path().join("policy.md"), &source_text).expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    ProjectIndexer::new(
+        services.hierarchy().await.expect("hierarchy").clone(),
+        services.context_map().await.expect("context map").clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![project_root.path().to_path_buf()],
+    })
+    .await
+    .expect("index source");
+    let context_map = services.context_map().await.expect("context map");
+    let file_hit = context_map
+        .file_hits_for_path(
+            "project-1",
+            &ProjectRelativePath::parse("policy.md").expect("relative path"),
+        )
+        .await
+        .expect("file route lookup")
+        .into_iter()
+        .next()
+        .expect("file route");
+    let region_hit = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "decisive_route_fact".to_string(),
+            max_results: 1,
+        })
+        .await
+        .expect("region route lookup")
+        .into_iter()
+        .next()
+        .expect("region route");
+    let roots = [project_root.path().to_path_buf()];
+    let mut checks = SourceCheckCache::default();
+
+    let file_check = checks
+        .check(
+            &roots,
+            &file_hit,
+            MAX_TOTAL_AUDITED_BYTES,
+            MAX_AUDITED_SOURCE_BYTES,
+        )
+        .await;
+    let region_check = checks
+        .check(
+            &roots,
+            &region_hit,
+            MAX_TOTAL_AUDITED_BYTES,
+            MAX_AUDITED_SOURCE_BYTES,
+        )
+        .await;
+
+    assert_eq!(file_check, region_check);
+    assert_eq!(checks.checks.len(), 1);
+    assert_eq!(
+        checks.hashed_bytes,
+        u64::try_from(source_text.len()).expect("source length fits u64")
+    );
+}
 
 #[tokio::test]
 async fn stale_audit_observation_cannot_regress_a_concurrent_refresh() {
