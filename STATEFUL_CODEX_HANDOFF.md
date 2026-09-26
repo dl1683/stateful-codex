@@ -516,6 +516,20 @@ overlap and are bounded to 55 minutes. The first complete four-stage smoke
 passed. A later script revision writes Codex progress events separately from
 the final critique so raw CLI event streams are not fed back as peer analysis.
 
+The first maximum-reasoning cycle completed all four stages successfully and
+produced the decision record under
+`%LOCALAPPDATA%\StatefulCodex\hourly-droid-reviews\20260926-110328`. It forced
+the explicit confirmation threat-model audit above and identified repeated
+same-file hashing as a smaller deterministic cost mechanism. Commit
+`fc671dedb9` now reuses one live source check within each root audit or
+point-of-use observation when file and region routes share the same indexed
+source location. Every route still compares the live result against its own
+stored fingerprint and reconciles its own node. The focused regression proves
+one file route plus one real region route hashes exactly one file length; all 26
+Stateful extension tests passed, followed by scoped Clippy and formatting. This
+does not solve refresh/index publication cost or cross-call hashing, so GitHub
+issue #19 remains open.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
