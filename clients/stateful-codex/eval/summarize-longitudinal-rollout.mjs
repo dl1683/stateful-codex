@@ -139,6 +139,7 @@ export function summarizeLongitudinalEvents(events) {
           name: item.name ?? "unknown",
           input: toolInput(item),
           output: null,
+          rejected: false,
         };
         turn.calls.push(call);
         if (call.callId) callsById.set(call.callId, { turn, call });
@@ -157,8 +158,12 @@ export function summarizeLongitudinalEvents(events) {
         const outputTurn = recordedCall?.turn ?? turn;
         if (!outputTurn) return;
         const outputText = callOutputText(item);
-        if (recordedCall) recordedCall.call.output = outputText;
-        if (isRejectedToolOutput(outputText)) {
+        const rejected = isRejectedToolOutput(outputText);
+        if (recordedCall) {
+          recordedCall.call.output = outputText;
+          recordedCall.call.rejected = rejected;
+        }
+        if (rejected) {
           outputTurn.rejectedToolResults += 1;
         }
         const submittedResult = outputTurn.completionRequests.get(item.call_id);
@@ -186,13 +191,17 @@ export function summarizeLongitudinalEvents(events) {
   });
 
   if (!metadata) throw new Error("rollout is missing session metadata");
+  const finalizedTurns = order.map((turnId, index) =>
+    finalizeTurn(turns.get(turnId), index),
+  );
+  addLongitudinalEvidenceMetrics(finalizedTurns);
   return {
     sessionId: metadata.id ?? metadata.session_id,
     originator: metadata.originator,
     source: metadata.source,
     issues,
     unattributedCompactions,
-    turns: order.map((turnId, index) => finalizeTurn(turns.get(turnId), index)),
+    turns: finalizedTurns,
   };
 }
 
@@ -295,7 +304,15 @@ function summarizeCalls(turn) {
       count + (call.input.match(READ_OPERATION_PATTERN)?.length ?? 0),
     0,
   );
-  const evidenceReads = turn.calls.flatMap(extractEvidenceReads);
+  const evidenceReadObservations = turn.calls.map(
+    extractEvidenceReadObservations,
+  );
+  const evidenceReads = evidenceReadObservations.flatMap(
+    (observation) => observation.completed,
+  );
+  const evidenceReadAttempts = evidenceReadObservations.flatMap(
+    (observation) => observation.attempts,
+  );
   const uniqueEvidencePaths = [
     ...new Set(evidenceReads.map((read) => read.relativePath).filter(Boolean)),
   ];
@@ -309,12 +326,22 @@ function summarizeCalls(turn) {
     ).length,
     readOperations,
     evidenceReads,
+    evidenceReadAttempts,
     uniqueEvidencePaths,
     uniqueEvidenceReadIdentities: [...new Set(evidenceReadIdentities)],
     repeatedEvidenceReads:
       evidenceReadIdentities.length - new Set(evidenceReadIdentities).size,
     unattributedEvidenceReads: evidenceReads.filter(
       (read) => evidenceReadIdentity(read) == null,
+    ).length,
+    failedEvidenceReadAttempts: evidenceReadAttempts.filter(
+      (attempt) => attempt.outcome === "failed",
+    ).length,
+    unresolvedEvidenceReadAttempts: evidenceReadAttempts.filter(
+      (attempt) => attempt.outcome === "unresolved",
+    ).length,
+    unattributedEvidenceReadAttempts: evidenceReadAttempts.filter(
+      (attempt) => evidenceReadIdentity(attempt) == null,
     ).length,
     blackboardQueries: namedInvocations(turn.calls, "blackboard_query"),
     blackboardEntryScopes: extractBlackboardEntryScopes(turn.calls),
@@ -355,30 +382,50 @@ function namedInvocations(calls, name) {
   );
 }
 
-function extractEvidenceReads(call) {
+function extractEvidenceReadObservations(call) {
   const requests = extractEvidenceReadRequests(call);
-  if (requests.length === 0) return [];
+  if (requests.length === 0) return { completed: [], attempts: [] };
   const resolvedReads = extractResolvedEvidenceReads(call.output);
-  if (resolvedReads.length === 0) return requests;
-
   const unmatchedResolvedReads = [...resolvedReads];
-  const reads = requests.map((request) => {
-    const matchIndex = unmatchedResolvedReads.findIndex((resolved) =>
-      evidenceReadMatches(request, resolved),
+  const unmatchedRequests = [];
+  for (const request of requests) {
+    const exactMatchIndex = unmatchedResolvedReads.findIndex(
+      (resolved) =>
+        evidenceReadMatches(request, resolved) &&
+        request.lineStart === resolved.lineStart &&
+        request.lineEnd === resolved.lineEnd,
     );
-    if (matchIndex < 0) return request;
-    return unmatchedResolvedReads.splice(matchIndex, 1)[0];
-  });
-  for (
-    let index = 0;
-    index < reads.length && unmatchedResolvedReads.length > 0;
-    index += 1
-  ) {
-    if (evidenceReadIdentity(reads[index]) == null) {
-      reads[index] = unmatchedResolvedReads.shift();
+    const matchIndex =
+      exactMatchIndex >= 0
+        ? exactMatchIndex
+        : unmatchedResolvedReads.findIndex((resolved) =>
+            evidenceReadMatches(request, resolved),
+          );
+    if (matchIndex >= 0) {
+      unmatchedResolvedReads.splice(matchIndex, 1);
+    } else {
+      unmatchedRequests.push(request);
     }
   }
-  return reads.concat(unmatchedResolvedReads);
+  while (unmatchedRequests.length > 0 && unmatchedResolvedReads.length > 0) {
+    const unattributedIndex = unmatchedRequests.findIndex(
+      (request) => evidenceReadIdentity(request) == null,
+    );
+    if (unattributedIndex < 0) break;
+    unmatchedRequests.splice(unattributedIndex, 1);
+    unmatchedResolvedReads.shift();
+  }
+  const unresolvedAttempts = unmatchedRequests.map((request) => ({
+    ...request,
+    outcome: call.rejected ? "failed" : "unresolved",
+  }));
+  return {
+    completed: resolvedReads,
+    attempts: [
+      ...resolvedReads.map((read) => ({ ...read, outcome: "completed" })),
+      ...unresolvedAttempts,
+    ],
+  };
 }
 
 function extractEvidenceReadRequests(call) {
@@ -448,6 +495,7 @@ function extractResolvedEvidenceReads(output) {
         relativePath: value.source.relativePath ?? null,
         lineStart: value.firstLine ?? null,
         lineEnd: value.lastLine ?? null,
+        truncated: value.truncated ?? null,
         attribution: "resolvedOutput",
       });
     } catch {
@@ -474,11 +522,45 @@ function evidenceReadMatches(request, resolved) {
     return false;
   if (request.projectRoot && request.projectRoot !== resolved.projectRoot)
     return false;
-  if (request.lineStart != null && request.lineStart !== resolved.lineStart)
+  if (
+    request.lineStart != null &&
+    (resolved.lineStart == null || resolved.lineStart < request.lineStart)
+  )
     return false;
-  if (request.lineEnd != null && request.lineEnd !== resolved.lineEnd)
+  if (
+    request.lineEnd != null &&
+    (resolved.lineEnd == null || resolved.lineEnd > request.lineEnd)
+  )
     return false;
   return evidenceReadIdentity(request) != null;
+}
+
+function addLongitudinalEvidenceMetrics(turns) {
+  const priorIdentities = new Set();
+  for (const turn of turns) {
+    const currentIdentities = new Set();
+    let repeatedFromPriorTurns = 0;
+    let repeatedWithinTurn = 0;
+    let newEvidenceReads = 0;
+    for (const read of turn.calls.evidenceReads) {
+      const identity = evidenceReadIdentity(read);
+      if (!identity) continue;
+      if (priorIdentities.has(identity)) {
+        repeatedFromPriorTurns += 1;
+      } else if (currentIdentities.has(identity)) {
+        repeatedWithinTurn += 1;
+      } else {
+        newEvidenceReads += 1;
+      }
+      currentIdentities.add(identity);
+    }
+    turn.calls.repeatedEvidenceReadsFromPriorTurns = repeatedFromPriorTurns;
+    turn.calls.repeatedEvidenceReadsWithinTurn = repeatedWithinTurn;
+    turn.calls.repeatedEvidenceReads =
+      repeatedFromPriorTurns + repeatedWithinTurn;
+    turn.calls.newEvidenceReads = newEvidenceReads;
+    for (const identity of currentIdentities) priorIdentities.add(identity);
+  }
 }
 
 function evidenceReadIdentity(read) {
@@ -503,6 +585,7 @@ function unattributedEvidenceRead() {
     relativePath: null,
     lineStart: null,
     lineEnd: null,
+    truncated: null,
     attribution: "unattributed",
   };
 }

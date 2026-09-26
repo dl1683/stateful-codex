@@ -19,6 +19,15 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
   const firstUsage = usage(100, 40, 10, 2);
   const secondUsageA = usage(200, 150, 20, 4);
   const secondUsageB = usage(50, 0, 5, 1);
+  const resolvedRead = (start, end, truncated = false) =>
+    JSON.stringify({
+      contextMapEntryId: "route-1",
+      sourceFingerprint: "sha256:source-1",
+      source: { projectRoot: "C:/project", relativePath: "decision.md" },
+      firstLine: start,
+      lastLine: end,
+      truncated,
+    });
   const events = [
     metadata("thread-stateful"),
     started("turn-1", 100),
@@ -30,7 +39,7 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
       "read-1",
       "text(await tools.evidence_read({relativePath: 'decision.md', lineRange: {start: 2, end: 4}}));",
     ),
-    toolOutput("read-1", "Script completed"),
+    toolOutput("read-1", resolvedRead(2, 4)),
     usageRecord("turn-1", "response-1", firstUsage, firstUsage, firstUsage),
     message(
       "turn-1",
@@ -87,7 +96,7 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
         "text(await tools.evidence_read({relativePath: 'decision.md', lineStart: 5, lineEnd: 6}));",
       ].join("\n"),
     ),
-    toolOutput("read-2", "Script completed"),
+    toolOutput("read-2", [resolvedRead(2, 4), resolvedRead(5, 6)].join("\n")),
     usageRecord(
       "turn-2",
       "response-3",
@@ -123,16 +132,20 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
   assert.equal(summary.turns[1].calls.evidenceReads.length, 2);
   assert.deepEqual(summary.turns[0].calls.evidenceReads, [
     {
-      contextMapEntryId: null,
-      sourceFingerprint: null,
-      projectRoot: null,
+      contextMapEntryId: "route-1",
+      sourceFingerprint: "sha256:source-1",
+      projectRoot: "C:/project",
       relativePath: "decision.md",
       lineStart: 2,
       lineEnd: 4,
-      attribution: "request",
+      truncated: false,
+      attribution: "resolvedOutput",
     },
   ]);
-  assert.equal(summary.turns[1].calls.repeatedEvidenceReads, 0);
+  assert.equal(summary.turns[1].calls.repeatedEvidenceReads, 1);
+  assert.equal(summary.turns[1].calls.repeatedEvidenceReadsFromPriorTurns, 1);
+  assert.equal(summary.turns[1].calls.repeatedEvidenceReadsWithinTurn, 0);
+  assert.equal(summary.turns[1].calls.newEvidenceReads, 1);
   assert.equal(summary.turns[1].calls.unattributedEvidenceReads, 0);
   assert.equal(summary.turns[0].projectState.atFirstResponse.revision, 7);
   assert.equal(summary.turns[0].projectState.atLastResponse.revision, 8);
@@ -151,13 +164,14 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
 });
 
 test("normalizes mixed evidence read forms without conflating distinct ranges", () => {
-  const resolvedRead = (start, end) =>
+  const resolvedRead = (start, end, truncated = false) =>
     JSON.stringify({
       contextMapEntryId: "route-1",
       sourceFingerprint: "sha256:source-1",
       source: { projectRoot: "C:/project", relativePath: "decision.md" },
       firstLine: start,
       lastLine: end,
+      truncated,
     });
   const directCall = (callId, input) => ({
     type: "response_item",
@@ -195,6 +209,12 @@ test("normalizes mixed evidence read forms without conflating distinct ranges", 
     toolOutput("other-range", resolvedRead(5, 6)),
     toolCall(
       "turn-1",
+      "truncated-range",
+      "text(await tools.evidence_read({relativePath: 'decision.md', lineRange: {start: 10, end: 100}}));",
+    ),
+    toolOutput("truncated-range", resolvedRead(10, 20, true)),
+    toolCall(
+      "turn-1",
       "unattributed",
       "text(await tools.evidence_read({maxBytes: 10}));",
     ),
@@ -206,6 +226,7 @@ test("normalizes mixed evidence read forms without conflating distinct ranges", 
   const calls = summarizeLongitudinalEvents(events).turns[0].calls;
 
   assert.equal(calls.evidenceReads.length, 4);
+  assert.equal(calls.evidenceReadAttempts.length, 5);
   assert.deepEqual(calls.evidenceReads.slice(0, 2), [
     {
       contextMapEntryId: "route-1",
@@ -214,6 +235,7 @@ test("normalizes mixed evidence read forms without conflating distinct ranges", 
       relativePath: "decision.md",
       lineStart: 2,
       lineEnd: 4,
+      truncated: false,
       attribution: "resolvedOutput",
     },
     {
@@ -223,13 +245,34 @@ test("normalizes mixed evidence read forms without conflating distinct ranges", 
       relativePath: "decision.md",
       lineStart: 2,
       lineEnd: 4,
+      truncated: false,
       attribution: "resolvedOutput",
     },
   ]);
   assert.deepEqual(calls.uniqueEvidencePaths, ["decision.md"]);
-  assert.equal(calls.uniqueEvidenceReadIdentities.length, 2);
+  assert.equal(calls.uniqueEvidenceReadIdentities.length, 3);
   assert.equal(calls.repeatedEvidenceReads, 1);
-  assert.equal(calls.unattributedEvidenceReads, 1);
+  assert.equal(calls.repeatedEvidenceReadsFromPriorTurns, 0);
+  assert.equal(calls.repeatedEvidenceReadsWithinTurn, 1);
+  assert.equal(calls.unattributedEvidenceReads, 0);
+  assert.equal(calls.failedEvidenceReadAttempts, 1);
+  assert.equal(calls.unresolvedEvidenceReadAttempts, 0);
+  assert.equal(calls.unattributedEvidenceReadAttempts, 1);
+  assert.deepEqual(
+    calls.evidenceReads.filter((read) => read.lineStart === 10),
+    [
+      {
+        contextMapEntryId: "route-1",
+        sourceFingerprint: "sha256:source-1",
+        projectRoot: "C:/project",
+        relativePath: "decision.md",
+        lineStart: 10,
+        lineEnd: 20,
+        truncated: true,
+        attribution: "resolvedOutput",
+      },
+    ],
+  );
 });
 
 test("does not treat pre-prompt compaction usage as the first agent response", () => {
