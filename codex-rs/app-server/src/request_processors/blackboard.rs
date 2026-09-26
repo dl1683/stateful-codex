@@ -7,6 +7,7 @@ use codex_app_server_protocol::BlackboardRelateParams;
 use codex_app_server_protocol::BlackboardRelateResponse;
 use codex_app_server_protocol::BlackboardUpsertParams;
 use codex_app_server_protocol::BlackboardUpsertResponse;
+use codex_app_server_protocol::BlackboardVerification as ApiBlackboardVerification;
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_project_intelligence::BlackboardEntryId;
@@ -79,6 +80,11 @@ impl BlackboardRequestProcessor {
         params: BlackboardUpsertParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.require_project(&params.project_id).await?;
+        if params.verification == ApiBlackboardVerification::SourceVerified {
+            return Err(invalid_params(
+                "blackboard/upsert cannot persist sourceVerified knowledge without a host-issued read receipt",
+            ));
+        }
         let entry_id = BlackboardEntryId::parse(params.entry_id)
             .map_err(|error| invalid_params(error.to_string()))?;
         let confidence = ConfidenceScore::from_basis_points(params.confidence_basis_points)

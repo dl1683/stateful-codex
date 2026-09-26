@@ -4,6 +4,7 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_repeating_assistant;
+use codex_app_server::INVALID_PARAMS_ERROR_CODE;
 use codex_app_server_protocol::BlackboardEntityKind;
 use codex_app_server_protocol::BlackboardEntryState;
 use codex_app_server_protocol::BlackboardEvidenceFreshness;
@@ -26,6 +27,7 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
+use codex_app_server_protocol::RequestId;
 use codex_features::Feature;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::HierarchyStore;
@@ -35,6 +37,7 @@ use codex_project_intelligence::ProjectRelativePath;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
+use serde_json::json;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -82,6 +85,37 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
             },
         )
         .await?;
+
+    let forged_request_id = server
+        .send_request(
+            "blackboard/upsert",
+            Some(json!({
+                "projectId": created.project.id,
+                "entryId": "forged-source-verified",
+                "nodeId": node_id,
+                "kind": "claim",
+                "content": "This claim was never read from its alleged source.",
+                "confidenceBasisPoints": 10_000,
+                "verification": "sourceVerified",
+                "importance": "critical",
+                "rootPromotion": "promoted",
+                "evidence": [{
+                    "contextMapEntryId": "copied-current-route",
+                    "sourceFingerprint": "sha256:copied-current-fingerprint",
+                    "lineRange": {"start": 1, "end": 1}
+                }],
+                "provenance": {"kind": "agent", "sourceId": "untrusted-client"}
+            })),
+        )
+        .await?;
+    let forged_error = server
+        .read_stream_until_error_message(RequestId::Integer(forged_request_id))
+        .await?;
+    assert_eq!(forged_error.error.code, INVALID_PARAMS_ERROR_CODE);
+    assert_eq!(
+        forged_error.error.message,
+        "blackboard/upsert cannot persist sourceVerified knowledge without a host-issued read receipt"
+    );
 
     let instruction: BlackboardUpsertResponse = server
         .request(|request_id| ClientRequest::BlackboardUpsert {
