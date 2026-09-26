@@ -629,17 +629,58 @@ This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
 
+Commit `f2af68d17b` and a two-thread live canary now close the narrow
+thread-view-continuity gate. The deterministic app-server integration completes
+a project outcome in one thread, opens an independent thread on the same
+project, proves that the completed result and learning enter the new model
+request, and proves that a private transcript marker does not.
+
+The live run used cached ChatGPT login with API-key environment variables
+removed and `gpt-5.6-sol` at high reasoning. First thread
+`01a0dec1-0f8a-70b0-a470-97c02d9fdfee` read `DEPLOYMENT.md:L1-L3` once,
+promoted the exact conjunctive release gate, and completed correctly. Fresh
+thread `01a0dec2-29d8-7382-bd14-d2c7a69740a9` reused the current root finding
+and completed outcome, gave the same exact `C7-42` plus passed-rollback answer,
+and made no evidence-read, context-map, shell, or code-mode filesystem call.
+Its only tool calls queried or mutated durable blackboard/run state through the
+code-mode host. The first
+and second turns used 149,106 versus 130,142 total tokens, 28,786 versus 15,070
+uncached-input-plus-output tokens, six versus five model requests, and 6,630
+versus 4,988 bytes of tool output. Wall time was about 34 seconds for each.
+This is positive evidence for demonstrated fresh-thread use and zero repeated
+source ranges; the 47.64% uncached-token reduction is directional evidence from
+one tiny fixture, not a general cost claim.
+
+The first fixture refresh indexed four diagnostic stdout/stderr artifacts
+because those files were initially redirected inside the selected directory.
+It opened only `DEPLOYMENT.md:L1-L3` as evidence, and the second thread's logs
+were outside the project. This makes the token totals conservative and prevents
+treating them as a clean benchmark; it does not create an alternative second-
+thread source path because that thread performed no filesystem read.
+
+The canary also preserves its limitations. The second prompt explicitly asked
+the model to persist a continuity conclusion, causing a record/query/promote
+sequence that ordinary answer reuse should not need. Failed pre-runs with
+`gpt-6-luna` and `gpt-6-sol` were rejected before inference because those model
+aliases are unavailable through this ChatGPT-account endpoint. The successful
+local CLI reports version `0.0.0` and predates the newest observability/test-only
+commits; rebuilding the current branch was blocked before linking by the `v8`
+150.4.0 archive download and unavailable local Python fallback. Deterministic
+current-source coverage and the older-binary live trajectory are therefore
+separate evidence. The live run did not exercise the new index phase fields.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
-   a fresh thread attached to the same project, because threads must not be
-   project-memory boundaries.
-2. **Real index-cost attribution.** The next suitable repository refresh must
+1. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
    from the small local fixture.
+2. **Continuity efficiency.** Remove avoidable persistence round trips when a
+   fresh thread can answer directly from adequate current root knowledge, then
+   verify the behavior without an evaluation-specific request to record a
+   meta-finding.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
 and uncached tokens, model requests, tool-output volume, wall time, state writes
@@ -647,11 +688,11 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Run the smallest fresh-thread continuity canary: one thread must record a
-decisive project finding and complete; a new thread attached to the same project
-must receive and use that understanding without relying on the first thread's
-history. Keep the corpus tiny, force no broad benchmark, and distinguish
-mechanical injection from demonstrated model use. Capture source reads,
-requests, tokens, and whether the decisive finding changes the second answer.
-Collect the new index phase diagnostics whenever the canary refreshes, but do
-not turn that tiny fixture into a claim about issue #19.
+Use the completed canary to tighten the ordinary reuse path before another broad
+benchmark. Determine why a fresh-thread answer that already had adequate current
+root knowledge spent three calls recording, querying, and promoting a
+meta-continuity fact, and prevent equivalent low-value persistence without
+weakening reusable project learning. Separately, collect the new scan and
+publication diagnostics on the next suitable real repository refresh, including
+database size and routes used versus indexed; do not infer issue #19's cause
+from this tiny fixture.

@@ -1249,6 +1249,55 @@ database size, and used-versus-indexed routes. Meanwhile advance the small
 fresh-thread continuity canary, which tests the central project-memory thesis
 without a large compute run.
 
+Commit `f2af68d17b` establishes the deterministic half of that continuity gate.
+The app-server integration completes a durable Stateful outcome on one selected
+project and thread, starts an independent second thread on the same project,
+and proves that the second model request contains the completed result and
+learning while excluding a private first-thread transcript marker. The targeted
+app-server test passed, followed by scoped Clippy and formatting.
+
+The corresponding live canary then passed through cached ChatGPT login with API
+key environment variables removed. Thread
+`01a0dec1-0f8a-70b0-a470-97c02d9fdfee` used `gpt-5.6-sol` at high reasoning,
+read `DEPLOYMENT.md:L1-L3` once, persisted the exact conjunctive gate, and
+completed with the correct result: checksum `C7-42` and a recorded passing
+rollback rehearsal are both required; absence of either blocks release. Fresh
+thread `01a0dec2-29d8-7382-bd14-d2c7a69740a9` received that root finding and
+completed outcome, returned the same exact answer, and made no evidence-read,
+context-map, shell, or code-mode filesystem call. Its only four tool calls were
+blackboard/run-state operations carried through the code-mode host. This is
+demonstrated model use across a thread boundary, not merely mechanical
+injection.
+
+The first and second turns respectively used 149,106 and 130,142 total tokens,
+28,786 and 15,070 uncached-input-plus-output tokens, six and five model
+requests, 6,630 and 4,988 bytes of tool output, and about 34.3 and 34.8 seconds.
+The fresh turn therefore avoided the prior source range and reduced uncached
+input plus output by 47.64%, despite recording an evaluation-specific continuity
+finding before completion. This two-turn fixture is encouraging mechanism and
+directional cost evidence only; it is not representative longitudinal proof.
+The second turn's record/query/promote sequence also shows that meta-findings can
+consume avoidable state round trips when the requested answer is already
+available in current root knowledge.
+
+The first fixture refresh indexed four diagnostic stdout/stderr artifacts
+because those files were initially redirected inside the selected directory;
+only `DEPLOYMENT.md:L1-L3` was actually opened as evidence, and the second
+thread's logs were written outside the project. That contamination makes the
+token measurements conservative and unsuitable as a clean benchmark, but it
+does not supply the second thread with an alternative file-read path because
+the second thread made no filesystem read.
+
+Two requested model aliases failed before inference because ChatGPT-account
+Codex rejected `gpt-6-luna` and `gpt-6-sol`; those attempts are authentication
+capability failures, not product outcomes. The successful local CLI identified
+itself as version `0.0.0` and predates the newest branch observability/test-only
+commits. A latest-branch rebuild was blocked before linking when the `v8`
+150.4.0 prebuilt archive download and local Python fallback both failed. The
+live trajectory proves the already-present continuity mechanism, while current
+source correctness remains covered by `f2af68d17b`; it does not validate the
+new index phase fields in `99fb9ce290`.
+
 For every gate, record answer quality, repeated source ranges, input and uncached
 tokens, model requests, tool-output volume, wall time, state writes/queries, and
 whether the decisive prior conclusion was actually used. Operational failures
