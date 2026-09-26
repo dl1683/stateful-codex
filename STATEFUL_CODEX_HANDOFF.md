@@ -200,14 +200,43 @@ artifact after each turn.
 This is directional evidence for the basic reuse policy, not a broad product
 claim. The follow-up prompt explicitly cued state-first behavior, the fact was
 root-promoted, the source did not change, and the fixture is small. A stricter
-gate must remove the explicit cue, exercise relevant deeper/non-root knowledge,
-and then test the stored-but-unused q02 -> compaction -> q06 decision case.
+gate therefore removed the explicit cue and root promotion.
+
+That stricter two-turn Luna canary also passed. Turn 1 persisted one complete
+source-verified conclusion at `executed-amendment-1.md` file scope: the records
+audit is quarterly and binding under an executed amendment, not merely
+proposed. The root remained empty. Turn 2 asked the same authority/frequency
+question without mentioning memory, state, reuse, citations, or rereading. It
+queried active blackboard state, made zero source reads, answered correctly,
+and left intelligence revision 43 and entry revision 1 unchanged.
+
+- Model responses fell from 7 to 3, tool calls from 6 to 2, and source reads
+  from 1 to 0.
+- Input tokens fell from 135,455 to 75,342; uncached input fell from 26,399 to
+  6,478 (75.5%); output fell from 1,422 to 592; and measured model-turn
+  duration fell from 41.4 to 18.0 seconds.
+- The follow-up began at the preceding intelligence revision, preserved the
+  exact non-root entry and evidence link, completed durably, and made no
+  redundant state write.
+
+This closes the small root and deeper-state behavioral reuse gate. It still
+does not establish compaction continuity, changed-source behavior, performance
+on a large corpus, or an aggregate advantage over ordinary Codex.
 
 The first disposable attempt was falsely invalidated by an evaluator phrase
 that crossed a source line break (`six\npercent`). Commit `66f9831b31` now
 normalizes whitespace in evidence assertions and covers the wrapped-source
 case. This was an evaluation defect; the underlying attempt had already
 created source-verified entries and evidence links.
+
+A second disposable deeper-state probe exposed another evaluator defect: raw
+rollouts correctly emitted project revision deltas `0 -> 42 -> 43`, but the
+summarizer carried only the original full packet at revision 0 into the next
+turn. Commit `4a5558fbda` now folds `<stateful_project_update>` deltas into the
+effective project state. The frozen rollout then passes inheritance: turn 1
+ends at revision 43 and turn 2 begins at revision 43. The model had in fact
+queried the non-root entry; the earlier inheritance failure was not a product
+continuity failure.
 
 The branch CLI was rebuilt from the current source. Rebuilding the code-mode
 companion in the same command could not download the prebuilt V8 archive on
@@ -219,18 +248,16 @@ as evidence about Stateful behavior.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Uncued and deeper-state reuse.** Repeat the small decision canary without
-   telling the model to use state first, and use relevant non-root knowledge so
-   route-reported coverage must trigger deeper retrieval before any reread.
-2. **Semantic capture and active retrieval.** Use q02 -> compaction -> q06 to
+1. **Semantic capture and active retrieval through compaction.** Use q02 ->
+   compaction -> q06 to
    prove the reset mismatch is captured, survives, and changes the later action
    without an unjustified reread.
-3. **Changed authority.** A newer controlling source must invalidate confident
+2. **Changed authority.** A newer controlling source must invalidate confident
    reuse even if the old cited bytes remain unchanged.
-4. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+3. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim.
-5. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+4. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
@@ -239,6 +266,7 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Run one stricter uncued, non-root reuse probe to distinguish prompt compliance
-from default policy. If it passes, move directly to semantic capture and the
-q02 -> compaction -> q06 gate rather than continuing to tune FTS against q10.
+Move directly to semantic capture and the q02 -> compaction -> q06 gate. The
+small root and non-root reuse probes passed; continuing to tune them or FTS
+against q10 would now provide less information than testing the observed
+stored-but-unused conclusion across compaction.
