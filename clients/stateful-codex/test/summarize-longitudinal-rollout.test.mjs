@@ -117,23 +117,119 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
   assert.equal(summary.turns[1].compaction.observed, 1);
   assert.equal(summary.turns[1].compaction.canonicalEvents[0].windowNumber, 1);
   assert.equal(summary.turns[1].calls.rejectedToolResults, 1);
-  assert.deepEqual(summary.turns[1].calls.blackboardEntryScopes, ["historical"]);
+  assert.deepEqual(summary.turns[1].calls.blackboardEntryScopes, [
+    "historical",
+  ]);
   assert.equal(summary.turns[1].calls.evidenceReads.length, 2);
   assert.deepEqual(summary.turns[0].calls.evidenceReads, [
-    { relativePath: "decision.md", lineStart: 2, lineEnd: 4 },
+    {
+      contextMapEntryId: null,
+      sourceFingerprint: null,
+      projectRoot: null,
+      relativePath: "decision.md",
+      lineStart: 2,
+      lineEnd: 4,
+      attribution: "request",
+    },
   ]);
-  assert.equal(summary.turns[1].calls.repeatedEvidenceReads, 1);
+  assert.equal(summary.turns[1].calls.repeatedEvidenceReads, 0);
+  assert.equal(summary.turns[1].calls.unattributedEvidenceReads, 0);
   assert.equal(summary.turns[0].projectState.atFirstResponse.revision, 7);
   assert.equal(summary.turns[0].projectState.atLastResponse.revision, 8);
   assert.equal(summary.turns[1].projectState.atStart.revision, 8);
   assert.equal(summary.turns[1].projectState.atFirstResponse.revision, 9);
   assert.equal(summary.turns[1].projectState.atFirstResponse.rootEntries, 1);
   assert.equal(summary.turns[1].projectState.atFirstResponse.evidenceRoutes, 1);
-  assert.equal(summary.turns[1].projectState.atFirstResponse.omittedRootEntries, 2);
+  assert.equal(
+    summary.turns[1].projectState.atFirstResponse.omittedRootEntries,
+    2,
+  );
   assert.deepEqual(
     summary.turns[1].projectState.atFirstResponse.entryEvidenceFreshness,
     { current: 1, stale: 0, sourceUnavailable: 0 },
   );
+});
+
+test("normalizes mixed evidence read forms without conflating distinct ranges", () => {
+  const resolvedRead = (start, end) =>
+    JSON.stringify({
+      contextMapEntryId: "route-1",
+      sourceFingerprint: "sha256:source-1",
+      source: { projectRoot: "C:/project", relativePath: "decision.md" },
+      firstLine: start,
+      lastLine: end,
+    });
+  const directCall = (callId, input) => ({
+    type: "response_item",
+    payload: {
+      type: "function_call",
+      call_id: callId,
+      name: "evidence_read",
+      arguments: JSON.stringify(input),
+      internal_chat_message_metadata_passthrough: { turn_id: "turn-1" },
+    },
+  });
+  const events = [
+    metadata("thread-stateful"),
+    started("turn-1", 100),
+    context("turn-1"),
+    message("turn-1", "user", "Compare the evidence reads."),
+    directCall("explicit", {
+      relativePath: "decision.md",
+      lineRange: { start: 2, end: 4 },
+    }),
+    toolOutput("explicit", resolvedRead(2, 4)),
+    directCall("guarded", {
+      evidenceRoute: {
+        contextMapEntryId: "route-1",
+        sourceFingerprint: "sha256:source-1",
+        lineRange: { start: 2, end: 4 },
+      },
+    }),
+    toolOutput("guarded", resolvedRead(2, 4)),
+    toolCall(
+      "turn-1",
+      "other-range",
+      "const relativePath = 'decision.md'; text(await tools.evidence_read({relativePath, lineRange: {start: 5, end: 6}}));",
+    ),
+    toolOutput("other-range", resolvedRead(5, 6)),
+    toolCall(
+      "turn-1",
+      "unattributed",
+      "text(await tools.evidence_read({maxBytes: 10}));",
+    ),
+    toolOutput("unattributed", "Tool failed: missing source locator"),
+    message("turn-1", "assistant", "Done."),
+    completed("turn-1", 100, 900),
+  ];
+
+  const calls = summarizeLongitudinalEvents(events).turns[0].calls;
+
+  assert.equal(calls.evidenceReads.length, 4);
+  assert.deepEqual(calls.evidenceReads.slice(0, 2), [
+    {
+      contextMapEntryId: "route-1",
+      sourceFingerprint: "sha256:source-1",
+      projectRoot: "C:/project",
+      relativePath: "decision.md",
+      lineStart: 2,
+      lineEnd: 4,
+      attribution: "resolvedOutput",
+    },
+    {
+      contextMapEntryId: "route-1",
+      sourceFingerprint: "sha256:source-1",
+      projectRoot: "C:/project",
+      relativePath: "decision.md",
+      lineStart: 2,
+      lineEnd: 4,
+      attribution: "resolvedOutput",
+    },
+  ]);
+  assert.deepEqual(calls.uniqueEvidencePaths, ["decision.md"]);
+  assert.equal(calls.uniqueEvidenceReadIdentities.length, 2);
+  assert.equal(calls.repeatedEvidenceReads, 1);
+  assert.equal(calls.unattributedEvidenceReads, 1);
 });
 
 test("does not treat pre-prompt compaction usage as the first agent response", () => {
@@ -143,7 +239,13 @@ test("does not treat pre-prompt compaction usage as the first agent response", (
     metadata("thread-stateful"),
     started("turn-1", 100),
     message("turn-1", "developer", projectFragment),
-    usageRecord("turn-1", "compact-response", firstUsage, firstUsage, firstUsage),
+    usageRecord(
+      "turn-1",
+      "compact-response",
+      firstUsage,
+      firstUsage,
+      firstUsage,
+    ),
     {
       type: "world_state",
       payload: {

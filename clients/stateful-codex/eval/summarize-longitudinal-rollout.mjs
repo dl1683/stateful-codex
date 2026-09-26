@@ -5,7 +5,8 @@ import {
   toolInput,
 } from "./compare-rollouts.mjs";
 
-const READ_OPERATION_PATTERN = /\b(Get-ChildItem|Get-Content|Select-String|evidence_read|read_file|read_text_file|cat|sed|rg|grep)\b/gi;
+const READ_OPERATION_PATTERN =
+  /\b(Get-ChildItem|Get-Content|Select-String|evidence_read|read_file|read_text_file|cat|sed|rg|grep)\b/gi;
 const PROJECT_START = "<stateful_project>";
 const PROJECT_END = "</stateful_project>";
 const PROJECT_UPDATE_START = "<stateful_project_update>";
@@ -40,7 +41,8 @@ export function summarizeLongitudinalEvents(events) {
         latestProjectState = { ...latestProjectState, revision };
         const turn = ensureTurn(activeTurnId);
         if (turn) {
-          turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
+          turn.projectStateAtLastResponse =
+            cloneProjectState(latestProjectState);
         }
       }
       return;
@@ -100,7 +102,8 @@ export function summarizeLongitudinalEvents(events) {
     if (event.type === "response_item") {
       const item = event.payload;
       const turn = ensureTurn(
-        item?.internal_chat_message_metadata_passthrough?.turn_id ?? activeTurnId,
+        item?.internal_chat_message_metadata_passthrough?.turn_id ??
+          activeTurnId,
       );
       if (item?.type === "message") {
         const text = messageText(item);
@@ -109,14 +112,16 @@ export function summarizeLongitudinalEvents(events) {
           if (fragment) {
             latestProjectState = summarizeProjectFragment(fragment);
             if (turn) {
-              turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
+              turn.projectStateAtLastResponse =
+                cloneProjectState(latestProjectState);
             }
           } else {
             const revision = extractProjectUpdateRevision(text);
             if (revision != null && latestProjectState) {
               latestProjectState = { ...latestProjectState, revision };
               if (turn) {
-                turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
+                turn.projectStateAtLastResponse =
+                  cloneProjectState(latestProjectState);
               }
             }
           }
@@ -133,9 +138,10 @@ export function summarizeLongitudinalEvents(events) {
           callId: item.call_id ?? null,
           name: item.name ?? "unknown",
           input: toolInput(item),
+          output: null,
         };
         turn.calls.push(call);
-        if (call.callId) callsById.set(call.callId, turn);
+        if (call.callId) callsById.set(call.callId, { turn, call });
         const completion = completedRunResults(call);
         turn.completionAttempts += completion.attempts;
         for (const result of completion.results) {
@@ -147,9 +153,12 @@ export function summarizeLongitudinalEvents(events) {
         item?.type === "function_call_output" ||
         item?.type === "custom_tool_call_output"
       ) {
-        const outputTurn = callsById.get(item.call_id) ?? turn;
+        const recordedCall = callsById.get(item.call_id);
+        const outputTurn = recordedCall?.turn ?? turn;
         if (!outputTurn) return;
-        if (isRejectedToolOutput(callOutputText(item))) {
+        const outputText = callOutputText(item);
+        if (recordedCall) recordedCall.call.output = outputText;
+        if (isRejectedToolOutput(outputText)) {
           outputTurn.rejectedToolResults += 1;
         }
         const submittedResult = outputTurn.completionRequests.get(item.call_id);
@@ -218,12 +227,16 @@ function finalizeTurn(turn, index) {
     emptyUsage(),
   );
   const measurementIssues = [];
-  if (turn.tokenRecords.length === 0) measurementIssues.push("has no token usage records");
+  if (turn.tokenRecords.length === 0)
+    measurementIssues.push("has no token usage records");
   if (turn.lastTurnUsage && !usageEquals(usage, turn.lastTurnUsage)) {
-    measurementIssues.push("summed response usage differs from reported turn usage");
+    measurementIssues.push(
+      "summed response usage differs from reported turn usage",
+    );
   }
   if (!turn.userPrompt) measurementIssues.push("has no user prompt");
-  if (!turn.finalAnswer) measurementIssues.push("has no final assistant answer");
+  if (!turn.finalAnswer)
+    measurementIssues.push("has no final assistant answer");
   return {
     index: index + 1,
     turnId: turn.turnId,
@@ -238,7 +251,8 @@ function finalizeTurn(turn, index) {
     threadUsageAtEnd: turn.threadUsageAtEnd,
     modelResponses: turn.tokenRecords.length,
     latency: {
-      startedAt: turn.completion?.started_at ?? turn.started?.started_at ?? null,
+      startedAt:
+        turn.completion?.started_at ?? turn.started?.started_at ?? null,
       completedAt: turn.completion?.completed_at ?? null,
       durationMs: turn.completion?.duration_ms ?? null,
       timeToFirstTokenMs: turn.completion?.time_to_first_token_ms ?? null,
@@ -251,7 +265,8 @@ function finalizeTurn(turn, index) {
     },
     projectState: {
       atStart: turn.projectStateAtStart,
-      atFirstResponse: turn.projectStateAtFirstResponse ?? turn.projectStateAtStart,
+      atFirstResponse:
+        turn.projectStateAtFirstResponse ?? turn.projectStateAtStart,
       atLastResponse:
         turn.projectStateAtLastResponse ??
         turn.projectStateAtFirstResponse ??
@@ -276,11 +291,17 @@ function compactConfiguration(context) {
 
 function summarizeCalls(turn) {
   const readOperations = turn.calls.reduce(
-    (count, call) => count + (call.input.match(READ_OPERATION_PATTERN)?.length ?? 0),
+    (count, call) =>
+      count + (call.input.match(READ_OPERATION_PATTERN)?.length ?? 0),
     0,
   );
   const evidenceReads = turn.calls.flatMap(extractEvidenceReads);
-  const uniqueEvidencePaths = [...new Set(evidenceReads.map((read) => read.relativePath))];
+  const uniqueEvidencePaths = [
+    ...new Set(evidenceReads.map((read) => read.relativePath).filter(Boolean)),
+  ];
+  const evidenceReadIdentities = evidenceReads
+    .map(evidenceReadIdentity)
+    .filter(Boolean);
   return {
     total: turn.calls.length,
     readBearingOuterCalls: turn.calls.filter((call) =>
@@ -289,7 +310,12 @@ function summarizeCalls(turn) {
     readOperations,
     evidenceReads,
     uniqueEvidencePaths,
-    repeatedEvidenceReads: evidenceReads.length - uniqueEvidencePaths.length,
+    uniqueEvidenceReadIdentities: [...new Set(evidenceReadIdentities)],
+    repeatedEvidenceReads:
+      evidenceReadIdentities.length - new Set(evidenceReadIdentities).size,
+    unattributedEvidenceReads: evidenceReads.filter(
+      (read) => evidenceReadIdentity(read) == null,
+    ).length,
     blackboardQueries: namedInvocations(turn.calls, "blackboard_query"),
     blackboardEntryScopes: extractBlackboardEntryScopes(turn.calls),
     contextMapQueries: namedInvocations(turn.calls, "context_map_query"),
@@ -310,7 +336,9 @@ function extractBlackboardEntryScopes(calls) {
         scopes.push("invalid");
       }
     }
-    for (const match of call.input.matchAll(/\bblackboard_query\s*\(\s*\{([\s\S]*?)\}\s*\)/g)) {
+    for (const match of call.input.matchAll(
+      /\bblackboard_query\s*\(\s*\{([\s\S]*?)\}\s*\)/g,
+    )) {
       scopes.push(stringProperty(match[1], "entryScope") ?? "active");
     }
   }
@@ -321,44 +349,170 @@ function namedInvocations(calls, name) {
   const pattern = new RegExp(`\\b${name}\\s*\\(`, "g");
   return calls.reduce(
     (count, call) =>
-      count + (call.name === name ? 1 : call.input.match(pattern)?.length ?? 0),
+      count +
+      (call.name === name ? 1 : (call.input.match(pattern)?.length ?? 0)),
     0,
   );
 }
 
 function extractEvidenceReads(call) {
+  const requests = extractEvidenceReadRequests(call);
+  if (requests.length === 0) return [];
+  const resolvedReads = extractResolvedEvidenceReads(call.output);
+  if (resolvedReads.length === 0) return requests;
+
+  const unmatchedResolvedReads = [...resolvedReads];
+  const reads = requests.map((request) => {
+    const matchIndex = unmatchedResolvedReads.findIndex((resolved) =>
+      evidenceReadMatches(request, resolved),
+    );
+    if (matchIndex < 0) return request;
+    return unmatchedResolvedReads.splice(matchIndex, 1)[0];
+  });
+  for (
+    let index = 0;
+    index < reads.length && unmatchedResolvedReads.length > 0;
+    index += 1
+  ) {
+    if (evidenceReadIdentity(reads[index]) == null) {
+      reads[index] = unmatchedResolvedReads.shift();
+    }
+  }
+  return reads.concat(unmatchedResolvedReads);
+}
+
+function extractEvidenceReadRequests(call) {
   if (call.name === "evidence_read") {
     try {
       const input = JSON.parse(call.input);
-      return [{
-        relativePath: input.relativePath ?? null,
-        lineStart: input.lineRange?.start ?? input.lineStart ?? null,
-        lineEnd: input.lineRange?.end ?? input.lineEnd ?? null,
-      }];
+      return [evidenceReadFromInput(input)];
     } catch {
-      return [];
+      return [unattributedEvidenceRead()];
     }
   }
   const reads = [];
-  for (const match of call.input.matchAll(/\bevidence_read\s*\(\s*\{([\s\S]*?)\}\s*\)/g)) {
-    const relativePath = stringProperty(match[1], "relativePath");
-    if (relativePath) {
+  for (const match of call.input.matchAll(
+    /\bevidence_read\s*\(\s*\{([\s\S]*?)\}\s*\)/g,
+  )) {
+    reads.push({
+      contextMapEntryId: stringProperty(match[1], "contextMapEntryId"),
+      sourceFingerprint: stringProperty(match[1], "sourceFingerprint"),
+      projectRoot: stringProperty(match[1], "projectRoot"),
+      relativePath: stringProperty(match[1], "relativePath"),
+      lineStart:
+        nestedNumberProperty(match[1], "lineRange", "start") ??
+        numberProperty(match[1], "lineStart"),
+      lineEnd:
+        nestedNumberProperty(match[1], "lineRange", "end") ??
+        numberProperty(match[1], "lineEnd"),
+      attribution: "request",
+    });
+  }
+  return reads;
+}
+
+function evidenceReadFromInput(input) {
+  return {
+    contextMapEntryId: input.evidenceRoute?.contextMapEntryId ?? null,
+    sourceFingerprint: input.evidenceRoute?.sourceFingerprint ?? null,
+    projectRoot: input.projectRoot ?? null,
+    relativePath: input.relativePath ?? null,
+    lineStart:
+      input.evidenceRoute?.lineRange?.start ??
+      input.lineRange?.start ??
+      input.lineStart ??
+      null,
+    lineEnd:
+      input.evidenceRoute?.lineRange?.end ??
+      input.lineRange?.end ??
+      input.lineEnd ??
+      null,
+    attribution: "request",
+  };
+}
+
+function extractResolvedEvidenceReads(output) {
+  if (!output) return [];
+  const reads = [];
+  for (const line of output.split(/\r?\n/)) {
+    const candidate = line.trim();
+    if (!candidate.startsWith("{") || !candidate.endsWith("}")) continue;
+    try {
+      const value = JSON.parse(candidate);
+      if (!value.contextMapEntryId || !value.sourceFingerprint || !value.source)
+        continue;
       reads.push({
-        relativePath,
-        lineStart:
-          nestedNumberProperty(match[1], "lineRange", "start") ??
-          numberProperty(match[1], "lineStart"),
-        lineEnd:
-          nestedNumberProperty(match[1], "lineRange", "end") ??
-          numberProperty(match[1], "lineEnd"),
+        contextMapEntryId: value.contextMapEntryId,
+        sourceFingerprint: value.sourceFingerprint,
+        projectRoot: value.source.projectRoot ?? null,
+        relativePath: value.source.relativePath ?? null,
+        lineStart: value.firstLine ?? null,
+        lineEnd: value.lastLine ?? null,
+        attribution: "resolvedOutput",
       });
+    } catch {
+      // Tool output may contain ordinary process text or truncated JSON.
     }
   }
   return reads;
 }
 
+function evidenceReadMatches(request, resolved) {
+  if (
+    request.contextMapEntryId &&
+    request.contextMapEntryId !== resolved.contextMapEntryId
+  ) {
+    return false;
+  }
+  if (
+    request.sourceFingerprint &&
+    request.sourceFingerprint !== resolved.sourceFingerprint
+  ) {
+    return false;
+  }
+  if (request.relativePath && request.relativePath !== resolved.relativePath)
+    return false;
+  if (request.projectRoot && request.projectRoot !== resolved.projectRoot)
+    return false;
+  if (request.lineStart != null && request.lineStart !== resolved.lineStart)
+    return false;
+  if (request.lineEnd != null && request.lineEnd !== resolved.lineEnd)
+    return false;
+  return evidenceReadIdentity(request) != null;
+}
+
+function evidenceReadIdentity(read) {
+  const range = `${read.lineStart ?? "*"}-${read.lineEnd ?? "*"}`;
+  if (read.projectRoot && read.relativePath) {
+    return `source:${read.projectRoot}::${read.relativePath}@${read.sourceFingerprint ?? "*"}:${range}`;
+  }
+  if (read.relativePath) {
+    return `path:${read.relativePath}@${read.sourceFingerprint ?? "*"}:${range}`;
+  }
+  if (read.contextMapEntryId) {
+    return `route:${read.contextMapEntryId}@${read.sourceFingerprint ?? "*"}:${range}`;
+  }
+  return null;
+}
+
+function unattributedEvidenceRead() {
+  return {
+    contextMapEntryId: null,
+    sourceFingerprint: null,
+    projectRoot: null,
+    relativePath: null,
+    lineStart: null,
+    lineEnd: null,
+    attribution: "unattributed",
+  };
+}
+
 function stringProperty(source, property) {
-  return new RegExp(`\\b${property}\\s*:\\s*(["'\`])([^"'\`]+)\\1`).exec(source)?.[2] ?? null;
+  return (
+    new RegExp(`\\b${property}\\s*:\\s*(["'\`])([^"'\`]+)\\1`).exec(
+      source,
+    )?.[2] ?? null
+  );
 }
 
 function numberProperty(source, property) {
@@ -376,7 +530,9 @@ function nestedNumberProperty(source, object, property) {
 function extractProjectFragment(text) {
   const start = text.indexOf(PROJECT_START);
   const end = text.indexOf(PROJECT_END, start);
-  return start < 0 || end < 0 ? null : text.slice(start, end + PROJECT_END.length);
+  return start < 0 || end < 0
+    ? null
+    : text.slice(start, end + PROJECT_END.length);
 }
 
 function extractProjectUpdateRevision(text) {
@@ -404,7 +560,10 @@ function summarizeProjectFragment(fragment) {
     rootEntries: [...root.matchAll(/^- E\d+\s/gm)].length,
     evidenceRoutes: [...root.matchAll(/^- S\d+=/gm)].length,
     omittedRootEntries:
-      numberMatch(root, /^- (\d+) root entries omitted by the context bound;/m) ?? 0,
+      numberMatch(
+        root,
+        /^- (\d+) root entries omitted by the context bound;/m,
+      ) ?? 0,
     entryEvidenceFreshness: freshnessCounts(root, /evidence=(\w+)/g),
     routeFreshness: freshnessCounts(root, /^- S\d+=.*\((\w+)\)$/gm),
   };
@@ -430,7 +589,10 @@ function callOutputText(item) {
 }
 
 function isRejectedToolOutput(output) {
-  if (/^Script (failed|timed out)\b/m.test(output) || /^Tool (failed|error)\b/im.test(output)) {
+  if (
+    /^Script (failed|timed out)\b/m.test(output) ||
+    /^Tool (failed|error)\b/im.test(output)
+  ) {
     return true;
   }
   for (const line of output.split(/\r?\n/).reverse()) {
@@ -439,7 +601,11 @@ function isRejectedToolOutput(output) {
     try {
       const value = JSON.parse(candidate);
       const values = Array.isArray(value) ? value : [value];
-      if (values.some((item) => item?.isError === true || item?.ok === false || item?.error)) {
+      if (
+        values.some(
+          (item) => item?.isError === true || item?.ok === false || item?.error,
+        )
+      ) {
         return true;
       }
     } catch {
@@ -451,7 +617,10 @@ function isRejectedToolOutput(output) {
 
 function compactUsage(usage) {
   if (!usage) return null;
-  const uncachedInputTokens = Math.max(0, usage.input_tokens - usage.cached_input_tokens);
+  const uncachedInputTokens = Math.max(
+    0,
+    usage.input_tokens - usage.cached_input_tokens,
+  );
   return {
     inputTokens: usage.input_tokens,
     cachedInputTokens: usage.cached_input_tokens,
