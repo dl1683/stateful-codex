@@ -410,7 +410,7 @@ fn parent_path(path: &ProjectRelativePath) -> Result<ProjectRelativePath, Hierar
     Ok(ProjectRelativePath::parse(parent)?)
 }
 
-fn kind_name(kind: NodeKind) -> &'static str {
+pub(crate) fn kind_name(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Project => "project",
         NodeKind::Directory => "directory",
@@ -429,7 +429,7 @@ fn parse_kind(value: &str) -> Result<NodeKind, HierarchyStoreError> {
     }
 }
 
-fn lifecycle_name(lifecycle: NodeLifecycle) -> &'static str {
+pub(crate) fn lifecycle_name(lifecycle: NodeLifecycle) -> &'static str {
     match lifecycle {
         NodeLifecycle::Active => "active",
         NodeLifecycle::Missing => "missing",

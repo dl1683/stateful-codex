@@ -6,8 +6,10 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::*;
+use crate::ContextMapCoverage;
 use crate::ContextMapQuery;
 use crate::RegionAnchor;
+use crate::SourceFingerprint;
 
 #[tokio::test]
 async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
@@ -171,5 +173,92 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
             .expect("deleted regions should load")
             .iter()
             .all(|node| node.lifecycle == NodeLifecycle::Missing)
+    );
+}
+
+#[tokio::test]
+async fn failed_file_publication_preserves_the_complete_previous_generation() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(root.path().join("facts.md"), "old_generation_fact\n")
+        .expect("source fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    indexer
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("initial generation should index");
+
+    let root_text = root.path().display().to_string();
+    let file_id =
+        stable_id("file", &["project-1", &root_text, "facts.md"]).expect("stable file ID");
+    let before = hierarchy
+        .get_node("project-1", &file_id)
+        .await
+        .expect("file should load")
+        .expect("file should exist");
+    let conflicting_region = |description: &str| super::regions::ScannedRegion {
+        start_line: 1,
+        end_line: 1,
+        description: description.to_string(),
+        coverage: ContextMapCoverage::Complete,
+    };
+    let failed = super::publish::publish_file(
+        &indexer,
+        "project-1",
+        &file_id,
+        before.value.parent_id.clone().expect("file parent"),
+        &super::scan::ScannedFile {
+            project_root: root_text,
+            relative_path: "facts.md".to_string(),
+            fingerprint: SourceFingerprint::parse("sha256:new-generation")
+                .expect("valid fingerprint"),
+            description: "facts.md | new_generation_fact".to_string(),
+            routing_terms: vec!["new_generation_fact".to_string()],
+            coverage: ContextMapCoverage::Complete,
+            regions: vec![
+                conflicting_region("facts.md:1-1 | new_generation_fact"),
+                conflicting_region("facts.md:1-1 | duplicate_anchor"),
+            ],
+        },
+    )
+    .await;
+    assert!(failed.is_err());
+
+    assert_eq!(
+        hierarchy
+            .get_node("project-1", &file_id)
+            .await
+            .expect("file should reload")
+            .expect("file should remain"),
+        before
+    );
+    assert_eq!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "old_generation_fact".to_string(),
+                max_results: 10,
+            })
+            .await
+            .expect("old generation query should succeed")
+            .len(),
+        1
+    );
+    assert!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "new_generation_fact".to_string(),
+                max_results: 10,
+            })
+            .await
+            .expect("new generation query should succeed")
+            .is_empty()
     );
 }

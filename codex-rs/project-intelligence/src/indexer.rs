@@ -9,30 +9,25 @@ use sha2::Sha256;
 use thiserror::Error;
 
 mod regions;
+mod publish;
 mod scan;
 
-use regions::mark_file_regions_missing;
-use regions::sync_file_regions;
-use scan::ScannedFile;
+use publish::mark_file_missing;
+use publish::publish_file;
 use scan::normalized_relative_path;
 use scan::scan_project_file;
 use scan::scan_roots;
 
-use crate::ContextMapEntryId;
-use crate::ContextMapEntryUpdate;
 use crate::ContextMapStore;
 use crate::ContextMapStoreError;
 use crate::HierarchyNode;
 use crate::HierarchyNodeId;
-use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;
 use crate::HierarchyStoreError;
-use crate::NewContextMapEntry;
 use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
-use crate::SourceFingerprint;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectIndexRequest {
@@ -135,19 +130,7 @@ impl ProjectIndexer {
                 "file",
                 &[&project_id, &file.project_root, &file.relative_path],
             )?;
-            let relative_path = ProjectRelativePath::parse(&file.relative_path)?;
-            self.upsert_file_node(
-                &project_id,
-                &file_id,
-                parent_id,
-                &file.project_root,
-                relative_path,
-                file.fingerprint.clone(),
-            )
-            .await?;
-            self.upsert_context_entry(&project_id, &file_id, &file)
-                .await?;
-            sync_file_regions(self, &project_id, &file_id, &file).await?;
+            publish_file(self, &project_id, &file_id, parent_id, &file).await?;
             seen_files.insert(file_id);
         }
 
@@ -252,18 +235,7 @@ impl ProjectIndexer {
                 &mut directory_nodes,
             )
             .await?;
-        self.upsert_file_node(
-            &project_id,
-            &file_id,
-            parent_id,
-            &project_root,
-            relative_path,
-            file.fingerprint.clone(),
-        )
-        .await?;
-        self.upsert_context_entry(&project_id, &file_id, &file)
-            .await?;
-        sync_file_regions(self, &project_id, &file_id, &file).await?;
+        publish_file(self, &project_id, &file_id, parent_id, &file).await?;
         Ok(ProjectIndexReport {
             files_indexed: 1,
             files_skipped: 0,
@@ -315,98 +287,6 @@ impl ProjectIndexer {
         Ok(current)
     }
 
-    async fn upsert_file_node(
-        &self,
-        project_id: &str,
-        file_id: &HierarchyNodeId,
-        parent_id: HierarchyNodeId,
-        project_root: &str,
-        relative_path: ProjectRelativePath,
-        fingerprint: SourceFingerprint,
-    ) -> Result<(), ProjectIndexerError> {
-        let Some(existing) = self.hierarchy.get_node(project_id, file_id).await? else {
-            self.hierarchy
-                .create_node(
-                    file_id.clone(),
-                    NewHierarchyNode {
-                        project_id: project_id.to_string(),
-                        parent_id: Some(parent_id),
-                        kind: NodeKind::File,
-                        project_root: Some(project_root.to_string()),
-                        relative_path,
-                        region_anchor: None,
-                        source_fingerprint: Some(fingerprint),
-                    },
-                )
-                .await?;
-            return Ok(());
-        };
-        if existing.value.parent_id.as_ref() != Some(&parent_id)
-            || existing.value.project_root.as_deref() != Some(project_root)
-            || existing.value.relative_path != relative_path
-            || existing.value.kind != NodeKind::File
-        {
-            return Err(ProjectIndexerError::IdentityConflict(file_id.to_string()));
-        }
-        if existing.lifecycle != NodeLifecycle::Active
-            || existing.value.source_fingerprint.as_ref() != Some(&fingerprint)
-        {
-            self.hierarchy
-                .update_source_state(
-                    project_id,
-                    file_id,
-                    HierarchySourceUpdate {
-                        expected_revision: existing.revision,
-                        lifecycle: NodeLifecycle::Active,
-                        source_fingerprint: Some(fingerprint),
-                    },
-                )
-                .await?;
-        }
-        Ok(())
-    }
-
-    async fn upsert_context_entry(
-        &self,
-        project_id: &str,
-        file_id: &HierarchyNodeId,
-        file: &ScannedFile,
-    ) -> Result<(), ProjectIndexerError> {
-        let raw_id = stable_id_text(
-            "context",
-            &[project_id, &file.project_root, &file.relative_path],
-        );
-        let id = ContextMapEntryId::parse(raw_id)?;
-        let value = NewContextMapEntry {
-            project_id: project_id.to_string(),
-            node_id: file_id.clone(),
-            source_fingerprint: file.fingerprint.clone(),
-            description: file.description.clone(),
-            routing_terms: file.routing_terms.clone(),
-            coverage: file.coverage,
-        };
-        let Some(existing) = self.context_map.get_entry(project_id, &id).await? else {
-            self.context_map.create_entry(id, value).await?;
-            return Ok(());
-        };
-        if existing.value != value {
-            self.context_map
-                .update_entry(
-                    project_id,
-                    &id,
-                    ContextMapEntryUpdate {
-                        expected_revision: existing.revision,
-                        source_fingerprint: value.source_fingerprint,
-                        description: value.description,
-                        routing_terms: value.routing_terms,
-                        coverage: value.coverage,
-                    },
-                )
-                .await?;
-        }
-        Ok(())
-    }
-
     async fn mark_missing_files(
         &self,
         project_id: &str,
@@ -441,19 +321,7 @@ impl ProjectIndexer {
         project_id: &str,
         file: HierarchyNode,
     ) -> Result<(), ProjectIndexerError> {
-        mark_file_regions_missing(self, project_id, &file.id).await?;
-        self.hierarchy
-            .update_source_state(
-                project_id,
-                &file.id,
-                HierarchySourceUpdate {
-                    expected_revision: file.revision,
-                    lifecycle: NodeLifecycle::Missing,
-                    source_fingerprint: file.value.source_fingerprint,
-                },
-            )
-            .await?;
-        Ok(())
+        mark_file_missing(self, project_id, &file.id).await
     }
 }
 
@@ -521,6 +389,8 @@ pub enum ProjectIndexerError {
     HierarchyValue(#[from] crate::HierarchyError),
     #[error(transparent)]
     ContextMapValue(#[from] crate::ContextMapError),
+    #[error(transparent)]
+    Storage(#[from] sqlx::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("project index scan task failed: {0}")]

@@ -61,6 +61,12 @@ impl ContextMapStore {
         Ok(Self { pool })
     }
 
+    pub(crate) async fn begin_immediate(
+        &self,
+    ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, sqlx::Error> {
+        self.pool.begin_with("BEGIN IMMEDIATE").await
+    }
+
     pub async fn create_entry(
         &self,
         id: ContextMapEntryId,
@@ -423,6 +429,81 @@ async fn load_hit(
         source,
         freshness,
     }))
+}
+
+pub(crate) async fn upsert_indexed_entry(
+    connection: &mut SqliteConnection,
+    id: &ContextMapEntryId,
+    value: NewContextMapEntry,
+) -> Result<(), ContextMapStoreError> {
+    value.validate()?;
+    let node = load_node(connection, &value.project_id, &value.node_id)
+        .await?
+        .ok_or_else(|| ContextMapStoreError::NodeNotFound(value.node_id.to_string()))?;
+    validate_current_source(&value, &node)?;
+    let now = unix_timestamp_millis()?;
+    let Some(existing) = load_entry_by_id(connection, id).await? else {
+        let insert = sqlx::query(
+            "INSERT INTO context_map_entries (
+                id, project_id, node_id, source_fingerprint, description, coverage,
+                revision, created_at_ms, updated_at_ms, last_verified_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        )
+        .bind(id.as_str())
+        .bind(&value.project_id)
+        .bind(value.node_id.as_str())
+        .bind(value.source_fingerprint.as_str())
+        .bind(&value.description)
+        .bind(coverage_name(value.coverage))
+        .bind(INITIAL_REVISION)
+        .bind(now)
+        .bind(now)
+        .execute(&mut *connection)
+        .await?;
+        write_routing_terms(connection, id, &value.routing_terms).await?;
+        write_search_row(connection, insert.last_insert_rowid(), id, &value).await?;
+        return Ok(());
+    };
+    if existing.value.project_id != value.project_id
+        || existing.value.node_id != value.node_id
+    {
+        return Err(ContextMapStoreError::EntryIdentityConflict(id.to_string()));
+    }
+    if existing.value == value {
+        return Ok(());
+    }
+    let rowid: i64 = sqlx::query_scalar(
+        "SELECT rowid FROM context_map_entries WHERE project_id = ? AND id = ?",
+    )
+    .bind(&value.project_id)
+    .bind(id.as_str())
+    .fetch_one(&mut *connection)
+    .await?;
+    sqlx::query(
+        "UPDATE context_map_entries
+         SET source_fingerprint = ?, description = ?, coverage = ?,
+             revision = revision + 1, updated_at_ms = ?
+         WHERE project_id = ? AND id = ?",
+    )
+    .bind(value.source_fingerprint.as_str())
+    .bind(&value.description)
+    .bind(coverage_name(value.coverage))
+    .bind(now)
+    .bind(&value.project_id)
+    .bind(id.as_str())
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query("DELETE FROM context_map_routing_terms WHERE entry_id = ?")
+        .bind(id.as_str())
+        .execute(&mut *connection)
+        .await?;
+    write_routing_terms(connection, id, &value.routing_terms).await?;
+    sqlx::query("DELETE FROM context_map_search WHERE rowid = ?")
+        .bind(rowid)
+        .execute(&mut *connection)
+        .await?;
+    write_search_row(connection, rowid, id, &value).await?;
+    Ok(())
 }
 
 async fn load_entry(
