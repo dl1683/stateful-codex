@@ -434,21 +434,25 @@ provenance should remain a separate next layer rather than being inferred by the
 host.
 
 The same review exposed a defect in longitudinal evidence-read measurement,
-now fixed in `649a89e116` and closed as GitHub issue #18. The evaluator pairs
-tool results with their originating calls and normalizes successful reads to a
-source fingerprint plus exact returned range. Guarded routes remain attributable
-from their route identity when output is unavailable; distinct ranges in one
-file stay distinct; explicit and guarded forms for the same resolved read share
-one identity; and genuinely unresolved calls are reported separately instead of
-collapsing into a null path. Dynamic code-mode calls are reconciled with every
-returned evidence object, so one syntactic invocation that performs multiple
-reads is no longer undercounted. All 41 Stateful client tests passed. A read-only
-replay of the protected ten-turn SC-EVAL-032 rollout produced summed per-turn
-counts of 214 executed reads, 195 unique exact identities, 13 exact repeats, and
-6 unattributed calls. That difference means the earlier syntactic-call reread
-counts must be regenerated before reuse; no protected result was modified. This
-is a telemetry repair, not evidence that any repeat was unnecessary or that
-Stateful is cheaper.
+now fixed through `649a89e116` and `7f94840695` and closed as GitHub issue #18.
+The evaluator pairs tool results with their originating calls and normalizes
+completed reads to a source fingerprint plus exact returned range. Guarded
+routes remain attributable as attempts from their route identity when a result
+is unavailable; distinct ranges in one file stay distinct; explicit and guarded
+forms for the same resolved read share one identity; and unresolved or failed
+calls remain attempts rather than being counted as completed reads. Dynamic
+code-mode calls are reconciled with every returned evidence object, so one
+syntactic invocation that performs multiple reads is no longer undercounted.
+Truncated reads contribute one completed record for the exact returned subset.
+Exact-repeat accounting is longitudinal: it distinguishes prior-turn repeats
+from duplicates within the current turn. All 41 Stateful client tests passed. A
+read-only replay of the protected ten-turn SC-EVAL-032 rollout produced 178
+completed reads: 143 new exact identities, 22 prior-turn repeats, and 13
+within-turn repeats, plus 2 failed and 7 unresolved syntactic attempts; 6
+attempts had no concrete identity. That difference means the earlier
+syntactic-call reread counts must be regenerated before reuse; no protected
+result was modified. This is a telemetry repair, not evidence that any repeat
+was unnecessary or that Stateful is cheaper.
 
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
