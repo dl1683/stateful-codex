@@ -194,7 +194,8 @@ async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
         context_map
             .query(query.clone())
             .await
-            .expect("query should succeed"),
+            .expect("query should succeed")
+            .data,
         vec![ContextMapHit {
             entry: entry.clone(),
             source: readme_source(),
@@ -218,7 +219,8 @@ async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
         context_map
             .query(query)
             .await
-            .expect("stale map should remain discoverable"),
+            .expect("stale map should remain discoverable")
+            .data,
         vec![ContextMapHit {
             entry,
             source: readme_source(),
@@ -281,7 +283,7 @@ async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
         })
         .await
         .expect("current query succeeds");
-    assert_eq!(current[0].freshness, ContextMapFreshness::Stale);
+    assert_eq!(current.data[0].freshness, ContextMapFreshness::Stale);
 }
 
 #[tokio::test]
@@ -373,7 +375,8 @@ async fn query_prefers_bounded_regions_without_one_source_crowding_results() {
             max_results: 10,
         })
         .await
-        .expect("query should succeed");
+        .expect("query should succeed")
+        .data;
     assert_eq!(hits.len(), 4);
     assert_eq!(
         hits.iter()
@@ -412,7 +415,8 @@ async fn query_prefers_bounded_regions_without_one_source_crowding_results() {
             max_results: 10,
         })
         .await
-        .expect("query should exclude prior-generation regions");
+        .expect("query should exclude prior-generation regions")
+        .data;
     assert!(
         hits.iter()
             .filter(|hit| hit.source.relative_path.as_str() == "README.md")
@@ -443,7 +447,7 @@ async fn query_preserves_results_beyond_one_busy_top_level_directory() {
             .await
             .expect("directory should insert");
     }
-    for index in 0..5 {
+    for index in 0..160 {
         let node_id =
             HierarchyNodeId::parse(format!("node-review-{index}")).expect("valid file ID");
         let relative_path = format!("reviews/{index}.md");
@@ -511,29 +515,50 @@ async fn query_preserves_results_beyond_one_busy_top_level_directory() {
         .await
         .expect("docs route should insert");
 
-    let hits = context_map
+    let result = context_map
         .query(ContextMapQuery {
             project_id: "project-1".to_string(),
             text: "shared route".to_string(),
-            max_results: 4,
+            max_results: 10,
         })
         .await
         .expect("query should succeed");
     assert_eq!(
-        hits.iter()
+        result
+            .data
+            .iter()
             .map(|hit| hit.source.relative_path.as_str())
             .collect::<Vec<_>>(),
         vec![
             "reviews/0.md",
             "reviews/1.md",
-            "reviews/2.md",
+            "reviews/10.md",
             "docs/guide.md",
         ]
     );
+    assert!(!result.truncated);
+
+    let limited = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "shared route".to_string(),
+            max_results: 3,
+        })
+        .await
+        .expect("limited query should succeed");
+    assert_eq!(
+        limited
+            .data
+            .iter()
+            .map(|hit| hit.source.relative_path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["reviews/0.md", "reviews/1.md", "reviews/10.md"]
+    );
+    assert!(limited.truncated);
 }
 
 #[tokio::test]
-async fn query_pages_past_prior_generation_regions_to_find_a_current_route() {
+async fn query_scans_past_prior_generation_regions_to_find_a_current_route() {
     let temp_dir = TempDir::new().expect("tempdir should be created");
     let (hierarchy, context_map) = stores(&temp_dir).await;
     let file = create_file(&hierarchy).await;
@@ -625,7 +650,8 @@ async fn query_pages_past_prior_generation_regions_to_find_a_current_route() {
                 max_results: 1,
             })
             .await
-            .expect("query should find the current route"),
+            .expect("query should find the current route")
+            .data,
         vec![ContextMapHit {
             entry: current,
             source: ContextMapSource {
@@ -688,6 +714,7 @@ async fn guarded_reindex_replaces_the_search_document_for_the_current_source() {
             })
             .await
             .expect("old search should succeed")
+            .data
             .is_empty()
     );
     assert_eq!(
@@ -698,7 +725,8 @@ async fn guarded_reindex_replaces_the_search_document_for_the_current_source() {
                 max_results: 5,
             })
             .await
-            .expect("new search should succeed"),
+            .expect("new search should succeed")
+            .data,
         vec![ContextMapHit {
             entry: updated,
             source: readme_source(),

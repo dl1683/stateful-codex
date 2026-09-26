@@ -20,6 +20,7 @@ pub struct ContextMapQueryParams {
 #[ts(export_to = "v2/")]
 pub struct ContextMapQueryResponse {
     pub data: Vec<ContextMapQueryHit>,
+    pub truncated: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]

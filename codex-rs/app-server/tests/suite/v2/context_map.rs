@@ -198,6 +198,7 @@ async fn context_map_query_returns_exact_routes_and_reports_stale_sources() -> R
         current,
         ContextMapQueryResponse {
             data: vec![expected_hit.clone()],
+            truncated: false,
         }
     );
 
@@ -222,6 +223,7 @@ async fn context_map_query_returns_exact_routes_and_reports_stale_sources() -> R
                 freshness: ApiContextMapFreshness::Stale,
                 ..expected_hit
             }],
+            truncated: false,
         }
     );
 

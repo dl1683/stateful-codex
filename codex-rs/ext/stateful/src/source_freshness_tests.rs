@@ -85,6 +85,7 @@ async fn file_and_region_routes_share_one_physical_source_check() {
         })
         .await
         .expect("region route lookup")
+        .data
         .into_iter()
         .next()
         .expect("region route");

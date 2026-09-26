@@ -136,6 +136,12 @@ impl ContextMapQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContextMapQueryResult {
+    pub data: Vec<ContextMapHit>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextMapListQuery {
     pub project_id: String,
     pub max_results: u32,

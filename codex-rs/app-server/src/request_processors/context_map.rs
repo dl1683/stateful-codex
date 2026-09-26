@@ -109,7 +109,7 @@ impl ContextMapRequestProcessor {
             .await
             .map_err(context_map_project_error)?
             .ok_or_else(|| invalid_params(format!("project not found: {}", params.project_id)))?;
-        let hits = store
+        let result = store
             .query(ContextMapQuery {
                 project_id: params.project_id,
                 text: params.text,
@@ -119,10 +119,12 @@ impl ContextMapRequestProcessor {
             .map_err(context_map_store_error)?;
         Ok(Some(
             ContextMapQueryResponse {
-                data: hits
+                data: result
+                    .data
                     .into_iter()
                     .map(|hit| api_hit(hit, &project))
                     .collect::<Result<_, _>>()?,
+                truncated: result.truncated,
             }
             .into(),
         ))

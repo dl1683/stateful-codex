@@ -829,6 +829,7 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
             max_results: 10,
         })
         .await?
+        .data
         .into_iter()
         .find(|hit| hit.source.region_anchor.is_some())
         .expect("refreshed region route should exist");
@@ -996,6 +997,7 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
             .expect("context-map output should be text"),
     )?;
     assert_eq!(context_output["knowledgeCoverageAvailable"], true);
+    assert_eq!(context_output["mayHaveMore"], false);
     let headline = context_output["data"][0]["headline"]
         .as_str()
         .expect("query route should include a headline");

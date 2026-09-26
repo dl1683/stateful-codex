@@ -161,6 +161,7 @@ async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
         })
         .await
         .expect("query route")
+        .data
         .into_iter()
         .next()
         .expect("decisive region");
@@ -202,6 +203,7 @@ async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
         })
         .await
         .expect("query current route")
+        .data
         .into_iter()
         .next()
         .expect("current decisive region");

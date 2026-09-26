@@ -84,7 +84,7 @@ impl ContextMapQueryTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel("selected project no longer exists".to_string())
             })?;
-        let hits = self
+        let result = self
             .services
             .context_map()
             .await
@@ -97,7 +97,8 @@ impl ContextMapQueryTool {
             .await
             .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
-        let may_have_more = hits.len() == limit as usize;
+        let may_have_more = result.truncated;
+        let hits = result.data;
         let (knowledge, knowledge_coverage_available) =
             route_knowledge(&self.services, &self.project_id, &hits).await;
         let roots = project

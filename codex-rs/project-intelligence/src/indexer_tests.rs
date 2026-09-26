@@ -66,7 +66,8 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
             max_results: 10,
         })
         .await
-        .expect("region query should succeed");
+        .expect("region query should succeed")
+        .data;
     assert_eq!(hits.len(), 1);
     assert_eq!(
         hits[0].source.region_anchor,
@@ -254,6 +255,7 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
             })
             .await
             .expect("old generation query should succeed")
+            .data
             .len(),
         1
     );
@@ -266,6 +268,7 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
             })
             .await
             .expect("new generation query should succeed")
+            .data
             .is_empty()
     );
 }
@@ -346,7 +349,8 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
             max_results: 10,
         })
         .await
-        .expect("last complete route should remain queryable");
+        .expect("last complete route should remain queryable")
+        .data;
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].freshness, ContextMapFreshness::Current);
 }

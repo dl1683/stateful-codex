@@ -17,6 +17,7 @@ use crate::ContextMapFreshness;
 use crate::ContextMapHit;
 use crate::ContextMapListQuery;
 use crate::ContextMapQuery;
+use crate::ContextMapQueryResult;
 use crate::HierarchyNode;
 use crate::HierarchyNodeId;
 use crate::NewContextMapEntry;
@@ -35,7 +36,7 @@ const INITIAL_REVISION: i64 = 1;
 const MAX_QUERY_HITS_PER_SOURCE: usize = 3;
 const MAX_QUERY_HITS_PER_DIRECTORY: usize = 3;
 const CANDIDATE_OVERFETCH_FACTOR: u32 = 16;
-const MAX_CANDIDATE_PAGES: i64 = 16;
+const CANDIDATE_SCAN_FACTOR: i64 = 16;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(FromRow)]
@@ -224,61 +225,49 @@ impl ContextMapStore {
     pub async fn query(
         &self,
         query: ContextMapQuery,
-    ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
+    ) -> Result<ContextMapQueryResult, ContextMapStoreError> {
         query.validate()?;
         let expression = search_expression(&query.text)?;
         let candidate_target =
             i64::from(query.max_results.saturating_mul(CANDIDATE_OVERFETCH_FACTOR));
-        let candidate_scan_limit = candidate_target.saturating_mul(MAX_CANDIDATE_PAGES);
-        let candidate_target =
-            usize::try_from(candidate_target).map_err(|_| ContextMapError::InvalidQuery)?;
+        let candidate_scan_limit = candidate_target.saturating_mul(CANDIDATE_SCAN_FACTOR);
+        let candidate_probe_limit = candidate_scan_limit.saturating_add(1);
+        let candidate_scan_limit =
+            usize::try_from(candidate_scan_limit).map_err(|_| ContextMapError::InvalidQuery)?;
         let mut transaction = self.pool.begin().await?;
-        let mut candidates = Vec::new();
-        let mut offset = 0_i64;
-        while candidates.len() < candidate_target && offset < candidate_scan_limit {
-            let page_limit = i64::try_from(candidate_target)
-                .unwrap_or(i64::MAX)
-                .min(candidate_scan_limit - offset);
-            let page = sqlx::query_as::<_, SearchCandidate>(
-                "SELECT entry.id, node.project_root, node.relative_path, node.kind,
-                        node.lifecycle, node.source_fingerprint AS node_source_fingerprint,
-                        entry.source_fingerprint AS entry_source_fingerprint,
-                        parent.kind AS parent_kind, parent.lifecycle AS parent_lifecycle,
-                        parent.source_fingerprint AS parent_source_fingerprint,
-                        ranked.score
-                 FROM (
-                   SELECT rowid, rank AS score
-                   FROM context_map_search
-                   WHERE context_map_search MATCH ? AND project_id = ?
-                   ORDER BY rank, rowid
-                   LIMIT ? OFFSET ?
-                 ) AS ranked
-                 JOIN context_map_entries AS entry ON entry.rowid = ranked.rowid
-                 JOIN hierarchy_nodes AS node ON node.id = entry.node_id
-                 LEFT JOIN hierarchy_nodes AS parent
-                   ON parent.id = node.parent_id AND parent.project_id = node.project_id
-                 WHERE entry.project_id = ?
-                 ORDER BY ranked.score, entry.id",
-            )
-            .bind(&expression)
-            .bind(&query.project_id)
-            .bind(page_limit)
-            .bind(offset)
-            .bind(&query.project_id)
-            .fetch_all(&mut *transaction)
-            .await?;
-            let page_len = i64::try_from(page.len()).unwrap_or(i64::MAX);
-            offset = offset.saturating_add(page_len);
-            let remaining = candidate_target.saturating_sub(candidates.len());
-            candidates.extend(
-                page.into_iter()
-                    .filter(SearchCandidate::is_queryable)
-                    .take(remaining),
-            );
-            if page_len < page_limit {
-                break;
-            }
-        }
+        let candidates = sqlx::query_as::<_, SearchCandidate>(
+            "SELECT entry.id, node.project_root, node.relative_path, node.kind,
+                    node.lifecycle, node.source_fingerprint AS node_source_fingerprint,
+                    entry.source_fingerprint AS entry_source_fingerprint,
+                    parent.kind AS parent_kind, parent.lifecycle AS parent_lifecycle,
+                    parent.source_fingerprint AS parent_source_fingerprint,
+                    ranked.score
+             FROM (
+               SELECT rowid, rank AS score
+               FROM context_map_search
+               WHERE context_map_search MATCH ? AND project_id = ?
+               ORDER BY rank, rowid
+               LIMIT ?
+             ) AS ranked
+             JOIN context_map_entries AS entry ON entry.rowid = ranked.rowid
+             JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+             LEFT JOIN hierarchy_nodes AS parent
+               ON parent.id = node.parent_id AND parent.project_id = node.project_id
+             WHERE entry.project_id = ?
+             ORDER BY ranked.score, entry.id",
+        )
+        .bind(&expression)
+        .bind(&query.project_id)
+        .bind(candidate_probe_limit)
+        .bind(&query.project_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let search_exhausted = candidates.len() <= candidate_scan_limit;
+        let mut candidates = candidates
+            .into_iter()
+            .take(candidate_scan_limit)
+            .filter(SearchCandidate::is_queryable)
+            .collect::<Vec<_>>();
         candidates.sort_by(|left, right| {
             left.score
                 .total_cmp(&right.score)
@@ -293,7 +282,7 @@ impl ContextMapStore {
             usize::try_from(query.max_results).map_err(|_| ContextMapError::InvalidQuery)?;
         let mut source_hits = HashMap::new();
         let mut directory_hits = HashMap::new();
-        let mut entry_ids = Vec::with_capacity(max_results);
+        let mut entry_ids = Vec::with_capacity(max_results.saturating_add(1));
         for candidate in candidates {
             if !matches!(candidate.kind.as_str(), "file" | "region") {
                 return Err(ContextMapStoreError::CorruptEntry(candidate.id));
@@ -315,10 +304,12 @@ impl ContextMapStore {
             *hits += 1;
             *directory_hits += 1;
             entry_ids.push(candidate.id);
-            if entry_ids.len() == max_results {
+            if entry_ids.len() > max_results {
                 break;
             }
         }
+        let truncated = entry_ids.len() > max_results || !search_exhausted;
+        entry_ids.truncate(max_results);
         let mut hits = Vec::with_capacity(entry_ids.len());
         for raw_id in entry_ids {
             let id = ContextMapEntryId::parse(&raw_id)
@@ -330,7 +321,10 @@ impl ContextMapStore {
             );
         }
         transaction.commit().await?;
-        Ok(hits)
+        Ok(ContextMapQueryResult {
+            data: hits,
+            truncated,
+        })
     }
 
     pub async fn list_project(
