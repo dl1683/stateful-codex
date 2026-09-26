@@ -1365,3 +1365,28 @@ child-region query while making no second evidence-read call. Scoped Clippy and
 formatting pass. This establishes the mechanism and the tool trajectory, not an
 unconstrained-model or representative cost result. General ranking, live reuse
 frequency, and the SC-EVAL-032 longitudinal gate remain open.
+
+### Implementation checkpoint: model-visible unchecked audit transitions (2026-09-26)
+
+Commit `5dc0fd7b14` closes a narrow fail-open World State path. The project
+semantic fingerprint previously normalized every `uncheckedThisTurn` label to
+`current`. A visible `sourceVerified` finding still changed its effective
+verification to `unverified`, but a user-confirmed finding with supplemental
+evidence could keep the same fingerprint while its live audit became unchecked.
+The retained packet could therefore continue presenting that evidence and its
+route as current.
+
+The red/green app-server integration tests the actual next model request at an
+unchanged root revision. It audits a normal evidence file, replaces that path
+with a directory so the next live check is unchecked without mutating hierarchy
+state, and requires the second request to contain both the finding's
+`evidence=uncheckedThisTurn` and the route's `(uncheckedThisTurn)` label. The
+pre-fix request omitted that invalidation; the fixed request replaces the packet.
+
+Only audit-label normalization was removed. Project-revision normalization
+remains, so revision-only changes still emit the compact update. The complete
+Stateful extension suite passes 27/27, the new app-server test passes, and the
+affected existing project-context integration passes. Scoped Clippy and
+formatting pass. This proves model-visible invalidation for the frozen
+transition; it does not address durable refresh-generation health or measure
+how often audit limits occur in representative projects.

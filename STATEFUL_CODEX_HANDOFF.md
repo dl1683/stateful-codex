@@ -40,8 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Latest implementation head before this handoff update: `b85c1dbe64`
-  (`fix(stateful): preserve knowledge across source routes`).
+- Latest implementation head before this handoff update: `5dc0fd7b14`
+  (`fix(stateful): surface unchecked evidence transitions`).
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -731,26 +731,45 @@ deterministic no-reread trajectory. It does not prove that an unconstrained live
 model will reliably use the signal, that retrieval ranking is broadly adequate,
 or that lifetime cost falls on representative work.
 
+Commit `5dc0fd7b14` closes the suppressed audit-transition risk found by the
+recurring peer review. The old semantic fingerprint rewrote every
+`uncheckedThisTurn` label to `current`. That was harmless for a visible
+`sourceVerified` finding because its effective verification also fell to
+`unverified`, but it hid the only model-visible change for a `userConfirmed` or
+other non-source-verified finding with supplemental evidence, and could hide a
+catalog-only route downgrade.
+
+The app-server regression exercises the real next model request. It first loads
+a normal evidence file and verifies that the packet reports the user-confirmed
+finding and route as current. It then replaces the path with a directory, which
+makes the live audit unchecked without changing the stored hierarchy or root
+revision. Before the fix, the second request retained no invalidation packet;
+after the fix, it contains both `evidence=uncheckedThisTurn` and the route's
+`(uncheckedThisTurn)` label.
+
+The fingerprint still normalizes only the project-intelligence revision, so a
+pure revision advance keeps its compact update. All 27 Stateful extension tests
+pass, the red/green app-server request test passes, and the affected existing
+project-context integration passes after correcting a pre-existing stale text
+assertion to the production wording already at HEAD. Scoped Clippy and
+formatting pass; the pre-existing root-blackboard large-enum warning remains.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Real World State audit transition.** Capture the next model request when an
-   unchanged root revision moves from `current` to `uncheckedThisTurn`. Prove
-   source-verified, non-source-verified, and catalog-only visibility before
-   changing the fingerprint logic.
-2. **Persistent refresh health.** Separate complete file inventory from partial
+1. **Persistent refresh health.** Separate complete file inventory from partial
    region coverage, preserve skipped-file and truncation state across restart,
    retry incomplete startup work, and reject an older refresh publisher after a
    newer generation completes.
-3. **Selective completion capture.** Prove whether a material conclusion can
+2. **Selective completion capture.** Prove whether a material conclusion can
    disappear after the five-outcome window when completion recorded no reusable
    blackboard learning. Do not solve this by enlarging the always-loaded packet.
-4. **Real index-cost attribution.** The next suitable repository refresh must
+3. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
    from the small local fixture.
-5. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
+4. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
    unique sources, route use, knowledge reuse, rereads, model requests, tokens,
    tool output, and wall time before another matched longitudinal rerun.
 
@@ -760,9 +779,9 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Run the bounded World State audit-transition integration first. If an actual
-next model request suppresses a material freshness downgrade, fix that exact
-render/fingerprint path; if it does not, record the falsification and proceed to
-persistent refresh health. Collect issue #19 diagnostics only on the next
-suitable real refresh, and do not launch a broad benchmark merely to obtain the
-measurement.
+Persist separate file-inventory and region-coverage health first. Prove an
+incomplete initial refresh remains visibly incomplete after restart, a retry can
+clear it and discover the missing source, and an older paused refresh cannot
+overwrite a newer completed generation. Collect issue #19 diagnostics only on
+the next suitable real refresh, and do not launch a broad benchmark merely to
+obtain the measurement.
