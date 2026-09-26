@@ -1390,3 +1390,32 @@ affected existing project-context integration passes. Scoped Clippy and
 formatting pass. This proves model-visible invalidation for the frozen
 transition; it does not address durable refresh-generation health or measure
 how often audit limits occur in representative projects.
+
+### Implementation checkpoint: durable and visible refresh health (2026-09-26)
+
+Commits `f177cce404`, `197c48ba8c`, and `8884f86384` close the restart and
+recovery portions of the refresh-health gate. The project store now persists
+the last completed full-refresh result while distinguishing complete file
+inventory from partial region coverage. It records scanned and indexed counts,
+skipped paths, missing-file reconciliation, region truncation, phase timings,
+and completion time. A targeted single-file refresh cannot overwrite that
+project-wide result.
+
+App-server v2 exposes the durable result, the World State packet presents it to
+the model with explicit incomplete or partial warnings, and the browser shows
+the same distinction. Startup retries an uninitialized or inventory-incomplete
+project even when an earlier run already exists; partial region coverage alone
+does not trigger an endless full refresh. Volatile timing and completion-time
+fields are deliberately excluded from the model packet's semantic fingerprint
+so operational churn does not cause context cache misses.
+
+The recovery regression injects a transient unread-file failure, reopens the
+store to prove the incomplete status survived restart, restores the source,
+adds a newly discoverable file, and runs the ordinary retry path. The second
+refresh clears the incomplete status and discovers the new source. All 42
+project-intelligence tests, the 28-test Stateful extension suite, the relevant
+app-server request integrations, 310 app-server-protocol tests with one
+configured skip, and 44 browser tests passed; scoped Clippy and formatting
+passed. The remaining refresh-health gate is publication ordering: a refresh
+that started earlier must not publish stale results after a newer generation
+has completed.

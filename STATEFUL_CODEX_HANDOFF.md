@@ -40,8 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Latest implementation head before this handoff update: `5dc0fd7b14`
-  (`fix(stateful): surface unchecked evidence transitions`).
+- Latest implementation head before this handoff update: `8884f86384`
+  (`test(stateful): prove refresh retry recovery`).
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -512,9 +512,19 @@ its timestamped artifacts are under
 `%LOCALAPPDATA%\StatefulCodex\hourly-droid-reviews`. Each cycle runs a broad
 maximum-reasoning Droid repository/issue review, a Codex source-grounded
 critique, a Droid rebuttal, and a final Codex decision record. Runs cannot
-overlap and are bounded to 55 minutes. The first complete four-stage smoke
-passed. A later script revision writes Codex progress events separately from
-the final critique so raw CLI event streams are not fed back as peer analysis.
+overlap and are bounded to three hours. Every run reviews a detached worktree
+of the committed head, so concurrent implementation edits cannot invalidate
+the review snapshot. Each Droid stage has bounded retries and the worktree is
+removed even after failure. The first complete four-stage smoke passed. A later
+script revision writes Codex progress events separately from the final critique
+so raw CLI event streams are not fed back as peer analysis.
+
+At the latest checkpoint the scheduler remains enabled, but Factory rejected a
+fresh CLI probe before inference with HTTP 402: both the standard and Droid
+Core five-hour usage windows were exhausted and Extra Usage was not active for
+the authenticated CLI account. Droid was updated to `0.228.0`; the same
+account-side response remained. The task will retry on its next hourly trigger
+and needs no repository change when the usage window resets.
 
 The first maximum-reasoning cycle completed all four stages successfully and
 produced the decision record under
@@ -754,14 +764,33 @@ project-context integration passes after correcting a pre-existing stale text
 assertion to the production wording already at HEAD. Scoped Clippy and
 formatting pass; the pre-existing root-blackboard large-enum warning remains.
 
+Commits `f177cce404`, `197c48ba8c`, and `8884f86384` complete the durable
+refresh-health restart and recovery path. Full refresh now persists separate
+file-inventory and region-coverage health, counts, skipped and missing paths,
+truncation, phase timings, and completion time. Targeted file refresh does not
+replace the project-wide status. App-server v2, the model-visible World State,
+and the browser expose the distinction; startup retries uninitialized or
+inventory-incomplete projects without treating partial region coverage as a
+reason for an endless full refresh. Volatile timing fields do not participate
+in the semantic fingerprint.
+
+The deterministic recovery test injects an unread source, proves the
+incomplete result survives store reopen, restores the source, adds a new file,
+and verifies that an ordinary retry both clears the health warning and indexes
+the new source. All 42 project-intelligence tests, 28 Stateful extension tests,
+310 app-server-protocol tests with one configured skip, 44 browser tests, and
+the four affected app-server integrations passed. Scoped Clippy and formatting
+passed; the pre-existing root-blackboard large-enum warning remains. No full
+Rust suite was run.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Persistent refresh health.** Separate complete file inventory from partial
-   region coverage, preserve skipped-file and truncation state across restart,
-   retry incomplete startup work, and reject an older refresh publisher after a
-   newer generation completes.
+1. **Refresh publication ordering.** Durable health, model/UI visibility,
+   startup retry, and retry recovery are complete. Reject an older refresh
+   publisher after a newer generation completes without introducing a broad
+   coordinator or weakening per-file atomic publication.
 2. **Selective completion capture.** Prove whether a material conclusion can
    disappear after the five-outcome window when completion recorded no reusable
    blackboard learning. Do not solve this by enlarging the always-loaded packet.
@@ -779,9 +808,10 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Persist separate file-inventory and region-coverage health first. Prove an
-incomplete initial refresh remains visibly incomplete after restart, a retry can
-clear it and discover the missing source, and an older paused refresh cannot
-overwrite a newer completed generation. Collect issue #19 diagnostics only on
-the next suitable real refresh, and do not launch a broad benchmark merely to
-obtain the measurement.
+Fence refresh publication ordering. First write a deterministic concurrency
+regression in which an older refresh pauses, a newer refresh completes, and the
+older publisher is rejected without changing the newer generation or its
+health. Implement the narrowest transactional generation guard that makes that
+test pass. Then move to selective completion capture. Collect issue #19
+diagnostics only on the next suitable real refresh, and do not launch a broad
+benchmark merely to obtain the measurement.
