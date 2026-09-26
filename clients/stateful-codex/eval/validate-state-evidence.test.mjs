@@ -11,7 +11,7 @@ test("requires decisive terms to occur inside the persisted evidence range", asy
   const workspace = await mkdtemp(path.join(tmpdir(), "stateful-evidence-"));
   await writeFile(
     path.join(workspace, "policy.md"),
-    "# Policy\nLaunch requires approval.\nThreshold is 10 or fewer.\n",
+    "# Policy\nLaunch requires approval.\nThreshold is 10 or\nfewer.\n",
   );
   const source = await readFile(path.join(workspace, "policy.md"));
   const fingerprint = `sha256:${createHash("sha256").update(source).digest("hex")}`;
@@ -31,7 +31,7 @@ test("requires decisive terms to occur inside the persisted evidence range", asy
     validateStateEvidenceAssertions({ state, benchmarkCase, workspace }),
     /no current sourceVerified blackboard entry/,
   );
-  state.blackboard.evidenceLinks[0].lastLine = 3;
+  state.blackboard.evidenceLinks[0].lastLine = 4;
   assert.deepEqual(
     await validateStateEvidenceAssertions({ state, benchmarkCase, workspace }),
     [
@@ -42,7 +42,7 @@ test("requires decisive terms to occur inside the persisted evidence range", asy
         contextMapEntryId: "policy-route",
         relativePath: "policy.md",
         firstLine: 2,
-        lastLine: 3,
+        lastLine: 4,
       },
     ],
   );

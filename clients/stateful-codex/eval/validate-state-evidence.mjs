@@ -113,10 +113,14 @@ function validTermGroups(groups) {
 }
 
 function includesTermGroups(value, groups) {
-  const normalized = value.toLocaleLowerCase("en-US");
+  const normalized = normalizeWhitespace(value);
   return groups.every((group) =>
-    group.some((term) => normalized.includes(term.toLocaleLowerCase("en-US"))),
+    group.some((term) => normalized.includes(normalizeWhitespace(term))),
   );
+}
+
+function normalizeWhitespace(value) {
+  return value.toLocaleLowerCase("en-US").replaceAll(/\s+/g, " ").trim();
 }
 
 async function readSourceLines(workspace, node, link) {
