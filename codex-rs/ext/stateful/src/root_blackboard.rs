@@ -15,9 +15,11 @@ use sha2::Sha256;
 
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::source_freshness::AuditedEvidenceFreshness;
+use crate::source_freshness::AuditedPremiseFreshness;
 use crate::source_freshness::EvidenceAudit;
 use crate::source_freshness::audited_blackboard_freshness;
 use crate::source_freshness::audited_context_freshness;
+use crate::source_freshness::audited_premise_freshness;
 use crate::source_freshness::audited_verification;
 use crate::world_state::append_line;
 use crate::world_state::hash_component;
@@ -141,12 +143,13 @@ fn render_evidence_catalog(
     root: &ResolvedRootBlackboard,
 ) -> HashMap<ContextMapEntryId, String> {
     let mut ordered_routes = Vec::new();
-    for evidence in root
-        .projection
-        .data
-        .iter()
-        .flat_map(|hit| &hit.entry.value.evidence)
-    {
+    for evidence in root.projection.data.iter().flat_map(|hit| {
+        hit.entry
+            .value
+            .evidence
+            .iter()
+            .chain(hit.premise_evidence())
+    }) {
         if root
             .evidence_routes
             .contains_key(&evidence.context_map_entry_id)
@@ -255,19 +258,35 @@ fn render_hit(
         .collect::<Vec<_>>()
         .join(",");
     let evidence_freshness = audited_blackboard_freshness(hit, evidence_audit);
-    let effective_verification = audited_verification(value.verification, evidence_freshness);
+    let premise_freshness = audited_premise_freshness(hit, evidence_audit);
+    let effective_verification =
+        audited_verification(value.verification, evidence_freshness, premise_freshness);
+    let premises = value
+        .premises
+        .iter()
+        .map(|premise| {
+            let alias = entry_aliases
+                .get(premise.entry_id.as_str())
+                .map(String::as_str)
+                .unwrap_or("deeper");
+            format!("{alias}@r{}", premise.revision)
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let mut line = format!(
-        "- {alias} [{} {}; verification={}; declared={}; evidence={}; confidence={}; provenance={}] content={}{} sources=[{}] relations=[{}]",
+        "- {alias} [{} {}; verification={}; declared={}; evidence={}; premises={}; confidence={}; provenance={}] content={}{} sources=[{}] premiseRefs=[{}] relations=[{}]",
         importance_name(value.importance),
         kind_name(value.kind),
         verification_name(effective_verification),
         verification_name(value.verification),
         rendered_freshness_name(evidence_freshness),
+        rendered_premise_freshness_name(premise_freshness),
         value.confidence.basis_points(),
         provenance_name(value.provenance.kind),
         single_line(&value.content),
         structured,
         evidence,
+        premises,
         relations,
     );
     if line.len() > MAX_ENTRY_BYTES {
@@ -277,6 +296,16 @@ fn render_hit(
         line.push_str(&marker);
     }
     line
+}
+
+fn rendered_premise_freshness_name(freshness: AuditedPremiseFreshness) -> &'static str {
+    match freshness {
+        AuditedPremiseFreshness::NotApplicable => "notApplicable",
+        AuditedPremiseFreshness::Current => "current",
+        AuditedPremiseFreshness::Stale => "stale",
+        AuditedPremiseFreshness::SourceUnavailable => "sourceUnavailable",
+        AuditedPremiseFreshness::UncheckedThisTurn => "uncheckedThisTurn",
+    }
 }
 
 fn rendered_freshness_name(freshness: AuditedEvidenceFreshness) -> &'static str {

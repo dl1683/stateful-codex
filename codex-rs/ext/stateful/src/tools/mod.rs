@@ -1,5 +1,6 @@
 mod blackboard;
 mod blackboard_evidence;
+mod blackboard_premises;
 mod blackboard_update;
 mod blackboard_write;
 mod context_map;

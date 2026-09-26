@@ -332,6 +332,7 @@ pub struct BlackboardHit {
     pub evidence_freshness: BlackboardEvidenceFreshness,
     pub premise_freshness: BlackboardPremiseFreshness,
     pub effective_verification: BlackboardVerification,
+    premise_evidence: Vec<BlackboardEvidenceLink>,
 }
 
 impl BlackboardHit {
@@ -349,7 +350,20 @@ impl BlackboardHit {
             evidence_freshness,
             premise_freshness: BlackboardPremiseFreshness::NotApplicable,
             effective_verification,
+            premise_evidence: Vec::new(),
         }
+    }
+
+    pub fn premise_evidence(&self) -> &[BlackboardEvidenceLink] {
+        &self.premise_evidence
+    }
+
+    pub(crate) fn with_premise_evidence(
+        mut self,
+        premise_evidence: Vec<BlackboardEvidenceLink>,
+    ) -> Self {
+        self.premise_evidence = premise_evidence;
+        self
     }
 
     pub(crate) fn with_premise_freshness(

@@ -14,7 +14,9 @@ use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
 use crate::source_freshness::AuditedEvidenceFreshness;
+use crate::source_freshness::AuditedPremiseFreshness;
 use crate::source_freshness::audited_blackboard_freshness;
+use crate::source_freshness::audited_premise_freshness;
 use crate::source_freshness::audited_verification;
 use crate::source_freshness::observe_evidence;
 
@@ -186,21 +188,21 @@ async fn material_root_checklist(
         };
         selected.push((reference, hit));
     }
-    let evidence_audit = if selected.is_empty() {
+    let mut evidence_ids = Vec::new();
+    for (_, hit) in &selected {
+        evidence_ids.extend(
+            hit.entry
+                .value
+                .evidence
+                .iter()
+                .chain(hit.premise_evidence())
+                .map(|evidence| evidence.context_map_entry_id.clone()),
+        );
+    }
+    let evidence_audit = if evidence_ids.is_empty() {
         None
     } else {
-        Some(
-            observe_evidence(
-                services,
-                project_id,
-                project_roots,
-                selected
-                    .iter()
-                    .flat_map(|(_, hit)| &hit.entry.value.evidence)
-                    .map(|evidence| evidence.context_map_entry_id.clone()),
-            )
-            .await,
-        )
+        Some(observe_evidence(services, project_id, project_roots, evidence_ids).await)
     };
     let context_map = services.context_map().await.map_err(respond)?;
     let mut material = MaterialChecklist {
@@ -209,6 +211,7 @@ async fn material_root_checklist(
     };
     for (reference, hit) in selected {
         let evidence_freshness = audited_blackboard_freshness(hit, evidence_audit.as_ref());
+        let premise_freshness = audited_premise_freshness(hit, evidence_audit.as_ref());
         if hit.entry.value.verification == BlackboardVerification::SourceVerified
             && evidence_freshness != AuditedEvidenceFreshness::Current
         {
@@ -217,10 +220,28 @@ async fn material_root_checklist(
                 freshness_name(evidence_freshness)
             )));
         }
-        let effective_verification =
-            audited_verification(hit.entry.value.verification, evidence_freshness);
+        if !matches!(
+            premise_freshness,
+            AuditedPremiseFreshness::NotApplicable | AuditedPremiseFreshness::Current
+        ) {
+            return Err(respond(format!(
+                "material root finding {reference} premises are {}; revise or supersede the finding before completing",
+                premise_freshness_name(premise_freshness)
+            )));
+        }
+        let effective_verification = audited_verification(
+            hit.entry.value.verification,
+            evidence_freshness,
+            premise_freshness,
+        );
         let mut sources = Vec::new();
-        for evidence in &hit.entry.value.evidence {
+        for evidence in hit
+            .entry
+            .value
+            .evidence
+            .iter()
+            .chain(hit.premise_evidence())
+        {
             material
                 .source_fingerprints
                 .insert(evidence.source_fingerprint.as_str().to_ascii_lowercase());
@@ -251,15 +272,26 @@ async fn material_root_checklist(
         material.items.push(ChecklistItem {
             category: "rootFinding",
             text: bounded_item(&format!(
-                "{reference} [{}; verification={}; evidence={}] {}{sources}",
+                "{reference} [{}; verification={}; evidence={}; premises={}] {}{sources}",
                 importance_name(hit.entry.value.importance),
                 verification_name(effective_verification),
                 freshness_name(evidence_freshness),
+                premise_freshness_name(premise_freshness),
                 hit.entry.value.content,
             )),
         });
     }
     Ok(material)
+}
+
+fn premise_freshness_name(freshness: AuditedPremiseFreshness) -> &'static str {
+    match freshness {
+        AuditedPremiseFreshness::NotApplicable => "notApplicable",
+        AuditedPremiseFreshness::Current => "current",
+        AuditedPremiseFreshness::Stale => "stale",
+        AuditedPremiseFreshness::SourceUnavailable => "sourceUnavailable",
+        AuditedPremiseFreshness::UncheckedThisTurn => "uncheckedThisTurn",
+    }
 }
 
 fn invalid_root_alias(reference: &str, expected_root_revision: u64) -> FunctionCallError {

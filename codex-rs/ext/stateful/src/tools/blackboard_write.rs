@@ -37,6 +37,9 @@ use crate::services::ProjectIntelligenceServices;
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
 use super::blackboard_evidence::resolve_evidence;
+use super::blackboard_premises::PremiseArguments;
+use super::blackboard_premises::premise_schema;
+use super::blackboard_premises::resolve_premises;
 use super::parse_arguments;
 use super::stable_id;
 
@@ -60,6 +63,8 @@ struct RecordArguments {
     root_promotion: RootPromotion,
     #[serde(default)]
     evidence: Vec<EvidenceArguments>,
+    #[serde(default)]
+    premises: Vec<PremiseArguments>,
 }
 
 #[derive(Deserialize)]
@@ -111,7 +116,7 @@ impl BlackboardRecordTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: RecordArguments = parse_arguments(&call)?;
-        let project_roots = if arguments.evidence.is_empty() {
+        let project_roots = if arguments.evidence.is_empty() && arguments.premises.is_empty() {
             Vec::new()
         } else {
             self.project_roots().await?
@@ -143,6 +148,7 @@ impl BlackboardRecordTool {
             importance,
             root_promotion,
             evidence,
+            premises,
         } = arguments;
         if verification == BlackboardVerification::UserConfirmed {
             return Err(FunctionCallError::RespondToModel(
@@ -158,6 +164,8 @@ impl BlackboardRecordTool {
             evidence,
         )
         .await?;
+        let premises =
+            resolve_premises(&self.project_id, &self.services, project_roots, premises).await?;
         let node_id = match node_id {
             Some(node_id) => HierarchyNodeId::parse(node_id).map_err(respond)?,
             None => match inferred_node_id {
@@ -201,7 +209,7 @@ impl BlackboardRecordTool {
                     importance,
                     root_promotion,
                     evidence,
-                    premises: Vec::new(),
+                    premises,
                     provenance: BlackboardProvenance {
                         kind: BlackboardProvenanceKind::Agent,
                         source_id: source_id.to_string(),
@@ -247,7 +255,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
+            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. When a new conclusion semantically depends on trusted blackboard knowledge, pin each exact entryId and revision in premises; premises are checked live, do not count as direct evidence, and do not confer sourceVerified. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&record_schema())
@@ -320,7 +328,10 @@ impl BlackboardBatchRecordTool {
         let mut results = Vec::with_capacity(records.len());
         let mut entry_ids = HashMap::with_capacity(records.len());
         let mut recorded = 0usize;
-        let project_roots = if records.iter().all(|record| record.evidence.is_empty()) {
+        let project_roots = if records
+            .iter()
+            .all(|record| record.evidence.is_empty() && record.premises.is_empty())
+        {
             Vec::new()
         } else {
             self.recorder.project_roots().await?
@@ -426,7 +437,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings and up to {MAX_BATCH_RELATIONS} relationships in one bounded call. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals instead of compressing the batch to the immediate answer. Relations reference record idempotencyKey values from this same call through fromRecordKey and toRecordKey, avoiding opaque entry-ID copying. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this after one evidence-review pass."
+                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings and up to {MAX_BATCH_RELATIONS} navigational relationships in one bounded call. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals instead of compressing the batch to the immediate answer. Pin an existing trusted entry's exact revision in premises when a finding semantically depends on it; do not substitute an unversioned dependsOn relation. Relations reference record idempotencyKey values from this same call through fromRecordKey and toRecordKey, avoiding opaque entry-ID copying. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this after one evidence-review pass."
             ),
             strict: false,
             defer_loading: None,
@@ -481,7 +492,8 @@ fn record_schema() -> serde_json::Value {
             "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links. It records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
-            "evidence": evidence_schema()
+            "evidence": evidence_schema(),
+            "premises": premise_schema()
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false

@@ -21,7 +21,9 @@ use crate::services::ProjectIntelligenceServices;
 mod blackboard;
 
 pub(crate) use blackboard::AuditedEvidenceFreshness;
+pub(crate) use blackboard::AuditedPremiseFreshness;
 pub(crate) use blackboard::audited_blackboard_freshness;
+pub(crate) use blackboard::audited_premise_freshness;
 pub(crate) use blackboard::audited_verification;
 
 const MAX_AUDITED_SOURCES: usize = 256;

@@ -26,6 +26,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use super::AuditedEvidenceFreshness;
+use super::AuditedPremiseFreshness;
 use super::MAX_AUDITED_SOURCE_BYTES;
 use super::MAX_TOTAL_AUDITED_BYTES;
 use super::SourceAuditStatus;
@@ -282,7 +283,11 @@ async fn deeper_knowledge_observation_detects_changed_bytes_without_mutating_sta
         Some(ContextMapFreshness::Stale)
     );
     assert_eq!(
-        audited_verification(result.data[0].entry.value.verification, freshness),
+        audited_verification(
+            result.data[0].entry.value.verification,
+            freshness,
+            AuditedPremiseFreshness::NotApplicable,
+        ),
         BlackboardVerification::Stale
     );
     let unchecked_audit =
@@ -290,7 +295,11 @@ async fn deeper_knowledge_observation_detects_changed_bytes_without_mutating_sta
     let unchecked = audited_blackboard_freshness(&result.data[0], Some(&unchecked_audit));
     assert_eq!(unchecked, AuditedEvidenceFreshness::UncheckedThisTurn);
     assert_eq!(
-        audited_verification(result.data[0].entry.value.verification, unchecked),
+        audited_verification(
+            result.data[0].entry.value.verification,
+            unchecked,
+            AuditedPremiseFreshness::NotApplicable,
+        ),
         BlackboardVerification::Unverified
     );
     let node_after = hierarchy

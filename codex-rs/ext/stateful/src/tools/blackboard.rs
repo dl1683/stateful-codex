@@ -23,6 +23,7 @@ use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
 use crate::source_freshness::audited_blackboard_freshness;
+use crate::source_freshness::audited_premise_freshness;
 use crate::source_freshness::audited_verification;
 use crate::source_freshness::observe_evidence;
 
@@ -150,7 +151,13 @@ impl BlackboardQueryTool {
         let evidence_ids = result
             .data
             .iter()
-            .flat_map(|hit| &hit.entry.value.evidence)
+            .flat_map(|hit| {
+                hit.entry
+                    .value
+                    .evidence
+                    .iter()
+                    .chain(hit.premise_evidence())
+            })
             .map(|evidence| evidence.context_map_entry_id.clone())
             .collect::<Vec<_>>();
         let evidence_audit = if evidence_ids.is_empty() {
@@ -180,8 +187,12 @@ impl BlackboardQueryTool {
         let mut truncated = result.truncated;
         for (index, hit) in result.data.into_iter().enumerate() {
             let evidence_freshness = audited_blackboard_freshness(&hit, evidence_audit.as_ref());
-            let effective_verification =
-                audited_verification(hit.entry.value.verification, evidence_freshness);
+            let premise_freshness = audited_premise_freshness(&hit, evidence_audit.as_ref());
+            let effective_verification = audited_verification(
+                hit.entry.value.verification,
+                evidence_freshness,
+                premise_freshness,
+            );
             let evidence_count = hit.entry.value.evidence.len();
             let mut item = json!({
                 "entryId": hit.entry.id.to_string(),
@@ -197,12 +208,18 @@ impl BlackboardQueryTool {
                 "effectiveVerification": effective_verification,
                 "evidenceFreshness": evidence_freshness,
                 "storedEvidenceFreshness": hit.evidence_freshness,
+                "premiseFreshness": premise_freshness,
+                "storedPremiseFreshness": hit.premise_freshness,
                 "importance": hit.entry.value.importance,
                 "rootPromotion": hit.entry.value.root_promotion,
                 "evidence": hit.entry.value.evidence.into_iter().map(|link| json!({
                     "contextMapEntryId": link.context_map_entry_id.to_string(),
                     "sourceFingerprint": link.source_fingerprint.to_string(),
                     "lineRange": link.line_range,
+                })).collect::<Vec<_>>(),
+                "premises": hit.entry.value.premises.into_iter().map(|link| json!({
+                    "entryId": link.entry_id.to_string(),
+                    "revision": link.revision,
                 })).collect::<Vec<_>>(),
                 "provenance": hit.entry.value.provenance,
                 "relations": hit.relations.into_iter().map(|relation| json!({
@@ -285,7 +302,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Source-linked results are byte-checked against the selected project without mutating project state; evidenceFreshness is the effective observation and storedEvidenceFreshness is the persisted index state. Reuse sourceVerified knowledge only when evidenceFreshness=current. Active knowledge is the default. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to enumerate entries whose current revisions directly cite the changed source through either its file route or any current or retired region route. This does not discover semantic dependencies that were never recorded. Affected-source pages omit evidence locators and navigational relations to stay resumable within the response budget. Inspect every page before mutating project intelligence, then deliberately revise or supersede stale direct dependents; retaining meaning requires fresh supporting receipts, while leaving a stale entry unchanged is not repair. The host reports mechanical dependency and freshness only and never infers semantic invalidation. The first page returns projectRevision. If truncated=true, repeat the same query with that revision as expectedProjectRevision and nextAfterEntryId copied into afterEntryId; if the project revision changes, restart from the first page. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review pending root-promotion decisions, and omit text only when intentionally enumerating a bounded set.".to_string(),
+            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Source-linked results and their transitive sourceVerified premises are byte-checked against the selected project without mutating project state. Reuse knowledge only when evidenceFreshness and premiseFreshness are current or notApplicable and effectiveVerification has the required authority. Active knowledge is the default. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to enumerate both direct citations and current conclusions connected through exact revision-pinned premises. Semantic dependencies that were never recorded remain undiscoverable. Affected-source pages omit evidence locators and navigational relations to stay resumable within the response budget, but retain premise references and freshness. Inspect every page before mutating project intelligence, then deliberately revise or supersede affected knowledge; retaining source-verified meaning requires fresh supporting receipts, while leaving stale knowledge unchanged is not repair. The host reports mechanical dependency and freshness only and never infers semantic invalidation. The first page returns projectRevision. If truncated=true, repeat the same query with that revision as expectedProjectRevision and nextAfterEntryId copied into afterEntryId; if the project revision changes, restart from the first page. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review pending root-promotion decisions, and omit text only when intentionally enumerating a bounded set.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

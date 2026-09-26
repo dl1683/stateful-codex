@@ -33,6 +33,9 @@ use crate::services::ProjectIntelligenceServices;
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
 use super::blackboard_evidence::resolve_evidence;
+use super::blackboard_premises::PremiseArguments;
+use super::blackboard_premises::premise_schema;
+use super::blackboard_premises::resolve_premises;
 use super::parse_arguments;
 
 const UPDATE_TOOL_NAME: &str = "blackboard_update_batch";
@@ -70,6 +73,7 @@ enum MutationArguments {
         importance: Option<BlackboardImportance>,
         root_promotion: Option<RootPromotion>,
         evidence: Option<Vec<EvidenceArguments>>,
+        premises: Option<Vec<PremiseArguments>>,
     },
     Supersede {
         entry_id: String,
@@ -148,16 +152,19 @@ impl BlackboardUpdateTool {
         }
         let mut updated = 0usize;
         let mut results = Vec::with_capacity(mutations.len());
-        let revises_evidence = mutations.iter().any(|mutation| {
+        let revises_support = mutations.iter().any(|mutation| {
             matches!(
                 mutation,
                 MutationArguments::Revise {
                     evidence: Some(_),
                     ..
+                } | MutationArguments::Revise {
+                    premises: Some(_),
+                    ..
                 }
             )
         });
-        let project_roots = if revises_evidence {
+        let project_roots = if revises_support {
             self.projects
                 .read_project(self.project_id.clone())
                 .await
@@ -254,6 +261,7 @@ impl BlackboardUpdateTool {
                 importance,
                 root_promotion,
                 evidence,
+                premises,
                 ..
             } => {
                 if verification == Some(BlackboardVerification::UserConfirmed) {
@@ -277,6 +285,7 @@ impl BlackboardUpdateTool {
                     && importance.is_none()
                     && root_promotion.is_none()
                     && evidence.is_none()
+                    && premises.is_none()
                 {
                     return Err(FunctionCallError::RespondToModel(
                         "revise must change at least one field".to_string(),
@@ -292,7 +301,7 @@ impl BlackboardUpdateTool {
                     || (clear_structured_value && update.structured_value.is_some());
                 let revised_verification = verification.unwrap_or(update.verification);
                 if revised_verification == BlackboardVerification::UserConfirmed
-                    && source_meaning_changed
+                    && (source_meaning_changed || evidence.is_some() || premises.is_some())
                 {
                     return Err(FunctionCallError::RespondToModel(
                         "changing user-confirmed meaning requires a new host-observed user action or an explicit verification downgrade"
@@ -333,6 +342,11 @@ impl BlackboardUpdateTool {
                     )
                     .await?
                     .0;
+                }
+                if let Some(premises) = premises {
+                    update.premises =
+                        resolve_premises(&self.project_id, &self.services, project_roots, premises)
+                            .await?;
                 }
             }
             MutationArguments::Supersede {
@@ -377,7 +391,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, or evidence changes. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. userConfirmed is host-issued from an explicit user action and cannot be selected here; changing confirmed meaning requires a new user action or an explicit downgrade. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. A successful supersede or retire result includes historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, direct evidence, or exact premise revisions change. Premises are live-checked semantic provenance and never confer sourceVerified; pass an empty premises array only to deliberately clear them. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. userConfirmed is host-issued from an explicit user action and cannot be selected here; changing confirmed meaning or its support requires a new user action or an explicit downgrade. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. A successful supersede or retire result includes historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
             ),
             strict: false,
             defer_loading: None,
@@ -448,6 +462,7 @@ fn update_schema() -> serde_json::Value {
     revise_properties["rootPromotion"] =
         json!({"type": "string", "enum": ["notPromoted", "candidate", "promoted"]});
     revise_properties["evidence"] = evidence_schema();
+    revise_properties["premises"] = premise_schema();
     json!({
         "type": "object",
         "properties": {

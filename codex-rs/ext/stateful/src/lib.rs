@@ -247,39 +247,48 @@ impl StatefulExtension {
                 };
                 let mut evidence_routes = std::collections::HashMap::new();
                 let mut complete_evidence_routes = true;
-                for evidence in projection
-                    .data
-                    .iter()
-                    .flat_map(|hit| &hit.entry.value.evidence)
-                {
-                    if evidence_routes.contains_key(&evidence.context_map_entry_id) {
-                        continue;
-                    }
-                    match context_map
-                        .get_hit(project_id, &evidence.context_map_entry_id)
-                        .await
+                for hit in &projection.data {
+                    for evidence in hit
+                        .entry
+                        .value
+                        .evidence
+                        .iter()
+                        .chain(hit.premise_evidence())
                     {
-                        Ok(Some(hit)) => {
-                            evidence_routes.insert(evidence.context_map_entry_id.clone(), hit);
+                        if evidence_routes.contains_key(&evidence.context_map_entry_id) {
+                            continue;
                         }
-                        Ok(None) => complete_evidence_routes = false,
-                        Err(error) => {
-                            complete_evidence_routes = false;
-                            tracing::warn!(
-                                %project_id,
-                                context_map_entry_id = %evidence.context_map_entry_id,
-                                %error,
-                                "failed to resolve a root evidence route"
-                            );
+                        match context_map
+                            .get_hit(project_id, &evidence.context_map_entry_id)
+                            .await
+                        {
+                            Ok(Some(hit)) => {
+                                evidence_routes.insert(evidence.context_map_entry_id.clone(), hit);
+                            }
+                            Ok(None) => complete_evidence_routes = false,
+                            Err(error) => {
+                                complete_evidence_routes = false;
+                                tracing::warn!(
+                                    %project_id,
+                                    context_map_entry_id = %evidence.context_map_entry_id,
+                                    %error,
+                                    "failed to resolve a root evidence route"
+                                );
+                            }
                         }
                     }
                 }
-                let evidence_ids = projection
-                    .data
-                    .iter()
-                    .flat_map(|hit| &hit.entry.value.evidence)
-                    .map(|evidence| evidence.context_map_entry_id.clone())
-                    .collect::<Vec<_>>();
+                let mut evidence_ids = Vec::new();
+                for hit in &projection.data {
+                    evidence_ids.extend(
+                        hit.entry
+                            .value
+                            .evidence
+                            .iter()
+                            .chain(hit.premise_evidence())
+                            .map(|evidence| evidence.context_map_entry_id.clone()),
+                    );
+                }
                 let roots = project
                     .roots
                     .iter()

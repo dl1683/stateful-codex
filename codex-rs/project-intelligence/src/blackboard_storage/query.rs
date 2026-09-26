@@ -23,7 +23,9 @@ use crate::storage::load_node;
 
 use super::BlackboardStore;
 use super::BlackboardStoreError;
+use super::StoredEvidenceLink;
 use super::load_entry;
+use super::parse_stored;
 use super::promotion_name;
 use super::relation::load_relations_for_entry;
 
@@ -41,6 +43,33 @@ struct StoredRouteKnowledge {
 }
 
 impl BlackboardStore {
+    pub async fn get_hit(
+        &self,
+        project_id: &str,
+        entry_id: &BlackboardEntryId,
+    ) -> Result<Option<BlackboardHit>, BlackboardStoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let entry = load_entry(&mut transaction, project_id, entry_id).await?;
+        let hit = match entry {
+            Some(entry) => {
+                let freshness = load_evidence_freshness(&mut transaction, &entry).await?;
+                let premise_freshness = load_premise_freshness(&mut transaction, &entry).await?;
+                let premise_evidence = load_premise_evidence(&mut transaction, &entry).await?;
+                let relations =
+                    load_relations_for_entry(&mut transaction, project_id, &entry.id, 256).await?;
+                Some(
+                    BlackboardHit::new(entry, freshness)
+                        .with_premise_freshness(premise_freshness)
+                        .with_premise_evidence(premise_evidence)
+                        .with_relations(relations),
+                )
+            }
+            None => None,
+        };
+        transaction.commit().await?;
+        Ok(hit)
+    }
+
     pub async fn evidence_dependents(
         &self,
         query: BlackboardEvidenceDependentsQuery,
@@ -168,8 +197,11 @@ impl BlackboardStore {
                 .ok_or_else(|| BlackboardStoreError::EntryNotFound(raw_id))?;
             let freshness = load_evidence_freshness(&mut transaction, &entry).await?;
             let premise_freshness = load_premise_freshness(&mut transaction, &entry).await?;
+            let premise_evidence = load_premise_evidence(&mut transaction, &entry).await?;
             data.push(
-                BlackboardHit::new(entry, freshness).with_premise_freshness(premise_freshness),
+                BlackboardHit::new(entry, freshness)
+                    .with_premise_freshness(premise_freshness)
+                    .with_premise_evidence(premise_evidence),
             );
         }
         transaction.commit().await?;
@@ -457,9 +489,11 @@ async fn load_hit(
         .ok_or_else(|| BlackboardStoreError::EntryNotFound(raw_id))?;
     let freshness = load_evidence_freshness(connection, &entry).await?;
     let premise_freshness = load_premise_freshness(connection, &entry).await?;
+    let premise_evidence = load_premise_evidence(connection, &entry).await?;
     let relations = load_relations_for_entry(connection, project_id, &entry.id, 256).await?;
     Ok(BlackboardHit::new(entry, freshness)
         .with_premise_freshness(premise_freshness)
+        .with_premise_evidence(premise_evidence)
         .with_relations(relations))
 }
 
@@ -570,4 +604,61 @@ pub(super) async fn load_premise_freshness(
     } else {
         BlackboardPremiseFreshness::Current
     })
+}
+
+async fn load_premise_evidence(
+    connection: &mut SqliteConnection,
+    entry: &crate::BlackboardEntry,
+) -> Result<Vec<crate::BlackboardEvidenceLink>, BlackboardStoreError> {
+    sqlx::query_as::<_, StoredEvidenceLink>(
+        "WITH RECURSIVE premise_tree(entry_id, revision) AS (
+           SELECT premise_entry_id, premise_revision
+           FROM blackboard_premise_links
+           WHERE entry_id = ? AND revision = ?
+           UNION
+           SELECT link.premise_entry_id, link.premise_revision
+           FROM blackboard_premise_links AS link
+           JOIN premise_tree AS owner
+             ON owner.entry_id = link.entry_id AND owner.revision = link.revision
+         )
+         SELECT DISTINCT evidence.context_map_entry_id, evidence.source_fingerprint,
+                evidence.first_line, evidence.last_line
+         FROM premise_tree
+         JOIN blackboard_entry_revisions AS revision
+           ON revision.entry_id = premise_tree.entry_id
+          AND revision.revision = premise_tree.revision
+          AND revision.verification = 'source_verified'
+         JOIN blackboard_evidence_links AS evidence
+           ON evidence.entry_id = premise_tree.entry_id
+          AND evidence.revision = premise_tree.revision
+         ORDER BY evidence.context_map_entry_id, evidence.first_line, evidence.last_line",
+    )
+    .bind(entry.id.as_str())
+    .bind(i64::try_from(entry.revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?)
+    .fetch_all(connection)
+    .await?
+    .into_iter()
+    .map(|link| {
+        Ok(crate::BlackboardEvidenceLink {
+            context_map_entry_id: parse_stored(
+                ContextMapEntryId::parse(link.context_map_entry_id),
+                entry.id.as_str(),
+            )?,
+            source_fingerprint: parse_stored(
+                crate::SourceFingerprint::parse(link.source_fingerprint),
+                entry.id.as_str(),
+            )?,
+            line_range: match (link.first_line, link.last_line) {
+                (None, None) => None,
+                (Some(first_line), Some(last_line)) => Some(crate::EvidenceLineRange {
+                    start: u64::try_from(first_line)
+                        .map_err(|_| BlackboardStoreError::CorruptEntry(entry.id.to_string()))?,
+                    end: u64::try_from(last_line)
+                        .map_err(|_| BlackboardStoreError::CorruptEntry(entry.id.to_string()))?,
+                }),
+                _ => return Err(BlackboardStoreError::CorruptEntry(entry.id.to_string())),
+            },
+        })
+    })
+    .collect()
 }
