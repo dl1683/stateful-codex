@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use sha2::Digest;
 use sha2::Sha256;
@@ -45,9 +46,12 @@ pub struct ProjectIndexFileRequest {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectIndexReport {
     pub files_indexed: u64,
+    pub regions_indexed: u64,
     pub files_skipped: u64,
     pub missing_files: u64,
     pub truncated: bool,
+    pub scan_duration_ms: u64,
+    pub publication_duration_ms: u64,
 }
 
 #[derive(Clone)]
@@ -70,10 +74,25 @@ impl ProjectIndexer {
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         validate_request(&request)?;
         let roots = request.roots.clone();
+        let scan_started = Instant::now();
         let scan = tokio::task::spawn_blocking(move || scan_roots(&roots))
             .await
             .map_err(ProjectIndexerError::ScanTask)??;
-        self.publish_refresh(request, scan).await
+        let scan_duration_ms = elapsed_millis(scan_started);
+        let regions_indexed = scan.files.iter().try_fold(0_u64, |count, file| {
+            count
+                .checked_add(
+                    u64::try_from(file.regions.len())
+                        .map_err(|_| ProjectIndexerError::CountOverflow)?,
+                )
+                .ok_or(ProjectIndexerError::CountOverflow)
+        })?;
+        let publication_started = Instant::now();
+        let mut report = self.publish_refresh(request, scan).await?;
+        report.regions_indexed = regions_indexed;
+        report.scan_duration_ms = scan_duration_ms;
+        report.publication_duration_ms = elapsed_millis(publication_started);
+        Ok(report)
     }
 
     async fn publish_refresh(
@@ -145,9 +164,12 @@ impl ProjectIndexer {
         let mut report = ProjectIndexReport {
             files_indexed: u64::try_from(seen_files.len())
                 .map_err(|_| ProjectIndexerError::CountOverflow)?,
+            regions_indexed: 0,
             files_skipped: scan.files_skipped,
             missing_files: 0,
             truncated: scan.truncated,
+            scan_duration_ms: 0,
+            publication_duration_ms: 0,
         };
         if scan.inventory_complete {
             for root_id in root_nodes.values() {
@@ -174,9 +196,12 @@ impl ProjectIndexer {
         )?;
         let scan_root = project_root.clone();
         let scan_path = relative_path.clone();
+        let scan_started = Instant::now();
         let file = tokio::task::spawn_blocking(move || scan_project_file(&scan_root, &scan_path))
             .await
             .map_err(ProjectIndexerError::ScanTask)??;
+        let scan_duration_ms = elapsed_millis(scan_started);
+        let publication_started = Instant::now();
         let Some(file) = file else {
             let existing = self
                 .hierarchy
@@ -197,11 +222,16 @@ impl ProjectIndexer {
             };
             return Ok(ProjectIndexReport {
                 files_indexed: 0,
+                regions_indexed: 0,
                 files_skipped: 0,
                 missing_files,
                 truncated: false,
+                scan_duration_ms,
+                publication_duration_ms: elapsed_millis(publication_started),
             });
         };
+        let regions_indexed =
+            u64::try_from(file.regions.len()).map_err(|_| ProjectIndexerError::CountOverflow)?;
         let project_node_id = stable_id("project", &[&project_id])?;
         self.hierarchy
             .create_node(
@@ -246,9 +276,12 @@ impl ProjectIndexer {
         publish_file(self, &project_id, &file_id, parent_id, &file).await?;
         Ok(ProjectIndexReport {
             files_indexed: 1,
+            regions_indexed,
             files_skipped: 0,
             missing_files: 0,
             truncated: false,
+            scan_duration_ms,
+            publication_duration_ms: elapsed_millis(publication_started),
         })
     }
 
@@ -331,6 +364,10 @@ impl ProjectIndexer {
     ) -> Result<(), ProjectIndexerError> {
         mark_file_missing(self, project_id, &file.id).await
     }
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 fn validate_request(request: &ProjectIndexRequest) -> Result<(), ProjectIndexerError> {

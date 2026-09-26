@@ -36,10 +36,16 @@ pub struct ContextMapRefreshResponse {
     #[ts(type = "number")]
     pub files_indexed: u64,
     #[ts(type = "number")]
+    pub regions_indexed: u64,
+    #[ts(type = "number")]
     pub files_skipped: u64,
     #[ts(type = "number")]
     pub missing_files: u64,
     pub truncated: bool,
+    #[ts(type = "number")]
+    pub scan_duration_ms: u64,
+    #[ts(type = "number")]
+    pub publication_duration_ms: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

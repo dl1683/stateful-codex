@@ -87,9 +87,12 @@ impl ContextMapRequestProcessor {
         Ok(Some(
             ContextMapRefreshResponse {
                 files_indexed: report.files_indexed,
+                regions_indexed: report.regions_indexed,
                 files_skipped: report.files_skipped,
                 missing_files: report.missing_files,
                 truncated: report.truncated,
+                scan_duration_ms: report.scan_duration_ms,
+                publication_duration_ms: report.publication_duration_ms,
             }
             .into(),
         ))

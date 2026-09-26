@@ -261,9 +261,12 @@ impl ContextMapRefreshTool {
                 &json!({
                     "projectId": self.project_id,
                     "filesIndexed": report.files_indexed,
+                    "regionsIndexed": report.regions_indexed,
                     "filesSkipped": report.files_skipped,
                     "missingFiles": report.missing_files,
                     "truncated": report.truncated,
+                    "scanDurationMs": report.scan_duration_ms,
+                    "publicationDurationMs": report.publication_duration_ms,
                     "routes": &data,
                     "routesTruncated": routes_truncated,
                     "knowledgeCoverageAvailable": knowledge_coverage_available,
@@ -278,9 +281,12 @@ impl ContextMapRefreshTool {
         Ok(Box::new(JsonToolOutput::new(json!({
             "projectId": self.project_id,
             "filesIndexed": report.files_indexed,
+            "regionsIndexed": report.regions_indexed,
             "filesSkipped": report.files_skipped,
             "missingFiles": report.missing_files,
             "truncated": report.truncated,
+            "scanDurationMs": report.scan_duration_ms,
+            "publicationDurationMs": report.publication_duration_ms,
             "routes": data,
             "routesTruncated": routes_truncated,
             "knowledgeCoverageAvailable": knowledge_coverage_available,
@@ -296,7 +302,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: REFRESH_TOOL_NAME.to_string(),
-            description: "Refresh the selected project's filesystem hierarchy and source-routing index. Use when the context map is empty or project files changed. The result includes a bounded source-route inventory; use those routes directly and query the context map only when the inventory is truncated or does not identify the needed source.".to_string(),
+            description: "Refresh the selected project's filesystem hierarchy and source-routing index. Use when the context map is empty or project files changed. The result reports indexed files/regions and separate scan/publication milliseconds, plus a bounded source-route inventory; use those routes directly and query the context map only when the inventory is truncated or does not identify the needed source.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

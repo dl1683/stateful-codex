@@ -158,13 +158,19 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
         })
         .await
         .expect("deletion refresh should succeed");
+    let mut stable_deletion = deletion;
+    stable_deletion.scan_duration_ms = 0;
+    stable_deletion.publication_duration_ms = 0;
     assert_eq!(
-        deletion,
+        stable_deletion,
         ProjectIndexReport {
             files_indexed: 0,
+            regions_indexed: 0,
             files_skipped: 0,
             missing_files: 1,
             truncated: false,
+            scan_duration_ms: 0,
+            publication_duration_ms: 0,
         }
     );
     assert!(
@@ -317,9 +323,12 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
         report,
         ProjectIndexReport {
             files_indexed: 0,
+            regions_indexed: 0,
             files_skipped: 1,
             missing_files: 0,
             truncated: true,
+            scan_duration_ms: 0,
+            publication_duration_ms: 0,
         }
     );
     assert_eq!(

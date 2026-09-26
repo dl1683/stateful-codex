@@ -93,13 +93,19 @@ async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
     })
     .await
     .expect("refresh changed source");
+    let mut stable_report = report;
+    stable_report.scan_duration_ms = 0;
+    stable_report.publication_duration_ms = 0;
     assert_eq!(
-        report,
+        stable_report,
         ProjectIndexReport {
             files_indexed: 1,
+            regions_indexed: 1,
             files_skipped: 0,
             missing_files: 0,
             truncated: false,
+            scan_duration_ms: 0,
+            publication_duration_ms: 0,
         }
     );
     let refreshed = reader

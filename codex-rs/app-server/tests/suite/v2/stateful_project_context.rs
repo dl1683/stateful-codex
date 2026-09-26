@@ -632,6 +632,9 @@ async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<
             .expect("refresh output should be text"),
     )?;
     assert_eq!(output["filesIndexed"], 2);
+    assert_eq!(output["regionsIndexed"], 2);
+    assert!(output["scanDurationMs"].as_u64().is_some());
+    assert!(output["publicationDurationMs"].as_u64().is_some());
     assert_eq!(output["routesTruncated"], false);
     assert_eq!(output["knowledgeCoverageAvailable"], true);
     assert_eq!(output["routes"].as_array().map(Vec::len), Some(2));

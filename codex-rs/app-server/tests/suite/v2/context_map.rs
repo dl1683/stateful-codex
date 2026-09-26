@@ -282,13 +282,19 @@ async fn context_map_refresh_indexes_changes_and_marks_missing_sources() -> Resu
             params: params.clone(),
         })
         .await?;
+    let mut stable_refreshed = refreshed;
+    stable_refreshed.scan_duration_ms = 0;
+    stable_refreshed.publication_duration_ms = 0;
     assert_eq!(
-        refreshed,
+        stable_refreshed,
         ContextMapRefreshResponse {
             files_indexed: 1,
+            regions_indexed: 1,
             files_skipped: 0,
             missing_files: 0,
             truncated: false,
+            scan_duration_ms: 0,
+            publication_duration_ms: 0,
         }
     );
     let query = ContextMapQueryParams {
