@@ -1213,6 +1213,16 @@ multi-hit reads still cross autocommit statement boundaries. Make those reads
 transaction-consistent and falsify candidate/hit mixing under a concurrent
 mutation before the interrupted-refresh canary or another model run.
 
+Commit `c6266e5559` completes that gate. Ordinary blackboard search and composed
+context-map reads now select and materialize through one SQLite read
+transaction. Deterministic WAL tests hold a reader snapshot open, commit a
+concurrent source mutation, verify that the in-flight hit remains internally
+pre-mutation/current, and verify that the next query observes the
+post-mutation/stale state. All 40 project-intelligence tests passed, followed by
+scoped Clippy and formatting. The next gate is interrupted refresh: a transient
+scan/read failure must preserve the last complete published generation instead
+of reconciling an unread file as missing.
+
 For every gate, record answer quality, repeated source ranges, input and uncached
 tokens, model requests, tool-output volume, wall time, state writes/queries, and
 whether the decisive prior conclusion was actually used. Operational failures

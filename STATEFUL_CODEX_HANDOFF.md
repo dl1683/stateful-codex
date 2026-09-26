@@ -573,6 +573,20 @@ multiple autocommit reads. Root projection and affected-source enumeration
 already use one read transaction; ordinary retrieval must receive the same
 snapshot guarantee before concurrent refresh behavior is trusted.
 
+Commit `c6266e5559` closes that snapshot gap. Ordinary blackboard search now
+validates scope, selects candidate IDs, and materializes full entries,
+relations, direct-evidence freshness, and premise freshness in one SQLite read
+transaction. Context-map search does the same across every FTS candidate page,
+diversity selection, and hit load. Project listing, multi-hit path lookup,
+multi-statement entry/hit loads, and guarded-hit validation also use one read
+snapshot. Single-statement aggregate reads remain single statements. Two
+deterministic WAL regressions select candidates, commit a concurrent source
+mutation, prove the open reader still materializes the pre-mutation/current
+view, then prove a new query sees the changed/stale view. All 40
+project-intelligence tests passed, followed by scoped Clippy and formatting.
+This proves the storage snapshot boundary, not application-level freshness of
+the indexed data.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
@@ -581,17 +595,13 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Ordinary retrieval snapshots.** Root projection and affected-source pages
-   have transaction-consistent snapshots. Audit and, where necessary, give
-   ordinary blackboard and context-map queries the same consistency guarantee
-   before relying on them during concurrent refresh or mutation.
+1. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+   failure so reconciliation cannot silently mark an unread file missing.
 2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
    a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
-3. **Interrupted refresh.** Add a deterministic canary for transient scan/read
-   failure so reconciliation cannot silently mark an unread file missing.
-4. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+3. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
 
@@ -601,12 +611,11 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. Give ordinary blackboard retrieval, context-map
-search, context-map project listing, and multi-hit path lookup one coherent
-SQLite read snapshot, then add a deterministic concurrent-mutation regression
-that would expose candidate/hit mixing. Keep single-statement reads simple and
-do not add coordination machinery merely to make the test convenient. After
-that gate, test interrupted refresh behavior before spending on another Luna
-trajectory. The premise mechanism is now implemented; the product claim that it
-reduces rereading and cost remains deliberately open until a small model replay
-uses it.
+Do not rerun the model yet. Add the smallest deterministic interrupted-refresh
+canary: a transient scan or read failure must preserve the last complete
+published generation and must not reconcile an unread file as missing. Reuse
+the existing generation/publication boundary rather than adding a second state
+machine. After that gate, inspect the measured publication profile before
+choosing an indexing optimization. The premise and retrieval-snapshot
+mechanisms are implemented; the product claim that they reduce rereading and
+cost remains deliberately open until a small model replay uses them.
