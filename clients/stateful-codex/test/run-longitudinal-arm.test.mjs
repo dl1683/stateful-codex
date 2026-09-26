@@ -154,7 +154,7 @@ test("preserves and reuses an exact content-addressed corpus artifact", async ()
   }
 });
 
-test("proves a resumed turn inherited the preceding project state", () => {
+test("accepts source reconciliation that advances inherited state before the first response", () => {
   const previous = stateArtifact({ revision: 7 });
   const current = stateArtifact({
     revision: 9,
@@ -165,17 +165,18 @@ test("proves a resumed turn inherited the preceding project state", () => {
     previous,
     current,
     currentTurn: {
-      projectState: { atFirstResponse: { revision: 7 } },
+      projectState: { atFirstResponse: { revision: 8 } },
     },
     threadId: "thread-1",
   });
   assert.equal(result.passed, true);
   assert.equal(result.priorIntelligenceRevision, 7);
+  assert.equal(result.initialVisibleIntelligenceRevision, 8);
   assert.equal(result.currentIntelligenceRevision, 9);
   assert.equal(result.retainedBlackboardEntries, 1);
 });
 
-test("rejects a resumed turn that did not load the preceding revision", () => {
+test("rejects a resumed turn that regressed behind the preceding revision", () => {
   const previous = stateArtifact({ revision: 7 });
   const current = stateArtifact({ revision: 9, runId: "run-2" });
   assert.throws(
@@ -188,7 +189,24 @@ test("rejects a resumed turn that did not load the preceding revision", () => {
         },
         threadId: "thread-1",
       }),
-    /did not start from the preceding intelligence revision/,
+    /started before the preceding intelligence revision/,
+  );
+});
+
+test("rejects a visible starting revision newer than the captured artifact", () => {
+  const previous = stateArtifact({ revision: 7 });
+  const current = stateArtifact({ revision: 9, runId: "run-2" });
+  assert.throws(
+    () =>
+      validateStateInheritance({
+        previous,
+        current,
+        currentTurn: {
+          projectState: { atFirstResponse: { revision: 10 } },
+        },
+        threadId: "thread-1",
+      }),
+    /visible starting revision exceeds the captured project revision/,
   );
 });
 

@@ -34,6 +34,17 @@ export function summarizeLongitudinalEvents(events) {
       metadata = event.payload;
       return;
     }
+    if (event.type === "world_state") {
+      const revision = event.payload?.state?.stateful_project?.rootRevision;
+      if (Number.isInteger(revision) && latestProjectState) {
+        latestProjectState = { ...latestProjectState, revision };
+        const turn = ensureTurn(activeTurnId);
+        if (turn) {
+          turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
+        }
+      }
+      return;
+    }
     if (event.type === "event_msg" && event.payload?.type === "task_started") {
       if (activeTurnId && !turns.get(activeTurnId)?.complete) {
         issues.push(`turn ${activeTurnId} was superseded before task_complete`);
@@ -79,8 +90,10 @@ export function summarizeLongitudinalEvents(events) {
       turn.tokenRecords.push(event.payload);
       turn.lastTurnUsage = compactUsage(event.payload.turn_token_usage);
       turn.threadUsageAtEnd = compactUsage(event.payload.thread_token_usage);
-      turn.projectStateAtFirstResponse ??=
-        cloneProjectState(latestProjectState);
+      if (turn.userPrompt) {
+        turn.projectStateAtFirstResponse ??=
+          cloneProjectState(latestProjectState);
+      }
       turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
       return;
     }

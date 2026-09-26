@@ -40,6 +40,14 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
     message("turn-1", "assistant", "Answer one"),
     completed("turn-1", 100, 900),
     started("turn-2", 110),
+    {
+      type: "world_state",
+      payload: {
+        state: {
+          stateful_project: { rootRevision: 9 },
+        },
+      },
+    },
     context("turn-2"),
     message("turn-2", "user", "Question two?"),
     {
@@ -118,7 +126,7 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
   assert.equal(summary.turns[0].projectState.atFirstResponse.revision, 7);
   assert.equal(summary.turns[0].projectState.atLastResponse.revision, 8);
   assert.equal(summary.turns[1].projectState.atStart.revision, 8);
-  assert.equal(summary.turns[1].projectState.atFirstResponse.revision, 8);
+  assert.equal(summary.turns[1].projectState.atFirstResponse.revision, 9);
   assert.equal(summary.turns[1].projectState.atFirstResponse.rootEntries, 1);
   assert.equal(summary.turns[1].projectState.atFirstResponse.evidenceRoutes, 1);
   assert.equal(summary.turns[1].projectState.atFirstResponse.omittedRootEntries, 2);
@@ -126,4 +134,37 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
     summary.turns[1].projectState.atFirstResponse.entryEvidenceFreshness,
     { current: 1, stale: 0, sourceUnavailable: 0 },
   );
+});
+
+test("does not treat pre-prompt compaction usage as the first agent response", () => {
+  const firstUsage = usage(10, 0, 1, 0);
+  const answerUsage = usage(20, 5, 2, 0);
+  const events = [
+    metadata("thread-stateful"),
+    started("turn-1", 100),
+    message("turn-1", "developer", projectFragment),
+    usageRecord("turn-1", "compact-response", firstUsage, firstUsage, firstUsage),
+    {
+      type: "world_state",
+      payload: {
+        state: {
+          stateful_project: { rootRevision: 8 },
+        },
+      },
+    },
+    message("turn-1", "user", "Question after compaction?"),
+    usageRecord(
+      "turn-1",
+      "answer-response",
+      answerUsage,
+      usage(30, 5, 3, 0),
+      usage(30, 5, 3, 0),
+    ),
+    message("turn-1", "assistant", "Answer"),
+    completed("turn-1", 100, 900),
+  ];
+
+  const summary = summarizeLongitudinalEvents(events);
+
+  assert.equal(summary.turns[0].projectState.atFirstResponse.revision, 8);
 });

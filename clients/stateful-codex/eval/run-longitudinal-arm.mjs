@@ -262,8 +262,18 @@ export function validateStateInheritance({
   if (current.intelligenceRevision < previous.intelligenceRevision) {
     failures.push("project intelligence revision regressed");
   }
-  if (currentTurn?.projectState?.atFirstResponse?.revision !== previous.intelligenceRevision) {
-    failures.push("the next turn did not start from the preceding intelligence revision");
+  const initialVisibleRevision = currentTurn?.projectState?.atFirstResponse?.revision;
+  if (
+    !Number.isInteger(initialVisibleRevision) ||
+    initialVisibleRevision < previous.intelligenceRevision
+  ) {
+    failures.push("the next turn started before the preceding intelligence revision");
+  }
+  if (
+    Number.isInteger(initialVisibleRevision) &&
+    initialVisibleRevision > current.intelligenceRevision
+  ) {
+    failures.push("the visible starting revision exceeds the captured project revision");
   }
   if (!current.run?.threadIds?.includes(threadId)) {
     failures.push("the completed run is not attached to the continuous thread");
@@ -291,7 +301,7 @@ export function validateStateInheritance({
     threadId,
     priorSnapshotSha256: previous.snapshotSha256,
     priorIntelligenceRevision: previous.intelligenceRevision,
-    initialVisibleIntelligenceRevision: currentTurn.projectState.atFirstResponse.revision,
+    initialVisibleIntelligenceRevision: initialVisibleRevision,
     currentIntelligenceRevision: current.intelligenceRevision,
     retainedHierarchyNodes: previous.hierarchy.length,
     retainedContextMapEntries: previous.contextMap.length,
