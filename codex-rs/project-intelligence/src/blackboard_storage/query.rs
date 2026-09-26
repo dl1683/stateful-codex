@@ -217,12 +217,56 @@ impl BlackboardStore {
         query: BlackboardRouteKnowledgeQuery,
     ) -> Result<Vec<BlackboardRouteKnowledge>, BlackboardStoreError> {
         query.validate()?;
-        let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT link.context_map_entry_id,
+        let mut builder =
+            QueryBuilder::<Sqlite>::new("WITH requested(context_map_entry_id) AS (VALUES ");
+        {
+            let mut separated = builder.separated(", ");
+            for entry_id in &query.context_map_entry_ids {
+                separated
+                    .push("(")
+                    .push_bind_unseparated(entry_id.as_str())
+                    .push_unseparated(")");
+            }
+        }
+        builder.push(
+            "), requested_sources AS (
+               SELECT requested.context_map_entry_id,
+                      CASE node.kind
+                        WHEN 'file' THEN node.id
+                        WHEN 'region' THEN node.parent_id
+                      END AS source_node_id
+               FROM requested
+               JOIN context_map_entries AS requested_entry
+                 ON requested_entry.id = requested.context_map_entry_id
+               JOIN hierarchy_nodes AS node ON node.id = requested_entry.node_id
+               WHERE requested_entry.project_id = ",
+        );
+        builder.push_bind(&query.project_id);
+        builder.push(" AND node.project_id = ");
+        builder.push_bind(&query.project_id);
+        builder.push(
+            " AND node.kind IN ('file', 'region')
+             )
+             SELECT requested_sources.context_map_entry_id,
                     COUNT(DISTINCT entry.id) AS active_entries,
                     COUNT(DISTINCT CASE WHEN revision.root_promotion = 'promoted'
                         THEN entry.id END) AS root_entries
-             FROM blackboard_evidence_links AS link
+             FROM requested_sources
+             JOIN hierarchy_nodes AS source
+               ON (source.id = requested_sources.source_node_id
+                 OR source.parent_id = requested_sources.source_node_id)
+              AND source.kind IN ('file', 'region')
+              AND source.project_id = ",
+        );
+        builder.push_bind(&query.project_id);
+        builder.push(
+            " JOIN context_map_entries AS evidence
+               ON evidence.node_id = source.id AND evidence.project_id = ",
+        );
+        builder.push_bind(&query.project_id);
+        builder.push(
+            " JOIN blackboard_evidence_links AS link
+               ON link.context_map_entry_id = evidence.id
              JOIN blackboard_entries AS entry ON entry.id = link.entry_id
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id
@@ -231,12 +275,11 @@ impl BlackboardStore {
              WHERE entry.project_id = ",
         );
         builder.push_bind(&query.project_id);
-        builder.push(" AND revision.state = 'active' AND link.context_map_entry_id IN (");
-        let mut separated = builder.separated(", ");
-        for entry_id in &query.context_map_entry_ids {
-            separated.push_bind(entry_id.as_str());
-        }
-        separated.push_unseparated(") GROUP BY link.context_map_entry_id");
+        builder.push(
+            " AND revision.state = 'active'
+              GROUP BY requested_sources.context_map_entry_id
+              ORDER BY requested_sources.context_map_entry_id",
+        );
         let rows = builder
             .build_query_as::<StoredRouteKnowledge>()
             .fetch_all(&self.pool)

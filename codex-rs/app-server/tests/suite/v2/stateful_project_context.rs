@@ -31,6 +31,7 @@ use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::ContextMapCoverage;
 use codex_project_intelligence::ContextMapEntryId;
+use codex_project_intelligence::ContextMapListQuery;
 use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::EvidenceRoute;
@@ -781,7 +782,7 @@ async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<
 }
 
 #[tokio::test]
-async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> Result<()> {
+async fn model_can_reuse_file_learning_from_a_child_region_without_rereading() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -822,7 +823,16 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
     assert_eq!(refreshed.files_indexed, 1);
     let context_store =
         ContextMapStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs())).await?;
-    let route = context_store
+    let file_route = context_store
+        .list_project(ContextMapListQuery {
+            project_id: created.project.id.clone(),
+            max_results: 10,
+        })
+        .await?
+        .into_iter()
+        .next()
+        .expect("refreshed file route should exist");
+    let child_region = context_store
         .query(ContextMapQuery {
             project_id: created.project.id.clone(),
             text: "durable project state exact region".to_string(),
@@ -833,7 +843,7 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
         .into_iter()
         .find(|hit| hit.source.region_anchor.is_some())
         .expect("refreshed region route should exist");
-    let evidence_route = EvidenceRoute::from_hit(&route)?;
+    let evidence_route = EvidenceRoute::from_hit(&file_route)?;
     let evidence_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -866,7 +876,7 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
     )?;
     assert_eq!(
         evidence_output["contextMapEntryId"],
-        route.entry.id.to_string()
+        file_route.entry.id.to_string()
     );
     let read_receipt_id = evidence_output["blackboardEvidence"]["readReceiptId"]
         .as_str()
@@ -973,7 +983,7 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
     )?;
     assert_eq!(
         query_output["data"][0]["nodeId"],
-        route.entry.value.node_id.to_string()
+        file_route.entry.value.node_id.to_string()
     );
     assert_eq!(
         query_output["data"][0]["declaredVerification"],
@@ -986,8 +996,8 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
     assert_eq!(
         query_output["data"][0]["evidence"][0],
         json!({
-            "contextMapEntryId": route.entry.id.to_string(),
-            "sourceFingerprint": route.entry.value.source_fingerprint.to_string(),
+            "contextMapEntryId": file_route.entry.id.to_string(),
+            "sourceFingerprint": file_route.entry.value.source_fingerprint.to_string(),
             "lineRange": {"start": first_line, "end": last_line},
         })
     );
@@ -1005,8 +1015,9 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
     assert!(headline.contains("Durable project state"));
     assert_eq!(
         context_output["data"][0]["evidenceRoute"]["contextMapEntryId"],
-        route.entry.id.to_string()
+        child_region.entry.id.to_string()
     );
+    assert_ne!(child_region.entry.id, file_route.entry.id);
     assert_eq!(
         context_output["data"][0]["knownKnowledge"],
         json!({"rootEntries": 1, "deeperEntries": 0})

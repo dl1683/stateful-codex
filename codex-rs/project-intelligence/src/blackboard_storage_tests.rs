@@ -33,6 +33,7 @@ use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
+use crate::RegionAnchor;
 use crate::RootBlackboardQuery;
 
 fn fingerprint(value: &str) -> SourceFingerprint {
@@ -190,6 +191,62 @@ async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
     assert_eq!(
         current.data[0].evidence_freshness,
         BlackboardEvidenceFreshness::Stale
+    );
+}
+
+#[tokio::test]
+async fn route_knowledge_includes_file_citation_for_child_region() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (hierarchy, blackboard, _entry, _) = fixture(&temp_dir).await;
+    let region_id = HierarchyNodeId::parse("node-readme-region").expect("valid node ID");
+    hierarchy
+        .create_node(
+            region_id.clone(),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(HierarchyNodeId::parse("node-file").expect("valid node ID")),
+                kind: NodeKind::Region,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("README.md").expect("valid path"),
+                region_anchor: Some(
+                    RegionAnchor::new("lines", "1-20").expect("valid region anchor"),
+                ),
+                source_fingerprint: Some(fingerprint("sha256:abc")),
+            },
+        )
+        .await
+        .expect("region node inserts");
+    let region_context_id = ContextMapEntryId::parse("map-readme-region").expect("valid map ID");
+    ContextMapStore::open(&SqliteConfig::new_for_testing(temp_dir.path().abs()))
+        .await
+        .expect("context map opens")
+        .create_entry(
+            region_context_id.clone(),
+            NewContextMapEntry {
+                project_id: "project-1".to_string(),
+                node_id: region_id,
+                source_fingerprint: fingerprint("sha256:abc"),
+                description: "README purpose and constraints section.".to_string(),
+                routing_terms: vec!["purpose".to_string()],
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("region context-map entry inserts");
+
+    assert_eq!(
+        blackboard
+            .route_knowledge(BlackboardRouteKnowledgeQuery {
+                project_id: "project-1".to_string(),
+                context_map_entry_ids: vec![region_context_id.clone()],
+            })
+            .await
+            .expect("route knowledge loads"),
+        vec![BlackboardRouteKnowledge {
+            context_map_entry_id: region_context_id,
+            active_entries: 1,
+            root_entries: 1,
+        }]
     );
 }
 
