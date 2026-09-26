@@ -247,6 +247,8 @@ impl BlackboardRequestProcessor {
         ))
     }
 
+    /// Applies the user authority delegated to the app-server client while
+    /// preserving the exact entry revision that client displayed.
     pub(crate) async fn confirm(
         &self,
         params: BlackboardConfirmParams,

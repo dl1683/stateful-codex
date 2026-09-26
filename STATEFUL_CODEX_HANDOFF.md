@@ -486,7 +486,14 @@ cannot submit replacement content, evidence, verification, or provenance; it
 refreshes after confirmation and removes the action once the effective grade
 is `userConfirmed`. The client suite passed 42/42. A real-browser check proved
 the exact RPC payload, the post-confirm badge and action removal, and no console
-errors. GitHub issue #23 is closed.
+errors. The maximum-reasoning peer review then forced an explicit trust-boundary
+audit: neither code mode nor any model-facing tool references the confirm RPC,
+and the normal restricted sandbox blocks loopback network access. Confirmation
+is authority delegated to a trusted app-server client, not cryptographic proof
+against a process granted arbitrary host control; such a process could also
+edit the state database directly. The protocol and local-client documentation
+state this boundary explicitly. GitHub issue #23 was reopened during that audit
+and its acceptance gate is complete only under this now-recorded limitation.
 
 Commit `b47e85b470` closes the browser exact-evidence break recorded as GitHub
 issue #22. `evidence/read` now reconstructs the guarded route from the current

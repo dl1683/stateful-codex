@@ -63,6 +63,11 @@ pub struct BlackboardUpsertResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+/// Confirms the exact displayed revision through a trusted user-facing client.
+///
+/// Clients must invoke this only for a direct user action. This request is not
+/// a model-facing mutation primitive and deliberately accepts no replacement
+/// meaning, evidence, verification grade, or provenance.
 pub struct BlackboardConfirmParams {
     pub project_id: String,
     pub entry_id: String,

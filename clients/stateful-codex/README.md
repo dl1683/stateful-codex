@@ -19,6 +19,22 @@ they are in a normal Codex package. The gateway removes `OPENAI_API_KEY` and
 `CODEX_API_KEY` from its child environment and forces the Codex ChatGPT login
 method.
 
+## User-confirmation boundary
+
+`Confirm this understanding` is a trusted-client action, not a model tool. The
+browser sends only the displayed entry ID and revision; the app-server
+preserves the entry's meaning and evidence and issues the `userConfirmed`
+grade. Model-facing blackboard record/update tools cannot select that grade,
+and the generic upsert API cannot manufacture it.
+
+This is an application authority boundary, not proof against a process with
+arbitrary host control. The gateway stays loopback-only and normal sandboxed
+agent commands cannot use the network. A process explicitly granted
+unsandboxed host access could impersonate local clients or edit the state store
+directly, so work performed with that authority is outside the provenance
+guarantee. Clients must invoke `blackboard/confirm` only in direct response to
+an explicit user action.
+
 ## Rollout comparison
 
 Compare an ordinary Codex rollout with a Stateful rollout only after running the
