@@ -474,12 +474,19 @@ proves the rejected update did not advance state because the legitimate
 revision-guarded update still succeeds. The targeted app-server test passed,
 then scoped Clippy and formatting passed.
 
-The second trust defect remains open: model-facing record/update schemas still
-offer `userConfirmed`, and the generic API still relies on caller-supplied user
-provenance. Do not replace this with a cosmetic provenance check. Define the
-host-observed user action or receipt that earns `userConfirmed`; model tools
-must not self-award it, and model revisions of confirmed meaning must either
-retain an exact valid confirmation or downgrade/reject the grade.
+The second trust defect is closed across three commits. `44bf6dcc58` removes
+`userConfirmed` from model record/update schemas, rejects out-of-schema
+self-awards and generic API attempts even when the caller claims user
+provenance, and requires a downgrade before changing confirmed meaning.
+`6aa45e7f92` adds the experimental `blackboard/confirm` RPC: it accepts only an
+exact active entry ID and expected revision, preserves the existing meaning and
+evidence, and lets the host issue user provenance and the confirmed grade.
+`59ea293d75` exposes that exact action in the browser workspace. The client
+cannot submit replacement content, evidence, verification, or provenance; it
+refreshes after confirmation and removes the action once the effective grade
+is `userConfirmed`. The client suite passed 42/42. A real-browser check proved
+the exact RPC payload, the post-confirm badge and action removal, and no console
+errors. GitHub issue #23 is closed.
 
 Commit `b47e85b470` closes the browser exact-evidence break recorded as GitHub
 issue #22. `evidence/read` now reconstructs the guarded route from the current
@@ -510,27 +517,23 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Trusted user confirmation.** Close the remaining `userConfirmed`
-   authority gap with a host-bound user action. Generic callers and model tools
-   must not be able to manufacture the grade by selecting an enum or claiming
-   user provenance.
-2. **Derived premise provenance.** Direct source-citation enumeration is now
+1. **Derived premise provenance.** Direct source-citation enumeration is now
    implemented, but the frozen repair also needs honest reuse of current
    source-verified blackboard premises. Design bounded revision-pinned premise
    references that distinguish a derived conclusion from direct source
    verification and let changed-premise dependents be enumerated without the
    host making semantic authority decisions.
-3. **Ordinary retrieval snapshots.** Root projection and affected-source pages
+2. **Ordinary retrieval snapshots.** Root projection and affected-source pages
    have transaction-consistent snapshots. Audit and, where necessary, give
    ordinary blackboard and context-map queries the same consistency guarantee
    before relying on them during concurrent refresh or mutation.
-4. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+3. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
    a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
-5. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+4. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
-6. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+5. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
 
@@ -540,11 +543,12 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. First close the smaller authority invariant:
-`userConfirmed` must be issued only from an exact host-observed user action and
-must never be self-awarded by a model or generic caller. Falsify both creation
-and revision paths and preserve legitimate user instructions. Then design the
-smallest honest revision-pinned dependency contract for derived knowledge and
-test it with the changed-amendment case plus an unchanged-source premise. Only
-after those deterministic contracts survive review should a small Luna replay
-test whether the repair trajectory actually becomes shorter.
+Do not rerun the model yet. The user-confirmation authority invariant is now
+closed. Design the smallest honest revision-pinned dependency contract for
+derived knowledge and test it with the changed-amendment case plus an
+unchanged-source premise. In parallel, apply the recurring review's cheap
+deterministic challenges to repeated physical-source hashing and truthful
+context-map query metadata; do not weaken fingerprint checks or sourceVerified
+semantics merely to reduce cost. Only after those deterministic contracts
+survive review should a small Luna replay test whether the repair trajectory
+actually becomes shorter.
