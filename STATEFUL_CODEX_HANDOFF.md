@@ -40,8 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Latest implementation head before this handoff update: `3578c5e5a0`
-  (`fix(stateful): fence stale full refresh publishers`).
+- Latest implementation head before this handoff update: `dc2dd91aeb`
+  (`fix(stateful): require durable learning capture`).
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -800,20 +800,36 @@ Targeted single-file refresh remains outside this full-refresh generation
 policy and retains its per-file atomic transaction; general live-edit
 coordination is still tracked by issue #16.
 
+Commit `dc2dd91aeb` closes the narrow selective-completion-capture gate. The
+five-outcome projection remains bounded. Instead of enlarging it or copying
+terminal prose into a parallel memory store, completion now rejects any
+non-empty `finalObligation.learning` when neither a current root alias nor an
+exact historical blackboard revision was selected. The rejection instructs the
+model to record and promote the smallest durable conclusion, then retry.
+Outcome-only completion remains available when the run declares no reusable
+project learning.
+
+The real app-server tool-call regression submits a material threshold learning
+with no blackboard finding. The host rejects it before terminal mutation; the
+run remains running and the obligation store remains empty. The 28/28 Stateful
+extension suite, both completion-guard integrations, the autonomous
+continuation integration, and the unselected-provenance integration passed.
+Scoped Clippy and formatting passed with the pre-existing root-blackboard
+large-enum warning. The invariant is structural, not semantic: the model still
+chooses which current or historical finding actually preserves its learning,
+so representative trajectory work must measure that choice.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Selective completion capture.** Prove whether a material conclusion can
-   disappear after the five-outcome window when completion recorded no reusable
-   blackboard learning. Do not solve this by enlarging the always-loaded packet.
+1. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
+   unique sources, route use, knowledge reuse, rereads, model requests, tokens,
+   tool output, and wall time before another matched longitudinal rerun.
 2. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
    from the small local fixture.
-3. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
-   unique sources, route use, knowledge reuse, rereads, model requests, tokens,
-   tool output, and wall time before another matched longitudinal rerun.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
 and uncached tokens, model requests, tool-output volume, wall time, state writes
@@ -821,10 +837,10 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Move to selective completion capture. First freeze the failure in which a
-material completed-run conclusion has no reusable blackboard learning and ages
-out of the five-outcome projection. Then preserve only the smallest durable,
-provenance-bound conclusion needed by a later turn; do not enlarge the
-always-loaded outcome window or convert final prose wholesale into memory.
-Collect issue #19 diagnostics only on the next suitable real refresh, and do
-not launch a broad benchmark merely to obtain the measurement.
+Implement the smallest end-to-end issue #24 attribution slice before another
+matched run: make one headless run report what Stateful state it read, reused,
+verified, invalidated, and wrote, alongside existing request/token/tool timing.
+The first acceptance gate is a machine-readable per-run summary whose counts
+can be reconciled against the rollout and deterministic tool calls. Collect
+issue #19 diagnostics only on the next suitable real refresh, and do not launch
+a broad benchmark merely to obtain the measurement.

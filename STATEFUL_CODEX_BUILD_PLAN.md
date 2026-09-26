@@ -1438,3 +1438,31 @@ followed by scoped Clippy and formatting. Targeted single-file refresh retains
 its existing per-file atomic behavior and does not participate in the
 full-refresh generation policy; broader live-edit coordination remains part of
 issue #16 rather than being hidden inside this gate.
+
+### Implementation checkpoint: completion learning cannot be outcome-only (2026-09-26)
+
+Commit `dc2dd91aeb` closes the deterministic five-outcome semantic-capture
+hole. A completed run may still be outcome-only when it declares no reusable
+project learning. When `finalObligation.learning` is non-empty, however, the
+completion must select at least one current root finding or exact historical
+blackboard revision. Otherwise the host rejects the terminal mutation and tells
+the model to record and promote the smallest durable conclusion before retrying.
+
+This preserves the division of responsibility: the model decides what the
+learning means and where it belongs in the filesystem-mirrored blackboard; the
+host enforces that declared reusable learning cannot exist only in a recent-run
+packet that disappears after five newer outcomes. It does not copy final prose
+into memory, enlarge the always-loaded outcome window, or invent verification.
+Current findings remain in the rich root; historical findings remain exact,
+revision-pinned, queryable project knowledge.
+
+The app-server integration exercises the real model tool call with a material
+learning and no selected blackboard finding. Completion is rejected, the run
+remains running, and no final obligation is written. The complete 28-test
+Stateful extension suite, both completion-guard integrations, the autonomous
+continuation integration, and the unselected-provenance integration passed;
+scoped Clippy and formatting passed with only the pre-existing root-blackboard
+large-enum warning. The host cannot prove semantic equivalence between a free-
+form learning and the model-selected finding; later longitudinal work must
+measure whether models capture the right conclusion rather than selecting a
+merely convenient alias.
