@@ -332,7 +332,7 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
     assert_eq!(failed_scan.files_skipped, 1);
 
     let report = indexer
-        .publish_refresh(request, failed_scan)
+        .publish_refresh(request.clone(), failed_scan)
         .await
         .expect("incomplete inventory should publish without deletion reconciliation");
     assert_eq!(
@@ -385,4 +385,41 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
         .data;
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].freshness, ContextMapFreshness::Current);
+
+    fs::write(
+        root.path().join("recovered.md"),
+        "newly_discovered_after_retry\n",
+    )
+    .expect("recovered source fixture should write");
+    let recovered = indexer
+        .refresh(request)
+        .await
+        .expect("a normal retry should complete");
+    assert!(recovered.inventory_complete);
+    assert!(recovered.region_coverage_complete);
+    assert_eq!(recovered.files_indexed, 2);
+    assert_eq!(recovered.files_skipped, 0);
+    let recovered_status = hierarchy
+        .project_intelligence_status("project-1")
+        .await
+        .expect("recovered project status should load")
+        .last_refresh
+        .expect("recovered refresh status should persist");
+    assert!(recovered_status.inventory_complete);
+    assert!(recovered_status.region_coverage_complete);
+    assert_eq!(recovered_status.files_indexed, 2);
+    assert_eq!(recovered_status.files_skipped, 0);
+    assert_eq!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "newly_discovered_after_retry".to_string(),
+                max_results: 10,
+            })
+            .await
+            .expect("recovered source query should succeed")
+            .data
+            .len(),
+        1
+    );
 }
