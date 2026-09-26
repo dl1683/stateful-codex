@@ -377,7 +377,7 @@ two concrete tool-contract costs:
   was rejected, queried the same historical entry again, compacted, and retried
   completion with revision 2.
 
-Two bounded fixes are now pushed:
+Three bounded fixes are now pushed:
 
 - `f2fbe0a390` adds `refreshInput` to stale context-map hits. It is directly
   consumable by `evidence_read`, refreshes only the changed file, withholds the
@@ -392,12 +392,46 @@ Two bounded fixes are now pushed:
   integration proves superseding revision 1 returns the exact historical
   selection at revision 2. Scoped Clippy and formatting passed; the pre-existing
   `RootBlackboardStatus` large-enum warning remains.
+- `a78f394b8b` adds direct changed-source dependency enumeration. A file-route
+  seed expands to the file plus its current and retired region routes, so a
+  refreshed file can still find active entries citing an older region route.
+  Results contain current active entry revisions and direct-citation freshness,
+  support lifecycle scope and stable-ID pagination, and are materialized in the
+  same SQLite transaction that selects them. The first page returns the current
+  project-intelligence revision; continuation requires that revision and fails
+  closed if project state changes. Unknown, non-source, or cross-project seed
+  route IDs are rejected instead of producing a misleading partial answer.
+  Pages omit evidence locators and relations, report their counts explicitly,
+  and byte-budget the complete response including the continuation cursor.
+  Storage tests cover two-page traversal and both invalid-seed and
+  concurrent-revision failures. A real app-server integration proves that a
+  changed file route finds a stale active finding whose direct citation used a
+  guarded region route. The project-intelligence suite passed 37/37, the
+  Stateful extension suite passed 24/24, and the targeted app-server integration
+  passed. Scoped Clippy and formatting passed; the same pre-existing large-enum
+  warning remains.
 
 These changes give a six-call direct repair path in place of the frozen
 nine-call path: one route query, one changed-source read, one affected-knowledge
 query, one coherent record batch, one lifecycle update, and one completion.
 That is a displacement theory, not a measured cost result. No new model run has
 yet shown that Luna follows the shorter path.
+
+The affected-source query is deliberately mechanical. It reports entries with
+direct citations to the selected file/regions and their current freshness; it
+does not infer that an unchanged-source conclusion semantically depends on a
+changed authority. The model still decides whether each result should be
+revised, superseded, retired, or retained. A stale citation that remains true is
+not itself a reason to supersede a finding. Revision-pinned provenance between
+derived conclusions and premise entries remains a separate design problem.
+
+Independent Astra, Claude Code, and Droid reviews challenged this slice before
+it was finalized. Their concrete findings drove region-route closure, bounded
+pagination, transaction-consistent materialization, compact pages, cursor byte
+budgeting, project-revision pinning, invalid-seed rejection, and the explicit
+direct-citation boundary. They independently agreed that semantic dependency
+provenance should remain a separate next layer rather than being inferred by the
+host.
 
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
@@ -407,19 +441,25 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Semantic reuse at persistence and dependent-state cleanup.** The frozen
-   repair reread unchanged sources partly because a new source-verified decision
-   can cite only fresh read receipts, not current source-verified blackboard
-   premises. It also left a stale draft-status fact active after superseding the
-   root decision. Design a bounded way to enumerate every entry dependent on a
-   changed route and preserve honest derived provenance without copying source
-   verification onto an inference the model did not verify from source.
-2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+1. **Trustworthy evaluation telemetry.** GitHub issue #18 shows that the
+   longitudinal evaluator reads only top-level path/range fields. Preferred
+   guarded `evidenceRoute` reads therefore collapse to a null identity, and
+   path-only uniqueness can also conflate distinct ranges. Fix and
+   deterministically test both input forms before making another reread, reuse,
+   or cost claim.
+2. **Derived premise provenance.** Direct source-citation enumeration is now
+   implemented, but the frozen repair also needs honest reuse of current
+   source-verified blackboard premises. Design bounded revision-pinned premise
+   references that distinguish a derived conclusion from direct source
+   verification and let changed-premise dependents be enumerated without the
+   host making semantic authority decisions.
+3. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
-   claim.
-3. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+   claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
+   a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
+4. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
-4. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+5. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
 
@@ -429,12 +469,12 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. First design the smallest honest dependency contract
-for derived knowledge. It should let the model find all active entries whose
-evidence includes a changed route, distinguish direct source verification from
-reasoning based on current verified premises, and supersede or revise affected
-claims without rereading unchanged sources. Do not let the host infer semantic
-authority or automatically supersede claims. Falsify the contract with the
-frozen amendment case and an unchanged-source premise before implementing it;
-then cover the chosen tool path deterministically. Only after that should a
-small Luna replay test whether the repair trajectory actually becomes shorter.
+Do not rerun the model yet. First repair issue #18 so guarded and explicit
+evidence reads produce the same concrete source/range identity, distinct ranges
+remain distinct, and unattributable reads are counted explicitly rather than
+folded together. Add a frozen evaluator fixture that proves the read totals and
+repeat classification across mixed input forms. Then design the smallest honest
+revision-pinned dependency contract for derived knowledge. Falsify that contract
+with the changed-amendment case and an unchanged-source premise before
+implementing it. Only after those gates should a small Luna replay test whether
+the repair trajectory actually becomes shorter.
