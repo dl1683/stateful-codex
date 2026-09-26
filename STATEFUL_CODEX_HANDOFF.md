@@ -823,12 +823,15 @@ so representative trajectory work must measure that choice.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Finish live per-run attribution.** Commit `1f55cc0d62` now reports bytes
-   hashed, unique physical sources, evidence-route freshness results, categorized
-   Stateful reads and writes, failed calls, selected material findings, tracked
-   turn time, and turn outcomes. Issue #24 still needs live headless progress,
-   all-tool and tool-output totals, model requests, compactions, authoritative
-   dollar cost, and cross-run trends before another matched longitudinal rerun.
+1. **Persist comparable run records.** Commits `a3f27fb130` and `a288e3eb54`
+   extend the bounded attribution record with invocation time, completed model
+   responses, compactions, model-issued tool calls by kind, serialized tool-
+   output bytes, live JSONL `turn.progress` snapshots, live per-turn
+   `stateful.attribution`, and compact human headless progress. Issue #24 still
+   needs durable cross-run trends and authoritative dollar cost before another
+   matched longitudinal rerun. Completed responses are not failed model-request
+   attempts, and cost must not be fabricated when applied provider pricing is
+   unavailable.
 2. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
@@ -840,13 +843,13 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-The minimal controlled headless fixture now reconciles: its terminal
-`stateful_attribution` object reported three successful Stateful calls and two
-material findings, matching the rollout's `evidence_read`, `obligation_update`,
-and `stateful_run_update` calls and selected aliases `E4`/`E7`. Next, extend the
-same bounded record with already observable request, token, all-tool,
-tool-output, and compaction totals plus live progress; do not fabricate dollar
-cost when the provider and applied price are unavailable. Remove the duplicate
-ignored-config warnings from headless item output as a separate hygiene fix.
-Collect issue #19 diagnostics only on the next suitable real refresh, and do
-not launch a broad benchmark merely to obtain either measurement.
+The minimal controlled headless fixture reconciles its state contribution, and
+the exec layer now exposes the rest of the observable trajectory without raw
+rollout parsing. The next smallest gate is to store one bounded terminal record
+per Stateful run and expose a project-scoped series so cost and reuse trends can
+be compared across runs. Keep token usage separate from unavailable dollar
+pricing, and keep completed responses separate from failed request attempts.
+Remove the duplicate ignored-config warnings from headless item output as a
+separate hygiene fix. Collect issue #19 diagnostics only on the next suitable
+real refresh, and do not launch a broad benchmark merely to obtain either
+measurement.

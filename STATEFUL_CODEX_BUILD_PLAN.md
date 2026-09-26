@@ -1530,3 +1530,33 @@ The run also surfaced two duplicate headless error items for ignored legacy user
 configuration keys; they did not affect execution or the empty stderr stream,
 but they are output noise to remove separately rather than hide in the
 attribution result.
+
+### Implementation checkpoint: live headless trajectory visibility (2026-09-26)
+
+Commit `a3f27fb130` extends the terminal attribution with invocation duration,
+completed model responses, compactions, model-issued tool calls by response-item
+kind, and serialized tool-output bytes. These counters deliberately describe
+completed responses rather than claiming failed model-request attempts that the
+client cannot observe authoritatively. Tool counts describe model-issued shell,
+function, custom, tool-search, web-search, and image-generation calls; Stateful
+operations executed inside code mode retain their separate, finer-grained
+counters.
+
+Commit `1cdf984ef8` extracts that accounting from the already-large JSONL event
+processor into one private accumulator. Commit `a288e3eb54` then uses the same
+accumulator for both headless surfaces. JSONL emits bounded cumulative
+`turn.progress` snapshots when token usage changes and a
+`stateful.attribution` snapshot after every Stateful turn stops. Human output
+prints changed token, elapsed-time, response, and tool totals plus a compact
+Stateful line covering root entries, route freshness, reads, writes, and reused
+findings. Prompt text, source content, final prose, and tool payload content are
+not copied into either record.
+
+The complete `codex-exec` suite passed 122/122, including the Stateful start,
+resume, and autonomous-continuation integrations. Focused progress and
+attribution regressions passed again after duplicate token snapshots were
+suppressed. Scoped Clippy and formatting passed. This closes the live progress,
+completed-response, compaction, model-tool, and output-volume portions of issue
+#24 at the headless boundary. It does not provide authoritative dollar cost,
+failed model-request counts, durable per-run storage, or cross-run trends. Those
+remaining distinctions must stay explicit.
