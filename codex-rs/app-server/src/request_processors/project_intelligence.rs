@@ -4,6 +4,7 @@ use std::sync::Arc;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use codex_app_server_protocol::ClientResponsePayload;
+use codex_app_server_protocol::ContextMapRegionAnchor as ApiContextMapRegionAnchor;
 use codex_app_server_protocol::ContextMapSource as ApiContextMapSource;
 use codex_app_server_protocol::EvidenceEncoding;
 use codex_app_server_protocol::EvidenceReadParams;
@@ -24,6 +25,7 @@ use codex_project_intelligence::EvidenceLineRange as InternalEvidenceLineRange;
 use codex_project_intelligence::EvidenceReadLocator as InternalEvidenceReadLocator;
 use codex_project_intelligence::EvidenceReadRequest as InternalEvidenceReadRequest;
 use codex_project_intelligence::EvidenceReader;
+use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::HierarchyNode;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::NodeKind;
@@ -129,11 +131,6 @@ impl ProjectIntelligenceRequestProcessor {
                 hit.freshness
             )));
         }
-        if hit.source.region_anchor.is_some() {
-            return Err(invalid_params(
-                "anchored-region evidence reads require a supported exact locator",
-            ));
-        }
         if !project
             .roots
             .iter()
@@ -153,6 +150,72 @@ impl ProjectIntelligenceRequestProcessor {
         if !canonical_path.starts_with(&root) {
             return Err(invalid_params(
                 "evidence source resolves outside its project root",
+            ));
+        }
+        if hit.source.region_anchor.is_some() {
+            let route =
+                EvidenceRoute::from_hit(&hit).map_err(|error| invalid_params(error.to_string()))?;
+            let anchored_range = route.line_range.ok_or_else(|| {
+                invalid_params("anchored-region evidence route has no exact line range")
+            })?;
+            if let Some(line_range) = params.line_range {
+                let requested_range = InternalEvidenceLineRange {
+                    start: line_range.start,
+                    end: line_range.end,
+                };
+                if requested_range != anchored_range {
+                    return Err(invalid_params(format!(
+                        "lineRange must match the current anchored region {}-{}",
+                        anchored_range.start, anchored_range.end
+                    )));
+                }
+            }
+            let read = EvidenceReader::new(self.context_map().await?.clone())
+                .read(InternalEvidenceReadRequest {
+                    project_id: params.project_id.clone(),
+                    project_roots: project
+                        .roots
+                        .iter()
+                        .map(|root| PathBuf::from(&root.path))
+                        .collect(),
+                    locator: InternalEvidenceReadLocator::ContextMapRoute(route),
+                    max_bytes,
+                })
+                .await
+                .map_err(|error| invalid_params(error.to_string()))?;
+            return Ok(Some(
+                EvidenceReadResponse {
+                    project_id: params.project_id,
+                    context_map_entry_id: entry_id.to_string(),
+                    node_id: read.hit.entry.value.node_id.to_string(),
+                    source_fingerprint: read.hit.entry.value.source_fingerprint.to_string(),
+                    source: ApiContextMapSource {
+                        project_root: AbsolutePathBuf::from_absolute_path(root).map_err(
+                            |error| {
+                                internal_error(format!(
+                                    "canonical evidence root is invalid: {error}"
+                                ))
+                            },
+                        )?,
+                        relative_path: read.hit.source.relative_path.to_string(),
+                        region_anchor: read.hit.source.region_anchor.map(|anchor| {
+                            ApiContextMapRegionAnchor {
+                                scheme: anchor.scheme,
+                                locator: anchor.locator,
+                            }
+                        }),
+                    },
+                    encoding: EvidenceEncoding::Utf8,
+                    content: read.content,
+                    bytes_returned: read.bytes_returned,
+                    total_bytes: read.total_bytes,
+                    total_lines: read.total_lines,
+                    first_line: read.first_line,
+                    last_line: read.last_line,
+                    truncated: read.truncated,
+                    revision: read.hit.entry.revision,
+                }
+                .into(),
             ));
         }
         if let Some(line_range) = params.line_range {

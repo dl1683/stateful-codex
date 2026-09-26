@@ -24,6 +24,9 @@ use codex_app_server_protocol::ProjectIntelligenceTreeResponse;
 use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::RequestId;
 use codex_features::Feature;
+use codex_project_intelligence::ContextMapStore;
+use codex_project_intelligence::ProjectRelativePath;
+use codex_state::SqliteConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -39,6 +42,7 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
     MockResponsesConfig::new(&responses.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
+    let codex_home_path = AbsolutePathBuf::try_from(codex_home.path().to_path_buf())?;
     let project_root_path = AbsolutePathBuf::try_from(project_root.path().to_path_buf())?;
     let mut server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -79,10 +83,10 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
     assert_eq!(status.project_id, created.project.id);
     assert_eq!(status.roots, vec![project_root_path.clone()]);
     assert!(status.initialized);
-    assert_eq!(status.hierarchy_node_count, 3);
+    assert_eq!(status.hierarchy_node_count, 4);
     assert_eq!(status.file_count, 1);
     assert_eq!(status.missing_source_count, 0);
-    assert_eq!(status.context_map_entry_count, 1);
+    assert_eq!(status.context_map_entry_count, 2);
     assert_eq!(status.blackboard_entry_count, 0);
     assert_eq!(status.promoted_entry_count, 0);
     assert!(status.updated_at.is_some());
@@ -120,30 +124,26 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
             (ProjectIntelligenceNodeKind::Project, ""),
             (ProjectIntelligenceNodeKind::Directory, ""),
             (ProjectIntelligenceNodeKind::File, "EVIDENCE.txt"),
+            (ProjectIntelligenceNodeKind::Region, "EVIDENCE.txt"),
         ]
     );
 
-    let routes: ContextMapQueryResponse = server
-        .request(|request_id| ClientRequest::ContextMapQuery {
-            request_id,
-            params: ContextMapQueryParams {
-                project_id: status.project_id.clone(),
-                text: "decisive evidence".to_string(),
-                limit: Some(5),
-            },
-        })
-        .await?;
-    let route = routes
-        .data
+    let route = ContextMapStore::open(&SqliteConfig::new_for_testing(codex_home_path))
+        .await?
+        .file_hits_for_path(
+            &status.project_id,
+            &ProjectRelativePath::parse("EVIDENCE.txt")?,
+        )
+        .await?
         .into_iter()
-        .next()
-        .expect("indexed source route");
+        .find(|route| route.source.region_anchor.is_none())
+        .expect("indexed file source route");
     let evidence: EvidenceReadResponse = server
         .request(|request_id| ClientRequest::EvidenceRead {
             request_id,
             params: EvidenceReadParams {
                 project_id: status.project_id.clone(),
-                context_map_entry_id: route.entry_id.clone(),
+                context_map_entry_id: route.entry.id.to_string(),
                 line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
                 max_bytes: Some(12),
             },
@@ -153,10 +153,14 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
         evidence,
         EvidenceReadResponse {
             project_id: status.project_id.clone(),
-            context_map_entry_id: route.entry_id.clone(),
-            node_id: route.node_id,
-            source_fingerprint: route.source_fingerprint,
-            source: route.source,
+            context_map_entry_id: route.entry.id.to_string(),
+            node_id: route.entry.value.node_id.to_string(),
+            source_fingerprint: route.entry.value.source_fingerprint.to_string(),
+            source: codex_app_server_protocol::ContextMapSource {
+                project_root: project_root_path,
+                relative_path: route.source.relative_path.to_string(),
+                region_anchor: None,
+            },
             encoding: EvidenceEncoding::Utf8,
             content: "next".to_string(),
             bytes_returned: 4,
@@ -165,7 +169,7 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
             first_line: Some(2),
             last_line: Some(2),
             truncated: false,
-            revision: route.revision,
+            revision: route.entry.revision,
         }
     );
 
@@ -175,7 +179,7 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
             "evidence/read",
             Some(json!({
                 "projectId": status.project_id,
-                "contextMapEntryId": route.entry_id,
+                "contextMapEntryId": route.entry.id,
                 "maxBytes": 12,
             })),
         )
@@ -187,6 +191,118 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
     assert_eq!(
         error.error.message,
         "evidence source changed after indexing; refresh the context map"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn evidence_read_accepts_current_exact_region_and_rejects_mismatched_range() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    let source = (1..=70)
+        .map(|line| {
+            if line == 70 {
+                "decisive_region_fact".to_string()
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(project_root.path().join("FACTS.md"), source)?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Region evidence project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "region-evidence-project".to_string(),
+            },
+        })
+        .await?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    let routes: ContextMapQueryResponse = server
+        .request(|request_id| ClientRequest::ContextMapQuery {
+            request_id,
+            params: ContextMapQueryParams {
+                project_id: created.project.id.clone(),
+                text: "decisive_region_fact".to_string(),
+                limit: Some(5),
+            },
+        })
+        .await?;
+    let route = routes
+        .data
+        .into_iter()
+        .find(|route| route.source.region_anchor.is_some())
+        .expect("query should return an exact region route");
+    assert_eq!(
+        route
+            .source
+            .region_anchor
+            .as_ref()
+            .map(|anchor| (anchor.scheme.as_str(), anchor.locator.as_str())),
+        Some(("lines", "65-70"))
+    );
+
+    let evidence: EvidenceReadResponse = server
+        .request(|request_id| ClientRequest::EvidenceRead {
+            request_id,
+            params: EvidenceReadParams {
+                project_id: created.project.id.clone(),
+                context_map_entry_id: route.entry_id.clone(),
+                line_range: Some(EvidenceLineRange { start: 65, end: 70 }),
+                max_bytes: Some(32_768),
+            },
+        })
+        .await?;
+    assert_eq!(evidence.context_map_entry_id, route.entry_id);
+    assert_eq!(evidence.node_id, route.node_id);
+    assert_eq!(evidence.source_fingerprint, route.source_fingerprint);
+    assert_eq!(evidence.source, route.source);
+    assert_eq!(
+        (evidence.first_line, evidence.last_line),
+        (Some(65), Some(70))
+    );
+    assert!(evidence.content.ends_with("decisive_region_fact"));
+
+    let mismatched_request_id = server
+        .send_request(
+            "evidence/read",
+            Some(json!({
+                "projectId": created.project.id,
+                "contextMapEntryId": evidence.context_map_entry_id,
+                "lineRange": {"start": 64, "end": 70},
+                "maxBytes": 32_768
+            })),
+        )
+        .await?;
+    let mismatch = server
+        .read_stream_until_error_message(RequestId::Integer(mismatched_request_id))
+        .await?;
+    assert_eq!(mismatch.error.code, INVALID_PARAMS_ERROR_CODE);
+    assert_eq!(
+        mismatch.error.message,
+        "lineRange must match the current anchored region 65-70"
     );
     Ok(())
 }
