@@ -1466,3 +1466,48 @@ large-enum warning. The host cannot prove semantic equivalence between a free-
 form learning and the model-selected finding; later longitudinal work must
 measure whether models capture the right conclusion rather than selecting a
 merely convenient alias.
+
+### Implementation checkpoint: per-run Stateful contribution attribution (2026-09-26)
+
+Commit `1f55cc0d62` implements the first end-to-end issue #24 attribution gate.
+For every turn on a selected Stateful project, a bounded tracker now records
+root World State samples and entries, evidence routes audited by freshness
+result, unique physical sources observed, source bytes hashed, successful
+Stateful reads and writes by category, failed Stateful tool calls, and material
+current or historical findings explicitly selected into a successful terminal
+run update. It emits counts only: prompts, source text, tool payloads, and final
+answer content are not copied into the telemetry surface.
+
+The experimental app-server notification
+`statefulAttribution/completed` publishes one typed summary when a turn stops or
+aborts. Failed turns retain a failed status even if the host later runs the
+ordinary stop lifecycle. `codex exec --json` accumulates those per-turn records
+across autonomous continuations and attaches one invocation-to-date
+`stateful_attribution` object to the terminal `turn.completed` event, including
+completed, failed, and aborted turn counts. This makes the first Stateful
+contribution account machine-readable beside existing token usage and the
+ordinary JSONL tool events.
+
+The counters preserve important distinctions. Evidence-route counts refer to
+blackboard provenance routes, while `root_unique_sources_observed` refers to
+physical files deduplicated during a recomputed audit. Root entries are counted
+per World State sample rather than claimed as unique knowledge. Material reuse
+is credited only after the model selects exact current aliases or historical
+revisions and the completion mutation succeeds; an attempted or rejected
+selection does not count.
+
+The full 29-test Stateful extension suite passed. The 310-test app-server
+protocol suite passed with its one configured skip; both stable and
+experimental schemas were regenerated. The real app-server steering trajectory
+emitted the notification and reconciled four Stateful tool calls, one
+obligation write, two steering writes, one run update, and one selected material
+finding. The headless processor regression reconciled two turn summaries into
+one terminal aggregate. Scoped Clippy passes and formatting completed; the only
+warning was the pre-existing large root-blackboard enum.
+
+This is attribution, not a performance claim and not all of issue #24. It does
+not yet report live headless progress, all non-Stateful tool totals and output
+bytes, model-request counts, compactions, authoritative dollar cost, or
+cross-run trends. `duration_ms` is tracked turn time, and the headless aggregate
+sums that time across continuations. These boundaries must remain visible when
+the first live JSONL result is interpreted.

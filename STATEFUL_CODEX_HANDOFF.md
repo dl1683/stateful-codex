@@ -823,9 +823,12 @@ so representative trajectory work must measure that choice.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
-   unique sources, route use, knowledge reuse, rereads, model requests, tokens,
-   tool output, and wall time before another matched longitudinal rerun.
+1. **Finish live per-run attribution.** Commit `1f55cc0d62` now reports bytes
+   hashed, unique physical sources, evidence-route freshness results, categorized
+   Stateful reads and writes, failed calls, selected material findings, tracked
+   turn time, and turn outcomes. Issue #24 still needs live headless progress,
+   all-tool and tool-output totals, model requests, compactions, authoritative
+   dollar cost, and cross-run trends before another matched longitudinal rerun.
 2. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
@@ -837,10 +840,11 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Implement the smallest end-to-end issue #24 attribution slice before another
-matched run: make one headless run report what Stateful state it read, reused,
-verified, invalidated, and wrote, alongside existing request/token/tool timing.
-The first acceptance gate is a machine-readable per-run summary whose counts
-can be reconciled against the rollout and deterministic tool calls. Collect
-issue #19 diagnostics only on the next suitable real refresh, and do not launch
-a broad benchmark merely to obtain the measurement.
+Run one minimal controlled headless fixture through the committed issue #24
+slice and reconcile its terminal `stateful_attribution` object against the
+rollout and deterministic tool calls. Then extend the same bounded record with
+already observable request, token, all-tool, tool-output, and compaction totals,
+plus live progress; do not fabricate dollar cost when the provider and applied
+price are unavailable. Collect issue #19 diagnostics only on the next suitable
+real refresh, and do not launch a broad benchmark merely to obtain either
+measurement.
