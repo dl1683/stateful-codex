@@ -24,6 +24,7 @@ use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
+use crate::search::literal_expression;
 use crate::search::literal_prefix_expression;
 use crate::storage::DATABASE_NAME;
 use crate::storage::HierarchyStoreError;
@@ -32,7 +33,9 @@ use crate::storage::unix_timestamp_millis;
 
 const INITIAL_REVISION: i64 = 1;
 const MAX_QUERY_HITS_PER_SOURCE: usize = 3;
-const MAX_REGIONS_PER_SOURCE: u32 = 64;
+const MAX_QUERY_HITS_PER_DIRECTORY: usize = 3;
+const CANDIDATE_OVERFETCH_FACTOR: u32 = 16;
+const MAX_CANDIDATE_PAGES: i64 = 16;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(FromRow)]
@@ -41,6 +44,13 @@ struct SearchCandidate {
     project_root: String,
     relative_path: String,
     kind: String,
+    lifecycle: String,
+    node_source_fingerprint: Option<String>,
+    entry_source_fingerprint: String,
+    parent_kind: Option<String>,
+    parent_lifecycle: Option<String>,
+    parent_source_fingerprint: Option<String>,
+    score: f64,
 }
 
 #[derive(Clone)]
@@ -209,39 +219,63 @@ impl ContextMapStore {
     ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
         query.validate()?;
         let expression = search_expression(&query.text)?;
-        let candidate_limit = i64::from(
-            query
-                .max_results
-                .saturating_mul(MAX_REGIONS_PER_SOURCE.saturating_add(1)),
-        );
+        let candidate_target =
+            i64::from(query.max_results.saturating_mul(CANDIDATE_OVERFETCH_FACTOR));
+        let candidate_scan_limit = candidate_target.saturating_mul(MAX_CANDIDATE_PAGES);
+        let candidate_target =
+            usize::try_from(candidate_target).map_err(|_| ContextMapError::InvalidQuery)?;
         let mut connection = self.pool.acquire().await?;
-        let candidates = sqlx::query_as::<_, SearchCandidate>(
-            "SELECT entry.id, node.project_root, node.relative_path, node.kind
-             FROM context_map_search AS search
-             JOIN context_map_entries AS entry ON entry.rowid = search.rowid
-             JOIN hierarchy_nodes AS node ON node.id = entry.node_id
-             LEFT JOIN hierarchy_nodes AS parent
-               ON parent.id = node.parent_id AND parent.project_id = node.project_id
-             WHERE context_map_search MATCH ? AND entry.project_id = ?
-               AND (
-                 node.kind = 'file'
-                 OR (
-                   node.kind = 'region'
-                   AND node.lifecycle = 'active'
-                   AND node.source_fingerprint = entry.source_fingerprint
-                   AND parent.kind = 'file'
-                   AND parent.lifecycle = 'active'
-                   AND parent.source_fingerprint = entry.source_fingerprint
-                 )
-               )
-             ORDER BY bm25(context_map_search), entry.id
-             LIMIT ?",
-        )
-        .bind(expression)
-        .bind(&query.project_id)
-        .bind(candidate_limit)
-        .fetch_all(&mut *connection)
-        .await?;
+        let mut candidates = Vec::new();
+        let mut offset = 0_i64;
+        while candidates.len() < candidate_target && offset < candidate_scan_limit {
+            let page_limit = i64::try_from(candidate_target)
+                .unwrap_or(i64::MAX)
+                .min(candidate_scan_limit - offset);
+            let page = sqlx::query_as::<_, SearchCandidate>(
+                "SELECT entry.id, node.project_root, node.relative_path, node.kind,
+                        node.lifecycle, node.source_fingerprint AS node_source_fingerprint,
+                        entry.source_fingerprint AS entry_source_fingerprint,
+                        parent.kind AS parent_kind, parent.lifecycle AS parent_lifecycle,
+                        parent.source_fingerprint AS parent_source_fingerprint,
+                        ranked.score
+                 FROM (
+                   SELECT rowid, rank AS score
+                   FROM context_map_search
+                   WHERE context_map_search MATCH ? AND project_id = ?
+                   ORDER BY rank, rowid
+                   LIMIT ? OFFSET ?
+                 ) AS ranked
+                 JOIN context_map_entries AS entry ON entry.rowid = ranked.rowid
+                 JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+                 LEFT JOIN hierarchy_nodes AS parent
+                   ON parent.id = node.parent_id AND parent.project_id = node.project_id
+                 WHERE entry.project_id = ?
+                 ORDER BY ranked.score, entry.id",
+            )
+            .bind(&expression)
+            .bind(&query.project_id)
+            .bind(page_limit)
+            .bind(offset)
+            .bind(&query.project_id)
+            .fetch_all(&mut *connection)
+            .await?;
+            let page_len = i64::try_from(page.len()).unwrap_or(i64::MAX);
+            offset = offset.saturating_add(page_len);
+            let remaining = candidate_target.saturating_sub(candidates.len());
+            candidates.extend(
+                page.into_iter()
+                    .filter(SearchCandidate::is_queryable)
+                    .take(remaining),
+            );
+            if page_len < page_limit {
+                break;
+            }
+        }
+        candidates.sort_by(|left, right| {
+            left.score
+                .total_cmp(&right.score)
+                .then_with(|| left.id.cmp(&right.id))
+        });
         let sources_with_regions = candidates
             .iter()
             .filter(|candidate| candidate.kind == "region")
@@ -250,6 +284,7 @@ impl ContextMapStore {
         let max_results =
             usize::try_from(query.max_results).map_err(|_| ContextMapError::InvalidQuery)?;
         let mut source_hits = HashMap::new();
+        let mut directory_hits = HashMap::new();
         let mut entry_ids = Vec::with_capacity(max_results);
         for candidate in candidates {
             if !matches!(candidate.kind.as_str(), "file" | "region") {
@@ -263,7 +298,14 @@ impl ContextMapStore {
             if *hits == MAX_QUERY_HITS_PER_SOURCE {
                 continue;
             }
+            let directory_hits = directory_hits
+                .entry(candidate.directory_key())
+                .or_insert(0_usize);
+            if *directory_hits == MAX_QUERY_HITS_PER_DIRECTORY {
+                continue;
+            }
             *hits += 1;
+            *directory_hits += 1;
             entry_ids.push(candidate.id);
             if entry_ids.len() == max_results {
                 break;
@@ -392,8 +434,32 @@ impl ContextMapStore {
 }
 
 impl SearchCandidate {
+    fn is_queryable(&self) -> bool {
+        match self.kind.as_str() {
+            "file" => true,
+            "region" => {
+                self.lifecycle == "active"
+                    && self.node_source_fingerprint.as_deref()
+                        == Some(self.entry_source_fingerprint.as_str())
+                    && self.parent_kind.as_deref() == Some("file")
+                    && self.parent_lifecycle.as_deref() == Some("active")
+                    && self.parent_source_fingerprint.as_deref()
+                        == Some(self.entry_source_fingerprint.as_str())
+            }
+            _ => true,
+        }
+    }
+
     fn source_key(&self) -> (String, String) {
         (self.project_root.clone(), self.relative_path.clone())
+    }
+
+    fn directory_key(&self) -> (String, String) {
+        let directory = self
+            .relative_path
+            .split_once('/')
+            .map_or(self.relative_path.as_str(), |(directory, _)| directory);
+        (self.project_root.clone(), directory.to_string())
     }
 }
 
@@ -464,21 +530,18 @@ pub(crate) async fn upsert_indexed_entry(
         write_search_row(connection, insert.last_insert_rowid(), id, &value).await?;
         return Ok(());
     };
-    if existing.value.project_id != value.project_id
-        || existing.value.node_id != value.node_id
-    {
+    if existing.value.project_id != value.project_id || existing.value.node_id != value.node_id {
         return Err(ContextMapStoreError::EntryIdentityConflict(id.to_string()));
     }
     if existing.value == value {
         return Ok(());
     }
-    let rowid: i64 = sqlx::query_scalar(
-        "SELECT rowid FROM context_map_entries WHERE project_id = ? AND id = ?",
-    )
-    .bind(&value.project_id)
-    .bind(id.as_str())
-    .fetch_one(&mut *connection)
-    .await?;
+    let rowid: i64 =
+        sqlx::query_scalar("SELECT rowid FROM context_map_entries WHERE project_id = ? AND id = ?")
+            .bind(&value.project_id)
+            .bind(id.as_str())
+            .fetch_one(&mut *connection)
+            .await?;
     sqlx::query(
         "UPDATE context_map_entries
          SET source_fingerprint = ?, description = ?, coverage = ?,
@@ -612,7 +675,17 @@ fn parse_coverage(value: &str) -> Result<ContextMapCoverage, ContextMapStoreErro
 }
 
 fn search_expression(text: &str) -> Result<String, ContextMapStoreError> {
-    literal_prefix_expression(text).ok_or_else(|| ContextMapError::NoSearchTerms.into())
+    let term_count = text
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .filter(|term| !term.is_empty())
+        .take(2)
+        .count();
+    let expression = if term_count == 1 {
+        literal_prefix_expression(text)
+    } else {
+        literal_expression(text)
+    };
+    expression.ok_or_else(|| ContextMapError::NoSearchTerms.into())
 }
 
 async fn write_routing_terms(

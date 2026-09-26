@@ -96,10 +96,14 @@ fn readme_source() -> ContextMapSource {
 }
 
 #[test]
-fn search_input_is_lowered_to_literal_prefix_terms() {
+fn search_input_is_lowered_to_safe_literal_terms() {
     assert_eq!(
         search_expression("setup OR \"secret\"").expect("searchable terms"),
-        "\"setup\"* OR \"OR\"* OR \"secret\"*"
+        "\"setup\" OR \"OR\" OR \"secret\""
+    );
+    assert_eq!(
+        search_expression("deploy").expect("searchable term"),
+        "\"deploy\"*"
     );
     assert!(matches!(
         search_expression("!!!"),
@@ -356,6 +360,224 @@ async fn query_prefers_bounded_regions_without_one_source_crowding_results() {
         hits.iter()
             .filter(|hit| hit.source.relative_path.as_str() == "README.md")
             .all(|hit| hit.source.region_anchor.is_none())
+    );
+}
+
+#[tokio::test]
+async fn query_preserves_results_beyond_one_busy_top_level_directory() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    create_file(&hierarchy).await;
+    let root_id = HierarchyNodeId::parse("node-root").expect("valid root ID");
+    for directory in ["reviews", "docs"] {
+        hierarchy
+            .create_node(
+                HierarchyNodeId::parse(format!("node-{directory}")).expect("valid directory ID"),
+                NewHierarchyNode {
+                    project_id: "project-1".to_string(),
+                    parent_id: Some(root_id.clone()),
+                    kind: NodeKind::Directory,
+                    project_root: Some("C:\\workspace".to_string()),
+                    relative_path: ProjectRelativePath::parse(directory).expect("valid path"),
+                    region_anchor: None,
+                    source_fingerprint: Some(fingerprint("sha256:directory")),
+                },
+            )
+            .await
+            .expect("directory should insert");
+    }
+    for index in 0..5 {
+        let node_id =
+            HierarchyNodeId::parse(format!("node-review-{index}")).expect("valid file ID");
+        let relative_path = format!("reviews/{index}.md");
+        hierarchy
+            .create_node(
+                node_id.clone(),
+                NewHierarchyNode {
+                    project_id: "project-1".to_string(),
+                    parent_id: Some(
+                        HierarchyNodeId::parse("node-reviews").expect("valid directory ID"),
+                    ),
+                    kind: NodeKind::File,
+                    project_root: Some("C:\\workspace".to_string()),
+                    relative_path: ProjectRelativePath::parse(relative_path.clone())
+                        .expect("valid path"),
+                    region_anchor: None,
+                    source_fingerprint: Some(fingerprint("sha256:review")),
+                },
+            )
+            .await
+            .expect("review file should insert");
+        context_map
+            .create_entry(
+                ContextMapEntryId::parse(format!("map-a-review-{index}")).expect("valid entry ID"),
+                NewContextMapEntry {
+                    project_id: "project-1".to_string(),
+                    node_id,
+                    source_fingerprint: fingerprint("sha256:review"),
+                    description: "shared route".to_string(),
+                    routing_terms: Vec::new(),
+                    coverage: ContextMapCoverage::Complete,
+                },
+            )
+            .await
+            .expect("review route should insert");
+    }
+    let docs_id = HierarchyNodeId::parse("node-docs-guide").expect("valid file ID");
+    hierarchy
+        .create_node(
+            docs_id.clone(),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(HierarchyNodeId::parse("node-docs").expect("valid directory ID")),
+                kind: NodeKind::File,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("docs/guide.md").expect("valid path"),
+                region_anchor: None,
+                source_fingerprint: Some(fingerprint("sha256:docs")),
+            },
+        )
+        .await
+        .expect("docs file should insert");
+    context_map
+        .create_entry(
+            ContextMapEntryId::parse("map-z-docs").expect("valid entry ID"),
+            NewContextMapEntry {
+                project_id: "project-1".to_string(),
+                node_id: docs_id,
+                source_fingerprint: fingerprint("sha256:docs"),
+                description: "shared route".to_string(),
+                routing_terms: Vec::new(),
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("docs route should insert");
+
+    let hits = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "shared route".to_string(),
+            max_results: 4,
+        })
+        .await
+        .expect("query should succeed");
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.source.relative_path.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "reviews/0.md",
+            "reviews/1.md",
+            "reviews/2.md",
+            "docs/guide.md",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn query_pages_past_prior_generation_regions_to_find_a_current_route() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    let file = create_file(&hierarchy).await;
+    for index in 0..17 {
+        let node_id =
+            HierarchyNodeId::parse(format!("node-stale-region-{index}")).expect("valid region ID");
+        hierarchy
+            .create_node(
+                node_id.clone(),
+                NewHierarchyNode {
+                    project_id: "project-1".to_string(),
+                    parent_id: Some(file.id.clone()),
+                    kind: NodeKind::Region,
+                    project_root: Some("C:\\workspace".to_string()),
+                    relative_path: ProjectRelativePath::parse("README.md").expect("valid path"),
+                    region_anchor: Some(
+                        RegionAnchor::new("lines", format!("{}-{}", index + 1, index + 1))
+                            .expect("valid anchor"),
+                    ),
+                    source_fingerprint: Some(fingerprint("sha256:abc")),
+                },
+            )
+            .await
+            .expect("region should insert");
+        context_map
+            .create_entry(
+                ContextMapEntryId::parse(format!("map-stale-region-{index}"))
+                    .expect("valid entry ID"),
+                NewContextMapEntry {
+                    project_id: "project-1".to_string(),
+                    node_id,
+                    source_fingerprint: fingerprint("sha256:abc"),
+                    description: "needle".to_string(),
+                    routing_terms: Vec::new(),
+                    coverage: ContextMapCoverage::Complete,
+                },
+            )
+            .await
+            .expect("region route should insert");
+    }
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &file.id,
+            HierarchySourceUpdate {
+                expected_revision: file.revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:changed")),
+            },
+        )
+        .await
+        .expect("parent file should advance");
+    let current_file_id = HierarchyNodeId::parse("node-current-file").expect("valid file ID");
+    hierarchy
+        .create_node(
+            current_file_id.clone(),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(HierarchyNodeId::parse("node-root").expect("valid root ID")),
+                kind: NodeKind::File,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("CURRENT.md").expect("valid path"),
+                region_anchor: None,
+                source_fingerprint: Some(fingerprint("sha256:current")),
+            },
+        )
+        .await
+        .expect("current file should insert");
+    let current = context_map
+        .create_entry(
+            ContextMapEntryId::parse("map-current").expect("valid entry ID"),
+            NewContextMapEntry {
+                project_id: "project-1".to_string(),
+                node_id: current_file_id,
+                source_fingerprint: fingerprint("sha256:current"),
+                description: "needle".to_string(),
+                routing_terms: Vec::new(),
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("current route should insert");
+
+    assert_eq!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "needle".to_string(),
+                max_results: 1,
+            })
+            .await
+            .expect("query should find the current route"),
+        vec![ContextMapHit {
+            entry: current,
+            source: ContextMapSource {
+                project_root: "C:\\workspace".to_string(),
+                relative_path: ProjectRelativePath::parse("CURRENT.md").expect("valid path"),
+                region_anchor: None,
+            },
+            freshness: ContextMapFreshness::Current,
+        }]
     );
 }
 

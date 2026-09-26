@@ -8,8 +8,8 @@ use sha2::Digest;
 use sha2::Sha256;
 use thiserror::Error;
 
-mod regions;
 mod publish;
+mod regions;
 mod scan;
 
 use publish::mark_file_missing;

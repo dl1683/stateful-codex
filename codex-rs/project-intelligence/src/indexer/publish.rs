@@ -100,13 +100,7 @@ pub(super) async fn publish_file(
         .await?;
         active_region_ids.insert(region_id);
     }
-    retire_absent_regions(
-        &mut transaction,
-        project_id,
-        file_id,
-        &active_region_ids,
-    )
-    .await?;
+    retire_absent_regions(&mut transaction, project_id, file_id, &active_region_ids).await?;
     transaction.commit().await?;
     Ok(())
 }
