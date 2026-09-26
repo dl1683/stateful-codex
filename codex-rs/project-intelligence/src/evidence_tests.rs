@@ -99,6 +99,8 @@ async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
     assert_eq!(
         stable_report,
         ProjectIndexReport {
+            inventory_complete: true,
+            region_coverage_complete: true,
             files_indexed: 1,
             regions_indexed: 1,
             files_skipped: 0,

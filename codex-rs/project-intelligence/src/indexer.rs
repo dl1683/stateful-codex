@@ -29,6 +29,7 @@ use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
+use crate::storage::unix_timestamp_millis;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectIndexRequest {
@@ -45,6 +46,8 @@ pub struct ProjectIndexFileRequest {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectIndexReport {
+    pub inventory_complete: bool,
+    pub region_coverage_complete: bool,
     pub files_indexed: u64,
     pub regions_indexed: u64,
     pub files_skipped: u64,
@@ -73,6 +76,7 @@ impl ProjectIndexer {
         request: ProjectIndexRequest,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         validate_request(&request)?;
+        let project_id = request.project_id.clone();
         let roots = request.roots.clone();
         let scan_started = Instant::now();
         let scan = tokio::task::spawn_blocking(move || scan_roots(&roots))
@@ -92,6 +96,7 @@ impl ProjectIndexer {
         report.regions_indexed = regions_indexed;
         report.scan_duration_ms = scan_duration_ms;
         report.publication_duration_ms = elapsed_millis(publication_started);
+        self.record_refresh_status(&project_id, &report).await?;
         Ok(report)
     }
 
@@ -101,6 +106,11 @@ impl ProjectIndexer {
         scan: scan::ScanResult,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         let project_id = request.project_id.clone();
+        let inventory_complete = scan.inventory_complete;
+        let region_coverage_complete = scan
+            .files
+            .iter()
+            .all(|file| file.coverage == crate::ContextMapCoverage::Complete);
         let project_node_id = stable_id("project", &[&project_id])?;
         self.hierarchy
             .create_node(
@@ -162,6 +172,8 @@ impl ProjectIndexer {
         }
 
         let mut report = ProjectIndexReport {
+            inventory_complete,
+            region_coverage_complete,
             files_indexed: u64::try_from(seen_files.len())
                 .map_err(|_| ProjectIndexerError::CountOverflow)?,
             regions_indexed: 0,
@@ -221,6 +233,8 @@ impl ProjectIndexer {
                 0
             };
             return Ok(ProjectIndexReport {
+                inventory_complete: true,
+                region_coverage_complete: true,
                 files_indexed: 0,
                 regions_indexed: 0,
                 files_skipped: 0,
@@ -275,6 +289,8 @@ impl ProjectIndexer {
             .await?;
         publish_file(self, &project_id, &file_id, parent_id, &file).await?;
         Ok(ProjectIndexReport {
+            inventory_complete: true,
+            region_coverage_complete: file.coverage == crate::ContextMapCoverage::Complete,
             files_indexed: 1,
             regions_indexed,
             files_skipped: 0,
@@ -283,6 +299,49 @@ impl ProjectIndexer {
             scan_duration_ms,
             publication_duration_ms: elapsed_millis(publication_started),
         })
+    }
+
+    async fn record_refresh_status(
+        &self,
+        project_id: &str,
+        report: &ProjectIndexReport,
+    ) -> Result<(), ProjectIndexerError> {
+        let count =
+            |value: u64| i64::try_from(value).map_err(|_| ProjectIndexerError::CountOverflow);
+        let mut transaction = self.context_map.begin_immediate().await?;
+        sqlx::query(
+            "INSERT INTO project_index_refresh_status (
+                project_id, inventory_complete, region_coverage_complete,
+                files_indexed, regions_indexed, files_skipped, missing_files,
+                truncated, scan_duration_ms, publication_duration_ms, completed_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(project_id) DO UPDATE SET
+                inventory_complete = excluded.inventory_complete,
+                region_coverage_complete = excluded.region_coverage_complete,
+                files_indexed = excluded.files_indexed,
+                regions_indexed = excluded.regions_indexed,
+                files_skipped = excluded.files_skipped,
+                missing_files = excluded.missing_files,
+                truncated = excluded.truncated,
+                scan_duration_ms = excluded.scan_duration_ms,
+                publication_duration_ms = excluded.publication_duration_ms,
+                completed_at_ms = excluded.completed_at_ms",
+        )
+        .bind(project_id)
+        .bind(report.inventory_complete)
+        .bind(report.region_coverage_complete)
+        .bind(count(report.files_indexed)?)
+        .bind(count(report.regions_indexed)?)
+        .bind(count(report.files_skipped)?)
+        .bind(count(report.missing_files)?)
+        .bind(report.truncated)
+        .bind(count(report.scan_duration_ms)?)
+        .bind(count(report.publication_duration_ms)?)
+        .bind(unix_timestamp_millis()?)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     async fn ensure_parent_directories(

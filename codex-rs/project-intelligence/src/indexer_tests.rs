@@ -40,6 +40,17 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
         .refresh(request.clone())
         .await
         .expect("project should index");
+    let refresh = hierarchy
+        .project_intelligence_status("project-1")
+        .await
+        .expect("project status should load")
+        .last_refresh
+        .expect("full refresh status should persist");
+    assert!(refresh.inventory_complete);
+    assert!(refresh.region_coverage_complete);
+    assert_eq!(refresh.files_indexed, 1);
+    assert_eq!(refresh.regions_indexed, 2);
+    assert_eq!(refresh.files_skipped, 0);
 
     let root_text = root.path().display().to_string();
     let file_id =
@@ -165,6 +176,8 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
     assert_eq!(
         stable_deletion,
         ProjectIndexReport {
+            inventory_complete: true,
+            region_coverage_complete: true,
             files_indexed: 0,
             regions_indexed: 0,
             files_skipped: 0,
@@ -325,6 +338,8 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
     assert_eq!(
         report,
         ProjectIndexReport {
+            inventory_complete: false,
+            region_coverage_complete: true,
             files_indexed: 0,
             regions_indexed: 0,
             files_skipped: 1,
@@ -334,6 +349,23 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
             publication_duration_ms: 0,
         }
     );
+    indexer
+        .record_refresh_status("project-1", &report)
+        .await
+        .expect("incomplete refresh health should persist");
+    let refresh = HierarchyStore::open(&sqlite)
+        .await
+        .expect("hierarchy should reopen")
+        .project_intelligence_status("project-1")
+        .await
+        .expect("project status should survive reopen")
+        .last_refresh
+        .expect("incomplete refresh status should survive reopen");
+    assert!(!refresh.inventory_complete);
+    assert!(refresh.region_coverage_complete);
+    assert_eq!(refresh.files_indexed, 0);
+    assert_eq!(refresh.files_skipped, 1);
+    assert!(refresh.truncated);
     assert_eq!(
         hierarchy
             .get_node("project-1", &file_id)
