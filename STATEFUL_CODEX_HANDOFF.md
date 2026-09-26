@@ -40,9 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Last product-work head: `5f855b3651`
-  (`docs(stateful): close route preview gate`); authentication handoff commits
-  follow it.
+- Last pushed head before this handoff update: `fb8fcc9170`
+  (`docs(stateful): close behavioral reuse canary`).
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -244,21 +243,81 @@ this host, but the already-present companion executed every canary tool call
 successfully. Treat a future companion rebuild as an infrastructure task, not
 as evidence about Stateful behavior.
 
+## Compaction continuity canary
+
+A deliberately small q02 -> compaction -> q06 mechanism canary passed on
+2026-09-26. It used a five-file synthetic UART certificate corpus modeled on
+the reset-boundary failure observed in the protected Pramana evidence. The
+project copy was isolated and read-only, host memories were disabled, Luna ran
+at medium effort, and automatic compaction was forced at a low token limit.
+
+The q02-style turn compared production RTL, the formal bridge, firmware entry,
+and certificate scope. It persisted five current, source-verified root findings
+at intelligence revision 35, including the decisive contrast: production
+resets both synchronizer stages low, while the formal model initializes both
+high and has no production reset branch. It completed durably and passed the
+source-evidence assertion. Two canonical compactions occurred during that
+turn; the post-compaction project packet contained all five findings and their
+current evidence routes.
+
+The q06-style prompt was intentionally uncued:
+
+> What would a skeptical certificate reviewer attack first in RX-EXACT?
+> Construct the strongest concrete attack and explain why it is stronger than
+> the excluded host-throughput concern. Cite exact files and lines. Do not edit
+> files.
+
+The follow-up began at the exact preceding revision 35, retained 16 hierarchy
+nodes, 10 context-map entries, all five blackboard entries and revisions, and
+all current evidence. It made zero read-bearing calls, blackboard queries, or
+context-map queries because the relevant root findings were already injected.
+It selected the reset-to-first-frame production/formal mismatch as the first
+and strongest attack, explained that it occurs before the explicitly excluded
+host/FIFO boundary, preserved the caveat that the reviewed sources alone do
+not prove an unconditional extra push, and completed durably without writing
+duplicate state. Two more canonical compactions occurred during the follow-up.
+
+Directional trajectory measurements were:
+
+- model responses: 8 -> 4;
+- tool calls: 5 -> 1;
+- read-bearing calls: 1 -> 0;
+- input tokens: 167,724 -> 87,480;
+- uncached input tokens: 43,564 -> 17,848;
+- output tokens: 11,207 -> 4,837; and
+- measured runner duration: 218.5 -> 97.4 seconds.
+
+This closes the narrow semantic-capture-through-compaction mechanism gate. It
+does not establish a broad quality or cost advantage: the corpus had only five
+files, findings were root-promoted, the source was unchanged, the thread was
+continuous, compaction was forced aggressively, and there was no ordinary
+baseline arm. Its value is causal and architectural: an uncued later decision
+was controlled by source-verified project state after four real compactions
+without source rereading.
+
+Two disposable precursor attempts produced the same substantive finding but
+were rejected by an over-specific bag-of-words assertion because the model used
+semantically equivalent phrases such as `different`, `unsound`, and `do not
+agree`. The final gate asserts the stable invariant instead: one current
+source-verified entry must co-locate production, formal, reset, low, and high,
+and must cite the production lines containing both synchronizer registers and
+their low reset assignments. Treat exact-synonym evidence assertions as an eval
+fragility, not as product evidence.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Semantic capture and active retrieval through compaction.** Use q02 ->
-   compaction -> q06 to
-   prove the reset mismatch is captured, survives, and changes the later action
-   without an unjustified reread.
-2. **Changed authority.** A newer controlling source must invalidate confident
+1. **Changed authority.** A newer controlling source must invalidate confident
    reuse even if the old cited bytes remain unchanged.
-3. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim.
-4. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+3. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
+4. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+   a fresh thread attached to the same project, because threads must not be
+   project-memory boundaries.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
 and uncached tokens, model requests, tool-output volume, wall time, state writes
@@ -266,7 +325,8 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Move directly to semantic capture and the q02 -> compaction -> q06 gate. The
-small root and non-root reuse probes passed; continuing to tune them or FTS
-against q10 would now provide less information than testing the observed
-stored-but-unused conclusion across compaction.
+Move directly to the changed-authority gate with a tiny source intervention.
+The test must distinguish an unchanged old citation from a newly controlling
+source, prevent confident reuse of the superseded conclusion, route to the
+smallest decisive new region, and update rather than duplicate durable state.
+Do not launch a broad benchmark until that behavior is demonstrated.
