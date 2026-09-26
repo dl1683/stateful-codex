@@ -40,7 +40,9 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Current pushed implementation head: `e90eaed41d`
+- Current pushed head: `d5b35490c6`
+  (`test(stateful): prove exact region knowledge reuse`)
+- Current routing implementation head: `e90eaed41d`
   (`fix(stateful): keep context routes fast and diverse`)
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
@@ -93,12 +95,19 @@ The current sequence after the original region experiment is:
    - Multi-token queries use literal tokens rather than broad prefixes; a
      single discovery token retains prefix matching.
    - Region descriptions no longer duplicate per-token routing-term rows.
+7. `d5b35490c6 test(stateful): prove exact region knowledge reuse`
+   - At the app-server/model tool boundary, a region query returns a canonical
+     fingerprint-bound route, `evidence_read` reads that exact cell, the model
+     records source-verified knowledge with the host receipt, and the same
+     region query reports the linked root knowledge.
 
 Focused validation before the final `just fix` and `just fmt`:
 
 - `just test -p codex-project-intelligence`: 37/37 passed.
 - `just fix -p codex-project-intelligence`: passed.
 - `just fmt`: passed.
+- Targeted `codex-app-server` region route/read/record/requery integration test:
+  passed.
 
 No full Rust suite was run; it still requires explicit user approval.
 
@@ -146,9 +155,9 @@ Do not launch another broad benchmark yet. Close these small gates first:
 1. **Model-visible matched preview.** Return a bounded query-centered snippet
    or equivalent evidence explaining why a route matched. A leading excerpt can
    still hide a fact near the end of a truthful 4 KiB cell.
-2. **Structural reuse.** Route -> read -> persist a source-verified conclusion
-   -> repeat the route query. The second query must expose linked root/deeper
-   knowledge once, with the same canonical fingerprint-bound route.
+2. **Behavioral reuse.** The structural region loop now passes, but a scripted
+   tool trajectory does not prove the model will use reported knowledge before
+   rereading. Add a small decision-level canary at the model boundary.
 3. **Semantic capture and active retrieval.** Use q02 -> compaction -> q06 to
    prove the reset mismatch is captured, survives, and changes the later action
    without an unjustified reread.
@@ -166,9 +175,9 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Start with the structural-reuse gate and inspect the real model-visible
-context-map response boundary. It is the shortest connection between the now
-truthful exact routes and issue #15's central failure: verified understanding
-must displace rereading. Add a match-centered preview only at that boundary and
-measure its bounded context cost. Then move directly to semantic capture and
-the q06 compaction canary rather than continuing to tune FTS against q10.
+Add the bounded match-centered preview at the model-visible context-map boundary
+and measure its context cost. Then use the proven structural region loop in a
+small decision-level canary: when `knownKnowledge` covers the route, the model
+must query/use that knowledge before choosing any reread. Move directly from
+that canary to semantic capture and q02 -> compaction -> q06 rather than
+continuing to tune FTS against q10.
