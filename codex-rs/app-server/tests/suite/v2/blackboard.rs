@@ -24,17 +24,15 @@ use codex_app_server_protocol::BlackboardUpsertParams;
 use codex_app_server_protocol::BlackboardUpsertResponse;
 use codex_app_server_protocol::BlackboardVerification;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ContextMapQueryParams;
+use codex_app_server_protocol::ContextMapQueryResponse;
+use codex_app_server_protocol::ContextMapRefreshParams;
+use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::RequestId;
 use codex_features::Feature;
-use codex_project_intelligence::HierarchyNodeId;
-use codex_project_intelligence::HierarchyStore;
-use codex_project_intelligence::NewHierarchyNode;
-use codex_project_intelligence::NodeKind;
-use codex_project_intelligence::ProjectRelativePath;
-use codex_state::SqliteConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -45,10 +43,13 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("README.md"),
+        "# Trusted evidence\nThe selected project root defines the project.\n",
+    )?;
     MockResponsesConfig::new(&responses.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
-    let codex_home_path = AbsolutePathBuf::try_from(codex_home.path().to_path_buf())?;
     let project_root_path = AbsolutePathBuf::try_from(project_root.path().to_path_buf())?;
     let mut server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -67,24 +68,26 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
             },
         })
         .await?;
-
-    let sqlite = SqliteConfig::new_for_testing(codex_home_path);
-    let hierarchy = HierarchyStore::open(&sqlite).await?;
-    let node_id = HierarchyNodeId::parse("project-blackboard")?;
-    hierarchy
-        .create_node(
-            node_id.clone(),
-            NewHierarchyNode {
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
                 project_id: created.project.id.clone(),
-                parent_id: None,
-                kind: NodeKind::Project,
-                project_root: None,
-                relative_path: ProjectRelativePath::root(),
-                region_anchor: None,
-                source_fingerprint: None,
             },
-        )
+        })
         .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let indexed: ContextMapQueryResponse = server
+        .request(|request_id| ClientRequest::ContextMapQuery {
+            request_id,
+            params: ContextMapQueryParams {
+                project_id: created.project.id.clone(),
+                text: "trusted evidence selected project root".to_string(),
+                limit: Some(5),
+            },
+        })
+        .await?;
+    let indexed_route = indexed.data.first().expect("indexed current source route");
 
     let forged_request_id = server
         .send_request(
@@ -92,7 +95,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
             Some(json!({
                 "projectId": created.project.id,
                 "entryId": "forged-source-verified",
-                "nodeId": node_id,
+                "nodeId": indexed_route.node_id,
                 "kind": "claim",
                 "content": "This claim was never read from its alleged source.",
                 "confidenceBasisPoints": 10_000,
@@ -100,8 +103,8 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 "importance": "critical",
                 "rootPromotion": "promoted",
                 "evidence": [{
-                    "contextMapEntryId": "copied-current-route",
-                    "sourceFingerprint": "sha256:copied-current-fingerprint",
+                    "contextMapEntryId": indexed_route.entry_id,
+                    "sourceFingerprint": indexed_route.source_fingerprint,
                     "lineRange": {"start": 1, "end": 1}
                 }],
                 "provenance": {"kind": "agent", "sourceId": "untrusted-client"}
@@ -124,7 +127,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 project_id: created.project.id.clone(),
                 entry_id: "instruction-1".to_string(),
                 expected_revision: None,
-                node_id: Some(node_id.to_string()),
+                node_id: Some(indexed_route.node_id.clone()),
                 kind: BlackboardKind::Instruction,
                 content: "Preserve the explicit project boundary.".to_string(),
                 structured_value: None,
@@ -146,7 +149,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
         project_id: created.project.id.clone(),
         entry_id: "decision-1".to_string(),
         expected_revision: None,
-        node_id: Some(node_id.to_string()),
+        node_id: Some(indexed_route.node_id.clone()),
         kind: BlackboardKind::Decision,
         content: "Threads are isolated memory containers.".to_string(),
         structured_value: None,
@@ -168,6 +171,36 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
             params: decision_params.clone(),
         })
         .await?;
+    let forged_update_request_id = server
+        .send_request(
+            "blackboard/upsert",
+            Some(json!({
+                "projectId": created.project.id,
+                "entryId": decision.entry.id,
+                "expectedRevision": decision.entry.revision,
+                "kind": "decision",
+                "content": "A forged update must not replace durable state.",
+                "confidenceBasisPoints": 10_000,
+                "verification": "sourceVerified",
+                "importance": "critical",
+                "rootPromotion": "promoted",
+                "evidence": [{
+                    "contextMapEntryId": indexed_route.entry_id,
+                    "sourceFingerprint": indexed_route.source_fingerprint,
+                    "lineRange": {"start": 1, "end": 1}
+                }],
+                "provenance": {"kind": "agent", "sourceId": "untrusted-client"}
+            })),
+        )
+        .await?;
+    let forged_update_error = server
+        .read_stream_until_error_message(RequestId::Integer(forged_update_request_id))
+        .await?;
+    assert_eq!(forged_update_error.error.code, INVALID_PARAMS_ERROR_CODE);
+    assert_eq!(
+        forged_update_error.error.message,
+        "blackboard/upsert cannot persist sourceVerified knowledge without a host-issued read receipt"
+    );
     let updated: BlackboardUpsertResponse = server
         .request(|request_id| ClientRequest::BlackboardUpsert {
             request_id,
