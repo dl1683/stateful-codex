@@ -69,11 +69,19 @@ impl ProjectIndexer {
         request: ProjectIndexRequest,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         validate_request(&request)?;
-        let project_id = request.project_id.clone();
         let roots = request.roots.clone();
         let scan = tokio::task::spawn_blocking(move || scan_roots(&roots))
             .await
             .map_err(ProjectIndexerError::ScanTask)??;
+        self.publish_refresh(request, scan).await
+    }
+
+    async fn publish_refresh(
+        &self,
+        request: ProjectIndexRequest,
+        scan: scan::ScanResult,
+    ) -> Result<ProjectIndexReport, ProjectIndexerError> {
+        let project_id = request.project_id.clone();
         let project_node_id = stable_id("project", &[&project_id])?;
         self.hierarchy
             .create_node(

@@ -32,9 +32,9 @@ pub(super) struct ScanResult {
 }
 
 #[derive(Clone, Copy)]
-struct ScanLimits {
-    max_files: usize,
-    max_project_regions: usize,
+pub(super) struct ScanLimits {
+    pub(super) max_files: usize,
+    pub(super) max_project_regions: usize,
 }
 
 pub(super) struct ScannedFile {
@@ -54,12 +54,14 @@ pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexer
             max_files: MAX_FILES,
             max_project_regions: MAX_PROJECT_REGIONS,
         },
+        scan_file,
     )
 }
 
-fn scan_roots_with_limits(
+pub(super) fn scan_roots_with_limits(
     roots: &[PathBuf],
     limits: ScanLimits,
+    mut scan_one: impl FnMut(&Path, &Path) -> Result<ScannedFile, ProjectIndexerError>,
 ) -> Result<ScanResult, ProjectIndexerError> {
     let mut files = Vec::new();
     let mut files_skipped = 0_u64;
@@ -102,7 +104,7 @@ fn scan_roots_with_limits(
                     inventory_complete,
                 });
             }
-            match scan_file(root, entry.path()) {
+            match scan_one(root, entry.path()) {
                 Ok(mut file) => {
                     let remaining_regions =
                         limits.max_project_regions.saturating_sub(regions_scanned);

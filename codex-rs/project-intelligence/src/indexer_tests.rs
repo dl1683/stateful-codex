@@ -7,6 +7,7 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::ContextMapCoverage;
+use crate::ContextMapFreshness;
 use crate::ContextMapQuery;
 use crate::RegionAnchor;
 use crate::SourceFingerprint;
@@ -261,4 +262,82 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
             .expect("new generation query should succeed")
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(root.path().join("facts.md"), "last_complete_generation\n")
+        .expect("source fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let request = ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    };
+    indexer
+        .refresh(request.clone())
+        .await
+        .expect("initial generation should index");
+    let root_text = root.path().display().to_string();
+    let file_id =
+        stable_id("file", &["project-1", &root_text, "facts.md"]).expect("stable file ID");
+    let before = hierarchy
+        .get_node("project-1", &file_id)
+        .await
+        .expect("file should load")
+        .expect("file should exist");
+
+    let failed_scan = super::scan::scan_roots_with_limits(
+        &request.roots,
+        super::scan::ScanLimits {
+            max_files: 10,
+            max_project_regions: 10,
+        },
+        |_, _| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "injected transient read failure",
+            )
+            .into())
+        },
+    )
+    .expect("a file read failure should produce an incomplete scan");
+    assert!(!failed_scan.inventory_complete);
+    assert_eq!(failed_scan.files_skipped, 1);
+
+    let report = indexer
+        .publish_refresh(request, failed_scan)
+        .await
+        .expect("incomplete inventory should publish without deletion reconciliation");
+    assert_eq!(
+        report,
+        ProjectIndexReport {
+            files_indexed: 0,
+            files_skipped: 1,
+            missing_files: 0,
+            truncated: true,
+        }
+    );
+    assert_eq!(
+        hierarchy
+            .get_node("project-1", &file_id)
+            .await
+            .expect("file should reload")
+            .expect("file should remain"),
+        before
+    );
+    let hits = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "last_complete_generation".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("last complete route should remain queryable");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].freshness, ContextMapFreshness::Current);
 }

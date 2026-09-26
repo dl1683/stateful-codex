@@ -84,6 +84,7 @@ fn project_region_budget_preserves_the_complete_file_inventory() {
             max_files: 10,
             max_project_regions: 1,
         },
+        scan_file,
     )
     .expect("project should scan");
 
