@@ -330,6 +330,16 @@ app.addEventListener("click", async (event) => {
         );
         render();
         break;
+      case "confirm-knowledge":
+        await action("Confirming project understanding", () =>
+          rpc("blackboard/confirm", {
+            projectId,
+            entryId: button.dataset.entryId,
+            expectedRevision: Number(button.dataset.revision),
+          }),
+        );
+        await refresh();
+        break;
       case "node":
         state.selectedNodeId =
           state.selectedNodeId === button.dataset.nodeId

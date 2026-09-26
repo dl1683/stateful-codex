@@ -18,7 +18,24 @@ test("workspace presents semantic progress and evidence before raw activity", as
   );
   assert.match(actual, /A result is not automatically verified/);
   assert.match(actual, /Command/);
+  assert.equal(
+    actual.match(/data-action="confirm-knowledge"/g)?.length,
+    statefulFindingCount(workspaceFixture()),
+  );
   assert.doesNotMatch(actual, /undefined · Recorded/);
+});
+
+test("already user-confirmed understanding cannot be confirmed again", () => {
+  const state = workspaceFixture();
+  state.blackboard[0].effectiveVerification = "userConfirmed";
+
+  const actual = renderWorkspace(state);
+
+  assert.equal(
+    actual.match(/data-action="confirm-knowledge"/g)?.length,
+    statefulFindingCount(state) - 1,
+  );
+  assert.match(actual, /badge userConfirmed/);
 });
 
 test("terminal workspace preserves the record without accepting dead controls", () => {
@@ -33,3 +50,7 @@ test("terminal workspace preserves the record without accepting dead controls", 
   assert.doesNotMatch(actual, /data-action="maintain"/);
   assert.match(actual, /Start another outcome/);
 });
+
+function statefulFindingCount(state) {
+  return state.blackboard.length;
+}

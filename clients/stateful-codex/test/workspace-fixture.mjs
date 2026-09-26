@@ -192,7 +192,14 @@ function hit(
   relations,
 ) {
   return {
-    entry: { id: `${nodeId}-${kind}`, nodeId, kind, content, evidence },
+    entry: {
+      id: `${nodeId}-${kind}`,
+      nodeId,
+      kind,
+      content,
+      evidence,
+      revision: 2,
+    },
     evidenceFreshness,
     effectiveVerification,
     relations,

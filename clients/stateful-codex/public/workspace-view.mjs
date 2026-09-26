@@ -238,7 +238,11 @@ function renderFinding(hit) {
         `<button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(link.contextMapEntryId)}"${link.lineRange ? ` data-first-line="${link.lineRange.start}" data-last-line="${link.lineRange.end}"` : ""} ${hit.evidenceFreshness !== "current" ? "disabled" : ""}>Open evidence${link.lineRange ? ` · lines ${link.lineRange.start}–${link.lineRange.end}` : ""}</button>`,
     )
     .join("");
-  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span><span class="badge ${escapeHtml(hit.evidenceFreshness)}">${escapeHtml(hit.evidenceFreshness)}</span></div><p>${escapeHtml(entry.content)}</p>${evidence}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
+  const confirm =
+    hit.effectiveVerification === "userConfirmed"
+      ? ""
+      : `<button class="text-button" data-action="confirm-knowledge" data-entry-id="${escapeHtml(entry.id)}" data-revision="${entry.revision}">Confirm this understanding</button>`;
+  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span><span class="badge ${escapeHtml(hit.evidenceFreshness)}">${escapeHtml(hit.evidenceFreshness)}</span></div><p>${escapeHtml(entry.content)}</p>${evidence}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
 }
 
 function renderInstructionForm(state) {
