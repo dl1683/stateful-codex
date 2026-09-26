@@ -17,6 +17,8 @@ pub use blackboard::BlackboardEntryScope;
 pub use blackboard::BlackboardEntryState;
 pub use blackboard::BlackboardEntryUpdate;
 pub use blackboard::BlackboardError;
+pub use blackboard::BlackboardEvidenceDependentsQuery;
+pub use blackboard::BlackboardEvidenceDependentsResult;
 pub use blackboard::BlackboardEvidenceFreshness;
 pub use blackboard::BlackboardEvidenceLink;
 pub use blackboard::BlackboardHit;

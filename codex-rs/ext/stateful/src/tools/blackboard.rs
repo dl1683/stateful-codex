@@ -9,8 +9,12 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryScope;
+use codex_project_intelligence::BlackboardEvidenceDependentsQuery;
 use codex_project_intelligence::BlackboardQuery;
+use codex_project_intelligence::BlackboardQueryResult;
+use codex_project_intelligence::ContextMapEntryId;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::RootPromotion;
 use codex_thread_store::ThreadStore;
@@ -37,6 +41,9 @@ struct QueryArguments {
     within_node_id: Option<String>,
     root_promotion: Option<RootPromotion>,
     entry_scope: Option<BlackboardEntryScope>,
+    evidence_context_map_entry_ids: Option<Vec<String>>,
+    expected_project_revision: Option<u64>,
+    after_entry_id: Option<String>,
     limit: Option<u32>,
 }
 
@@ -63,30 +70,83 @@ impl BlackboardQueryTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: QueryArguments = parse_arguments(&call)?;
-        let within_node = arguments
-            .within_node_id
+        let QueryArguments {
+            text,
+            within_node_id,
+            root_promotion,
+            entry_scope,
+            evidence_context_map_entry_ids,
+            expected_project_revision,
+            after_entry_id,
+            limit,
+        } = parse_arguments(&call)?;
+        let within_node = within_node_id
             .map(HierarchyNodeId::parse)
             .transpose()
             .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
-        let limit = arguments.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-        let result = self
+        let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        let entry_scope = entry_scope.unwrap_or(BlackboardEntryScope::Active);
+        let after_entry_id = after_entry_id
+            .map(BlackboardEntryId::parse)
+            .transpose()
+            .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+        let blackboard = self
             .services
             .blackboard()
             .await
-            .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?
-            .query(BlackboardQuery {
-                project_id: self.project_id.clone(),
-                text: arguments.text,
-                within_node,
-                root_promotion: arguments.root_promotion,
-                entry_scope: arguments
-                    .entry_scope
-                    .unwrap_or(BlackboardEntryScope::Active),
-                max_results: limit,
-            })
-            .await
             .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+        let evidence_query = evidence_context_map_entry_ids.is_some();
+        let (project_revision, result) = if let Some(entry_ids) = evidence_context_map_entry_ids {
+            if text.is_some() || within_node.is_some() || root_promotion.is_some() {
+                return Err(FunctionCallError::RespondToModel(
+                    "evidenceContextMapEntryIds can be combined only with entryScope, expectedProjectRevision, afterEntryId, and limit".to_string(),
+                ));
+            }
+            let context_map_entry_ids = entry_ids
+                .into_iter()
+                .map(ContextMapEntryId::parse)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+            let result = blackboard
+                .evidence_dependents(BlackboardEvidenceDependentsQuery {
+                    project_id: self.project_id.clone(),
+                    context_map_entry_ids,
+                    entry_scope,
+                    expected_project_revision,
+                    after_entry_id,
+                    max_results: limit,
+                })
+                .await
+                .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+            (
+                Some(result.project_revision),
+                BlackboardQueryResult {
+                    data: result.data,
+                    truncated: result.truncated,
+                },
+            )
+        } else {
+            if after_entry_id.is_some() || expected_project_revision.is_some() {
+                return Err(FunctionCallError::RespondToModel(
+                    "expectedProjectRevision and afterEntryId require evidenceContextMapEntryIds"
+                        .to_string(),
+                ));
+            }
+            (
+                None,
+                blackboard
+                    .query(BlackboardQuery {
+                        project_id: self.project_id.clone(),
+                        text,
+                        within_node,
+                        root_promotion,
+                        entry_scope,
+                        max_results: limit,
+                    })
+                    .await
+                    .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?,
+            )
+        };
         let evidence_ids = result
             .data
             .iter()
@@ -115,13 +175,15 @@ impl BlackboardQueryTool {
             Some(observe_evidence(&self.services, &self.project_id, &roots, evidence_ids).await)
         };
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let hit_count = result.data.len();
         let mut data = Vec::new();
         let mut truncated = result.truncated;
-        for hit in result.data {
+        for (index, hit) in result.data.into_iter().enumerate() {
             let evidence_freshness = audited_blackboard_freshness(&hit, evidence_audit.as_ref());
             let effective_verification =
                 audited_verification(hit.entry.value.verification, evidence_freshness);
-            let item = json!({
+            let evidence_count = hit.entry.value.evidence.len();
+            let mut item = json!({
                 "entryId": hit.entry.id.to_string(),
                 "nodeId": hit.entry.value.node_id.to_string(),
                 "revision": hit.entry.revision,
@@ -154,12 +216,34 @@ impl BlackboardQueryTool {
                     "provenance": relation.value.provenance,
                 })).collect::<Vec<_>>(),
             });
+            if evidence_query {
+                let serde_json::Value::Object(item) = &mut item else {
+                    unreachable!("static blackboard query item should be an object");
+                };
+                item.remove("evidence");
+                item.remove("relations");
+                item.insert("evidenceCount".to_string(), json!(evidence_count));
+                item.insert(
+                    "detailsOmitted".to_string(),
+                    json!(["evidenceLocators", "relations"]),
+                );
+            }
             data.push(item);
+            let candidate_truncated = result.truncated || index + 1 < hit_count;
+            let candidate_next_after_entry_id = if evidence_query && candidate_truncated {
+                data.last()
+                    .and_then(|item| item["entryId"].as_str())
+                    .map(str::to_string)
+            } else {
+                None
+            };
             if !fits_response(
                 &json!({
                     "projectId": self.project_id,
                     "data": &data,
-                    "truncated": truncated,
+                    "truncated": candidate_truncated,
+                    "projectRevision": project_revision,
+                    "nextAfterEntryId": candidate_next_after_entry_id,
                 }),
                 byte_budget,
             ) {
@@ -167,11 +251,28 @@ impl BlackboardQueryTool {
                 truncated = true;
                 break;
             }
+            truncated = candidate_truncated;
         }
+        let next_after_entry_id = if evidence_query && truncated {
+            Some(
+                data.last()
+                    .and_then(|item| item["entryId"].as_str())
+                    .ok_or_else(|| {
+                        FunctionCallError::RespondToModel(
+                            "response budget cannot fit one affected knowledge entry".to_string(),
+                        )
+                    })?
+                    .to_string(),
+            )
+        } else {
+            None
+        };
         Ok(Box::new(JsonToolOutput::new(json!({
             "projectId": self.project_id,
             "data": data,
             "truncated": truncated,
+            "projectRevision": project_revision,
+            "nextAfterEntryId": next_after_entry_id,
         }))))
     }
 }
@@ -184,7 +285,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Source-linked results are byte-checked against the selected project without mutating project state; evidenceFreshness is the effective observation and storedEvidenceFreshness is the persisted index state. Reuse sourceVerified knowledge only when evidenceFreshness=current. Active knowledge is the default. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review candidate knowledge deliberately, and omit text only when intentionally enumerating a bounded set.".to_string(),
+            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Source-linked results are byte-checked against the selected project without mutating project state; evidenceFreshness is the effective observation and storedEvidenceFreshness is the persisted index state. Reuse sourceVerified knowledge only when evidenceFreshness=current. Active knowledge is the default. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to enumerate entries whose current revisions directly cite the changed source through either its file route or any current or retired region route. This does not discover semantic dependencies that were never recorded. Affected-source pages omit evidence locators and navigational relations to stay resumable within the response budget. Inspect every page before mutating project intelligence, then deliberately revise or supersede stale direct dependents; retaining meaning requires fresh supporting receipts, while leaving a stale entry unchanged is not repair. The host reports mechanical dependency and freshness only and never infers semantic invalidation. The first page returns projectRevision. If truncated=true, repeat the same query with that revision as expectedProjectRevision and nextAfterEntryId copied into afterEntryId; if the project revision changes, restart from the first page. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review pending root-promotion decisions, and omit text only when intentionally enumerating a bounded set.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -194,6 +295,9 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
                     "withinNodeId": {"type": "string", "description": "Optional hierarchy node whose subtree bounds the query."},
                     "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"], "description": "Optional lifecycle filter. Use candidate to review pending root-promotion decisions."},
                     "entryScope": {"type": "string", "enum": ["active", "historical", "all"], "description": "Entry lifecycle scope. Defaults to active; historical returns superseded and tombstoned entries."},
+                    "evidenceContextMapEntryIds": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}, "description": "Exact contextMapEntryId values returned by evidence_read. Each ID expands to the source file and all its file or region routes. Combine only with entryScope, expectedProjectRevision, afterEntryId, and limit."},
+                    "expectedProjectRevision": {"type": "integer", "minimum": 0, "description": "For continuation pages, copy projectRevision from the first affected-source page. Omit on the first page; a mismatch fails closed and requires restarting enumeration."},
+                    "afterEntryId": {"type": "string", "description": "Continuation returned as nextAfterEntryId by an affected-source query. Requires evidenceContextMapEntryIds; copy it unchanged."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Maximum records to return. Use the smallest useful value."}
                 },
                 "additionalProperties": false

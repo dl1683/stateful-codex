@@ -6,6 +6,8 @@ use tempfile::TempDir;
 use super::*;
 use crate::BlackboardEntryScope;
 use crate::BlackboardEntryUpdate;
+use crate::BlackboardEvidenceDependentsQuery;
+use crate::BlackboardEvidenceDependentsResult;
 use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
 use crate::BlackboardQuery;
@@ -140,6 +142,15 @@ async fn fixture(temp_dir: &TempDir) -> (HierarchyStore, BlackboardStore, Blackb
 async fn blackboard_persistence_is_idempotent_and_rejects_stale_evidence() {
     let temp_dir = TempDir::new().expect("tempdir created");
     let (hierarchy, blackboard, created, file_revision) = fixture(&temp_dir).await;
+    let mut tail_value = created.value.clone();
+    tail_value.content = "A second finding depends on the same source.".to_string();
+    let tail = blackboard
+        .create_entry(
+            BlackboardEntryId::parse("fact-purpose-tail").expect("valid entry ID"),
+            tail_value,
+        )
+        .await
+        .expect("second source-linked entry inserts");
     assert_eq!(
         blackboard
             .create_entry(created.id.clone(), created.value.clone())
@@ -165,8 +176,8 @@ async fn blackboard_persistence_is_idempotent_and_rejects_stale_evidence() {
             .expect("route knowledge loads"),
         vec![BlackboardRouteKnowledge {
             context_map_entry_id: ContextMapEntryId::parse("map-readme").expect("valid map ID"),
-            active_entries: 1,
-            root_entries: 1,
+            active_entries: 2,
+            root_entries: 2,
         }]
     );
     drop(blackboard);
@@ -195,6 +206,85 @@ async fn blackboard_persistence_is_idempotent_and_rejects_stale_evidence() {
         )
         .await
         .expect("source fingerprint changes");
+    let project_revision = hierarchy
+        .project_intelligence_status("project-1")
+        .await
+        .expect("project intelligence status loads")
+        .revision;
+    assert_eq!(
+        reopened
+            .evidence_dependents(BlackboardEvidenceDependentsQuery {
+                project_id: "project-1".to_string(),
+                context_map_entry_ids: vec![
+                    ContextMapEntryId::parse("map-readme").expect("valid map ID"),
+                ],
+                entry_scope: BlackboardEntryScope::Active,
+                expected_project_revision: None,
+                after_entry_id: None,
+                max_results: 1,
+            })
+            .await
+            .expect("changed-route dependents load"),
+        BlackboardEvidenceDependentsResult {
+            project_revision,
+            data: vec![BlackboardHit::new(
+                created.clone(),
+                BlackboardEvidenceFreshness::Stale,
+            )],
+            truncated: true,
+        }
+    );
+    assert_eq!(
+        reopened
+            .evidence_dependents(BlackboardEvidenceDependentsQuery {
+                project_id: "project-1".to_string(),
+                context_map_entry_ids: vec![
+                    ContextMapEntryId::parse("map-readme").expect("valid map ID"),
+                ],
+                entry_scope: BlackboardEntryScope::Active,
+                expected_project_revision: Some(project_revision),
+                after_entry_id: Some(created.id.clone()),
+                max_results: 1,
+            })
+            .await
+            .expect("next changed-route dependent page loads"),
+        BlackboardEvidenceDependentsResult {
+            project_revision,
+            data: vec![BlackboardHit::new(tail, BlackboardEvidenceFreshness::Stale,)],
+            truncated: false,
+        }
+    );
+    assert!(matches!(
+        reopened
+            .evidence_dependents(BlackboardEvidenceDependentsQuery {
+                project_id: "project-1".to_string(),
+                context_map_entry_ids: vec![
+                    ContextMapEntryId::parse("missing-route").expect("valid map ID"),
+                ],
+                entry_scope: BlackboardEntryScope::Active,
+                expected_project_revision: None,
+                after_entry_id: None,
+                max_results: 1,
+            })
+            .await,
+        Err(BlackboardStoreError::EvidenceNotFound(id)) if id == "missing-route"
+    ));
+    assert!(matches!(
+        reopened
+            .evidence_dependents(BlackboardEvidenceDependentsQuery {
+                project_id: "project-1".to_string(),
+                context_map_entry_ids: vec![
+                    ContextMapEntryId::parse("map-readme").expect("valid map ID"),
+                ],
+                entry_scope: BlackboardEntryScope::Active,
+                expected_project_revision: Some(project_revision + 1),
+                after_entry_id: Some(created.id.clone()),
+                max_results: 1,
+            })
+            .await,
+        Err(BlackboardStoreError::ProjectRevisionConflict { expected, actual })
+            if expected == project_revision + 1 && actual == project_revision
+    ));
     let mut stale = created.value;
     stale.content = "This claim still points to the old source revision.".to_string();
     assert!(matches!(

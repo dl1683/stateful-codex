@@ -6,6 +6,8 @@ use sqlx::SqliteConnection;
 use crate::BlackboardEntryId;
 use crate::BlackboardEntryScope;
 use crate::BlackboardError;
+use crate::BlackboardEvidenceDependentsQuery;
+use crate::BlackboardEvidenceDependentsResult;
 use crate::BlackboardEvidenceFreshness;
 use crate::BlackboardHit;
 use crate::BlackboardQuery;
@@ -38,6 +40,130 @@ struct StoredRouteKnowledge {
 }
 
 impl BlackboardStore {
+    pub async fn evidence_dependents(
+        &self,
+        query: BlackboardEvidenceDependentsQuery,
+    ) -> Result<BlackboardEvidenceDependentsResult, BlackboardStoreError> {
+        query.validate()?;
+        let mut transaction = self.pool.begin().await?;
+        let project_revision = sqlx::query_scalar::<_, i64>(
+            "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
+        )
+        .bind(&query.project_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .unwrap_or_default();
+        let project_revision =
+            u64::try_from(project_revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
+        if let Some(expected) = query.expected_project_revision
+            && expected != project_revision
+        {
+            return Err(BlackboardStoreError::ProjectRevisionConflict {
+                expected,
+                actual: project_revision,
+            });
+        }
+        let mut route_builder = QueryBuilder::<Sqlite>::new(
+            "SELECT seed.id
+             FROM context_map_entries AS seed
+             JOIN hierarchy_nodes AS source
+               ON source.id = seed.node_id AND source.project_id = seed.project_id
+             WHERE seed.project_id = ",
+        );
+        route_builder.push_bind(&query.project_id);
+        route_builder.push(" AND source.kind IN ('file', 'region') AND seed.id IN (");
+        let mut separated = route_builder.separated(", ");
+        for entry_id in &query.context_map_entry_ids {
+            separated.push_bind(entry_id.as_str());
+        }
+        separated.push_unseparated(")");
+        let resolved_routes = route_builder
+            .build_query_scalar::<String>()
+            .fetch_all(&mut *transaction)
+            .await?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        if let Some(missing) = query
+            .context_map_entry_ids
+            .iter()
+            .find(|entry_id| !resolved_routes.contains(entry_id.as_str()))
+        {
+            return Err(BlackboardStoreError::EvidenceNotFound(missing.to_string()));
+        }
+        let limit = i64::from(query.max_results) + 1;
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "WITH changed_sources AS (
+               SELECT DISTINCT source.project_root, source.relative_path
+               FROM context_map_entries AS seed
+               JOIN hierarchy_nodes AS source
+                 ON source.id = seed.node_id AND source.project_id = seed.project_id
+               WHERE seed.project_id = ",
+        );
+        builder.push_bind(&query.project_id);
+        builder.push(" AND seed.id IN (");
+        let mut separated = builder.separated(", ");
+        for entry_id in &query.context_map_entry_ids {
+            separated.push_bind(entry_id.as_str());
+        }
+        separated.push_unseparated(
+            ")
+             )
+             SELECT DISTINCT entry.id
+             FROM blackboard_evidence_links AS link
+             JOIN context_map_entries AS evidence ON evidence.id = link.context_map_entry_id
+             JOIN hierarchy_nodes AS evidence_source
+               ON evidence_source.id = evidence.node_id
+              AND evidence_source.project_id = evidence.project_id
+             JOIN changed_sources AS changed
+               ON changed.project_root = evidence_source.project_root
+              AND changed.relative_path = evidence_source.relative_path
+             JOIN blackboard_entries AS entry ON entry.id = link.entry_id
+             JOIN blackboard_entry_revisions AS revision
+               ON revision.entry_id = entry.id
+              AND revision.revision = entry.revision
+              AND revision.revision = link.revision
+             WHERE entry.project_id = ",
+        );
+        builder.push_bind(&query.project_id);
+        builder.push(" AND evidence.project_id = ");
+        builder.push_bind(&query.project_id);
+        builder.push(" AND CASE ");
+        builder.push_bind(entry_scope_name(query.entry_scope));
+        builder.push(
+            " WHEN 'active' THEN revision.state = 'active'
+              WHEN 'historical' THEN revision.state <> 'active'
+              ELSE 1 END",
+        );
+        if let Some(after_entry_id) = &query.after_entry_id {
+            builder.push(" AND entry.id > ");
+            builder.push_bind(after_entry_id.as_str());
+        }
+        builder.push(" ORDER BY entry.id LIMIT ");
+        builder.push_bind(limit);
+        let entry_ids = builder
+            .build_query_scalar::<String>()
+            .fetch_all(&mut *transaction)
+            .await?;
+        let truncated = entry_ids.len() > query.max_results as usize;
+        let entry_ids = entry_ids.into_iter().take(query.max_results as usize);
+        let mut data = Vec::with_capacity(query.max_results as usize);
+        for raw_id in entry_ids {
+            let id = BlackboardEntryId::parse(&raw_id)
+                .map_err(|_| BlackboardStoreError::CorruptEntry(raw_id.clone()))?;
+            let entry = load_entry(&mut transaction, &query.project_id, &id)
+                .await?
+                .ok_or_else(|| BlackboardStoreError::EntryNotFound(raw_id))?;
+            let freshness = load_evidence_freshness(&mut transaction, &entry).await?;
+            data.push(BlackboardHit::new(entry, freshness));
+        }
+        transaction.commit().await?;
+        Ok(BlackboardEvidenceDependentsResult {
+            project_revision,
+            data,
+            truncated,
+        })
+    }
+
     pub async fn route_knowledge(
         &self,
         query: BlackboardRouteKnowledgeQuery,

@@ -368,6 +368,41 @@ pub struct BlackboardQueryResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Selects current blackboard revisions that cite any supplied context-map route.
+pub struct BlackboardEvidenceDependentsQuery {
+    pub project_id: String,
+    pub context_map_entry_ids: Vec<ContextMapEntryId>,
+    pub entry_scope: BlackboardEntryScope,
+    pub expected_project_revision: Option<u64>,
+    pub after_entry_id: Option<BlackboardEntryId>,
+    pub max_results: u32,
+}
+
+impl BlackboardEvidenceDependentsQuery {
+    pub fn validate(&self) -> Result<(), BlackboardError> {
+        validate_identity(&self.project_id, MAX_PROJECT_ID_BYTES)
+            .map_err(|()| BlackboardError::InvalidProjectId)?;
+        let unique = self.context_map_entry_ids.iter().collect::<HashSet<_>>();
+        if self.context_map_entry_ids.is_empty()
+            || self.context_map_entry_ids.len() > MAX_ROUTE_KNOWLEDGE_ENTRIES
+            || unique.len() != self.context_map_entry_ids.len()
+            || self.max_results == 0
+            || self.max_results > MAX_QUERY_RESULTS
+        {
+            return Err(BlackboardError::InvalidQuery);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlackboardEvidenceDependentsResult {
+    pub project_revision: u64,
+    pub data: Vec<BlackboardHit>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlackboardRouteKnowledgeQuery {
     pub project_id: String,
     pub context_map_entry_ids: Vec<ContextMapEntryId>,

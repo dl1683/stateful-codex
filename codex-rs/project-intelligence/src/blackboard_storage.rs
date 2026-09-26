@@ -441,6 +441,10 @@ pub enum BlackboardStoreError {
     EntryIdentityConflict(String),
     #[error("blackboard revision conflict: expected {expected}, found {actual}")]
     RevisionConflict { expected: u64, actual: u64 },
+    #[error(
+        "project intelligence revision conflict: expected {expected}, found {actual}; restart affected-source enumeration from the first page"
+    )]
+    ProjectRevisionConflict { expected: u64, actual: u64 },
     #[error("blackboard entry is no longer active: {0}")]
     EntryNotActive(String),
     #[error("blackboard successor entry was not found in this project: {0}")]
