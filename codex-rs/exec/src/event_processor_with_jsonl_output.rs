@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 use codex_app_server_protocol::CollabAgentTool;
 use codex_app_server_protocol::CollabAgentToolCallStatus;
@@ -16,7 +15,6 @@ use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::WebSearchAction as ApiWebSearchAction;
 use codex_core::config::Config;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use serde_json::json;
@@ -45,7 +43,6 @@ use crate::exec_events::McpToolCallStatus as ExecMcpToolCallStatus;
 use crate::exec_events::PatchApplyStatus as ExecPatchApplyStatus;
 use crate::exec_events::PatchChangeKind as ExecPatchChangeKind;
 use crate::exec_events::ReasoningItem;
-use crate::exec_events::StatefulAttribution;
 use crate::exec_events::ThreadErrorEvent;
 use crate::exec_events::ThreadEvent;
 use crate::exec_events::ThreadItem as ExecThreadItem;
@@ -58,6 +55,7 @@ use crate::exec_events::TurnFailedEvent;
 use crate::exec_events::TurnStartedEvent;
 use crate::exec_events::Usage;
 use crate::exec_events::WebSearchItem;
+use crate::stateful_attribution::StatefulAttributionAccumulator;
 
 pub struct EventProcessorWithJsonOutput {
     last_message_path: Option<PathBuf>,
@@ -68,18 +66,7 @@ pub struct EventProcessorWithJsonOutput {
     last_critical_error: Option<ThreadErrorEvent>,
     final_message: Option<String>,
     emit_final_message_on_shutdown: bool,
-    stateful_attribution: Option<StatefulAttribution>,
-    invocation_started_at: Option<Instant>,
-    completed_model_responses: u64,
-    compactions: u64,
-    model_tool_calls: u64,
-    model_shell_tool_calls: u64,
-    model_function_tool_calls: u64,
-    model_custom_tool_calls: u64,
-    model_tool_search_calls: u64,
-    model_web_search_calls: u64,
-    model_image_generation_calls: u64,
-    tool_output_bytes: u64,
+    stateful_attribution: StatefulAttributionAccumulator,
 }
 
 #[derive(Debug, Clone)]
@@ -105,18 +92,7 @@ impl EventProcessorWithJsonOutput {
             last_critical_error: None,
             final_message: None,
             emit_final_message_on_shutdown: false,
-            stateful_attribution: None,
-            invocation_started_at: None,
-            completed_model_responses: 0,
-            compactions: 0,
-            model_tool_calls: 0,
-            model_shell_tool_calls: 0,
-            model_function_tool_calls: 0,
-            model_custom_tool_calls: 0,
-            model_tool_search_calls: 0,
-            model_web_search_calls: 0,
-            model_image_generation_calls: 0,
-            tool_output_bytes: 0,
+            stateful_attribution: StatefulAttributionAccumulator::default(),
         }
     }
 
@@ -152,75 +128,6 @@ impl EventProcessorWithJsonOutput {
             cache_write_input_tokens: usage.total.cache_write_input_tokens,
             output_tokens: usage.total.output_tokens,
             reasoning_output_tokens: usage.total.reasoning_output_tokens,
-        }
-    }
-
-    fn completed_stateful_attribution(&self) -> Option<StatefulAttribution> {
-        let mut attribution = self.stateful_attribution.clone()?;
-        attribution.invocation_duration_ms = self
-            .invocation_started_at
-            .map(|started_at| started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
-            .unwrap_or_default();
-        attribution.completed_model_responses = self.completed_model_responses;
-        attribution.compactions = self.compactions;
-        attribution.model_tool_calls = self.model_tool_calls;
-        attribution.model_shell_tool_calls = self.model_shell_tool_calls;
-        attribution.model_function_tool_calls = self.model_function_tool_calls;
-        attribution.model_custom_tool_calls = self.model_custom_tool_calls;
-        attribution.model_tool_search_calls = self.model_tool_search_calls;
-        attribution.model_web_search_calls = self.model_web_search_calls;
-        attribution.model_image_generation_calls = self.model_image_generation_calls;
-        attribution.tool_output_bytes = self.tool_output_bytes;
-        Some(attribution)
-    }
-
-    fn record_raw_response_item(&mut self, item: &ResponseItem) {
-        match item {
-            ResponseItem::LocalShellCall { .. } => {
-                self.model_tool_calls += 1;
-                self.model_shell_tool_calls += 1;
-            }
-            ResponseItem::FunctionCall { .. } => {
-                self.model_tool_calls += 1;
-                self.model_function_tool_calls += 1;
-            }
-            ResponseItem::CustomToolCall { .. } => {
-                self.model_tool_calls += 1;
-                self.model_custom_tool_calls += 1;
-            }
-            ResponseItem::ToolSearchCall { .. } => {
-                self.model_tool_calls += 1;
-                self.model_tool_search_calls += 1;
-            }
-            ResponseItem::WebSearchCall { .. } => {
-                self.model_tool_calls += 1;
-                self.model_web_search_calls += 1;
-            }
-            ResponseItem::ImageGenerationCall { result, .. } => {
-                self.model_tool_calls += 1;
-                self.model_image_generation_calls += 1;
-                self.tool_output_bytes += result.len() as u64;
-            }
-            ResponseItem::FunctionCallOutput { output, .. }
-            | ResponseItem::CustomToolCallOutput { output, .. } => {
-                self.tool_output_bytes += serde_json::to_vec(output)
-                    .map(|output| output.len() as u64)
-                    .unwrap_or_default();
-            }
-            ResponseItem::ToolSearchOutput { tools, .. } => {
-                self.tool_output_bytes += serde_json::to_vec(tools)
-                    .map(|output| output.len() as u64)
-                    .unwrap_or_default();
-            }
-            ResponseItem::AdditionalTools { .. }
-            | ResponseItem::Message { .. }
-            | ResponseItem::AgentMessage { .. }
-            | ResponseItem::Reasoning { .. }
-            | ResponseItem::Compaction { .. }
-            | ResponseItem::ConfigurationUpdate { .. }
-            | ResponseItem::CompactionTrigger {}
-            | ResponseItem::ContextCompaction { .. }
-            | ResponseItem::Other => {}
         }
     }
 
@@ -607,58 +514,21 @@ impl EventProcessorWithJsonOutput {
                 CodexStatus::Running
             }
             ServerNotification::RawResponseCompleted(_) => {
-                self.completed_model_responses += 1;
+                self.stateful_attribution.record_model_response();
                 CodexStatus::Running
             }
             ServerNotification::RawResponseItemCompleted(notification) => {
-                self.record_raw_response_item(&notification.item);
+                self.stateful_attribution
+                    .record_response_item(&notification.item);
                 CodexStatus::Running
             }
             ServerNotification::ContextCompacted(_) => {
-                self.compactions += 1;
+                self.stateful_attribution.record_compaction();
                 CodexStatus::Running
             }
             ServerNotification::StatefulAttributionCompleted(notification) => {
-                let attribution = self
-                    .stateful_attribution
-                    .get_or_insert_with(StatefulAttribution::default);
-                attribution.turns += 1;
-                match notification.status {
-                    codex_app_server_protocol::StatefulAttributionStatus::Completed => {
-                        attribution.completed_turns += 1;
-                    }
-                    codex_app_server_protocol::StatefulAttributionStatus::Failed => {
-                        attribution.failed_turns += 1;
-                    }
-                    codex_app_server_protocol::StatefulAttributionStatus::Aborted => {
-                        attribution.aborted_turns += 1;
-                    }
-                }
-                attribution.duration_ms += notification.duration_ms;
-                let counters = notification.counters;
-                attribution.world_state_samples += counters.world_state_samples;
-                attribution.root_entries_loaded += counters.root_entries_loaded;
-                attribution.root_evidence_routes_checked += counters.root_evidence_routes_checked;
-                attribution.root_evidence_routes_current += counters.root_evidence_routes_current;
-                attribution.root_evidence_routes_stale += counters.root_evidence_routes_stale;
-                attribution.root_evidence_routes_unavailable +=
-                    counters.root_evidence_routes_unavailable;
-                attribution.root_evidence_routes_unchecked +=
-                    counters.root_evidence_routes_unchecked;
-                attribution.root_unique_sources_observed += counters.root_unique_sources_observed;
-                attribution.root_source_bytes_hashed += counters.root_source_bytes_hashed;
-                attribution.stateful_tool_calls += counters.stateful_tool_calls;
-                attribution.failed_stateful_tool_calls += counters.failed_stateful_tool_calls;
-                attribution.knowledge_query_calls += counters.knowledge_query_calls;
-                attribution.route_query_calls += counters.route_query_calls;
-                attribution.evidence_read_calls += counters.evidence_read_calls;
-                attribution.steering_query_calls += counters.steering_query_calls;
-                attribution.blackboard_write_calls += counters.blackboard_write_calls;
-                attribution.context_refresh_calls += counters.context_refresh_calls;
-                attribution.obligation_write_calls += counters.obligation_write_calls;
-                attribution.run_update_calls += counters.run_update_calls;
-                attribution.steering_write_calls += counters.steering_write_calls;
-                attribution.material_findings_reused += counters.material_findings_reused;
+                self.stateful_attribution
+                    .record_stateful_turn(&notification);
                 CodexStatus::Running
             }
             ServerNotification::TurnCompleted(notification) => {
@@ -683,7 +553,7 @@ impl EventProcessorWithJsonOutput {
                         self.emit_final_message_on_shutdown = true;
                         events.push(ThreadEvent::TurnCompleted(TurnCompletedEvent {
                             usage: self.usage_from_last_total(),
-                            stateful_attribution: self.completed_stateful_attribution(),
+                            stateful_attribution: self.stateful_attribution.snapshot(),
                         }));
                         CodexStatus::InitiateShutdown
                     }
@@ -744,7 +614,7 @@ impl EventProcessorWithJsonOutput {
                 CodexStatus::Running
             }
             ServerNotification::TurnStarted(_) => {
-                self.invocation_started_at.get_or_insert_with(Instant::now);
+                self.stateful_attribution.start_invocation();
                 events.push(ThreadEvent::TurnStarted(TurnStartedEvent {}));
                 CodexStatus::Running
             }

@@ -10,6 +10,7 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
+mod stateful_attribution;
 mod worktree;
 
 pub use cli::Cli;
