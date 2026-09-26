@@ -633,12 +633,10 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
-    let mut source = (1..=64)
+    let mut source = (1..=127)
         .map(|line| format!("Background line {line}.\n"))
         .collect::<String>();
-    source.push_str(
-        "Durable project state should route back to this exact region.\nThe exact source version must remain bound to the learned conclusion.\n",
-    );
+    source.push_str("Durable project state should route back to this exact region, and the exact source version must remain bound to the learned conclusion.\n");
     std::fs::write(project_root.path().join("decision.md"), source)?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
@@ -846,6 +844,11 @@ async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> 
             .expect("context-map output should be text"),
     )?;
     assert_eq!(context_output["knowledgeCoverageAvailable"], true);
+    let headline = context_output["data"][0]["headline"]
+        .as_str()
+        .expect("query route should include a headline");
+    assert!(headline.len() <= 240);
+    assert!(headline.contains("Durable project state"));
     assert_eq!(
         context_output["data"][0]["evidenceRoute"]["contextMapEntryId"],
         route.entry.id.to_string()

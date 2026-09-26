@@ -75,6 +75,7 @@ impl ContextMapQueryTool {
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: QueryArguments = parse_arguments(&call)?;
         let limit = arguments.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        let query_text = arguments.text;
         let project = self
             .projects
             .read_project(self.project_id.clone())
@@ -90,7 +91,7 @@ impl ContextMapQueryTool {
             .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?
             .query(ContextMapQuery {
                 project_id: self.project_id.clone(),
-                text: arguments.text,
+                text: query_text.clone(),
                 max_results: limit,
             })
             .await
@@ -117,7 +118,7 @@ impl ContextMapQueryTool {
             let known = knowledge.get(&hit.entry.id);
             let freshness =
                 audited_context_freshness(&evidence_audit, &hit.entry.id, hit.freshness);
-            let item = route_json(hit, &project, known, freshness)?;
+            let item = route_json(hit, &project, known, freshness, Some(&query_text))?;
             data.push(item);
             if !fits_response(
                 &json!({
@@ -160,7 +161,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are routing metadata, not evidence. Pass a current evidenceRoute unchanged to evidence_read; it is bound to the returned source revision and exact range. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
+            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are bounded match-centered routing previews, not evidence. Pass a current evidenceRoute unchanged to evidence_read; it is bound to the returned source revision and exact range. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -254,7 +255,7 @@ impl ContextMapRefreshTool {
         for hit in routes {
             let known = knowledge.get(&hit.entry.id);
             let freshness = Some(hit.freshness);
-            let item = route_json(hit, &project, known, freshness)?;
+            let item = route_json(hit, &project, known, freshness, /*query_text*/ None)?;
             data.push(item);
             if !fits_response(
                 &json!({
@@ -325,6 +326,7 @@ fn route_json(
     project: &codex_thread_store::StoredProject,
     knowledge: Option<&BlackboardRouteKnowledge>,
     freshness: Option<ContextMapFreshness>,
+    query_text: Option<&str>,
 ) -> Result<serde_json::Value, FunctionCallError> {
     if !project
         .roots
@@ -339,17 +341,7 @@ fn route_json(
         .then(|| EvidenceRoute::from_hit(&hit))
         .transpose()
         .map_err(respond)?;
-    let description = hit.entry.value.description;
-    let headline = if description.len() <= MAX_HEADLINE_BYTES {
-        description
-    } else {
-        let marker = "…";
-        let mut boundary = MAX_HEADLINE_BYTES.saturating_sub(marker.len());
-        while !description.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        format!("{}{marker}", &description[..boundary])
-    };
+    let headline = bounded_headline(&hit.entry.value.description, query_text);
     let mut source = serde_json::Map::from_iter([(
         "relativePath".to_string(),
         json!(hit.source.relative_path.to_string()),
@@ -377,6 +369,78 @@ fn route_json(
         });
     }
     Ok(route)
+}
+
+fn bounded_headline(description: &str, query_text: Option<&str>) -> String {
+    if description.len() <= MAX_HEADLINE_BYTES {
+        return description.to_string();
+    }
+    let marker = "…";
+    let Some(query_text) = query_text else {
+        let mut end = MAX_HEADLINE_BYTES.saturating_sub(marker.len());
+        while !description.is_char_boundary(end) {
+            end -= 1;
+        }
+        return format!("{}{marker}", &description[..end]);
+    };
+    let description_lower = description.to_ascii_lowercase();
+    let body_start = description
+        .find(" | ")
+        .map_or(/*default*/ 0, |position| position + 3);
+    let mut terms = Vec::new();
+    for term in query_text
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .filter(|term| term.len() > 1)
+        .take(/*n*/ 32)
+        .map(str::to_ascii_lowercase)
+    {
+        if !terms.contains(&term) {
+            terms.push(term);
+        }
+    }
+    let content_budget = MAX_HEADLINE_BYTES.saturating_sub(marker.len() * 2);
+    let mut best = None;
+    for term in &terms {
+        for (position, _) in description_lower.match_indices(term).take(/*n*/ 4) {
+            if position < body_start {
+                continue;
+            }
+            let mut start = position.saturating_sub(content_budget / 3);
+            while !description.is_char_boundary(start) {
+                start -= 1;
+            }
+            let mut end = (start + content_budget).min(description.len());
+            while !description.is_char_boundary(end) {
+                end -= 1;
+            }
+            let window = &description_lower[start..end];
+            let coverage = terms
+                .iter()
+                .filter(|term| window.contains(term.as_str()))
+                .count();
+            let candidate = (coverage, term.len(), std::cmp::Reverse(position), start);
+            if best.as_ref().is_none_or(|current| candidate > *current) {
+                best = Some(candidate);
+            }
+        }
+    }
+    let Some((_, _, _, start)) = best else {
+        let mut end = MAX_HEADLINE_BYTES.saturating_sub(marker.len());
+        while !description.is_char_boundary(end) {
+            end -= 1;
+        }
+        return format!("{}{marker}", &description[..end]);
+    };
+    let mut end = (start + content_budget).min(description.len());
+    while !description.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}{}{}",
+        if start > 0 { marker } else { "" },
+        &description[start..end],
+        if end < description.len() { marker } else { "" },
+    )
 }
 
 async fn route_knowledge(
