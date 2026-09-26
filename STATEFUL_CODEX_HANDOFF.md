@@ -1,6 +1,6 @@
 # Stateful Codex restart handoff
 
-Updated: 2026-09-25
+Updated: 2026-09-26
 
 ## Mandatory restart order
 
@@ -9,280 +9,166 @@ Updated: 2026-09-25
 2. Read the final two sections of `STATEFUL_CODEX_BUILD_PLAN.md`, beginning at
    `Open design problem: trusted reuse and state-aware compaction`.
 3. Read this handoff and refresh GitHub issues #15, #16, and #17.
-4. Do not resume Stateful implementation until the Codex ChatGPT-login blocker
-   below is resolved by a successful request from a newly started Codex process.
+4. Reconcile this document with live Git, source, tests, and processes. This is
+   a restart aid, not authority over newer evidence.
 
-## Current pause reason: Codex authentication is broken
+## Product priority
 
-Stateful product work is deliberately paused. A newly launched Codex process
-reports `Logged in using ChatGPT` but a real model request retries and then fails
-with HTTP 401 because a service-style API key is being sent to
-`https://chatgpt.com/backend-api/codex/responses`.
+Issues #15, #16, and #17 are one coupled intelligence loop:
 
-Evidence collected without printing credential values:
+```text
+source work
+  -> precise semantic capture
+  -> continuity across turns, threads, and compaction
+  -> active retrieval when captured understanding matters
+  -> exact routing for genuinely missing or consequential detail
+  -> point-of-use authority and freshness checks
+  -> less rereading, fewer requests, and better decisions over time
+```
 
-- No `OPENAI_API_KEY`, `CODEX_API_KEY`, `OPENAI_BASE_URL`, organization, project,
-  or `CODEX_HOME` override is set at process, user, or machine scope.
-- `codex login status` reports ChatGPT login.
-- The original saved auth record contained both ChatGPT tokens and a legacy
-  API-key field. Logout removed it.
-- A normal browser-based `codex login` recreated credentials, but a fresh
-  `codex exec` still failed with the same wrong-credential 401.
-- The official-documentation connector failed with the same 401, confirming a
-  shared authentication problem rather than a project-specific command failure.
-- The installed executable is the global npm launcher
-  `C:\Users\devan\AppData\Roaming\npm\codex.ps1`, version `0.157.0`.
-- `~/.codex/config.toml` currently places `forced_login_method = "chatgpt"`
-  inside `[mcp_servers.blackboard]`. Codex explicitly warns that
-  `mcp_servers.blackboard.forced_login_method` is unrecognized and ignored. If a
-  forced login method is retained, it must be a top-level setting.
+SC-EVAL-032 showed why this remains the priority. Stateful used 2.0x the input
+tokens, 2.7x the uncached input, and 2.3x the tool-output characters of ordinary
+Codex while aggregate quality was effectively level. The stateful/ordinary cost
+ratio worsened from 1.72x in q01-q05 to 2.58x in q06-q10. q06 had a decisive
+finding in state but did not use it; q10 lacked a decisive fact in state and the
+old file-only context map could not route to its body lines.
 
-The blocker is resolved only when all three checks pass:
+Do not treat a database, prompt packet, component test, or faster search as the
+product outcome. The gate is a better longitudinal work trajectory.
 
-1. `codex login status` reports ChatGPT.
-2. A brand-new process completes a real no-tool request.
-3. That process neither sends an API key to the ChatGPT endpoint nor relies on
-   the already-running Codex process's in-memory credentials.
+## Git and protected state
 
-Do not accept login-status output alone as proof.
-
-## Git and recovery state
-
-- Main development branch: `feature/stateful-codex`
-- Published product branch: `stateful/main`
-- Current safe branch head: `f1bc8b1082`
-  (`docs(stateful): prioritize longitudinal intelligence loop`)
-- The tracked working tree is clean at this checkpoint.
-- Two protected experiment directories remain untracked and must never be
+- Development branch: `feature/stateful-codex`
+- Published branch: `stateful/main`
+- Current pushed implementation head: `e90eaed41d`
+  (`fix(stateful): keep context routes fast and diverse`)
+- The tracked working tree was clean at this checkpoint.
+- These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
   - `clients/stateful-codex/eval/results/pramana-ab-2026-09-24/`
   - `clients/stateful-codex/eval/results/codex-vs-droid-2026-09-25/`
 
-The rejected, uncommitted exact-line-range prototype was preserved exactly on a
-separate remote checkpoint branch instead of contaminating `stateful/main`:
+The rejected bare-line-range prototype remains only as a recovery artifact on
+`checkpoint/stateful-region-routing-unsafe-20260925` at `a6cdb157de`. Do not
+merge it.
 
-- Branch: `checkpoint/stateful-region-routing-unsafe-20260925`
-- Commit: `a6cdb157de`
-- Status: recovery artifact only; do not merge as written.
+## Authentication status
 
-That checkpoint contains changes only to:
+The ChatGPT-login outage recorded on 2026-09-25 is resolved. Fresh Codex model
+requests subsequently completed, including the implementation and validation
+work below. Authentication is no longer the product-work gate. If the old 401
+returns, prove recovery with a real request from a newly started process; login
+status alone is insufficient.
 
-- `codex-rs/ext/stateful/src/tools/context_map.rs`
-- `codex-rs/app-server/tests/suite/v2/stateful_project_context.rs`
+## Exact-region routing work now pushed
 
-It added `source.lineRange`, instructed the model to pass the range to
-`evidence_read`, increased the displayed headline limit, and added a scripted
-two-turn transport test. The test passed, but Droid review showed that the
-prototype proves JSON plumbing rather than safe route consumption or product
-behavior.
+The current sequence after the original region experiment is:
 
-## Product priority and evidence
+1. `3fd48bdf16 fix(stateful): preserve context routes under scan limits`
+   - Exhausting the region budget no longer erases later file routes.
+2. `9a27507d90 feat(stateful): consume fingerprint-bound evidence routes`
+   - Context-map routes carry the fingerprint-bound range consumed by evidence
+     reads instead of passing bare coordinates.
+3. `e0c66eb5f7 test(stateful): reject shifted context routes end to end`
+   - An edit that shifts lines between query and read fails closed and cannot
+     issue a receipt for unrelated content.
+4. `4242a7a9df fix(stateful): keep region routes truthful and stable`
+   - Regions split at both 64 lines and 4 KiB of searchable text.
+   - A route never claims a complete range whose matched text was truncated.
+   - Cell identity is stable across ordinary growth/shrink while the exact line
+     anchor remains mutable source state.
+5. `f9b3e37602 fix(stateful): publish each indexed file atomically`
+   - File node, file context entry, region nodes, region entries, and retirement
+     of old cells publish in one SQLite transaction.
+   - Missing-file lifecycle updates file and regions atomically.
+   - A forced mid-publication failure proves the complete previous generation
+     remains visible and the failed generation remains absent.
+6. `e90eaed41d fix(stateful): keep context routes fast and diverse`
+   - FTS ranks a bounded candidate page before hierarchy validation, avoiding
+     the prior full join/rank scan.
+   - Bounded paging skips prior-generation regions rather than allowing them to
+     hide a current route.
+   - Per-source and top-level-directory limits prevent one file or review swarm
+     from monopolizing the result set.
+   - Multi-token queries use literal tokens rather than broad prefixes; a
+     single discovery token retains prefix matching.
+   - Region descriptions no longer duplicate per-token routing-term rows.
 
-Commit `f1bc8b1082` makes the highest priority explicit in the build plan:
-issues #15, #16, and #17 are one coupled intelligence loop:
+Focused validation before the final `just fix` and `just fmt`:
 
-```text
-semantic capture
-  -> continuity across turns, threads, and compaction
-  -> active retrieval
-  -> exact routing for missing detail
-  -> point-of-use source authority and freshness
-  -> less rereading, fewer requests, and better decisions over time
-```
+- `just test -p codex-project-intelligence`: 37/37 passed.
+- `just fix -p codex-project-intelligence`: passed.
+- `just fmt`: passed.
 
-This ordering is constrained by SC-EVAL-032:
+No full Rust suite was run; it still requires explicit user approval.
 
-- Stateful used 2.0x the input, 2.7x the uncached input, and 2.3x the tool-output
-  characters of ordinary Codex while aggregate quality was effectively level.
-- The stateful/ordinary cost ratio worsened from 1.72x in q01-q05 to 2.58x in
-  q06-q10.
-- q06 had the decisive reset-mismatch finding in state but did not use it.
-- q10 did not have the decisive routed-result fact in state and could not route
-  to the relevant body lines.
-- Forty of 81 later evidence reads overlapped an earlier read, but only a small
-  fraction of requested lines was represented in promoted knowledge. Retrieval
-  ranking alone therefore cannot solve the capture deficit.
-- Completed outcomes are bounded deterministic continuity and have a useful q06
-  counterfactual, but they should not be enlarged without measured benefit.
-- Byte-identical cited lines are not sufficient freshness authority because an
-  edited qualifier elsewhere can change their meaning. The range-rebinding
-  experiment was correctly reverted.
+## Frozen q10 mechanism evidence
 
-Issue #15 contains the full evolving evidence and the planning checkpoint:
-https://github.com/dl1683/stateful-codex/issues/15
+The exact two `context_map_query` inputs were recovered read-only from the
+protected q10 rollout:
 
-## Pushed routing work before the pause
+1. `STRATEGY_MAP earliest missing link final artifact end-to-end proof certificate integration`
+2. `PLAN.md Production integration merge winning src main proof migration next action`
 
-1. `710d3ec6cb fix(stateful): report context coverage honestly`
-   - A file is complete only when the searchable representation is complete,
-     not merely because all bytes fit the scan excerpt.
-2. `777dfb2901 feat(stateful): index bounded source regions`
-   - Added generic line-grid region nodes and context entries, lifecycle refresh,
-     hard per-file/project caps, and source fingerprints.
-3. `5e85663054 feat(stateful): diversify context region results`
-   - Suppresses a redundant file hit when matching regions exist and limits a
-     source path to three returned regions.
-4. `f1bc8b1082 docs(stateful): prioritize longitudinal intelligence loop`
-   - Records the coupled failure model, negative results, execution order, and
-     measurement gates.
+Measured frozen corpus:
 
-Validation completed before the pause:
+- 1,537 indexed files and 25,096 regions.
+- Source scan alone: 12.362 seconds.
+- SQLite database: 107,503,616 bytes at the measured checkpoint.
+- Full debug indexing completed but varied from about 169 to 248 seconds. This
+  remains too slow and was confounded by local build/system contention; do not
+  claim an indexing improvement yet.
+- Before the FTS pre-limit, the two exact queries took about 50.107 and 27.998
+  seconds.
+- After the pre-limit, max-10 probes took about 111.6 and 71.3 milliseconds.
+  Later max-20 probes were about 145-180 milliseconds.
 
-- `just test -p codex-project-intelligence`: 31/31 passed after the pushed
-  region and diversity slices.
-- `just test -p codex-stateful-extension`: 24/24 passed for the checkpointed
-  line-range prototype.
-- Targeted app-server integration
-  `model_can_verify_the_exact_line_range_returned_by_context_routing`: passed.
-- Scoped fixes and formatting passed for the pushed slices.
+Recall is mixed and must be described precisely:
 
-These results establish deterministic component behavior only. They do not
-establish q10 recall, safe route identity, lower cost, or improved quality.
+- Query 1 did not put the decisive passages in the top 10. With max 20, the
+  decisive `PLAN.md:116-168` route ranked 15 and `SCORECARD.md:48-76` ranked 19.
+- Query 2 put those same exact routes at ranks 2 and 6, so the actual two-query
+  q10 trajectory can reach both facts within a bounded top 10.
+- In raw FTS for query 1, the decisive passages ranked 50 and 65. The words in
+  the broad query do not identify the later project conclusions. Artificially
+  promoting those two cells would be benchmark-specific overfitting.
 
-## Droid review: blockers in the current region design
+The conclusion is not “q10 solved.” Exact routing and latency are materially
+better, and the second real query recovers both facts. The first query still
+demonstrates why accumulated blackboard understanding and query refinement must
+drive routing: text ranking cannot invent a strategic relationship absent from
+the query and state.
 
-Two independent read-only Droid reviews were completed before the pause. Their
-findings materially reject the current slice as merge-ready.
+## Remaining blockers and smallest gates
 
-### 1. The frozen q10 routing gate still fails
+Do not launch another broad benchmark yet. Close these small gates first:
 
-Regions are bounded to 64 lines but their searchable description is truncated
-to 4 KiB. `SCORECARD.md:1-64` is more than 11 KiB, so the decisive line 59 is
-outside the indexed text even though the returned anchor claims lines 1-64.
+1. **Model-visible matched preview.** Return a bounded query-centered snippet
+   or equivalent evidence explaining why a route matched. A leading excerpt can
+   still hide a fact near the end of a truthful 4 KiB cell.
+2. **Structural reuse.** Route -> read -> persist a source-verified conclusion
+   -> repeat the route query. The second query must expose linked root/deeper
+   knowledge once, with the same canonical fingerprint-bound route.
+3. **Semantic capture and active retrieval.** Use q02 -> compaction -> q06 to
+   prove the reset mismatch is captured, survives, and changes the later action
+   without an unjustified reread.
+4. **Changed authority.** A newer controlling source must invalidate confident
+   reuse even if the old cited bytes remain unchanged.
+5. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+   correct, but the frozen debug index is still far too slow for a product
+   claim.
+6. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+   failure so reconciliation cannot silently mark an unread file missing.
 
-A focused replay reported these ranks:
+For every mechanism gate, record answer quality, repeated source ranges, input
+and uncached tokens, model requests, tool-output volume, wall time, state writes
+and queries, and whether the decisive prior conclusion was actually used.
 
-| Frozen query | decisive PLAN region | decisive SCORECARD region |
-|---|---:|---:|
-| strategy / earliest missing link query | 12 | 23 |
-| production integration query | 3 | 89 |
+## Recommended next action
 
-The result limit is 10. The mechanism therefore would not have prevented the
-documented q10 miss.
-
-Required direction: create contiguous regions bounded by both line count and
-searchable bytes, never silently truncate the represented range, and rerun the
-exact frozen queries before ranking work or product claims.
-
-### 2. Route identity is not safely consumable
-
-The checkpoint tells the model to reuse a bare line range. If the file changes
-and lines are inserted above that range, `evidence_read` refreshes the file and
-can replay the old coordinates against new content. Unrelated shifted bytes can
-then receive a fresh read receipt.
-
-Required direction: consume a route identity bound to its fingerprint and exact
-range. On fingerprint mismatch, fail closed and return or require a refreshed
-route. Do not silently replay coordinates after refresh.
-
-### 3. Region routing loses the reuse signal
-
-Region search returns region context-map entry IDs, while `evidence_read`
-currently resolves and receipts the parent file route. Later region queries ask
-for blackboard knowledge linked to the region ID and therefore omit the parent
-file's `knownKnowledge`. This can recreate the rereading behavior the feature is
-supposed to reduce.
-
-Required canary: query region -> read -> record a source-verified conclusion ->
-repeat the same query. The second query must report the durable knowledge once,
-with the exact range and no route-identity ambiguity.
-
-### 4. The project region cap can erase file routes
-
-When the next file would exceed 50,000 regions, the scanner currently stops the
-entire corpus walk. Later files disappear instead of retaining file-level partial
-routes.
-
-Required direction: stop adding regions when the budget is exhausted, continue
-indexing every remaining file, and mark omitted region coverage partial.
-
-### 5. Refresh can expose mixed generations as current
-
-The file is updated before regions, regions are written individually, and old
-regions are retired last. A query during refresh or after partial failure can
-observe internally matching old region entry/node fingerprints and call them
-current even though the parent file has advanced. Historical matching regions
-can also consume the three-per-source diversity slots.
-
-Required direction: generation-aware or atomic per-file publication. Readers
-must see the complete old generation or complete new generation; current active
-routes must not be displaced by historical routes.
-
-### 6. Region identity accumulates EOF history
-
-The region ID contains both start and variable end line. Growing 65-70 to 65-71
-creates a new identity and leaves the previous node missing. Ordinary file growth
-therefore creates unbounded historical rows and can worsen stale-route crowding.
-
-Required direction: stable cell/start identity with the exact current end stored
-as mutable route metadata, or another identity scheme that remains stable across
-ordinary append/shrink cycles.
-
-### 7. Route headlines can hide the matched fact
-
-The checkpoint merely raises the leading headline from 240 to 512 bytes. A fact
-matched near the end of a bounded region can still be absent from the model-
-visible headline. The query may rank the right region while giving the model no
-reason to select it.
-
-Required direction: return a bounded query-specific FTS snippet or equivalent
-match-centered preview. Do not solve this by returning every 4 KiB description.
-
-### 8. Scan and deletion lifecycle truth has older gaps
-
-- A transient per-file scan failure can leave the file unseen and reconciliation
-  can mark it missing.
-- `refresh_file` canonicalizes before resolving the stored file, so a deleted
-  path cannot take the intended single-file missing lifecycle path.
-- The existing deletion test exercises full refresh, not `refresh_file`.
-
-These are issue #16 freshness/truthfulness problems and need explicit canaries.
-
-### 9. Refresh inventory and public API semantics are inconsistent
-
-`list_project` returns active file and region entries, so refresh inventory can
-inject redundant region metadata. The existing app-server expectation assumes
-file-level inventory. Public v2 still exposes only a generic region anchor, and
-public `evidence/read` does not accept region IDs. Decide the compact inventory
-contract first; stage public parity after the model path has a sound canonical
-route type, unless an external consumer requires it sooner.
-
-## Small gates required before another broad run
-
-After authentication is fixed, do not launch a broad benchmark. Use these
-small falsification gates first:
-
-1. Exact frozen q10 route gate: both PLAN and SCORECARD facts in the bounded top
-   10; record index time, database growth, query time, hashed bytes, and output.
-2. Structural reuse gate: route -> read -> persist -> same route query reports
-   the linked root/deeper knowledge.
-3. Shift-between-query-and-read gate: inserting lines above a returned route must
-   reject stale coordinates and must not issue a receipt for shifted content.
-4. q02 -> compaction -> q06 gate: the reset mismatch survives and is actually
-   used without an unjustified reread.
-5. Changed-authority gate: a newer controlling source invalidates confident
-   reuse even when old cited bytes remain unchanged.
-6. Region-cap and interrupted-refresh gates: all file routes survive the cap and
-   queries never observe a mixed generation as current.
-
-Only after those gates pass should a short matched trajectory test whether later
-turns use fewer requests and less repeated source output without losing quality.
-
-## Recommended resumption sequence
-
-1. Fix and validate Codex ChatGPT authentication first.
-2. Refresh issues #15-#17 and re-read the product intent and this handoff.
-3. Ask Droid to finish the interrupted second-round review that converts the
-   blockers above into sub-500-line review stages. Challenge its prioritization;
-   do not treat its first answer as authoritative.
-4. Decide whether to temporarily disable region results or fix forward. Do not
-   merge checkpoint `a6cdb157de`.
-5. Land the smallest safety slice first: route identity/fingerprint consumption,
-   region-cap preservation, and decisive lifecycle canaries.
-6. Make searchable regions truthful and run the exact q10 route gate.
-7. Connect parent knowledge and add the route/read/record/requery canary.
-8. Measure bounded indexing and query cost before default enablement.
-
-The product objective is unchanged. The current region implementation is a
-useful experiment that exposed the right failure layer, but it is not yet a safe
-or demonstrated solution.
+Start with the structural-reuse gate and inspect the real model-visible
+context-map response boundary. It is the shortest connection between the now
+truthful exact routes and issue #15's central failure: verified understanding
+must displace rereading. Add a match-centered preview only at that boundary and
+measure its bounded context cost. Then move directly to semantic capture and
+the q06 compaction canary rather than continuing to tune FTS against q10.
