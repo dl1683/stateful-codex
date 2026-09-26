@@ -8,11 +8,13 @@ import {
 const READ_OPERATION_PATTERN = /\b(Get-ChildItem|Get-Content|Select-String|evidence_read|read_file|read_text_file|cat|sed|rg|grep)\b/gi;
 const PROJECT_START = "<stateful_project>";
 const PROJECT_END = "</stateful_project>";
+const PROJECT_UPDATE_START = "<stateful_project_update>";
+const PROJECT_UPDATE_END = "</stateful_project_update>";
 
 export function summarizeLongitudinalEvents(events) {
   let metadata = null;
   let activeTurnId = null;
-  let latestProjectFragment = null;
+  let latestProjectState = null;
   let unattributedCompactions = 0;
   const turns = new Map();
   const order = [];
@@ -21,7 +23,7 @@ export function summarizeLongitudinalEvents(events) {
   const ensureTurn = (turnId) => {
     if (!turnId) return null;
     if (!turns.has(turnId)) {
-      turns.set(turnId, newTurn(turnId, latestProjectFragment));
+      turns.set(turnId, newTurn(turnId, latestProjectState));
       order.push(turnId);
     }
     return turns.get(turnId);
@@ -78,9 +80,8 @@ export function summarizeLongitudinalEvents(events) {
       turn.lastTurnUsage = compactUsage(event.payload.turn_token_usage);
       turn.threadUsageAtEnd = compactUsage(event.payload.thread_token_usage);
       turn.projectStateAtFirstResponse ??=
-        summarizeProjectFragment(latestProjectFragment);
-      turn.projectStateAtLastResponse =
-        summarizeProjectFragment(latestProjectFragment);
+        cloneProjectState(latestProjectState);
+      turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
       return;
     }
     if (event.type === "response_item") {
@@ -93,9 +94,17 @@ export function summarizeLongitudinalEvents(events) {
         if (item.role === "developer") {
           const fragment = extractProjectFragment(text);
           if (fragment) {
-            latestProjectFragment = fragment;
+            latestProjectState = summarizeProjectFragment(fragment);
             if (turn) {
-              turn.projectStateAtLastResponse = summarizeProjectFragment(fragment);
+              turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
+            }
+          } else {
+            const revision = extractProjectUpdateRevision(text);
+            if (revision != null && latestProjectState) {
+              latestProjectState = { ...latestProjectState, revision };
+              if (turn) {
+                turn.projectStateAtLastResponse = cloneProjectState(latestProjectState);
+              }
             }
           }
         } else if (turn && item.role === "user" && text) {
@@ -149,8 +158,7 @@ export function summarizeLongitudinalEvents(events) {
       turn.complete = true;
       turn.completion = event.payload;
       turn.finalAnswer ||= event.payload.last_agent_message ?? "";
-      turn.projectStateAtLastResponse ??=
-        summarizeProjectFragment(latestProjectFragment);
+      turn.projectStateAtLastResponse ??= cloneProjectState(latestProjectState);
       if (activeTurnId === turn.turnId) activeTurnId = null;
     }
   });
@@ -166,7 +174,7 @@ export function summarizeLongitudinalEvents(events) {
   };
 }
 
-function newTurn(turnId, projectFragment) {
+function newTurn(turnId, projectState) {
   return {
     turnId,
     complete: false,
@@ -185,7 +193,7 @@ function newTurn(turnId, projectFragment) {
     rejectedToolResults: 0,
     compactions: [],
     legacyCompactionSignals: 0,
-    projectStateAtStart: summarizeProjectFragment(projectFragment),
+    projectStateAtStart: cloneProjectState(projectState),
     projectStateAtFirstResponse: null,
     projectStateAtLastResponse: null,
   };
@@ -356,6 +364,20 @@ function extractProjectFragment(text) {
   const start = text.indexOf(PROJECT_START);
   const end = text.indexOf(PROJECT_END, start);
   return start < 0 || end < 0 ? null : text.slice(start, end + PROJECT_END.length);
+}
+
+function extractProjectUpdateRevision(text) {
+  const start = text.indexOf(PROJECT_UPDATE_START);
+  const end = text.indexOf(PROJECT_UPDATE_END, start);
+  if (start < 0 || end < 0) return null;
+  return numberMatch(
+    text.slice(start, end + PROJECT_UPDATE_END.length),
+    /Project intelligence revision advanced from \d+ to (\d+)/,
+  );
+}
+
+function cloneProjectState(state) {
+  return state == null ? null : structuredClone(state);
 }
 
 function summarizeProjectFragment(fragment) {

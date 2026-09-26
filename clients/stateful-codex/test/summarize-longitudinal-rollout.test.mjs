@@ -32,6 +32,11 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
     ),
     toolOutput("read-1", "Script completed"),
     usageRecord("turn-1", "response-1", firstUsage, firstUsage, firstUsage),
+    message(
+      "turn-1",
+      "developer",
+      "<stateful_project_update>Project intelligence revision advanced from 7 to 8. The model-visible root blackboard knowledge and source routes are unchanged.</stateful_project_update>",
+    ),
     message("turn-1", "assistant", "Answer one"),
     completed("turn-1", 100, 900),
     started("turn-2", 110),
@@ -110,7 +115,10 @@ test("attributes usage, compaction, state projection, reads, and failures per tu
     { relativePath: "decision.md", lineStart: 2, lineEnd: 4 },
   ]);
   assert.equal(summary.turns[1].calls.repeatedEvidenceReads, 1);
-  assert.equal(summary.turns[1].projectState.atFirstResponse.revision, 7);
+  assert.equal(summary.turns[0].projectState.atFirstResponse.revision, 7);
+  assert.equal(summary.turns[0].projectState.atLastResponse.revision, 8);
+  assert.equal(summary.turns[1].projectState.atStart.revision, 8);
+  assert.equal(summary.turns[1].projectState.atFirstResponse.revision, 8);
   assert.equal(summary.turns[1].projectState.atFirstResponse.rootEntries, 1);
   assert.equal(summary.turns[1].projectState.atFirstResponse.evidenceRoutes, 1);
   assert.equal(summary.turns[1].projectState.atFirstResponse.omittedRootEntries, 2);
