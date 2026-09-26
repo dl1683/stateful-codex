@@ -40,8 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Current pushed head: `f1e7002acd`
-  (`feat(stateful): center route previews on query matches`)
+- Current pushed head before this handoff-only update: `5f855b3651`
+  (`docs(stateful): close route preview gate`)
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -52,13 +52,25 @@ The rejected bare-line-range prototype remains only as a recovery artifact on
 `checkpoint/stateful-region-routing-unsafe-20260925` at `a6cdb157de`. Do not
 merge it.
 
-## Authentication status
+## Authentication incident in progress
 
-The ChatGPT-login outage recorded on 2026-09-25 is resolved. Fresh Codex model
-requests subsequently completed, including the implementation and validation
-work below. Authentication is no longer the product-work gate. If the old 401
-returns, prove recovery with a real request from a newly started process; login
-status alone is insufficient.
+Product work is paused behind a renewed local authentication incident. On
+2026-09-26, another newly started Codex run reached the ChatGPT Codex responses
+endpoint but received `401 Unauthorized: Incorrect API key provided`, with a
+redacted service-key prefix. The user then completed `codex login` again.
+
+The globally resolved CLI is `codex-cli 0.157.1`, and `codex login status`
+currently reports `Logged in using ChatGPT`. That status does not resolve the
+incident because the failing run still selected an API key. Before resuming
+product or evaluation work:
+
+1. identify the process, user, machine, wrapper, alternate `CODEX_HOME`, or
+   provider configuration supplying the stale key;
+2. remove that override without exposing credential contents;
+3. start a fresh Codex process; and
+4. prove recovery with a real no-tool model request, not login status alone.
+
+Do not alter the two protected experiment directories while diagnosing this.
 
 ## Exact-region routing work now pushed
 
