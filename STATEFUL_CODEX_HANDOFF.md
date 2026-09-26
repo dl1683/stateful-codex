@@ -40,8 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Last pushed head before this handoff update: `fb8fcc9170`
-  (`docs(stateful): close behavioral reuse canary`).
+- Last pushed head before this handoff update: `b47e85b470`
+  (`fix(stateful): read exact region evidence`).
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -464,6 +464,44 @@ project-intelligence suite passed 37/37, scoped Clippy passed, and formatting
 passed. GitHub issue #20 is closed. This removes the source-confirmed mixing
 mechanism; it does not claim that a mixed projection was observed in a real run.
 
+That review also found two public trust/verification defects. Generic
+`blackboard/upsert` previously accepted a caller-selected `sourceVerified`
+grade without the host-issued read receipt required by the model tool path.
+Commit `f0c9366f50` rejects that grade at the generic API boundary. Commit
+`9d0b2b113e` strengthens the public JSON-RPC regression: it uses a real current
+indexed route and fingerprint, rejects both create and update attempts, and
+proves the rejected update did not advance state because the legitimate
+revision-guarded update still succeeds. The targeted app-server test passed,
+then scoped Clippy and formatting passed.
+
+The second trust defect remains open: model-facing record/update schemas still
+offer `userConfirmed`, and the generic API still relies on caller-supplied user
+provenance. Do not replace this with a cosmetic provenance check. Define the
+host-observed user action or receipt that earns `userConfirmed`; model tools
+must not self-award it, and model revisions of confirmed meaning must either
+retain an exact valid confirmation or downgrade/reject the grade.
+
+Commit `b47e85b470` closes the browser exact-evidence break recorded as GitHub
+issue #22. `evidence/read` now reconstructs the guarded route from the current
+indexed region, rejects a supplied range that differs from the typed anchor,
+reads through the fingerprint-checked evidence reader, and preserves the
+region anchor in its response. Public JSON-RPC coverage passed for the exact
+region and mismatch paths. The existing file-level bounded/stale-source test
+also passed after its stale expectations were corrected to include the region
+node and route already produced by the indexer. Scoped Clippy and formatting
+passed; no full Rust suite was run.
+
+An hourly read-only peer-review loop is installed outside the repository as the
+Windows Scheduled Task `StatefulCodex-Hourly-Droid-Review`. Its script is
+`C:\Users\devan\.codex\automations\stateful-droid-hourly\run-review.ps1` and
+its timestamped artifacts are under
+`%LOCALAPPDATA%\StatefulCodex\hourly-droid-reviews`. Each cycle runs a broad
+maximum-reasoning Droid repository/issue review, a Codex source-grounded
+critique, a Droid rebuttal, and a final Codex decision record. Runs cannot
+overlap and are bounded to 55 minutes. The first complete four-stage smoke
+passed. A later script revision writes Codex progress events separately from
+the final critique so raw CLI event streams are not fed back as peer analysis.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
@@ -472,19 +510,27 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Derived premise provenance.** Direct source-citation enumeration is now
+1. **Trusted user confirmation.** Close the remaining `userConfirmed`
+   authority gap with a host-bound user action. Generic callers and model tools
+   must not be able to manufacture the grade by selecting an enum or claiming
+   user provenance.
+2. **Derived premise provenance.** Direct source-citation enumeration is now
    implemented, but the frozen repair also needs honest reuse of current
    source-verified blackboard premises. Design bounded revision-pinned premise
    references that distinguish a derived conclusion from direct source
    verification and let changed-premise dependents be enumerated without the
    host making semantic authority decisions.
-2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+3. **Ordinary retrieval snapshots.** Root projection and affected-source pages
+   have transaction-consistent snapshots. Audit and, where necessary, give
+   ordinary blackboard and context-map queries the same consistency guarantee
+   before relying on them during concurrent refresh or mutation.
+4. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
    a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
-3. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+5. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
-4. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+6. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
 
@@ -494,12 +540,11 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. Design the smallest honest revision-pinned dependency
-contract for derived knowledge. Falsify it first with the changed-amendment case
-and an unchanged-source premise: the changed premise must enumerate the derived
-decision as affected, while a semantically independent entry must remain out of
-scope; reuse of the unchanged premise must not be relabelled as direct source
-verification. Keep host behavior mechanical and let the model decide whether to
-revise, supersede, retire, or retain each affected conclusion. Only after that
-contract and its deterministic tool path survive review should a small Luna
-replay test whether the repair trajectory actually becomes shorter.
+Do not rerun the model yet. First close the smaller authority invariant:
+`userConfirmed` must be issued only from an exact host-observed user action and
+must never be self-awarded by a model or generic caller. Falsify both creation
+and revision paths and preserve legitimate user instructions. Then design the
+smallest honest revision-pinned dependency contract for derived knowledge and
+test it with the changed-amendment case plus an unchanged-source premise. Only
+after those deterministic contracts survive review should a small Luna replay
+test whether the repair trajectory actually becomes shorter.

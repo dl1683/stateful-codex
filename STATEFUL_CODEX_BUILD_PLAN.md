@@ -1131,11 +1131,14 @@ is a better longitudinal work trajectory.
   q06-q10. Any default feature that adds context or requests therefore needs a
   concrete displacement theory: what reread, model request, or lost conclusion
   will it eliminate?
-- Forty of 81 later evidence reads overlapped an earlier read, but promoted
-  findings covered only part of that repeated evidence. This separates two
-  problems: capture enough material understanding from completed work, then
-  make that understanding usable without pretending every repeated range is
-  semantically redundant.
+- Corrected replay telemetry found 178 completed exact reads: 143 new source
+  fingerprint/range identities, 22 repeats from prior turns, and 13 duplicates
+  within the current turn. It also kept 2 failed and 7 unresolved syntactic
+  attempts separate; 6 attempts lacked a concrete identity. These counts show
+  where exact rereading occurred, not whether a repeat was unnecessary. They
+  separate two problems: capture enough material understanding from completed
+  work, then make that understanding usable without treating every repeated
+  range as semantically redundant.
 - The q06 reset mismatch was already present but was not used. This is an active
   retrieval and decision-salience failure, not a missing-source failure.
 - The q10 routed-result fact was absent from state and undiscoverable through the
