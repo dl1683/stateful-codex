@@ -187,6 +187,78 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
 }
 
 #[tokio::test]
+async fn incomplete_refresh_health_is_visible_in_the_next_model_request() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(project_root.path().join("README.md"), "# Indexed source\n")?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Incomplete refresh project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "incomplete-refresh-project".to_string(),
+            },
+        })
+        .await?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    let sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    let _hierarchy = HierarchyStore::open(&sqlite).await?;
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.home().join("project_intelligence_1.sqlite"))
+        .await?;
+    sqlx::query(
+        "UPDATE project_index_refresh_status
+         SET inventory_complete = 0, files_skipped = 1, truncated = 1
+         WHERE project_id = ?",
+    )
+    .bind(&created.project.id)
+    .execute(&pool)
+    .await?;
+    pool.close().await;
+
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+    run_turn(&mut server, &started.thread.id).await?;
+    let requests = responses.received_requests().await.unwrap_or_default();
+    let body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("model request should be recorded")
+        .body_json::<serde_json::Value>()?
+        .to_string();
+
+    assert!(body.contains("inventoryComplete=false"));
+    assert!(body.contains("filesSkipped=1"));
+    assert!(body.contains("Do not infer that an unindexed file is absent"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn unchecked_user_confirmed_evidence_replaces_the_current_packet() -> Result<()> {
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
@@ -833,6 +905,8 @@ async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<
             .function_call_output_text("refresh-call")
             .expect("refresh output should be text"),
     )?;
+    assert_eq!(output["inventoryComplete"], true);
+    assert_eq!(output["regionCoverageComplete"], true);
     assert_eq!(output["filesIndexed"], 2);
     assert_eq!(output["regionsIndexed"], 2);
     assert!(output["scanDurationMs"].as_u64().is_some());

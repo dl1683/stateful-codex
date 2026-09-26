@@ -71,6 +71,8 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
         .await?;
     assert_eq!(refreshed.files_indexed, 1);
     assert_eq!(refreshed.missing_files, 0);
+    assert!(refreshed.inventory_complete);
+    assert!(refreshed.region_coverage_complete);
 
     let status: ProjectIntelligenceStatusResponse = server
         .request(|request_id| ClientRequest::ProjectIntelligenceStatus {
@@ -89,6 +91,17 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
     assert_eq!(status.context_map_entry_count, 2);
     assert_eq!(status.blackboard_entry_count, 0);
     assert_eq!(status.promoted_entry_count, 0);
+    let last_refresh = status
+        .last_refresh
+        .expect("full refresh health should be returned");
+    assert!(last_refresh.inventory_complete);
+    assert!(last_refresh.region_coverage_complete);
+    assert_eq!(last_refresh.files_indexed, 1);
+    assert_eq!(last_refresh.regions_indexed, 1);
+    assert_eq!(last_refresh.files_skipped, 0);
+    assert_eq!(last_refresh.missing_files, 0);
+    assert!(!last_refresh.truncated);
+    assert!(last_refresh.completed_at > 0);
     assert!(status.updated_at.is_some());
 
     let first_tree_page: ProjectIntelligenceTreeResponse = server

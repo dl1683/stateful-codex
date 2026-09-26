@@ -290,6 +290,8 @@ async fn context_map_refresh_indexes_changes_and_marks_missing_sources() -> Resu
     assert_eq!(
         stable_refreshed,
         ContextMapRefreshResponse {
+            inventory_complete: true,
+            region_coverage_complete: true,
             files_indexed: 1,
             regions_indexed: 1,
             files_skipped: 0,

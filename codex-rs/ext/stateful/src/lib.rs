@@ -26,6 +26,7 @@ use codex_extension_api::ToolContributor;
 use codex_extension_api::ToolExecutor;
 use codex_extension_api::WorldStateContributionInput;
 use codex_extension_api::WorldStateSectionContribution;
+use codex_project_intelligence::ProjectRefreshStatus;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
@@ -134,8 +135,10 @@ impl ContextContributor for StatefulExtension {
             {
                 Ok(Some(project)) => {
                     let root_blackboard = self.root_blackboard(&project, input.turn_store).await;
+                    let last_refresh = self.project_refresh_status(&project.id).await;
                     ProjectIntelligenceStatus::Available {
                         project: Box::new(project),
+                        last_refresh,
                         root_blackboard: Box::new(root_blackboard),
                     }
                 }
@@ -169,6 +172,24 @@ impl ContextContributor for StatefulExtension {
 }
 
 impl StatefulExtension {
+    async fn project_refresh_status(&self, project_id: &str) -> Option<ProjectRefreshStatus> {
+        let services = self.services.as_ref()?;
+        let hierarchy = match services.hierarchy().await {
+            Ok(hierarchy) => hierarchy,
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to open Stateful hierarchy status");
+                return None;
+            }
+        };
+        match hierarchy.project_intelligence_status(project_id).await {
+            Ok(status) => status.last_refresh,
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to load Stateful refresh health");
+                None
+            }
+        }
+    }
+
     async fn project_outcomes(&self, project_id: &str) -> Option<ProjectOutcomesStatus> {
         const MAX_OUTCOMES: usize = 5;
 

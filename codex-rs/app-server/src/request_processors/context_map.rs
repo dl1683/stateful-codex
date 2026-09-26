@@ -86,6 +86,8 @@ impl ContextMapRequestProcessor {
             .map_err(context_map_refresh_error)?;
         Ok(Some(
             ContextMapRefreshResponse {
+                inventory_complete: report.inventory_complete,
+                region_coverage_complete: report.region_coverage_complete,
                 files_indexed: report.files_indexed,
                 regions_indexed: report.regions_indexed,
                 files_skipped: report.files_skipped,

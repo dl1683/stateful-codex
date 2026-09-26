@@ -18313,6 +18313,66 @@
         ],
         "type": "string"
       },
+      "ProjectIntelligenceRefreshStatus": {
+        "properties": {
+          "completedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "filesIndexed": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "filesSkipped": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "inventoryComplete": {
+            "type": "boolean"
+          },
+          "missingFiles": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "publicationDurationMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "regionCoverageComplete": {
+            "type": "boolean"
+          },
+          "regionsIndexed": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "scanDurationMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "completedAt",
+          "filesIndexed",
+          "filesSkipped",
+          "inventoryComplete",
+          "missingFiles",
+          "publicationDurationMs",
+          "regionCoverageComplete",
+          "regionsIndexed",
+          "scanDurationMs",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "ProjectRoot": {
         "properties": {
           "path": {

@@ -34,6 +34,8 @@ pub struct ContextMapRefreshParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ContextMapRefreshResponse {
+    pub inventory_complete: bool,
+    pub region_coverage_complete: bool,
     #[ts(type = "number")]
     pub files_indexed: u64,
     #[ts(type = "number")]

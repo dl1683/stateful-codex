@@ -429,6 +429,7 @@ export type { ProjectChangedNotification } from "./ProjectChangedNotification";
 export type { ProjectIntelligenceNode } from "./ProjectIntelligenceNode";
 export type { ProjectIntelligenceNodeKind } from "./ProjectIntelligenceNodeKind";
 export type { ProjectIntelligenceNodeLifecycle } from "./ProjectIntelligenceNodeLifecycle";
+export type { ProjectIntelligenceRefreshStatus } from "./ProjectIntelligenceRefreshStatus";
 export type { ProjectRoot } from "./ProjectRoot";
 export type { ProjectSortKey } from "./ProjectSortKey";
 export type { QueuedSubmission } from "./QueuedSubmission";

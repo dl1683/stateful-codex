@@ -64,9 +64,22 @@ function renderIntelligence(state) {
   return panel(
     "Project intelligence",
     status
-      ? `<div class="metrics"><div><strong>${status.blackboardEntryCount}</strong><span>understandings</span></div><div><strong>${status.contextMapEntryCount}</strong><span>source routes</span></div><div><strong>${status.fileCount}</strong><span>files mapped</span></div><div><strong>${status.missingSourceCount}</strong><span>missing sources</span></div></div><p class="microcopy">Knowledge revision ${status.revision}. Root-promoted: ${status.promotedEntryCount}.</p>`
+      ? `<div class="metrics"><div><strong>${status.blackboardEntryCount}</strong><span>understandings</span></div><div><strong>${status.contextMapEntryCount}</strong><span>source routes</span></div><div><strong>${status.fileCount}</strong><span>files mapped</span></div><div><strong>${status.missingSourceCount}</strong><span>missing sources</span></div></div>${renderRefreshHealth(status.lastRefresh)}<p class="microcopy">Knowledge revision ${status.revision}. Root-promoted: ${status.promotedEntryCount}.</p>`
       : empty("Project intelligence has not been initialized."),
   );
+}
+
+function renderRefreshHealth(refresh) {
+  if (!refresh) {
+    return `<p class="banner">No completed full source-map refresh is recorded. File inventory and region coverage are not yet known to be complete.</p>`;
+  }
+  if (!refresh.inventoryComplete) {
+    return `<p class="banner">File inventory incomplete · ${refresh.filesSkipped} skipped · ${refresh.filesIndexed} indexed. Startup will retry; unindexed files must not be treated as absent.</p>`;
+  }
+  if (!refresh.regionCoverageComplete) {
+    return `<p class="banner">File inventory complete, but searchable region coverage is partial. Exact source reads may still be required.</p>`;
+  }
+  return `<p class="microcopy">Last full refresh completed: ${refresh.filesIndexed} files and ${refresh.regionsIndexed} searchable regions.</p>`;
 }
 
 function renderHierarchy(state) {

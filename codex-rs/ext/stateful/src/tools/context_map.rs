@@ -261,6 +261,8 @@ impl ContextMapRefreshTool {
             if !fits_response(
                 &json!({
                     "projectId": self.project_id,
+                    "inventoryComplete": report.inventory_complete,
+                    "regionCoverageComplete": report.region_coverage_complete,
                     "filesIndexed": report.files_indexed,
                     "regionsIndexed": report.regions_indexed,
                     "filesSkipped": report.files_skipped,
@@ -281,6 +283,8 @@ impl ContextMapRefreshTool {
         }
         Ok(Box::new(JsonToolOutput::new(json!({
             "projectId": self.project_id,
+            "inventoryComplete": report.inventory_complete,
+            "regionCoverageComplete": report.region_coverage_complete,
             "filesIndexed": report.files_indexed,
             "regionsIndexed": report.regions_indexed,
             "filesSkipped": report.files_skipped,

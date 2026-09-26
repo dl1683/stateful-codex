@@ -13,6 +13,7 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ProjectIntelligenceNode;
 use codex_app_server_protocol::ProjectIntelligenceNodeKind;
 use codex_app_server_protocol::ProjectIntelligenceNodeLifecycle;
+use codex_app_server_protocol::ProjectIntelligenceRefreshStatus;
 use codex_app_server_protocol::ProjectIntelligenceStatusParams;
 use codex_app_server_protocol::ProjectIntelligenceStatusResponse;
 use codex_app_server_protocol::ProjectIntelligenceTreeParams;
@@ -99,6 +100,20 @@ impl ProjectIntelligenceRequestProcessor {
                 context_map_entry_count: status.context_map_entry_count,
                 blackboard_entry_count: status.blackboard_entry_count,
                 promoted_entry_count: status.promoted_entry_count,
+                last_refresh: status.last_refresh.map(|refresh| {
+                    ProjectIntelligenceRefreshStatus {
+                        inventory_complete: refresh.inventory_complete,
+                        region_coverage_complete: refresh.region_coverage_complete,
+                        files_indexed: refresh.files_indexed,
+                        regions_indexed: refresh.regions_indexed,
+                        files_skipped: refresh.files_skipped,
+                        missing_files: refresh.missing_files,
+                        truncated: refresh.truncated,
+                        scan_duration_ms: refresh.scan_duration_ms,
+                        publication_duration_ms: refresh.publication_duration_ms,
+                        completed_at: refresh.completed_at_ms.div_euclid(/*rhs*/ 1000),
+                    }
+                }),
                 updated_at: status
                     .updated_at_ms
                     .map(|timestamp| timestamp.div_euclid(/*rhs*/ 1000)),

@@ -1,6 +1,7 @@
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
+use codex_project_intelligence::ProjectRefreshStatus;
 use codex_thread_store::StoredProject;
 use serde_json::Map;
 use serde_json::Value;
@@ -22,6 +23,7 @@ const MAX_PROJECT_ROOT_BYTES: usize = 4 * 1024;
 pub(super) enum ProjectIntelligenceStatus {
     Available {
         project: Box<StoredProject>,
+        last_refresh: Option<ProjectRefreshStatus>,
         root_blackboard: Box<RootBlackboardStatus>,
     },
     Missing {
@@ -46,6 +48,7 @@ impl ProjectIntelligenceStatus {
         match self {
             Self::Available {
                 project,
+                last_refresh,
                 root_blackboard,
             } => {
                 hasher.update(b"available\0");
@@ -55,6 +58,7 @@ impl ProjectIntelligenceStatus {
                     hash_component(&mut hasher, &root.path);
                 }
                 hasher.update(project.updated_at_ms.to_be_bytes());
+                hash_refresh_status(&mut hasher, last_refresh.as_ref());
                 root_blackboard.update_fingerprint(&mut hasher);
             }
             Self::Missing { project_id } => {
@@ -107,6 +111,7 @@ impl ProjectIntelligenceStatus {
         match self {
             Self::Available {
                 project,
+                last_refresh,
                 root_blackboard,
             } => {
                 append_field(&mut body, "Project name", &project.name);
@@ -133,6 +138,7 @@ impl ProjectIntelligenceStatus {
                         &format!("... {omitted} additional roots omitted"),
                     );
                 }
+                render_refresh_status(&mut body, last_refresh.as_ref());
                 render_root_blackboard(&mut body, root_blackboard);
             }
             Self::Missing { .. } => append_line(
@@ -145,6 +151,60 @@ impl ProjectIntelligenceStatus {
             ),
         }
         body
+    }
+}
+
+fn hash_refresh_status(hasher: &mut Sha256, refresh: Option<&ProjectRefreshStatus>) {
+    let Some(refresh) = refresh else {
+        hasher.update(b"no-refresh\0");
+        return;
+    };
+    hasher.update(b"refresh\0");
+    hasher.update([u8::from(refresh.inventory_complete)]);
+    hasher.update([u8::from(refresh.region_coverage_complete)]);
+    for count in [
+        refresh.files_indexed,
+        refresh.regions_indexed,
+        refresh.files_skipped,
+        refresh.missing_files,
+    ] {
+        hasher.update(count.to_be_bytes());
+    }
+    hasher.update([u8::from(refresh.truncated)]);
+}
+
+fn render_refresh_status(output: &mut String, refresh: Option<&ProjectRefreshStatus>) {
+    let Some(refresh) = refresh else {
+        append_line(
+            output,
+            "Source-map refresh health: no completed full refresh is recorded. Do not assume the file inventory or searchable region coverage is complete.",
+        );
+        return;
+    };
+    append_line(
+        output,
+        &format!(
+            "Source-map refresh health: inventoryComplete={} regionCoverageComplete={} filesIndexed={} regionsIndexed={} filesSkipped={} missingFiles={} truncated={}.",
+            refresh.inventory_complete,
+            refresh.region_coverage_complete,
+            refresh.files_indexed,
+            refresh.regions_indexed,
+            refresh.files_skipped,
+            refresh.missing_files,
+            refresh.truncated,
+        ),
+    );
+    if !refresh.inventory_complete {
+        append_line(
+            output,
+            "Warning: the last full refresh did not complete the file inventory. Do not infer that an unindexed file is absent; refresh before relying on corpus completeness.",
+        );
+    }
+    if !refresh.region_coverage_complete {
+        append_line(
+            output,
+            "Warning: the file inventory completed, but at least one indexed file has only partial searchable region coverage. Use an exact source read when omitted regions could matter.",
+        );
     }
 }
 

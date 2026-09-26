@@ -29,6 +29,13 @@ export function workspaceFixture() {
       fileCount: 6,
       missingSourceCount: 1,
       promotedEntryCount: 3,
+      lastRefresh: {
+        inventoryComplete: true,
+        regionCoverageComplete: true,
+        filesIndexed: 6,
+        regionsIndexed: 18,
+        filesSkipped: 0,
+      },
     },
     hierarchy: [
       node("node-project", null, "project", ""),

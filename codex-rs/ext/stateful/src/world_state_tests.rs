@@ -2,6 +2,7 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::PromptCacheAffinity;
+use codex_project_intelligence::ProjectRefreshStatus;
 use codex_project_intelligence::RootBlackboardProjection;
 use codex_thread_store::StoredProject;
 use codex_thread_store::StoredProjectRoot;
@@ -41,6 +42,7 @@ fn available_at_revision(
     let project_id = project.id.clone();
     ProjectIntelligenceStatus::Available {
         project: Box::new(project),
+        last_refresh: None,
         root_blackboard: Box::new(RootBlackboardStatus::Available(ResolvedRootBlackboard {
             projection: RootBlackboardProjection {
                 project_id,
@@ -53,6 +55,45 @@ fn available_at_revision(
             evidence_audit: None,
         })),
     }
+}
+
+#[test]
+fn incomplete_refresh_health_is_visible_and_changes_project_context() {
+    let base_project = project("Research", Vec::new());
+    let previous = project_world_state_section(available(base_project.clone()));
+    let mut current = available(base_project);
+    let ProjectIntelligenceStatus::Available { last_refresh, .. } = &mut current else {
+        unreachable!("test status should be available");
+    };
+    *last_refresh = Some(ProjectRefreshStatus {
+        inventory_complete: false,
+        region_coverage_complete: true,
+        files_indexed: 3,
+        regions_indexed: 9,
+        files_skipped: 1,
+        missing_files: 0,
+        truncated: true,
+        scan_duration_ms: 12,
+        publication_duration_ms: 34,
+        completed_at_ms: 56,
+    });
+    let current = project_world_state_section(current);
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("changed refresh health must be visible");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project>", "</stateful_project>")
+    );
+    assert!(rendered.body().contains("inventoryComplete=false"));
+    assert!(rendered.body().contains("filesSkipped=1"));
+    assert!(
+        rendered
+            .body()
+            .contains("Do not infer that an unindexed file is absent")
+    );
 }
 
 #[test]

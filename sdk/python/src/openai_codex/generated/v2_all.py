@@ -3746,6 +3746,22 @@ class ProjectIntelligenceNodeLifecycle(Enum):
     replaced = "replaced"
 
 
+class ProjectIntelligenceRefreshStatus(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    completed_at: Annotated[int, Field(alias="completedAt")]
+    files_indexed: Annotated[int, Field(alias="filesIndexed", ge=0)]
+    files_skipped: Annotated[int, Field(alias="filesSkipped", ge=0)]
+    inventory_complete: Annotated[bool, Field(alias="inventoryComplete")]
+    missing_files: Annotated[int, Field(alias="missingFiles", ge=0)]
+    publication_duration_ms: Annotated[int, Field(alias="publicationDurationMs", ge=0)]
+    region_coverage_complete: Annotated[bool, Field(alias="regionCoverageComplete")]
+    regions_indexed: Annotated[int, Field(alias="regionsIndexed", ge=0)]
+    scan_duration_ms: Annotated[int, Field(alias="scanDurationMs", ge=0)]
+    truncated: bool
+
+
 class ProjectRoot(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,

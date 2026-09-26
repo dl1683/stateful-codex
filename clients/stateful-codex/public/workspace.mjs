@@ -1,4 +1,5 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
+import { needsProjectRefresh } from "./refresh-policy.mjs";
 import { renderWorkspace } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
@@ -56,6 +57,13 @@ async function ensureRun() {
   state.project = projectResponse.project;
   state.status = status;
   state.recovery = runResponse.recovery;
+  if (needsProjectRefresh(status)) {
+    state.busyAction = status.initialized
+      ? "Retrying the incomplete project index"
+      : "Indexing the selected project";
+    render();
+    await rpc("contextMap/refresh", { projectId });
+  }
   if (runResponse.run) {
     state.run = runResponse.run;
     if (
@@ -82,11 +90,6 @@ async function ensureRun() {
       await sendInitialTurn();
     }
     return;
-  }
-  if (!status.initialized) {
-    state.busyAction = "Indexing the selected project";
-    render();
-    await rpc("contextMap/refresh", { projectId });
   }
   const idempotencyKey =
     sessionStorage.getItem("stateful-run-key") ?? crypto.randomUUID();

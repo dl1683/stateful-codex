@@ -38,6 +38,17 @@ test("already user-confirmed understanding cannot be confirmed again", () => {
   assert.match(actual, /badge userConfirmed/);
 });
 
+test("workspace warns when the durable file inventory is incomplete", () => {
+  const state = workspaceFixture();
+  state.status.lastRefresh.inventoryComplete = false;
+  state.status.lastRefresh.filesSkipped = 2;
+
+  const actual = renderWorkspace(state);
+
+  assert.match(actual, /File inventory incomplete · 2 skipped/);
+  assert.match(actual, /unindexed files must not be treated as absent/);
+});
+
 test("terminal workspace preserves the record without accepting dead controls", () => {
   const state = workspaceFixture();
   state.run.status = "completed";

@@ -36,8 +36,32 @@ pub struct ProjectIntelligenceStatusResponse {
     pub blackboard_entry_count: u64,
     #[ts(type = "number")]
     pub promoted_entry_count: u64,
+    pub last_refresh: Option<ProjectIntelligenceRefreshStatus>,
     #[ts(type = "number | null")]
     pub updated_at: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ProjectIntelligenceRefreshStatus {
+    pub inventory_complete: bool,
+    pub region_coverage_complete: bool,
+    #[ts(type = "number")]
+    pub files_indexed: u64,
+    #[ts(type = "number")]
+    pub regions_indexed: u64,
+    #[ts(type = "number")]
+    pub files_skipped: u64,
+    #[ts(type = "number")]
+    pub missing_files: u64,
+    pub truncated: bool,
+    #[ts(type = "number")]
+    pub scan_duration_ms: u64,
+    #[ts(type = "number")]
+    pub publication_duration_ms: u64,
+    #[ts(type = "number")]
+    pub completed_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
