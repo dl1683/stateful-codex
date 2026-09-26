@@ -1419,3 +1419,22 @@ configured skip, and 44 browser tests passed; scoped Clippy and formatting
 passed. The remaining refresh-health gate is publication ordering: a refresh
 that started earlier must not publish stale results after a newer generation
 has completed.
+
+Commit `3578c5e5a0` closes that ordering gate for competing full refreshes. A
+full refresh claims a durable per-project generation before scanning. Every
+subsequent structural, file, missing-file, and status publication verifies that
+generation inside the same SQLite write transaction as its mutation. Because a
+new claim also takes the SQLite write lock, an older publisher can finish only
+a transaction already ahead of the newer claim; after the claim, every
+remaining old-generation mutation is rejected. The newer complete scan then
+reconciles any earlier old-generation file transaction normally.
+
+The deterministic regression uses independently opened stores: the older
+refresh claims and scans, the source changes, the newer refresh claims and
+completes, and the older publisher resumes. It receives the explicit
+superseded-refresh error; the newer status and route remain byte-for-byte
+unchanged, and the old fact is absent. All 43 project-intelligence tests pass,
+followed by scoped Clippy and formatting. Targeted single-file refresh retains
+its existing per-file atomic behavior and does not participate in the
+full-refresh generation policy; broader live-edit coordination remains part of
+issue #16 rather than being hidden inside this gate.

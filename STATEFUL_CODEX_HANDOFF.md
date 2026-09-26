@@ -40,8 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Latest implementation head before this handoff update: `8884f86384`
-  (`test(stateful): prove refresh retry recovery`).
+- Latest implementation head before this handoff update: `3578c5e5a0`
+  (`fix(stateful): fence stale full refresh publishers`).
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -783,22 +783,35 @@ the four affected app-server integrations passed. Scoped Clippy and formatting
 passed; the pre-existing root-blackboard large-enum warning remains. No full
 Rust suite was run.
 
+Commit `3578c5e5a0` completes the full-refresh publication-ordering gate. Each
+full refresh durably claims a per-project generation before scanning. Project,
+root, directory, file, missing-file, and refresh-status mutations all verify
+that generation under the same SQLite write transaction as the mutation. A
+later claim therefore fences every remaining write from an older scan without
+turning the entire index build into one large transaction or weakening the
+existing per-file rollback boundary.
+
+The regression opens independent stores, pauses the older generation after its
+scan, changes the source, completes a newer refresh, and resumes the older
+publisher. The older call is rejected as superseded; the newer status remains
+unchanged, the newer fact remains queryable, and the older fact is absent. All
+43 project-intelligence tests passed, followed by scoped Clippy and formatting.
+Targeted single-file refresh remains outside this full-refresh generation
+policy and retains its per-file atomic transaction; general live-edit
+coordination is still tracked by issue #16.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Refresh publication ordering.** Durable health, model/UI visibility,
-   startup retry, and retry recovery are complete. Reject an older refresh
-   publisher after a newer generation completes without introducing a broad
-   coordinator or weakening per-file atomic publication.
-2. **Selective completion capture.** Prove whether a material conclusion can
+1. **Selective completion capture.** Prove whether a material conclusion can
    disappear after the five-outcome window when completion recorded no reusable
    blackboard learning. Do not solve this by enlarging the always-loaded packet.
-3. **Real index-cost attribution.** The next suitable repository refresh must
+2. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
    from the small local fixture.
-4. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
+3. **Live per-run attribution.** Add issue #24 measurements for bytes hashed,
    unique sources, route use, knowledge reuse, rereads, model requests, tokens,
    tool output, and wall time before another matched longitudinal rerun.
 
@@ -808,10 +821,10 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Fence refresh publication ordering. First write a deterministic concurrency
-regression in which an older refresh pauses, a newer refresh completes, and the
-older publisher is rejected without changing the newer generation or its
-health. Implement the narrowest transactional generation guard that makes that
-test pass. Then move to selective completion capture. Collect issue #19
-diagnostics only on the next suitable real refresh, and do not launch a broad
-benchmark merely to obtain the measurement.
+Move to selective completion capture. First freeze the failure in which a
+material completed-run conclusion has no reusable blackboard learning and ages
+out of the five-outcome projection. Then preserve only the smallest durable,
+provenance-bound conclusion needed by a later turn; do not enlarge the
+always-loaded outcome window or convert final prose wholesale into memory.
+Collect issue #19 diagnostics only on the next suitable real refresh, and do
+not launch a broad benchmark merely to obtain the measurement.
