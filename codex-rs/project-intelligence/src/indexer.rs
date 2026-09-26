@@ -158,7 +158,7 @@ impl ProjectIndexer {
             missing_files: 0,
             truncated: scan.truncated,
         };
-        if !report.truncated {
+        if scan.inventory_complete {
             for root_id in root_nodes.values() {
                 report.missing_files += self
                     .mark_missing_files(&project_id, root_id, &seen_files)
@@ -176,11 +176,41 @@ impl ProjectIndexer {
         let project_id = request.project_id;
         let project_root = request.project_root;
         let relative_path = request.relative_path;
+        let project_root_text = project_root.display().to_string();
+        let file_id = stable_id(
+            "file",
+            &[&project_id, &project_root_text, relative_path.as_str()],
+        )?;
         let scan_root = project_root.clone();
         let scan_path = relative_path.clone();
         let file = tokio::task::spawn_blocking(move || scan_project_file(&scan_root, &scan_path))
             .await
             .map_err(ProjectIndexerError::ScanTask)??;
+        let Some(file) = file else {
+            let existing = self
+                .hierarchy
+                .get_node(&project_id, &file_id)
+                .await?
+                .ok_or_else(|| ProjectIndexerError::SourceNotIndexed(relative_path.to_string()))?;
+            if existing.value.kind != NodeKind::File
+                || existing.value.project_root.as_deref() != Some(&project_root_text)
+                || existing.value.relative_path != relative_path
+            {
+                return Err(ProjectIndexerError::IdentityConflict(file_id.to_string()));
+            }
+            let missing_files = if existing.lifecycle == NodeLifecycle::Active {
+                self.mark_missing(&project_id, existing).await?;
+                1
+            } else {
+                0
+            };
+            return Ok(ProjectIndexReport {
+                files_indexed: 0,
+                files_skipped: 0,
+                missing_files,
+                truncated: false,
+            });
+        };
         let project_node_id = stable_id("project", &[&project_id])?;
         self.hierarchy
             .create_node(
@@ -196,7 +226,7 @@ impl ProjectIndexer {
                 },
             )
             .await?;
-        let project_root = project_root.display().to_string();
+        let project_root = project_root_text;
         let root_id = stable_id("root", &[&project_id, &project_root])?;
         self.hierarchy
             .create_node(
@@ -222,10 +252,6 @@ impl ProjectIndexer {
                 &mut directory_nodes,
             )
             .await?;
-        let file_id = stable_id(
-            "file",
-            &[&project_id, &project_root, relative_path.as_str()],
-        )?;
         self.upsert_file_node(
             &project_id,
             &file_id,
@@ -481,6 +507,8 @@ pub enum ProjectIndexerError {
     InvalidRoot,
     #[error("indexed file did not belong to a configured project root")]
     UnrecognizedRoot,
+    #[error("source is not indexed in the selected project: {0}")]
+    SourceNotIndexed(String),
     #[error("stable indexed identity conflicts with existing hierarchy: {0}")]
     IdentityConflict(String),
     #[error("project index count overflow")]

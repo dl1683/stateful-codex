@@ -173,7 +173,20 @@ impl ContextMapStore {
              FROM context_map_search AS search
              JOIN context_map_entries AS entry ON entry.rowid = search.rowid
              JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+             LEFT JOIN hierarchy_nodes AS parent
+               ON parent.id = node.parent_id AND parent.project_id = node.project_id
              WHERE context_map_search MATCH ? AND entry.project_id = ?
+               AND (
+                 node.kind = 'file'
+                 OR (
+                   node.kind = 'region'
+                   AND node.lifecycle = 'active'
+                   AND node.source_fingerprint = entry.source_fingerprint
+                   AND parent.kind = 'file'
+                   AND parent.lifecycle = 'active'
+                   AND parent.source_fingerprint = entry.source_fingerprint
+                 )
+               )
              ORDER BY bm25(context_map_search), entry.id
              LIMIT ?",
         )

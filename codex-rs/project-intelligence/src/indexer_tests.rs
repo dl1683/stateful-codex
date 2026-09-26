@@ -114,10 +114,23 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
     );
 
     fs::remove_file(source).expect("source should delete");
-    indexer
-        .refresh(request)
+    let deletion = indexer
+        .refresh_file(ProjectIndexFileRequest {
+            project_id: "project-1".to_string(),
+            project_root: root.path().to_path_buf(),
+            relative_path: ProjectRelativePath::parse("facts.md").expect("relative path"),
+        })
         .await
         .expect("deletion refresh should succeed");
+    assert_eq!(
+        deletion,
+        ProjectIndexReport {
+            files_indexed: 0,
+            files_skipped: 0,
+            missing_files: 1,
+            truncated: false,
+        }
+    );
     assert!(
         hierarchy
             .list_children("project-1", &file_id)

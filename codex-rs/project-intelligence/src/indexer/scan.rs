@@ -28,6 +28,13 @@ pub(super) struct ScanResult {
     pub(super) files: Vec<ScannedFile>,
     pub(super) files_skipped: u64,
     pub(super) truncated: bool,
+    pub(super) inventory_complete: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ScanLimits {
+    max_files: usize,
+    max_project_regions: usize,
 }
 
 pub(super) struct ScannedFile {
@@ -41,9 +48,23 @@ pub(super) struct ScannedFile {
 }
 
 pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexerError> {
+    scan_roots_with_limits(
+        roots,
+        ScanLimits {
+            max_files: MAX_FILES,
+            max_project_regions: MAX_PROJECT_REGIONS,
+        },
+    )
+}
+
+fn scan_roots_with_limits(
+    roots: &[PathBuf],
+    limits: ScanLimits,
+) -> Result<ScanResult, ProjectIndexerError> {
     let mut files = Vec::new();
     let mut files_skipped = 0_u64;
     let mut truncated = false;
+    let mut inventory_complete = true;
     let mut regions_scanned = 0_usize;
     for root in roots {
         let mut builder = WalkBuilder::new(root);
@@ -63,55 +84,69 @@ pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexer
                 Ok(entry) => entry,
                 Err(_) => {
                     files_skipped = files_skipped.saturating_add(1);
+                    truncated = true;
+                    inventory_complete = false;
                     continue;
                 }
             };
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
             }
-            if files.len() == MAX_FILES {
+            if files.len() == limits.max_files {
                 truncated = true;
-                break;
+                inventory_complete = false;
+                return Ok(ScanResult {
+                    files,
+                    files_skipped,
+                    truncated,
+                    inventory_complete,
+                });
             }
             match scan_file(root, entry.path()) {
-                Ok(file)
-                    if regions_scanned.saturating_add(file.regions.len())
-                        <= MAX_PROJECT_REGIONS =>
-                {
+                Ok(mut file) => {
+                    let remaining_regions =
+                        limits.max_project_regions.saturating_sub(regions_scanned);
+                    if file.regions.len() > remaining_regions {
+                        file.regions.truncate(remaining_regions);
+                        file.coverage = ContextMapCoverage::Partial;
+                        truncated = true;
+                    }
                     regions_scanned += file.regions.len();
                     files.push(file);
                 }
-                Ok(_) => {
+                Err(_) => {
+                    files_skipped = files_skipped.saturating_add(1);
                     truncated = true;
-                    break;
+                    inventory_complete = false;
                 }
-                Err(_) => files_skipped = files_skipped.saturating_add(1),
             }
-        }
-        if truncated {
-            break;
         }
     }
     Ok(ScanResult {
         files,
         files_skipped,
         truncated,
+        inventory_complete,
     })
 }
 
 pub(super) fn scan_project_file(
     root: &Path,
     relative_path: &ProjectRelativePath,
-) -> Result<ScannedFile, ProjectIndexerError> {
+) -> Result<Option<ScannedFile>, ProjectIndexerError> {
     let canonical_root = std::fs::canonicalize(root)?;
     let path = root.join(relative_path.as_str());
-    let canonical_path = std::fs::canonicalize(&path)?;
+    let canonical_path = match std::fs::canonicalize(&path) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
     if !canonical_path.starts_with(&canonical_root)
         || !std::fs::metadata(&canonical_path)?.is_file()
     {
         return Err(ProjectIndexerError::InvalidRoot);
     }
-    scan_file(root, &path)
+    scan_file(root, &path).map(Some)
 }
 
 fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerError> {

@@ -29,3 +29,39 @@ fn coverage_describes_searchable_content_instead_of_bytes_scanned() {
     assert_eq!(region.coverage, ContextMapCoverage::Complete);
     assert_eq!(truncated.coverage, ContextMapCoverage::Partial);
 }
+
+#[test]
+fn project_region_budget_preserves_the_complete_file_inventory() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let content = (1..=130)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(temp_dir.path().join("a.md"), &content).expect("first fixture should write");
+    fs::write(temp_dir.path().join("b.md"), content).expect("second fixture should write");
+
+    let scan = scan_roots_with_limits(
+        &[temp_dir.path().to_path_buf()],
+        ScanLimits {
+            max_files: 10,
+            max_project_regions: 1,
+        },
+    )
+    .expect("project should scan");
+
+    assert_eq!(scan.files.len(), 2);
+    assert_eq!(
+        scan.files
+            .iter()
+            .map(|file| file.regions.len())
+            .sum::<usize>(),
+        1
+    );
+    assert!(
+        scan.files
+            .iter()
+            .all(|file| file.coverage == ContextMapCoverage::Partial)
+    );
+    assert!(scan.truncated);
+    assert!(scan.inventory_complete);
+}

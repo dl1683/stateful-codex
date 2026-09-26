@@ -331,6 +331,32 @@ async fn query_prefers_bounded_regions_without_one_source_crowding_results() {
             .count(),
         1
     );
+
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &file.id,
+            HierarchySourceUpdate {
+                expected_revision: file.revision,
+                lifecycle: NodeLifecycle::Active,
+                source_fingerprint: Some(fingerprint("sha256:changed")),
+            },
+        )
+        .await
+        .expect("parent file should advance");
+    let hits = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "shared route".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("query should exclude prior-generation regions");
+    assert!(
+        hits.iter()
+            .filter(|hit| hit.source.relative_path.as_str() == "README.md")
+            .all(|hit| hit.source.region_anchor.is_none())
+    );
 }
 
 #[tokio::test]
