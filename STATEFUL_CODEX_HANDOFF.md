@@ -433,6 +433,23 @@ direct-citation boundary. They independently agreed that semantic dependency
 provenance should remain a separate next layer rather than being inferred by the
 host.
 
+The same review exposed a defect in longitudinal evidence-read measurement,
+now fixed in `649a89e116` and closed as GitHub issue #18. The evaluator pairs
+tool results with their originating calls and normalizes successful reads to a
+source fingerprint plus exact returned range. Guarded routes remain attributable
+from their route identity when output is unavailable; distinct ranges in one
+file stay distinct; explicit and guarded forms for the same resolved read share
+one identity; and genuinely unresolved calls are reported separately instead of
+collapsing into a null path. Dynamic code-mode calls are reconciled with every
+returned evidence object, so one syntactic invocation that performs multiple
+reads is no longer undercounted. All 41 Stateful client tests passed. A read-only
+replay of the protected ten-turn SC-EVAL-032 rollout produced summed per-turn
+counts of 214 executed reads, 195 unique exact identities, 13 exact repeats, and
+6 unattributed calls. That difference means the earlier syntactic-call reread
+counts must be regenerated before reuse; no protected result was modified. This
+is a telemetry repair, not evidence that any repeat was unnecessary or that
+Stateful is cheaper.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
@@ -441,25 +458,19 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Trustworthy evaluation telemetry.** GitHub issue #18 shows that the
-   longitudinal evaluator reads only top-level path/range fields. Preferred
-   guarded `evidenceRoute` reads therefore collapse to a null identity, and
-   path-only uniqueness can also conflate distinct ranges. Fix and
-   deterministically test both input forms before making another reread, reuse,
-   or cost claim.
-2. **Derived premise provenance.** Direct source-citation enumeration is now
+1. **Derived premise provenance.** Direct source-citation enumeration is now
    implemented, but the frozen repair also needs honest reuse of current
    source-verified blackboard premises. Design bounded revision-pinned premise
    references that distinguish a derived conclusion from direct source
    verification and let changed-premise dependents be enumerated without the
    host making semantic authority decisions.
-3. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
    a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
-4. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+3. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
-5. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+4. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
 
@@ -469,12 +480,12 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. First repair issue #18 so guarded and explicit
-evidence reads produce the same concrete source/range identity, distinct ranges
-remain distinct, and unattributable reads are counted explicitly rather than
-folded together. Add a frozen evaluator fixture that proves the read totals and
-repeat classification across mixed input forms. Then design the smallest honest
-revision-pinned dependency contract for derived knowledge. Falsify that contract
-with the changed-amendment case and an unchanged-source premise before
-implementing it. Only after those gates should a small Luna replay test whether
-the repair trajectory actually becomes shorter.
+Do not rerun the model yet. Design the smallest honest revision-pinned dependency
+contract for derived knowledge. Falsify it first with the changed-amendment case
+and an unchanged-source premise: the changed premise must enumerate the derived
+decision as affected, while a semantically independent entry must remain out of
+scope; reuse of the unchanged premise must not be relabelled as direct source
+verification. Keep host behavior mechanical and let the model decide whether to
+revise, supersede, retire, or retain each affected conclusion. Only after that
+contract and its deterministic tool path survive review should a small Luna
+replay test whether the repair trajectory actually becomes shorter.
