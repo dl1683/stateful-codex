@@ -600,6 +600,31 @@ This protects the last published generation from a transient unread file; it
 does not make a genuinely deleted file distinguishable from every host-specific
 filesystem anomaly outside the scanner's error contract.
 
+The first controlled index-cost diagnostic then falsified an overly simple
+explanation for issue #19. In temporary local debug fixtures with a fixed 496
+regions, initial publication rose from roughly 277 ms at 16 files to 450 ms at
+124 files and 828 ms at 496 files; unchanged publication rose from roughly 110
+ms to 155 ms and 332 ms. A 160-file/4,960-region fixture measured about 1.26 s
+of scan work, 3.43 s of initial publication, and 1.33 s of unchanged
+publication. Current code was approximately linear in this bounded range.
+Extrapolation remains far below the protected Pramana observation of 1,537
+files, 25,096 regions, and 169–248 seconds, so the current per-region SQL loop
+alone does not explain that historical result. Source filesystem/OneDrive/AV
+behavior, database growth, environmental contention, or the older code path may
+dominate. The temporary diagnostic was removed; no indexer rewrite was made on
+an unfalsified guess.
+
+Commit `99fb9ce290` makes the next real refresh diagnostic. Project-wide and
+single-file reports now include `regionsIndexed`, `scanDurationMs`, and
+`publicationDurationMs`. The bounded model tool and experimental
+`contextMap/refresh` v2 response expose the same fields, and the tool response
+budget accounts for them. Project-intelligence passed 41/41, Stateful extension
+27/27, app-server protocol 310/310 with one skipped, and both affected public
+app-server integrations passed. Scoped Clippy and formatting passed; only the
+pre-existing root-blackboard large-enum warning remains. Issue #19 stays open
+until a real repository refresh records the phase split and index cost is
+compared with routes actually used and longitudinal savings.
+
 This closes the narrow changed-authority safety gate. It does not establish
 efficient repair, automatic semantic cleanup of every dependent claim, or
 freshness behavior at large-corpus scale.
@@ -608,13 +633,13 @@ freshness behavior at large-corpus scale.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
-   correct, but the frozen debug index is still far too slow for a product
-   claim. GitHub issue #19 records the current Pramana footprint: 25,096 regions,
-   a 107.5 MB database, and roughly 169-248 seconds of debug indexing.
-2. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
+1. **Thread-view continuity.** Repeat the now-passing compaction mechanism with
    a fresh thread attached to the same project, because threads must not be
    project-memory boundaries.
+2. **Real index-cost attribution.** The next suitable repository refresh must
+   record the new scan/publication split, database size, and used-versus-indexed
+   routes. Do not optimize the historical 169–248 second result by extrapolating
+   from the small local fixture.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
 and uncached tokens, model requests, tool-output volume, wall time, state writes
@@ -622,12 +647,11 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Do not rerun the model yet. Profile the existing publication path on small,
-controlled fixtures before changing it: separate scan/region construction from
-SQLite file/region/context-map publication, count statements or equivalent
-work per file and region, and identify the dominant scaling term behind issue
-#19. Optimize only a measured mechanism and preserve per-file atomicity,
-stable identities, and exact-region search behavior. The premise,
-retrieval-snapshot, and interrupted-refresh mechanisms are implemented; their
-combined model/cost effect remains deliberately open until a small replay uses
-them.
+Run the smallest fresh-thread continuity canary: one thread must record a
+decisive project finding and complete; a new thread attached to the same project
+must receive and use that understanding without relying on the first thread's
+history. Keep the corpus tiny, force no broad benchmark, and distinguish
+mechanical injection from demonstrated model use. Capture source reads,
+requests, tokens, and whether the decisive finding changes the second answer.
+Collect the new index phase diagnostics whenever the canary refreshes, but do
+not turn that tiny fixture into a claim about issue #19.

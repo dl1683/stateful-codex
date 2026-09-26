@@ -1232,6 +1232,23 @@ The next action is a small controlled profile of scan/region construction versus
 SQLite publication; do not optimize the 25,096-region Pramana result until the
 dominant scaling mechanism is measured.
 
+The bounded diagnostic did not justify an indexer rewrite. With 496 regions,
+initial publication measured roughly 277 ms at 16 files, 450 ms at 124 files,
+and 828 ms at 496 files; unchanged publication measured roughly 110 ms, 155 ms,
+and 332 ms. At 160 files and 4,960 regions, scan/initial/unchanged publication
+were approximately 1.26/3.43/1.33 seconds. This was linear enough that the
+historical 169–248 second Pramana result cannot be assigned to the current
+per-region SQL loop from this evidence alone.
+
+Commit `99fb9ce290` therefore adds measurement instead of speculative
+optimization. Refresh results expose indexed regions plus separate scan and
+publication milliseconds through the model tool and experimental app-server v2
+API. All focused storage, extension, protocol, and public integration checks
+passed. Leave issue #19 open until a real refresh records the new split,
+database size, and used-versus-indexed routes. Meanwhile advance the small
+fresh-thread continuity canary, which tests the central project-memory thesis
+without a large compute run.
+
 For every gate, record answer quality, repeated source ranges, input and uncached
 tokens, model requests, tool-output volume, wall time, state writes/queries, and
 whether the decisive prior conclusion was actually used. Operational failures
