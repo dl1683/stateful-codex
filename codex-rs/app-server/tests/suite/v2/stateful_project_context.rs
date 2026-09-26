@@ -442,6 +442,37 @@ async fn model_guarded_route_rejects_shifted_source_until_requeried() -> Result<
     assert_eq!(stale_route["lineRange"], json!({"start": 65, "end": 70}));
 
     std::fs::write(&source_path, format!("inserted\n{source}"))?;
+    let stale_query = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "stale-query",
+                    "context_map_query",
+                    &json!({"text": "decisive_route_fact"}).to_string(),
+                ),
+                responses::ev_completed("stale-query-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("stale-query-done", "Stale route found"),
+                responses::ev_completed("stale-query-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let stale_query_output: serde_json::Value = serde_json::from_str(
+        &stale_query
+            .function_call_output_text("stale-query")
+            .expect("stale context output should be text"),
+    )?;
+    assert_eq!(stale_query_output["data"][0]["freshness"], "stale");
+    assert_eq!(
+        stale_query_output["data"][0]["refreshInput"],
+        json!({"relativePath": "facts.md"})
+    );
+    assert!(stale_query_output["data"][0].get("evidenceRoute").is_none());
+
     let stale_read = responses::mount_sse_sequence(
         &responses_server,
         vec![

@@ -161,7 +161,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are bounded match-centered routing previews, not evidence. Pass a current evidenceRoute unchanged to evidence_read; it is bound to the returned source revision and exact range. Reuse adequate root knowledge without a confirming read. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
+            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are bounded match-centered routing previews, not evidence. Pass a current evidenceRoute unchanged to evidence_read; it is bound to the returned source revision and exact range. For a stale route, pass refreshInput unchanged to evidence_read; it refreshes and reads that changed file once. Refresh only stale decisive sources and reuse adequate current knowledge without a confirming read. If a changed large file is truncated or a prior region moved, query again after refresh for a current exact route. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -342,6 +342,16 @@ fn route_json(
         .transpose()
         .map_err(respond)?;
     let headline = bounded_headline(&hit.entry.value.description, query_text);
+    let refresh_input = (freshness == Some(ContextMapFreshness::Stale)).then(|| {
+        let mut input = serde_json::Map::from_iter([(
+            "relativePath".to_string(),
+            json!(hit.source.relative_path.to_string()),
+        )]);
+        if project.roots.len() > 1 {
+            input.insert("projectRoot".to_string(), json!(&hit.source.project_root));
+        }
+        serde_json::Value::Object(input)
+    });
     let mut source = serde_json::Map::from_iter([(
         "relativePath".to_string(),
         json!(hit.source.relative_path.to_string()),
@@ -361,6 +371,9 @@ fn route_json(
     });
     if let Some(evidence_route) = evidence_route {
         route["evidenceRoute"] = json!(evidence_route);
+    }
+    if let Some(refresh_input) = refresh_input {
+        route["refreshInput"] = refresh_input;
     }
     if let Some(knowledge) = knowledge.filter(|knowledge| knowledge.active_entries > 0) {
         route["knownKnowledge"] = json!({
