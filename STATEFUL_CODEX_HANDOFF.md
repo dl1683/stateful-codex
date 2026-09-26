@@ -40,10 +40,8 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Current pushed head: `d5b35490c6`
-  (`test(stateful): prove exact region knowledge reuse`)
-- Current routing implementation head: `e90eaed41d`
-  (`fix(stateful): keep context routes fast and diverse`)
+- Current pushed head: `f1e7002acd`
+  (`feat(stateful): center route previews on query matches`)
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -100,6 +98,12 @@ The current sequence after the original region experiment is:
      fingerprint-bound route, `evidence_read` reads that exact cell, the model
      records source-verified knowledge with the host receipt, and the same
      region query reports the linked root knowledge.
+8. `f1e7002acd feat(stateful): center route previews on query matches`
+   - Query results return a UTF-8-safe preview bounded to 240 bytes and centered
+     on the body window covering the most query terms.
+   - Filename/path matches do not hide a later matching fact in the same cell.
+   - Refresh inventory retains the stable leading summary because it has no
+     query-specific match.
 
 Focused validation before the final `just fix` and `just fmt`:
 
@@ -108,6 +112,9 @@ Focused validation before the final `just fix` and `just fmt`:
 - `just fmt`: passed.
 - Targeted `codex-app-server` region route/read/record/requery integration test:
   passed.
+- `just test -p codex-stateful-extension`: 24/24 passed after the preview
+  change; the targeted app-server test also proved a fact near the end of a
+  64-line region appears within the 240-byte model-visible preview.
 
 No full Rust suite was run; it still requires explicit user approval.
 
@@ -152,21 +159,18 @@ the query and state.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Model-visible matched preview.** Return a bounded query-centered snippet
-   or equivalent evidence explaining why a route matched. A leading excerpt can
-   still hide a fact near the end of a truthful 4 KiB cell.
-2. **Behavioral reuse.** The structural region loop now passes, but a scripted
+1. **Behavioral reuse.** The structural region loop now passes, but a scripted
    tool trajectory does not prove the model will use reported knowledge before
    rereading. Add a small decision-level canary at the model boundary.
-3. **Semantic capture and active retrieval.** Use q02 -> compaction -> q06 to
+2. **Semantic capture and active retrieval.** Use q02 -> compaction -> q06 to
    prove the reset mismatch is captured, survives, and changes the later action
    without an unjustified reread.
-4. **Changed authority.** A newer controlling source must invalidate confident
+3. **Changed authority.** A newer controlling source must invalidate confident
    reuse even if the old cited bytes remain unchanged.
-5. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
+4. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim.
-6. **Interrupted refresh.** Add a deterministic canary for transient scan/read
+5. **Interrupted refresh.** Add a deterministic canary for transient scan/read
    failure so reconciliation cannot silently mark an unread file missing.
 
 For every mechanism gate, record answer quality, repeated source ranges, input
@@ -175,9 +179,7 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Add the bounded match-centered preview at the model-visible context-map boundary
-and measure its context cost. Then use the proven structural region loop in a
-small decision-level canary: when `knownKnowledge` covers the route, the model
-must query/use that knowledge before choosing any reread. Move directly from
-that canary to semantic capture and q02 -> compaction -> q06 rather than
-continuing to tune FTS against q10.
+Use the proven structural region loop in a small decision-level canary: when
+`knownKnowledge` covers the route, the model must query/use that knowledge
+before choosing any reread. Move directly from that canary to semantic capture
+and q02 -> compaction -> q06 rather than continuing to tune FTS against q10.
