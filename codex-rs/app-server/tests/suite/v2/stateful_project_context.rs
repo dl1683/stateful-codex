@@ -31,7 +31,9 @@ use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::ContextMapCoverage;
 use codex_project_intelligence::ContextMapEntryId;
+use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::ContextMapStore;
+use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::NewBlackboardEntry;
@@ -627,14 +629,17 @@ async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<
 }
 
 #[tokio::test]
-async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
+async fn model_can_record_and_retrieve_learning_from_an_exact_region_route() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
-    std::fs::write(
-        project_root.path().join("decision.md"),
-        "# Decision\nDurable project state should route back to this exact source.\nThe exact source version must remain bound to the learned conclusion.\n",
-    )?;
+    let mut source = (1..=64)
+        .map(|line| format!("Background line {line}.\n"))
+        .collect::<String>();
+    source.push_str(
+        "Durable project state should route back to this exact region.\nThe exact source version must remain bound to the learned conclusion.\n",
+    );
+    std::fs::write(project_root.path().join("decision.md"), source)?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -668,13 +673,16 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     let context_store =
         ContextMapStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs())).await?;
     let route = context_store
-        .file_hits_for_path(
-            &created.project.id,
-            &ProjectRelativePath::parse("decision.md")?,
-        )
+        .query(ContextMapQuery {
+            project_id: created.project.id.clone(),
+            text: "durable project state exact region".to_string(),
+            max_results: 10,
+        })
         .await?
-        .pop()
-        .expect("refreshed source route should exist");
+        .into_iter()
+        .find(|hit| hit.source.region_anchor.is_some())
+        .expect("refreshed region route should exist");
+    let evidence_route = EvidenceRoute::from_hit(&route)?;
     let evidence_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -682,11 +690,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
                 responses::ev_function_call(
                     "evidence-call",
                     "evidence_read",
-                    &json!({
-                        "relativePath": "decision.md",
-                        "lineRange": {"start": 2, "end": 3}
-                    })
-                    .to_string(),
+                    &json!({"evidenceRoute": evidence_route}).to_string(),
                 ),
                 responses::ev_completed("evidence-response"),
             ]),
@@ -709,10 +713,20 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
             .function_call_output_text("evidence-call")
             .expect("evidence output should be text"),
     )?;
+    assert_eq!(
+        evidence_output["contextMapEntryId"],
+        route.entry.id.to_string()
+    );
     let read_receipt_id = evidence_output["blackboardEvidence"]["readReceiptId"]
         .as_str()
         .expect("complete evidence read should return a receipt")
         .to_string();
+    let first_line = evidence_output["firstLine"]
+        .as_u64()
+        .expect("region read should have a first line");
+    let last_line = evidence_output["lastLine"]
+        .as_u64()
+        .expect("region read should have a last line");
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -771,7 +785,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
                 responses::ev_function_call(
                     "context-query-call",
                     "context_map_query",
-                    &json!({"text": "decision"}).to_string(),
+                    &json!({"text": "durable project state exact region"}).to_string(),
                 ),
                 responses::ev_completed("context-query-response"),
             ]),
@@ -800,7 +814,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
     assert_eq!(batch_output["relationsRecorded"], 1);
     assert_eq!(batch_output["relationsFailed"], 0);
     assert_eq!(batch_output["relationResults"][0]["recorded"], true);
-    assert!(requests[1].body_contains_text("S1:L2-L3"));
+    assert!(requests[1].body_contains_text(&format!("S1:L{first_line}-L{last_line}")));
     let query_output: serde_json::Value = serde_json::from_str(
         &requests[2]
             .function_call_output_text("query-call")
@@ -823,7 +837,7 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
         json!({
             "contextMapEntryId": route.entry.id.to_string(),
             "sourceFingerprint": route.entry.value.source_fingerprint.to_string(),
-            "lineRange": {"start": 2, "end": 3},
+            "lineRange": {"start": first_line, "end": last_line},
         })
     );
     let context_output: serde_json::Value = serde_json::from_str(
@@ -832,6 +846,10 @@ async fn model_can_batch_record_and_retrieve_project_learning() -> Result<()> {
             .expect("context-map output should be text"),
     )?;
     assert_eq!(context_output["knowledgeCoverageAvailable"], true);
+    assert_eq!(
+        context_output["data"][0]["evidenceRoute"]["contextMapEntryId"],
+        route.entry.id.to_string()
+    );
     assert_eq!(
         context_output["data"][0]["knownKnowledge"],
         json!({"rootEntries": 1, "deeperEntries": 0})
