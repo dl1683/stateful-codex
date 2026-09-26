@@ -40,8 +40,9 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Current pushed head before this handoff-only update: `5f855b3651`
-  (`docs(stateful): close route preview gate`)
+- Last product-work head: `5f855b3651`
+  (`docs(stateful): close route preview gate`); authentication handoff commits
+  follow it.
 - The tracked working tree was clean at this checkpoint.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
@@ -52,25 +53,30 @@ The rejected bare-line-range prototype remains only as a recovery artifact on
 `checkpoint/stateful-region-routing-unsafe-20260925` at `a6cdb157de`. Do not
 merge it.
 
-## Authentication incident in progress
+## Authentication incident resolved
 
-Product work is paused behind a renewed local authentication incident. On
-2026-09-26, another newly started Codex run reached the ChatGPT Codex responses
-endpoint but received `401 Unauthorized: Incorrect API key provided`, with a
-redacted service-key prefix. The user then completed `codex login` again.
+On 2026-09-26, another Codex run reached the ChatGPT Codex responses endpoint
+but received `401 Unauthorized: Incorrect API key provided`, with a redacted
+service-key prefix. The user completed `codex login` again.
 
-The globally resolved CLI is `codex-cli 0.157.1`, and `codex login status`
-currently reports `Logged in using ChatGPT`. That status does not resolve the
-incident because the failing run still selected an API key. Before resuming
-product or evaluation work:
+The host had no `OPENAI_API_KEY`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, base
+URL, alternate `CODEX_HOME`, or workload-identity override at process, user, or
+machine scope. The current auth cache was updated by the login, identified
+itself as `chatgpt`, contained usable access and refresh tokens, and had no
+non-empty legacy API key. User configuration also forces the `chatgpt` login
+method.
 
-1. identify the process, user, machine, wrapper, alternate `CODEX_HOME`, or
-   provider configuration supplying the stale key;
-2. remove that override without exposing credential contents;
-3. start a fresh Codex process; and
-4. prove recovery with a real no-tool model request, not login status alone.
+The failing interactive Codex pair had been running since 2026-09-25, before
+the refreshed login, and retained the obsolete API credential in memory. Only
+that exact pre-login process pair was stopped. This current Codex session and
+the managed app-server daemon, both started on 2026-09-26, were left running.
 
-Do not alter the two protected experiment directories while diagnosing this.
+Recovery was proven from a separate newly started `codex-cli 0.157.1` process:
+`codex login status` reported `Logged in using ChatGPT`, and a real read-only
+`codex exec --json` model request completed with the exact response `AUTH_OK`.
+The issue was stale process state, not a current global credential or Stateful
+Codex launcher leak. Any other Codex process that was already alive before the
+login must be restarted; newly started processes use the ChatGPT login.
 
 ## Exact-region routing work now pushed
 
