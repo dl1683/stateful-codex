@@ -173,13 +173,55 @@ demonstrates why accumulated blackboard understanding and query refinement must
 drive routing: text ranking cannot invent a strategic relationship absent from
 the query and state.
 
+## Small behavioral reuse canary
+
+A two-turn, read-only Luna canary on a fresh isolated copy of the licensing
+fixture passed on 2026-09-26. It used one continuous thread, disabled host
+memories, retained ChatGPT authentication, and captured a project-state
+artifact after each turn.
+
+- Turn 1 asked for the controlling royalty as of 2026-03-15. The model made
+  five exact evidence reads, correctly concluded 6% of net sales effective
+  2026-03-01, and persisted current source-verified knowledge. The artifact
+  reached intelligence revision 45 with two current root entries and four
+  evidence routes.
+- Turn 2 asked the same unchanged question and explicitly told the model to
+  start from verified project intelligence. It inherited revision 45, queried
+  active blackboard state, made zero raw-source or evidence reads, produced the
+  same correct answer, and left intelligence revision 45 unchanged rather than
+  duplicating state.
+- Model responses fell from 5 to 3, tool calls from 4 to 2, and source reads
+  from 5 to 0. Input tokens fell from 104,781 to 87,787; uncached input fell
+  from 27,981 to 7,659 (72.6%); output fell from 2,283 to 753; and measured
+  model-turn duration fell from 52.8 to 20.8 seconds.
+- State inheritance and the source-evidence assertion both passed after each
+  canonical turn. Both runs completed durably with no rejected tool result.
+
+This is directional evidence for the basic reuse policy, not a broad product
+claim. The follow-up prompt explicitly cued state-first behavior, the fact was
+root-promoted, the source did not change, and the fixture is small. A stricter
+gate must remove the explicit cue, exercise relevant deeper/non-root knowledge,
+and then test the stored-but-unused q02 -> compaction -> q06 decision case.
+
+The first disposable attempt was falsely invalidated by an evaluator phrase
+that crossed a source line break (`six\npercent`). Commit `66f9831b31` now
+normalizes whitespace in evidence assertions and covers the wrapped-source
+case. This was an evaluation defect; the underlying attempt had already
+created source-verified entries and evidence links.
+
+The branch CLI was rebuilt from the current source. Rebuilding the code-mode
+companion in the same command could not download the prebuilt V8 archive on
+this host, but the already-present companion executed every canary tool call
+successfully. Treat a future companion rebuild as an infrastructure task, not
+as evidence about Stateful behavior.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Behavioral reuse.** The structural region loop now passes, but a scripted
-   tool trajectory does not prove the model will use reported knowledge before
-   rereading. Add a small decision-level canary at the model boundary.
+1. **Uncued and deeper-state reuse.** Repeat the small decision canary without
+   telling the model to use state first, and use relevant non-root knowledge so
+   route-reported coverage must trigger deeper retrieval before any reread.
 2. **Semantic capture and active retrieval.** Use q02 -> compaction -> q06 to
    prove the reset mismatch is captured, survives, and changes the later action
    without an unjustified reread.
@@ -197,7 +239,6 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Use the proven structural region loop in a small decision-level canary: when
-`knownKnowledge` covers the route, the model must query/use that knowledge
-before choosing any reread. Move directly from that canary to semantic capture
-and q02 -> compaction -> q06 rather than continuing to tune FTS against q10.
+Run one stricter uncued, non-root reuse probe to distinguish prompt compliance
+from default policy. If it passes, move directly to semantic capture and the
+q02 -> compaction -> q06 gate rather than continuing to tune FTS against q10.
