@@ -304,12 +304,78 @@ and must cite the production lines containing both synchronizer registers and
 their low reset assignments. Treat exact-synonym evidence assertions as an eval
 fragility, not as product evidence.
 
+## Changed-authority canary
+
+A two-turn Luna canary passed the narrow changed-authority safety gate on
+2026-09-26. The isolated project contained a base policy with an executed
+threshold of 10, a draft amendment with a threshold of 6, and an assessment
+count of 8. Turn 1 correctly concluded that launch was permitted because the
+draft amendment was not binding, persisted four source-grounded entries, and
+ended at intelligence revision 25.
+
+Between turns, the base policy remained byte-identical and only the amendment
+changed: it became executed effective 2026-03-01 and expressly replaced the
+base-policy threshold with 6. The second user prompt did not announce a source
+change. It asked for the controlling authority, threshold, and assessment as of
+2026-03-15, and for an explanation of any prior conclusion that no longer
+controlled. Before the first substantive response, the point-of-use freshness
+audit advanced the project from revision 25 to 26 and marked the old root
+decision and amendment route stale. The model then read the decisive changed
+source, correctly concluded that launch was not permitted because 8 exceeds 6,
+explicitly superseded the old root decision, and completed at revision 35.
+
+The frozen canonical rollout therefore proves the mechanism that matters:
+
+- an unchanged old citation did not make the old conclusion safe to reuse;
+- the newly controlling source was detected before the answer, even though the
+  user did not announce the change;
+- the prior root decision became stale and was superseded by a current,
+  source-verified decision; and
+- the final answer identified the new authority and explained why the old
+  conclusion no longer controlled.
+
+The trajectory was safe but inefficient. Turn 1 used 157,121 input tokens,
+40,129 uncached input tokens, 7,664 output tokens, eight model responses, five
+tool calls, two compactions, and 161.0 seconds. Turn 2 used 320,041 input tokens,
+52,265 uncached input tokens, 14,495 output tokens, 14 model responses, nine
+tool calls, four compactions, and 288.6 seconds. It made two blackboard queries,
+two context-map queries, and one read-bearing outer call. One completion was
+rejected because supersession advanced the old entry from revision 1 to 2 while
+the model still submitted revision 1; the model recovered on retry. This is a
+tool-contract and repair-efficiency signal, not a correctness failure.
+
+Some non-root cleanup debt also remains. The earlier draft-status entry is
+still active in raw storage even though its evidence fingerprint is stale, and
+the earlier conditional base-authority fact remains active because its cited
+bytes did not change. The root decision is safely superseded and queries expose
+freshness, so this did not corrupt the answer, but mature project intelligence
+should make dependent stale claims easier to find and repair without forcing a
+long exploratory trajectory.
+
+The eval summarizer initially misreported the second turn as beginning at
+revision 25. The raw rollout showed a `world_state` snapshot at revision 26
+before the first agent response; a pre-prompt compaction usage record had been
+mistaken for that response. The evaluator now folds canonical `world_state`
+root revisions into the effective state and ignores pre-prompt usage when
+locating the first response. State inheritance permits a monotonic pre-response
+advance caused by freshness reconciliation but still rejects revision
+regression or a starting revision newer than the captured artifact. Frozen
+replay now reports revision 25 at turn start, 26 at first response, and 35 at
+completion, with all prior hierarchy, context-map, and blackboard records
+retained.
+
+This closes the narrow changed-authority safety gate. It does not establish
+efficient repair, automatic semantic cleanup of every dependent claim, or
+freshness behavior at large-corpus scale.
+
 ## Remaining blockers and smallest gates
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Changed authority.** A newer controlling source must invalidate confident
-   reuse even if the old cited bytes remain unchanged.
+1. **Repair efficiency and dependent-state cleanup.** Use the frozen
+   changed-authority trajectory to determine why a one-file authority change
+   required 14 responses and nine tool calls, and make stale dependent entries
+   easier to identify and repair without unsafe host-side semantic guesses.
 2. **Indexing cost.** Profile publication before optimizing it. Atomicity is now
    correct, but the frozen debug index is still far too slow for a product
    claim.
@@ -325,8 +391,12 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-Move directly to the changed-authority gate with a tiny source intervention.
-The test must distinguish an unchanged old citation from a newly controlling
-source, prevent confident reuse of the superseded conclusion, route to the
-smallest decisive new region, and update rather than duplicate durable state.
-Do not launch a broad benchmark until that behavior is demonstrated.
+Study the frozen changed-authority rollout before adding another model run.
+Identify which responses and tool round trips were required for legitimate
+freshness repair, which were caused by weak state/query ergonomics, and why the
+revision-checked supersession required a retry. Prefer a small general product
+improvement that helps the model enumerate and repair stale dependents; do not
+encode domain-specific authority semantics in the host. Then replay or add a
+deterministic integration test before spending on another behavioral canary.
+Do not launch a broad benchmark until correction is both safe and reasonably
+direct.
