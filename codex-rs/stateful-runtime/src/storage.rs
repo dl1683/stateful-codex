@@ -67,7 +67,7 @@ impl StatefulRunStore {
         let pool = sqlite
             .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
             .await?;
-        if let Err(error) = MIGRATOR.run(&pool).await {
+        if let Err(error) = sqlite.run_migrations(&pool, &MIGRATOR).await {
             pool.close().await;
             return Err(error.into());
         }
@@ -942,6 +942,20 @@ pub enum StatefulRunStoreError {
     ObligationNotFound(String),
     #[error("stored obligation sequence has no record: {0}")]
     CorruptObligationSequence(i64),
+    #[error("turn measurement does not belong to a thread in the run")]
+    MeasurementThreadMismatch,
+    #[error("turn measurement identity conflicts with an existing record")]
+    MeasurementIdentityConflict,
+    #[error("turn measurement not found")]
+    MeasurementNotFound,
+    #[error("turn measurement completion timestamp is invalid")]
+    InvalidMeasurementTimestamp,
+    #[error("too many incomplete turn measurements are awaiting attribution")]
+    MeasurementPendingCapacity,
+    #[error("timed out waiting to merge turn attribution with its terminal trajectory")]
+    MeasurementMergeTimeout,
+    #[error("turn measurement writer is no longer available")]
+    MeasurementWriterClosed,
     #[error("obligation project does not match its run")]
     ProjectMismatch,
     #[error("atomic completion requires completed run status")]
@@ -973,12 +987,14 @@ pub enum StatefulRunStoreError {
     InvalidListLimit,
     #[error("autonomous lease duration must be between 1 and 600000 milliseconds")]
     InvalidLeaseDuration,
-    #[error("list cursor does not belong to the requested run")]
+    #[error("list cursor does not belong to the requested scope")]
     InvalidListCursor,
     #[error("stored runtime enum value is unknown: {0}")]
     CorruptEnum(String),
     #[error("stored runtime count is invalid")]
     CorruptCount,
+    #[error("turn measurement counts must be non-negative")]
+    InvalidMeasurementCount,
     #[error("runtime count overflow")]
     CountOverflow,
     #[error("runtime timestamp overflow")]

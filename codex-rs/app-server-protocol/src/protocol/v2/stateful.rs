@@ -4,6 +4,9 @@ use codex_experimental_api_macros::ExperimentalApi;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::TokenUsageBreakdown;
+use super::TurnTrajectory;
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
@@ -376,6 +379,112 @@ pub struct StatefulAttributionCounters {
     pub steering_write_calls: u64,
     #[ts(type = "number")]
     pub material_findings_reused: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulTurnStatus {
+    Completed,
+    Failed,
+    Aborted,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulTurnMeasurement {
+    pub run_id: String,
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub status: StatefulTurnStatus,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub counters: StatefulAttributionCounters,
+    pub trajectory: Option<TurnTrajectory>,
+    /// Provider-reported usage accumulated across completed responses in this
+    /// turn. `None` means no response included usage data.
+    pub token_usage: Option<TokenUsageBreakdown>,
+    #[ts(type = "number | null")]
+    pub completed_at: Option<i64>,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMeasurementListParams {
+    pub project_id: String,
+    #[ts(optional = nullable)]
+    pub cursor: Option<String>,
+    #[ts(optional = nullable)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMeasurementListResponse {
+    pub data: Vec<StatefulTurnMeasurement>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMeasurementSummaryParams {
+    pub project_id: String,
+    /// Number of newest measurements to include in the bounded window.
+    #[ts(optional = nullable)]
+    pub limit: Option<u32>,
+}
+
+/// Exact totals over a bounded newest-first window of project measurements.
+///
+/// Token counts are exposed without estimating monetary cost because the
+/// persisted records do not contain authoritative provider pricing, units, or
+/// currency.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMeasurementSummary {
+    pub project_id: String,
+    #[ts(type = "number")]
+    pub measurement_count: u64,
+    #[ts(type = "number")]
+    pub run_count: u64,
+    #[ts(type = "number")]
+    pub terminal_measurement_count: u64,
+    #[ts(type = "number")]
+    pub completed_turns: u64,
+    #[ts(type = "number")]
+    pub failed_turns: u64,
+    #[ts(type = "number")]
+    pub aborted_turns: u64,
+    #[ts(type = "number")]
+    pub turns_with_token_usage: u64,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    pub counters: StatefulAttributionCounters,
+    pub trajectory: Option<TurnTrajectory>,
+    pub token_usage: Option<TokenUsageBreakdown>,
+    #[ts(type = "number | null")]
+    pub oldest_created_at: Option<i64>,
+    #[ts(type = "number | null")]
+    pub newest_created_at: Option<i64>,
+    /// True when older project measurements exist outside this window.
+    pub has_more: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMeasurementSummaryResponse {
+    pub summary: StatefulMeasurementSummary,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

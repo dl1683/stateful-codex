@@ -5030,6 +5030,26 @@
           "properties": {
             "method": {
               "enum": [
+                "turn/trajectory/updated"
+              ],
+              "title": "Turn/trajectory/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/TurnTrajectoryUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Turn/trajectory/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "turn/started"
               ],
               "title": "Turn/startedNotificationMethod",
@@ -21269,6 +21289,109 @@
         ],
         "type": "string"
       },
+      "StatefulMeasurementSummary": {
+        "description": "Exact totals over a bounded newest-first window of project measurements.\n\nToken counts are exposed without estimating monetary cost because the persisted records do not contain authoritative provider pricing, units, or currency.",
+        "properties": {
+          "abortedTurns": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "completedTurns": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "counters": {
+            "$ref": "#/definitions/v2/StatefulAttributionCounters"
+          },
+          "durationMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "failedTurns": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "hasMore": {
+            "description": "True when older project measurements exist outside this window.",
+            "type": "boolean"
+          },
+          "measurementCount": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "newestCreatedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "oldestCreatedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "runCount": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "terminalMeasurementCount": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "tokenUsage": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/TokenUsageBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trajectory": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/TurnTrajectory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "turnsWithTokenUsage": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "abortedTurns",
+          "completedTurns",
+          "counters",
+          "durationMs",
+          "failedTurns",
+          "hasMore",
+          "measurementCount",
+          "projectId",
+          "runCount",
+          "terminalMeasurementCount",
+          "turnsWithTokenUsage"
+        ],
+        "type": "object"
+      },
       "StatefulObligation": {
         "properties": {
           "createdAt": {
@@ -21619,6 +21742,89 @@
           "acknowledged",
           "applied",
           "rejected"
+        ],
+        "type": "string"
+      },
+      "StatefulTurnMeasurement": {
+        "properties": {
+          "completedAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "counters": {
+            "$ref": "#/definitions/v2/StatefulAttributionCounters"
+          },
+          "createdAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "durationMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/definitions/v2/StatefulTurnStatus"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "tokenUsage": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/TokenUsageBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider-reported usage accumulated across completed responses in this turn. `None` means no response included usage data."
+          },
+          "trajectory": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/TurnTrajectory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "counters",
+          "createdAt",
+          "durationMs",
+          "projectId",
+          "runId",
+          "status",
+          "threadId",
+          "turnId",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "StatefulTurnStatus": {
+        "enum": [
+          "completed",
+          "failed",
+          "aborted"
         ],
         "type": "string"
       },
@@ -26849,6 +27055,102 @@
           "name",
           "output"
         ],
+        "type": "object"
+      },
+      "TurnTrajectory": {
+        "description": "Bounded, content-free counters for one model turn.",
+        "properties": {
+          "compactions": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "completedModelResponses": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "modelCustomToolCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "modelFunctionToolCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "modelImageGenerationCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "modelShellToolCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "modelToolCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "modelToolSearchCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "modelWebSearchCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "toolOutputBytes": {
+            "description": "Bytes in the JSON serialization of explicit tool output payloads.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "compactions",
+          "completedModelResponses",
+          "modelCustomToolCalls",
+          "modelFunctionToolCalls",
+          "modelImageGenerationCalls",
+          "modelShellToolCalls",
+          "modelToolCalls",
+          "modelToolSearchCalls",
+          "modelWebSearchCalls",
+          "toolOutputBytes"
+        ],
+        "type": "object"
+      },
+      "TurnTrajectoryUpdatedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Reports cumulative trajectory counters for the current turn without exposing raw response items or tool payloads to clients.",
+        "properties": {
+          "isFinal": {
+            "description": "Whether this is the terminal snapshot for the turn. Transports may coalesce or drop intermediate updates, but must preserve this update.",
+            "type": "boolean"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "trajectory": {
+            "$ref": "#/definitions/v2/TurnTrajectory"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "isFinal",
+          "threadId",
+          "trajectory",
+          "turnId"
+        ],
+        "title": "TurnTrajectoryUpdatedNotification",
         "type": "object"
       },
       "TurnsPage": {

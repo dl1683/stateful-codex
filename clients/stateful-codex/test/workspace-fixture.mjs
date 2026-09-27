@@ -121,6 +121,34 @@ export function workspaceFixture() {
         reason: null,
       },
     ],
+    measurementSummary: {
+      projectId: "project-1",
+      measurementCount: 4,
+      runCount: 2,
+      terminalMeasurementCount: 3,
+      completedTurns: 2,
+      failedTurns: 1,
+      abortedTurns: 0,
+      turnsWithTokenUsage: 3,
+      durationMs: 94_200,
+      counters: {
+        evidenceReadCalls: 5,
+        materialFindingsReused: 3,
+      },
+      trajectory: {
+        completedModelResponses: 9,
+        modelToolCalls: 14,
+        toolOutputBytes: 8_192,
+      },
+      tokenUsage: {
+        inputTokens: 125_000,
+        cachedInputTokens: 80_000,
+        outputTokens: 7_500,
+      },
+      oldestCreatedAt: 1,
+      newestCreatedAt: 2,
+      hasMore: true,
+    },
     contextHits: [
       {
         entryId: "map-1",

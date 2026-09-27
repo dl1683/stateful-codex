@@ -20,28 +20,17 @@ use serde_json::Value;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
-use tracing::info;
 use tracing::warn;
 
 /// Core-facing handle to the SQLite-backed state runtime.
 pub type StateDbHandle = Arc<codex_state::StateRuntime>;
 
-#[cfg(not(test))]
-const STARTUP_BACKFILL_POLL_INTERVAL: Duration = Duration::from_secs(1);
-#[cfg(test)]
-const STARTUP_BACKFILL_POLL_INTERVAL: Duration = Duration::from_millis(10);
-#[cfg(not(test))]
-const STARTUP_BACKFILL_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(test)]
-const STARTUP_BACKFILL_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
-
 /// Initialize the state runtime for thread state persistence.
 ///
 /// This is the process entry point for local state: it opens the SQLite-backed
-/// runtime, applies rollout metadata backfills as needed, and returns the
-/// initialized handle.
+/// runtime, starts rollout metadata backfill when needed, and returns the
+/// initialized handle without waiting for historical rollout traversal.
 pub async fn init(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
     let config = RolloutConfig::from_view(config);
     match try_init_with_roots(config.codex_home, config.sqlite, config.model_provider_id).await {
@@ -107,91 +96,27 @@ async fn try_init_with_roots_inner(
                     sqlite.home().display()
                 )
             })?;
-    let backfill_gate_started = Instant::now();
-    let backfill_gate_result = wait_for_backfill_gate(
-        runtime.as_ref(),
-        codex_home.as_path(),
-        default_model_provider_id.as_str(),
+    let backfill_worker_started = Instant::now();
+    let backfill_worker_result = crate::state_db_backfill::start(
+        runtime.clone(),
+        codex_home,
+        default_model_provider_id,
         backfill_lease_seconds,
     )
     .await;
-    codex_state::record_backfill_gate(
+    codex_state::record_backfill_worker_start(
         /*telemetry*/ None,
-        backfill_gate_started.elapsed(),
-        &backfill_gate_result,
+        backfill_worker_started.elapsed(),
+        &backfill_worker_result,
     );
-    if let Err(err) = backfill_gate_result {
+    if let Err(err) = backfill_worker_result {
         runtime.close().await;
         return Err(err);
     }
     Ok(runtime)
 }
 
-async fn wait_for_backfill_gate(
-    runtime: &codex_state::StateRuntime,
-    codex_home: &Path,
-    default_model_provider_id: &str,
-    backfill_lease_seconds: Option<i64>,
-) -> anyhow::Result<()> {
-    let wait_started = Instant::now();
-    let mut reported_wait = false;
-    loop {
-        let backfill_state = runtime.get_backfill_state().await.map_err(|err| {
-            anyhow::anyhow!(
-                "failed to read backfill state at {}: {err}",
-                codex_home.display()
-            )
-        })?;
-        if backfill_state.status == codex_state::BackfillStatus::Complete {
-            return Ok(());
-        }
-
-        if let Some(backfill_lease_seconds) = backfill_lease_seconds {
-            metadata::backfill_sessions_with_lease(
-                runtime,
-                codex_home,
-                default_model_provider_id,
-                backfill_lease_seconds,
-            )
-            .await;
-        } else {
-            metadata::backfill_sessions(runtime, codex_home, default_model_provider_id).await;
-        }
-        let backfill_state = runtime.get_backfill_state().await.map_err(|err| {
-            anyhow::anyhow!(
-                "failed to read backfill state at {} after startup backfill: {err}",
-                codex_home.display()
-            )
-        })?;
-        if backfill_state.status == codex_state::BackfillStatus::Complete {
-            return Ok(());
-        }
-        if wait_started.elapsed() >= STARTUP_BACKFILL_WAIT_TIMEOUT {
-            return Err(anyhow::anyhow!(
-                "timed out waiting for state db backfill at {} after {:?} (status: {})",
-                codex_home.display(),
-                STARTUP_BACKFILL_WAIT_TIMEOUT,
-                backfill_state.status.as_str()
-            ));
-        }
-
-        let message = format!(
-            "state db backfill is {} at {}; waiting up to {:?} before retrying startup initialization",
-            backfill_state.status.as_str(),
-            codex_home.display(),
-            STARTUP_BACKFILL_WAIT_TIMEOUT,
-        );
-        if reported_wait {
-            info!("{message}");
-        } else {
-            emit_startup_warning(&message);
-            reported_wait = true;
-        }
-        tokio::time::sleep(STARTUP_BACKFILL_POLL_INTERVAL).await;
-    }
-}
-
-fn emit_startup_warning(message: &str) {
+pub(super) fn emit_startup_warning(message: &str) {
     warn!("{message}");
     if !tracing::dispatcher::has_been_set() {
         #[allow(clippy::print_stderr)]
@@ -246,33 +171,17 @@ async fn require_backfill_complete(
     runtime: StateDbHandle,
     codex_home: &Path,
 ) -> Option<StateDbHandle> {
-    match runtime.get_backfill_state().await {
-        Ok(state) if state.status == codex_state::BackfillStatus::Complete => Some(runtime),
-        Ok(state) => {
-            warn!(
-                "state db backfill not complete at {} (status: {})",
-                codex_home.display(),
-                state.status.as_str()
-            );
-            codex_state::record_fallback(
-                "get_state_db",
-                "backfill_incomplete",
-                /*telemetry_override*/ None,
-            );
-            None
-        }
-        Err(err) => {
-            warn!(
-                "failed to read backfill state at {}: {err}",
-                codex_home.display()
-            );
-            codex_state::record_fallback(
-                "get_state_db",
-                "db_error",
-                /*telemetry_override*/ None,
-            );
-            None
-        }
+    if crate::state_db_backfill::ready(Some(runtime.as_ref()), "get_state_db")
+        .await
+        .is_some()
+    {
+        Some(runtime)
+    } else {
+        warn!(
+            "state db is not ready for optional reads at {}",
+            codex_home.display()
+        );
+        None
     }
 }
 
@@ -304,7 +213,7 @@ pub async fn list_thread_ids_db(
     archived_only: bool,
     stage: &str,
 ) -> Option<Vec<ThreadId>> {
-    let ctx = context?;
+    let ctx = crate::state_db_backfill::ready(context, "list_thread_ids_db").await?;
     if ctx.sqlite() != sqlite {
         warn!(
             "state db SQLite home mismatch: expected {}, got {}",
@@ -365,7 +274,7 @@ pub async fn list_threads_db(
     project_id: Option<Option<&str>>,
     search_term: Option<&str>,
 ) -> Option<codex_state::ThreadsPage> {
-    let ctx = context?;
+    let ctx = crate::state_db_backfill::ready(context, "list_threads_db").await?;
     if ctx.sqlite() != sqlite {
         warn!(
             "state db SQLite home mismatch: expected {}, got {}",
@@ -489,7 +398,7 @@ pub async fn find_rollout_path_by_id(
     archived_only: Option<bool>,
     stage: &str,
 ) -> Option<PathBuf> {
-    let ctx = context?;
+    let ctx = crate::state_db_backfill::ready(context, "find_rollout_path_by_id").await?;
     ctx.find_rollout_path_by_id(thread_id, archived_only)
         .await
         .unwrap_or_else(|err| {

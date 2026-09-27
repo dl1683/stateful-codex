@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "TurnTrajectory": {
+      "description": "Bounded, content-free counters for one model turn.",
+      "properties": {
+        "compactions": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "completedModelResponses": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelCustomToolCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelFunctionToolCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelImageGenerationCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelShellToolCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelToolCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelToolSearchCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelWebSearchCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "toolOutputBytes": {
+          "description": "Bytes in the JSON serialization of explicit tool output payloads.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "compactions",
+        "completedModelResponses",
+        "modelCustomToolCalls",
+        "modelFunctionToolCalls",
+        "modelImageGenerationCalls",
+        "modelShellToolCalls",
+        "modelToolCalls",
+        "modelToolSearchCalls",
+        "modelWebSearchCalls",
+        "toolOutputBytes"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Reports cumulative trajectory counters for the current turn without exposing raw response items or tool payloads to clients.",
+  "properties": {
+    "isFinal": {
+      "description": "Whether this is the terminal snapshot for the turn. Transports may coalesce or drop intermediate updates, but must preserve this update.",
+      "type": "boolean"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "trajectory": {
+      "$ref": "#/definitions/TurnTrajectory"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "isFinal",
+    "threadId",
+    "trajectory",
+    "turnId"
+  ],
+  "title": "TurnTrajectoryUpdatedNotification",
+  "type": "object"
+}

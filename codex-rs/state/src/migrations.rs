@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
+use sqlx::AssertSqlSafe;
+use sqlx::SqlSafeStr;
 use sqlx::SqlitePool;
+use sqlx::migrate::Migration;
 use sqlx::migrate::Migrator;
 
 pub(crate) static STATE_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -53,6 +56,26 @@ pub(crate) fn runtime_thread_history_migrator() -> Migrator {
     runtime_migrator(&THREAD_HISTORY_MIGRATOR)
 }
 
+pub(crate) fn checksum_is_line_ending_equivalent(
+    migration: &Migration,
+    applied_checksum: &[u8],
+) -> bool {
+    let lf_sql = migration.sql.as_str().replace("\r\n", "\n");
+    let crlf_sql = lf_sql.replace('\n', "\r\n");
+    [lf_sql, crlf_sql].into_iter().any(|sql| {
+        Migration::new(
+            migration.version,
+            migration.description.clone(),
+            migration.migration_type,
+            AssertSqlSafe(sql).into_sql_str(),
+            migration.no_tx,
+        )
+        .checksum
+        .as_ref()
+            == applied_checksum
+    })
+}
+
 pub(crate) async fn repair_legacy_recency_migration_version(
     pool: &SqlitePool,
     migrator: &Migrator,
@@ -74,24 +97,24 @@ pub(crate) async fn repair_legacy_recency_migration_version(
         return Ok(());
     }
 
-    let legacy_recency_needs_repair = sqlx::query_scalar::<_, i64>(
+    let legacy_checksum = sqlx::query_scalar::<_, Vec<u8>>(
         r#"
-SELECT 1
+SELECT checksum
 FROM _sqlx_migrations
 WHERE version = ?
-  AND checksum = ?
   AND NOT EXISTS (
       SELECT 1 FROM _sqlx_migrations WHERE version = ?
   )
         "#,
     )
     .bind(38_i64)
-    .bind(recency_migration.checksum.as_ref())
     .bind(recency_migration.version)
     .fetch_optional(pool)
-    .await?
-    .is_some();
-    if !legacy_recency_needs_repair {
+    .await?;
+    let Some(legacy_checksum) = legacy_checksum else {
+        return Ok(());
+    };
+    if !checksum_is_line_ending_equivalent(recency_migration, &legacy_checksum) {
         return Ok(());
     }
 
@@ -109,7 +132,7 @@ WHERE version = ?
     .bind(recency_migration.version)
     .bind(recency_migration.description.as_ref())
     .bind(38_i64)
-    .bind(recency_migration.checksum.as_ref())
+    .bind(legacy_checksum)
     .bind(recency_migration.version)
     .execute(pool)
     .await?;

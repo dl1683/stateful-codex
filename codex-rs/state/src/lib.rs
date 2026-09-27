@@ -33,6 +33,7 @@ pub use model::RolloutMigrationCursor;
 pub use model::RolloutMigrationSkippedRollout;
 pub use model::RolloutMigrationState;
 /// Preferred entrypoint: owns configuration and metrics.
+pub use runtime::BackfillLease;
 pub use runtime::StateRuntime;
 pub use sqlite::SqliteConfig;
 
@@ -93,7 +94,7 @@ pub use sqlite::RuntimeDbPath;
 pub use telemetry::DbTelemetry;
 pub use telemetry::DbTelemetryHandle;
 pub use telemetry::install_process_db_telemetry;
-pub use telemetry::record_backfill_gate;
+pub use telemetry::record_backfill_worker_start;
 pub use telemetry::record_fallback;
 
 /// Maximum number of pending user submissions permitted for one thread.

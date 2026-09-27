@@ -175,7 +175,7 @@ async fn opening_existing_rollout_preserves_modified_time() -> std::io::Result<(
 }
 
 #[tokio::test]
-async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
+async fn state_db_init_backfills_in_background() -> anyhow::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let uuid = Uuid::new_v4();
     let thread_id = ThreadId::from_string(&uuid.to_string())?;
@@ -247,10 +247,16 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
         .await
         .expect("state db should initialize");
 
-    let metadata = runtime
-        .get_thread(thread_id)
-        .await?
-        .expect("thread should be backfilled before init returns");
+    let metadata = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(metadata) = runtime.get_thread(thread_id).await? {
+                return Ok::<_, anyhow::Error>(metadata);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("background backfill should complete")?;
     assert_eq!(metadata.rollout_path, rollout_path);
     assert_eq!(
         runtime.get_backfill_state().await?.status,

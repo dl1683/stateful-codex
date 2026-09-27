@@ -15,7 +15,6 @@ use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::ThreadHistoryMode;
 use codex_state::BackfillState;
 use codex_state::BackfillStats;
 use codex_state::BackfillStatus;
@@ -30,7 +29,7 @@ use std::path::PathBuf;
 use tracing::info;
 use tracing::warn;
 
-const BACKFILL_BATCH_SIZE: usize = 200;
+const BACKFILL_BATCH_SIZE: usize = 25;
 #[cfg(not(test))]
 const BACKFILL_LEASE_SECONDS: i64 = 900;
 #[cfg(test)]
@@ -217,8 +216,15 @@ pub(crate) async fn backfill_sessions_with_lease(
     if backfill_state.status == BackfillStatus::Complete {
         return;
     }
-    let claimed = match runtime.try_claim_backfill(backfill_lease_seconds).await {
-        Ok(claimed) => claimed,
+    let lease = match runtime.try_claim_backfill(backfill_lease_seconds).await {
+        Ok(Some(lease)) => lease,
+        Ok(None) => {
+            info!(
+                "state db backfill already running at {}; skipping duplicate worker",
+                codex_home.display()
+            );
+            return;
+        }
         Err(err) => {
             warn!(
                 "failed to claim backfill worker at {}: {err}",
@@ -227,42 +233,21 @@ pub(crate) async fn backfill_sessions_with_lease(
             return;
         }
     };
-    if !claimed {
-        info!(
-            "state db backfill already running at {}; skipping duplicate worker",
-            codex_home.display()
-        );
-        return;
-    }
-    let mut backfill_state = match runtime.get_backfill_state().await {
-        Ok(state) => state,
-        Err(err) => {
-            warn!(
-                "failed to read claimed backfill state at {}: {err}",
-                codex_home.display()
-            );
-            BackfillState {
-                status: BackfillStatus::Running,
-                ..Default::default()
-            }
-        }
-    };
-    if backfill_state.status != BackfillStatus::Running {
-        if let Err(err) = runtime.mark_backfill_running().await {
-            warn!(
-                "failed to mark backfill running at {}: {err}",
-                codex_home.display()
-            );
-        } else {
-            backfill_state.status = BackfillStatus::Running;
-        }
-    }
 
     let sessions_root = codex_home.join(SESSIONS_SUBDIR);
     let archived_root = codex_home.join(ARCHIVED_SESSIONS_SUBDIR);
     let mut rollout_paths: Vec<BackfillRolloutPath> = Vec::new();
+    let mut collection_failed = false;
     for (root, archived) in [(sessions_root, false), (archived_root, true)] {
-        if !tokio::fs::try_exists(&root).await.unwrap_or(false) {
+        let exists = match tokio::fs::try_exists(&root).await {
+            Ok(exists) => exists,
+            Err(err) => {
+                warn!("failed to inspect rollout root {}: {err}", root.display());
+                collection_failed = true;
+                break;
+            }
+        };
+        if !exists {
             continue;
         }
         match collect_rollout_paths(&root).await {
@@ -278,8 +263,19 @@ pub(crate) async fn backfill_sessions_with_lease(
                     "failed to collect rollout paths under {}: {err}",
                     root.display()
                 );
+                collection_failed = true;
+                break;
             }
         }
+    }
+    if collection_failed {
+        if let Err(err) = runtime.release_backfill_lease(&lease).await {
+            warn!(
+                "failed to release incomplete backfill lease at {}: {err}",
+                codex_home.display()
+            );
+        }
+        return;
     }
     rollout_paths.sort_by(|a, b| a.watermark.cmp(&b.watermark));
     if let Some(last_watermark) = backfill_state.last_watermark.as_deref() {
@@ -292,7 +288,9 @@ pub(crate) async fn backfill_sessions_with_lease(
         failed: 0,
     };
     let mut last_watermark = backfill_state.last_watermark.clone();
-    for batch in rollout_paths.chunks(BACKFILL_BATCH_SIZE) {
+    let mut lost_lease = false;
+    'backfill: for batch in rollout_paths.chunks(BACKFILL_BATCH_SIZE) {
+        let mut batch_last_watermark = None;
         for rollout in batch {
             stats.scanned = stats.scanned.saturating_add(1);
             match extract_metadata_from_rollout(&rollout.path, default_provider).await {
@@ -309,38 +307,22 @@ pub(crate) async fn backfill_sessions_with_lease(
                     let mut metadata = outcome.metadata;
                     metadata.cwd = normalize_cwd_for_state_db(&metadata.cwd);
                     let memory_mode = outcome.memory_mode.unwrap_or_else(|| "enabled".to_string());
-                    let existing_metadata = runtime.get_thread(metadata.id).await.ok().flatten();
-                    // Paginated metadata updates are SQLite-only. Use the rollout mode to seed a
-                    // missing row, then keep the value from SQLite.
-                    let restore_memory_mode_from_rollout = existing_metadata.is_none()
-                        || matches!(metadata.history_mode, ThreadHistoryMode::Legacy);
-                    if let Some(existing_metadata) = existing_metadata.as_ref() {
-                        metadata.prefer_existing_git_info(existing_metadata);
-                        metadata.prefer_existing_explicit_title(existing_metadata);
-                    }
                     if rollout.archived && metadata.archived_at.is_none() {
                         let fallback_archived_at = metadata.updated_at;
                         metadata.archived_at = file_modified_time_utc(&rollout.path)
                             .await
                             .or(Some(fallback_archived_at));
                     }
-                    if let Err(err) = runtime.upsert_thread(&metadata).await {
+                    if let Err(err) = runtime
+                        .insert_thread_if_absent_with_memory_mode(&metadata, memory_mode.as_str())
+                        .await
+                    {
                         stats.failed = stats.failed.saturating_add(1);
-                        warn!("failed to upsert rollout {}: {err}", rollout.path.display());
+                        warn!("failed to seed rollout {}: {err}", rollout.path.display());
+                        break 'backfill;
                     } else {
-                        if restore_memory_mode_from_rollout
-                            && let Err(err) = runtime
-                                .set_thread_memory_mode(metadata.id, memory_mode.as_str())
-                                .await
-                        {
-                            stats.failed = stats.failed.saturating_add(1);
-                            warn!(
-                                "failed to restore memory mode for {}: {err}",
-                                rollout.path.display()
-                            );
-                            continue;
-                        }
                         stats.upserted = stats.upserted.saturating_add(1);
+                        batch_last_watermark = Some(rollout.watermark.clone());
                     }
                 }
                 Err(err) => {
@@ -349,30 +331,65 @@ pub(crate) async fn backfill_sessions_with_lease(
                         "failed to extract rollout {}: {err}",
                         rollout.path.display()
                     );
+                    break 'backfill;
                 }
             }
         }
 
-        if let Some(last_entry) = batch.last() {
-            if let Err(err) = runtime
-                .checkpoint_backfill(last_entry.watermark.as_str())
+        if let Some(batch_last_watermark) = batch_last_watermark {
+            match runtime
+                .checkpoint_claimed_backfill(&lease, batch_last_watermark.as_str())
                 .await
             {
-                warn!(
-                    "failed to checkpoint backfill at {}: {err}",
-                    codex_home.display()
-                );
-            } else {
-                last_watermark = Some(last_entry.watermark.clone());
+                Ok(true) => last_watermark = Some(batch_last_watermark),
+                Ok(false) => {
+                    lost_lease = true;
+                    warn!(
+                        "state db backfill lease was replaced at {}; stopping stale worker",
+                        codex_home.display()
+                    );
+                    break;
+                }
+                Err(err) => {
+                    stats.failed = stats.failed.saturating_add(1);
+                    warn!(
+                        "failed to checkpoint backfill at {}: {err}",
+                        codex_home.display()
+                    );
+                    break;
+                }
             }
         }
     }
-    if let Err(err) = runtime
-        .mark_backfill_complete(last_watermark.as_deref())
-        .await
-    {
+    if stats.failed == 0 && !lost_lease {
+        match runtime
+            .mark_claimed_backfill_complete(&lease, last_watermark.as_deref())
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                warn!(
+                    "state db backfill lease was replaced before completion at {}",
+                    codex_home.display()
+                );
+            }
+            Err(err) => {
+                stats.failed = stats.failed.saturating_add(1);
+                warn!(
+                    "failed to mark backfill complete at {}: {err}",
+                    codex_home.display()
+                );
+                if let Err(release_err) = runtime.release_backfill_lease(&lease).await {
+                    warn!(
+                        "failed to release backfill lease after completion error at {}: {release_err}",
+                        codex_home.display()
+                    );
+                }
+            }
+        }
+    } else if !lost_lease && let Err(err) = runtime.release_backfill_lease(&lease).await {
         warn!(
-            "failed to mark backfill complete at {}: {err}",
+            "failed to release incomplete backfill lease at {}: {err}",
             codex_home.display()
         );
     }
@@ -440,35 +457,14 @@ async fn collect_rollout_paths(root: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut stack = vec![root.to_path_buf()];
     let mut paths = Vec::new();
     while let Some(dir) = stack.pop() {
-        let mut read_dir = match tokio::fs::read_dir(&dir).await {
-            Ok(read_dir) => read_dir,
-            Err(err) => {
-                warn!("failed to read directory {}: {err}", dir.display());
-                continue;
-            }
-        };
+        let mut read_dir = tokio::fs::read_dir(&dir).await?;
         loop {
-            let next_entry = match read_dir.next_entry().await {
-                Ok(next_entry) => next_entry,
-                Err(err) => {
-                    warn!(
-                        "failed to read directory entry under {}: {err}",
-                        dir.display()
-                    );
-                    continue;
-                }
-            };
+            let next_entry = read_dir.next_entry().await?;
             let Some(entry) = next_entry else {
                 break;
             };
             let path = entry.path();
-            let file_type = match entry.file_type().await {
-                Ok(file_type) => file_type,
-                Err(err) => {
-                    warn!("failed to read file type for {}: {err}", path.display());
-                    continue;
-                }
-            };
+            let file_type = entry.file_type().await?;
             if file_type.is_dir() {
                 stack.push(path);
                 continue;

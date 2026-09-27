@@ -36,6 +36,7 @@ export function renderWorkspace(state) {
         </section>
         <aside class="stack-panel controls-panel">
           ${renderControls(state)}
+          ${renderMeasuredWork(state.measurementSummary)}
           ${renderSteering(state)}
         </aside>
         <section class="findings-work">
@@ -211,6 +212,36 @@ function renderControls(state) {
   );
 }
 
+function renderMeasuredWork(summary) {
+  if (!summary || !summary.measurementCount) {
+    return panel(
+      "Measured work",
+      empty("No durable Stateful turn measurements are available yet."),
+    );
+  }
+  const trajectory = summary.trajectory;
+  const counters = summary.counters ?? {};
+  const usage = summary.tokenUsage;
+  const usageLine = usage
+    ? `<p class="microcopy">Token coverage ${summary.turnsWithTokenUsage}/${summary.measurementCount} records · ${formatNumber(usage.inputTokens)} input (${formatNumber(usage.cachedInputTokens)} cached) · ${formatNumber(usage.outputTokens)} output.</p>`
+    : `<p class="microcopy">Provider token usage is unavailable for this window.</p>`;
+  const windowBoundary = summary.hasMore
+    ? " Older measurements exist outside this window."
+    : " This window includes every recorded project measurement.";
+  const trajectoryCoverage = trajectory
+    ? summary.terminalMeasurementCount < summary.measurementCount
+      ? ` Recorded trajectory subtotal covers ${summary.terminalMeasurementCount}/${summary.measurementCount} records.`
+      : ""
+    : " Model-response, model-tool, and tool-output totals are unavailable because no terminal trajectory has been merged.";
+  const trajectoryLine = trajectory
+    ? `${formatNumber(trajectory.modelToolCalls)} model tool calls · ${formatNumber(trajectory.toolOutputBytes)} tool-output bytes.`
+    : "Model tool calls and tool-output bytes unavailable.";
+  return panel(
+    "Measured work",
+    `<div class="metrics"><div><strong>${formatNumber(summary.measurementCount)}</strong><span>turn records</span></div><div><strong>${formatNumber(summary.runCount)}</strong><span>runs represented</span></div><div><strong>${trajectory ? formatNumber(trajectory.completedModelResponses) : "—"}</strong><span>model responses</span></div><div><strong>${formatNumber(counters.materialFindingsReused ?? 0)}</strong><span>findings reused</span></div></div><p class="microcopy">Terminal coverage ${summary.terminalMeasurementCount}/${summary.measurementCount} · ${summary.completedTurns} completed · ${summary.failedTurns} failed · ${summary.abortedTurns} aborted · ${formatMilliseconds(summary.durationMs)} measured.${trajectoryCoverage}</p>${usageLine}<p class="microcopy">${trajectoryLine} ${formatNumber(counters.evidenceReadCalls ?? 0)} exact evidence reads.${windowBoundary} Exact observed counts only; no monetary cost is inferred.</p>`,
+  );
+}
+
 function renderSteering(state) {
   const items = state.steering.slice(-5).reverse();
   const input = isTerminalRun(state.run)
@@ -224,8 +255,9 @@ function renderSteering(state) {
 
 function renderFindings(state) {
   const selected = state.selectedNodeId;
-  const entries = state.blackboard
-    .filter((hit) => !selected || hit.entry.nodeId === selected);
+  const entries = state.blackboard.filter(
+    (hit) => !selected || hit.entry.nodeId === selected,
+  );
   return panel(
     selected
       ? "Selected-node understanding"
@@ -385,6 +417,18 @@ function activityDetail(item) {
 function formatDuration(seconds) {
   if (seconds < 3600) return `${Math.ceil(seconds / 60)} min`;
   return `${Math.round((seconds / 3600) * 10) / 10} hr`;
+}
+
+function formatMilliseconds(milliseconds) {
+  if (milliseconds < 60_000)
+    return `${Math.round(milliseconds / 100) / 10} sec`;
+  if (milliseconds < 3_600_000)
+    return `${Math.round(milliseconds / 6_000) / 10} min`;
+  return `${Math.round(milliseconds / 360_000) / 10} hr`;
+}
+
+function formatNumber(value) {
+  return Number(value ?? 0).toLocaleString("en-US");
 }
 
 function escapeHtml(value) {

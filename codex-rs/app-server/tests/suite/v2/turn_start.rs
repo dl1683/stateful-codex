@@ -72,6 +72,8 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::TurnSteerParams;
+use codex_app_server_protocol::TurnTrajectory;
+use codex_app_server_protocol::TurnTrajectoryUpdatedNotification;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_app_server_protocol::WarningNotification;
 use codex_core::test_support::all_model_presets;
@@ -1280,6 +1282,83 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
         }
     );
 
+    response_mock.single_request();
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_start_emits_content_free_trajectory_without_raw_event_opt_in() -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let mut completed = responses::ev_completed_with_tokens("resp-1", /*total_tokens*/ 37);
+    completed["response"]["usage_metadata"] = json!({ "amount": "0.125" });
+    let response_mock = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "Done"),
+            completed,
+        ]),
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    write_models_cache(codex_home.path()).await?;
+    let mut app_server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let ThreadStartResponse { thread, .. } = app_server
+        .start_thread(ThreadStartParams::default())
+        .await?;
+
+    let TurnStartResponse { turn } = app_server
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![V2UserInput::Text {
+                    text: "Hello".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    let progress: TurnTrajectoryUpdatedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_notification("turn/trajectory/updated"),
+    )
+    .await??;
+    let final_update: TurnTrajectoryUpdatedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_notification("turn/trajectory/updated"),
+    )
+    .await??;
+
+    assert_eq!(
+        progress,
+        TurnTrajectoryUpdatedNotification {
+            thread_id: thread.id.clone(),
+            turn_id: turn.id.clone(),
+            is_final: false,
+            trajectory: TurnTrajectory {
+                completed_model_responses: 1,
+                ..Default::default()
+            },
+        }
+    );
+    assert_eq!(
+        final_update,
+        TurnTrajectoryUpdatedNotification {
+            thread_id: thread.id,
+            turn_id: turn.id,
+            is_final: true,
+            trajectory: TurnTrajectory {
+                completed_model_responses: 1,
+                ..Default::default()
+            },
+        }
+    );
     response_mock.single_request();
     Ok(())
 }

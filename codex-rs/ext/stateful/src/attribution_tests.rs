@@ -82,6 +82,7 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
     assert_eq!(
         summary,
         StatefulAttributionSummary {
+            run_id: None,
             project_id: "project-1".to_string(),
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),

@@ -1560,3 +1560,217 @@ completed-response, compaction, model-tool, and output-volume portions of issue
 #24 at the headless boundary. It does not provide authoritative dollar cost,
 failed model-request counts, durable per-run storage, or cross-run trends. Those
 remaining distinctions must stay explicit.
+
+### Evidence correction: the first live trajectory claim was invalid (2026-09-27)
+
+The live licensing run recorded after `19222f07f3` does **not** validate the
+trajectory counters described above. Stateful attribution and the final answer
+were correct, but the model-response, tool-call, tool-output, and compaction
+counters were all zero. The app server observed those counters only through raw
+response-item notifications, while ordinary headless clients do not receive raw
+notifications without the experimental raw-event opt-in. The compaction event
+was also consumed before it reached the headless accumulator. The earlier claim
+that this run closed those portions of issue #24 is withdrawn; issue #24 remains
+open.
+
+The corrective implementation in the current working tree moves trajectory
+accounting behind the app-server boundary, before raw-event suppression, and
+publishes a bounded content-free `turn/trajectory/updated` notification. It
+also makes the terminal trajectory notification reliable while allowing
+intermediate updates to coalesce or drop under backpressure, serializes
+thread-scoped Stateful attribution immediately before terminal completion,
+measures failed and interrupted invocations, and reports resume usage relative
+to the current invocation rather than lifetime thread tokens. Generated schemas
+and SDK models have been refreshed. Focused app-server tests, the full
+`codex-exec` suite, the app-server-protocol suite, scoped Clippy, formatting,
+and the TypeScript build and lint pass. The TypeScript Jest command remains
+blocked before test execution by its existing Windows `file://C:\\...` module
+resolution failure.
+
+A fresh live smoke is still required before any trajectory-visibility claim is
+restored. Do not run it against a normal Codex home until the migration checksum
+and first-run rollout-backfill failures tracked in issues #29 and #31 are fixed
+or safely isolated. Authoritative dollar cost also remains unmeasured: the
+provider amount observed by the client has no reliable unit and currency, so it
+must not be converted into a fabricated USD field. The durable per-turn record
+and public paginated query implemented below still need live validation and a
+derived-series contract before they can support cross-run trend claims under
+issue #24.
+
+### Migration and first-run backfill reliability gate (2026-09-27)
+
+The current working tree addresses the concrete failures behind issues #29 and
+#31 without weakening database integrity or returning to blocking startup.
+Migration SQL is pinned to LF for future checkouts. The shared SQLite runner
+accepts an already-applied checksum only when recomputing the embedded SQL with
+LF or CRLF proves it is the same migration, leaves the stored checksum intact,
+and retries once after a version mismatch to cover a concurrent initializer.
+Substantive SQL changes still fail checksum validation.
+
+Historical rollout metadata now backfills in the background while thread reads
+use the existing filesystem path until the backfill is complete. The backfill
+only inserts missing thread rows, so it cannot overwrite a live archive,
+revert, selected rollout, title, token count, or settings. A persisted owner
+token fences checkpoints and completion after lease takeover. The first
+enumeration, extraction, or database failure keeps the backfill incomplete,
+releases its lease, and retries from the last contiguous checkpoint instead of
+skipping a record and declaring success. Migration 0056 resets legacy backfill
+completion once so a database produced by the older skip-on-failure worker is
+reseeded safely; insert-only writes make that replay non-destructive.
+
+Adversarial Astra and Sol reviews independently identified the overwrite,
+skip-on-failure, lease-fencing, and migration-initialization race conditions;
+the implementation above incorporates those findings. Fresh Claude Code and
+Droid reviews could not reach their remote services in this sandbox because
+HTTPS is forced through the unavailable `127.0.0.1:9` proxy, so they must not be
+reported as completed reviews of this slice.
+
+`just test -p codex-state -p codex-rollout` passes 331/331 tests, including
+legacy-completion reset, stale-worker fencing, failed-rollout recovery,
+non-overwrite of live metadata, background initialization, and filesystem
+fallback while incomplete. This closes the local implementation gate, not the
+live-product gate: a small normal-home smoke must still demonstrate successful
+startup and non-zero trajectory counters before issue #24 evidence is restored.
+
+### Durable turn measurement checkpoint (2026-09-27)
+
+The current working tree now stores each active Stateful turn as a bounded,
+content-free measurement keyed to its run, project, thread, and turn. The row
+combines semantic attribution counters with the app-server trajectory: completed
+model responses, compactions, model-issued tool calls by kind, and tool-output
+bytes. It also accumulates exact provider-reported usage across completed model
+responses in the turn. Missing upstream usage remains `None`; lifetime thread
+totals are never mistaken for turn-local work. Pagination orders by the immutable
+record-creation timestamp with run and
+turn identity tie-breakers; terminal completion time remains separately visible.
+Late terminal merging or repair bookkeeping therefore cannot move an existing
+record between pages. Exact attribution retries are no-ops, while conflicting
+retries fail instead of rewriting prior evidence.
+
+The first implementation incorrectly coupled the two record halves through a
+single listener-local run binding. Independent Astra and Sol reviews found that
+a later turn could erase an earlier binding, a terminal event could win the race
+between two listener channels, a failed Core turn could remain labeled
+`completed`, and normal in-process shutdown could cancel the listener before the
+abort record was delivered. The revised path registers a measured turn
+synchronously in the process-scoped Stateful store, merges attribution and
+terminal trajectory in either arrival order, derives final status from Core's
+terminal event, and waits for the merge before publishing the terminal
+trajectory. Graceful shutdown now waits for each listener's `ShutdownComplete`
+barrier, drains measurement writes, and only then clears listeners. Attribution
+notifications retain a direct fallback when no listener is available.
+
+The experimental v2 `statefulMeasurement/list` method now exposes these records
+by explicit project ID with bounded limits and an opaque project-bound cursor.
+It returns status, duration, attribution counters, trajectory counters,
+turn-local token usage, and second-resolution lifecycle timestamps without
+exposing raw response items or tool output. The five-test
+`codex-stateful-runtime` suite passes, including token-usage persistence,
+same-timestamp pagination, and cross-project cursor rejection. Focused
+app-server regressions prove terminal-before-attribution merge, failed-status
+correction, and exact accumulation across multiple completed responses; the
+public app-server integration proves one active run persists its terminal
+attribution, trajectory, and upstream usage and reads that record back through
+the new v2 method. The four focused schema-fixture checks pass after stable and
+experimental regeneration.
+
+This is durable mechanism and public-query evidence, not a restored
+live-performance claim. Derived cross-run summaries, authoritative monetary
+cost, and the small normal-home non-zero counter smoke remain open.
+
+### Headless startup-warning hygiene checkpoint (2026-09-27)
+
+The current working tree removes the duplicate ignored-configuration warning
+observed in the first live headless reconciliation. `codex exec` receives each
+startup warning once through app-server initialization and once through the
+Core session event stream. A private exec-only bounded multiset now consumes
+exactly one Core duplicate for each configured startup warning. Matching is by
+the complete message, and the entry is removed when consumed, so unrelated
+warnings and later runtime warnings with identical text remain visible. The
+app-server notification contract is unchanged for other clients.
+
+A unit regression proves one-for-one exact matching, and a real
+`codex exec --experimental-json` integration with an ignored user-config key
+proves that one warning item, rather than two, reaches headless output. The
+complete `codex-exec` crate suite passes. This is an output-quality correction,
+not performance evidence and not a substitute for the still-open normal-home
+measurement reconciliation.
+
+### Bounded project measurement summaries (2026-09-27)
+
+The current working tree adds the experimental v2
+`statefulMeasurement/summary` method over the durable turn records. The caller
+selects one explicit project and a bounded count of its newest measurements. The
+response reports the exact records and distinct runs represented, terminal
+status coverage, summed duration, Stateful attribution counters, trajectory
+counters, provider-reported token usage, and the oldest/newest creation times in
+that window. `hasMore` is true when older project measurements exist outside the
+window, so a bounded result cannot be mistaken for an all-time total.
+
+Attribution-only records remain part of measurement, duration, and Stateful
+counter totals because they are real observed work, but they do not increment
+completed, failed, or aborted counts until a terminal trajectory has been
+merged. `turnsWithTokenUsage` makes partial upstream usage coverage explicit;
+missing usage is not converted to zero. Sums use saturating arithmetic. No
+monetary-cost field is exposed because the durable records do not contain
+authoritative provider pricing, units, or currency.
+
+The complete `codex-stateful-runtime` suite passes, including exact aggregation
+and a truncated newest-two-record window. The app-server-protocol schema fixture
+test and the complete protocol suite pass after stable, experimental, TypeScript,
+and Python artifact generation. A public app-server integration proves a real
+active-run measurement can be read back through both `statefulMeasurement/list`
+and the exact one-record summary. A combined broad app-server run was interrupted
+after remaining at 45 percent without actionable failure output; it is not
+claimed as passing evidence. Scoped Clippy, repository formatting, and the final
+diff hygiene check pass. The normal-home live reconciliation remains the
+operational gate before these records support restored performance claims.
+
+### Measured-work workspace checkpoint (2026-09-27)
+
+The first-class browser workspace now consumes
+`statefulMeasurement/summary` during its ordinary refresh rather than leaving
+durable trajectory evidence hidden behind an API. A compact “Measured work”
+panel shows the bounded record and run counts, terminal-status coverage, model
+responses, tool calls and output bytes, exact evidence reads, material findings
+reused, measured duration, and provider token totals with explicit usage
+coverage. It states when older measurements fall outside the selected 100-record
+window and explicitly says that no monetary cost is inferred.
+
+The panel refreshes with normal turn and Stateful-attribution events. Its fixture
+includes incomplete terminal and token coverage plus an older-record boundary,
+and the checked-in workspace snapshot asserts that all three limitations remain
+visible. The four focused workspace-view tests pass when run directly in-process.
+Node's default test-file worker could not spawn in this sandbox (`EPERM`), so that
+environmental runner failure is recorded separately from the passing assertions.
+This UI makes measurement evidence inspectable; it does not restore the still-
+blocked normal-home performance claim.
+
+### Measured-work correctness and pause checkpoint (2026-09-27)
+
+Independent Astra and Sol review of the first measured-work surface identified
+two browser-only correctness gaps. The refresh promise coalesced overlapping
+events but did not remember that another refresh was needed, so a terminal
+measurement event could arrive after the summary RPC completed but before the
+remaining workspace RPCs settled and leave the panel stale indefinitely. The
+workspace now uses a small refresh gate that records demand during an active
+refresh and runs exactly one follow-up batch after it settles.
+
+The first renderer also converted a missing terminal trajectory to an empty
+object and displayed unknown model responses, model tool calls, and tool-output
+bytes as zero. The runtime deliberately permits an attribution-only record, so
+zero was a false measurement. The renderer now preserves `trajectory: null`,
+uses an unavailable marker and explanation in that state, and labels present
+trajectory aggregates as recorded subtotals whenever terminal coverage is
+partial.
+
+The deterministic refresh-race suite passes 2/2 and the workspace render suite
+passes 5/5 with a checked-in partial-coverage snapshot and a separate
+attribution-only assertion. Fresh handoff validation also passes for the five
+stateful-runtime tests, 331 state/rollout tests, 310 protocol tests with one
+configured skip, all 127 exec tests, and the three focused app-server merge,
+public persistence/query, and content-free notification integrations. The
+repository formatter passes with its `uv` cache redirected inside the writable
+checkout. These are local mechanism gates. The normal-home live reconciliation,
+fresh rendered browser observation, and approval-gated workspace-wide Rust
+suite remain open.

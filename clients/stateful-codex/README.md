@@ -35,6 +35,25 @@ directly, so work performed with that authority is outside the provenance
 guarantee. Clients must invoke `blackboard/confirm` only in direct response to
 an explicit user action.
 
+## Measured work
+
+The workspace reads the experimental `statefulMeasurement/summary` method for
+the selected project. The panel is intentionally a bounded evidence view, not
+an all-time billing dashboard:
+
+- record and run totals cover only the requested newest-first window;
+- `hasMore` is rendered when older records fall outside that window;
+- terminal and provider-token coverage remain explicit;
+- trajectory totals are unavailable until a terminal trajectory has merged;
+- partially merged trajectory totals are labeled as recorded subtotals; and
+- no monetary cost is inferred because the durable record has no authoritative
+  provider price, unit, or currency.
+
+Workspace refreshes are coalesced while preserving one queued follow-up. An
+event that arrives during an in-flight read therefore causes one final read
+after the active batch settles instead of being permanently hidden by stale
+responses.
+
 ## Rollout comparison
 
 Compare an ordinary Codex rollout with a Stateful rollout only after running the

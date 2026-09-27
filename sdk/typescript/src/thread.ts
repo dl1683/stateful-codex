@@ -1,10 +1,24 @@
 import { CodexOptions } from "./codexOptions";
-import { ThreadEvent, ThreadError, Usage } from "./events";
+import { RunTrajectory, ThreadEvent, ThreadError, Usage } from "./events";
 import { CodexExec } from "./exec";
 import { ThreadItem } from "./items";
 import { ThreadOptions } from "./threadOptions";
 import { TurnOptions } from "./turnOptions";
 import { createOutputSchemaFile } from "./outputSchemaFile";
+
+const emptyTrajectory = (): RunTrajectory => ({
+  invocation_duration_ms: 0,
+  completed_model_responses: 0,
+  compactions: 0,
+  model_tool_calls: 0,
+  model_shell_tool_calls: 0,
+  model_function_tool_calls: 0,
+  model_custom_tool_calls: 0,
+  model_tool_search_calls: 0,
+  model_web_search_calls: 0,
+  model_image_generation_calls: 0,
+  tool_output_bytes: 0,
+});
 
 /** Completed turn. */
 export type Turn = {
@@ -104,8 +118,27 @@ export class Thread {
         }
         if (parsed.type === "thread.started") {
           this._id = parsed.thread_id;
+        } else if (parsed.type === "turn.progress") {
+          parsed.trajectory ??= {
+            ...emptyTrajectory(),
+            invocation_duration_ms: parsed.elapsed_ms ?? 0,
+            completed_model_responses: parsed.completed_model_responses ?? 0,
+            compactions: parsed.compactions ?? 0,
+            model_tool_calls: parsed.model_tool_calls ?? 0,
+            tool_output_bytes: parsed.tool_output_bytes ?? 0,
+          };
         } else if (parsed.type === "turn.completed") {
           parsed.usage.cache_write_input_tokens ??= 0;
+          parsed.trajectory ??= emptyTrajectory();
+        } else if (parsed.type === "turn.failed") {
+          parsed.usage ??= {
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+          };
+          parsed.trajectory ??= emptyTrajectory();
         }
         yield parsed;
       }

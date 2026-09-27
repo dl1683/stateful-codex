@@ -165,6 +165,7 @@ impl TracingHarness {
 
     async fn shutdown(self) {
         self.processor.shutdown_threads().await;
+        self.processor.drain_stateful_measurements().await;
         self.processor.drain_background_tasks().await;
     }
 

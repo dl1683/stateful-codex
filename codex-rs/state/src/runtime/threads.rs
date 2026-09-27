@@ -605,6 +605,16 @@ ON CONFLICT(child_thread_id) DO NOTHING
         &self,
         metadata: &crate::ThreadMetadata,
     ) -> anyhow::Result<bool> {
+        self.insert_thread_if_absent_with_memory_mode(metadata, "enabled")
+            .await
+    }
+
+    /// Seed rollout-derived metadata without overwriting an existing live row.
+    pub async fn insert_thread_if_absent_with_memory_mode(
+        &self,
+        metadata: &crate::ThreadMetadata,
+        memory_mode: &str,
+    ) -> anyhow::Result<bool> {
         let updated_at = self.allocate_thread_updated_at(metadata.updated_at)?;
         let recency_at = self.allocate_thread_recency_at(metadata.recency_at)?;
         let preview = metadata_preview(metadata);
@@ -698,7 +708,7 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.git_sha.as_deref())
         .bind(metadata.git_branch.as_deref())
         .bind(metadata.git_origin_url.as_deref())
-        .bind("enabled")
+        .bind(memory_mode)
         .bind(metadata.project_id.as_deref())
         .bind(metadata.daybreak_enabled)
         .execute(self.pool.as_ref())

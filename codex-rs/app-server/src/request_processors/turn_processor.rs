@@ -89,6 +89,7 @@ pub(crate) struct TurnRequestProcessor {
     pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
     thread_state_manager: ThreadStateManager,
     thread_watch_manager: ThreadWatchManager,
+    stateful_store: StatefulStoreHandle,
     skills_watcher: Arc<SkillsWatcher>,
     turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
 }
@@ -151,6 +152,7 @@ impl TurnRequestProcessor {
         pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
         thread_state_manager: ThreadStateManager,
         thread_watch_manager: ThreadWatchManager,
+        stateful_store: StatefulStoreHandle,
         skills_watcher: Arc<SkillsWatcher>,
         turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
     ) -> Self {
@@ -166,6 +168,7 @@ impl TurnRequestProcessor {
             pending_thread_unloads,
             thread_state_manager,
             thread_watch_manager,
+            stateful_store,
             skills_watcher,
             turn_cost_worker,
         }
@@ -1665,6 +1668,7 @@ impl TurnRequestProcessor {
             thread_unload_delay: self.config.thread_unload_delay,
             skills_watcher: Arc::clone(&self.skills_watcher),
             turn_cost_worker: self.turn_cost_worker.clone(),
+            stateful_store: self.stateful_store.clone(),
         }
     }
 

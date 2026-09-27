@@ -11,6 +11,11 @@ use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::StatefulAttributionCompletedNotification;
 use codex_app_server_protocol::StatefulAttributionCounters;
 use codex_app_server_protocol::StatefulAttributionStatus;
+use codex_app_server_protocol::StatefulMeasurementListParams;
+use codex_app_server_protocol::StatefulMeasurementListResponse;
+use codex_app_server_protocol::StatefulMeasurementSummary;
+use codex_app_server_protocol::StatefulMeasurementSummaryParams;
+use codex_app_server_protocol::StatefulMeasurementSummaryResponse;
 use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunPauseParams;
 use codex_app_server_protocol::StatefulRunPauseResponse;
@@ -25,6 +30,7 @@ use codex_app_server_protocol::StatefulRunStartResponse;
 use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulRunUpdatedNotification;
 use codex_app_server_protocol::StatefulSteeringStatus;
+use codex_app_server_protocol::StatefulTurnStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::SteeringListParams;
 use codex_app_server_protocol::SteeringListResponse;
@@ -32,6 +38,7 @@ use codex_app_server_protocol::SteeringSubmitParams;
 use codex_app_server_protocol::SteeringSubmitResponse;
 use codex_app_server_protocol::SteeringUpdatedNotification;
 use codex_app_server_protocol::ThreadStartParams;
+use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
@@ -57,6 +64,152 @@ use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
+
+#[tokio::test]
+async fn active_run_persists_terminal_attribution_and_trajectory() -> Result<()> {
+    let responses = responses::start_mock_server().await;
+    let completed = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp-1",
+            "usage": {
+                "input_tokens": 30,
+                "input_tokens_details": {
+                    "cached_tokens": 11,
+                    "cache_write_tokens": 2
+                },
+                "output_tokens": 7,
+                "output_tokens_details": { "reasoning_tokens": 3 },
+                "total_tokens": 37
+            }
+        }
+    });
+    let body = responses::sse(vec![
+        responses::ev_response_created("resp-1"),
+        responses::ev_assistant_message("msg-1", "Done"),
+        completed,
+    ]);
+    let _response_mock = responses::mount_sse_once(&responses, body).await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Measured run".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "measured-run-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id.clone(),
+                thread_id: thread.thread.id.clone(),
+                goal: "Measure one turn.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 600,
+                },
+                idempotency_key: "measured-run".to_string(),
+            },
+        })
+        .await?;
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "Complete one measured turn.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let measurements: StatefulMeasurementListResponse = server
+        .request(|request_id| ClientRequest::StatefulMeasurementList {
+            request_id,
+            params: StatefulMeasurementListParams {
+                project_id: project.project.id.clone(),
+                cursor: None,
+                limit: Some(5),
+            },
+        })
+        .await?;
+    assert_eq!(measurements.next_cursor, None);
+    let [measurement] = measurements.data.as_slice() else {
+        panic!("expected one persisted turn measurement");
+    };
+    assert_eq!(measurement.run_id, started.run.id);
+    assert_eq!(measurement.thread_id, thread.thread.id);
+    assert_eq!(measurement.status, StatefulTurnStatus::Completed);
+    assert_eq!(measurement.counters.world_state_samples, 2);
+    assert_eq!(
+        measurement.token_usage,
+        Some(TokenUsageBreakdown {
+            total_tokens: 37,
+            input_tokens: 30,
+            cached_input_tokens: 11,
+            cache_write_input_tokens: 2,
+            output_tokens: 7,
+            reasoning_output_tokens: 3,
+        })
+    );
+    assert_eq!(
+        measurement
+            .trajectory
+            .as_ref()
+            .expect("terminal trajectory persisted")
+            .completed_model_responses,
+        1
+    );
+    let summary: StatefulMeasurementSummaryResponse = server
+        .request(|request_id| ClientRequest::StatefulMeasurementSummary {
+            request_id,
+            params: StatefulMeasurementSummaryParams {
+                project_id: project.project.id.clone(),
+                limit: Some(5),
+            },
+        })
+        .await?;
+    assert_eq!(
+        summary.summary,
+        StatefulMeasurementSummary {
+            project_id: project.project.id,
+            measurement_count: 1,
+            run_count: 1,
+            terminal_measurement_count: 1,
+            completed_turns: 1,
+            failed_turns: 0,
+            aborted_turns: 0,
+            turns_with_token_usage: 1,
+            duration_ms: measurement.duration_ms,
+            counters: measurement.counters.clone(),
+            trajectory: measurement.trajectory.clone(),
+            token_usage: measurement.token_usage.clone(),
+            oldest_created_at: Some(measurement.created_at),
+            newest_created_at: Some(measurement.created_at),
+            has_more: false,
+        }
+    );
+    Ok(())
+}
 
 #[tokio::test]
 async fn selected_project_provides_shared_prompt_cache_affinity() -> Result<()> {

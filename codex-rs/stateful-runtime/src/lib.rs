@@ -1,10 +1,21 @@
 //! Durable run, obligation, steering, and autonomous-recovery state for Stateful Codex.
 
+mod measurement;
+mod measurement_storage;
 mod run;
 mod steering;
 mod steering_storage;
 mod storage;
 
+pub use measurement::NewStatefulTurnMeasurement;
+pub use measurement::StatefulAttributionCounters;
+pub use measurement::StatefulMeasurementSummary;
+pub use measurement::StatefulTokenUsage;
+pub use measurement::StatefulTurnMeasurement;
+pub use measurement::StatefulTurnMeasurementPage;
+pub use measurement::StatefulTurnStatus;
+pub use measurement::StatefulTurnTerminalMeasurement;
+pub use measurement::TurnTrajectory;
 pub use run::NewObligation;
 pub use run::NewStatefulRun;
 pub use run::ObligationPacket;

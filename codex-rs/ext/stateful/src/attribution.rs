@@ -17,6 +17,7 @@ use crate::SelectedThread;
 use crate::StatefulEvent;
 use crate::StatefulExtension;
 use crate::source_freshness::EvidenceAudit;
+use codex_stateful_runtime::StatefulRunId;
 
 const BLACKBOARD_QUERY: &str = "blackboard_query";
 const CONTEXT_MAP_QUERY: &str = "context_map_query";
@@ -65,6 +66,7 @@ pub struct StatefulAttributionCounters {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatefulAttributionSummary {
+    pub run_id: Option<StatefulRunId>,
     pub project_id: String,
     pub thread_id: String,
     pub turn_id: String,
@@ -79,6 +81,7 @@ pub(super) struct StatefulAttributionTracker {
 }
 
 struct ActiveAttribution {
+    run_id: Option<StatefulRunId>,
     project_id: String,
     thread_id: String,
     started_at: Instant,
@@ -95,6 +98,7 @@ impl StatefulAttributionTracker {
             .insert(
                 turn_id.to_string(),
                 ActiveAttribution {
+                    run_id: None,
                     project_id,
                     thread_id,
                     started_at: Instant::now(),
@@ -103,6 +107,10 @@ impl StatefulAttributionTracker {
                     pending_material_findings: HashMap::new(),
                 },
             );
+    }
+
+    pub(super) fn bind_run(&self, turn_id: &str, run_id: StatefulRunId) {
+        self.with_turn(turn_id, |turn| turn.run_id = Some(run_id));
     }
 
     pub(super) fn record_world_state(
@@ -198,6 +206,7 @@ impl StatefulAttributionTracker {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(turn_id)?;
         Some(StatefulAttributionSummary {
+            run_id: turn.run_id,
             project_id: turn.project_id,
             thread_id: turn.thread_id,
             turn_id: turn_id.to_string(),

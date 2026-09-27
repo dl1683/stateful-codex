@@ -28,7 +28,8 @@ describe("Codex", () => {
         events.push(event);
       }
 
-      expect(events).toEqual([
+      expect(events.some((event) => event.type === "turn.progress")).toBe(true);
+      expect(events.filter((event) => event.type !== "turn.progress")).toEqual([
         {
           type: "thread.started",
           thread_id: expect.any(String),
@@ -53,6 +54,13 @@ describe("Codex", () => {
             output_tokens: 5,
             reasoning_output_tokens: 0,
           },
+          trajectory: expect.objectContaining({
+            invocation_duration_ms: expect.any(Number),
+            completed_model_responses: 1,
+            compactions: 0,
+            model_tool_calls: 0,
+            tool_output_bytes: 0,
+          }),
         },
       ]);
       expect(thread.id).toEqual(expect.any(String));

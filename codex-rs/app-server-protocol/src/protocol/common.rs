@@ -903,6 +903,18 @@ client_request_definitions! {
         serialization: global("stateful-runtime"),
         response: v2::StatefulRunSetModeResponse,
     },
+    #[experimental("statefulMeasurement/list")]
+    StatefulMeasurementList => "statefulMeasurement/list" {
+        params: v2::StatefulMeasurementListParams,
+        serialization: global_shared_read("stateful-runtime"),
+        response: v2::StatefulMeasurementListResponse,
+    },
+    #[experimental("statefulMeasurement/summary")]
+    StatefulMeasurementSummary => "statefulMeasurement/summary" {
+        params: v2::StatefulMeasurementSummaryParams,
+        serialization: global_shared_read("stateful-runtime"),
+        response: v2::StatefulMeasurementSummaryResponse,
+    },
     #[experimental("obligation/list")]
     ObligationList => "obligation/list" {
         params: v2::ObligationListParams,
@@ -2052,6 +2064,8 @@ server_notification_definitions! {
     #[experimental("thread/settings/updated")]
     ThreadSettingsUpdated => "thread/settings/updated" (v2::ThreadSettingsUpdatedNotification),
     ThreadTokenUsageUpdated => "thread/tokenUsage/updated" (v2::ThreadTokenUsageUpdatedNotification),
+    #[experimental("turn/trajectory/updated")]
+    TurnTrajectoryUpdated => "turn/trajectory/updated" (v2::TurnTrajectoryUpdatedNotification),
     TurnStarted => "turn/started" (v2::TurnStartedNotification),
     HookStarted => "hook/started" (v2::HookStartedNotification),
     TurnCompleted => "turn/completed" (v2::TurnCompletedNotification),

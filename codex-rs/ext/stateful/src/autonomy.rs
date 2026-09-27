@@ -170,6 +170,7 @@ impl TurnLifecycleContributor for StatefulExtension {
             };
             match store.run_for_thread(&thread.thread_id).await {
                 Ok(Some(run)) if run.value.project_id == selected.project_id() => {
+                    self.attribution.bind_run(input.turn_id, run.id.clone());
                     input.thread_store.insert(ActiveRunTurn {
                         run_id: run.id,
                         turn_id: input.turn_id.to_string(),

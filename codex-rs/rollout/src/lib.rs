@@ -24,6 +24,7 @@ mod seekable_reader;
 pub(crate) mod session_index;
 mod sqlite_metrics;
 pub mod state_db;
+mod state_db_backfill;
 mod writer_lock;
 
 pub use codex_history::CompactedItem;

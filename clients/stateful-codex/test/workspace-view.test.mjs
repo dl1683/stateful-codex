@@ -17,12 +17,38 @@ test("workspace presents semantic progress and evidence before raw activity", as
       actual.indexOf("Supporting activity"),
   );
   assert.match(actual, /A result is not automatically verified/);
+  assert.match(actual, /Terminal coverage 3\/4/);
+  assert.match(actual, /Recorded trajectory subtotal covers 3\/4 records/);
+  assert.match(actual, /Older measurements exist outside this window/);
+  assert.match(actual, /no monetary cost is inferred/);
   assert.match(actual, /Command/);
   assert.equal(
     actual.match(/data-action="confirm-knowledge"/g)?.length,
     statefulFindingCount(workspaceFixture()),
   );
   assert.doesNotMatch(actual, /undefined · Recorded/);
+});
+
+test("missing terminal trajectory is not rendered as measured zeroes", () => {
+  const state = workspaceFixture();
+  state.measurementSummary.terminalMeasurementCount = 0;
+  state.measurementSummary.completedTurns = 0;
+  state.measurementSummary.failedTurns = 0;
+  state.measurementSummary.abortedTurns = 0;
+  state.measurementSummary.trajectory = null;
+
+  const actual = renderWorkspace(state);
+
+  assert.match(actual, /<strong>—<\/strong><span>model responses<\/span>/);
+  assert.match(
+    actual,
+    /Model-response, model-tool, and tool-output totals are unavailable/,
+  );
+  assert.match(actual, /Model tool calls and tool-output bytes unavailable/);
+  assert.doesNotMatch(
+    actual,
+    /<strong>0<\/strong><span>model responses<\/span>/,
+  );
 });
 
 test("already user-confirmed understanding cannot be confirmed again", () => {

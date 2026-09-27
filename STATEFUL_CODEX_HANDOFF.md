@@ -1,6 +1,6 @@
 # Stateful Codex restart handoff
 
-Updated: 2026-09-26
+Updated: 2026-09-27
 
 ## Mandatory restart order
 
@@ -40,9 +40,11 @@ product outcome. The gate is a better longitudinal work trajectory.
 
 - Development branch: `feature/stateful-codex`
 - Published branch: `stateful/main`
-- Latest implementation head before this handoff update: `dc2dd91aeb`
-  (`fix(stateful): require durable learning capture`).
-- The tracked working tree was clean at this checkpoint.
+- Current branch head: `19222f07f331`; the migration/backfill, corrected
+  trajectory, and durable-measurement work described below is still in the
+  working tree. The session filesystem allows source edits but not writes to
+  `.git`, so `git add` cannot create `index.lock`; do not describe this state as
+  committed or pushed.
 - These untracked experiment directories are read-only and must never be
   modified, staged, deleted, or regenerated:
   - `clients/stateful-codex/eval/results/pramana-ab-2026-09-24/`
@@ -51,6 +53,95 @@ product outcome. The gate is a better longitudinal work trajectory.
 The rejected bare-line-range prototype remains only as a recovery artifact on
 `checkpoint/stateful-region-routing-unsafe-20260925` at `a6cdb157de`. Do not
 merge it.
+
+## Pause handoff checkpoint (2026-09-27)
+
+The current working tree is a coherent continuation of `19222f07f331`, not a
+finished release. It contains four coupled implementation slices:
+
+1. migration and first-run rollout-backfill reliability, including line-ending
+   equivalent migration checksums, retryable insert-only seeding, filesystem
+   fallback while incomplete, and owner-token fencing;
+2. app-server-owned turn trajectory accounting and durable per-turn Stateful
+   measurements, including arrival-order-independent attribution/terminal
+   merging, graceful-shutdown draining, stable pagination, exact turn-local
+   provider usage, and the experimental `statefulMeasurement/list` and
+   `statefulMeasurement/summary` methods;
+3. headless output cleanup that removes exactly one Core duplicate for each
+   startup warning already emitted during app-server initialization; and
+4. a browser “Measured work” surface that exposes the bounded summary without
+   presenting partial coverage as all-time data or inventing monetary cost.
+
+The final browser review found two correctness defects and both are fixed in
+the working tree. A state-change event received during an active workspace
+refresh now queues exactly one follow-up refresh, so the last persisted
+measurement cannot remain hidden behind an older in-flight request. A summary
+with no terminal trajectory now renders trajectory totals as unavailable rather
+than measured zero; a partially merged summary labels its trajectory values as
+a recorded subtotal.
+
+Fresh handoff validation after those fixes:
+
+- `node clients/stateful-codex/test/refresh-policy.test.mjs`: 2/2 passed;
+- `node clients/stateful-codex/test/workspace-view.test.mjs`: 5/5 passed;
+- `just test -p codex-stateful-runtime`: 5/5 passed;
+- `just test -p codex-state -p codex-rollout`: 331/331 passed;
+- `just test -p codex-app-server-protocol`: 310/310 passed, one configured
+  skip;
+- `just test -p codex-exec`: 127/127 passed;
+- focused app-server terminal-before-attribution merge: passed;
+- focused public active-run measurement persistence/query integration: passed;
+- focused content-free trajectory notification integration: passed;
+- `just fmt` passed with `UV_CACHE_DIR` redirected to the repository-local
+  cache; and
+- `git diff --check`: passed before this documentation update and must be run
+  once more after the final handoff edit.
+
+Do not inflate this evidence. A normal-home live smoke is still required to
+prove startup recovery, non-zero trajectory counters, exact turn-local usage,
+and agreement between the raw rollout and both public measurement methods. The
+repository-wide Rust suite was not run because it remains approval-gated. A
+fresh rendered browser pass was not available in this session. GitHub issue
+refresh and publication were also blocked during preparation by the sandbox's
+forced `127.0.0.1:9` HTTPS proxy. A final `git add -u` attempt also failed with
+`Unable to create '.git/index.lock': Permission denied`. Therefore HEAD and the
+published `stateful/main` ref remain at `19222f07f331`; the validated source
+work described here is still uncommitted in this checkout. Reconcile the final
+commit and remote state against live Git rather than assuming this paragraph is
+current, and never stage the two protected experiment directories while doing
+so.
+
+When Git metadata and network access are writable again, publish only after
+rechecking the diff. `git add -u` stages the tracked product changes without
+touching the protected untracked directories. Then add only these untracked
+implementation paths:
+
+```text
+codex-rs/app-server-protocol/schema/json/v2/TurnTrajectoryUpdatedNotification.json
+codex-rs/app-server-protocol/schema/typescript/v2/StatefulMeasurementSummary.ts
+codex-rs/app-server-protocol/schema/typescript/v2/StatefulTurnMeasurement.ts
+codex-rs/app-server-protocol/schema/typescript/v2/StatefulTurnStatus.ts
+codex-rs/app-server-protocol/schema/typescript/v2/TurnTrajectory.ts
+codex-rs/app-server-protocol/schema/typescript/v2/TurnTrajectoryUpdatedNotification.ts
+codex-rs/app-server-protocol/src/protocol/v2/turn_trajectory.rs
+codex-rs/app-server/src/stateful_store.rs
+codex-rs/app-server/src/stateful_store_tests.rs
+codex-rs/app-server/src/turn_trajectory.rs
+codex-rs/app-server/src/turn_trajectory_tests.rs
+codex-rs/exec/src/startup_warning_deduper.rs
+codex-rs/exec/src/startup_warning_deduper_tests.rs
+codex-rs/exec/tests/suite/startup_warnings.rs
+codex-rs/rollout/src/state_db_backfill.rs
+codex-rs/state/migrations/0056_backfill_owner_token.sql
+codex-rs/stateful-runtime/migrations/0004_turn_measurements.sql
+codex-rs/stateful-runtime/src/measurement.rs
+codex-rs/stateful-runtime/src/measurement_storage.rs
+```
+
+Review `git diff --cached --check` and `git diff --cached --stat`, commit the
+coherent handoff, then push `feature/stateful-codex` to `stateful/main`. Do not
+use `git add .`, `git add -A`, or a directory-wide add under
+`clients/stateful-codex/eval/results`.
 
 ## Authentication incident resolved
 
@@ -823,16 +914,45 @@ so representative trajectory work must measure that choice.
 
 Do not launch another broad benchmark yet. Close these small gates first:
 
-1. **Persist comparable run records.** Commits `a3f27fb130` and `a288e3eb54`
-   extend the bounded attribution record with invocation time, completed model
-   responses, compactions, model-issued tool calls by kind, serialized tool-
-   output bytes, live JSONL `turn.progress` snapshots, live per-turn
-   `stateful.attribution`, and compact human headless progress. Issue #24 still
-   needs durable cross-run trends and authoritative dollar cost before another
-   matched longitudinal rerun. Completed responses are not failed model-request
-   attempts, and cost must not be fabricated when applied provider pricing is
+1. **Finish the migration/backfill gate with a live smoke.** The current working
+   tree addresses issues #29 and #31 locally: LF/CRLF-equivalent migrations are
+   accepted without rewriting stored checksums, substantive mutations still
+   fail, historical metadata backfills outside startup, incomplete reads fall
+   back to the filesystem, seeding cannot overwrite live rows, failures cannot
+   be skipped, and owner-token fencing rejects stale checkpoints/completion.
+   Migration 0056 resets legacy completion once for a safe insert-only reseed.
+   `codex-state` plus `codex-rollout` pass 331/331 tests. A small normal-home
+   smoke remains required before calling the gate closed operationally.
+   Re-check issue #30 against the actual runtime migrator before changing
+   version-skew behavior: the current runtime migrator already enables
+   `ignore_missing`, so a checksum failure must not be mislabeled as ordinary
+   forward-version skew.
+2. **Validate and expose comparable run records.** The live licensing run
+   recorded after `19222f07f3` had correct Stateful attribution and answer
+   content but zero model-response, tool, output, and compaction counters. Raw
+   app-server events had been suppressed for the ordinary headless client, so
+   the earlier evidence claim is invalid and issue #24 remains open. The
+   corrective working-tree implementation now counts before raw-event
+   suppression, guarantees terminal trajectory delivery, measures
+   failed/interrupted invocations, and uses invocation-local resume tokens.
+   Active Stateful turns are durably stored with typed attribution, trajectory,
+   exact turn-local provider token usage when available, final status, and
+   stable completion time. Missing usage remains absent rather than being
+   inferred from lifetime thread totals. Independent Astra and Sol reviews
+   found and drove fixes for cross-turn binding loss, two-channel arrival races,
+   failed-turn status mismatch, notification loss, destructive replay, mutable
+   ordering, and shutdown cancellation. Attribution and terminal trajectory now
+   merge in either order; graceful shutdown waits for listener drain before
+   clearing listeners. The experimental v2 `statefulMeasurement/list` method
+   now exposes a bounded, project-scoped series using an opaque project-bound
+   cursor and immutable creation ordering. Runtime 5/5, the terminal-first and
+   multi-response usage regressions, the public active-run persistence/query
+   integration with exact upstream usage, and four schema-fixture checks pass.
+   It still needs a fresh live smoke after the migration/backfill gate, derived
+   summaries, and authoritative monetary cost. Cost must
+   not be fabricated when the provider amount's unit and currency are
    unavailable.
-2. **Real index-cost attribution.** The next suitable repository refresh must
+3. **Real index-cost attribution.** The next suitable repository refresh must
    record the new scan/publication split, database size, and used-versus-indexed
    routes. Do not optimize the historical 169–248 second result by extrapolating
    from the small local fixture.
@@ -843,13 +963,23 @@ and queries, and whether the decisive prior conclusion was actually used.
 
 ## Recommended next action
 
-The minimal controlled headless fixture reconciles its state contribution, and
-the exec layer now exposes the rest of the observable trajectory without raw
-rollout parsing. The next smallest gate is to store one bounded terminal record
-per Stateful run and expose a project-scoped series so cost and reuse trends can
-be compared across runs. Keep token usage separate from unavailable dollar
-pricing, and keep completed responses separate from failed request attempts.
-Remove the duplicate ignored-config warnings from headless item output as a
-separate hygiene fix. Collect issue #19 diagnostics only on the next suitable
-real refresh, and do not launch a broad benchmark merely to obtain either
-measurement.
+The local migration, first-run rollout-backfill, durable turn-record, and bounded
+project-summary implementations now pass their focused suites. The experimental
+`statefulMeasurement/summary` method aggregates an explicit newest-first window,
+reports its terminal and token-usage coverage, and discloses omitted older rows;
+it does not invent dollar pricing or failed-request counts. The duplicate
+ignored-config warning in headless item output is also removed by an exec-only,
+exact one-for-one deduper with focused unit and real CLI JSONL integration
+coverage plus the complete `codex-exec` suite. The browser workspace now reads
+that summary and presents bounded measurement, trajectory, reuse, status, and
+token-coverage evidence without calling it all-time or monetary cost; its focused
+render assertions and checked-in snapshot pass 4/4 in-process.
+
+Run one small normal-home headless fixture next and verify startup recovery,
+non-zero trajectory counters, exact turn-local token usage, and the merged
+persisted turn record against the raw rollout plus both public measurement
+methods before restoring any observability claim. The current sandbox cannot
+write a normal Codex home, so this operational gate requires a writable ordinary
+runtime rather than another component test. Collect issue #19 diagnostics only
+on the next suitable real refresh, and do not launch a broad benchmark merely to
+obtain either measurement.

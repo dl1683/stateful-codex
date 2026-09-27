@@ -2,15 +2,21 @@ use std::sync::Arc;
 
 mod api;
 
+use api::api_measurement_summary;
 use api::api_obligation;
 use api::api_run;
 use api::api_steering;
+use api::api_turn_measurement;
 use api::workflow_mode;
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::ObligationListParams;
 use codex_app_server_protocol::ObligationListResponse;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::StatefulMeasurementListParams;
+use codex_app_server_protocol::StatefulMeasurementListResponse;
+use codex_app_server_protocol::StatefulMeasurementSummaryParams;
+use codex_app_server_protocol::StatefulMeasurementSummaryResponse;
 use codex_app_server_protocol::StatefulRunCancelParams;
 use codex_app_server_protocol::StatefulRunCancelResponse;
 use codex_app_server_protocol::StatefulRunPauseParams;
@@ -31,7 +37,6 @@ use codex_app_server_protocol::SteeringSubmitParams;
 use codex_app_server_protocol::SteeringSubmitResponse;
 use codex_app_server_protocol::SteeringUpdatedNotification;
 use codex_protocol::ThreadId;
-use codex_state::SqliteConfig;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::NewSteeringInstruction;
 use codex_stateful_runtime::RunBudget;
@@ -49,12 +54,12 @@ use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
 use sha2::Digest;
 use sha2::Sha256;
-use tokio::sync::OnceCell;
 
 use crate::error_code::internal_error;
 use crate::error_code::invalid_params;
 use crate::error_code::method_not_found;
 use crate::outgoing_message::OutgoingMessageSender;
+use crate::stateful_store::StatefulStoreHandle;
 
 const DEFAULT_LIST_LIMIT: u32 = 20;
 const MAX_LIST_LIMIT: u32 = 101;
@@ -62,21 +67,19 @@ const MAX_LIST_LIMIT: u32 = 101;
 #[derive(Clone)]
 pub(crate) struct StatefulRequestProcessor {
     thread_store: Arc<dyn ThreadStore>,
-    sqlite: Option<SqliteConfig>,
-    store: Arc<OnceCell<StatefulRunStore>>,
+    store: StatefulStoreHandle,
     outgoing: Arc<OutgoingMessageSender>,
 }
 
 impl StatefulRequestProcessor {
     pub(crate) fn new(
         thread_store: Arc<dyn ThreadStore>,
-        sqlite: Option<SqliteConfig>,
+        store: StatefulStoreHandle,
         outgoing: Arc<OutgoingMessageSender>,
     ) -> Self {
         Self {
             thread_store,
-            sqlite,
-            store: Arc::new(OnceCell::new()),
+            store,
             outgoing,
         }
     }
@@ -258,6 +261,45 @@ impl StatefulRequestProcessor {
         ))
     }
 
+    pub(crate) async fn measurement_list(
+        &self,
+        params: StatefulMeasurementListParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let limit = list_limit(params.limit)?;
+        let page = self
+            .store()
+            .await?
+            .list_project_measurements(&params.project_id, params.cursor.as_deref(), limit)
+            .await
+            .map_err(runtime_error)?;
+        Ok(Some(
+            StatefulMeasurementListResponse {
+                data: page.data.into_iter().map(api_turn_measurement).collect(),
+                next_cursor: page.next_cursor,
+            }
+            .into(),
+        ))
+    }
+
+    pub(crate) async fn measurement_summary(
+        &self,
+        params: StatefulMeasurementSummaryParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let limit = list_limit(params.limit)?;
+        let summary = self
+            .store()
+            .await?
+            .summarize_project_measurements(&params.project_id, limit)
+            .await
+            .map_err(runtime_error)?;
+        Ok(Some(
+            StatefulMeasurementSummaryResponse {
+                summary: api_measurement_summary(summary),
+            }
+            .into(),
+        ))
+    }
+
     pub(crate) async fn steering_submit(
         &self,
         params: SteeringSubmitParams,
@@ -392,13 +434,15 @@ impl StatefulRequestProcessor {
     }
 
     async fn store(&self) -> Result<&StatefulRunStore, JSONRPCErrorError> {
-        let sqlite = self.sqlite.as_ref().ok_or_else(|| {
-            method_not_found("Stateful runs are unavailable without sqlite state")
-        })?;
         self.store
-            .get_or_try_init(|| StatefulRunStore::open(sqlite))
+            .get()
             .await
             .map_err(runtime_error)
+            .and_then(|store| {
+                store.ok_or_else(|| {
+                    method_not_found("Stateful runs are unavailable without sqlite state")
+                })
+            })
     }
 
     async fn notify_run(&self, run: &StatefulRun) {
@@ -478,7 +522,14 @@ fn runtime_error(error: StatefulRunStoreError) -> JSONRPCErrorError {
         | StatefulRunStoreError::InvalidSteeringTransition { .. }
         | StatefulRunStoreError::StrategyRevisionMismatch
         | StatefulRunStoreError::InvalidListLimit
-        | StatefulRunStoreError::InvalidListCursor => invalid_params(error.to_string()),
+        | StatefulRunStoreError::InvalidListCursor
+        | StatefulRunStoreError::MeasurementThreadMismatch
+        | StatefulRunStoreError::MeasurementIdentityConflict
+        | StatefulRunStoreError::MeasurementNotFound
+        | StatefulRunStoreError::InvalidMeasurementTimestamp
+        | StatefulRunStoreError::MeasurementPendingCapacity
+        | StatefulRunStoreError::MeasurementMergeTimeout
+        | StatefulRunStoreError::MeasurementWriterClosed => invalid_params(error.to_string()),
         error => internal_error(format!("Stateful runtime failed: {error}")),
     }
 }

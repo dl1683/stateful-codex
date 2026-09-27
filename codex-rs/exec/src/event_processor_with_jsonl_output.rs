@@ -11,7 +11,6 @@ use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
-use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::WebSearchAction as ApiWebSearchAction;
 use codex_core::config::Config;
@@ -64,11 +63,11 @@ pub struct EventProcessorWithJsonOutput {
     next_item_id: AtomicU64,
     raw_to_exec_item_id: HashMap<String, String>,
     running_todo_list: Option<RunningTodoList>,
-    last_total_token_usage: Option<ThreadTokenUsage>,
     last_critical_error: Option<ThreadErrorEvent>,
     final_message: Option<String>,
     emit_final_message_on_shutdown: bool,
     stateful_attribution: StatefulAttributionAccumulator,
+    pending_stateful_status: Option<StatefulTurnStatus>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,11 +89,11 @@ impl EventProcessorWithJsonOutput {
             next_item_id: AtomicU64::new(0),
             raw_to_exec_item_id: HashMap::new(),
             running_todo_list: None,
-            last_total_token_usage: None,
             last_critical_error: None,
             final_message: None,
             emit_final_message_on_shutdown: false,
             stateful_attribution: StatefulAttributionAccumulator::default(),
+            pending_stateful_status: None,
         }
     }
 
@@ -118,19 +117,6 @@ impl EventProcessorWithJsonOutput {
                 .to_string()
             })
         );
-    }
-
-    fn usage_from_last_total(&self) -> Usage {
-        let Some(usage) = self.last_total_token_usage.as_ref() else {
-            return Usage::default();
-        };
-        Usage {
-            input_tokens: usage.total.input_tokens,
-            cached_input_tokens: usage.total.cached_input_tokens,
-            cache_write_input_tokens: usage.total.cache_write_input_tokens,
-            output_tokens: usage.total.output_tokens,
-            reasoning_output_tokens: usage.total.reasoning_output_tokens,
-        }
     }
 
     pub fn map_todo_items(plan: &[codex_app_server_protocol::TurnPlanStep]) -> Vec<TodoItem> {
@@ -512,40 +498,28 @@ impl EventProcessorWithJsonOutput {
             }
             ServerNotification::ModelVerification(_) => CodexStatus::Running,
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
-                let changed = self.last_total_token_usage.as_ref().is_none_or(|previous| {
-                    previous.total.total_tokens != notification.token_usage.total.total_tokens
-                        || previous.total.cached_input_tokens
-                            != notification.token_usage.total.cached_input_tokens
-                        || previous.total.output_tokens
-                            != notification.token_usage.total.output_tokens
-                });
-                self.last_total_token_usage = Some(notification.token_usage);
-                if changed
-                    && self
-                        .last_total_token_usage
-                        .as_ref()
-                        .is_some_and(|usage| usage.total.total_tokens > 0)
+                if self.stateful_attribution.record_token_usage(&notification)
+                    && self.stateful_attribution.usage() != Usage::default()
                 {
                     events.push(ThreadEvent::TurnProgress(
                         self.stateful_attribution
-                            .progress(self.usage_from_last_total()),
+                            .progress(self.stateful_attribution.usage()),
                     ));
                 }
                 CodexStatus::Running
             }
-            ServerNotification::RawResponseCompleted(_) => {
-                self.stateful_attribution.record_model_response();
+            ServerNotification::TurnTrajectoryUpdated(notification) => {
+                if self.stateful_attribution.record_trajectory(&notification) {
+                    events.push(ThreadEvent::TurnProgress(
+                        self.stateful_attribution
+                            .progress(self.stateful_attribution.usage()),
+                    ));
+                }
                 CodexStatus::Running
             }
-            ServerNotification::RawResponseItemCompleted(notification) => {
-                self.stateful_attribution
-                    .record_response_item(&notification.item);
-                CodexStatus::Running
-            }
-            ServerNotification::ContextCompacted(_) => {
-                self.stateful_attribution.record_compaction();
-                CodexStatus::Running
-            }
+            ServerNotification::RawResponseCompleted(_)
+            | ServerNotification::RawResponseItemCompleted(_)
+            | ServerNotification::ContextCompacted(_) => CodexStatus::Running,
             ServerNotification::StatefulAttributionCompleted(notification) => {
                 let turn_status = match notification.status {
                     codex_app_server_protocol::StatefulAttributionStatus::Completed => {
@@ -560,15 +534,18 @@ impl EventProcessorWithJsonOutput {
                 };
                 self.stateful_attribution
                     .record_stateful_turn(&notification);
-                if let Some(attribution) = self.stateful_attribution.snapshot() {
+                self.pending_stateful_status = Some(turn_status);
+                CodexStatus::Running
+            }
+            ServerNotification::TurnCompleted(notification) => {
+                if let Some(turn_status) = self.pending_stateful_status.take()
+                    && let Some(attribution) = self.stateful_attribution.snapshot()
+                {
                     events.push(ThreadEvent::StatefulAttribution(StatefulAttributionEvent {
                         turn_status,
                         attribution,
                     }));
                 }
-                CodexStatus::Running
-            }
-            ServerNotification::TurnCompleted(notification) => {
                 if let Some(running) = self.running_todo_list.take() {
                     events.push(ThreadEvent::ItemCompleted(ItemCompletedEvent {
                         item: ExecThreadItem {
@@ -589,7 +566,8 @@ impl EventProcessorWithJsonOutput {
                         }
                         self.emit_final_message_on_shutdown = true;
                         events.push(ThreadEvent::TurnCompleted(TurnCompletedEvent {
-                            usage: self.usage_from_last_total(),
+                            usage: self.stateful_attribution.usage(),
+                            trajectory: self.stateful_attribution.trajectory(),
                             stateful_attribution: self.stateful_attribution.snapshot(),
                         }));
                         CodexStatus::InitiateShutdown
@@ -612,12 +590,25 @@ impl EventProcessorWithJsonOutput {
                             .unwrap_or_else(|| ThreadErrorEvent {
                                 message: "turn failed".to_string(),
                             });
-                        events.push(ThreadEvent::TurnFailed(TurnFailedEvent { error }));
+                        events.push(ThreadEvent::TurnFailed(TurnFailedEvent {
+                            error,
+                            usage: self.stateful_attribution.usage(),
+                            trajectory: self.stateful_attribution.trajectory(),
+                            stateful_attribution: self.stateful_attribution.snapshot(),
+                        }));
                         CodexStatus::InitiateShutdown
                     }
                     TurnStatus::Interrupted => {
                         self.final_message = None;
                         self.emit_final_message_on_shutdown = false;
+                        events.push(ThreadEvent::TurnFailed(TurnFailedEvent {
+                            error: ThreadErrorEvent {
+                                message: "turn interrupted".to_string(),
+                            },
+                            usage: self.stateful_attribution.usage(),
+                            trajectory: self.stateful_attribution.trajectory(),
+                            stateful_attribution: self.stateful_attribution.snapshot(),
+                        }));
                         CodexStatus::InitiateShutdown
                     }
                     TurnStatus::InProgress => CodexStatus::Running,
@@ -650,8 +641,8 @@ impl EventProcessorWithJsonOutput {
                 }
                 CodexStatus::Running
             }
-            ServerNotification::TurnStarted(_) => {
-                self.stateful_attribution.start_invocation();
+            ServerNotification::TurnStarted(notification) => {
+                self.stateful_attribution.start_turn(&notification.turn.id);
                 events.push(ThreadEvent::TurnStarted(TurnStartedEvent {}));
                 CodexStatus::Running
             }

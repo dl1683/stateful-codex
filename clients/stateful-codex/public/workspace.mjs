@@ -1,5 +1,5 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
-import { needsProjectRefresh } from "./refresh-policy.mjs";
+import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { renderWorkspace } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
@@ -23,6 +23,7 @@ const state = {
   blackboard: [],
   obligations: [],
   steering: [],
+  measurementSummary: null,
   activity: [],
   contextHits: [],
   evidence: null,
@@ -36,7 +37,7 @@ const state = {
 };
 
 let refreshTimer;
-let refreshPromise;
+const refresh = createRefreshGate(refreshWorkspace);
 
 async function boot() {
   subscribe(handleEvent);
@@ -116,15 +117,6 @@ async function ensureRun() {
   await sendInitialTurn();
 }
 
-function refresh() {
-  if (!refreshPromise) {
-    refreshPromise = refreshWorkspace().finally(() => {
-      refreshPromise = null;
-    });
-  }
-  return refreshPromise;
-}
-
 async function refreshWorkspace() {
   state.loading = !state.project;
   state.error = null;
@@ -137,6 +129,7 @@ async function refreshWorkspace() {
     blackboard,
     obligations,
     steering,
+    measurementSummary,
     activity,
   ] = await Promise.all([
     rpc("project/read", { projectId }),
@@ -158,6 +151,7 @@ async function refreshWorkspace() {
           limit: 100,
         })
       : { data: [] },
+    rpc("statefulMeasurement/summary", { projectId, limit: 100 }),
     rpc("thread/items/list", {
       threadId,
       cursor: null,
@@ -176,6 +170,7 @@ async function refreshWorkspace() {
   state.blackboard = blackboard.data;
   state.obligations = obligations.data;
   state.steering = steering.data;
+  state.measurementSummary = measurementSummary.summary;
   state.activity = activity.data.reverse();
   state.loading = false;
   state.busyAction = null;
@@ -227,7 +222,7 @@ function handleEvent(message) {
   }
   if (message.method === "turn/started") state.liveText = "";
   if (
-    /^(statefulRun|obligation|steering|blackboard|project|thread|turn)\//.test(
+    /^(statefulRun|statefulAttribution|obligation|steering|blackboard|project|thread|turn)\//.test(
       message.method,
     )
   ) {

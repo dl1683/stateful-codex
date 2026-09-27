@@ -1,6 +1,9 @@
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
+use crate::turn_trajectory::TurnTrajectorySnapshot;
+use crate::turn_trajectory::TurnTrajectoryState;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::StatefulAttributionCompletedNotification;
 use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadHistoryBuilder;
 use codex_app_server_protocol::ThreadHistoryTurnMetadata;
@@ -74,6 +77,12 @@ pub(crate) enum ThreadListenerCommand {
     EmitWarning {
         message: String,
     },
+    // EmitStatefulAttributionCompleted orders the user-visible notification
+    // with other thread notifications. Durable measurement writes use the
+    // process-scoped Stateful store independently of listener lifetime.
+    EmitStatefulAttributionCompleted {
+        notification: StatefulAttributionCompletedNotification,
+    },
     // EmitThreadGoalCleared is used to order app-server goal clears with running-thread resume responses.
     EmitThreadGoalCleared,
     // EmitThreadGoalSnapshot is used to read and emit the latest goal state in the listener order.
@@ -107,6 +116,7 @@ pub(crate) struct ThreadState {
     shutdown_drain_waiter: Option<oneshot::Sender<()>>,
     pub(crate) cancel_tx: Option<oneshot::Sender<()>>,
     pub(crate) experimental_raw_events: bool,
+    turn_trajectory: TurnTrajectoryState,
     pub(crate) listener_generation: u64,
     last_thread_settings: Option<ThreadSettings>,
     listener_command_tx: Option<mpsc::UnboundedSender<ThreadListenerCommand>>,
@@ -215,6 +225,14 @@ impl ThreadState {
                 self.current_turn_history.reset();
             }
         }
+    }
+
+    pub(crate) fn track_turn_trajectory_event(
+        &mut self,
+        event_turn_id: &str,
+        event: &EventMsg,
+    ) -> Option<TurnTrajectorySnapshot> {
+        self.turn_trajectory.observe(event_turn_id, event)
     }
 
     pub(crate) fn note_thread_settings(&mut self, thread_settings: ThreadSettings) -> bool {

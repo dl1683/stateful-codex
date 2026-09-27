@@ -61,6 +61,9 @@ async fn list_threads_db_rejects_mismatched_sqlite_config_without_cleanup() -> a
     );
     let runtime =
         codex_state::StateRuntime::init(runtime_sqlite, "test-provider".to_string()).await?;
+    runtime
+        .mark_backfill_complete(/*last_watermark*/ None)
+        .await?;
     let thread_id = ThreadId::new();
     let metadata = ThreadMetadataBuilder::new(
         thread_id,
@@ -95,7 +98,7 @@ async fn list_threads_db_rejects_mismatched_sqlite_config_without_cleanup() -> a
 }
 
 #[tokio::test]
-async fn try_init_waits_for_concurrent_startup_backfill() -> anyhow::Result<()> {
+async fn try_init_returns_while_concurrent_startup_backfill_finishes() -> anyhow::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let runtime = codex_state::StateRuntime::init(
         codex_state::SqliteConfig::new_for_testing(home.path().abs()),
@@ -103,7 +106,7 @@ async fn try_init_waits_for_concurrent_startup_backfill() -> anyhow::Result<()> 
     )
     .await?;
     let claimed = runtime.try_claim_backfill(/*lease_seconds*/ 60).await?;
-    assert!(claimed);
+    assert!(claimed.is_some());
     let runtime_for_completion = runtime.clone();
     let complete_backfill = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
@@ -129,7 +132,7 @@ async fn try_init_waits_for_concurrent_startup_backfill() -> anyhow::Result<()> 
 }
 
 #[tokio::test]
-async fn try_init_times_out_waiting_for_stuck_startup_backfill() -> anyhow::Result<()> {
+async fn try_init_does_not_fail_for_stuck_startup_backfill_lease() -> anyhow::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let runtime = codex_state::StateRuntime::init(
         codex_state::SqliteConfig::new_for_testing(home.path().abs()),
@@ -137,25 +140,55 @@ async fn try_init_times_out_waiting_for_stuck_startup_backfill() -> anyhow::Resu
     )
     .await?;
     let claimed = runtime.try_claim_backfill(/*lease_seconds*/ 60).await?;
-    assert!(claimed);
+    assert!(claimed.is_some());
 
-    let result = try_init_with_roots_and_backfill_lease(
+    let started = std::time::Instant::now();
+    let initialized = try_init_with_roots_and_backfill_lease(
         home.path().to_path_buf(),
         codex_state::SqliteConfig::new_for_testing(home.path().abs()),
         "test-provider".to_string(),
         /*backfill_lease_seconds*/ 60,
     )
-    .await;
-    let err = match result {
-        Ok(_) => panic!("state db init should not wait forever for incomplete backfill"),
-        Err(err) => err,
-    };
+    .await?;
     assert!(
-        err.to_string()
-            .contains("timed out waiting for state db backfill"),
-        "unexpected error: {err}"
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "state db init waited for historical backfill: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        initialized.get_backfill_state().await?.status,
+        codex_state::BackfillStatus::Running
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_threads_db_falls_back_until_backfill_is_complete() -> anyhow::Result<()> {
+    let root = TempDir::new().expect("temp dir");
+    let sqlite = codex_state::SqliteConfig::new_for_testing(root.path().abs());
+    let runtime =
+        codex_state::StateRuntime::init(sqlite.clone(), "test-provider".to_string()).await?;
+
+    let page = list_threads_db(
+        Some(runtime.as_ref()),
+        &sqlite,
+        /*page_size*/ 10,
+        /*cursor*/ None,
+        ThreadSortKey::CreatedAt,
+        SortDirection::Desc,
+        &[],
+        /*model_providers*/ None,
+        /*cwd_filters*/ None,
+        /*relation_filter*/ None,
+        /*archived*/ false,
+        /*section*/ None,
+        /*project_id*/ None,
+        /*search_term*/ None,
+    )
+    .await;
+
+    assert!(page.is_none());
     Ok(())
 }
 

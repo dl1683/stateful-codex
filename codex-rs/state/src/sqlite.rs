@@ -6,6 +6,7 @@
 )]
 
 use crate::DbTelemetry;
+use crate::migrations::checksum_is_line_ending_equivalent;
 use crate::migrations::repair_legacy_recency_migration_version;
 use crate::runtime::RuntimeDbInitError;
 use crate::telemetry;
@@ -15,12 +16,15 @@ use log::LevelFilter;
 use sqlx::ConnectOptions;
 use sqlx::Error;
 use sqlx::SqlitePool;
+use sqlx::migrate::MigrateError;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::SqliteAutoVacuum;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteSynchronous;
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -135,6 +139,37 @@ impl SqliteConfig {
 
     pub fn home(&self) -> &Path {
         self.sqlite_home.as_path()
+    }
+
+    /// Run embedded migrations while treating CRLF and LF source checkouts as
+    /// the same migration content.
+    ///
+    /// SQLx hashes migration source bytes, so Git line-ending conversion can
+    /// otherwise make the same SQL look modified across Windows and Unix. This
+    /// compatibility path adapts only the in-memory expected checksum and still
+    /// rejects every substantive source change.
+    pub async fn run_migrations(
+        &self,
+        pool: &SqlitePool,
+        migrator: &Migrator,
+    ) -> Result<(), MigrateError> {
+        let compatible_migrator = line_ending_compatible_migrator(pool, migrator).await?;
+        let result = match compatible_migrator.as_ref() {
+            Some(compatible_migrator) => compatible_migrator.run(pool).await,
+            None => migrator.run(pool).await,
+        };
+        if !matches!(&result, Err(MigrateError::VersionMismatch(_))) {
+            return result;
+        }
+
+        // Another process can apply a migration between the compatibility read
+        // above and SQLx acquiring its migration lock. Refresh once, and retry
+        // only when the stored checksum is proven to differ by line endings.
+        let Some(refreshed_migrator) = line_ending_compatible_migrator(pool, migrator).await?
+        else {
+            return result;
+        };
+        refreshed_migrator.run(pool).await
     }
 
     /// Return the path to the primary state database.
@@ -275,7 +310,9 @@ impl SqliteConfig {
             if matches!(spec.kind, DbKind::State) {
                 repair_legacy_recency_migration_version(&pool, migrator).await?;
             }
-            migrator.run(&pool).await.map_err(anyhow::Error::from)
+            self.run_migrations(&pool, migrator)
+                .await
+                .map_err(anyhow::Error::from)
         }
         .await;
         telemetry::record_init_result(
@@ -329,4 +366,56 @@ impl SqliteConfig {
             .connect_with(options)
             .await
     }
+}
+
+async fn line_ending_compatible_migrator(
+    pool: &SqlitePool,
+    migrator: &Migrator,
+) -> Result<Option<Migrator>, Error> {
+    if migrator.table_name.as_ref() != "_sqlx_migrations" {
+        return Ok(None);
+    }
+    let migrations_table_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    if !migrations_table_exists {
+        return Ok(None);
+    }
+
+    let applied = sqlx::query_as::<_, (i64, Vec<u8>)>(
+        "SELECT version, checksum FROM _sqlx_migrations WHERE success = 1",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect::<HashMap<_, _>>();
+    let mut migrations = migrator.migrations.to_vec();
+    let mut adapted = false;
+    for migration in &mut migrations {
+        let Some(applied_checksum) = applied.get(&migration.version) else {
+            continue;
+        };
+        if migration.checksum.as_ref() == applied_checksum
+            || !checksum_is_line_ending_equivalent(migration, applied_checksum)
+        {
+            continue;
+        }
+        migration.checksum = Cow::Owned(applied_checksum.clone());
+        adapted = true;
+    }
+    if !adapted {
+        return Ok(None);
+    }
+
+    Ok(Some(Migrator {
+        migrations: Cow::Owned(migrations),
+        ignore_missing: migrator.ignore_missing,
+        locking: migrator.locking,
+        no_tx: migrator.no_tx,
+        table_name: migrator.table_name.clone(),
+        create_schemas: migrator.create_schemas.clone(),
+    }))
 }

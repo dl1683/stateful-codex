@@ -131,11 +131,13 @@ mod request_processors;
 mod request_serialization;
 mod server_request_error;
 mod skills_watcher;
+mod stateful_store;
 mod thread_state;
 mod thread_status;
 mod transport;
 mod turn_admission;
 mod turn_cost_worker;
+mod turn_trajectory;
 mod user_verification;
 mod user_verification_response;
 
@@ -1312,6 +1314,7 @@ pub async fn run_main_with_transport_options(
                 connection_cleanup_tasks.drain().await;
                 processor.drain_background_tasks().await;
                 processor.shutdown_threads().await;
+                processor.drain_stateful_measurements().await;
             } else {
                 connection_cleanup_tasks.abort();
             }

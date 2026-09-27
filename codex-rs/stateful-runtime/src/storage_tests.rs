@@ -7,20 +7,226 @@ use crate::AutonomousClaimOutcome;
 use crate::AutonomousClaimRequest;
 use crate::NewObligation;
 use crate::NewStatefulRun;
+use crate::NewStatefulTurnMeasurement;
 use crate::NewSteeringInstruction;
 use crate::ObligationPacket;
 use crate::RunBudget;
+use crate::StatefulAttributionCounters;
+use crate::StatefulMeasurementSummary;
 use crate::StatefulRun;
 use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunUpdate;
+use crate::StatefulTokenUsage;
+use crate::StatefulTurnStatus;
+use crate::StatefulTurnTerminalMeasurement;
 use crate::SteeringId;
 use crate::SteeringStatus;
 use crate::SteeringUpdate;
+use crate::TurnTrajectory;
 use crate::WorkflowMode;
 
 use super::StatefulRunStore;
 use super::StatefulRunStoreError;
+
+#[tokio::test]
+async fn turn_measurement_merges_terminal_trajectory_and_is_project_queryable() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let store = StatefulRunStore::open(&sqlite).await.expect("store opens");
+    let run_id = StatefulRunId::parse("measurement-run").expect("valid run ID");
+    store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["measurement-thread".to_string()],
+                goal: "Measure the Stateful work.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 4,
+                    max_elapsed_seconds: 600,
+                },
+            },
+        )
+        .await
+        .expect("run inserts");
+    let attribution = NewStatefulTurnMeasurement {
+        run_id: run_id.clone(),
+        project_id: "project-1".to_string(),
+        thread_id: "measurement-thread".to_string(),
+        turn_id: "measurement-turn".to_string(),
+        status: StatefulTurnStatus::Completed,
+        duration_ms: 250,
+        attribution_counters: StatefulAttributionCounters {
+            root_entries_loaded: 3,
+            material_findings_reused: 2,
+            ..Default::default()
+        },
+    };
+    let initial = store
+        .record_turn_attribution(attribution.clone())
+        .await
+        .expect("attribution persists");
+    assert_eq!(initial.value, attribution);
+    assert_eq!(initial.trajectory, None);
+    assert_eq!(initial.token_usage, None);
+    assert_eq!(initial.completed_at_ms, None);
+    assert_eq!(
+        store
+            .record_turn_attribution(attribution.clone())
+            .await
+            .expect("identical attribution retry is idempotent"),
+        initial
+    );
+
+    let trajectory = TurnTrajectory {
+        completed_model_responses: 2,
+        model_tool_calls: 4,
+        tool_output_bytes: 512,
+        ..Default::default()
+    };
+    let token_usage = StatefulTokenUsage {
+        total_tokens: 900,
+        input_tokens: 700,
+        cached_input_tokens: 500,
+        cache_write_input_tokens: 25,
+        output_tokens: 200,
+        reasoning_output_tokens: 75,
+    };
+    let completed = store
+        .record_turn_terminal(
+            &run_id,
+            "measurement-turn",
+            StatefulTurnTerminalMeasurement {
+                status: StatefulTurnStatus::Failed,
+                completed_at_ms: Some(123_000),
+                trajectory: trajectory.clone(),
+                token_usage: Some(token_usage.clone()),
+            },
+        )
+        .await
+        .expect("trajectory persists");
+    assert_eq!(completed.trajectory, Some(trajectory));
+    assert_eq!(completed.token_usage, Some(token_usage));
+    assert_eq!(completed.value.status, StatefulTurnStatus::Failed);
+    assert_eq!(completed.completed_at_ms, Some(123_000));
+    let mut conflicting = attribution;
+    conflicting.duration_ms += 1;
+    assert!(matches!(
+        store.record_turn_attribution(conflicting).await,
+        Err(StatefulRunStoreError::MeasurementIdentityConflict)
+    ));
+    assert_eq!(
+        store
+            .recent_project_measurements("project-1", /*max_results*/ 5)
+            .await
+            .expect("project measurements load"),
+        vec![completed.clone()]
+    );
+    assert_eq!(
+        store
+            .summarize_project_measurements("project-1", /*max_results*/ 5)
+            .await
+            .expect("project measurement summary loads"),
+        StatefulMeasurementSummary {
+            project_id: "project-1".to_string(),
+            measurement_count: 1,
+            run_count: 1,
+            terminal_measurement_count: 1,
+            completed_turns: 0,
+            failed_turns: 1,
+            aborted_turns: 0,
+            turns_with_token_usage: 1,
+            duration_ms: 250,
+            attribution_counters: StatefulAttributionCounters {
+                root_entries_loaded: 3,
+                material_findings_reused: 2,
+                ..Default::default()
+            },
+            trajectory: completed.trajectory.clone(),
+            token_usage: completed.token_usage.clone(),
+            oldest_created_at_ms: Some(completed.created_at_ms),
+            newest_created_at_ms: Some(completed.created_at_ms),
+            has_more: false,
+        }
+    );
+
+    for turn_id in ["measurement-turn-2", "measurement-turn-3"] {
+        store
+            .record_turn_attribution(NewStatefulTurnMeasurement {
+                run_id: run_id.clone(),
+                project_id: "project-1".to_string(),
+                thread_id: "measurement-thread".to_string(),
+                turn_id: turn_id.to_string(),
+                status: StatefulTurnStatus::Completed,
+                duration_ms: 100,
+                attribution_counters: StatefulAttributionCounters::default(),
+            })
+            .await
+            .expect("additional measurement persists");
+    }
+    sqlx::query("UPDATE stateful_turn_measurements SET created_at_ms = 42 WHERE project_id = ?")
+        .bind("project-1")
+        .execute(&store.pool)
+        .await
+        .expect("fixture measurements share one ordering timestamp");
+    let expected = store
+        .recent_project_measurements("project-1", /*max_results*/ 5)
+        .await
+        .expect("ordered project measurements load");
+    assert_eq!(
+        store
+            .summarize_project_measurements("project-1", /*max_results*/ 2)
+            .await
+            .expect("bounded project measurement summary loads"),
+        StatefulMeasurementSummary {
+            project_id: "project-1".to_string(),
+            measurement_count: 2,
+            run_count: 1,
+            terminal_measurement_count: 0,
+            completed_turns: 0,
+            failed_turns: 0,
+            aborted_turns: 0,
+            turns_with_token_usage: 0,
+            duration_ms: 200,
+            attribution_counters: StatefulAttributionCounters::default(),
+            trajectory: None,
+            token_usage: None,
+            oldest_created_at_ms: Some(42),
+            newest_created_at_ms: Some(42),
+            has_more: true,
+        }
+    );
+    let first = store
+        .list_project_measurements("project-1", /*after*/ None, /*max_results*/ 1)
+        .await
+        .expect("first measurement page loads");
+    let first_cursor = first
+        .next_cursor
+        .clone()
+        .expect("first page has a continuation cursor");
+    let second = store
+        .list_project_measurements("project-1", Some(&first_cursor), /*max_results*/ 1)
+        .await
+        .expect("second measurement page loads");
+    let second_cursor = second
+        .next_cursor
+        .clone()
+        .expect("second page has a continuation cursor");
+    let third = store
+        .list_project_measurements("project-1", Some(&second_cursor), /*max_results*/ 1)
+        .await
+        .expect("third measurement page loads");
+    assert_eq!(third.next_cursor, None);
+    assert_eq!([first.data, second.data, third.data].concat(), expected);
+    assert!(matches!(
+        store
+            .list_project_measurements("project-2", Some(&first_cursor), /*max_results*/ 1,)
+            .await,
+        Err(StatefulRunStoreError::InvalidListCursor)
+    ));
+}
 
 #[tokio::test]
 async fn run_and_obligation_state_survive_reopen_with_guarded_transitions() {

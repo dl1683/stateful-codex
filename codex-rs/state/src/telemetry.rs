@@ -84,12 +84,18 @@ pub(crate) fn record_init_result<T>(
     record_duration(telemetry, DB_INIT_DURATION_METRIC, duration, &tags);
 }
 
-pub fn record_backfill_gate(
+pub fn record_backfill_worker_start(
     telemetry: Option<&dyn DbTelemetry>,
     duration: Duration,
     result: &anyhow::Result<()>,
 ) {
-    record_init_result(telemetry, DbKind::State, "backfill_gate", duration, result);
+    record_init_result(
+        telemetry,
+        DbKind::State,
+        "backfill_worker_start",
+        duration,
+        result,
+    );
 }
 
 pub fn record_fallback(

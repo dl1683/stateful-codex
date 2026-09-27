@@ -10,6 +10,7 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
+mod startup_warning_deduper;
 mod stateful_attribution;
 mod worktree;
 
@@ -146,6 +147,7 @@ pub use exec_events::McpToolCallStatus;
 pub use exec_events::PatchApplyStatus;
 pub use exec_events::PatchChangeKind;
 pub use exec_events::ReasoningItem;
+pub use exec_events::RunTrajectory;
 pub use exec_events::StatefulAttribution;
 pub use exec_events::StatefulAttributionEvent;
 pub use exec_events::StatefulTurnStatus;
@@ -184,6 +186,7 @@ use uuid::Uuid;
 
 use crate::cli::Command as ExecCommand;
 use crate::event_processor::EventProcessor;
+use crate::startup_warning_deduper::StartupWarningDeduper;
 
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
 const EXEC_DEFAULT_LOG_FILTER: &str = "error,opentelemetry_sdk=off,opentelemetry_otlp=off";
@@ -1296,6 +1299,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let mut autonomous_follow_deadline = None;
     let mut pending_autonomous_turn = None;
     let primary_thread_id_for_requests = primary_thread_id.to_string();
+    let mut startup_warning_deduper = StartupWarningDeduper::new(&config.startup_warnings);
     loop {
         let server_event = tokio::select! {
             maybe_interrupt = interrupt_rx.recv(), if interrupt_channel_open => {
@@ -1486,6 +1490,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     &primary_thread_id_for_requests,
                     &task_id,
                 ) {
+                    if let ServerNotification::Warning(warning) = &notification
+                        && startup_warning_deduper.take_duplicate(&warning.message)
+                    {
+                        continue;
+                    }
                     maybe_backfill_turn_completed_items(
                         config.ephemeral,
                         &client,
@@ -2009,7 +2018,6 @@ fn should_process_notification(
 ) -> bool {
     match notification {
         ServerNotification::ConfigWarning(_) | ServerNotification::DeprecationNotice(_) => true,
-        // TODO(anp) resolve duplicate startup warnings
         ServerNotification::Warning(notification) => notification
             .thread_id
             .as_deref()
@@ -2048,6 +2056,9 @@ fn should_process_notification(
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }
         ServerNotification::ThreadTokenUsageUpdated(notification) => {
+            notification.thread_id == thread_id
+        }
+        ServerNotification::TurnTrajectoryUpdated(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }
         ServerNotification::RawResponseCompleted(notification) => {

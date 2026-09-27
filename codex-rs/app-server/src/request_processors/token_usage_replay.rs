@@ -80,7 +80,7 @@ fn latest_token_usage_turn_id_from_rollout_items(
     }
 
     if turns.is_empty() {
-        return builder.active_turn_id_if_explicit();
+        return builder.active_turn_id().map(ToString::to_string);
     }
 
     let active_turn_id = builder.active_turn_id()?;

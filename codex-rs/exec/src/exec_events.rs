@@ -52,19 +52,46 @@ pub struct ThreadStartedEvent {
 
 pub struct TurnStartedEvent {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, Default)]
 pub struct TurnProgressEvent {
-    pub elapsed_ms: u64,
     pub usage: Usage,
+    /// Structured replacement for the legacy flat trajectory counters.
+    #[serde(default)]
+    pub trajectory: RunTrajectory,
+    /// Deprecated compatibility alias for `trajectory.invocation_duration_ms`.
+    pub elapsed_ms: u64,
+    /// Deprecated compatibility alias for `trajectory.completed_model_responses`.
+    pub completed_model_responses: u64,
+    /// Deprecated compatibility alias for `trajectory.compactions`.
+    pub compactions: u64,
+    /// Deprecated compatibility alias for `trajectory.model_tool_calls`.
+    pub model_tool_calls: u64,
+    /// Deprecated compatibility alias for `trajectory.tool_output_bytes`.
+    /// Bytes in the JSON serialization of explicit tool output payloads.
+    pub tool_output_bytes: u64,
+}
+
+/// Cumulative content-free trajectory observed by this headless invocation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS, Default)]
+pub struct RunTrajectory {
+    pub invocation_duration_ms: u64,
     pub completed_model_responses: u64,
     pub compactions: u64,
     pub model_tool_calls: u64,
+    pub model_shell_tool_calls: u64,
+    pub model_function_tool_calls: u64,
+    pub model_custom_tool_calls: u64,
+    pub model_tool_search_calls: u64,
+    pub model_web_search_calls: u64,
+    pub model_image_generation_calls: u64,
     pub tool_output_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct TurnCompletedEvent {
     pub usage: Usage,
+    #[serde(default)]
+    pub trajectory: RunTrajectory,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub stateful_attribution: Option<StatefulAttribution>,
@@ -77,17 +104,6 @@ pub struct StatefulAttribution {
     pub completed_turns: u64,
     pub failed_turns: u64,
     pub aborted_turns: u64,
-    pub invocation_duration_ms: u64,
-    pub completed_model_responses: u64,
-    pub compactions: u64,
-    pub model_tool_calls: u64,
-    pub model_shell_tool_calls: u64,
-    pub model_function_tool_calls: u64,
-    pub model_custom_tool_calls: u64,
-    pub model_tool_search_calls: u64,
-    pub model_web_search_calls: u64,
-    pub model_image_generation_calls: u64,
-    pub tool_output_bytes: u64,
     pub duration_ms: u64,
     pub world_state_samples: u64,
     pub root_entries_loaded: u64,
@@ -110,6 +126,28 @@ pub struct StatefulAttribution {
     pub run_update_calls: u64,
     pub steering_write_calls: u64,
     pub material_findings_reused: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub invocation_duration_ms: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub completed_model_responses: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub compactions: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub model_tool_calls: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub model_shell_tool_calls: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub model_function_tool_calls: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub model_custom_tool_calls: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub model_tool_search_calls: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub model_web_search_calls: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub model_image_generation_calls: u64,
+    /// Deprecated compatibility alias for the neutral run trajectory.
+    pub tool_output_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -129,6 +167,13 @@ pub struct StatefulAttributionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct TurnFailedEvent {
     pub error: ThreadErrorEvent,
+    #[serde(default)]
+    pub usage: Usage,
+    #[serde(default)]
+    pub trajectory: RunTrajectory,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stateful_attribution: Option<StatefulAttribution>,
 }
 
 /// Describes the usage of tokens during a turn.

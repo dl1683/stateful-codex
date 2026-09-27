@@ -8,6 +8,21 @@ use core_test_support::responses;
 use core_test_support::test_codex_exec::test_codex_exec;
 use pretty_assertions::assert_eq;
 
+fn completed_model_responses(stdout: &[u8]) -> Option<u64> {
+    completed_event(stdout).and_then(|event| {
+        event
+            .pointer("/trajectory/completed_model_responses")
+            .and_then(serde_json::Value::as_u64)
+    })
+}
+
+fn completed_event(stdout: &[u8]) -> Option<serde_json::Value> {
+    String::from_utf8_lossy(stdout).lines().find_map(|line| {
+        let event: serde_json::Value = serde_json::from_str(line).ok()?;
+        (event.get("type")?.as_str()? == "turn.completed").then_some(event)
+    })
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_stateful_with_positional_prompt_does_not_wait_for_open_stdin() -> anyhow::Result<()> {
     let test = test_codex_exec();
@@ -27,6 +42,7 @@ async fn exec_stateful_with_positional_prompt_does_not_wait_for_open_stdin() -> 
     command
         .arg("--stateful")
         .arg("collaborative")
+        .arg("--json")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(test.cwd_path())
@@ -57,6 +73,51 @@ async fn exec_stateful_with_positional_prompt_does_not_wait_for_open_stdin() -> 
     );
     let request = response_mock.single_request();
     assert!(request.has_message_with_input_texts("user", |texts| texts == [prompt.to_string()]));
+    assert_eq!(completed_model_responses(&output.stdout), Some(1));
+    assert_eq!(
+        completed_event(&output.stdout)
+            .as_ref()
+            .and_then(|event| event.pointer("/stateful_attribution/completed_turns"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_exec_reports_neutral_trajectory_without_stateful_attribution()
+-> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    let response_mock = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("response-1"),
+            responses::ev_assistant_message("message-1", "done"),
+            responses::ev_completed("response-1"),
+        ]),
+    )
+    .await;
+
+    let assertion = test
+        .cmd_with_server(&server)
+        .arg("--json")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("Measure an ordinary run")
+        .assert()
+        .success();
+
+    response_mock.single_request();
+    let completed = completed_event(&assertion.get_output().stdout).expect("turn.completed event");
+    assert_eq!(
+        completed
+            .pointer("/trajectory/completed_model_responses")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert!(completed.get("stateful_attribution").is_none());
     Ok(())
 }
 
@@ -103,12 +164,12 @@ async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::R
                     "exec",
                     r#"const result = await tools.stateful_run_update({expectedRevision: 1, status: "failed", result: "test terminal result"}); text(JSON.stringify(result));"#,
                 ),
-                responses::ev_completed("response-1"),
+                responses::ev_completed_with_tokens("response-1", /*total_tokens*/ 60),
             ]),
             responses::sse(vec![
                 responses::ev_response_created("response-2"),
                 responses::ev_assistant_message("message-2", "first run finished"),
-                responses::ev_completed("response-2"),
+                responses::ev_completed_with_tokens("response-2", /*total_tokens*/ 40),
             ]),
         ],
     )
@@ -129,13 +190,15 @@ async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::R
         responses::sse(vec![
             responses::ev_response_created("response-3"),
             responses::ev_assistant_message("message-3", "second run active"),
-            responses::ev_completed("response-3"),
+            responses::ev_completed_with_tokens("response-3", /*total_tokens*/ 30),
         ]),
     )
     .await;
-    test.cmd_with_server(&server)
+    let assertion = test
+        .cmd_with_server(&server)
         .arg("--stateful")
         .arg("collaborative")
+        .arg("--json")
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(test.cwd_path())
@@ -151,6 +214,23 @@ async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::R
     assert!(request.body_contains_text("<stateful_run>"));
     assert!(request.body_contains_text("stateful_run_update"));
     assert!(!request.body_contains_text("Continue Autonomous Stateful run"));
+    assert_eq!(
+        completed_model_responses(&assertion.get_output().stdout),
+        Some(1)
+    );
+    let completed = completed_event(&assertion.get_output().stdout).expect("turn.completed event");
+    assert_eq!(
+        completed
+            .pointer("/usage/input_tokens")
+            .and_then(serde_json::Value::as_i64),
+        Some(30)
+    );
+    assert_eq!(
+        completed
+            .pointer("/stateful_attribution/completed_turns")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
     Ok(())
 }
 

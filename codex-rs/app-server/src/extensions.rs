@@ -48,10 +48,14 @@ use codex_stateful_extension::AutonomousContinuationSink;
 use codex_stateful_extension::BlackboardEntityKind;
 use codex_stateful_extension::StatefulEvent;
 use codex_stateful_extension::StatefulEventSink;
+use codex_stateful_runtime::NewStatefulTurnMeasurement;
+use codex_stateful_runtime::StatefulAttributionCounters as RuntimeAttributionCounters;
+use codex_stateful_runtime::StatefulTurnStatus as RuntimeTurnStatus;
 use codex_thread_store::ThreadStore;
 
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
+use crate::stateful_store::StatefulStoreHandle;
 use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadStateManager;
 
@@ -237,12 +241,20 @@ impl AutonomousContinuationSink for AppServerAutonomousContinuationSink {
 
 pub(crate) fn app_server_stateful_event_sink(
     outgoing: Arc<OutgoingMessageSender>,
+    thread_state_manager: ThreadStateManager,
+    stateful_store: StatefulStoreHandle,
 ) -> Arc<dyn StatefulEventSink> {
-    Arc::new(AppServerStatefulEventSink { outgoing })
+    Arc::new(AppServerStatefulEventSink {
+        outgoing,
+        thread_state_manager,
+        stateful_store,
+    })
 }
 
 struct AppServerStatefulEventSink {
     outgoing: Arc<OutgoingMessageSender>,
+    thread_state_manager: ThreadStateManager,
+    stateful_store: StatefulStoreHandle,
 }
 
 impl StatefulEventSink for AppServerStatefulEventSink {
@@ -302,58 +314,155 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                 revision,
             }),
             StatefulEvent::AttributionCompleted { summary } => {
-                ServerNotification::StatefulAttributionCompleted(
-                    StatefulAttributionCompletedNotification {
-                        project_id: summary.project_id,
-                        thread_id: summary.thread_id,
-                        turn_id: summary.turn_id,
-                        status: match summary.status {
-                            codex_stateful_extension::StatefulAttributionStatus::Completed => {
-                                StatefulAttributionStatus::Completed
-                            }
-                            codex_stateful_extension::StatefulAttributionStatus::Failed => {
-                                StatefulAttributionStatus::Failed
-                            }
-                            codex_stateful_extension::StatefulAttributionStatus::Aborted => {
-                                StatefulAttributionStatus::Aborted
-                            }
-                        },
-                        duration_ms: summary.duration_ms,
-                        counters: StatefulAttributionCounters {
-                            world_state_samples: summary.counters.world_state_samples,
-                            root_entries_loaded: summary.counters.root_entries_loaded,
-                            root_evidence_routes_checked: summary
-                                .counters
-                                .root_evidence_routes_checked,
-                            root_evidence_routes_current: summary
-                                .counters
-                                .root_evidence_routes_current,
-                            root_evidence_routes_stale: summary.counters.root_evidence_routes_stale,
-                            root_evidence_routes_unavailable: summary
-                                .counters
-                                .root_evidence_routes_unavailable,
-                            root_evidence_routes_unchecked: summary
-                                .counters
-                                .root_evidence_routes_unchecked,
-                            root_unique_sources_observed: summary
-                                .counters
-                                .root_unique_sources_observed,
-                            root_source_bytes_hashed: summary.counters.root_source_bytes_hashed,
-                            stateful_tool_calls: summary.counters.stateful_tool_calls,
-                            failed_stateful_tool_calls: summary.counters.failed_stateful_tool_calls,
-                            knowledge_query_calls: summary.counters.knowledge_query_calls,
-                            route_query_calls: summary.counters.route_query_calls,
-                            evidence_read_calls: summary.counters.evidence_read_calls,
-                            steering_query_calls: summary.counters.steering_query_calls,
-                            blackboard_write_calls: summary.counters.blackboard_write_calls,
-                            context_refresh_calls: summary.counters.context_refresh_calls,
-                            obligation_write_calls: summary.counters.obligation_write_calls,
-                            run_update_calls: summary.counters.run_update_calls,
-                            steering_write_calls: summary.counters.steering_write_calls,
-                            material_findings_reused: summary.counters.material_findings_reused,
-                        },
+                let notification = StatefulAttributionCompletedNotification {
+                    project_id: summary.project_id,
+                    thread_id: summary.thread_id,
+                    turn_id: summary.turn_id,
+                    status: match summary.status {
+                        codex_stateful_extension::StatefulAttributionStatus::Completed => {
+                            StatefulAttributionStatus::Completed
+                        }
+                        codex_stateful_extension::StatefulAttributionStatus::Failed => {
+                            StatefulAttributionStatus::Failed
+                        }
+                        codex_stateful_extension::StatefulAttributionStatus::Aborted => {
+                            StatefulAttributionStatus::Aborted
+                        }
                     },
-                )
+                    duration_ms: summary.duration_ms,
+                    counters: StatefulAttributionCounters {
+                        world_state_samples: summary.counters.world_state_samples,
+                        root_entries_loaded: summary.counters.root_entries_loaded,
+                        root_evidence_routes_checked: summary.counters.root_evidence_routes_checked,
+                        root_evidence_routes_current: summary.counters.root_evidence_routes_current,
+                        root_evidence_routes_stale: summary.counters.root_evidence_routes_stale,
+                        root_evidence_routes_unavailable: summary
+                            .counters
+                            .root_evidence_routes_unavailable,
+                        root_evidence_routes_unchecked: summary
+                            .counters
+                            .root_evidence_routes_unchecked,
+                        root_unique_sources_observed: summary.counters.root_unique_sources_observed,
+                        root_source_bytes_hashed: summary.counters.root_source_bytes_hashed,
+                        stateful_tool_calls: summary.counters.stateful_tool_calls,
+                        failed_stateful_tool_calls: summary.counters.failed_stateful_tool_calls,
+                        knowledge_query_calls: summary.counters.knowledge_query_calls,
+                        route_query_calls: summary.counters.route_query_calls,
+                        evidence_read_calls: summary.counters.evidence_read_calls,
+                        steering_query_calls: summary.counters.steering_query_calls,
+                        blackboard_write_calls: summary.counters.blackboard_write_calls,
+                        context_refresh_calls: summary.counters.context_refresh_calls,
+                        obligation_write_calls: summary.counters.obligation_write_calls,
+                        run_update_calls: summary.counters.run_update_calls,
+                        steering_write_calls: summary.counters.steering_write_calls,
+                        material_findings_reused: summary.counters.material_findings_reused,
+                    },
+                };
+                let measurement = summary.run_id.map(|run_id| NewStatefulTurnMeasurement {
+                    run_id,
+                    project_id: notification.project_id.clone(),
+                    thread_id: notification.thread_id.clone(),
+                    turn_id: notification.turn_id.clone(),
+                    status: match notification.status {
+                        StatefulAttributionStatus::Completed => RuntimeTurnStatus::Completed,
+                        StatefulAttributionStatus::Failed => RuntimeTurnStatus::Failed,
+                        StatefulAttributionStatus::Aborted => RuntimeTurnStatus::Aborted,
+                    },
+                    duration_ms: notification.duration_ms,
+                    attribution_counters: RuntimeAttributionCounters {
+                        world_state_samples: notification.counters.world_state_samples,
+                        root_entries_loaded: notification.counters.root_entries_loaded,
+                        root_evidence_routes_checked: notification
+                            .counters
+                            .root_evidence_routes_checked,
+                        root_evidence_routes_current: notification
+                            .counters
+                            .root_evidence_routes_current,
+                        root_evidence_routes_stale: notification
+                            .counters
+                            .root_evidence_routes_stale,
+                        root_evidence_routes_unavailable: notification
+                            .counters
+                            .root_evidence_routes_unavailable,
+                        root_evidence_routes_unchecked: notification
+                            .counters
+                            .root_evidence_routes_unchecked,
+                        root_unique_sources_observed: notification
+                            .counters
+                            .root_unique_sources_observed,
+                        root_source_bytes_hashed: notification.counters.root_source_bytes_hashed,
+                        stateful_tool_calls: notification.counters.stateful_tool_calls,
+                        failed_stateful_tool_calls: notification
+                            .counters
+                            .failed_stateful_tool_calls,
+                        knowledge_query_calls: notification.counters.knowledge_query_calls,
+                        route_query_calls: notification.counters.route_query_calls,
+                        evidence_read_calls: notification.counters.evidence_read_calls,
+                        steering_query_calls: notification.counters.steering_query_calls,
+                        blackboard_write_calls: notification.counters.blackboard_write_calls,
+                        context_refresh_calls: notification.counters.context_refresh_calls,
+                        obligation_write_calls: notification.counters.obligation_write_calls,
+                        run_update_calls: notification.counters.run_update_calls,
+                        steering_write_calls: notification.counters.steering_write_calls,
+                        material_findings_reused: notification.counters.material_findings_reused,
+                    },
+                });
+                if let Some(measurement) = measurement {
+                    self.stateful_store.schedule_attribution(measurement);
+                }
+                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                    tracing::warn!(
+                        "sending Stateful attribution without thread scoping due to invalid thread id: {}",
+                        notification.thread_id
+                    );
+                    let outgoing = Arc::clone(&self.outgoing);
+                    tokio::spawn(async move {
+                        outgoing
+                            .send_server_notification(
+                                ServerNotification::StatefulAttributionCompleted(notification),
+                            )
+                            .await;
+                    });
+                    return;
+                };
+                let listener_command_tx = self
+                    .thread_state_manager
+                    .current_listener_command_tx(thread_id);
+                if let Some(listener_command_tx) = listener_command_tx {
+                    match listener_command_tx.send(
+                        ThreadListenerCommand::EmitStatefulAttributionCompleted { notification },
+                    ) {
+                        Ok(()) => return,
+                        Err(error) => {
+                            let ThreadListenerCommand::EmitStatefulAttributionCompleted {
+                                notification,
+                            } = error.0
+                            else {
+                                unreachable!("sent command retains its variant")
+                            };
+                            let outgoing = Arc::clone(&self.outgoing);
+                            tokio::spawn(async move {
+                                outgoing
+                                    .send_server_notification(
+                                        ServerNotification::StatefulAttributionCompleted(
+                                            notification,
+                                        ),
+                                    )
+                                    .await;
+                            });
+                            return;
+                        }
+                    }
+                }
+                let outgoing = Arc::clone(&self.outgoing);
+                tokio::spawn(async move {
+                    outgoing
+                        .send_server_notification(ServerNotification::StatefulAttributionCompleted(
+                            notification,
+                        ))
+                        .await;
+                });
+                return;
             }
         };
         let outgoing = Arc::clone(&self.outgoing);

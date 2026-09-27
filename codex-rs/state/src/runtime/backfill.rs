@@ -1,5 +1,14 @@
 use super::*;
 
+/// Opaque ownership proof for one rollout metadata backfill worker.
+///
+/// A worker must present the current lease when it checkpoints or completes so
+/// a stale worker cannot overwrite progress after another process takes over.
+#[derive(Debug, PartialEq, Eq)]
+pub struct BackfillLease {
+    owner_token: String,
+}
+
 impl StateRuntime {
     pub async fn get_backfill_state(&self) -> anyhow::Result<crate::BackfillState> {
         self.ensure_backfill_state_row().await?;
@@ -17,30 +26,35 @@ WHERE id = 1
 
     /// Attempt to claim ownership of rollout metadata backfill.
     ///
-    /// Returns `true` when this runtime claimed the backfill worker slot.
-    /// Returns `false` if backfill is already complete or currently owned by a
+    /// Returns a lease when this runtime claimed the backfill worker slot.
+    /// Returns `None` if backfill is already complete or currently owned by a
     /// non-expired worker.
-    pub async fn try_claim_backfill(&self, lease_seconds: i64) -> anyhow::Result<bool> {
+    pub async fn try_claim_backfill(
+        &self,
+        lease_seconds: i64,
+    ) -> anyhow::Result<Option<BackfillLease>> {
         self.ensure_backfill_state_row().await?;
         let now = Utc::now().timestamp();
         let lease_cutoff = now.saturating_sub(lease_seconds.max(0));
+        let owner_token = uuid::Uuid::new_v4().to_string();
         let result = sqlx::query(
             r#"
 UPDATE backfill_state
-SET status = ?, updated_at = ?
+SET status = ?, owner_token = ?, updated_at = ?
 WHERE id = 1
   AND status != ?
   AND (status != ? OR updated_at <= ?)
             "#,
         )
         .bind(crate::BackfillStatus::Running.as_str())
+        .bind(owner_token.as_str())
         .bind(now)
         .bind(crate::BackfillStatus::Complete.as_str())
         .bind(crate::BackfillStatus::Running.as_str())
         .bind(lease_cutoff)
         .execute(self.pool.as_ref())
         .await?;
-        Ok(result.rows_affected() == 1)
+        Ok((result.rows_affected() == 1).then_some(BackfillLease { owner_token }))
     }
 
     /// Mark rollout metadata backfill as running.
@@ -49,7 +63,7 @@ WHERE id = 1
         sqlx::query(
             r#"
 UPDATE backfill_state
-SET status = ?, updated_at = ?
+SET status = ?, owner_token = NULL, updated_at = ?
 WHERE id = 1
             "#,
         )
@@ -60,22 +74,47 @@ WHERE id = 1
         Ok(())
     }
 
-    /// Persist rollout metadata backfill progress.
-    pub async fn checkpoint_backfill(&self, watermark: &str) -> anyhow::Result<()> {
+    /// Persist progress only while `lease` still owns the backfill worker slot.
+    pub async fn checkpoint_claimed_backfill(
+        &self,
+        lease: &BackfillLease,
+        watermark: &str,
+    ) -> anyhow::Result<bool> {
         self.ensure_backfill_state_row().await?;
-        sqlx::query(
+        let result = sqlx::query(
             r#"
 UPDATE backfill_state
 SET status = ?, last_watermark = ?, updated_at = ?
-WHERE id = 1
+WHERE id = 1 AND status = ? AND owner_token = ?
             "#,
         )
         .bind(crate::BackfillStatus::Running.as_str())
         .bind(watermark)
         .bind(Utc::now().timestamp())
+        .bind(crate::BackfillStatus::Running.as_str())
+        .bind(lease.owner_token.as_str())
         .execute(self.pool.as_ref())
         .await?;
-        Ok(())
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Release an incomplete claim so another worker can retry immediately.
+    pub async fn release_backfill_lease(&self, lease: &BackfillLease) -> anyhow::Result<bool> {
+        self.ensure_backfill_state_row().await?;
+        let result = sqlx::query(
+            r#"
+UPDATE backfill_state
+SET status = ?, owner_token = NULL, updated_at = ?
+WHERE id = 1 AND status = ? AND owner_token = ?
+            "#,
+        )
+        .bind(crate::BackfillStatus::Pending.as_str())
+        .bind(Utc::now().timestamp())
+        .bind(crate::BackfillStatus::Running.as_str())
+        .bind(lease.owner_token.as_str())
+        .execute(self.pool.as_ref())
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     /// Mark rollout metadata backfill as complete.
@@ -89,6 +128,7 @@ SET
     status = ?,
     last_watermark = COALESCE(?, last_watermark),
     last_success_at = ?,
+    owner_token = NULL,
     updated_at = ?
 WHERE id = 1
             "#,
@@ -100,6 +140,37 @@ WHERE id = 1
         .execute(self.pool.as_ref())
         .await?;
         Ok(())
+    }
+
+    /// Mark rollout metadata backfill complete only while `lease` remains current.
+    pub async fn mark_claimed_backfill_complete(
+        &self,
+        lease: &BackfillLease,
+        last_watermark: Option<&str>,
+    ) -> anyhow::Result<bool> {
+        self.ensure_backfill_state_row().await?;
+        let now = Utc::now().timestamp();
+        let result = sqlx::query(
+            r#"
+UPDATE backfill_state
+SET
+    status = ?,
+    last_watermark = COALESCE(?, last_watermark),
+    last_success_at = ?,
+    owner_token = NULL,
+    updated_at = ?
+WHERE id = 1 AND status = ? AND owner_token = ?
+            "#,
+        )
+        .bind(crate::BackfillStatus::Complete.as_str())
+        .bind(last_watermark)
+        .bind(now)
+        .bind(now)
+        .bind(crate::BackfillStatus::Running.as_str())
+        .bind(lease.owner_token.as_str())
+        .execute(self.pool.as_ref())
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     async fn ensure_backfill_state_row(&self) -> anyhow::Result<()> {
@@ -134,14 +205,17 @@ mod tests {
         assert_eq!(initial.last_watermark, None);
         assert_eq!(initial.last_success_at, None);
 
-        runtime
-            .mark_backfill_running()
+        let lease = runtime
+            .try_claim_backfill(/*lease_seconds*/ 3600)
             .await
-            .expect("mark backfill running");
-        runtime
-            .checkpoint_backfill("sessions/2026/01/27/rollout-a.jsonl")
-            .await
-            .expect("checkpoint backfill");
+            .expect("claim backfill")
+            .expect("backfill should be claimable");
+        assert!(
+            runtime
+                .checkpoint_claimed_backfill(&lease, "sessions/2026/01/27/rollout-a.jsonl",)
+                .await
+                .expect("checkpoint backfill")
+        );
 
         let running = runtime
             .get_backfill_state()
@@ -154,10 +228,15 @@ mod tests {
         );
         assert_eq!(running.last_success_at, None);
 
-        runtime
-            .mark_backfill_complete(Some("sessions/2026/01/28/rollout-b.jsonl"))
-            .await
-            .expect("mark backfill complete");
+        assert!(
+            runtime
+                .mark_claimed_backfill_complete(
+                    &lease,
+                    Some("sessions/2026/01/28/rollout-b.jsonl"),
+                )
+                .await
+                .expect("mark backfill complete")
+        );
         let completed = runtime
             .get_backfill_state()
             .await
@@ -241,17 +320,17 @@ mod tests {
         .await
         .expect("initialize runtime");
 
-        let claimed = runtime
+        let first_lease = runtime
             .try_claim_backfill(/*lease_seconds*/ 3600)
             .await
-            .expect("initial backfill claim");
-        assert_eq!(claimed, true);
+            .expect("initial backfill claim")
+            .expect("initial claim should succeed");
 
         let duplicate_claim = runtime
             .try_claim_backfill(/*lease_seconds*/ 3600)
             .await
             .expect("duplicate backfill claim");
-        assert_eq!(duplicate_claim, false);
+        assert_eq!(duplicate_claim, None);
 
         let stale_updated_at = Utc::now().timestamp().saturating_sub(10_000);
         sqlx::query(
@@ -267,21 +346,35 @@ WHERE id = 1
         .await
         .expect("force stale backfill lease");
 
-        let stale_claim = runtime
+        let replacement_lease = runtime
             .try_claim_backfill(/*lease_seconds*/ 10)
             .await
-            .expect("stale backfill claim");
-        assert_eq!(stale_claim, true);
+            .expect("stale backfill claim")
+            .expect("stale claim should be replaced");
 
-        runtime
-            .mark_backfill_complete(/*last_watermark*/ None)
-            .await
-            .expect("mark complete");
+        assert!(
+            !runtime
+                .checkpoint_claimed_backfill(&first_lease, "stale-watermark")
+                .await
+                .expect("reject stale checkpoint")
+        );
+        assert!(
+            !runtime
+                .mark_claimed_backfill_complete(&first_lease, /*last_watermark*/ None)
+                .await
+                .expect("reject stale completion")
+        );
+        assert!(
+            runtime
+                .mark_claimed_backfill_complete(&replacement_lease, /*last_watermark*/ None)
+                .await
+                .expect("mark replacement complete")
+        );
         let claim_after_complete = runtime
             .try_claim_backfill(/*lease_seconds*/ 3600)
             .await
             .expect("claim after complete");
-        assert_eq!(claim_after_complete, false);
+        assert_eq!(claim_after_complete, None);
 
         let _ = tokio::fs::remove_dir_all(codex_home).await;
     }

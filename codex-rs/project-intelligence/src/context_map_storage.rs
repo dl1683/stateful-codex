@@ -65,7 +65,7 @@ impl ContextMapStore {
         let pool = sqlite
             .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
             .await?;
-        if let Err(error) = MIGRATOR.run(&pool).await {
+        if let Err(error) = sqlite.run_migrations(&pool, &MIGRATOR).await {
             pool.close().await;
             return Err(error.into());
         }

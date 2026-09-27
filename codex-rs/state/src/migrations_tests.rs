@@ -2,7 +2,10 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use sqlx::Connection;
 use sqlx::Row;
+use sqlx::SqlSafeStr;
+use sqlx::migrate::MigrateError;
 use sqlx::migrate::Migration;
+use sqlx::migrate::MigrationType;
 use sqlx::migrate::Migrator;
 use std::borrow::Cow;
 
@@ -30,6 +33,113 @@ fn migrator_through(version: i64) -> Migrator {
         create_schemas: STATE_MIGRATOR.create_schemas.clone(),
         no_tx: STATE_MIGRATOR.no_tx,
     }
+}
+
+#[tokio::test]
+async fn migration_runner_accepts_only_line_ending_equivalent_checksums() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let pool = sqlite
+        .open_read_write_pool(&sqlite_home.join("line_endings.sqlite"))
+        .await
+        .expect("sqlite database should open");
+    let crlf_migration = Migration::new(
+        1,
+        "create example".into(),
+        MigrationType::Simple,
+        "CREATE TABLE example (\r\n    id INTEGER PRIMARY KEY\r\n);\r\n".into_sql_str(),
+        /*no_tx*/ false,
+    );
+    let crlf_checksum = crlf_migration.checksum.to_vec();
+    Migrator::with_migrations(vec![crlf_migration])
+        .run(&pool)
+        .await
+        .expect("CRLF migration should apply");
+
+    let lf_migrator = Migrator::with_migrations(vec![Migration::new(
+        1,
+        "create example".into(),
+        MigrationType::Simple,
+        "CREATE TABLE example (\n    id INTEGER PRIMARY KEY\n);\n".into_sql_str(),
+        /*no_tx*/ false,
+    )]);
+    let direct_error = lf_migrator
+        .run(&pool)
+        .await
+        .expect_err("SQLx should see raw line-ending checksums as different");
+    assert!(matches!(direct_error, MigrateError::VersionMismatch(1)));
+    sqlite
+        .run_migrations(&pool, &lf_migrator)
+        .await
+        .expect("line-ending-compatible runner should accept equivalent SQL");
+    let stored_checksum =
+        sqlx::query_scalar::<_, Vec<u8>>("SELECT checksum FROM _sqlx_migrations WHERE version = 1")
+            .fetch_one(&pool)
+            .await
+            .expect("stored checksum should load");
+    assert_eq!(stored_checksum, crlf_checksum);
+
+    let changed_migrator = Migrator::with_migrations(vec![Migration::new(
+        1,
+        "create example".into(),
+        MigrationType::Simple,
+        "CREATE TABLE example (\n    id TEXT PRIMARY KEY\n);\n".into_sql_str(),
+        /*no_tx*/ false,
+    )]);
+    let changed_error = sqlite
+        .run_migrations(&pool, &changed_migrator)
+        .await
+        .expect_err("substantive migration changes must remain rejected");
+    assert!(matches!(changed_error, MigrateError::VersionMismatch(1)));
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn backfill_owner_migration_resets_legacy_completion_for_safe_reseed() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.state_db_path())
+        .await
+        .expect("sqlite database should open");
+    migrator_through(/*version*/ 55)
+        .run(&pool)
+        .await
+        .expect("legacy state migrations should apply");
+    sqlx::query(
+        "UPDATE backfill_state SET status = 'complete', last_watermark = 'skipped-rollout', last_success_at = 1, updated_at = 1 WHERE id = 1",
+    )
+    .execute(&pool)
+    .await
+    .expect("legacy completion should be recorded");
+
+    STATE_MIGRATOR
+        .run(&pool)
+        .await
+        .expect("owner-token migration should apply");
+
+    let state = sqlx::query_as::<_, (String, Option<String>, Option<i64>, Option<String>)>(
+        "SELECT status, last_watermark, last_success_at, owner_token FROM backfill_state WHERE id = 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("migrated state should load");
+    assert_eq!(state, ("pending".to_string(), None, None, None));
+
+    pool.close().await;
 }
 
 #[tokio::test]

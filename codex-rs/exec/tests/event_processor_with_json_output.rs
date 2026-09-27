@@ -5,7 +5,6 @@ use codex_app_server_protocol::CollabAgentToolCallStatus as ApiCollabAgentToolCa
 use codex_app_server_protocol::CommandAction;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus as ApiCommandExecutionStatus;
-use codex_app_server_protocol::ContextCompactedNotification;
 use codex_app_server_protocol::ErrorNotification;
 use codex_app_server_protocol::FileUpdateChange as ApiFileUpdateChange;
 use codex_app_server_protocol::ItemCompletedNotification;
@@ -15,8 +14,6 @@ use codex_app_server_protocol::McpToolCallResult;
 use codex_app_server_protocol::McpToolCallStatus as ApiMcpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus as ApiPatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind as ApiPatchChangeKind;
-use codex_app_server_protocol::RawResponseCompletedNotification;
-use codex_app_server_protocol::RawResponseItemCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::StatefulAttributionCompletedNotification;
 use codex_app_server_protocol::StatefulAttributionCounters;
@@ -32,13 +29,13 @@ use codex_app_server_protocol::TurnPlanStepStatus;
 use codex_app_server_protocol::TurnPlanUpdatedNotification;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::TurnTrajectory;
+use codex_app_server_protocol::TurnTrajectoryUpdatedNotification;
 use codex_app_server_protocol::WebSearchAction as ApiWebSearchAction;
 use codex_app_server_protocol::WebSearchItem as ApiWebSearchItem;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
-use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::SessionConfiguredEvent;
@@ -72,6 +69,7 @@ use codex_exec::McpToolCallStatus;
 use codex_exec::PatchApplyStatus;
 use codex_exec::PatchChangeKind;
 use codex_exec::ReasoningItem;
+use codex_exec::RunTrajectory;
 use codex_exec::StatefulAttribution;
 use codex_exec::StatefulAttributionEvent;
 use codex_exec::StatefulTurnStatus;
@@ -1241,6 +1239,7 @@ fn plan_update_emits_started_then_updated_then_completed() {
                 }),
                 ThreadEvent::TurnCompleted(TurnCompletedEvent {
                     usage: Usage::default(),
+                    trajectory: RunTrajectory::default(),
                     stateful_attribution: None,
                 }),
             ],
@@ -1314,6 +1313,20 @@ fn plan_update_after_completion_starts_new_todo_list_with_new_id() {
 #[test]
 fn token_usage_update_is_emitted_on_turn_completion() {
     let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
+    let _ =
+        processor.collect_thread_events(ServerNotification::TurnStarted(TurnStartedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: Turn {
+                id: "turn-1".to_string(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                items: Vec::new(),
+                status: TurnStatus::InProgress,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            },
+        }));
 
     let usage_update =
         processor.collect_thread_events(ServerNotification::ThreadTokenUsageUpdated(
@@ -1345,7 +1358,6 @@ fn token_usage_update_is_emitted_on_turn_completion() {
         usage_update,
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnProgress(TurnProgressEvent {
-                elapsed_ms: 0,
                 usage: Usage {
                     input_tokens: 10,
                     cached_input_tokens: 3,
@@ -1353,10 +1365,8 @@ fn token_usage_update_is_emitted_on_turn_completion() {
                     output_tokens: 29,
                     reasoning_output_tokens: 7,
                 },
-                completed_model_responses: 0,
-                compactions: 0,
-                model_tool_calls: 0,
-                tool_output_bytes: 0,
+                trajectory: RunTrajectory::default(),
+                ..Default::default()
             })],
             status: CodexStatus::Running,
         }
@@ -1388,6 +1398,7 @@ fn token_usage_update_is_emitted_on_turn_completion() {
                     output_tokens: 29,
                     reasoning_output_tokens: 7,
                 },
+                trajectory: RunTrajectory::default(),
                 stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
@@ -1396,11 +1407,91 @@ fn token_usage_update_is_emitted_on_turn_completion() {
 }
 
 #[test]
+fn resumed_turn_usage_excludes_replayed_thread_history() {
+    let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
+    let replay_total = TokenUsageBreakdown {
+        total_tokens: 130,
+        input_tokens: 100,
+        cached_input_tokens: 20,
+        cache_write_input_tokens: 4,
+        output_tokens: 30,
+        reasoning_output_tokens: 5,
+    };
+    let replay = processor.collect_thread_events(ServerNotification::ThreadTokenUsageUpdated(
+        codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-old".to_string(),
+            token_usage: ThreadTokenUsage {
+                total: replay_total.clone(),
+                last: replay_total,
+                model_context_window: Some(128_000),
+            },
+        },
+    ));
+    assert_eq!(
+        replay,
+        CollectedThreadEvents {
+            events: Vec::new(),
+            status: CodexStatus::Running,
+        }
+    );
+    let _ =
+        processor.collect_thread_events(ServerNotification::TurnStarted(TurnStartedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: Turn {
+                id: "turn-new".to_string(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                items: Vec::new(),
+                status: TurnStatus::InProgress,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            },
+        }));
+
+    let current_total = TokenUsageBreakdown {
+        total_tokens: 182,
+        input_tokens: 140,
+        cached_input_tokens: 25,
+        cache_write_input_tokens: 10,
+        output_tokens: 42,
+        reasoning_output_tokens: 7,
+    };
+    let current = processor.collect_thread_events(ServerNotification::ThreadTokenUsageUpdated(
+        codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-new".to_string(),
+            token_usage: ThreadTokenUsage {
+                total: current_total.clone(),
+                last: current_total,
+                model_context_window: Some(128_000),
+            },
+        },
+    ));
+    assert_eq!(
+        current,
+        CollectedThreadEvents {
+            events: vec![ThreadEvent::TurnProgress(TurnProgressEvent {
+                usage: Usage {
+                    input_tokens: 40,
+                    cached_input_tokens: 5,
+                    cache_write_input_tokens: 6,
+                    output_tokens: 12,
+                    reasoning_output_tokens: 2,
+                },
+                trajectory: RunTrajectory::default(),
+                ..Default::default()
+            })],
+            status: CodexStatus::Running,
+        }
+    );
+}
+
+#[test]
 fn stateful_attribution_is_aggregated_into_turn_completion() {
     let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
-    for (index, (turn_id, root_entries_loaded)) in
-        [("turn-1", 3), ("turn-2", 2)].into_iter().enumerate()
-    {
+    for (turn_id, root_entries_loaded) in [("turn-1", 3), ("turn-2", 2)] {
         let collected =
             processor.collect_thread_events(ServerNotification::StatefulAttributionCompleted(
                 StatefulAttributionCompletedNotification {
@@ -1421,84 +1512,77 @@ fn stateful_attribution_is_aggregated_into_turn_completion() {
         assert_eq!(
             collected,
             CollectedThreadEvents {
-                events: vec![ThreadEvent::StatefulAttribution(StatefulAttributionEvent {
-                    turn_status: StatefulTurnStatus::Completed,
-                    attribution: StatefulAttribution {
-                        turns: index as u64 + 1,
-                        completed_turns: index as u64 + 1,
-                        duration_ms: (index as u64 + 1) * 10,
-                        root_entries_loaded: if index == 0 { 3 } else { 5 },
-                        stateful_tool_calls: (index as u64 + 1) * 2,
-                        knowledge_query_calls: index as u64 + 1,
-                        material_findings_reused: index as u64 + 1,
-                        ..Default::default()
-                    },
-                },)],
+                events: Vec::new(),
                 status: CodexStatus::Running,
             }
         );
     }
-    for response_id in ["response-1", "response-2"] {
-        let collected = processor.collect_thread_events(ServerNotification::RawResponseCompleted(
-            RawResponseCompletedNotification {
-                thread_id: "thread-1".to_string(),
-                turn_id: "turn-2".to_string(),
-                response_id: response_id.to_string(),
-                usage: None,
-                usage_metadata: None,
+    let first_trajectory = processor.collect_thread_events(
+        ServerNotification::TurnTrajectoryUpdated(TurnTrajectoryUpdatedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            is_final: false,
+            trajectory: TurnTrajectory {
+                completed_model_responses: 1,
+                model_tool_calls: 1,
+                model_custom_tool_calls: 1,
+                tool_output_bytes: 4,
+                ..Default::default()
             },
-        ));
-        assert_eq!(
-            collected,
-            CollectedThreadEvents {
-                events: Vec::new(),
-                status: CodexStatus::Running,
-            }
-        );
-    }
-    for item in [
-        ResponseItem::CustomToolCall {
-            id: None,
-            status: Some("completed".to_string()),
-            call_id: "call-1".to_string(),
-            name: "exec".to_string(),
-            namespace: None,
-            input: "text(true);".to_string(),
-            internal_chat_message_metadata_passthrough: None,
-        },
-        ResponseItem::CustomToolCallOutput {
-            id: None,
-            call_id: "call-1".to_string(),
-            name: Some("exec".to_string()),
-            output: FunctionCallOutputPayload::from_text("ok".to_string()),
-            internal_chat_message_metadata_passthrough: None,
-        },
-    ] {
-        let collected = processor.collect_thread_events(
-            ServerNotification::RawResponseItemCompleted(RawResponseItemCompletedNotification {
-                thread_id: "thread-1".to_string(),
-                turn_id: "turn-2".to_string(),
-                item,
-            }),
-        );
-        assert_eq!(
-            collected,
-            CollectedThreadEvents {
-                events: Vec::new(),
-                status: CodexStatus::Running,
-            }
-        );
-    }
-    let compacted = processor.collect_thread_events(ServerNotification::ContextCompacted(
-        ContextCompactedNotification {
+        }),
+    );
+    assert_eq!(
+        first_trajectory,
+        CollectedThreadEvents {
+            events: vec![ThreadEvent::TurnProgress(TurnProgressEvent {
+                usage: Usage::default(),
+                trajectory: RunTrajectory {
+                    completed_model_responses: 1,
+                    model_tool_calls: 1,
+                    model_custom_tool_calls: 1,
+                    tool_output_bytes: 4,
+                    ..Default::default()
+                },
+                completed_model_responses: 1,
+                model_tool_calls: 1,
+                tool_output_bytes: 4,
+                ..Default::default()
+            })],
+            status: CodexStatus::Running,
+        }
+    );
+    let second_trajectory = processor.collect_thread_events(
+        ServerNotification::TurnTrajectoryUpdated(TurnTrajectoryUpdatedNotification {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-2".to_string(),
-        },
-    ));
+            is_final: true,
+            trajectory: TurnTrajectory {
+                completed_model_responses: 1,
+                compactions: 1,
+                ..Default::default()
+            },
+        }),
+    );
+    let expected_trajectory = RunTrajectory {
+        completed_model_responses: 2,
+        compactions: 1,
+        model_tool_calls: 1,
+        model_custom_tool_calls: 1,
+        tool_output_bytes: 4,
+        ..Default::default()
+    };
     assert_eq!(
-        compacted,
+        second_trajectory,
         CollectedThreadEvents {
-            events: Vec::new(),
+            events: vec![ThreadEvent::TurnProgress(TurnProgressEvent {
+                usage: Usage::default(),
+                trajectory: expected_trajectory.clone(),
+                completed_model_responses: 2,
+                compactions: 1,
+                model_tool_calls: 1,
+                tool_output_bytes: 4,
+                ..Default::default()
+            })],
             status: CodexStatus::Running,
         }
     );
@@ -1521,24 +1605,45 @@ fn stateful_attribution_is_aggregated_into_turn_completion() {
     assert_eq!(
         completed,
         CollectedThreadEvents {
-            events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
-                usage: Usage::default(),
-                stateful_attribution: Some(StatefulAttribution {
-                    turns: 2,
-                    completed_turns: 2,
-                    completed_model_responses: 2,
-                    compactions: 1,
-                    model_tool_calls: 1,
-                    model_custom_tool_calls: 1,
-                    tool_output_bytes: 4,
-                    duration_ms: 20,
-                    root_entries_loaded: 5,
-                    stateful_tool_calls: 4,
-                    knowledge_query_calls: 2,
-                    material_findings_reused: 2,
-                    ..Default::default()
+            events: vec![
+                ThreadEvent::StatefulAttribution(StatefulAttributionEvent {
+                    turn_status: StatefulTurnStatus::Completed,
+                    attribution: StatefulAttribution {
+                        turns: 2,
+                        completed_turns: 2,
+                        duration_ms: 20,
+                        root_entries_loaded: 5,
+                        stateful_tool_calls: 4,
+                        knowledge_query_calls: 2,
+                        material_findings_reused: 2,
+                        completed_model_responses: 2,
+                        compactions: 1,
+                        model_tool_calls: 1,
+                        model_custom_tool_calls: 1,
+                        tool_output_bytes: 4,
+                        ..Default::default()
+                    },
                 }),
-            })],
+                ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                    usage: Usage::default(),
+                    trajectory: expected_trajectory,
+                    stateful_attribution: Some(StatefulAttribution {
+                        turns: 2,
+                        completed_turns: 2,
+                        duration_ms: 20,
+                        root_entries_loaded: 5,
+                        stateful_tool_calls: 4,
+                        knowledge_query_calls: 2,
+                        material_findings_reused: 2,
+                        completed_model_responses: 2,
+                        compactions: 1,
+                        model_tool_calls: 1,
+                        model_custom_tool_calls: 1,
+                        tool_output_bytes: 4,
+                        ..Default::default()
+                    }),
+                }),
+            ],
             status: CodexStatus::InitiateShutdown,
         }
     );
@@ -1576,6 +1681,7 @@ fn turn_completion_recovers_final_message_from_turn_items() {
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                trajectory: RunTrajectory::default(),
                 stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
@@ -1674,6 +1780,7 @@ fn turn_completion_reconciles_started_items_from_turn_items() {
                 }),
                 ThreadEvent::TurnCompleted(TurnCompletedEvent {
                     usage: Usage::default(),
+                    trajectory: RunTrajectory::default(),
                     stateful_attribution: None,
                 }),
             ],
@@ -1729,6 +1836,7 @@ fn turn_completion_overwrites_stale_final_message_from_turn_items() {
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                trajectory: RunTrajectory::default(),
                 stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
@@ -1777,6 +1885,7 @@ fn turn_completion_preserves_streamed_final_message_when_turn_items_are_empty() 
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                trajectory: RunTrajectory::default(),
                 stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
@@ -1861,6 +1970,7 @@ fn turn_completion_falls_back_to_final_plan_text() {
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                trajectory: RunTrajectory::default(),
                 stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
@@ -1916,6 +2026,45 @@ fn turn_failure_prefers_structured_error_message() {
                 error: ThreadErrorEvent {
                     message: "backend failed (request id abc)".to_string(),
                 },
+                usage: Usage::default(),
+                trajectory: RunTrajectory::default(),
+                stateful_attribution: None,
+            })],
+            status: CodexStatus::InitiateShutdown,
+        }
+    );
+}
+
+#[test]
+fn interrupted_turn_emits_terminal_measurements() {
+    let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
+
+    let interrupted = processor.collect_thread_events(ServerNotification::TurnCompleted(
+        TurnCompletedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: Turn {
+                id: "turn-1".to_string(),
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                items: Vec::new(),
+                status: TurnStatus::Interrupted,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            },
+        },
+    ));
+
+    assert_eq!(
+        interrupted,
+        CollectedThreadEvents {
+            events: vec![ThreadEvent::TurnFailed(TurnFailedEvent {
+                error: ThreadErrorEvent {
+                    message: "turn interrupted".to_string(),
+                },
+                usage: Usage::default(),
+                trajectory: RunTrajectory::default(),
+                stateful_attribution: None,
             })],
             status: CodexStatus::InitiateShutdown,
         }

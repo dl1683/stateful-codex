@@ -112,6 +112,7 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
     matches!(
         notification,
         ServerNotification::TurnCompleted(_)
+            | ServerNotification::StatefulAttributionCompleted(_)
             | ServerNotification::ThreadQueueChanged(_)
             | ServerNotification::ThreadSettingsUpdated(_)
             | ServerNotification::ThreadAttachmentUpdated(_)
@@ -123,6 +124,9 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
                 },
                 ..
             })
+    ) || matches!(
+        notification,
+        ServerNotification::TurnTrajectoryUpdated(notification) if notification.is_final
     )
 }
 
@@ -575,9 +579,10 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
             processor
                 .connection_closed(IN_PROCESS_CONNECTION_ID, &session)
                 .await;
-            processor.clear_all_thread_listeners().await;
             processor.drain_background_tasks().await;
             processor.shutdown_threads().await;
+            processor.drain_stateful_measurements().await;
+            processor.clear_all_thread_listeners().await;
         });
         let mut pending_request_responses =
             HashMap::<RequestId, oneshot::Sender<PendingClientRequestResponse>>::new();
@@ -1008,6 +1013,23 @@ mod tests {
 
     #[test]
     fn guaranteed_delivery_helpers_cover_required_server_notifications() {
+        let trajectory = codex_app_server_protocol::TurnTrajectoryUpdatedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            is_final: false,
+            trajectory: codex_app_server_protocol::TurnTrajectory::default(),
+        };
+        assert!(!server_notification_requires_delivery(
+            &ServerNotification::TurnTrajectoryUpdated(trajectory.clone())
+        ));
+        assert!(server_notification_requires_delivery(
+            &ServerNotification::TurnTrajectoryUpdated(
+                codex_app_server_protocol::TurnTrajectoryUpdatedNotification {
+                    is_final: true,
+                    ..trajectory
+                }
+            )
+        ));
         assert!(server_notification_requires_delivery(
             &ServerNotification::TurnCompleted(TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),

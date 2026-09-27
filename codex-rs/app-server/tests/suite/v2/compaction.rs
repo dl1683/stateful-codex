@@ -28,6 +28,8 @@ use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::TurnTrajectory;
+use codex_app_server_protocol::TurnTrajectoryUpdatedNotification;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -235,6 +237,18 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
         mcp.read_notification("rawResponse/completed"),
     )
     .await??;
+    let mut trajectory: TurnTrajectoryUpdatedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/trajectory/updated"),
+    )
+    .await??;
+    if trajectory.trajectory.compactions == 0 {
+        trajectory = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("turn/trajectory/updated"),
+        )
+        .await??;
+    }
     let completed = wait_for_context_compaction_completed(&mut mcp).await?;
     wait_for_turn_completed(&mut mcp, &started.turn_id).await?;
 
@@ -248,6 +262,19 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
     assert_eq!(started.thread_id, thread_id);
     assert_eq!(completed.thread_id, thread_id);
     assert_eq!(started_id, completed_id);
+    assert_eq!(
+        trajectory,
+        TurnTrajectoryUpdatedNotification {
+            thread_id: thread_id.clone(),
+            turn_id: started.turn_id.clone(),
+            is_final: false,
+            trajectory: TurnTrajectory {
+                completed_model_responses: 1,
+                compactions: 1,
+                ..Default::default()
+            },
+        }
+    );
     assert_eq!(
         raw_completed,
         RawResponseCompletedNotification {

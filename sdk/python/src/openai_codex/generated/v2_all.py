@@ -5242,6 +5242,12 @@ class StatefulSteeringStatus(Enum):
     rejected = "rejected"
 
 
+class StatefulTurnStatus(Enum):
+    completed = "completed"
+    failed = "failed"
+    aborted = "aborted"
+
+
 class StatefulWorkflowMode(Enum):
     autonomous = "autonomous"
     collaborative = "collaborative"
@@ -6587,6 +6593,45 @@ class TurnSteerResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
+class TurnTrajectory(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    compactions: Annotated[int, Field(ge=0)]
+    completed_model_responses: Annotated[int, Field(alias="completedModelResponses", ge=0)]
+    model_custom_tool_calls: Annotated[int, Field(alias="modelCustomToolCalls", ge=0)]
+    model_function_tool_calls: Annotated[int, Field(alias="modelFunctionToolCalls", ge=0)]
+    model_image_generation_calls: Annotated[int, Field(alias="modelImageGenerationCalls", ge=0)]
+    model_shell_tool_calls: Annotated[int, Field(alias="modelShellToolCalls", ge=0)]
+    model_tool_calls: Annotated[int, Field(alias="modelToolCalls", ge=0)]
+    model_tool_search_calls: Annotated[int, Field(alias="modelToolSearchCalls", ge=0)]
+    model_web_search_calls: Annotated[int, Field(alias="modelWebSearchCalls", ge=0)]
+    tool_output_bytes: Annotated[
+        int,
+        Field(
+            alias="toolOutputBytes",
+            description="Bytes in the JSON serialization of explicit tool output payloads.",
+            ge=0,
+        ),
+    ]
+
+
+class TurnTrajectoryUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    is_final: Annotated[
+        bool,
+        Field(
+            alias="isFinal",
+            description="Whether this is the terminal snapshot for the turn. Transports may coalesce or drop intermediate updates, but must preserve this update.",
+        ),
+    ]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    trajectory: TurnTrajectory
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
@@ -9498,6 +9543,23 @@ class ThreadProjectUpdatedServerNotification(BaseModel):
     params: ThreadProjectUpdatedNotification
 
 
+class TurnTrajectoryUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["turn/trajectory/updated"], Field(title="Turn/trajectory/updatedNotificationMethod")
+    ]
+    params: TurnTrajectoryUpdatedNotification
+
+
 class HookStartedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9935,6 +9997,33 @@ class StatefulAttributionCompletedNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class StatefulMeasurementSummary(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    aborted_turns: Annotated[int, Field(alias="abortedTurns", ge=0)]
+    completed_turns: Annotated[int, Field(alias="completedTurns", ge=0)]
+    counters: StatefulAttributionCounters
+    duration_ms: Annotated[int, Field(alias="durationMs", ge=0)]
+    failed_turns: Annotated[int, Field(alias="failedTurns", ge=0)]
+    has_more: Annotated[
+        bool,
+        Field(
+            alias="hasMore",
+            description="True when older project measurements exist outside this window.",
+        ),
+    ]
+    measurement_count: Annotated[int, Field(alias="measurementCount", ge=0)]
+    newest_created_at: Annotated[int | None, Field(alias="newestCreatedAt")] = None
+    oldest_created_at: Annotated[int | None, Field(alias="oldestCreatedAt")] = None
+    project_id: Annotated[str, Field(alias="projectId")]
+    run_count: Annotated[int, Field(alias="runCount", ge=0)]
+    terminal_measurement_count: Annotated[int, Field(alias="terminalMeasurementCount", ge=0)]
+    token_usage: Annotated[TokenUsageBreakdown | None, Field(alias="tokenUsage")] = None
+    trajectory: TurnTrajectory | None = None
+    turns_with_token_usage: Annotated[int, Field(alias="turnsWithTokenUsage", ge=0)]
+
+
 class StatefulObligation(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9985,6 +10074,30 @@ class StatefulSteering(BaseModel):
     revision: Annotated[int, Field(ge=0)]
     run_id: Annotated[str, Field(alias="runId")]
     status: StatefulSteeringStatus
+    updated_at: Annotated[int, Field(alias="updatedAt")]
+
+
+class StatefulTurnMeasurement(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    completed_at: Annotated[int | None, Field(alias="completedAt")] = None
+    counters: StatefulAttributionCounters
+    created_at: Annotated[int, Field(alias="createdAt")]
+    duration_ms: Annotated[int, Field(alias="durationMs", ge=0)]
+    project_id: Annotated[str, Field(alias="projectId")]
+    run_id: Annotated[str, Field(alias="runId")]
+    status: StatefulTurnStatus
+    thread_id: Annotated[str, Field(alias="threadId")]
+    token_usage: Annotated[
+        TokenUsageBreakdown | None,
+        Field(
+            alias="tokenUsage",
+            description="Provider-reported usage accumulated across completed responses in this turn. `None` means no response included usage data.",
+        ),
+    ] = None
+    trajectory: TurnTrajectory | None = None
+    turn_id: Annotated[str, Field(alias="turnId")]
     updated_at: Annotated[int, Field(alias="updatedAt")]
 
 
@@ -13212,6 +13325,7 @@ class ServerNotification(
         | ThreadEnvironmentDisconnectedServerNotification
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
+        | TurnTrajectoryUpdatedServerNotification
         | TurnStartedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification
@@ -13305,6 +13419,7 @@ class ServerNotification(
         | ThreadEnvironmentDisconnectedServerNotification
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
+        | TurnTrajectoryUpdatedServerNotification
         | TurnStartedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification

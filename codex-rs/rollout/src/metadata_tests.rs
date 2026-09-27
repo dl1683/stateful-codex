@@ -348,11 +348,17 @@ async fn backfill_sessions_resumes_from_watermark_and_marks_complete() {
     .await
     .expect("initialize runtime");
     let first_watermark = backfill_watermark_for_path(codex_home.as_path(), first_path.as_path());
-    runtime.mark_backfill_running().await.expect("mark running");
-    runtime
-        .checkpoint_backfill(first_watermark.as_str())
+    let lease = runtime
+        .try_claim_backfill(BACKFILL_LEASE_SECONDS)
         .await
-        .expect("checkpoint first watermark");
+        .expect("claim backfill")
+        .expect("backfill should be claimable");
+    assert!(
+        runtime
+            .checkpoint_claimed_backfill(&lease, first_watermark.as_str())
+            .await
+            .expect("checkpoint first watermark")
+    );
     tokio::time::sleep(std::time::Duration::from_secs(
         (BACKFILL_LEASE_SECONDS + 1) as u64,
     ))
@@ -393,7 +399,82 @@ async fn backfill_sessions_resumes_from_watermark_and_marks_complete() {
 }
 
 #[tokio::test]
-async fn backfill_sessions_preserves_existing_git_branch_and_fills_missing_git_fields() {
+async fn backfill_sessions_retries_failed_rollout_before_marking_complete() {
+    let dir = tempdir().expect("tempdir");
+    let codex_home = dir.path().to_path_buf();
+    let failed_uuid = Uuid::new_v4();
+    let successful_uuid = Uuid::new_v4();
+    let sessions_dir = codex_home.join("sessions");
+    std::fs::create_dir_all(sessions_dir.as_path()).expect("create sessions dir");
+    let failed_path = sessions_dir.join(format!("rollout-2026-01-27T12-33-56-{failed_uuid}.jsonl"));
+    std::fs::write(&failed_path, "{invalid-json\n").expect("write invalid rollout");
+    let successful_path = write_rollout_in_sessions(
+        codex_home.as_path(),
+        "2026-01-27T12-34-56",
+        "2026-01-27T12:34:56Z",
+        successful_uuid,
+        /*git*/ None,
+    );
+    let runtime = codex_state::StateRuntime::init(
+        codex_state::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
+        "test-provider".to_string(),
+    )
+    .await
+    .expect("initialize runtime");
+
+    backfill_sessions(runtime.as_ref(), codex_home.as_path(), "test-provider").await;
+
+    assert_eq!(
+        runtime
+            .get_backfill_state()
+            .await
+            .expect("read incomplete state")
+            .status,
+        BackfillStatus::Pending
+    );
+    assert_eq!(
+        runtime
+            .get_thread(ThreadId::from_string(&successful_uuid.to_string()).expect("thread id"))
+            .await
+            .expect("read later thread"),
+        None
+    );
+
+    let repaired_path = write_rollout_in_sessions(
+        codex_home.as_path(),
+        "2026-01-27T12-33-56",
+        "2026-01-27T12:33:56Z",
+        failed_uuid,
+        /*git*/ None,
+    );
+    assert_eq!(repaired_path, failed_path);
+    backfill_sessions(runtime.as_ref(), codex_home.as_path(), "test-provider").await;
+
+    let state = runtime
+        .get_backfill_state()
+        .await
+        .expect("read completed state");
+    assert_eq!(state.status, BackfillStatus::Complete);
+    assert_eq!(
+        state.last_watermark,
+        Some(backfill_watermark_for_path(
+            codex_home.as_path(),
+            successful_path.as_path(),
+        ))
+    );
+    for thread_uuid in [failed_uuid, successful_uuid] {
+        assert!(
+            runtime
+                .get_thread(ThreadId::from_string(&thread_uuid.to_string()).expect("thread id"))
+                .await
+                .expect("read recovered thread")
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
+async fn backfill_sessions_does_not_overwrite_existing_live_metadata() {
     let dir = tempdir().expect("tempdir");
     let codex_home = dir.path().to_path_buf();
     let thread_uuid = Uuid::new_v4();
@@ -426,10 +507,22 @@ async fn backfill_sessions_preserves_existing_git_branch_and_fills_missing_git_f
     existing.git_sha = None;
     existing.git_branch = Some("sqlite-branch".to_string());
     existing.git_origin_url = None;
+    existing.rollout_path = codex_home.join("selected-live-rollout.jsonl");
+    existing.title = "live title".to_string();
+    existing.archived_at = Some(
+        chrono::DateTime::parse_from_rfc3339("2026-01-28T12:34:56Z")
+            .expect("valid timestamp")
+            .with_timezone(&chrono::Utc),
+    );
     runtime
         .upsert_thread(&existing)
         .await
         .expect("existing metadata upsert");
+    let expected = runtime
+        .get_thread(thread_id)
+        .await
+        .expect("get existing thread")
+        .expect("existing thread should be persisted");
 
     backfill_sessions(runtime.as_ref(), codex_home.as_path(), "test-provider").await;
 
@@ -438,12 +531,7 @@ async fn backfill_sessions_preserves_existing_git_branch_and_fills_missing_git_f
         .await
         .expect("get thread")
         .expect("thread exists");
-    assert_eq!(persisted.git_sha.as_deref(), Some("rollout-sha"));
-    assert_eq!(persisted.git_branch.as_deref(), Some("sqlite-branch"));
-    assert_eq!(
-        persisted.git_origin_url.as_deref(),
-        Some("git@example.com:openai/codex.git")
-    );
+    assert_eq!(persisted, expected);
 }
 
 #[tokio::test]

@@ -58,6 +58,7 @@ use crate::request_serialization::QueuedInitializedRequest;
 use crate::request_serialization::RequestSerializationQueueKey;
 use crate::request_serialization::RequestSerializationQueues;
 use crate::skills_watcher::SkillsWatcher;
+use crate::stateful_store::StatefulStoreHandle;
 use crate::thread_state::ConnectionCapabilities;
 use crate::thread_state::ThreadStateManager;
 use crate::transport::AppServerTransport;
@@ -170,6 +171,7 @@ pub(crate) struct MessageProcessor {
     project_processor: ProjectRequestProcessor,
     remote_control_processor: RemoteControlRequestProcessor,
     search_processor: SearchRequestProcessor,
+    stateful_store: StatefulStoreHandle,
     stateful_processor: StatefulRequestProcessor,
     thread_goal_processor: ThreadGoalRequestProcessor,
     thread_queue_processor: ThreadQueueRequestProcessor,
@@ -325,9 +327,15 @@ impl MessageProcessor {
         let goal_service = Arc::new(GoalService::new());
         let turn_admission = TurnAdmission::default();
         let turn_start_admission: Arc<dyn TurnStartAdmission> = Arc::new(turn_admission.clone());
+        let stateful_store =
+            StatefulStoreHandle::new(state_db.as_ref().map(|state_db| state_db.sqlite().clone()));
         let extension_event_sink =
             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
-        let stateful_event_sink = app_server_stateful_event_sink(outgoing.clone());
+        let stateful_event_sink = app_server_stateful_event_sink(
+            outgoing.clone(),
+            thread_state_manager.clone(),
+            stateful_store.clone(),
+        );
         let mut queue_service = None;
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             queue_service = queue_store.map(|queue| {
@@ -527,7 +535,7 @@ impl MessageProcessor {
         );
         let stateful_processor = StatefulRequestProcessor::new(
             Arc::clone(&thread_store),
-            state_db.as_ref().map(|state_db| state_db.sqlite().clone()),
+            stateful_store.clone(),
             outgoing.clone(),
         );
         let thread_processor = ThreadRequestProcessor::new(
@@ -544,6 +552,7 @@ impl MessageProcessor {
             Arc::clone(&thread_list_state_permit),
             thread_goal_processor.clone(),
             state_db.clone(),
+            stateful_store.clone(),
             log_db,
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
@@ -559,6 +568,7 @@ impl MessageProcessor {
             pending_thread_unloads,
             thread_state_manager,
             thread_watch_manager,
+            stateful_store.clone(),
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
         );
@@ -634,6 +644,7 @@ impl MessageProcessor {
             project_processor,
             remote_control_processor,
             search_processor,
+            stateful_store,
             stateful_processor,
             thread_goal_processor,
             thread_queue_processor,
@@ -888,6 +899,10 @@ impl MessageProcessor {
 
     pub(crate) async fn shutdown_threads(&self) {
         self.thread_processor.shutdown_threads().await;
+    }
+
+    pub(crate) async fn drain_stateful_measurements(&self) {
+        self.stateful_store.drain_measurements().await;
     }
 
     pub(crate) async fn connection_closed(
@@ -1561,6 +1576,12 @@ impl MessageProcessor {
             }
             ClientRequest::StatefulRunSetMode { params, .. } => {
                 self.stateful_processor.run_set_mode(params).await
+            }
+            ClientRequest::StatefulMeasurementList { params, .. } => {
+                self.stateful_processor.measurement_list(params).await
+            }
+            ClientRequest::StatefulMeasurementSummary { params, .. } => {
+                self.stateful_processor.measurement_summary(params).await
             }
             ClientRequest::ObligationList { params, .. } => {
                 self.stateful_processor.obligation_list(params).await

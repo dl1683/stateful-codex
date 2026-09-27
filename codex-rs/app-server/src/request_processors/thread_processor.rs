@@ -455,6 +455,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) thread_list_state_permit: Arc<Semaphore>,
     pub(super) thread_goal_processor: ThreadGoalRequestProcessor,
     pub(super) state_db: Option<StateDbHandle>,
+    pub(super) stateful_store: StatefulStoreHandle,
     pub(super) log_db: Option<LogDbLayer>,
     pub(super) background_tasks: TaskTracker,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
@@ -495,6 +496,7 @@ impl ThreadRequestProcessor {
         thread_list_state_permit: Arc<Semaphore>,
         thread_goal_processor: ThreadGoalRequestProcessor,
         state_db: Option<StateDbHandle>,
+        stateful_store: StatefulStoreHandle,
         log_db: Option<LogDbLayer>,
         skills_watcher: Arc<SkillsWatcher>,
         turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
@@ -514,6 +516,7 @@ impl ThreadRequestProcessor {
             thread_list_state_permit,
             thread_goal_processor,
             state_db,
+            stateful_store,
             log_db,
             background_tasks: TaskTracker::new(),
             skills_watcher,
@@ -1090,6 +1093,7 @@ impl ThreadRequestProcessor {
             thread_unload_delay: self.config.thread_unload_delay,
             skills_watcher: Arc::clone(&self.skills_watcher),
             turn_cost_worker: self.turn_cost_worker.clone(),
+            stateful_store: self.stateful_store.clone(),
         }
     }
 
@@ -1221,6 +1225,7 @@ impl ThreadRequestProcessor {
             thread_unload_delay: self.config.thread_unload_delay,
             skills_watcher: Arc::clone(&self.skills_watcher),
             turn_cost_worker: self.turn_cost_worker.clone(),
+            stateful_store: self.stateful_store.clone(),
         };
         let request_trace = request_context.request_trace();
         let config_manager = self.config_manager.clone();
@@ -1280,6 +1285,14 @@ impl ThreadRequestProcessor {
     }
 
     pub(crate) async fn shutdown_threads(&self) {
+        let mut listener_drains = Vec::new();
+        for thread_id in self.thread_manager.list_thread_ids().await {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            let mut thread_state = thread_state.lock().await;
+            if thread_state.cancel_tx.is_some() {
+                listener_drains.push((thread_id, thread_state.register_shutdown_drain_waiter()));
+            }
+        }
         let report = self
             .thread_manager
             .shutdown_all_threads_bounded(Duration::from_secs(10))
@@ -1289,6 +1302,18 @@ impl ThreadRequestProcessor {
         }
         for thread_id in report.timed_out {
             warn!("timed out waiting for thread {thread_id} to shut down");
+        }
+        if tokio::time::timeout(Duration::from_secs(10), async move {
+            for (thread_id, drain) in listener_drains {
+                if drain.await.is_err() {
+                    warn!("thread {thread_id} listener stopped before draining shutdown events");
+                }
+            }
+        })
+        .await
+        .is_err()
+        {
+            warn!("timed out waiting for thread listeners to drain shutdown events");
         }
     }
 
@@ -4030,19 +4055,6 @@ impl ThreadRequestProcessor {
                 } else {
                     None
                 };
-                // Auto-attach a thread listener when resuming a thread.
-                log_listener_attach_result(
-                    self.ensure_conversation_listener(
-                        thread_id,
-                        request_id.connection_id,
-                        /*raw_events_enabled*/ false,
-                    )
-                    .await,
-                    thread_id,
-                    request_id.connection_id,
-                    "thread",
-                );
-
                 let mut thread = match self
                     .load_thread_from_resume_source_or_send_internal(
                         thread_id,
@@ -4128,18 +4140,17 @@ impl ThreadRequestProcessor {
                 } else {
                     None
                 };
-                let token_usage_turn_id = (include_turns || paginated_resume)
-                    .then(|| {
-                        let turns = if thread.turns.is_empty() {
-                            initial_turns_page
-                                .as_ref()
-                                .map_or(&[][..], |page| page.data.as_slice())
-                        } else {
-                            thread.turns.as_slice()
-                        };
-                        restored_token_usage_turn_id(response_history.get_rollout_items(), turns)
-                    })
-                    .filter(|turn_id| !turn_id.is_empty());
+                let turns = if thread.turns.is_empty() {
+                    initial_turns_page
+                        .as_ref()
+                        .map_or(&[][..], |page| page.data.as_slice())
+                } else {
+                    thread.turns.as_slice()
+                };
+                let token_usage_turn_id =
+                    restored_token_usage_turn_id(response_history.get_rollout_items(), turns);
+                let token_usage_turn_id =
+                    (!token_usage_turn_id.is_empty()).then_some(token_usage_turn_id);
                 if redact_resume_payloads {
                     redact_thread_resume_payloads(&mut thread.turns);
                     if let Some(initial_turns_page) = initial_turns_page.as_mut() {
@@ -4170,15 +4181,9 @@ impl ThreadRequestProcessor {
                 };
 
                 let connection_id = request_id.connection_id;
-                self.outgoing
-                    .send_response_with_thread_originator(request_id, response, thread_originator)
-                    .await;
-                // `excludeTurns` is explicitly the cheap resume path, so avoid
-                // rebuilding history only to attribute a replayed usage update.
                 if let Some(token_usage_turn_id) = token_usage_turn_id {
-                    // The client needs restored usage before it starts another turn.
-                    // Sending after the response preserves JSON-RPC request ordering while
-                    // still filling the status line before the next turn lifecycle begins.
+                    // Establish the restored usage baseline before this connection can receive
+                    // live turn notifications or submit another turn after the resume response.
                     send_thread_token_usage_update_to_connection(
                         &self.outgoing,
                         connection_id,
@@ -4188,6 +4193,22 @@ impl ThreadRequestProcessor {
                     )
                     .await;
                 }
+                // Attach only after replaying usage so another subscriber cannot start a live
+                // turn that reaches this connection before its historical baseline.
+                log_listener_attach_result(
+                    self.ensure_conversation_listener(
+                        thread_id,
+                        connection_id,
+                        /*raw_events_enabled*/ false,
+                    )
+                    .await,
+                    thread_id,
+                    connection_id,
+                    "thread",
+                );
+                self.outgoing
+                    .send_response_with_thread_originator(request_id, response, thread_originator)
+                    .await;
                 self.thread_goal_processor
                     .emit_resume_goal_snapshot(thread_id)
                     .await;

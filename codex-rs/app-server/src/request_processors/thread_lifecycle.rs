@@ -1,6 +1,7 @@
 use super::*;
 use crate::extensions::send_thread_warning;
 use codex_app_server_protocol::ThreadQueueChangedNotification;
+use codex_app_server_protocol::TurnTrajectoryUpdatedNotification;
 use codex_extension_api::ThreadIdleCause;
 use codex_protocol::config_types::MultiAgentMode;
 
@@ -15,6 +16,7 @@ pub(super) struct ListenerTaskContext {
     pub(super) thread_unload_delay: Duration,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
     pub(super) turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
+    pub(super) stateful_store: StatefulStoreHandle,
 }
 
 struct UnloadingState {
@@ -271,6 +273,7 @@ pub(super) async fn ensure_listener_task_running(
         thread_watch_manager,
         codex_home,
         turn_cost_worker,
+        stateful_store,
         ..
     } = listener_task_context;
     let outgoing_for_task = Arc::clone(&outgoing);
@@ -320,18 +323,29 @@ pub(super) async fn ensure_listener_task_running(
                     // Track the event before emitting any typed translations
                     // so thread-local state such as raw event opt-in stays
                     // synchronized with the conversation.
-                    let raw_events_enabled = {
+                    let terminal_measurement = match &event.msg {
+                        EventMsg::TurnComplete(payload) => Some((
+                            if payload.error.is_some() {
+                                codex_stateful_runtime::StatefulTurnStatus::Failed
+                            } else {
+                                codex_stateful_runtime::StatefulTurnStatus::Completed
+                            },
+                            payload.completed_at.and_then(|value| value.checked_mul(1_000)),
+                        )),
+                        EventMsg::TurnAborted(payload) => Some((
+                            codex_stateful_runtime::StatefulTurnStatus::Aborted,
+                            payload.completed_at.and_then(|value| value.checked_mul(1_000)),
+                        )),
+                        _ => None,
+                    };
+                    let is_final_trajectory = terminal_measurement.is_some();
+                    let (raw_events_enabled, trajectory) = {
                         let mut thread_state = thread_state.lock().await;
                         thread_state.track_current_turn_event(&event.id, &event.msg);
-                        thread_state.experimental_raw_events
+                        let trajectory =
+                            thread_state.track_turn_trajectory_event(&event.id, &event.msg);
+                        (thread_state.experimental_raw_events, trajectory)
                     };
-                    if matches!(
-                        &event.msg,
-                        EventMsg::RawResponseItem(_) | EventMsg::RawResponseCompleted(_)
-                    ) && !raw_events_enabled
-                    {
-                        continue;
-                    }
                     let subscribed_connection_ids = thread_state_manager
                         .subscribed_connection_ids(conversation_id)
                         .await;
@@ -340,6 +354,46 @@ pub(super) async fn ensure_listener_task_running(
                         subscribed_connection_ids,
                         conversation_id,
                     );
+                    if let Some(snapshot) = trajectory {
+                        if let Some((status, completed_at_ms)) = terminal_measurement
+                            && let Err(error) = stateful_store
+                                .record_terminal_measurement(
+                                    &conversation_id.to_string(),
+                                    &event.id,
+                                    status,
+                                    completed_at_ms,
+                                    &snapshot.trajectory,
+                                    snapshot.token_usage.clone(),
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    thread_id = %conversation_id,
+                                    turn_id = %event.id,
+                                    %error,
+                                    "failed to persist Stateful turn trajectory"
+                                );
+                            }
+                        thread_outgoing
+                            .send_server_notification(
+                                ServerNotification::TurnTrajectoryUpdated(
+                                    TurnTrajectoryUpdatedNotification {
+                                        thread_id: conversation_id.to_string(),
+                                        turn_id: event.id.clone(),
+                                        is_final: is_final_trajectory,
+                                        trajectory: snapshot.trajectory,
+                                    },
+                                ),
+                            )
+                            .await;
+                    }
+                    if matches!(
+                        &event.msg,
+                        EventMsg::RawResponseItem(_) | EventMsg::RawResponseCompleted(_)
+                    ) && !raw_events_enabled
+                    {
+                        continue;
+                    }
 
                     apply_bespoke_event_handling(
                         event.clone(),
@@ -530,6 +584,20 @@ pub(super) async fn handle_thread_listener_command(
         ThreadListenerCommand::EmitWarning { message } => {
             send_thread_warning(outgoing, thread_state_manager, conversation_id, message).await;
         }
+        ThreadListenerCommand::EmitStatefulAttributionCompleted { notification } => {
+            let subscribed_connection_ids = thread_state_manager
+                .subscribed_connection_ids(conversation_id)
+                .await;
+            ThreadScopedOutgoingMessageSender::new(
+                Arc::clone(outgoing),
+                subscribed_connection_ids,
+                conversation_id,
+            )
+            .send_server_notification(ServerNotification::StatefulAttributionCompleted(
+                notification,
+            ))
+            .await;
+        }
         ThreadListenerCommand::EmitThreadGoalCleared => {
             outgoing
                 .send_server_notification(ServerNotification::ThreadGoalCleared(
@@ -702,17 +770,31 @@ pub(super) async fn handle_pending_thread_resume_request(
                 .await;
             return;
         }
-        if !thread_state_manager
-            .try_add_connection_to_thread(conversation_id, connection_id)
-            .await
-        {
-            tracing::debug!(
-                thread_id = %conversation_id,
-                connection_id = ?connection_id,
-                "skipping running thread resume for closed connection"
-            );
-            return;
-        }
+    }
+
+    if let Some(token_usage_turn_id) = token_usage_turn_id {
+        // The listener command serializes this replay with core events. Send it before adding
+        // the connection to the thread so no live usage update can overtake the baseline.
+        send_thread_token_usage_update_to_connection(
+            outgoing,
+            connection_id,
+            conversation_id,
+            conversation.as_ref(),
+            token_usage_turn_id,
+        )
+        .await;
+    }
+
+    if !thread_state_manager
+        .try_add_connection_to_thread(conversation_id, connection_id)
+        .await
+    {
+        tracing::debug!(
+            thread_id = %conversation_id,
+            connection_id = ?connection_id,
+            "skipping running thread resume for closed connection"
+        );
+        return;
     }
 
     let (turns_backwards_cursor, items_backwards_cursor) = if let Some(thread_store) =
@@ -780,20 +862,6 @@ pub(super) async fn handle_pending_thread_resume_request(
     outgoing
         .send_response_with_thread_originator(request_id, response, originator)
         .await;
-    // Warm metadata-only resumes skip history reconstruction. Cold paginated children can
-    // replay usage using attribution captured before the listener was attached.
-    if let Some(token_usage_turn_id) = token_usage_turn_id {
-        // Rejoining a loaded thread has the same UI contract as a cold resume, but
-        // uses the live conversation state instead of reconstructing a new session.
-        send_thread_token_usage_update_to_connection(
-            outgoing,
-            connection_id,
-            conversation_id,
-            conversation.as_ref(),
-            token_usage_turn_id,
-        )
-        .await;
-    }
     if pending.emit_thread_goal_update {
         if let Some(state_db) = pending.thread_goal_state_db {
             send_thread_goal_snapshot_notification(outgoing, conversation_id, &state_db).await;
