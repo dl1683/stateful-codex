@@ -382,7 +382,9 @@ impl ChatWidget {
             | ServerNotification::StatefulRunUpdated(_)
             | ServerNotification::ObligationUpdated(_)
             | ServerNotification::SteeringUpdated(_)
-            | ServerNotification::BlackboardUpdated(_) => {}
+            | ServerNotification::BlackboardUpdated(_)
+            | ServerNotification::StatefulAttributionCompleted(_)
+            | ServerNotification::TurnTrajectoryUpdated(_) => {}
             ServerNotification::ContextCompacted(_) => {}
         }
         // Tool and hook activity can recreate a hidden row with its default
