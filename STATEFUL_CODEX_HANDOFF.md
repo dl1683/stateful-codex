@@ -9,7 +9,10 @@ Updated: 2026-09-27
 2. Read the final two sections of `STATEFUL_CODEX_BUILD_PLAN.md`, beginning at
    `Open design problem: trusted reuse and state-aware compaction`.
 3. Read this handoff and refresh GitHub issues #15, #16, and #17.
-4. Reconcile this document with live Git, source, tests, and processes. This is
+4. Read `STATEFUL_CODEX_TESTING_HANDOFF.md` for the product-testing workstream:
+   test harness locations, the isolated test store, harness gotchas, issues
+   #24-#42 filed from hands-on testing, and the test-design lessons.
+5. Reconcile this document with live Git, source, tests, and processes. This is
    a restart aid, not authority over newer evidence.
 
 ## Product priority
@@ -53,6 +56,26 @@ product outcome. The gate is a better longitudinal work trajectory.
 The rejected bare-line-range prototype remains only as a recovery artifact on
 `checkpoint/stateful-region-routing-unsafe-20260925` at `a6cdb157de`. Do not
 merge it.
+
+## Reconciliation after the pause checkpoint (2026-09-27, evening)
+
+- `.git` is writable again. The validated working tree described below was
+  committed exactly as prescribed (tracked changes plus the listed untracked
+  implementation paths; neither protected experiment directory was staged) as
+  `89e79f57f1 feat(stateful): durable turn measurements and backfill
+  reliability`. Reconcile the published `stateful/main` ref against live Git.
+- **The interactive CLI does not compile (issue #38), and this commit widens the
+  gap.** `codex-rs/tui/src/app/app_server_event_targets.rs` (around line 194) and
+  `codex-rs/tui/src/chatwidget/protocol.rs` (around line 382) exhaustively match
+  `ServerNotification` but handle neither `StatefulAttributionCompleted` (added in
+  `1f55cc0`) nor the new `TurnTrajectoryUpdated`. The crate-scoped validation
+  listed below never built `codex-cli`/`codex-tui`, so it did not catch this. Fix
+  it first; the last commit whose TUI builds is `926f2ac`.
+- External long-running worker processes on this machine have used
+  `codex-rs/target/debug/codex.exe`. On Windows a running binary cannot be
+  replaced, so build into a separate `CARGO_TARGET_DIR` or confirm no process
+  holds that binary before rebuilding.
+- The scheduled task `StatefulCodex-Hourly-Droid-Review` is still enabled.
 
 ## Pause handoff checkpoint (2026-09-27)
 
