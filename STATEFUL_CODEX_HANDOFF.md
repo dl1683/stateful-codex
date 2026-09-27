@@ -36,6 +36,8 @@ ratio worsened from 1.72x in q01-q05 to 2.58x in q06-q10. q06 had a decisive
 finding in state but did not use it; q10 lacked a decisive fact in state and the
 old file-only context map could not route to its body lines.
 
+**Scope (added 2026-09-27):** this is the *one continuous thread* regime, where ordinary Codex's own conversation already acts as memory. Across **separate sessions** on the same project, hands-on testing found the opposite: Stateful was 20–54% cheaper after the first session, with comparable answers (issue #35; the "Cost evidence" section of `STATEFUL_CODEX_TESTING_HANDOFF.md`). The thesis holds across sessions and is currently inverted within a long thread.
+
 Do not treat a database, prompt packet, component test, or faster search as the
 product outcome. The gate is a better longitudinal work trajectory.
 

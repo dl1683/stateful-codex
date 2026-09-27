@@ -3313,6 +3313,8 @@ Status: completed on 2026-09-24. All 20 turns and the blind grading (two rounds)
 
 This was a qualitative probe requested by Devansh, not a protocol-valid longitudinal result. It used one project, one grader, and n=10.
 
+**Scope (added 2026-09-27):** this is the *one continuous thread* regime, where ordinary Codex's own conversation already acts as memory. Across **separate sessions** on the same project, hands-on testing found the opposite: Stateful was 20–54% cheaper after the first session, with comparable answers (issue #35; the "Cost evidence" section of `STATEFUL_CODEX_TESTING_HANDOFF.md`). The thesis holds across sessions and is currently inverted within a long thread.
+
 **Setup.** The corpus was the Pramana chip repository snapshot at commit `9c16fb73dc`, placed in isolated copies with per-turn corpus hashes. Each arm ran in one continuous thread (baseline `01a0d326-52f0-70c0-b61b-32244cf8ab36`, stateful `01a0d32b-e40e-72c2-b7f1-a6f1a4a04808`). Both arms used the default model at high effort, read-only, with memories disabled and a dedicated `CODEX_HOME`.
 
 The ten questions were the project's real open design decisions: the timing path, UART RX soundness, pinguard design, IMEM depth, bug hunting, certificate attack, the response-store SVA, the injection theorem, ABI integration, and strategy. They ran strictly sequentially and interleaved (q1 ordinary, q1 stateful, q2 …), alternating which arm went first. Artifacts are in `clients/stateful-codex/eval/results/pramana-ab-2026-09-24/`.
