@@ -68,25 +68,42 @@ Migration checksum line endings (#29) should be fixed by the uncommitted working
 - **#41:** Socratic mode's first reply is a refusal; "resume implementation" is impossible headless.
 - **#42:** a long single run took a scripted, templated shortcut (blinded judge preferred base 19/20).
 
-## Latest long-run evidence (v3, 150 topics, not yet filed)
+## Long-run v3 (2026-09-27, 150 topics): not memory evidence
 
-**Summary:** Stateful's prose was comparable to base, but its verification was weaker. It cost +25% uncached tokens and took +15% longer.
+**This run does not bear on memory's cost or benefit.** The topics were independent, and Stateful made only about 3 memory-tool calls in 844, so do not cite its token numbers as a memory result.
 
-**Verification:**
-- It fixed 1 of 5 real animation bugs that base fixed. It propagated one (a GP table contradicting its plot) into new text, and introduced one factual error.
-- It kept the canonical section order across 5 compactions; base's order flipped after compaction 3.
+It is kept only for two process observations:
+- **Obligation cadence.** The obligation was updated once at the start, then not again for 31 minutes and 34 topics, until compaction 1. After that it was updated every 4–7 minutes. The obligation should be maintained continuously, like a living plan, not revived by compaction.
+- **Re-anchoring.** Right after compaction 1 re-injected the agent's own starting strategy, which it had ignored for topics 21–39, behaviour switched to match it. The rolling obligation window also drops early learnings.
 
-**State tools barely used:**
-- The obligation was **updated once at the start, then not again for 31 minutes and 34 topics, until compaction 1.** After that it was updated every 4–7 minutes.
-- The blackboard stayed empty until the final two records.
+Notes: `sc_v2/review/v3_sc_notes.md`.
 
-**The re-anchoring effect:**
-- The agent's own starting strategy ("ground worked examples in animation values") was ignored during topics 21–39, where unverified and wrong examples were kept.
-- Right after compaction 1 re-injected it, behaviour switched to match.
-- Also, the obligation is a rolling window, so early learnings roll off.
-- **Worth filing as the product issue:** maintain the obligation continuously; promote durable learnings.
+## Cost evidence: where Stateful wins and where it loses
 
-**Details:** `sc_v2/review/v3_sc_notes.md` and `v3_base_notes.md`.
+These are two genuinely different regimes, and both results are real:
+
+| Setup | Result | Source |
+|---|---|---|
+| **Many separate sessions on the same project** (a fresh headless session per question; the ordinary arm starts cold each time) | **Stateful cheaper after the first session**, with comparable answers. The first contact always costs more. | #35 |
+| **One continuous thread** (both arms keep the whole conversation) | **Stateful about 2× more expensive** (2.0× input, 2.7× uncached, $18.16 versus $9.02; blind quality 6–4 to ordinary). The ordinary arm's conversation already serves as memory, and Stateful adds re-injected project packets (about 443k characters), re-verification and rehydration after compaction. | SC-EVAL-032 in `STATEFUL_CODEX_EVALUATION.md` |
+
+Cross-session series (#35). Tokens are the CLI's `tokens used`, meaning uncached input plus output. Both arms ran gpt-5.6-luna with reasoning high.
+
+| Series | Stateful versus ordinary |
+|---|---|
+| Datadog analyst, 15 questions | −5% overall; **−10% on Q6–15**; Q15 (4-filing synthesis) **−49%** with identical numbers |
+| ServiceNow analyst, 12 questions | −30% tokens, but +102% wall time from SQLite pool contention under concurrency (#37) |
+| Python coding, 4 tasks (tests pass in both arms) | task 1 +37% (first contact); **tasks 2–4 −33% tokens and about −35% time** |
+| JavaScript site, 4 tasks | **−27% tokens, −27% time**; no first-contact penalty |
+| Research repos, 3 projects × 6 questions | **−35% (series A), −54% (series B, with more accumulated state)**; cheaper in 29 of 30 pairs. Stateful's answers are sometimes shorter. |
+| Hardware RTL repo, 5 questions | −15% tokens, faster on all 5 |
+| First broad A/B, 4 projects (#32) | +5% overall, dominated by first-contact cost and thin learning capture |
+
+**Reading:**
+- Durable project memory pays off **across sessions**: the product thesis holds there.
+- Within one long continuous session it is currently **overhead**, because the conversation already carries the memory.
+- The gap to close is making state replace, rather than duplicate, conversational context inside a long thread (see SC-EVAL-032's mechanism list).
+- Metric caveat: #35 counts uncached input plus output. Stateful's cached input is large, and it costs about 10% of uncached input.
 
 ## Suggested next test (not run; needs Devansh's agreement on the design)
 

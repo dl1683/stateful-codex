@@ -76,6 +76,10 @@ merge it.
   replaced, so build into a separate `CARGO_TARGET_DIR` or confirm no process
   holds that binary before rebuilding.
 - The scheduled task `StatefulCodex-Hourly-Droid-Review` is still enabled.
+- **Cost evidence is two-sided.** SC-EVAL-032 (below) measured one continuous thread,
+  where Stateful costs about 2x. Hands-on testing across **separate sessions** found Stateful
+  20-54% cheaper after the first session, with comparable answers (#35). See "Cost
+  evidence" in `STATEFUL_CODEX_TESTING_HANDOFF.md` before drawing a cost conclusion.
 
 ## Pause handoff checkpoint (2026-09-27)
 
