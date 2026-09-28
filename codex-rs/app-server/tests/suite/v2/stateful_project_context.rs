@@ -867,7 +867,7 @@ async fn model_guarded_route_rejects_shifted_source_until_requeried() -> Result<
 }
 
 #[tokio::test]
-async fn model_reads_current_and_legacy_text_routes_and_rejects_docx_routes() -> Result<()> {
+async fn model_reads_current_and_legacy_text_and_docx_routes_with_provenance() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -1047,19 +1047,30 @@ async fn model_reads_current_and_legacy_text_routes_and_rejects_docx_routes() ->
                 responses::ev_completed("docx-read-response"),
             ]),
             responses::sse(vec![
-                responses::ev_assistant_message("docx-read-done", "DOCX route rejected"),
+                responses::ev_assistant_message("docx-read-done", "DOCX evidence read"),
                 responses::ev_completed("docx-read-done-response"),
             ]),
         ],
     )
     .await;
     run_turn(&mut server, &started.thread.id).await?;
-    let docx_output = docx_read
-        .function_call_output_text("docx-read")
-        .expect("DOCX read output should be text");
-    assert!(docx_output.contains("context-map region anchor is not supported for evidence reads"));
-    assert!(!docx_output.contains("content"));
-    assert!(!docx_output.contains("stateful-read-"));
+    let docx_output: serde_json::Value = serde_json::from_str(
+        &docx_read
+            .function_call_output_text("docx-read")
+            .expect("DOCX read output should be text"),
+    )?;
+    assert_eq!(
+        docx_output["content"],
+        "shared_boundary_term and docx evidence content"
+    );
+    assert_eq!(
+        docx_output["source"]["regionAnchor"],
+        docx_route["regionAnchor"]
+    );
+    assert_eq!(docx_output["extraction"], docx_route["indexedExtraction"]);
+    assert_eq!(docx_output["truncated"], false);
+    assert_eq!(docx_output["blackboardEvidence"], serde_json::Value::Null);
+    assert!(!docx_output.to_string().contains("stateful-read-"));
     Ok(())
 }
 

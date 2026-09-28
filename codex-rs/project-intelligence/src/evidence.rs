@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 
+use codex_document_extraction::DocumentExtractor;
+use codex_document_extraction::ExtractionError;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
@@ -19,6 +21,7 @@ use crate::SourceFingerprint;
 
 pub const MAX_EVIDENCE_READ_BYTES: u32 = 64 * 1024;
 const MAX_LINE_SPAN: u64 = 2_000;
+const MAX_OFFICE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,6 +105,7 @@ pub struct EvidenceReadResult {
     pub first_line: Option<u64>,
     pub last_line: Option<u64>,
     pub truncated: bool,
+    pub extraction: Option<IndexedExtraction>,
 }
 
 #[derive(Clone)]
@@ -124,7 +128,14 @@ impl EvidenceReader {
             .iter()
             .map(|root| root.display().to_string())
             .collect::<Vec<_>>();
-        let (mut hits, requested_root, requested_path, line_range) = match &request.locator {
+        let (
+            mut hits,
+            requested_root,
+            requested_path,
+            line_range,
+            region_anchor,
+            indexed_extraction,
+        ) = match &request.locator {
             EvidenceReadLocator::Source {
                 project_root,
                 relative_path,
@@ -135,32 +146,46 @@ impl EvidenceReader {
                     .context_map
                     .file_hits_for_path(&request.project_id, relative_path)
                     .await?;
-                (hits, requested_root, relative_path.to_string(), *line_range)
+                (
+                    hits,
+                    requested_root,
+                    relative_path.to_string(),
+                    *line_range,
+                    None,
+                    None,
+                )
             }
             EvidenceReadLocator::ContextMapRoute(route) => {
-                let hit = self
+                let hit = match self
                     .context_map
                     .get_guarded_hit(
                         &request.project_id,
                         &route.context_map_entry_id,
                         &route.source_fingerprint,
                     )
-                    .await?
-                    .ok_or_else(|| {
-                        EvidenceReadError::RouteNotFound(route.context_map_entry_id.to_string())
-                    })?;
+                    .await
+                {
+                    Ok(hit) => hit,
+                    Err(ContextMapStoreError::SourceNotCurrent(_)) => {
+                        return Err(EvidenceReadError::RouteChanged);
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+                .ok_or_else(|| {
+                    EvidenceReadError::RouteNotFound(route.context_map_entry_id.to_string())
+                })?;
                 if EvidenceRoute::from_hit(&hit)? != *route {
                     return Err(EvidenceReadError::RouteChanged);
                 }
-                if route.line_range.is_none()
-                    && let Some(anchor) = &route.region_anchor
-                {
-                    return Err(EvidenceReadError::UnsupportedRegionAnchor(
-                        anchor.scheme.clone(),
-                    ));
-                }
                 let requested_path = hit.source.relative_path.to_string();
-                (vec![hit], None, requested_path, route.line_range)
+                (
+                    vec![hit],
+                    None,
+                    requested_path,
+                    route.line_range,
+                    route.region_anchor.clone(),
+                    route.indexed_extraction.clone(),
+                )
             }
         };
         if requested_root
@@ -198,6 +223,34 @@ impl EvidenceReader {
         }
         let max_bytes =
             usize::try_from(request.max_bytes).map_err(|_| EvidenceReadError::InvalidRequest)?;
+        if let Some(anchor) = region_anchor {
+            let indexed_extraction =
+                indexed_extraction.ok_or(EvidenceReadError::InvalidIndexedExtraction)?;
+            let expected_fingerprint = hit.entry.value.source_fingerprint.to_string();
+            let read = tokio::task::spawn_blocking(move || {
+                read_region(
+                    source,
+                    &expected_fingerprint,
+                    &anchor,
+                    &indexed_extraction,
+                    max_bytes,
+                )
+            })
+            .await??;
+            let bytes_returned =
+                u64::try_from(read.content.len()).map_err(|_| EvidenceReadError::CountOverflow)?;
+            return Ok(EvidenceReadResult {
+                hit,
+                content: read.content,
+                bytes_returned,
+                total_bytes: read.total_bytes,
+                total_lines: 0,
+                first_line: None,
+                last_line: None,
+                truncated: read.truncated,
+                extraction: Some(read.extraction),
+            });
+        }
         let read = tokio::task::spawn_blocking(move || read_source(source, line_range, max_bytes))
             .await??;
         if read.fingerprint != hit.entry.value.source_fingerprint.as_str() {
@@ -214,6 +267,7 @@ impl EvidenceReader {
             first_line: read.first_line,
             last_line: read.last_line,
             truncated: read.truncated,
+            extraction: None,
         })
     }
 }
@@ -268,6 +322,63 @@ struct SourceRead {
     last_line: Option<u64>,
     truncated: bool,
     fingerprint: String,
+}
+
+struct RegionRead {
+    content: String,
+    total_bytes: u64,
+    truncated: bool,
+    extraction: IndexedExtraction,
+}
+
+fn read_region(
+    path: PathBuf,
+    expected_fingerprint: &str,
+    anchor: &crate::RegionAnchor,
+    indexed_extraction: &IndexedExtraction,
+    max_bytes: usize,
+) -> Result<RegionRead, EvidenceReadError> {
+    let mut file = File::open(&path)?;
+    let mut limited = file.by_ref().take(MAX_OFFICE_BYTES.saturating_add(1));
+    let mut original = Vec::new();
+    limited.read_to_end(&mut original)?;
+    if original.len() as u64 > MAX_OFFICE_BYTES {
+        return Err(EvidenceReadError::SourceTooLarge);
+    }
+    let fingerprint = format!("sha256:{:x}", Sha256::digest(&original));
+    if fingerprint != expected_fingerprint {
+        return Err(EvidenceReadError::SourceChanged);
+    }
+    let format = DocumentExtractor::format_for_path(&path)
+        .ok_or_else(|| EvidenceReadError::UnsupportedRegionAnchor(anchor.scheme.clone()))?;
+    let document = DocumentExtractor::production().extract(format, &original)?;
+    let current_extraction = IndexedExtraction::new(
+        document.extractor.name.clone(),
+        document.extractor.version.clone(),
+        document.canonical_representation_digest.clone(),
+    )
+    .map_err(|_| EvidenceReadError::InvalidIndexedExtraction)?;
+    if &current_extraction != indexed_extraction {
+        return Err(EvidenceReadError::ExtractionChanged);
+    }
+    let block = document
+        .blocks
+        .into_iter()
+        .find(|block| {
+            block.anchor.scheme == anchor.scheme && block.anchor.locator == anchor.locator
+        })
+        .ok_or(EvidenceReadError::RegionAnchorNotFound)?;
+    let total_bytes =
+        u64::try_from(block.text.len()).map_err(|_| EvidenceReadError::CountOverflow)?;
+    let end = block
+        .text
+        .floor_char_boundary(max_bytes.min(block.text.len()));
+    Ok(RegionRead {
+        content: block.text[..end].to_owned(),
+        total_bytes,
+        truncated: end < block.text.len(),
+        extraction: current_extraction,
+    })
 }
 
 fn read_source(
@@ -363,6 +474,10 @@ pub enum EvidenceReadError {
     InvalidRegionAnchor,
     #[error("context-map region anchor is not supported for evidence reads: {0}")]
     UnsupportedRegionAnchor(String),
+    #[error("context-map region anchor was not found in the current extraction")]
+    RegionAnchorNotFound,
+    #[error("indexed extraction provenance is missing or malformed")]
+    InvalidIndexedExtraction,
     #[error("source path exists in multiple project roots; provide projectRoot: {0}")]
     AmbiguousSource(String),
     #[error("source route is not current: {0:?}")]
@@ -371,6 +486,12 @@ pub enum EvidenceReadError {
     SourceOutsideRoot,
     #[error("source changed after indexing; refresh the context map before reading")]
     SourceChanged,
+    #[error("source exceeds the bounded Office read limit")]
+    SourceTooLarge,
+    #[error("current extraction differs from the indexed representation")]
+    ExtractionChanged,
+    #[error("Office extraction failed: {0}")]
+    Extraction(#[from] ExtractionError),
     #[error("source region is not valid UTF-8 text")]
     NonUtf8Source,
     #[error("evidence byte or line count overflow")]

@@ -30,14 +30,14 @@ use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
 
-use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 
 const TOOL_NAME: &str = "evidence_read";
-const DEFAULT_BYTES: u32 = 8 * 1024;
-const MAX_BYTES: u32 = 12 * 1024;
+const EVIDENCE_RESPONSE_BYTES: usize = 8 * 1024;
+const DEFAULT_BYTES: u32 = 6 * 1024;
+const MAX_BYTES: u32 = 6 * 1024;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -149,7 +149,7 @@ impl EvidenceReadTool {
             .read_with_refresh(project_roots, locator, max_bytes)
             .await?;
 
-        let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let byte_budget = call.response_byte_budget(EVIDENCE_RESPONSE_BYTES);
         let context_map_entry_id = result.hit.entry.id.to_string();
         let returned_line_range = match (result.first_line, result.last_line) {
             (Some(start), Some(end)) if !result.truncated => Some(EvidenceLineRange { start, end }),
@@ -168,6 +168,10 @@ impl EvidenceReadTool {
             );
             json!({"readReceiptId": receipt_id})
         });
+        let blackboard_evidence = result
+            .extraction
+            .as_ref()
+            .map_or(blackboard_evidence, |_| None);
         let mut content = result.content;
         let original_bytes = content.len();
         let mut output = json!({
@@ -177,7 +181,9 @@ impl EvidenceReadTool {
             "source": {
                 "projectRoot": result.hit.source.project_root,
                 "relativePath": result.hit.source.relative_path.to_string(),
+                "regionAnchor": result.hit.source.region_anchor,
             },
+            "extraction": result.extraction,
             "content": content,
             "bytesReturned": result.bytes_returned,
             "totalBytes": result.total_bytes,
@@ -323,7 +329,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read fingerprint-verified exact source evidence. Prefer a current evidenceRoute returned by context_map_query and copy it unchanged; that guarded route fails closed if its source or range changed and is never refreshed into new coordinates. When root blackboard evidence already names a source and lines, relativePath plus a narrow lineRange remains available and refreshes a changed file once. sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
+            description: "Read fingerprint-verified exact source evidence. Prefer a current evidenceRoute returned by context_map_query and copy it unchanged; that guarded route fails closed if its source, range, or derived representation changed. When root blackboard evidence already names a source and lines, relativePath plus a narrow lineRange remains available and refreshes a changed file once. sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. Line reads may return a host-issued read receipt when complete; derived region reads return extraction provenance and blackboardEvidence=null until region receipts are supported.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

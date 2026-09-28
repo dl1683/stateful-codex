@@ -1,7 +1,12 @@
+use std::io::Cursor;
+use std::io::Write;
+
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 use super::*;
 use crate::ContextMapStore;
@@ -10,6 +15,62 @@ use crate::ProjectIndexFileRequest;
 use crate::ProjectIndexReport;
 use crate::ProjectIndexRequest;
 use crate::ProjectIndexer;
+use crate::RegionAnchor;
+
+fn generated_docx(body: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+    writer
+        .start_file("word/document.xml", SimpleFileOptions::default())
+        .expect("document part should start");
+    writer
+        .write_all(
+            format!(
+                r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>{body}</w:body></w:document>"#
+            )
+            .as_bytes(),
+        )
+        .expect("document part should write");
+    writer.finish().expect("package should finish");
+    bytes
+}
+
+async fn indexed_docx() -> (TempDir, TempDir, ContextMapStore, ContextMapHit) {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    std::fs::write(
+        root.path().join("fixture.docx"),
+        generated_docx(
+            r#"<w:p><w:r><w:t>exact region content</w:t></w:r></w:p><w:p><w:r><w:t>another indexed clause</w:t></w:r></w:p>"#,
+        ),
+    )
+    .expect("write DOCX fixture");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    ProjectIndexer::new(
+        HierarchyStore::open(&sqlite).await.expect("hierarchy"),
+        context_map.clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    })
+    .await
+    .expect("index DOCX project");
+    let hit = context_map
+        .query(crate::ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "exact region content".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("query DOCX region")
+        .data
+        .into_iter()
+        .find(|hit| hit.source.region_anchor.is_some())
+        .expect("DOCX region");
+    (home, root, context_map, hit)
+}
 
 #[tokio::test]
 async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
@@ -63,6 +124,7 @@ async fn reads_a_fingerprint_verified_line_range_from_the_indexed_source() {
             first_line: Some(2),
             last_line: Some(3),
             truncated: false,
+            extraction: None,
         }
     );
 
@@ -198,7 +260,10 @@ async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
         })
         .await
         .expect("refresh shifted source");
-    assert!(reader.read(request).await.is_err());
+    assert!(matches!(
+        reader.read(request).await,
+        Err(EvidenceReadError::RouteChanged)
+    ));
 
     let current_hit = context_map
         .query(crate::ContextMapQuery {
@@ -225,4 +290,163 @@ async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
         .expect("requeried route should read");
     assert!(current.content.ends_with("decisive_route_fact"));
     assert_eq!(current.last_line, Some(71));
+}
+
+#[tokio::test]
+async fn reads_exact_docx_region_with_provenance_and_budget_truncation() {
+    let (_home, root, context_map, hit) = indexed_docx().await;
+    let route = EvidenceRoute::from_hit(&hit).expect("DOCX route");
+    assert_eq!(route.line_range, None);
+    assert!(route.region_anchor.is_some());
+    assert!(route.indexed_extraction.is_some());
+    let reader = EvidenceReader::new(context_map);
+    let result = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route.clone()),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect("read exact DOCX region");
+    assert_eq!(result.content, "exact region content");
+    assert_eq!(result.extraction, hit.source.indexed_extraction);
+    assert!(!result.truncated);
+    assert_eq!(result.first_line, None);
+    assert_eq!(result.last_line, None);
+
+    let partial = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route),
+            max_bytes: 5,
+        })
+        .await
+        .expect("bounded DOCX region read");
+    assert_eq!(partial.content, "exact");
+    assert!(partial.truncated);
+}
+
+#[tokio::test]
+async fn docx_region_source_mutation_is_source_changed() {
+    let (_home, root, context_map, hit) = indexed_docx().await;
+    let route = EvidenceRoute::from_hit(&hit).expect("DOCX route");
+    std::fs::write(
+        root.path().join("fixture.docx"),
+        generated_docx(r#"<w:p><w:r><w:t>mutated region content</w:t></w:r></w:p>"#),
+    )
+    .expect("mutate DOCX fixture");
+    let error = EvidenceReader::new(context_map)
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect_err("mutated DOCX must fail closed");
+    assert!(matches!(error, EvidenceReadError::SourceChanged));
+}
+
+#[tokio::test]
+async fn unknown_docx_anchor_fails_closed() {
+    let (_home, root, context_map, hit) = indexed_docx().await;
+    let mut route = EvidenceRoute::from_hit(&hit).expect("DOCX route");
+    route.region_anchor =
+        Some(RegionAnchor::new("docx-paragraph", "body/p[999]").expect("valid unknown anchor"));
+    let error = EvidenceReader::new(context_map)
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect_err("unknown route must fail closed");
+    assert!(matches!(error, EvidenceReadError::RouteChanged));
+}
+
+#[tokio::test]
+async fn extractor_upgrade_requires_refresh_and_requery() {
+    let (home, root, context_map, hit) = indexed_docx().await;
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let pool = sqlite
+        .open_read_write_pool(&home.path().join("project_intelligence_1.sqlite"))
+        .await
+        .expect("project intelligence database");
+    sqlx::query(
+        "UPDATE region_extraction_attestations
+         SET extractor_version = '1'
+         WHERE region_node_id = ?",
+    )
+    .bind(hit.entry.value.node_id.as_str())
+    .execute(&pool)
+    .await
+    .expect("write v1 attestation");
+    pool.close().await;
+    let stored_v1 = context_map
+        .get_hit("project-1", &hit.entry.id)
+        .await
+        .expect("load v1 hit")
+        .expect("v1 hit");
+    let v1_route = EvidenceRoute::from_hit(&stored_v1).expect("v1 route");
+    let reader = EvidenceReader::new(context_map.clone());
+    let error = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(v1_route.clone()),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect_err("extractor upgrade must fail closed");
+    assert!(matches!(error, EvidenceReadError::ExtractionChanged));
+
+    ProjectIndexer::new(
+        HierarchyStore::open(&sqlite).await.expect("hierarchy"),
+        context_map.clone(),
+    )
+    .refresh_file(ProjectIndexFileRequest {
+        project_id: "project-1".to_string(),
+        project_root: root.path().to_path_buf(),
+        relative_path: ProjectRelativePath::parse("fixture.docx").expect("relative path"),
+    })
+    .await
+    .expect("refresh extractor identity");
+    assert!(matches!(
+        reader
+            .read(EvidenceReadRequest {
+                project_id: "project-1".to_string(),
+                project_roots: vec![root.path().to_path_buf()],
+                locator: EvidenceReadLocator::ContextMapRoute(v1_route),
+                max_bytes: 64 * 1024,
+            })
+            .await,
+        Err(EvidenceReadError::RouteChanged)
+    ));
+    let current_hit = context_map
+        .query(crate::ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "exact region content".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("requery current route")
+        .data
+        .into_iter()
+        .find(|hit| hit.source.region_anchor.is_some())
+        .expect("current DOCX region");
+    let current = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(
+                EvidenceRoute::from_hit(&current_hit).expect("current route"),
+            ),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect("new extractor route should read");
+    assert_eq!(current.content, "exact region content");
 }
