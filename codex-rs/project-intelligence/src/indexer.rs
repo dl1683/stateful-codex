@@ -19,7 +19,6 @@ use publish::mark_file_missing;
 use publish::publish_file;
 use scan::normalized_relative_path;
 use scan::scan_project_file;
-use scan::scan_roots;
 
 use crate::ContextMapStore;
 use crate::ContextMapStoreError;
@@ -84,14 +83,25 @@ impl ProjectIndexer {
         &self,
         request: ProjectIndexRequest,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
+        self.refresh_with_office_limit(request, 64 * 1024 * 1024)
+            .await
+    }
+
+    pub(super) async fn refresh_with_office_limit(
+        &self,
+        request: ProjectIndexRequest,
+        max_office_bytes: u64,
+    ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         validate_request(&request)?;
         let project_id = request.project_id.clone();
         let generation = generation::claim(self, &project_id).await?;
         let roots = request.roots.clone();
         let scan_started = Instant::now();
-        let scan = tokio::task::spawn_blocking(move || scan_roots(&roots))
-            .await
-            .map_err(ProjectIndexerError::ScanTask)??;
+        let scan = tokio::task::spawn_blocking(move || {
+            scan::scan_roots_with_office_limit(&roots, max_office_bytes)
+        })
+        .await
+        .map_err(ProjectIndexerError::ScanTask)??;
         let scan_duration_ms = elapsed_millis(scan_started);
         let regions_indexed = scan.files.iter().try_fold(0_u64, |count, file| {
             count

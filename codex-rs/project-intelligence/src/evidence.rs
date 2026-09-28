@@ -82,16 +82,12 @@ impl EvidenceRoute {
                 .region_anchor
                 .clone()
                 .filter(|anchor| anchor.scheme != "lines"),
-            indexed_extraction: hit
-                .source
-                .indexed_extraction
-                .clone()
-                .filter(|_| {
-                    hit.source
-                        .region_anchor
-                        .as_ref()
-                        .is_some_and(|anchor| anchor.scheme != "lines")
-                }),
+            indexed_extraction: hit.source.indexed_extraction.clone().filter(|_| {
+                hit.source
+                    .region_anchor
+                    .as_ref()
+                    .is_some_and(|anchor| anchor.scheme != "lines")
+            }),
         })
     }
 }

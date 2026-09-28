@@ -5,6 +5,7 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::ContextMapSource;
+use crate::EvidenceLineRange;
 use crate::EvidenceRoute;
 use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;

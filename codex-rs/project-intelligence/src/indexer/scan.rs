@@ -57,18 +57,45 @@ pub(super) struct ScannedFile {
     pub(super) regions: Vec<ScannedRegion>,
 }
 
+#[cfg(test)]
 pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexerError> {
-    scan_roots_with_limits(
+    scan_roots_with_office_limit(roots, MAX_OFFICE_BYTES)
+}
+
+pub(super) fn scan_roots_with_office_limit(
+    roots: &[PathBuf],
+    max_office_bytes: u64,
+) -> Result<ScanResult, ProjectIndexerError> {
+    scan_roots_with_configured_limits(
         roots,
         ScanLimits {
             max_files: MAX_FILES,
             max_project_regions: MAX_PROJECT_REGIONS,
         },
-        scan_file,
+        max_office_bytes,
     )
 }
 
+#[cfg(test)]
 pub(super) fn scan_roots_with_limits(
+    roots: &[PathBuf],
+    limits: ScanLimits,
+    scan_one: impl FnMut(&Path, &Path) -> Result<ScannedFile, ProjectIndexerError>,
+) -> Result<ScanResult, ProjectIndexerError> {
+    scan_roots_with_scanner(roots, limits, scan_one)
+}
+
+pub(super) fn scan_roots_with_configured_limits(
+    roots: &[PathBuf],
+    limits: ScanLimits,
+    max_office_bytes: u64,
+) -> Result<ScanResult, ProjectIndexerError> {
+    scan_roots_with_scanner(roots, limits, |root, path| {
+        scan_file_with_office_limit(root, path, max_office_bytes)
+    })
+}
+
+fn scan_roots_with_scanner(
     roots: &[PathBuf],
     limits: ScanLimits,
     mut scan_one: impl FnMut(&Path, &Path) -> Result<ScannedFile, ProjectIndexerError>,
@@ -162,6 +189,14 @@ pub(super) fn scan_project_file(
 }
 
 fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerError> {
+    scan_file_with_office_limit(root, path, MAX_OFFICE_BYTES)
+}
+
+fn scan_file_with_office_limit(
+    root: &Path,
+    path: &Path,
+    max_office_bytes: u64,
+) -> Result<ScannedFile, ProjectIndexerError> {
     let relative = path
         .strip_prefix(root)
         .map_err(|_| ProjectIndexerError::InvalidRoot)?;
@@ -181,7 +216,7 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
         total_bytes = total_bytes
             .saturating_add(u64::try_from(read).map_err(|_| ProjectIndexerError::CountOverflow)?);
         hasher.update(&buffer[..read]);
-        if total_bytes <= MAX_OFFICE_BYTES {
+        if total_bytes <= max_office_bytes {
             if let Some(bytes) = office_bytes.as_mut() {
                 bytes.extend_from_slice(&buffer[..read]);
             }
@@ -249,7 +284,7 @@ fn scan_docx(
                 document.canonical_representation_digest.clone(),
             )
             .map_err(|_| ProjectIndexerError::InvalidExtractionIdentity)?;
-            let (regions, regions_truncated) =
+            let (regions, regions_incomplete) =
                 scan_office_regions(&relative_path, &document, indexed_extraction)?;
             let summary = document
                 .blocks
@@ -258,8 +293,12 @@ fn scan_docx(
                 .map(|block| block.text.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let description = describe_office_file(&relative_path, &summary, document.status);
-            let coverage = if document.status == ExtractionStatus::Complete && !regions_truncated {
+            let (description, description_complete) =
+                describe_office_file(&relative_path, &summary, document.status);
+            let coverage = if document.status == ExtractionStatus::Complete
+                && description_complete
+                && !regions_incomplete
+            {
                 ContextMapCoverage::Complete
             } else {
                 ContextMapCoverage::Partial
@@ -297,20 +336,24 @@ fn scan_office_regions(
     document: &codex_document_extraction::ExtractedDocument,
     indexed_extraction: IndexedExtraction,
 ) -> Result<(Vec<ScannedRegion>, bool), ProjectIndexerError> {
-    let truncated = document.blocks.len() > MAX_REGIONS_PER_FILE;
+    let mut incomplete = document.blocks.len() > MAX_REGIONS_PER_FILE;
     let regions = document
         .blocks
         .iter()
         .take(MAX_REGIONS_PER_FILE)
         .map(|block| {
             let anchor = RegionAnchor::new(&block.anchor.scheme, &block.anchor.locator)?;
-            let mut description = format!("{relative_path} | {}", block.text);
-            let complete = document.status == ExtractionStatus::Complete;
-            description.truncate(description.floor_char_boundary(MAX_REGION_DESCRIPTION_BYTES));
+            let full_description = format!("{relative_path} | {}", block.text);
+            let description = truncate_utf8(&full_description, MAX_REGION_DESCRIPTION_BYTES);
+            let complete = document.status == ExtractionStatus::Complete
+                && description.len() == full_description.len();
+            if !complete {
+                incomplete = true;
+            }
             Ok(ScannedRegion {
                 anchor,
                 indexed_extraction: Some(indexed_extraction.clone()),
-                description,
+                description: description.to_string(),
                 coverage: if complete {
                     ContextMapCoverage::Complete
                 } else {
@@ -319,17 +362,24 @@ fn scan_office_regions(
             })
         })
         .collect::<Result<Vec<_>, ProjectIndexerError>>()?;
-    Ok((regions, truncated))
+    Ok((regions, incomplete))
 }
 
-fn describe_office_file(relative_path: &str, summary: &str, status: ExtractionStatus) -> String {
+fn describe_office_file(
+    relative_path: &str,
+    summary: &str,
+    status: ExtractionStatus,
+) -> (String, bool) {
     let suffix = match status {
         ExtractionStatus::Complete => summary,
         ExtractionStatus::Partial if summary.is_empty() => "partial extraction",
         ExtractionStatus::Partial => summary,
     };
     let separator = if suffix.is_empty() { "" } else { " | " };
-    truncate_description(&format!("{relative_path}{separator}{suffix}"))
+    let full_description = format!("{relative_path}{separator}{suffix}");
+    let description = truncate_description(&full_description);
+    let complete = description.len() == full_description.len();
+    (description, complete)
 }
 
 fn extraction_failure_description(relative_path: &str, error: &ExtractionError) -> String {

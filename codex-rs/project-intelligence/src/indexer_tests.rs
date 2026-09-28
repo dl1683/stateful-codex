@@ -14,6 +14,9 @@ use crate::ContextMapCoverage;
 use crate::ContextMapFreshness;
 use crate::ContextMapListQuery;
 use crate::ContextMapQuery;
+use crate::HierarchyRegionSourceUpdate;
+use crate::IndexedExtraction;
+use crate::NodeLifecycle;
 use crate::RegionAnchor;
 use crate::SourceFingerprint;
 
@@ -101,12 +104,300 @@ async fn docx_indexing_publishes_structural_regions_and_v2_attestation() {
         Some(RegionAnchor::new("docx-paragraph", "body/tbl[1]/tr[1]/tc[1]/p[1]").expect("anchor"))
     );
     assert_eq!(
-        hit.source
-            .indexed_extraction
-            .as_ref()
-            .map(|extraction| (&extraction.extractor_name, &extraction.extractor_version)),
-        Some((&"codex-docx".to_string(), &"2".to_string()))
+        hit.source.indexed_extraction,
+        Some(
+            IndexedExtraction::new(
+                "codex-docx",
+                "2",
+                "sha256:f50fc47da7e122f07029464c66aa97ba16d8bcf9a7609e978d25f550f76efcfb",
+            )
+            .expect("valid extraction"),
+        )
     );
+}
+
+#[tokio::test]
+async fn over_limit_docx_is_published_as_one_partial_file_without_skips_or_regions() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(
+        root.path().join("bounded.docx"),
+        generated_docx(r#"<w:p><w:r><w:t>bounded content</w:t></w:r></w:p>"#),
+    )
+    .expect("DOCX fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let mut report = indexer
+        .refresh_with_office_limit(
+            ProjectIndexRequest {
+                project_id: "project-1".to_string(),
+                roots: vec![root.path().to_path_buf()],
+            },
+            16,
+        )
+        .await
+        .expect("over-limit DOCX should publish");
+    report.scan_duration_ms = 0;
+    report.publication_duration_ms = 0;
+    assert_eq!(
+        report,
+        ProjectIndexReport {
+            inventory_complete: true,
+            region_coverage_complete: false,
+            files_indexed: 1,
+            regions_indexed: 0,
+            files_skipped: 0,
+            missing_files: 0,
+            truncated: false,
+            scan_duration_ms: 0,
+            publication_duration_ms: 0,
+        }
+    );
+    let files = context_map
+        .list_project(ContextMapListQuery {
+            project_id: "project-1".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("partial file should be queryable");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].entry.value.coverage, ContextMapCoverage::Partial);
+    assert!(
+        hierarchy
+            .list_children("project-1", &files[0].entry.value.node_id)
+            .await
+            .expect("file children should load")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn published_docx_failure_uses_stable_code_without_an_adversarial_zip_name() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    let adversarial_name = format!("word/{}-secret.xml", "x".repeat(2_000));
+    let mut bytes = Vec::new();
+    let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+    writer
+        .start_file(&adversarial_name, SimpleFileOptions::default())
+        .expect("adversarial ZIP entry should start");
+    writer
+        .write_all(b"not a document part")
+        .expect("adversarial ZIP entry should write");
+    writer.finish().expect("adversarial ZIP should finish");
+    fs::write(root.path().join("fixture.docx"), bytes).expect("DOCX fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let report = ProjectIndexer::new(hierarchy, context_map.clone())
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("failure should publish");
+    assert_eq!(report.files_skipped, 0);
+    let expected = "fixture.docx | office extraction failed: corrupt";
+    let file = context_map
+        .list_project(ContextMapListQuery {
+            project_id: "project-1".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("published file should load")
+        .pop()
+        .expect("published file should exist");
+    assert_eq!(file.entry.value.description, expected);
+    assert!(!file.entry.value.description.contains(&adversarial_name));
+    let hit = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "fixture".to_string(),
+            max_results: 1,
+        })
+        .await
+        .expect("published failure should be searchable")
+        .data
+        .pop()
+        .expect("published failure hit should exist");
+    assert_eq!(hit.entry.value.description, expected);
+    assert!(!hit.entry.value.description.contains(&adversarial_name));
+}
+
+#[tokio::test]
+async fn region_attestation_replacement_is_atomic_and_rollback_preserves_all_fields() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(
+        root.path().join("agreement.docx"),
+        generated_docx(r#"<w:p><w:r><w:t>initial clause</w:t></w:r></w:p>"#),
+    )
+    .expect("initial DOCX should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    indexer
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("initial DOCX should index");
+    let root_text = root.path().display().to_string();
+    let file_id =
+        stable_id("file", &["project-1", &root_text, "agreement.docx"]).expect("stable file ID");
+    let file = hierarchy
+        .get_node("project-1", &file_id)
+        .await
+        .expect("file should load")
+        .expect("file should exist");
+    let replacement = IndexedExtraction::new("replacement-extractor", "9", "sha256:replacement")
+        .expect("valid replacement extraction");
+    super::publish::publish_file(
+        &indexer,
+        "project-1",
+        &file_id,
+        file.value.parent_id.clone().expect("file parent"),
+        &super::scan::ScannedFile {
+            project_root: root_text.clone(),
+            relative_path: "agreement.docx".to_string(),
+            fingerprint: SourceFingerprint::parse("sha256:replacement-source")
+                .expect("valid fingerprint"),
+            description: "agreement.docx | replacement clause".to_string(),
+            routing_terms: Vec::new(),
+            coverage: ContextMapCoverage::Complete,
+            regions: vec![super::regions::ScannedRegion {
+                anchor: RegionAnchor::new("docx-paragraph", "body/p[1]").expect("valid anchor"),
+                indexed_extraction: Some(replacement.clone()),
+                description: "agreement.docx | replacement clause".to_string(),
+                coverage: ContextMapCoverage::Complete,
+            }],
+        },
+        super::PublicationFence::Targeted,
+    )
+    .await
+    .expect("replacement should commit");
+    let replacement_hit = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "replacement clause".to_string(),
+            max_results: 1,
+        })
+        .await
+        .expect("replacement should query")
+        .data
+        .pop()
+        .expect("replacement hit should exist");
+    assert_eq!(
+        replacement_hit.source.indexed_extraction,
+        Some(replacement.clone())
+    );
+
+    let rollback = IndexedExtraction::new("rollback-extractor", "10", "sha256:rollback")
+        .expect("valid rollback extraction");
+    let failed = super::publish::publish_file(
+        &indexer,
+        "project-1",
+        &file_id,
+        file.value.parent_id.expect("file parent"),
+        &super::scan::ScannedFile {
+            project_root: root_text,
+            relative_path: "agreement.docx".to_string(),
+            fingerprint: SourceFingerprint::parse("sha256:rollback-source")
+                .expect("valid fingerprint"),
+            description: "agreement.docx | rollback clause".to_string(),
+            routing_terms: Vec::new(),
+            coverage: ContextMapCoverage::Complete,
+            regions: vec![
+                super::regions::ScannedRegion {
+                    anchor: RegionAnchor::new("docx-paragraph", "body/p[1]").expect("valid anchor"),
+                    indexed_extraction: Some(rollback.clone()),
+                    description: "agreement.docx | rollback clause".to_string(),
+                    coverage: ContextMapCoverage::Complete,
+                },
+                super::regions::ScannedRegion {
+                    anchor: RegionAnchor::new("docx-paragraph", "body/p[1]").expect("valid anchor"),
+                    indexed_extraction: Some(rollback),
+                    description: "agreement.docx | duplicate rollback clause".to_string(),
+                    coverage: ContextMapCoverage::Complete,
+                },
+            ],
+        },
+        super::PublicationFence::Targeted,
+    )
+    .await;
+    assert!(failed.is_err());
+    let after_rollback = context_map
+        .get_hit("project-1", &replacement_hit.entry.id)
+        .await
+        .expect("replacement hit should reload")
+        .expect("replacement hit should remain");
+    assert_eq!(after_rollback.source.indexed_extraction, Some(replacement));
+}
+
+#[tokio::test]
+async fn retired_docx_regions_fail_the_guarded_hit_check() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(
+        root.path().join("agreement.docx"),
+        generated_docx(r#"<w:p><w:r><w:t>retired clause</w:t></w:r></w:p>"#),
+    )
+    .expect("DOCX fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    ProjectIndexer::new(hierarchy.clone(), context_map.clone())
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("DOCX should index");
+    let hit = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "retired clause".to_string(),
+            max_results: 1,
+        })
+        .await
+        .expect("region should query")
+        .data
+        .pop()
+        .expect("region hit should exist");
+    let region = hierarchy
+        .get_node("project-1", &hit.entry.value.node_id)
+        .await
+        .expect("region should load")
+        .expect("region should exist");
+    hierarchy
+        .update_region_source(
+            "project-1",
+            &region.id,
+            HierarchyRegionSourceUpdate {
+                expected_revision: region.revision,
+                lifecycle: NodeLifecycle::Missing,
+                region_anchor: region.value.region_anchor.expect("region anchor"),
+                source_fingerprint: region.value.source_fingerprint.expect("region fingerprint"),
+            },
+        )
+        .await
+        .expect("region should retire");
+    assert!(matches!(
+        context_map
+            .get_guarded_hit(
+                "project-1",
+                &hit.entry.id,
+                &hit.entry.value.source_fingerprint
+            )
+            .await,
+        Err(crate::ContextMapStoreError::SourceNotCurrent(
+            ContextMapFreshness::Stale
+        ))
+    ));
 }
 
 #[tokio::test]

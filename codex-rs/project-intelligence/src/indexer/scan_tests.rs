@@ -176,44 +176,53 @@ fn docx_region_budget_marks_coverage_partial() {
 }
 
 #[test]
-fn docx_extraction_failures_are_partial_files_without_skips_or_archive_names() {
+fn truncated_docx_descriptions_mark_region_and_file_coverage_partial() {
     let temp_dir = TempDir::new().expect("tempdir should be created");
     fs::write(
-        temp_dir.path().join("corrupt.docx"),
-        b"word/secret-entry-name.xml is not a ZIP",
+        temp_dir.path().join("long-content.docx"),
+        generated_docx(&format!(
+            r#"<w:p><w:r><w:t>{}</w:t></w:r></w:p>"#,
+            "x".repeat(MAX_REGION_DESCRIPTION_BYTES + 1)
+        )),
     )
-    .expect("corrupt fixture should write");
+    .expect("long DOCX fixture should write");
+    let file = scan_file(temp_dir.path(), &temp_dir.path().join("long-content.docx"))
+        .expect("long DOCX should scan");
+
+    assert_eq!(file.coverage, ContextMapCoverage::Partial);
+    assert_eq!(file.regions.len(), 1);
+    assert_eq!(file.regions[0].coverage, ContextMapCoverage::Partial);
+    assert_eq!(
+        file.regions[0].description.len(),
+        MAX_REGION_DESCRIPTION_BYTES
+    );
+}
+
+#[test]
+fn docx_extraction_failures_have_stable_descriptions_without_archive_names() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    fs::write(temp_dir.path().join("sample.docx"), b"not a ZIP")
+        .expect("corrupt fixture should write");
     let mut encrypted = generated_docx(r#"<w:p><w:r><w:t>encrypted</w:t></w:r></w:p>"#);
     mark_encrypted(&mut encrypted);
-    fs::write(temp_dir.path().join("encrypted.docx"), encrypted)
+    fs::write(temp_dir.path().join("fixture.docx"), encrypted)
         .expect("encrypted fixture should write");
     let scan = scan_roots(&[temp_dir.path().to_path_buf()]).expect("failure scan should complete");
     assert_eq!(scan.files.len(), 2);
     assert_eq!(scan.files_skipped, 0);
+    assert_eq!(
+        scan.files
+            .iter()
+            .map(|file| file.description.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            "fixture.docx | office extraction failed: encrypted".to_string(),
+            "sample.docx | office extraction failed: corrupt".to_string(),
+        ]
+    );
     assert!(scan.files.iter().all(|file| {
         file.regions.is_empty()
             && file.coverage == ContextMapCoverage::Partial
             && file.description.len() <= 2_048
-            && !file.description.contains("secret-entry-name")
     }));
-    assert!(
-        scan.files
-            .iter()
-            .any(|file| file.description.contains("corrupt"))
-    );
-    assert!(
-        scan.files
-            .iter()
-            .any(|file| file.description.contains("encrypted"))
-    );
-    let oversized = scan_docx(
-        temp_dir.path(),
-        "oversized.docx".to_string(),
-        crate::SourceFingerprint::parse("sha256:oversized").expect("valid fingerprint"),
-        None,
-    )
-    .expect("bounded over-limit result should index");
-    assert!(oversized.regions.is_empty());
-    assert_eq!(oversized.coverage, ContextMapCoverage::Partial);
-    assert!(oversized.description.contains("limit-original-bytes"));
 }

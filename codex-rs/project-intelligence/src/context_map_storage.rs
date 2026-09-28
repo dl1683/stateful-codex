@@ -25,13 +25,13 @@ use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
+use crate::context_map_indexed_storage::load_indexed_extraction;
 use crate::search::literal_expression;
 use crate::search::literal_prefix_expression;
 use crate::storage::DATABASE_NAME;
 use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
-use crate::context_map_indexed_storage::load_indexed_extraction;
 
 const INITIAL_REVISION: i64 = 1;
 const MAX_QUERY_HITS_PER_SOURCE: usize = 3;
