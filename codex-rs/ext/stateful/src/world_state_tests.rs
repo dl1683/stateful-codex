@@ -556,3 +556,71 @@ fn visible_root_tracks_only_what_the_model_holds_in_full() {
         Some(6)
     );
 }
+
+#[test]
+fn premises_certify_only_when_rendered_at_their_pinned_revision() {
+    let registry = VisibleRootRegistry::default();
+    let pinned = |id: &str, entry_id: &str, revision: u64| {
+        let mut derived = hit(id, "The launch depends on an earlier finding.");
+        derived.entry.value.premises = vec![BlackboardPremiseLink {
+            entry_id: BlackboardEntryId::parse(entry_id).expect("valid entry ID"),
+            revision,
+        }];
+        derived
+    };
+    let mut current = hit("entry-a", "The permit was never transferred.");
+    current.entry.revision = 2;
+    let fillers = (0..12)
+        .map(|index| hit(&format!("entry-filler-{index}"), &"x".repeat(2_800)))
+        .collect::<Vec<_>>();
+    let mut data = vec![
+        current,
+        pinned("entry-exact", "entry-a", /*revision*/ 2),
+        pinned("entry-stale", "entry-a", /*revision*/ 1),
+        pinned("entry-over-budget", "entry-late", /*revision*/ 1),
+    ];
+    data.extend(fillers);
+    // Same size as the fillers, so once one filler no longer fits neither does this.
+    data.push(hit("entry-late", &"x".repeat(2_800)));
+    project_world_state_section(
+        with_entries(/*revision*/ 3, data),
+        Some((registry.clone(), "thread-1".to_string())),
+    )
+    .render_diff(PreviousWorldStateSection::Absent);
+
+    let shown = registry
+        .get("thread-1")
+        .expect("full render records the root");
+    assert_eq!(
+        [
+            shown.alias_for("entry-exact", /*revision*/ 1),
+            shown.alias_for("entry-stale", /*revision*/ 1),
+            shown.alias_for("entry-over-budget", /*revision*/ 1),
+        ],
+        [Some("E2"), None, None]
+    );
+}
+
+#[test]
+fn edited_tail_of_a_long_entry_is_sent_as_a_change() {
+    let long_id = format!("entry-{}", "x".repeat(400));
+    let entry = |tail: &str, revision: u64| {
+        let mut hit = hit(&long_id, &format!("{}{tail}", "A".repeat(2_790)));
+        hit.entry.revision = revision;
+        hit
+    };
+    let previous = section(with_entries(
+        /*revision*/ 3,
+        vec![entry("TAIL-OLD", 1)],
+    ));
+    let current = section(with_entries(
+        /*revision*/ 4,
+        vec![entry("TAIL-NEW", 2)],
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("an edited entry must render");
+
+    assert!(rendered.body().contains("TAIL-NEW"));
+}

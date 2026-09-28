@@ -133,16 +133,20 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
     let mut shown = Vec::with_capacity(projection.data.len());
     let mut omitted = projection.omitted_entries;
     for (index, hit) in projection.data.iter().enumerate() {
-        let line = render_hit(
-            &format!("E{}", index + 1),
-            hit,
-            &entry_aliases,
-            &evidence_aliases,
-            root.evidence_audit.as_ref(),
+        let alias = format!("E{}", index + 1);
+        let line = bounded_entry_line(
+            render_hit(
+                &alias,
+                hit,
+                &entry_aliases,
+                &evidence_aliases,
+                root.evidence_audit.as_ref(),
+            ),
+            &alias,
         );
         if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
             if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
-                shown.push((index, format!("E{}", index + 1)));
+                shown.push((index, alias));
             }
             let canonical = render_hit(
                 hit.entry.id.as_str(),
@@ -190,12 +194,16 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         ),
     );
     // Certify an entry as fully shown only after layout, against entries actually
-    // rendered: every evidence and premise reference must resolve in the packet, and
-    // relation-bearing entries are never certified (relation detail is not rendered).
+    // rendered: every evidence reference must resolve in the packet, every premise
+    // must be rendered at exactly its pinned revision, and relation-bearing entries
+    // are never certified (relation detail is not rendered).
     let rendered_entries = shown
         .iter()
-        .map(|(index, _)| projection.data[*index].entry.id.to_string())
-        .collect::<std::collections::HashSet<_>>();
+        .map(|(index, _)| {
+            let entry = &projection.data[*index].entry;
+            (entry.id.to_string(), entry.revision)
+        })
+        .collect::<HashMap<_, _>>();
     let complete_entries = shown
         .into_iter()
         .filter_map(|(index, alias)| {
@@ -207,12 +215,9 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
                     .evidence
                     .iter()
                     .all(|link| evidence_aliases.contains_key(&link.context_map_entry_id))
-                && hit
-                    .entry
-                    .value
-                    .premises
-                    .iter()
-                    .all(|premise| rendered_entries.contains(premise.entry_id.as_str()));
+                && hit.entry.value.premises.iter().all(|premise| {
+                    rendered_entries.get(premise.entry_id.as_str()) == Some(&premise.revision)
+                });
             complete.then(|| (hit.entry.id.to_string(), alias, hit.entry.revision))
         })
         .collect();
@@ -368,7 +373,7 @@ fn render_hit(
         })
         .collect::<Vec<_>>()
         .join(",");
-    let mut line = format!(
+    format!(
         "- {alias} [{} {}; verification={}; declared={}; evidence={}; premises={}; confidence={}; provenance={}] content={}{} sources=[{}] premiseRefs=[{}] relations=[{}]",
         importance_name(value.importance),
         kind_name(value.kind),
@@ -383,7 +388,12 @@ fn render_hit(
         evidence,
         premises,
         relations,
-    );
+    )
+}
+
+/// Bounds a rendered entry line for display. Change detection must digest the
+/// untruncated line, since truncation can hide an edited tail.
+fn bounded_entry_line(mut line: String, alias: &str) -> String {
     if line.len() > MAX_ENTRY_BYTES {
         let marker = format!("… [{alias}{TRUNCATED_ENTRY_SUFFIX}");
         let maximum = MAX_ENTRY_BYTES.saturating_sub(marker.len());
