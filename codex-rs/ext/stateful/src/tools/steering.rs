@@ -1,5 +1,4 @@
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -22,6 +21,7 @@ use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
+use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 use super::respond;
@@ -101,11 +101,14 @@ impl SteeringQueryTool {
             .flatten()
             .and_then(|item| item.get("id"))
             .and_then(Value::as_str);
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "data": rendered,
-            "nextCursor": next_cursor,
-            "truncated": has_more,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "data": rendered,
+                "nextCursor": next_cursor,
+                "truncated": has_more,
+            }),
+        )
     }
 }
 
@@ -274,13 +277,16 @@ impl SteeringReconcileTool {
                             revision: applied.revision,
                         });
                     }
-                    return Ok(Box::new(JsonToolOutput::new(json!({
-                        "steeringId": applied.id.to_string(),
-                        "status": steering_status_name(applied.status),
-                        "revision": applied.revision,
-                        "resultingStrategyRevision": applied.resulting_strategy_revision,
-                        "runRevision": updated.revision,
-                    }))));
+                    return bounded_json_output(
+                        &call,
+                        json!({
+                            "steeringId": applied.id.to_string(),
+                            "status": steering_status_name(applied.status),
+                            "revision": applied.revision,
+                            "resultingStrategyRevision": applied.resulting_strategy_revision,
+                            "runRevision": updated.revision,
+                        }),
+                    );
                 }
             };
         let updated = store
@@ -303,13 +309,16 @@ impl SteeringReconcileTool {
                 revision: updated.revision,
             });
         }
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "steeringId": updated.id.to_string(),
-            "status": steering_status_name(updated.status),
-            "revision": updated.revision,
-            "resultingStrategyRevision": updated.resulting_strategy_revision,
-            "runRevision": run_revision,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "steeringId": updated.id.to_string(),
+                "status": steering_status_name(updated.status),
+                "revision": updated.revision,
+                "resultingStrategyRevision": updated.resulting_strategy_revision,
+                "runRevision": run_revision,
+            }),
+        )
     }
 }
 

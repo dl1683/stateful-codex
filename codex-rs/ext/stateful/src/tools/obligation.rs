@@ -1,5 +1,4 @@
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -16,6 +15,7 @@ use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
+use super::bounded_json_output;
 use super::parse_arguments;
 use super::respond;
 use super::stable_id;
@@ -97,7 +97,7 @@ impl ObligationUpdateTool {
                     project_id: self.project_id.clone(),
                     run_id: run.id,
                     packet: arguments.packet,
-                    provenance_source_id: call.call_id,
+                    provenance_source_id: call.call_id.clone(),
                 },
             )
             .await
@@ -110,12 +110,15 @@ impl ObligationUpdateTool {
                 revision: obligation.revision,
             });
         }
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "obligationId": obligation.id,
-            "sequence": obligation.sequence,
-            "revision": obligation.revision,
-            "recorded": true,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "obligationId": obligation.id,
+                "sequence": obligation.sequence,
+                "revision": obligation.revision,
+                "recorded": true,
+            }),
+        )
     }
 }
 

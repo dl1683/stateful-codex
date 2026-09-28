@@ -7,7 +7,6 @@
 //! is rejected instead of silently restarting.
 
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -18,6 +17,7 @@ use codex_extension_api::parse_tool_input_schema;
 use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStatus;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
@@ -25,20 +25,20 @@ use serde_json::json;
 use crate::root_blackboard::short_digest;
 use crate::services::ProjectIntelligenceServices;
 
+use super::MAX_RESPONSE_BYTES;
+use super::bounded_json_output;
 use super::parse_arguments;
 use super::respond;
 use super::thread_run;
 
 const TOOL_NAME: &str = "stateful_run_read";
-/// Serialized response bound: one UTF-8 byte is the worst case per token, so this keeps
-/// every page under the 10K-token item limit with room for framing.
-const MAX_READ_RESPONSE_BYTES: usize = 9_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 enum Section {
     Goal,
     Obligation,
+    SubmittedResult,
 }
 
 impl Section {
@@ -46,6 +46,7 @@ impl Section {
         match self {
             Self::Goal => "goal",
             Self::Obligation => "obligation",
+            Self::SubmittedResult => "submittedResult",
         }
     }
 
@@ -53,6 +54,7 @@ impl Section {
         match value {
             "goal" => Some(Self::Goal),
             "obligation" => Some(Self::Obligation),
+            "submittedResult" => Some(Self::SubmittedResult),
             _ => None,
         }
     }
@@ -137,10 +139,20 @@ impl StatefulRunReadTool {
             .transpose()?;
         let run = match &cursor {
             Some(cursor) => self.cursor_run(&cursor.run_id).await?,
+            None if arguments.section == Section::SubmittedResult => {
+                return Err(FunctionCallError::RespondToModel(
+                    "submittedResult is read only with the cursor returned by the completing stateful_run_update".to_string(),
+                ));
+            }
             None => thread_run(&self.project_id, &self.thread_id, &self.services).await?,
         };
         let text = match arguments.section {
             Section::Goal => run.value.goal.clone(),
+            Section::SubmittedResult => submitted_result(&run).ok_or_else(|| {
+                FunctionCallError::RespondToModel(
+                    "this run has no completed result to read".to_string(),
+                )
+            })?,
             Section::Obligation => {
                 let obligation = self
                     .services
@@ -158,7 +170,7 @@ impl StatefulRunReadTool {
                 obligation_text(&obligation.value.packet)
             }
         };
-        let digest = short_digest(&text);
+        let digest = section_digest(arguments.section, &run, &text);
         let offset = match cursor {
             Some(cursor) if cursor.digest != digest => {
                 return Err(FunctionCallError::RespondToModel(format!(
@@ -177,7 +189,7 @@ impl StatefulRunReadTool {
         let page = read_page(
             &text,
             offset,
-            call.response_byte_budget(MAX_READ_RESPONSE_BYTES),
+            call.response_byte_budget(MAX_RESPONSE_BYTES),
             |end| {
                 (end < text.len()).then(|| {
                     ReadCursor {
@@ -205,7 +217,7 @@ impl StatefulRunReadTool {
                 "the response budget is too small to return any of this text".to_string(),
             )
         })?;
-        Ok(Box::new(JsonToolOutput::new(page)))
+        bounded_json_output(&call, page)
     }
 
     /// Resolves a cursor's run, which must belong to this project and thread.
@@ -232,6 +244,36 @@ impl StatefulRunReadTool {
         }
         Ok(run)
     }
+}
+
+/// The stored result of a completed run.
+fn submitted_result(run: &StatefulRun) -> Option<String> {
+    (run.status == StatefulRunStatus::Completed)
+        .then(|| run.result.clone())
+        .flatten()
+}
+
+/// A submitted-result cursor also binds the completed run revision.
+fn section_digest(section: Section, run: &StatefulRun, text: &str) -> String {
+    match section {
+        Section::Goal | Section::Obligation => short_digest(text),
+        Section::SubmittedResult => short_digest(&format!("{}\0{text}", run.revision)),
+    }
+}
+
+/// Mints the first-page cursor for a completed run's stored result, for a completion
+/// response too large to carry the result itself.
+pub(super) fn submitted_result_cursor(run: &StatefulRun) -> Option<String> {
+    let text = submitted_result(run)?;
+    Some(
+        ReadCursor {
+            section: Section::SubmittedResult,
+            run_id: run.id.to_string(),
+            digest: section_digest(Section::SubmittedResult, run, &text),
+            offset: 0,
+        }
+        .encode(),
+    )
 }
 
 /// Canonical text of an obligation packet: one `Label: value` line per item, values
@@ -297,13 +339,13 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read the exact stored goal or current semantic obligation of the selected thread's Stateful run, one bounded page at a time. Use it when <stateful_run> says the goal or obligation was shortened, or when earlier detail may no longer be in context. Follow nextCursor until it is null to read the whole text.".to_string(),
+            description: "Read the exact stored goal or current semantic obligation of the selected thread's Stateful run, one bounded page at a time, or a completed run's submitted result with the cursor its completion returned. Use it when <stateful_run> says the goal or obligation was shortened, or when earlier detail may no longer be in context. Follow nextCursor until it is null to read the whole text.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "section": {"type": "string", "enum": ["goal", "obligation"]},
+                    "section": {"type": "string", "enum": ["goal", "obligation", "submittedResult"]},
                     "cursor": {"type": "string"}
                 },
                 "required": ["section"],

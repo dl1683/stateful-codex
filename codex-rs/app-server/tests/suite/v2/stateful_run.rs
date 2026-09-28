@@ -1073,3 +1073,153 @@ async fn model_reads_a_long_goal_exactly_and_rejects_a_foreign_cursor() -> Resul
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Oversized result".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "oversized-result-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: "Summarize the data room.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "oversized-result-run".to_string(),
+            },
+        })
+        .await?;
+    let result = "The \"indemnity\" cap is 15%; the DOE renewal is unresolved.\n"
+        .repeat(300)
+        .trim_end()
+        .to_string();
+    let complete_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "complete",
+                    "stateful_run_update",
+                    &json!({
+                        "expectedRevision": started.run.revision,
+                        "status": "completed",
+                        "completionDisposition": "noReusableLearning",
+                        "result": result,
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("complete-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("completed", "Completed."),
+                responses::ev_completed("completed-response"),
+            ]),
+        ],
+    )
+    .await;
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "Finish.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let completion_text = complete_log
+        .function_call_output_text("complete")
+        .expect("completion output should be text");
+    let completion: Value = serde_json::from_str(&completion_text)?;
+    assert!(completion_text.len() <= 9_000);
+    assert_eq!(
+        (&completion["status"], &completion["submittedResult"]),
+        (&json!("completed"), &Value::Null)
+    );
+    let cursor = completion["submittedResultCursor"]
+        .as_str()
+        .expect("oversized result is paged")
+        .to_string();
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(started.run.id),
+                thread_id: None,
+            },
+        })
+        .await?;
+    let run = read.run.expect("run remains readable");
+    assert_eq!(
+        (run.status, run.result.as_deref()),
+        (StatefulRunStatus::Completed, Some(result.as_str()))
+    );
+
+    let read_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "read-result",
+                    "stateful_run_read",
+                    &json!({"section": "submittedResult", "cursor": cursor}).to_string(),
+                ),
+                responses::ev_completed("read-result-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("read-done", "Read the result."),
+                responses::ev_completed("read-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id,
+            input: vec![UserInput::Text {
+                text: "Show the result.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let page: Value = serde_json::from_str(
+        &read_log
+            .function_call_output_text("read-result")
+            .expect("read output should be text"),
+    )?;
+    let content = page["content"].as_str().expect("page content");
+    assert!(page.to_string().len() <= 9_000);
+    assert!(result.starts_with(content) && !content.is_empty());
+    assert!(page["nextCursor"].is_string());
+    Ok(())
+}

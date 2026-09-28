@@ -11,6 +11,7 @@ use codex_stateful_runtime::WorkflowMode;
 use serde_json::Value;
 
 use crate::checkpoint::CHECKPOINT_TOOL_CALLS;
+use crate::limits::MAX_MODEL_ITEM_BYTES;
 use serde_json::json;
 use sha2::Digest;
 use sha2::Sha256;
@@ -22,7 +23,7 @@ const UPDATE_START_MARKER: &str = "<stateful_run_update>";
 const UPDATE_END_MARKER: &str = "</stateful_run_update>";
 /// Markers plus body stay within the 9,000-byte model item bound (one byte per token
 /// is the worst case).
-const MAX_BODY_BYTES: usize = 9_000 - START_MARKER.len() - END_MARKER.len();
+const MAX_BODY_BYTES: usize = MAX_MODEL_ITEM_BYTES - START_MARKER.len() - END_MARKER.len();
 /// Independent budgets, rendered obligation first, so neither steering nor descriptive
 /// text can crowd the current obligation out of the packet.
 const MAX_OBLIGATION_BYTES: usize = 3 * 1024;

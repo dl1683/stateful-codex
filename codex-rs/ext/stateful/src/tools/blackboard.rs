@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -29,6 +28,7 @@ use crate::source_freshness::observe_evidence;
 use crate::visible_root::VisibleRootRegistry;
 
 use super::MAX_RESPONSE_BYTES;
+use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 
@@ -339,13 +339,16 @@ impl BlackboardQueryTool {
         } else {
             None
         };
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "projectId": self.project_id,
-            "data": data,
-            "truncated": truncated,
-            "projectRevision": project_revision,
-            "nextAfterEntryId": next_after_entry_id,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "projectId": self.project_id,
+                "data": data,
+                "truncated": truncated,
+                "projectRevision": project_revision,
+                "nextAfterEntryId": next_after_entry_id,
+            }),
+        )
     }
 }
 

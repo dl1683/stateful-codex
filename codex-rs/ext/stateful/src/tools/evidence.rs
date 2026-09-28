@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -30,6 +29,7 @@ use serde_json::json;
 use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
+use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 
@@ -212,7 +212,7 @@ impl EvidenceReadTool {
             output["bytesReturned"] = json!(content.len());
         }
         debug_assert!(content.len() <= original_bytes);
-        Ok(Box::new(JsonToolOutput::new(output)))
+        bounded_json_output(&call, output)
     }
 
     async fn read_with_refresh(

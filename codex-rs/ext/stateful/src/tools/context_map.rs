@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -29,6 +28,7 @@ use crate::source_freshness::audited_context_freshness;
 use crate::source_freshness::observe_evidence;
 
 use super::MAX_RESPONSE_BYTES;
+use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 
@@ -136,13 +136,16 @@ impl ContextMapQueryTool {
                 break;
             }
         }
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "projectId": self.project_id,
-            "data": data,
-            "truncated": truncated,
-            "mayHaveMore": may_have_more,
-            "knowledgeCoverageAvailable": knowledge_coverage_available,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "projectId": self.project_id,
+                "data": data,
+                "truncated": truncated,
+                "mayHaveMore": may_have_more,
+                "knowledgeCoverageAvailable": knowledge_coverage_available,
+            }),
+        )
     }
 }
 
@@ -281,21 +284,24 @@ impl ContextMapRefreshTool {
                 break;
             }
         }
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "projectId": self.project_id,
-            "inventoryComplete": report.inventory_complete,
-            "regionCoverageComplete": report.region_coverage_complete,
-            "filesIndexed": report.files_indexed,
-            "regionsIndexed": report.regions_indexed,
-            "filesSkipped": report.files_skipped,
-            "missingFiles": report.missing_files,
-            "truncated": report.truncated,
-            "scanDurationMs": report.scan_duration_ms,
-            "publicationDurationMs": report.publication_duration_ms,
-            "routes": data,
-            "routesTruncated": routes_truncated,
-            "knowledgeCoverageAvailable": knowledge_coverage_available,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "projectId": self.project_id,
+                "inventoryComplete": report.inventory_complete,
+                "regionCoverageComplete": report.region_coverage_complete,
+                "filesIndexed": report.files_indexed,
+                "regionsIndexed": report.regions_indexed,
+                "filesSkipped": report.files_skipped,
+                "missingFiles": report.missing_files,
+                "truncated": report.truncated,
+                "scanDurationMs": report.scan_duration_ms,
+                "publicationDurationMs": report.publication_duration_ms,
+                "routes": data,
+                "routesTruncated": routes_truncated,
+                "knowledgeCoverageAvailable": knowledge_coverage_available,
+            }),
+        )
     }
 }
 

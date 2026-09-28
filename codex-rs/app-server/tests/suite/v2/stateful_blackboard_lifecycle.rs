@@ -543,6 +543,110 @@ async fn model_can_enumerate_active_knowledge_affected_by_a_changed_route() -> R
     Ok(())
 }
 
+#[tokio::test]
+async fn batch_whose_receipts_cannot_fit_is_refused_before_any_write() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Oversized batch project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "oversized-batch-project".to_string(),
+            },
+        })
+        .await?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let key = |kind: &str, index: usize| format!("{kind}-{index}-{}", "k".repeat(100));
+    let records = (0..24)
+        .map(|index| {
+            json!({
+                "idempotencyKey": key("record", index),
+                "kind": "fact",
+                "content": format!("Fact {index}."),
+                "confidenceBasisPoints": 9000,
+                "verification": "unverified",
+                "importance": "normal",
+                "rootPromotion": "candidate"
+            })
+        })
+        .collect::<Vec<_>>();
+    let relations = (1..24)
+        .map(|index| {
+            json!({
+                "idempotencyKey": key("relation", index),
+                "fromRecordKey": key("record", index),
+                "toRecordKey": key("record", 0),
+                "kind": "supports",
+                "confidenceBasisPoints": 8000
+            })
+        })
+        .collect::<Vec<_>>();
+    let batch_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "oversized-batch",
+                    "blackboard_record_batch",
+                    &json!({"records": records, "relations": relations}).to_string(),
+                ),
+                responses::ev_completed("oversized-batch-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("batch-done", "I will split the batch."),
+                responses::ev_completed("batch-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let output = batch_log
+        .function_call_output_text("oversized-batch")
+        .expect("batch output should be text");
+    assert!(output.contains("nothing was written"), "{output}");
+    let knowledge: BlackboardQueryResponse = server
+        .request(|request_id| ClientRequest::BlackboardQuery {
+            request_id,
+            params: BlackboardQueryParams {
+                project_id: created.project.id,
+                text: None,
+                within_node_id: None,
+                limit: Some(10),
+            },
+        })
+        .await?;
+    assert_eq!(knowledge.data.len(), 0);
+    Ok(())
+}
+
 async fn run_turn(server: &mut TestAppServer, thread_id: &str) -> Result<()> {
     server
         .start_turn_and_wait_for_completion(TurnStartParams {

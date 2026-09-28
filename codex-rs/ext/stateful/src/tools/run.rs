@@ -1,5 +1,4 @@
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -13,6 +12,7 @@ use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulRunUpdate;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
+use serde_json::Value;
 use serde_json::json;
 
 use crate::StatefulEvent;
@@ -25,11 +25,15 @@ use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
 
+use super::MAX_RESPONSE_BYTES;
+use super::bounded_json_output;
 use super::parse_arguments;
 use super::respond;
+use super::run_read::submitted_result_cursor;
 use super::stable_id;
 use super::thread_run;
 
+const PAGED_RESULT_INSTRUCTION: &str = "The completed result is too large to return here. Read it exactly with stateful_run_read using section \"submittedResult\" and cursor submittedResultCursor, following nextCursor until it is null, then return it as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. Copy opaque evidence identifiers only from finalAnswerChecklist; if omittedChecklistItems is nonzero, also use finalObligation from this call.";
 const TOOL_NAME: &str = "stateful_run_update";
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -317,7 +321,7 @@ impl StatefulRunUpdateTool {
         let omitted_checklist_items = completion
             .as_ref()
             .map_or(0, |completion| completion.omitted_checklist_items);
-        Ok(Box::new(JsonToolOutput::new(json!({
+        let mut output = json!({
             "runId": run.id.to_string(),
             "status": status_name(run.status),
             "revision": run.revision,
@@ -328,7 +332,30 @@ impl StatefulRunUpdateTool {
             "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
                 "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. For a Windows drive path, use the exact C:/... Markdown target form and never rewrite it as /C:/.... Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, also use finalObligation from this call."
             ),
-        }))))
+        });
+        // The run is already durable here, so the response is packed to fit rather than
+        // refused: an oversized result moves behind an exact paged read, then checklist
+        // items drop from the end with an honest omitted count.
+        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        if output.to_string().len() > budget
+            && let Some(cursor) = submitted_result_cursor(&run)
+        {
+            output["submittedResult"] = Value::Null;
+            output["submittedResultCursor"] = json!(cursor);
+            output["finalAnswerInstruction"] = json!(PAGED_RESULT_INSTRUCTION);
+        }
+        while output.to_string().len() > budget {
+            if output["finalAnswerChecklist"]
+                .as_array_mut()
+                .and_then(Vec::pop)
+                .is_none()
+            {
+                break;
+            }
+            let omitted = output["omittedChecklistItems"].as_u64().unwrap_or_default();
+            output["omittedChecklistItems"] = json!(omitted + 1);
+        }
+        bounded_json_output(&call, output)
     }
 }
 

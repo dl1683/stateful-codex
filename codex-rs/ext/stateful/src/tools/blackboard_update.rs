@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -37,7 +36,12 @@ use super::blackboard_evidence::resolve_evidence;
 use super::blackboard_premises::PremiseArguments;
 use super::blackboard_premises::premise_schema;
 use super::blackboard_premises::resolve_premises;
+use super::bounded_json_output;
 use super::parse_arguments;
+use super::preflight_receipts;
+use super::receipt_error;
+use super::worst_identifier;
+use super::worst_receipt_error;
 
 const UPDATE_TOOL_NAME: &str = "blackboard_update_batch";
 const MAX_MUTATIONS: usize = 24;
@@ -151,6 +155,31 @@ impl BlackboardUpdateTool {
                 )));
             }
         }
+        preflight_receipts(
+            &call,
+            &json!({
+                "updated": u64::MAX,
+                "failed": u64::MAX,
+                "results": mutations
+                    .iter()
+                    .enumerate()
+                    .map(|(index, mutation)| {
+                        let entry_id = worst_identifier(mutation.entry_id());
+                        json!({
+                            "index": index,
+                            "action": "setRootPromotion",
+                            "entryId": entry_id,
+                            "revision": u64::MAX,
+                            "state": "x".repeat(16),
+                            "rootPromotion": "x".repeat(16),
+                            "updated": false,
+                            "historicalFinding": {"entryId": entry_id, "revision": u64::MAX},
+                            "error": worst_receipt_error(),
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            }),
+        )?;
         let mut updated = 0usize;
         let mut results = Vec::with_capacity(mutations.len());
         let revises_support = mutations.iter().any(|mutation| {
@@ -198,15 +227,18 @@ impl BlackboardUpdateTool {
                     "action": action,
                     "entryId": entry_id,
                     "updated": false,
-                    "error": error.to_string(),
+                    "error": receipt_error(error),
                 })),
             }
         }
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "updated": updated,
-            "failed": results.len().saturating_sub(updated),
-            "results": results,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "updated": updated,
+                "failed": results.len().saturating_sub(updated),
+                "results": results,
+            }),
+        )
     }
 
     async fn apply_mutation(

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use codex_extension_api::FunctionCallError;
-use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
@@ -41,8 +40,13 @@ use super::blackboard_evidence::resolve_evidence;
 use super::blackboard_premises::PremiseArguments;
 use super::blackboard_premises::premise_schema;
 use super::blackboard_premises::resolve_premises;
+use super::bounded_json_output;
 use super::parse_arguments;
+use super::preflight_receipts;
+use super::receipt_error;
 use super::stable_id;
+use super::worst_identifier;
+use super::worst_receipt_error;
 
 const RECORD_TOOL_NAME: &str = "blackboard_record";
 const BATCH_RECORD_TOOL_NAME: &str = "blackboard_record_batch";
@@ -125,11 +129,14 @@ impl BlackboardRecordTool {
         let entry = self
             .record(arguments, &call.call_id, &project_roots)
             .await?;
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "entryId": entry.id.to_string(),
-            "revision": entry.revision,
-            "recorded": true,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "entryId": entry.id.to_string(),
+                "revision": entry.revision,
+                "recorded": true,
+            }),
+        )
     }
 
     async fn record(
@@ -332,6 +339,36 @@ impl BlackboardBatchRecordTool {
                 )));
             }
         }
+        preflight_receipts(
+            &call,
+            &json!({
+                "recorded": u64::MAX,
+                "failed": u64::MAX,
+                "results": (0..records.len())
+                    .map(|index| json!({
+                        "index": index,
+                        "entryId": worst_identifier(""),
+                        "revision": u64::MAX,
+                        "recorded": false,
+                        "error": worst_receipt_error(),
+                    }))
+                    .collect::<Vec<_>>(),
+                "relationsRecorded": u64::MAX,
+                "relationsFailed": u64::MAX,
+                "relationResults": relations
+                    .iter()
+                    .enumerate()
+                    .map(|(index, relation)| json!({
+                        "index": index,
+                        "idempotencyKey": relation.idempotency_key,
+                        "relationId": worst_identifier(""),
+                        "revision": u64::MAX,
+                        "recorded": false,
+                        "error": worst_receipt_error(),
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+        )?;
         let mut results = Vec::with_capacity(records.len());
         let mut entry_ids = HashMap::with_capacity(records.len());
         let mut recorded = 0usize;
@@ -363,7 +400,7 @@ impl BlackboardBatchRecordTool {
                 Err(error) => results.push(json!({
                     "index": index,
                     "recorded": false,
-                    "error": error.to_string(),
+                    "error": receipt_error(error),
                 })),
             }
         }
@@ -377,10 +414,10 @@ impl BlackboardBatchRecordTool {
                     "index": index,
                     "idempotencyKey": relation_key,
                     "recorded": false,
-                    "error": format!(
+                    "error": receipt_error(format!(
                         "fromRecordKey was not recorded successfully: {}",
                         relation.from_record_key
-                    ),
+                    )),
                 }));
                 continue;
             };
@@ -389,10 +426,10 @@ impl BlackboardBatchRecordTool {
                     "index": index,
                     "idempotencyKey": relation_key,
                     "recorded": false,
-                    "error": format!(
+                    "error": receipt_error(format!(
                         "toRecordKey was not recorded successfully: {}",
                         relation.to_record_key
-                    ),
+                    )),
                 }));
                 continue;
             };
@@ -419,19 +456,22 @@ impl BlackboardBatchRecordTool {
                     "index": index,
                     "idempotencyKey": relation_key,
                     "recorded": false,
-                    "error": error.to_string(),
+                    "error": receipt_error(error),
                 })),
             }
         }
         let relations_failed = relation_results.len().saturating_sub(relations_recorded);
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "recorded": recorded,
-            "failed": failed,
-            "results": results,
-            "relationsRecorded": relations_recorded,
-            "relationsFailed": relations_failed,
-            "relationResults": relation_results,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "recorded": recorded,
+                "failed": failed,
+                "results": results,
+                "relationsRecorded": relations_recorded,
+                "relationsFailed": relations_failed,
+                "relationResults": relation_results,
+            }),
+        )
     }
 }
 
@@ -565,11 +605,14 @@ impl BlackboardRelateTool {
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: RelateArguments = parse_arguments(&call)?;
         let relation = self.relate(arguments, &call.call_id).await?;
-        Ok(Box::new(JsonToolOutput::new(json!({
-            "relationId": relation.id.to_string(),
-            "revision": relation.revision,
-            "recorded": true,
-        }))))
+        bounded_json_output(
+            &call,
+            json!({
+                "relationId": relation.id.to_string(),
+                "revision": relation.revision,
+                "recorded": true,
+            }),
+        )
     }
 
     async fn relate(
