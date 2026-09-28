@@ -2,11 +2,17 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::ExtractedDocument;
+use crate::ExtractionLimits;
 use crate::ExtractionNotice;
 use crate::ExtractionStatus;
 
 pub(crate) fn digest_bytes(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+pub(crate) fn limits_digest(limits: &ExtractionLimits) -> String {
+    let bytes = serde_json::to_vec(limits).expect("extraction limits are serializable");
+    digest_bytes(&bytes)
 }
 
 pub(crate) fn representation_digest(document: &ExtractedDocument) -> String {

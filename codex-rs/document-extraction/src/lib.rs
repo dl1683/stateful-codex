@@ -151,16 +151,16 @@ impl DocumentExtractor {
 
         let original_fingerprint = canonical::digest_bytes(original_bytes);
         let identity = ExtractorIdentity::for_format(format);
-        if let Some(document) =
-            self.cache
-                .load(&original_fingerprint, &identity)
-                .filter(|document| {
-                    document.original_fingerprint == original_fingerprint
-                        && document.original_bytes == original_bytes.len() as u64
-                        && document.extractor == identity
-                        && canonical::representation_digest(document)
-                            == document.canonical_representation_digest
-                })
+        if let Some(document) = self
+            .cache
+            .load(&original_fingerprint, &identity, &self.limits)
+            .filter(|document| {
+                document.original_fingerprint == original_fingerprint
+                    && document.original_bytes == original_bytes.len() as u64
+                    && document.extractor == identity
+                    && canonical::representation_digest(document)
+                        == document.canonical_representation_digest
+            })
         {
             return Ok(document);
         }
@@ -175,11 +175,7 @@ impl DocumentExtractor {
             DocumentFormat::Xlsx => return Err(ExtractionError::UnsupportedFormat),
         };
         document.canonical_representation_digest = canonical::representation_digest(&document);
-        self.cache.store(
-            &document,
-            self.limits.max_cache_entry_bytes,
-            self.limits.max_cache_bytes,
-        );
+        self.cache.store(&document, &self.limits);
         Ok(document)
     }
 }
