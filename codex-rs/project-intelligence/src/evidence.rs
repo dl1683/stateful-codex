@@ -1,6 +1,16 @@
+//! Fingerprint-verified source and derived-region evidence reads.
+//!
+//! Region reads are linearizable at `File::open`: the bytes are hashed and extracted from the
+//! same buffer. A path replacement after the handle opens can therefore return that old matching
+//! snapshot; this residual race is intentional and does not use platform file-identity APIs.
+
+mod region_read;
+
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 use codex_document_extraction::DocumentExtractor;
 use codex_document_extraction::ExtractionError;
@@ -18,10 +28,12 @@ use crate::ContextMapStoreError;
 use crate::IndexedExtraction;
 use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
+use region_read::read_region;
 
 pub const MAX_EVIDENCE_READ_BYTES: u32 = 64 * 1024;
+pub const MAX_CONCURRENT_OFFICE_READS: usize = 2;
 const MAX_LINE_SPAN: u64 = 2_000;
-const MAX_OFFICE_BYTES: u64 = 64 * 1024 * 1024;
+static OFFICE_READS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,13 +170,12 @@ impl EvidenceReader {
             EvidenceReadLocator::ContextMapRoute(route) => {
                 let hit = match self
                     .context_map
-                    .get_guarded_hit(
-                        &request.project_id,
-                        &route.context_map_entry_id,
-                        &route.source_fingerprint,
-                    )
+                    .get_guarded_hit(&request.project_id, &route.context_map_entry_id, route)
                     .await
                 {
+                    Err(ContextMapStoreError::RouteChanged) => {
+                        return Err(EvidenceReadError::RouteChanged);
+                    }
                     Ok(hit) => hit,
                     Err(ContextMapStoreError::SourceNotCurrent(_)) => {
                         return Err(EvidenceReadError::RouteChanged);
@@ -174,9 +185,6 @@ impl EvidenceReader {
                 .ok_or_else(|| {
                     EvidenceReadError::RouteNotFound(route.context_map_entry_id.to_string())
                 })?;
-                if EvidenceRoute::from_hit(&hit)? != *route {
-                    return Err(EvidenceReadError::RouteChanged);
-                }
                 let requested_path = hit.source.relative_path.to_string();
                 (
                     vec![hit],
@@ -221,13 +229,23 @@ impl EvidenceReader {
         if !source.starts_with(&root) {
             return Err(EvidenceReadError::SourceOutsideRoot);
         }
+        if region_anchor.is_none() && DocumentExtractor::format_for_path(&source).is_some() {
+            return Err(EvidenceReadError::OfficeSourceRoute);
+        }
         let max_bytes =
             usize::try_from(request.max_bytes).map_err(|_| EvidenceReadError::InvalidRequest)?;
         if let Some(anchor) = region_anchor {
             let indexed_extraction =
                 indexed_extraction.ok_or(EvidenceReadError::InvalidIndexedExtraction)?;
+            let permit = OFFICE_READS
+                .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_OFFICE_READS)))
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| EvidenceReadError::OfficeReadLimitClosed)?;
             let expected_fingerprint = hit.entry.value.source_fingerprint.to_string();
             let read = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
                 read_region(
                     source,
                     &expected_fingerprint,
@@ -322,63 +340,6 @@ struct SourceRead {
     last_line: Option<u64>,
     truncated: bool,
     fingerprint: String,
-}
-
-struct RegionRead {
-    content: String,
-    total_bytes: u64,
-    truncated: bool,
-    extraction: IndexedExtraction,
-}
-
-fn read_region(
-    path: PathBuf,
-    expected_fingerprint: &str,
-    anchor: &crate::RegionAnchor,
-    indexed_extraction: &IndexedExtraction,
-    max_bytes: usize,
-) -> Result<RegionRead, EvidenceReadError> {
-    let mut file = File::open(&path)?;
-    let mut limited = file.by_ref().take(MAX_OFFICE_BYTES.saturating_add(1));
-    let mut original = Vec::new();
-    limited.read_to_end(&mut original)?;
-    if original.len() as u64 > MAX_OFFICE_BYTES {
-        return Err(EvidenceReadError::SourceTooLarge);
-    }
-    let fingerprint = format!("sha256:{:x}", Sha256::digest(&original));
-    if fingerprint != expected_fingerprint {
-        return Err(EvidenceReadError::SourceChanged);
-    }
-    let format = DocumentExtractor::format_for_path(&path)
-        .ok_or_else(|| EvidenceReadError::UnsupportedRegionAnchor(anchor.scheme.clone()))?;
-    let document = DocumentExtractor::production().extract(format, &original)?;
-    let current_extraction = IndexedExtraction::new(
-        document.extractor.name.clone(),
-        document.extractor.version.clone(),
-        document.canonical_representation_digest.clone(),
-    )
-    .map_err(|_| EvidenceReadError::InvalidIndexedExtraction)?;
-    if &current_extraction != indexed_extraction {
-        return Err(EvidenceReadError::ExtractionChanged);
-    }
-    let block = document
-        .blocks
-        .into_iter()
-        .find(|block| {
-            block.anchor.scheme == anchor.scheme && block.anchor.locator == anchor.locator
-        })
-        .ok_or(EvidenceReadError::RegionAnchorNotFound)?;
-    let total_bytes =
-        u64::try_from(block.text.len()).map_err(|_| EvidenceReadError::CountOverflow)?;
-    let end = block
-        .text
-        .floor_char_boundary(max_bytes.min(block.text.len()));
-    Ok(RegionRead {
-        content: block.text[..end].to_owned(),
-        total_bytes,
-        truncated: end < block.text.len(),
-        extraction: current_extraction,
-    })
 }
 
 fn read_source(
@@ -488,6 +449,10 @@ pub enum EvidenceReadError {
     SourceChanged,
     #[error("source exceeds the bounded Office read limit")]
     SourceTooLarge,
+    #[error("Office source reads require context_map_query and an indexed, anchored region route")]
+    OfficeSourceRoute,
+    #[error("Office region read limit is unavailable")]
+    OfficeReadLimitClosed,
     #[error("current extraction differs from the indexed representation")]
     ExtractionChanged,
     #[error("Office extraction failed: {0}")]

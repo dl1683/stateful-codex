@@ -150,7 +150,7 @@ impl ContextMapStore {
         &self,
         project_id: &str,
         id: &ContextMapEntryId,
-        expected_fingerprint: &SourceFingerprint,
+        expected_route: &crate::EvidenceRoute,
     ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
         let mut transaction = self.pool.begin().await?;
         let hit = load_hit(&mut transaction, project_id, id).await?;
@@ -158,10 +158,13 @@ impl ContextMapStore {
             transaction.commit().await?;
             return Ok(None);
         };
-        if &hit.entry.value.source_fingerprint != expected_fingerprint {
-            return Err(ContextMapStoreError::SourceNotCurrent(
-                ContextMapFreshness::Stale,
-            ));
+        let stored_route = crate::EvidenceRoute::from_hit(&hit)
+            .map_err(|_| ContextMapStoreError::CorruptEntry(id.to_string()))?;
+        if stored_route != *expected_route {
+            return Err(ContextMapStoreError::RouteChanged);
+        }
+        if hit.freshness != ContextMapFreshness::Current {
+            return Err(ContextMapStoreError::RouteChanged);
         }
         if hit.source.region_anchor.is_some() {
             let current: i64 = sqlx::query_scalar(
@@ -181,9 +184,7 @@ impl ContextMapStore {
             .fetch_one(&mut *transaction)
             .await?;
             if current != 1 {
-                return Err(ContextMapStoreError::SourceNotCurrent(
-                    ContextMapFreshness::Stale,
-                ));
+                return Err(ContextMapStoreError::RouteChanged);
             }
         }
         transaction.commit().await?;
@@ -685,6 +686,8 @@ pub enum ContextMapStoreError {
     NodeNotFound(String),
     #[error("context-map source is not current: {0:?}")]
     SourceNotCurrent(ContextMapFreshness),
+    #[error("context-map evidence route changed; query the context map again")]
+    RouteChanged,
     #[error("context-map entry not found: {0}")]
     EntryNotFound(String),
     #[error("context-map entry ID was already used for different content: {0}")]

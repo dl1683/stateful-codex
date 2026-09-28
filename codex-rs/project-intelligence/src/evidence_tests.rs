@@ -5,12 +5,17 @@ use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
+use zip::CompressionMethod;
+use zip::DateTime;
+use zip::ZipArchive;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use super::*;
 use crate::ContextMapStore;
+use crate::HierarchyRegionSourceUpdate;
 use crate::HierarchyStore;
+use crate::NodeLifecycle;
 use crate::ProjectIndexFileRequest;
 use crate::ProjectIndexReport;
 use crate::ProjectIndexRequest;
@@ -20,8 +25,12 @@ use crate::RegionAnchor;
 fn generated_docx(body: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0)
+        .last_modified_time(DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0).expect("date"));
     writer
-        .start_file("word/document.xml", SimpleFileOptions::default())
+        .start_file("word/document.xml", options)
         .expect("document part should start");
     writer
         .write_all(
@@ -69,6 +78,60 @@ async fn indexed_docx() -> (TempDir, TempDir, ContextMapStore, ContextMapHit) {
         .into_iter()
         .find(|hit| hit.source.region_anchor.is_some())
         .expect("DOCX region");
+    (home, root, context_map, hit)
+}
+
+fn utf8_valid_docx() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0)
+        .last_modified_time(DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0).expect("date"));
+    writer
+        .start_file("word/document.xml", options)
+        .expect("document part should start");
+    writer.finish().expect("package should finish");
+    let central = bytes
+        .windows(4)
+        .position(|signature| signature == b"PK\x01\x02")
+        .expect("central directory");
+    bytes[central + 38..central + 42].fill(0);
+    assert!(
+        std::str::from_utf8(&bytes).is_ok(),
+        "UTF-8 error: {:?}",
+        std::str::from_utf8(&bytes).expect_err("fixture should be UTF-8")
+    );
+    bytes
+}
+
+async fn indexed_utf8_docx() -> (TempDir, TempDir, ContextMapStore, ContextMapHit) {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    std::fs::write(root.path().join("fixture.docx"), utf8_valid_docx())
+        .expect("write UTF-8-valid DOCX fixture");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    ProjectIndexer::new(
+        HierarchyStore::open(&sqlite).await.expect("hierarchy"),
+        context_map.clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    })
+    .await
+    .expect("index UTF-8-valid DOCX project");
+    let hit = context_map
+        .file_hits_for_path(
+            "project-1",
+            &ProjectRelativePath::parse("fixture.docx").expect("relative path"),
+        )
+        .await
+        .expect("file hit")
+        .into_iter()
+        .next()
+        .expect("UTF-8-valid DOCX file");
     (home, root, context_map, hit)
 }
 
@@ -329,6 +392,58 @@ async fn reads_exact_docx_region_with_provenance_and_budget_truncation() {
 }
 
 #[tokio::test]
+async fn office_file_routes_are_rejected_before_raw_utf8_reads() {
+    let (_home, root, context_map, hit) = indexed_utf8_docx().await;
+    let bytes = std::fs::read(root.path().join("fixture.docx")).expect("read DOCX fixture");
+    assert!(std::str::from_utf8(&bytes).is_ok());
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("stored ZIP fixture");
+    assert_eq!(
+        archive.by_index(0).expect("document part").compression(),
+        CompressionMethod::Stored
+    );
+    let file_hit = context_map
+        .file_hits_for_path(
+            "project-1",
+            &ProjectRelativePath::parse("fixture.docx").expect("relative path"),
+        )
+        .await
+        .expect("file hit")
+        .into_iter()
+        .next()
+        .expect("DOCX file hit");
+    let reader = EvidenceReader::new(context_map);
+    let source_error = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path: ProjectRelativePath::parse("fixture.docx").expect("relative path"),
+                line_range: None,
+            },
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect_err("relativePath DOCX reads must be rejected");
+    assert!(matches!(source_error, EvidenceReadError::OfficeSourceRoute));
+
+    let route = EvidenceRoute::from_hit(&file_hit).expect("file route");
+    assert_eq!(route.region_anchor, None);
+    let route_error = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect_err("file-node DOCX routes must be rejected");
+    assert!(matches!(route_error, EvidenceReadError::OfficeSourceRoute));
+
+    assert_eq!(hit.source.region_anchor, None);
+}
+
+#[tokio::test]
 async fn docx_region_source_mutation_is_source_changed() {
     let (_home, root, context_map, hit) = indexed_docx().await;
     let route = EvidenceRoute::from_hit(&hit).expect("DOCX route");
@@ -351,10 +466,36 @@ async fn docx_region_source_mutation_is_source_changed() {
 
 #[tokio::test]
 async fn unknown_docx_anchor_fails_closed() {
-    let (_home, root, context_map, hit) = indexed_docx().await;
-    let mut route = EvidenceRoute::from_hit(&hit).expect("DOCX route");
-    route.region_anchor =
-        Some(RegionAnchor::new("docx-paragraph", "body/p[999]").expect("valid unknown anchor"));
+    let (home, root, context_map, hit) = indexed_docx().await;
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let region = hierarchy
+        .get_node("project-1", &hit.entry.value.node_id)
+        .await
+        .expect("load region")
+        .expect("region");
+    hierarchy
+        .update_region_source(
+            "project-1",
+            &region.id,
+            HierarchyRegionSourceUpdate {
+                expected_revision: region.revision,
+                lifecycle: NodeLifecycle::Active,
+                region_anchor: RegionAnchor::new("docx-paragraph", "body/p[999]")
+                    .expect("valid unknown anchor"),
+                source_fingerprint: hit.entry.value.source_fingerprint.clone(),
+            },
+        )
+        .await
+        .expect("store unknown anchor");
+    let route = EvidenceRoute::from_hit(
+        &context_map
+            .get_hit("project-1", &hit.entry.id)
+            .await
+            .expect("load changed route")
+            .expect("changed route"),
+    )
+    .expect("DOCX route");
     let error = EvidenceReader::new(context_map)
         .read(EvidenceReadRequest {
             project_id: "project-1".to_string(),
@@ -364,7 +505,10 @@ async fn unknown_docx_anchor_fails_closed() {
         })
         .await
         .expect_err("unknown route must fail closed");
-    assert!(matches!(error, EvidenceReadError::RouteChanged));
+    assert!(
+        matches!(error, EvidenceReadError::RegionAnchorNotFound),
+        "unexpected error: {error:?}"
+    );
 }
 
 #[tokio::test]

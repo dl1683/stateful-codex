@@ -36,8 +36,10 @@ use super::parse_arguments;
 
 const TOOL_NAME: &str = "evidence_read";
 const EVIDENCE_RESPONSE_BYTES: usize = 8 * 1024;
-const DEFAULT_BYTES: u32 = 6 * 1024;
-const MAX_BYTES: u32 = 6 * 1024;
+const DEFAULT_TEXT_BYTES: u32 = 8 * 1024;
+const MAX_TEXT_BYTES: u32 = 12 * 1024;
+const DEFAULT_REGION_BYTES: u32 = 6 * 1024;
+const MAX_REGION_BYTES: u32 = 6 * 1024;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -93,13 +95,6 @@ impl EvidenceReadTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: EvidenceArguments = parse_arguments(&call)?;
-        let requested_max_bytes = arguments.max_bytes.unwrap_or(DEFAULT_BYTES);
-        if requested_max_bytes == 0 {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "maxBytes must be between 1 and {MAX_BYTES}"
-            )));
-        }
-        let max_bytes = requested_max_bytes.min(MAX_BYTES);
         let project = self
             .projects
             .read_project(self.project_id.clone())
@@ -145,6 +140,27 @@ impl EvidenceReadTool {
                 ));
             }
         };
+        let region_read = matches!(
+            &locator,
+            EvidenceReadLocator::ContextMapRoute(route) if route.region_anchor.is_some()
+        );
+        let default_bytes = if region_read {
+            DEFAULT_REGION_BYTES
+        } else {
+            DEFAULT_TEXT_BYTES
+        };
+        let max_allowed_bytes = if region_read {
+            MAX_REGION_BYTES
+        } else {
+            MAX_TEXT_BYTES
+        };
+        let requested_max_bytes = arguments.max_bytes.unwrap_or(default_bytes);
+        if requested_max_bytes == 0 {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "maxBytes must be between 1 and {MAX_TEXT_BYTES}"
+            )));
+        }
+        let max_bytes = requested_max_bytes.min(max_allowed_bytes);
         let (result, source_refreshed) = self
             .read_with_refresh(project_roots, locator, max_bytes)
             .await?;
@@ -181,9 +197,7 @@ impl EvidenceReadTool {
             "source": {
                 "projectRoot": result.hit.source.project_root,
                 "relativePath": result.hit.source.relative_path.to_string(),
-                "regionAnchor": result.hit.source.region_anchor,
             },
-            "extraction": result.extraction,
             "content": content,
             "bytesReturned": result.bytes_returned,
             "totalBytes": result.total_bytes,
@@ -197,6 +211,10 @@ impl EvidenceReadTool {
             "blackboardEvidence": blackboard_evidence,
             "revision": result.hit.entry.revision,
         });
+        if let Some(extraction) = result.extraction {
+            output["source"]["regionAnchor"] = json!(result.hit.source.region_anchor);
+            output["extraction"] = json!(extraction);
+        }
         if !fits_response(&output, byte_budget) {
             output["content"] = json!("");
             output["bytesReturned"] = json!(0);
@@ -385,7 +403,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
                         "required": ["start", "end"],
                         "additionalProperties": false
                     },
-                    "maxBytes": {"type": "integer", "minimum": 1, "maximum": MAX_BYTES}
+                    "maxBytes": {"type": "integer", "minimum": 1, "maximum": MAX_TEXT_BYTES}
                 },
                 "additionalProperties": false
             }))

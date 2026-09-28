@@ -877,9 +877,10 @@ async fn model_reads_current_and_legacy_text_and_docx_routes_with_provenance() -
     )?;
     std::fs::write(
         project_root.path().join("fixture.docx"),
-        generated_docx(
-            r#"<w:p><w:r><w:t>shared_boundary_term and docx evidence content</w:t></w:r></w:p>"#,
-        ),
+        generated_docx(&format!(
+            r#"<w:p><w:r><w:t>shared_boundary_term and escaped_json "quotes" \slashes content {}</w:t></w:r></w:p><w:p><w:r><w:t>second_block_archive_marker</w:t></w:r></w:p>"#,
+            "x".repeat(7_000)
+        )),
     )?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
@@ -912,7 +913,7 @@ async fn model_reads_current_and_legacy_text_and_docx_routes_with_provenance() -
         })
         .await?;
     assert_eq!(refreshed.files_indexed, 2);
-    assert_eq!(refreshed.regions_indexed, 2);
+    assert_eq!(refreshed.regions_indexed, 4);
     let started = server
         .start_thread(ThreadStartParams {
             project_id: Some(project_id),
@@ -1042,7 +1043,7 @@ async fn model_reads_current_and_legacy_text_and_docx_routes_with_provenance() -
                 responses::ev_function_call(
                     "docx-read",
                     "evidence_read",
-                    &json!({"evidenceRoute": docx_route}).to_string(),
+                    &json!({"evidenceRoute": docx_route, "maxBytes": 6_143}).to_string(),
                 ),
                 responses::ev_completed("docx-read-response"),
             ]),
@@ -1059,16 +1060,26 @@ async fn model_reads_current_and_legacy_text_and_docx_routes_with_provenance() -
             .function_call_output_text("docx-read")
             .expect("DOCX read output should be text"),
     )?;
-    assert_eq!(
-        docx_output["content"],
-        "shared_boundary_term and docx evidence content"
+    let docx_content = docx_output["content"]
+        .as_str()
+        .expect("DOCX content should be a string");
+    assert!(docx_content.starts_with("shared_boundary_term"));
+    assert!(docx_content.contains(r#"escaped_json "quotes" \slashes"#));
+    assert!(docx_content.len() <= 6_144);
+    assert!(
+        docx_output["totalBytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes >= 6_144)
     );
+    assert_eq!(docx_output["truncated"], true);
+    assert!(!docx_content.contains("second_block_archive_marker"));
+    assert!(!docx_output.to_string().contains("word/document.xml"));
+    assert!(docx_output.to_string().len() <= 8_192);
     assert_eq!(
         docx_output["source"]["regionAnchor"],
         docx_route["regionAnchor"]
     );
     assert_eq!(docx_output["extraction"], docx_route["indexedExtraction"]);
-    assert_eq!(docx_output["truncated"], false);
     assert_eq!(docx_output["blackboardEvidence"], serde_json::Value::Null);
     assert!(!docx_output.to_string().contains("stateful-read-"));
     Ok(())

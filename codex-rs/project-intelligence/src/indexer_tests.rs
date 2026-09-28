@@ -394,12 +394,10 @@ async fn retired_docx_regions_fail_the_guarded_hit_check() {
             .get_guarded_hit(
                 "project-1",
                 &hit.entry.id,
-                &hit.entry.value.source_fingerprint
+                &crate::EvidenceRoute::from_hit(&hit).expect("guarded route")
             )
             .await,
-        Err(crate::ContextMapStoreError::SourceNotCurrent(
-            ContextMapFreshness::Stale
-        ))
+        Err(crate::ContextMapStoreError::RouteChanged)
     ));
 }
 
