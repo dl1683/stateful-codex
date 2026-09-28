@@ -62,6 +62,7 @@ use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -958,5 +959,117 @@ async fn model_cannot_persist_final_packet_as_intermediate_obligation() -> Resul
         })
         .await?;
     assert_eq!(obligations.data, Vec::new());
+    Ok(())
+}
+
+#[tokio::test]
+async fn model_reads_a_long_goal_exactly_and_rejects_a_foreign_cursor() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Long goal".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "long-goal-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let goal = format!(
+        "{} Binding constraint: never cite the \"draft\" schedule.",
+        "Review every clause of the purchase agreement. ".repeat(300)
+    );
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: goal.clone(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "long-goal-run".to_string(),
+            },
+        })
+        .await?;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "read-goal",
+                    "stateful_run_read",
+                    &json!({"section": "goal"}).to_string(),
+                ),
+                responses::ev_completed("read-goal-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "foreign-cursor",
+                    "stateful_run_read",
+                    &json!({"section": "goal", "cursor": "goal.run-elsewhere.00ff.10"}).to_string(),
+                ),
+                responses::ev_completed("foreign-cursor-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done", "Read the goal."),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id,
+            input: vec![UserInput::Text {
+                text: "Start the review.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 3);
+    let first_page: Value = serde_json::from_str(
+        requests[1].function_call_output("read-goal")["output"]
+            .as_str()
+            .expect("tool output text"),
+    )?;
+    let content = first_page["content"].as_str().expect("page content");
+    assert!(first_page.to_string().len() <= 9_000);
+    assert!(goal.starts_with(content) && content.len() < goal.len());
+    assert_eq!(first_page["totalBytes"], json!(goal.len()));
+    assert_eq!(first_page["runId"], json!(started.run.id));
+    assert!(
+        first_page["nextCursor"]
+            .as_str()
+            .is_some_and(|cursor| cursor.ends_with(&format!(".{}", content.len())))
+    );
+    assert!(
+        requests[2]
+            .function_call_output("foreign-cursor")
+            .to_string()
+            .contains("cursor does not belong to a run of the selected thread")
+    );
     Ok(())
 }

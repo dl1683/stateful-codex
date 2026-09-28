@@ -7,6 +7,7 @@ mod context_map;
 mod evidence;
 mod obligation;
 mod run;
+mod run_read;
 mod steering;
 
 use std::sync::Arc;
@@ -98,6 +99,11 @@ pub(super) fn project_intelligence_tools(
             projects,
             event_sink.clone(),
             visible_root,
+        )),
+        Arc::new(run_read::StatefulRunReadTool::new(
+            project_id.clone(),
+            thread_id.clone(),
+            services.clone(),
         )),
         Arc::new(steering::SteeringQueryTool::new(
             project_id.clone(),

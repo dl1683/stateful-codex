@@ -31,6 +31,7 @@ const BLACKBOARD_RELATE: &str = "blackboard_relate";
 const CONTEXT_MAP_REFRESH: &str = "context_map_refresh";
 const OBLIGATION_UPDATE: &str = "obligation_update";
 const STATEFUL_RUN_UPDATE: &str = "stateful_run_update";
+const STATEFUL_RUN_READ: &str = "stateful_run_read";
 const STEERING_RECONCILE: &str = "steering_reconcile";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -262,6 +263,7 @@ fn stateful_tool_name(name: &codex_extension_api::ToolName) -> Option<&str> {
                     | CONTEXT_MAP_REFRESH
                     | OBLIGATION_UPDATE
                     | STATEFUL_RUN_UPDATE
+                    | STATEFUL_RUN_READ
                     | STEERING_RECONCILE
             )
         })

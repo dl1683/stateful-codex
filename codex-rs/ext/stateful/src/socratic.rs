@@ -61,6 +61,7 @@ fn allowed_while_pending(tool_name: &codex_extension_api::ToolName) -> bool {
                 | "blackboard_query"
                 | "context_map_query"
                 | "obligation_update"
+                | "stateful_run_read"
                 | "steering_query"
                 | "steering_reconcile"
         )

@@ -117,6 +117,7 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
     for direct in [
         "obligation_update",
         "stateful_run_update",
+        "stateful_run_read",
         "blackboard_record",
         "blackboard_record_batch",
         "blackboard_relate",

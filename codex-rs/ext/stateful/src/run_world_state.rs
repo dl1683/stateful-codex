@@ -186,7 +186,7 @@ impl RunWorldStateStatus {
                     "Goal",
                     &if goal_shortened {
                         format!(
-                            "{goal} [goal shortened here; the full text is the user's original request in this thread]"
+                            "{goal} [goal shortened; this is the stored run goal and may not remain in retained thread history. Call stateful_run_read with section=\"goal\" and follow nextCursor before relying on omitted constraints.]"
                         )
                     } else {
                         goal.to_string()

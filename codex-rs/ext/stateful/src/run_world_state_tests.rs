@@ -136,9 +136,11 @@ fn run_world_state_discloses_omitted_detail() {
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
         .expect("first contribution renders");
-    assert!(rendered.body().contains(
-        "[goal shortened here; the full text is the user's original request in this thread]"
-    ));
+    assert!(
+        rendered
+            .body()
+            .contains("Call stateful_run_read with section=\"goal\" and follow nextCursor")
+    );
     assert!(rendered.body().contains("Semantic checkpoint: current."));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
 }
