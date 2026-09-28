@@ -166,9 +166,12 @@ impl DocumentExtractor {
         }
 
         let mut document = match format {
-            DocumentFormat::Docx => {
-                docx::extract(original_bytes, &self.limits, original_fingerprint.clone())?
-            }
+            DocumentFormat::Docx => docx::extract(
+                original_bytes,
+                &self.limits,
+                original_fingerprint,
+                original_bytes.len() as u64,
+            )?,
             DocumentFormat::Xlsx => return Err(ExtractionError::UnsupportedFormat),
         };
         document.canonical_representation_digest = canonical::representation_digest(&document);
@@ -184,3 +187,7 @@ impl DocumentExtractor {
 #[cfg(test)]
 #[path = "archive_tests.rs"]
 mod archive_tests;
+
+#[cfg(test)]
+#[path = "docx_tests.rs"]
+mod docx_tests;
