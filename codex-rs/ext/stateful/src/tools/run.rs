@@ -30,12 +30,13 @@ use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
 use super::parse_arguments;
 use super::respond;
+use super::run_read::obligation_cursor;
 use super::run_read::submitted_result_cursor;
 use super::stable_id;
 use super::thread_run;
 
 const COMPLETION_FENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const PAGED_RESULT_INSTRUCTION: &str = "The completed result is too large to return here. Read it exactly with stateful_run_read using section \"submittedResult\" and cursor submittedResultCursor, following nextCursor until it is null, then return it as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. Copy opaque evidence identifiers only from finalAnswerChecklist; if omittedChecklistItems is nonzero, also use finalObligation from this call.";
+const PAGED_RESULT_INSTRUCTION: &str = "The completed result is too large to return here. Read it exactly with stateful_run_read using section \"submittedResult\" and cursor submittedResultCursor, following nextCursor until it is null, then return it as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. Copy opaque evidence identifiers only from finalAnswerChecklist; if omittedChecklistItems is nonzero, read the complete final obligation with stateful_run_read using section \"obligation\" and cursor finalObligationCursor, following nextCursor until it is null.";
 const TOOL_NAME: &str = "stateful_run_update";
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -353,23 +354,38 @@ impl StatefulRunUpdateTool {
             "omittedChecklistItems": omitted_checklist_items,
             "submittedResult": submitted_result,
             "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
-                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. For a Windows drive path, use the exact C:/... Markdown target form and never rewrite it as /C:/.... Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, also use finalObligation from this call."
+                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. For a Windows drive path, use the exact C:/... Markdown target form and never rewrite it as /C:/.... Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, read the complete final obligation with stateful_run_read using section \"obligation\" and cursor finalObligationCursor, following nextCursor until it is null."
             ),
         });
         // The run is already durable here, so the response is packed to fit rather than
         // refused: an oversized result moves behind an exact paged read, then checklist
         // items drop from the end with an honest omitted count.
+        // Pack to a fixed point: whenever checklist items are omitted (by completion or
+        // by this loop), the final obligation must stay readable through its cursor, and
+        // adding that cursor may itself force another item out.
         let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
-        if output.to_string().len() > budget
-            && let Some(cursor) = submitted_result
-                .as_deref()
-                .and_then(|submitted| submitted_result_cursor(&run, submitted))
-        {
-            output["submittedResult"] = Value::Null;
-            output["submittedResultCursor"] = json!(cursor);
-            output["finalAnswerInstruction"] = json!(PAGED_RESULT_INSTRUCTION);
-        }
-        while output.to_string().len() > budget {
+        let mut result_paged = false;
+        loop {
+            if output["omittedChecklistItems"].as_u64().unwrap_or_default() > 0
+                && output["finalObligationCursor"].is_null()
+                && let Some(obligation) = &final_obligation
+            {
+                output["finalObligationCursor"] = json!(obligation_cursor(&run, obligation)?);
+            }
+            if output.to_string().len() <= budget {
+                break;
+            }
+            if !result_paged
+                && let Some(cursor) = submitted_result
+                    .as_deref()
+                    .and_then(|submitted| submitted_result_cursor(&run, submitted))
+            {
+                result_paged = true;
+                output["submittedResult"] = Value::Null;
+                output["submittedResultCursor"] = json!(cursor);
+                output["finalAnswerInstruction"] = json!(PAGED_RESULT_INSTRUCTION);
+                continue;
+            }
             if output["finalAnswerChecklist"]
                 .as_array_mut()
                 .and_then(Vec::pop)

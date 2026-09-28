@@ -180,6 +180,14 @@ fn submitted_result_text(run: &StatefulRun, length: usize) -> Option<SectionText
     })
 }
 
+/// First-page cursor for a run's final obligation, readable after the run is terminal.
+pub(super) fn obligation_cursor(
+    run: &StatefulRun,
+    obligation: &StatefulObligation,
+) -> Result<String, FunctionCallError> {
+    Ok(obligation_text(obligation)?.cursor(Section::Obligation, run, 0))
+}
+
 /// First-page cursor for the submitted result of a just-completed run, for a completion
 /// response too large to carry the result itself.
 pub(super) fn submitted_result_cursor(run: &StatefulRun, submitted: &str) -> Option<String> {

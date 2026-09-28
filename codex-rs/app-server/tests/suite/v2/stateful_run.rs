@@ -1223,3 +1223,258 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
     assert!(page["nextCursor"].is_string());
     Ok(())
 }
+
+#[tokio::test]
+async fn oversized_durable_completion_pages_result_and_final_obligation_exactly() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Oversized durable completion".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "oversized-durable-project".to_string(),
+            },
+        })
+        .await?;
+    let sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    let project_node_id = HierarchyNodeId::parse(format!("project-node-{}", project.project.id))?;
+    HierarchyStore::open(&sqlite)
+        .await?
+        .create_node(
+            project_node_id.clone(),
+            NewHierarchyNode {
+                project_id: project.project.id.clone(),
+                parent_id: None,
+                kind: NodeKind::Project,
+                project_root: None,
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
+    let blackboard = BlackboardStore::open(&sqlite).await?;
+    blackboard
+        .create_entry(
+            BlackboardEntryId::parse(format!("material-finding-{}", project.project.id))?,
+            NewBlackboardEntry {
+                project_id: project.project.id.clone(),
+                node_id: project_node_id,
+                kind: BlackboardKind::Fact,
+                content: "The indemnity cap is 15% of the purchase price.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(10_000)?,
+                verification: BlackboardVerification::UserConfirmed,
+                importance: BlackboardImportance::Critical,
+                root_promotion: RootPromotion::Promoted,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "oversized-durable-fixture".to_string(),
+                },
+            },
+        )
+        .await?;
+    let root_revision = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: project.project.id.clone(),
+            max_entries: 256,
+        })
+        .await?
+        .revision;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: "Write the red-flag memo.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "oversized-durable-run".to_string(),
+            },
+        })
+        .await?;
+    let result =
+        "The \"indemnity\" cap is 15%; the DOE renewal remains unresolved. “Priority 1.”\n"
+            .repeat(150)
+            .trim_end()
+            .to_string();
+    let learning = (0..16)
+        .map(|index| {
+            format!(
+                "Learning {index}: {}",
+                "The cap binds every seller claim. ".repeat(22).trim_end()
+            )
+        })
+        .collect::<Vec<_>>();
+    let complete_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "complete",
+                    "stateful_run_update",
+                    &json!({
+                        "expectedRevision": started.run.revision,
+                        "status": "completed",
+                        "result": result,
+                        "rootRevision": root_revision,
+                        "materialRootFindings": ["E1"],
+                        "completionIdempotencyKey": "oversized-durable-completion",
+                        "finalObligation": {"learning": learning}
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("complete-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("completed", "Completed."),
+                responses::ev_completed("completed-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_simple_turn(&mut server, &thread.thread.id).await?;
+    let completion_text = complete_log
+        .function_call_output_text("complete")
+        .expect("completion output should be text");
+    let completion: Value = serde_json::from_str(&completion_text)?;
+    assert!(completion_text.len() <= 9_000, "{}", completion_text.len());
+    assert_eq!(
+        (
+            &completion["status"],
+            &completion["submittedResult"],
+            completion["omittedChecklistItems"]
+                .as_u64()
+                .is_some_and(|omitted| omitted > 0),
+        ),
+        (&json!("completed"), &Value::Null, true)
+    );
+
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(started.run.id),
+                thread_id: None,
+            },
+        })
+        .await?;
+    let stored = read
+        .run
+        .expect("run remains readable")
+        .result
+        .expect("stored result");
+    assert!(stored.starts_with(&result) && stored.len() > result.len());
+
+    let paged_result = read_every_page(
+        &responses_server,
+        &mut server,
+        &thread.thread.id,
+        "submittedResult",
+        completion["submittedResultCursor"]
+            .as_str()
+            .expect("result cursor"),
+    )
+    .await?;
+    assert_eq!(paged_result, result);
+    let paged_obligation = read_every_page(
+        &responses_server,
+        &mut server,
+        &thread.thread.id,
+        "obligation",
+        completion["finalObligationCursor"]
+            .as_str()
+            .expect("obligation cursor"),
+    )
+    .await?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&paged_obligation)?["learning"],
+        json!(learning)
+    );
+    Ok(())
+}
+
+async fn run_simple_turn(server: &mut TestAppServer, thread_id: &str) -> Result<()> {
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread_id.to_string(),
+            input: vec![UserInput::Text {
+                text: "Continue.".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    Ok(())
+}
+
+/// Follows a `stateful_run_read` cursor through every page, one model turn per page,
+/// asserting each page fits the model item bound, and returns the concatenated content.
+async fn read_every_page(
+    responses_server: &wiremock::MockServer,
+    server: &mut TestAppServer,
+    thread_id: &str,
+    section: &str,
+    first_cursor: &str,
+) -> Result<String> {
+    let mut content = String::new();
+    let mut cursor = Some(first_cursor.to_string());
+    let mut page_index = 0;
+    while let Some(current) = cursor {
+        let call_id = format!("read-{section}-{page_index}");
+        let log = responses::mount_sse_sequence(
+            responses_server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call(
+                        &call_id,
+                        "stateful_run_read",
+                        &json!({"section": section, "cursor": current}).to_string(),
+                    ),
+                    responses::ev_completed(&format!("{call_id}-response")),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message(&format!("{call_id}-done"), "Read."),
+                    responses::ev_completed(&format!("{call_id}-done-response")),
+                ]),
+            ],
+        )
+        .await;
+        run_simple_turn(server, thread_id).await?;
+        let text = log
+            .function_call_output_text(&call_id)
+            .expect("read output should be text");
+        assert!(
+            text.len() <= 9_000,
+            "page {page_index} is {} bytes",
+            text.len()
+        );
+        let page: Value = serde_json::from_str(&text)?;
+        content.push_str(page["content"].as_str().expect("page content"));
+        cursor = page["nextCursor"].as_str().map(str::to_string);
+        page_index += 1;
+    }
+    Ok(content)
+}
