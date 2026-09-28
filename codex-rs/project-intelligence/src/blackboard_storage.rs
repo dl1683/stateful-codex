@@ -3,6 +3,7 @@ use sqlx::FromRow;
 use sqlx::SqliteConnection;
 use sqlx::SqlitePool;
 use sqlx::migrate::MigrateError;
+use std::time::Duration;
 use thiserror::Error;
 
 use crate::BlackboardEntry;
@@ -27,9 +28,13 @@ use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
+mod fence;
 mod query;
 mod relation;
 mod update;
+
+pub use fence::CompletionFence;
+pub use query::AgentKnowledgeChange;
 
 const INITIAL_REVISION: i64 = 1;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -54,6 +59,24 @@ impl BlackboardStore {
 
     pub async fn create_entry(
         &self,
+        id: BlackboardEntryId,
+        value: NewBlackboardEntry,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.record_entry(None, id, value).await
+    }
+
+    pub async fn record_for_agent_run(
+        &self,
+        agent_run_id: &str,
+        id: BlackboardEntryId,
+        value: NewBlackboardEntry,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.record_entry(Some(agent_run_id), id, value).await
+    }
+
+    async fn record_entry(
+        &self,
+        agent_run_id: Option<&str>,
         id: BlackboardEntryId,
         value: NewBlackboardEntry,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
@@ -94,8 +117,11 @@ impl BlackboardStore {
             INITIAL_REVISION,
             &value,
             BlackboardEntryState::Active,
-            None,
-            now,
+            RevisionMetadata {
+                superseded_by: None,
+                recorded_at_ms: now,
+                agent_run_id,
+            },
         )
         .await?;
         let entry = load_entry(&mut transaction, &value.project_id, &id)
@@ -103,6 +129,13 @@ impl BlackboardStore {
             .ok_or_else(|| BlackboardStoreError::EntryNotFound(id.to_string()))?;
         transaction.commit().await?;
         Ok(entry)
+    }
+
+    pub async fn acquire_completion_fence(
+        &self,
+        timeout: Duration,
+    ) -> Result<CompletionFence, BlackboardStoreError> {
+        CompletionFence::acquire(&self.pool, timeout).await
     }
 
     pub async fn get_entry(
@@ -373,21 +406,27 @@ async fn validate_premises(
     Ok(())
 }
 
+struct RevisionMetadata<'a> {
+    superseded_by: Option<&'a BlackboardEntryId>,
+    recorded_at_ms: i64,
+    agent_run_id: Option<&'a str>,
+}
+
 async fn write_revision(
     connection: &mut SqliteConnection,
     id: &BlackboardEntryId,
     revision: i64,
     value: &NewBlackboardEntry,
     state: BlackboardEntryState,
-    superseded_by: Option<&BlackboardEntryId>,
-    now: i64,
+    metadata: RevisionMetadata<'_>,
 ) -> Result<(), BlackboardStoreError> {
     sqlx::query(
         "INSERT INTO blackboard_entry_revisions (
             entry_id, revision, kind, content, structured_value, structured_unit,
             confidence_basis_points, verification, importance, root_promotion,
-            state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms,
+            agent_run_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id.as_str())
     .bind(revision)
@@ -405,10 +444,11 @@ async fn write_revision(
     .bind(importance_name(value.importance))
     .bind(promotion_name(value.root_promotion))
     .bind(state_name(state))
-    .bind(superseded_by.map(BlackboardEntryId::as_str))
+    .bind(metadata.superseded_by.map(BlackboardEntryId::as_str))
     .bind(provenance_name(value.provenance.kind))
     .bind(&value.provenance.source_id)
-    .bind(now)
+    .bind(metadata.recorded_at_ms)
+    .bind(metadata.agent_run_id)
     .execute(&mut *connection)
     .await?;
     for (position, link) in value.evidence.iter().enumerate() {
@@ -574,6 +614,8 @@ pub enum BlackboardStoreError {
     RelationEndpointNotFound(String),
     #[error("blackboard relation ID was already used for different content: {0}")]
     RelationIdentityConflict(String),
+    #[error("timed out acquiring the project intelligence completion fence")]
+    CompletionFenceTimeout,
     #[error("stored blackboard entry is corrupt: {0}")]
     CorruptEntry(String),
     #[error("stored blackboard enum value is unknown: {0}")]
