@@ -16,7 +16,7 @@ pub(crate) struct CheckpointCounter {
 
 impl CheckpointCounter {
     /// Records one finished tool call; a successful obligation or run update resets.
-    pub(crate) fn record(&self, stateful_tool: Option<&str>, outcome: &ToolCallOutcome) {
+    pub(crate) fn record(&self, stateful_tool: Option<&str>, outcome: ToolCallOutcome) {
         let wrote_obligation = matches!(
             stateful_tool,
             Some("obligation_update" | "stateful_run_update")

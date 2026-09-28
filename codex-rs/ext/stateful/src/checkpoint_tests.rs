@@ -11,7 +11,7 @@ fn checkpoint_epochs_advance_only_at_thresholds_and_reset_on_obligation() {
     let counter = CheckpointCounter::default();
     let mut epochs = Vec::new();
     for _ in 0..(CHECKPOINT_TOOL_CALLS * 2) {
-        counter.record(/*stateful_tool*/ None, &DONE);
+        counter.record(/*stateful_tool*/ None, DONE);
         epochs.push(counter.due_epoch());
     }
     assert_eq!(epochs[6], None);
@@ -21,9 +21,9 @@ fn checkpoint_epochs_advance_only_at_thresholds_and_reset_on_obligation() {
 
     counter.record(
         Some("obligation_update"),
-        &ToolCallOutcome::Completed { success: false },
+        ToolCallOutcome::Completed { success: false },
     );
     assert_eq!(counter.due_epoch(), Some(2));
-    counter.record(Some("obligation_update"), &DONE);
+    counter.record(Some("obligation_update"), DONE);
     assert_eq!(counter.due_epoch(), None);
 }

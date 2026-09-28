@@ -285,7 +285,7 @@ impl ToolLifecycleContributor for StatefulExtension {
             input
                 .thread_store
                 .get_or_init(CheckpointCounter::default)
-                .record(stateful_tool_name(input.tool_name), &input.outcome);
+                .record(stateful_tool_name(input.tool_name), input.outcome);
             if let Some(tool_name) = stateful_tool_name(input.tool_name) {
                 self.attribution.record_tool_outcome(
                     input.turn_id,
