@@ -11,6 +11,7 @@ use sqlx::pool::PoolConnection;
 #[must_use]
 pub struct CompletionFence {
     connection: PoolConnection<Sqlite>,
+    released: bool,
 }
 
 impl CompletionFence {
@@ -37,7 +38,10 @@ impl CompletionFence {
                 return Err(BlackboardStoreError::CompletionFenceTimeout);
             }
         }
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            released: false,
+        })
     }
 
     pub async fn agent_knowledge_for_run(
@@ -57,6 +61,18 @@ impl CompletionFence {
 
     pub async fn release(mut self) -> Result<(), BlackboardStoreError> {
         sqlx::query("COMMIT").execute(&mut *self.connection).await?;
+        self.released = true;
         Ok(())
+    }
+}
+
+impl Drop for CompletionFence {
+    /// A fence dropped without `release` (an early return or a failed commit) must not
+    /// return its connection to the pool with the writer lock still held; closing the
+    /// connection rolls the open transaction back and frees the lock.
+    fn drop(&mut self) {
+        if !self.released {
+            self.connection.close_on_drop();
+        }
     }
 }

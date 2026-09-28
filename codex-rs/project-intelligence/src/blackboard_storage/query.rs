@@ -437,8 +437,32 @@ pub(super) async fn agent_knowledge_for_run_on_connection(
     )
     .fetch_one(&mut *connection)
     .await?;
+    // A run that started before attribution existed is unknowable only if some
+    // unattributed agent write landed after it started; with none, it wrote nothing
+    // unattributed. (A database first opened after the run started has no such writes.)
     if run_created_at_ms < enabled_at_ms {
-        return Ok(AgentKnowledgeChange::AttributionUnknownLegacy);
+        let unattributed = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM blackboard_entry_revisions AS revision
+                 JOIN blackboard_entries AS entry ON entry.id = revision.entry_id
+                 WHERE entry.project_id = ? AND revision.provenance_kind = 'agent'
+                   AND revision.agent_run_id IS NULL AND revision.recorded_at_ms >= ?
+             ) OR EXISTS(
+                 SELECT 1 FROM blackboard_relations
+                 WHERE project_id = ? AND provenance_kind = 'agent'
+                   AND agent_run_id IS NULL AND created_at_ms >= ?
+             )",
+        )
+        .bind(project_id)
+        .bind(run_created_at_ms)
+        .bind(project_id)
+        .bind(run_created_at_ms)
+        .fetch_one(&mut *connection)
+        .await?;
+        if unattributed != 0 {
+            return Ok(AgentKnowledgeChange::AttributionUnknownLegacy);
+        }
     }
     let changed = sqlx::query_scalar::<_, i64>(
         "SELECT EXISTS(

@@ -1178,3 +1178,43 @@ async fn completion_fence_blocks_other_store_and_times_out() {
         .expect("mutation task joins")
         .expect("mutation commits after release");
 }
+
+#[tokio::test]
+async fn completion_fence_dropped_without_release_frees_the_writer_lock() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
+    let fence = blackboard
+        .acquire_completion_fence(Duration::from_secs(1))
+        .await
+        .expect("completion fence acquires");
+    drop(fence);
+
+    let mut value = source.value;
+    value.content = "Written after an abandoned completion.".to_string();
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        blackboard.create_entry(
+            BlackboardEntryId::parse("after-dropped-fence").expect("valid entry ID"),
+            value,
+        ),
+    )
+    .await
+    .expect("write does not wait on the abandoned fence")
+    .expect("write commits");
+}
+
+#[tokio::test]
+async fn run_older_than_a_fresh_database_is_not_legacy_without_unattributed_writes() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let blackboard = BlackboardStore::open(&SqliteConfig::new_for_testing(temp_dir.path().abs()))
+        .await
+        .expect("fresh store opens");
+
+    assert_eq!(
+        blackboard
+            .agent_knowledge_for_run("project-1", "run-before-open", /*run_created_at_ms*/ 0)
+            .await
+            .expect("query succeeds"),
+        AgentKnowledgeChange::Unchanged
+    );
+}
