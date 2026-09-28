@@ -39,11 +39,11 @@ pub struct ExtractorIdentity {
 }
 
 impl ExtractorIdentity {
-    fn for_format(format: DocumentFormat) -> Self {
+    pub(crate) fn for_format(format: DocumentFormat) -> Self {
         match format {
             DocumentFormat::Docx => Self {
                 name: "codex-docx".to_owned(),
-                version: "1".to_owned(),
+                version: "2".to_owned(),
             },
             DocumentFormat::Xlsx => Self {
                 name: "codex-xlsx".to_owned(),

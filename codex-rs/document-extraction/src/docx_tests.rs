@@ -81,7 +81,7 @@ fn expected_document(
         original_bytes: original.len() as u64,
         extractor: ExtractorIdentity {
             name: "codex-docx".to_owned(),
-            version: "1".to_owned(),
+            version: "2".to_owned(),
         },
         canonical_representation_digest: String::new(),
         status,
@@ -531,15 +531,22 @@ fn transparent_wrappers_and_nested_tables_have_unique_locators() {
 #[test]
 fn accepts_alternate_word_namespace_prefixes() {
     let (_directory, extractor) = extractor();
-    let bytes = package(
+    let transitional = package(
         r#"<d:document xmlns:d="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><d:body><d:p><d:hyperlink><d:r><d:t>linked</d:t></d:r></d:hyperlink></d:p></d:body></d:document>"#,
         &[],
     );
-    let result = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+    let strict = package(
+        r#"<d:document xmlns:d="http://purl.oclc.org/ooxml/wordprocessingml/main"><d:body><d:p><d:hyperlink><d:r><d:t>linked</d:t></d:r></d:hyperlink></d:p></d:body></d:document>"#,
+        &[],
+    );
+    let transitional_result = extractor
+        .extract(DocumentFormat::Docx, &transitional)
+        .unwrap();
+    let result = extractor.extract(DocumentFormat::Docx, &strict).unwrap();
     assert_eq!(
         result,
         expected_document(
-            &bytes,
+            &strict,
             ExtractionStatus::Complete,
             Vec::new(),
             vec![ExtractedBlock {
@@ -548,6 +555,225 @@ fn accepts_alternate_word_namespace_prefixes() {
                     locator: "body/p[1]".to_owned(),
                 },
                 text: "linked".to_owned(),
+                notices: Vec::new(),
+            }],
+        )
+    );
+    assert_eq!(result.blocks, transitional_result.blocks);
+    assert_eq!(
+        result.canonical_representation_digest,
+        transitional_result.canonical_representation_digest
+    );
+    assert_ne!(result.original_fingerprint, transitional_result.original_fingerprint);
+    assert_ne!(result.original_bytes, transitional_result.original_bytes);
+}
+
+#[test]
+fn ignored_subtrees_preserve_real_structure() {
+    let (_directory, extractor) = extractor();
+    let bytes = package(
+        &document(
+            r#"<w:tbl><w:tr><w:tc><w:p><w:r><w:t>before</w:t></w:r><w:drawing><w:tbl><w:tr><w:tc><w:p><w:r><w:t>hidden</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:drawing><w:r><w:t>after</w:t></w:r></w:p><w:p><w:r><w:t>second</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>nested</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc><w:tc><w:p><w:r><w:t>next-cell</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>next-row</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>tail</w:t></w:r></w:p>"#,
+        ),
+        &[],
+    );
+
+    let result = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+
+    assert_eq!(
+        result,
+        expected_document(
+            &bytes,
+            ExtractionStatus::Partial,
+            vec![ExtractionNotice::UnsupportedPart {
+                part: "w:drawing".to_owned(),
+            }],
+            vec![
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[1]/tc[1]/p[1]".to_owned(),
+                    },
+                    text: "beforeafter".to_owned(),
+                    notices: vec![ExtractionNotice::UnsupportedPart {
+                        part: "w:drawing".to_owned(),
+                    }],
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[1]/tc[1]/p[2]".to_owned(),
+                    },
+                    text: "second".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[1]/tc[1]/tbl[1]/tr[1]/tc[1]/p[1]".to_owned(),
+                    },
+                    text: "nested".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[1]/tc[2]/p[1]".to_owned(),
+                    },
+                    text: "next-cell".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[2]/tc[1]/p[1]".to_owned(),
+                    },
+                    text: "next-row".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/p[1]".to_owned(),
+                    },
+                    text: "tail".to_owned(),
+                    notices: Vec::new(),
+                },
+            ],
+        )
+    );
+}
+
+#[test]
+fn ignored_subtrees_still_enforce_xml_limits() {
+    let deep = package(
+        &document(r#"<w:p><w:drawing><w:a><w:b><w:c><w:d/></w:c></w:b></w:a></w:drawing></w:p>"#),
+        &[],
+    );
+    let deep_directory = tempdir().unwrap();
+    let deep_extractor = DocumentExtractor::with_limits(
+        deep_directory.path().join("cache"),
+        ExtractionLimits {
+            max_xml_depth: 5,
+            ..ExtractionLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        deep_extractor.extract(DocumentFormat::Docx, &deep),
+        Err(ExtractionError::LimitExceeded(ExtractionLimit::XmlDepth))
+    ));
+
+    let attributes = package(
+        &document(r#"<w:p><w:drawing><w:fake a="1" b="2"/></w:drawing></w:p>"#),
+        &[],
+    );
+    let attribute_directory = tempdir().unwrap();
+    let attribute_extractor = DocumentExtractor::with_limits(
+        attribute_directory.path().join("cache"),
+        ExtractionLimits {
+            max_attributes_per_element: 1,
+            ..ExtractionLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        attribute_extractor.extract(DocumentFormat::Docx, &attributes),
+        Err(ExtractionError::LimitExceeded(
+            ExtractionLimit::XmlAttributes
+        ))
+    ));
+}
+
+#[test]
+fn refuses_scalars_larger_than_the_block_limit() {
+    for (limit, text) in [(1, "é"), (3, "😀"), (3, "a😀b")] {
+        let directory = tempdir().unwrap();
+        let extractor = DocumentExtractor::with_limits(
+            directory.path().join("cache"),
+            ExtractionLimits {
+                max_canonical_block_bytes: limit,
+                ..ExtractionLimits::default()
+            },
+        )
+        .unwrap();
+        let bytes = package(
+            &document(&format!(r#"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"#)),
+            &[],
+        );
+        assert!(matches!(
+            extractor.extract(DocumentFormat::Docx, &bytes),
+            Err(ExtractionError::LimitExceeded(
+                ExtractionLimit::CanonicalBlockBytes
+            ))
+        ));
+    }
+}
+
+#[test]
+fn splits_at_utf8_boundaries_without_exceeding_the_limit() {
+    let directory = tempdir().unwrap();
+    let extractor = DocumentExtractor::with_limits(
+        directory.path().join("cache"),
+        ExtractionLimits {
+            max_canonical_block_bytes: 4,
+            ..ExtractionLimits::default()
+        },
+    )
+    .unwrap();
+    let bytes = package(
+        &document(r#"<w:p><w:r><w:t>a😀b</w:t></w:r></w:p>"#),
+        &[],
+    );
+
+    assert_eq!(
+        extractor.extract(DocumentFormat::Docx, &bytes).unwrap(),
+        expected_document(
+            &bytes,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/p[1]@bytes[0:1]".to_owned(),
+                    },
+                    text: "a".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/p[1]@bytes[1:5]".to_owned(),
+                    },
+                    text: "😀".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/p[1]@bytes[5:6]".to_owned(),
+                    },
+                    text: "b".to_owned(),
+                    notices: Vec::new(),
+                },
+            ],
+        )
+    );
+
+    let emoji = package(&document(r#"<w:p><w:r><w:t>😀</w:t></w:r></w:p>"#), &[]);
+    assert_eq!(
+        extractor.extract(DocumentFormat::Docx, &emoji).unwrap(),
+        expected_document(
+            &emoji,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![ExtractedBlock {
+                anchor: ExtractionAnchor {
+                    scheme: "docx-paragraph".to_owned(),
+                    locator: "body/p[1]".to_owned(),
+                },
+                text: "😀".to_owned(),
                 notices: Vec::new(),
             }],
         )

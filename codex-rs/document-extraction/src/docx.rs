@@ -20,6 +20,7 @@ use crate::archive;
 
 const SCHEME: &str = "docx-paragraph";
 const WORD_NS: &[u8] = b"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const STRICT_WORD_NS: &[u8] = b"http://purl.oclc.org/ooxml/wordprocessingml/main";
 
 pub(crate) fn extract(
     bytes: &[u8],
@@ -130,10 +131,7 @@ fn parse_document(
     Ok(ExtractedDocument {
         original_fingerprint,
         original_bytes,
-        extractor: crate::ExtractorIdentity {
-            name: "codex-docx".to_owned(),
-            version: "1".to_owned(),
-        },
+        extractor: crate::ExtractorIdentity::for_format(crate::DocumentFormat::Docx),
         canonical_representation_digest: String::new(),
         status,
         notices: state.notices,
@@ -223,7 +221,8 @@ impl<'a> ParserState<'a> {
     ) -> Result<(), ExtractionError> {
         self.check_attributes(event)?;
         let element = Element::new(resolve, event.name().as_ref());
-        if self.ignored_depth > 0 {
+        let was_ignored = self.ignored_depth > 0;
+        if was_ignored {
             self.ignored_depth += 1;
             self.stack.push(element);
             self.depth += 1;
@@ -278,7 +277,8 @@ impl<'a> ParserState<'a> {
         name: quick_xml::name::QName<'_>,
     ) -> Result<(), ExtractionError> {
         let element_name = name.as_ref();
-        if self.ignored_depth > 0 {
+        let was_ignored = self.ignored_depth > 0;
+        if was_ignored {
             self.ignored_depth -= 1;
         } else if is_word_element(resolve, name, b"p") {
             self.finish_paragraph()?;
@@ -292,6 +292,10 @@ impl<'a> ParserState<'a> {
         if popped.name != element_name {
             return Err(ExtractionError::Corrupt);
         }
+        self.depth = self.depth.checked_sub(1).ok_or(ExtractionError::Corrupt)?;
+        if was_ignored {
+            return Ok(());
+        }
         if is_word_element(resolve, name, b"tc") {
             self.cells.pop();
         } else if is_word_element(resolve, name, b"tr") {
@@ -299,7 +303,6 @@ impl<'a> ParserState<'a> {
         } else if is_word_element(resolve, name, b"tbl") {
             self.tables.pop();
         }
-        self.depth = self.depth.checked_sub(1).ok_or(ExtractionError::Corrupt)?;
         Ok(())
     }
 
@@ -417,7 +420,7 @@ impl<'a> ParserState<'a> {
         if paragraph.text.is_empty() {
             return Ok(());
         }
-        let slices = byte_slices(&paragraph.text, self.limits.max_canonical_block_bytes);
+        let slices = byte_slices(&paragraph.text, self.limits.max_canonical_block_bytes)?;
         if self.blocks.len() + slices.len() > self.limits.max_extracted_blocks {
             return Err(ExtractionError::LimitExceeded(
                 ExtractionLimit::ExtractedBlocks,
@@ -476,7 +479,7 @@ impl Element {
 }
 
 fn is_word_namespace(resolve: &ResolveResult<'_>) -> bool {
-    matches!(resolve, ResolveResult::Bound(namespace) if namespace.0 == WORD_NS)
+    matches!(resolve, ResolveResult::Bound(namespace) if namespace.0 == WORD_NS || namespace.0 == STRICT_WORD_NS)
 }
 
 fn is_word_element(
@@ -500,7 +503,10 @@ fn is_unsupported_element(element: &Element) -> bool {
         || element.is_word(b"txbxContent")
 }
 
-fn byte_slices(text: &str, max_bytes: usize) -> Vec<(usize, usize, String)> {
+fn byte_slices(
+    text: &str,
+    max_bytes: usize,
+) -> Result<Vec<(usize, usize, String)>, ExtractionError> {
     let mut slices = Vec::new();
     let mut start = 0;
     while start < text.len() {
@@ -512,12 +518,17 @@ fn byte_slices(text: &str, max_bytes: usize) -> Vec<(usize, usize, String)> {
             let Some(next_boundary) =
                 (start + 1..=text.len()).find(|offset| text.is_char_boundary(*offset))
             else {
-                return slices;
+                return Err(ExtractionError::Corrupt);
             };
+            if next_boundary - start > max_bytes {
+                return Err(ExtractionError::LimitExceeded(
+                    ExtractionLimit::CanonicalBlockBytes,
+                ));
+            }
             end = next_boundary;
         }
         slices.push((start, end, text[start..end].to_owned()));
         start = end;
     }
-    slices
+    Ok(slices)
 }
