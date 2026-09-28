@@ -2,9 +2,10 @@ use std::io::Cursor;
 use std::io::Read;
 use std::io::Seek;
 
-use quick_xml::Reader;
 use quick_xml::events::BytesStart;
 use quick_xml::events::Event;
+use quick_xml::name::ResolveResult;
+use quick_xml::reader::NsReader;
 use zip::ZipArchive;
 
 use crate::ExtractedBlock;
@@ -18,6 +19,7 @@ use crate::ExtractionStatus;
 use crate::archive;
 
 const SCHEME: &str = "docx-paragraph";
+const WORD_NS: &[u8] = b"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 pub(crate) fn extract(
     bytes: &[u8],
@@ -95,17 +97,22 @@ fn parse_document(
         state.add_notice(ExtractionNotice::UnsupportedPart { part });
     }
 
-    let mut reader = Reader::from_reader(document_xml);
+    let mut reader = NsReader::from_reader(document_xml);
     reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
     loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(start)) => state.start(&start)?,
-            Ok(Event::Empty(empty)) => state.empty(&empty)?,
-            Ok(Event::End(end)) => state.end(end.name().as_ref())?,
-            Ok(Event::Text(text)) => state.text(&text)?,
-            Ok(Event::Eof) => break,
-            Ok(Event::Decl(_)) | Ok(Event::PI(_)) | Ok(Event::Comment(_)) => {}
+        match reader.read_resolved_event_into(&mut buffer) {
+            Ok((resolve, Event::Start(start))) => state.start(&resolve, &start)?,
+            Ok((resolve, Event::Empty(empty))) => state.empty(&resolve, &empty)?,
+            Ok((resolve, Event::End(end))) => state.end(&resolve, end.name())?,
+            Ok((_, Event::Text(text))) => state.text(&text)?,
+            Ok((_, Event::CData(cdata))) => state.cdata(&cdata)?,
+            Ok((_, Event::Eof)) => break,
+            Ok((_, Event::Decl(_)))
+            | Ok((_, Event::PI(_)))
+            | Ok((_, Event::Comment(_)))
+            | Ok((_, Event::DocType(_)))
+            | Ok((_, Event::GeneralRef(_))) => {}
             _ => {}
         }
         buffer.clear();
@@ -137,7 +144,7 @@ fn parse_document(
 struct ParserState<'a> {
     limits: &'a ExtractionLimits,
     depth: usize,
-    stack: Vec<Vec<u8>>,
+    stack: Vec<Element>,
     body_seen: bool,
     body_paragraphs: usize,
     body_tables: usize,
@@ -152,21 +159,35 @@ struct ParserState<'a> {
 }
 
 struct TableContext {
-    index: usize,
+    path: String,
     rows: usize,
 }
 
 struct RowContext {
-    table_index: usize,
-    index: usize,
+    path: String,
     cells: usize,
 }
 
 struct CellContext {
-    table_index: usize,
-    row_index: usize,
-    index: usize,
+    path: String,
     paragraphs: usize,
+    tables: usize,
+}
+
+struct Element {
+    name: Vec<u8>,
+    local: Vec<u8>,
+    word: bool,
+}
+
+impl Element {
+    fn new(resolve: &ResolveResult<'_>, name: &[u8]) -> Self {
+        Self {
+            name: name.to_owned(),
+            local: local_name(name),
+            word: is_word_namespace(resolve),
+        }
+    }
 }
 
 struct Paragraph {
@@ -195,11 +216,16 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    fn start(&mut self, event: &BytesStart<'_>) -> Result<(), ExtractionError> {
+    fn start(
+        &mut self,
+        resolve: &ResolveResult<'_>,
+        event: &BytesStart<'_>,
+    ) -> Result<(), ExtractionError> {
         self.check_attributes(event)?;
+        let element = Element::new(resolve, event.name().as_ref());
         if self.ignored_depth > 0 {
             self.ignored_depth += 1;
-            self.stack.push(event.name().as_ref().to_vec());
+            self.stack.push(element);
             self.depth += 1;
             if self.depth > self.limits.max_xml_depth {
                 return Err(ExtractionError::LimitExceeded(ExtractionLimit::XmlDepth));
@@ -207,31 +233,29 @@ impl<'a> ParserState<'a> {
             return Ok(());
         }
 
-        let event_name = event.name();
-        let name = event_name.as_ref();
-        if is_w(name, b"body") {
+        if element.is_word(b"body") {
             self.body_seen = true;
-        } else if is_w(name, b"tbl") {
+        } else if element.is_word(b"tbl") {
             self.start_table();
-        } else if is_w(name, b"tr") {
+        } else if element.is_word(b"tr") {
             self.start_row();
-        } else if is_w(name, b"tc") {
+        } else if element.is_word(b"tc") {
             self.start_cell();
-        } else if is_w(name, b"p") {
+        } else if element.is_word(b"p") {
             self.start_paragraph();
-        } else if is_w(name, b"ins")
-            || is_w(name, b"del")
-            || is_w(name, b"moveFrom")
-            || is_w(name, b"moveTo")
-            || is_w(name, b"rPrChange")
+        } else if element.is_word(b"ins")
+            || element.is_word(b"del")
+            || element.is_word(b"moveFrom")
+            || element.is_word(b"moveTo")
+            || element.is_word(b"rPrChange")
         {
             self.add_tracked_change();
-        } else if is_unsupported_element(name) {
-            self.add_unsupported_element(name);
+        } else if is_unsupported_element(&element) {
+            self.add_unsupported_element(&element);
             self.ignored_depth = 1;
         }
 
-        self.stack.push(name.to_vec());
+        self.stack.push(element);
         self.depth += 1;
         if self.depth > self.limits.max_xml_depth {
             return Err(ExtractionError::LimitExceeded(ExtractionLimit::XmlDepth));
@@ -239,39 +263,40 @@ impl<'a> ParserState<'a> {
         Ok(())
     }
 
-    fn empty(&mut self, event: &BytesStart<'_>) -> Result<(), ExtractionError> {
-        self.check_attributes(event)?;
-        if self.ignored_depth > 0 {
-            return Ok(());
-        }
-        let event_name = event.name();
-        let name = event_name.as_ref();
-        if is_w(name, b"tab") {
-            self.append_text("\t")?;
-        } else if is_w(name, b"br") || is_w(name, b"cr") {
-            self.append_text("\n")?;
-        } else if is_unsupported_element(name) {
-            self.add_unsupported_element(name);
-        }
-        Ok(())
+    fn empty(
+        &mut self,
+        resolve: &ResolveResult<'_>,
+        event: &BytesStart<'_>,
+    ) -> Result<(), ExtractionError> {
+        self.start(resolve, event)?;
+        self.end(resolve, event.name())
     }
 
-    fn end(&mut self, name: &[u8]) -> Result<(), ExtractionError> {
+    fn end(
+        &mut self,
+        resolve: &ResolveResult<'_>,
+        name: quick_xml::name::QName<'_>,
+    ) -> Result<(), ExtractionError> {
+        let element_name = name.as_ref();
         if self.ignored_depth > 0 {
             self.ignored_depth -= 1;
-        } else if is_w(name, b"p") {
+        } else if is_word_element(resolve, name, b"p") {
             self.finish_paragraph()?;
+        } else if is_word_element(resolve, name, b"tab") {
+            self.append_text("\t")?;
+        } else if is_word_element(resolve, name, b"br") || is_word_element(resolve, name, b"cr") {
+            self.append_text("\n")?;
         }
 
         let popped = self.stack.pop().ok_or(ExtractionError::Corrupt)?;
-        if popped != name {
+        if popped.name != element_name {
             return Err(ExtractionError::Corrupt);
         }
-        if is_w(name, b"tc") {
+        if is_word_element(resolve, name, b"tc") {
             self.cells.pop();
-        } else if is_w(name, b"tr") {
+        } else if is_word_element(resolve, name, b"tr") {
             self.rows.pop();
-        } else if is_w(name, b"tbl") {
+        } else if is_word_element(resolve, name, b"tbl") {
             self.tables.pop();
         }
         self.depth = self.depth.checked_sub(1).ok_or(ExtractionError::Corrupt)?;
@@ -280,13 +305,30 @@ impl<'a> ParserState<'a> {
 
     fn text(&mut self, text: &quick_xml::events::BytesText<'_>) -> Result<(), ExtractionError> {
         if self.ignored_depth > 0
-            || !self.stack.last().is_some_and(|name| is_w(name, b"t"))
-            || self.stack.iter().any(|name| is_w(name, b"delText"))
+            || !self
+                .stack
+                .last()
+                .is_some_and(|element| element.is_word(b"t"))
+            || self.stack.iter().any(|element| element.is_word(b"delText"))
         {
             return Ok(());
         }
-        let decoded = text.decode().map_err(|_| ExtractionError::Corrupt)?;
+        let decoded = text.xml10_content().map_err(|_| ExtractionError::Corrupt)?;
         let value = quick_xml::escape::unescape(&decoded).map_err(|_| ExtractionError::Corrupt)?;
+        self.append_text(&value)
+    }
+
+    fn cdata(&mut self, text: &quick_xml::events::BytesCData<'_>) -> Result<(), ExtractionError> {
+        if self.ignored_depth > 0
+            || !self
+                .stack
+                .last()
+                .is_some_and(|element| element.is_word(b"t"))
+            || self.stack.iter().any(|element| element.is_word(b"delText"))
+        {
+            return Ok(());
+        }
+        let value = text.xml10_content().map_err(|_| ExtractionError::Corrupt)?;
         self.append_text(&value)
     }
 
@@ -305,51 +347,45 @@ impl<'a> ParserState<'a> {
     }
 
     fn start_table(&mut self) {
-        let index = if self.stack.last().is_some_and(|name| is_w(name, b"body")) {
-            self.body_tables += 1;
-            self.body_tables
+        let path = if let Some(cell) = self.cells.last_mut() {
+            cell.tables += 1;
+            format!("{}/tbl[{}]", cell.path, cell.tables)
         } else {
-            self.tables.last().map_or(1, |table| table.index)
+            self.body_tables += 1;
+            format!("body/tbl[{}]", self.body_tables)
         };
-        self.tables.push(TableContext { index, rows: 0 });
+        self.tables.push(TableContext { path, rows: 0 });
     }
 
     fn start_row(&mut self) {
         if let Some(table) = self.tables.last_mut() {
             table.rows += 1;
-            self.rows.push(RowContext {
-                table_index: table.index,
-                index: table.rows,
-                cells: 0,
-            });
+            let path = format!("{}/tr[{}]", table.path, table.rows);
+            self.rows.push(RowContext { path, cells: 0 });
         }
     }
 
     fn start_cell(&mut self) {
         if let Some(row) = self.rows.last_mut() {
             row.cells += 1;
+            let path = format!("{}/tc[{}]", row.path, row.cells);
             self.cells.push(CellContext {
-                table_index: row.table_index,
-                row_index: row.index,
-                index: row.cells,
+                path,
                 paragraphs: 0,
+                tables: 0,
             });
         }
     }
 
     fn start_paragraph(&mut self) {
-        let locator = if self.stack.last().is_some_and(|name| is_w(name, b"body")) {
+        let locator = if let Some(cell) = self.cells.last_mut() {
+            cell.paragraphs += 1;
+            format!("{}/p[{}]", cell.path, cell.paragraphs)
+        } else if self.tables.is_empty()
+            && self.stack.iter().any(|element| element.is_word(b"body"))
+        {
             self.body_paragraphs += 1;
             format!("body/p[{}]", self.body_paragraphs)
-        } else if self.stack.last().is_some_and(|name| is_w(name, b"tc")) {
-            let Some(cell) = self.cells.last_mut() else {
-                return;
-            };
-            cell.paragraphs += 1;
-            format!(
-                "body/tbl[{}]/tr[{}]/tc[{}]/p[{}]",
-                cell.table_index, cell.row_index, cell.index, cell.paragraphs
-            )
         } else {
             return;
         };
@@ -415,8 +451,8 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    fn add_unsupported_element(&mut self, name: &[u8]) {
-        let part = String::from_utf8_lossy(name).into_owned();
+    fn add_unsupported_element(&mut self, element: &Element) {
+        let part = String::from_utf8_lossy(&element.name).into_owned();
         let notice = ExtractionNotice::UnsupportedPart { part };
         self.add_notice(notice.clone());
         if let Some(paragraph) = self.paragraph.as_mut()
@@ -433,15 +469,35 @@ impl<'a> ParserState<'a> {
     }
 }
 
-fn is_w(name: &[u8], local: &[u8]) -> bool {
-    name == local || name.strip_prefix(b"w:") == Some(local)
+impl Element {
+    fn is_word(&self, local: &[u8]) -> bool {
+        self.word && self.local == local
+    }
 }
 
-fn is_unsupported_element(name: &[u8]) -> bool {
-    is_w(name, b"drawing")
-        || is_w(name, b"pict")
-        || is_w(name, b"object")
-        || is_w(name, b"txbxContent")
+fn is_word_namespace(resolve: &ResolveResult<'_>) -> bool {
+    matches!(resolve, ResolveResult::Bound(namespace) if namespace.0 == WORD_NS)
+}
+
+fn is_word_element(
+    resolve: &ResolveResult<'_>,
+    name: quick_xml::name::QName<'_>,
+    local: &[u8],
+) -> bool {
+    is_word_namespace(resolve) && name.local_name().as_ref() == local
+}
+
+fn local_name(name: &[u8]) -> Vec<u8> {
+    name.iter()
+        .rposition(|byte| *byte == b':')
+        .map_or_else(|| name.to_owned(), |index| name[index + 1..].to_owned())
+}
+
+fn is_unsupported_element(element: &Element) -> bool {
+    element.is_word(b"drawing")
+        || element.is_word(b"pict")
+        || element.is_word(b"object")
+        || element.is_word(b"txbxContent")
 }
 
 fn byte_slices(text: &str, max_bytes: usize) -> Vec<(usize, usize, String)> {
