@@ -5,6 +5,7 @@ mod autonomy;
 mod checkpoint;
 mod completion;
 mod events;
+mod limits;
 mod outcome_world_state;
 mod read_receipts;
 mod root_blackboard;

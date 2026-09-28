@@ -1,4 +1,5 @@
 use codex_extension_api::PreviousWorldStateSection;
+use codex_extension_api::RenderedWorldStateFragment;
 use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::ObligationPacket;
@@ -11,6 +12,11 @@ use codex_stateful_runtime::WorkflowMode;
 
 use super::RunWorldStateStatus;
 use super::run_world_state_section;
+
+fn assert_fragment_bounded(fragment: &RenderedWorldStateFragment) {
+    let (start, end) = fragment.markers();
+    assert!(start.len() + fragment.body().len() + end.len() <= crate::limits::MAX_MODEL_ITEM_BYTES);
+}
 
 #[test]
 fn run_world_state_is_semantic_bounded_and_stable() {
@@ -96,6 +102,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
             .contains("Learned: One unresolved assumption")
     );
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
+    assert_fragment_bounded(&rendered);
     assert!(
         section
             .render_diff(PreviousWorldStateSection::Known(section.snapshot()))
@@ -141,6 +148,7 @@ fn run_world_state_discloses_omitted_detail() {
     ));
     assert!(rendered.body().contains("Semantic checkpoint: current."));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
+    assert_fragment_bounded(&rendered);
 }
 
 #[test]
@@ -200,6 +208,7 @@ fn obligation_change_replaces_only_the_obligation_block() {
         ("<stateful_run_update>", "</stateful_run_update>")
     );
     let body = rendered.body();
+    assert_fragment_bounded(&rendered);
     assert!(body.contains("Run ID: run-1"));
     assert!(body.contains("Semantic obligation (replaces the previous obligation entirely):"));
     assert!(body.contains("- Learned: The landlord consent is also missing."));

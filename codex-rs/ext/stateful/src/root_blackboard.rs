@@ -26,7 +26,7 @@ use crate::world_state::hash_component;
 use crate::world_state::try_append_line;
 
 const MAX_ENTRY_BYTES: usize = 3 * 1024;
-const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 12 * 1024;
+const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 4 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
 const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
 

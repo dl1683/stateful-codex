@@ -2,6 +2,7 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::PromptCacheAffinity;
+use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
@@ -24,18 +25,27 @@ use codex_thread_store::StoredProject;
 use codex_thread_store::StoredProjectRoot;
 use pretty_assertions::assert_eq;
 
+use super::END_MARKER;
 use super::MAX_BODY_BYTES;
 use super::MAX_ESTIMATED_TOKENS;
 use super::ProjectIntelligenceStatus;
+use super::START_MARKER;
 use super::project_world_state_section;
 use super::semantic_fingerprint;
 use crate::SelectedProject;
+use crate::limits::MAX_MODEL_ITEM_BYTES;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
+use crate::visible_root::VisibleRoot;
 use crate::visible_root::VisibleRootRegistry;
 
 fn section(status: ProjectIntelligenceStatus) -> WorldStateSectionContribution {
     project_world_state_section(status, /*visible_root*/ None)
+}
+
+fn assert_fragment_bounded(fragment: &RenderedWorldStateFragment) {
+    let (start, end) = fragment.markers();
+    assert!(start.len() + fragment.body().len() + end.len() <= MAX_MODEL_ITEM_BYTES);
 }
 
 fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
@@ -206,6 +216,7 @@ fn renders_selected_project_as_bounded_typed_world_state() {
             .contains("rootRevision is not expectedRevision")
     );
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
+    assert_fragment_bounded(&rendered);
 }
 
 #[test]
@@ -289,6 +300,56 @@ fn revision_only_change_renders_a_compact_update() {
         "Project intelligence revision advanced from 7 to 11. The model-visible root blackboard knowledge and source routes are unchanged. Use rootRevision 11 for completion; retain the existing root packet for reasoning and routing."
     );
     assert!(!rendered.body().contains("Project roots:"));
+    assert_fragment_bounded(&rendered);
+}
+
+#[test]
+fn hard_bound_uses_whole_lines_and_truthful_omission() {
+    let dense_line = "\x01\x02\x03\t".repeat(MAX_BODY_BYTES);
+    let mut output = String::new();
+    super::append_line(&mut output, &dense_line);
+    assert_eq!(output, super::OMISSION_MARKER);
+
+    let mut output = String::new();
+    let first_line = "A".repeat(MAX_BODY_BYTES - super::OMISSION_MARKER.len() - 2);
+    assert!(super::try_append_line(
+        &mut output,
+        &first_line,
+        /*reserved_bytes*/ 0
+    ));
+    assert!(!super::try_append_line(
+        &mut output,
+        "tail",
+        /*reserved_bytes*/ 0
+    ));
+    assert!(output.len() < MAX_BODY_BYTES);
+
+    let entries = (0..8)
+        .map(|index| hit(&format!("entry-dense-{index}"), &dense_line))
+        .collect();
+    let rendered = section(with_entries(/*revision*/ 3, entries))
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("dense project state should render");
+    assert_fragment_bounded(&rendered);
+    assert!(rendered.body().contains("omitted by the context bound"));
+}
+
+#[test]
+fn unexpected_fragment_overflow_clears_visible_root() {
+    let registry = VisibleRootRegistry::default();
+    registry.record("thread-1", VisibleRoot::new(/*project_revision*/ 3));
+    let visible_root = (registry.clone(), "thread-1".to_string());
+    let rendered = super::final_fragment(
+        "developer",
+        (START_MARKER, END_MARKER),
+        "x".repeat(MAX_MODEL_ITEM_BYTES),
+        "project-1",
+        Some(&visible_root),
+        super::RegistryUpdate::Record(None),
+    );
+    assert_fragment_bounded(&rendered);
+    assert!(rendered.body().contains("exceeded its hard byte bound"));
+    assert_eq!(registry.get("thread-1"), None);
 }
 
 #[test]
@@ -352,6 +413,7 @@ fn promoted_entry_change_sends_only_new_lines_and_alias_moves() {
         ("<stateful_project_update>", "</stateful_project_update>")
     );
     let body = rendered.body();
+    assert_fragment_bounded(&rendered);
     assert!(body.contains("revision advanced from 3 to 4"));
     assert!(body.contains("The permit UTH-0441 was never transferred."));
     assert!(body.contains("E alias changes (same content, renumbered): E1->E2"));
@@ -596,8 +658,9 @@ fn premises_certify_only_when_rendered_at_their_pinned_revision() {
             shown.alias_for("entry-exact", /*revision*/ 1),
             shown.alias_for("entry-stale", /*revision*/ 1),
             shown.alias_for("entry-over-budget", /*revision*/ 1),
+            shown.alias_for("entry-late", /*revision*/ 1),
         ],
-        [Some("E2"), None, None]
+        [Some("E2"), None, None, None]
     );
 }
 

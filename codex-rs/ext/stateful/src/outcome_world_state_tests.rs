@@ -1,4 +1,5 @@
 use codex_extension_api::PreviousWorldStateSection;
+use codex_extension_api::RenderedWorldStateFragment;
 use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::ObligationPacket;
@@ -14,6 +15,11 @@ use pretty_assertions::assert_eq;
 use super::MAX_BODY_BYTES;
 use super::ProjectOutcomesStatus;
 use super::project_outcomes_world_state_section;
+
+fn assert_fragment_bounded(fragment: &RenderedWorldStateFragment) {
+    let (start, end) = fragment.markers();
+    assert!(start.len() + fragment.body().len() + end.len() <= crate::limits::MAX_MODEL_ITEM_BYTES);
+}
 
 fn outcome(id: &str, goal: &str, result: &str, learning: &str) -> StatefulRunOutcome {
     let run_id = StatefulRunId::parse(id).expect("valid run ID");
@@ -98,6 +104,7 @@ fn renders_bounded_completed_outcomes_for_project_continuity() {
             .contains("The current policy replaced the prior threshold.")
     );
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
+    assert_fragment_bounded(&rendered);
 }
 
 #[test]
@@ -132,6 +139,7 @@ fn known_snapshot_renders_only_new_completed_outcomes() {
     );
     assert!(rendered.body().contains("The second result is durable."));
     assert!(!rendered.body().contains("The first result is durable."));
+    assert_fragment_bounded(&rendered);
 }
 
 #[test]
@@ -148,6 +156,7 @@ fn long_outcomes_are_truncated_on_utf8_boundaries() {
 
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
     assert!(std::str::from_utf8(rendered.body().as_bytes()).is_ok());
+    assert_fragment_bounded(&rendered);
 }
 
 #[test]
@@ -193,6 +202,7 @@ fn verbose_learning_cannot_hide_uncertainty_or_blockers() {
     );
     assert!(!rendered.body().contains("Learned conclusion 5."));
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
+    assert_fragment_bounded(&rendered);
 }
 
 #[test]
