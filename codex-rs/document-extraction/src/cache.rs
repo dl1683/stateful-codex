@@ -1,4 +1,5 @@
 use std::fs;
+use std::fs::Metadata;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -125,7 +126,7 @@ fn collect_json_files(directory: &Path, files: &mut Vec<(PathBuf, u64, SystemTim
             continue;
         };
         if !metadata.file_type().is_dir()
-            || metadata.file_type().is_symlink()
+            || is_link(&path, &metadata)
             || !is_hash_prefix(entry.file_name().to_str().unwrap_or_default())
         {
             continue;
@@ -144,7 +145,7 @@ fn collect_json_files(directory: &Path, files: &mut Vec<(PathBuf, u64, SystemTim
                 continue;
             };
             if !metadata.file_type().is_file()
-                || metadata.file_type().is_symlink()
+                || is_link(&path, &metadata)
                 || stem.len() != 62
                 || !stem.bytes().all(|byte| byte.is_ascii_hexdigit())
             {
@@ -161,6 +162,32 @@ fn collect_json_files(directory: &Path, files: &mut Vec<(PathBuf, u64, SystemTim
 
 fn is_hash_prefix(name: &str) -> bool {
     name.len() == 2 && name.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_link(path: &Path, metadata: &Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        use windows_sys::Win32::Storage::FileSystem::GetFileAttributesW;
+        use windows_sys::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES;
+
+        let path = path
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        let attributes = unsafe { GetFileAttributesW(path.as_ptr()) };
+        attributes != INVALID_FILE_ATTRIBUTES && attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 fn unique_temp_path(path: &Path) -> PathBuf {

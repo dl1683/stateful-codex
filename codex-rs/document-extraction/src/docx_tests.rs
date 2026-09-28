@@ -586,7 +586,22 @@ fn normalizes_xml_lines_and_reads_cdata() {
         )
     );
     let result = extractor.extract(DocumentFormat::Docx, &bom_bytes).unwrap();
-    assert_eq!(result.blocks[0].text, "bom");
+    assert_eq!(
+        result,
+        expected_document(
+            &bom_bytes,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![ExtractedBlock {
+                anchor: ExtractionAnchor {
+                    scheme: "docx-paragraph".to_owned(),
+                    locator: "body/p[1]".to_owned(),
+                },
+                text: "bom".to_owned(),
+                notices: Vec::new(),
+            }],
+        )
+    );
 }
 
 #[test]
