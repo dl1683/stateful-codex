@@ -1080,6 +1080,262 @@ async fn model_reads_a_long_goal_exactly_and_rejects_a_foreign_cursor() -> Resul
 }
 
 #[tokio::test]
+async fn run_read_rejects_stale_and_tampered_cursors_at_the_handler() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Exact cursor validation".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "exact-cursor-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id.clone(),
+                thread_id: thread.thread.id.clone(),
+                goal: format!("🙂{}", "goal detail ".repeat(1_000))
+                    .trim_end()
+                    .to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "exact-cursor-run".to_string(),
+            },
+        })
+        .await?;
+
+    let strategy = format!("strategy detail {}", "x ".repeat(5_000))
+        .trim_end()
+        .to_string();
+    let strategy_update: Value = serde_json::from_str(
+        &run_model_tool(
+            &responses_server,
+            &mut server,
+            &thread.thread.id,
+            "set-strategy-for-cursor",
+            "stateful_run_update",
+            &json!({
+                "expectedRevision": started.run.revision,
+                "status": "running",
+                "strategy": strategy,
+            }),
+        )
+        .await?,
+    )?;
+    let strategy_revision = strategy_update["revision"]
+        .as_u64()
+        .expect("strategy update returns a run revision");
+
+    let goal_page: Value = serde_json::from_str(
+        &run_model_tool(
+            &responses_server,
+            &mut server,
+            &thread.thread.id,
+            "read-goal-for-cursor",
+            "stateful_run_read",
+            &json!({"section": "goal"}),
+        )
+        .await?,
+    )?;
+    let goal_cursor = goal_page["nextCursor"]
+        .as_str()
+        .expect("long goal returns a cursor")
+        .to_string();
+    let strategy_page: Value = serde_json::from_str(
+        &run_model_tool(
+            &responses_server,
+            &mut server,
+            &thread.thread.id,
+            "read-strategy-for-cursor",
+            "stateful_run_read",
+            &json!({"section": "strategy"}),
+        )
+        .await?,
+    )?;
+    let strategy_cursor = strategy_page["nextCursor"]
+        .as_str()
+        .expect("long strategy returns a cursor")
+        .to_string();
+    let packet_items = (0..12)
+        .map(|index| {
+            format!("learning item {index}: {}", "detail ".repeat(110))
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    run_model_tool(
+        &responses_server,
+        &mut server,
+        &thread.thread.id,
+        "write-obligation-for-cursor",
+        "obligation_update",
+        &json!({
+            "idempotencyKey": "cursor-obligation-1",
+            "packet": {
+                "learning": packet_items,
+                "next": ["Read every cursor page before continuing."],
+            },
+        }),
+    )
+    .await?;
+    let obligation_page: Value = serde_json::from_str(
+        &run_model_tool(
+            &responses_server,
+            &mut server,
+            &thread.thread.id,
+            "read-obligation-for-cursor",
+            "stateful_run_read",
+            &json!({"section": "obligation"}),
+        )
+        .await?,
+    )?;
+    let obligation_cursor = obligation_page["nextCursor"]
+        .as_str()
+        .expect("long obligation returns a cursor")
+        .to_string();
+
+    run_model_tool(
+        &responses_server,
+        &mut server,
+        &thread.thread.id,
+        "stale-strategy-update",
+        "stateful_run_update",
+        &json!({
+            "expectedRevision": strategy_revision,
+            "status": "running",
+            "strategy": "new strategy after cursor issuance",
+        }),
+    )
+    .await?;
+    run_model_tool(
+        &responses_server,
+        &mut server,
+        &thread.thread.id,
+        "stale-obligation-update",
+        "obligation_update",
+        &json!({
+            "idempotencyKey": "cursor-obligation-2",
+            "packet": {
+                "learning": ["new obligation after cursor issuance"],
+                "next": ["Use only the current obligation after the cursor test."],
+            },
+        }),
+    )
+    .await?;
+
+    let goal_parts = goal_cursor.split('.').collect::<Vec<_>>();
+    assert_eq!(goal_parts.len(), 6);
+    let mut wrong_digest = goal_parts.clone();
+    wrong_digest[3] = "00000000000000000000000000000000";
+    let mut wrong_length = goal_parts.clone();
+    wrong_length[4] = "1";
+    let mut past_end = goal_parts
+        .iter()
+        .map(|part| (*part).to_string())
+        .collect::<Vec<_>>();
+    past_end[5] = goal_parts[4]
+        .parse::<usize>()?
+        .saturating_add(1)
+        .to_string();
+    let cases = [
+        (
+            "stale strategy",
+            "strategy",
+            strategy_cursor,
+            "changed after this cursor was issued",
+        ),
+        (
+            "stale obligation",
+            "obligation",
+            obligation_cursor,
+            "changed after this cursor was issued",
+        ),
+        (
+            "wrong digest",
+            "goal",
+            wrong_digest.join("."),
+            "changed after this cursor was issued",
+        ),
+        (
+            "wrong length",
+            "goal",
+            wrong_length.join("."),
+            "changed after this cursor was issued",
+        ),
+        (
+            "section mismatch",
+            "strategy",
+            goal_cursor.clone(),
+            "not a strategy cursor",
+        ),
+        (
+            "offset past end",
+            "goal",
+            past_end.join("."),
+            "not a valid position",
+        ),
+        (
+            "offset inside multibyte scalar",
+            "goal",
+            [goal_parts[..5].join("."), "1".to_string()].join("."),
+            "not a valid position",
+        ),
+    ];
+    for (label, section, cursor, expected) in cases {
+        let output = run_model_tool(
+            &responses_server,
+            &mut server,
+            &thread.thread.id,
+            &format!("tampered-{label}"),
+            "stateful_run_read",
+            &json!({"section": section, "cursor": cursor}),
+        )
+        .await?;
+        assert!(output.contains(expected), "{label}: {output}");
+    }
+
+    let foreign_thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id),
+            ..Default::default()
+        })
+        .await?;
+    let output = run_model_tool(
+        &responses_server,
+        &mut server,
+        &foreign_thread.thread.id,
+        "other-thread-cursor",
+        "stateful_run_read",
+        &json!({"section": "goal", "cursor": goal_cursor}),
+    )
+    .await?;
+    assert!(output.contains("cursor does not belong to a run of the selected thread"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
@@ -1437,6 +1693,34 @@ async fn run_simple_turn(server: &mut TestAppServer, thread_id: &str) -> Result<
         })
         .await?;
     Ok(())
+}
+
+async fn run_model_tool(
+    responses_server: &wiremock::MockServer,
+    server: &mut TestAppServer,
+    thread_id: &str,
+    call_id: &str,
+    tool_name: &str,
+    arguments: &Value,
+) -> Result<String> {
+    let response_log = responses::mount_sse_sequence(
+        responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(call_id, tool_name, &arguments.to_string()),
+                responses::ev_completed(&format!("{call_id}-response")),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message(&format!("{call_id}-done"), "Done."),
+                responses::ev_completed(&format!("{call_id}-done-response")),
+            ]),
+        ],
+    )
+    .await;
+    run_simple_turn(server, thread_id).await?;
+    Ok(response_log
+        .function_call_output_text(call_id)
+        .expect("tool output should be text"))
 }
 
 /// Follows a `stateful_run_read` cursor through every page, one model turn per page,
