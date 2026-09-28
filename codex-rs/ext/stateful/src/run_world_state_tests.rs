@@ -88,12 +88,12 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
-            .contains("Semantic progress: call obligation_update whenever learning")
+            .contains("Semantic progress: while work remains, call obligation_update only when")
     );
     assert!(
         rendered
             .body()
-            .contains("completionDisposition noReusableLearning with only the result")
+            .contains("completionDisposition noReusableLearning and only the result")
     );
     assert!(
         rendered

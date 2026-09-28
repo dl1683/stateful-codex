@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use super::AgentKnowledgeChange;
 use super::BlackboardStoreError;
+use super::query::agent_knowledge_changed_since_on_connection;
 use super::query::agent_knowledge_for_run_on_connection;
 use sqlx::Sqlite;
 use sqlx::SqlitePool;
@@ -42,6 +43,18 @@ impl CompletionFence {
             connection,
             released: false,
         })
+    }
+
+    /// Whether any agent wrote project knowledge at or after `since_ms`, read while the
+    /// fence holds the writer lock so no write can land between this check and the
+    /// completion it guards.
+    pub async fn agent_knowledge_changed_since(
+        &mut self,
+        project_id: &str,
+        since_ms: i64,
+    ) -> Result<bool, BlackboardStoreError> {
+        agent_knowledge_changed_since_on_connection(&mut self.connection, project_id, since_ms)
+            .await
     }
 
     pub async fn agent_knowledge_for_run(

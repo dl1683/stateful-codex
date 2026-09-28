@@ -34,7 +34,6 @@ use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
-use super::attributed_run_id;
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
 use super::blackboard_evidence::resolve_evidence;
@@ -199,30 +198,33 @@ impl BlackboardRecordTool {
         };
         let id = BlackboardEntryId::parse(stable_id("entry", &self.project_id, &idempotency_key))
             .map_err(respond)?;
-        let value = NewBlackboardEntry {
-            project_id: self.project_id.clone(),
-            node_id,
-            kind,
-            content,
-            structured_value,
-            confidence: ConfidenceScore::from_basis_points(confidence_basis_points)
-                .map_err(respond)?,
-            verification,
-            importance,
-            root_promotion,
-            evidence,
-            premises,
-            provenance: BlackboardProvenance {
-                kind: BlackboardProvenanceKind::Agent,
-                source_id: source_id.to_string(),
-            },
-        };
-        let store = self.services.blackboard().await.map_err(respond)?;
-        let entry =
-            match attributed_run_id(&self.project_id, &self.thread_id, &self.services).await? {
-                Some(run_id) => store.record_for_agent_run(&run_id, id, value).await,
-                None => store.create_entry(id, value).await,
-            }
+        let entry = self
+            .services
+            .blackboard()
+            .await
+            .map_err(respond)?
+            .create_entry(
+                id,
+                NewBlackboardEntry {
+                    project_id: self.project_id.clone(),
+                    node_id,
+                    kind,
+                    content,
+                    structured_value,
+                    confidence: ConfidenceScore::from_basis_points(confidence_basis_points)
+                        .map_err(respond)?,
+                    verification,
+                    importance,
+                    root_promotion,
+                    evidence,
+                    premises,
+                    provenance: BlackboardProvenance {
+                        kind: BlackboardProvenanceKind::Agent,
+                        source_id: source_id.to_string(),
+                    },
+                },
+            )
+            .await
             .map_err(respond)?;
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::BlackboardUpdated {
@@ -267,7 +269,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. When a new conclusion semantically depends on trusted blackboard knowledge, pin each exact entryId and revision in premises; premises are checked live, do not count as direct evidence, and do not confer sourceVerified. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
+            description: "Persist one new item of materially reusable project understanding after examining evidence. A lookup or read-only citation answer is not record-worthy merely because it was requested; record it only if it is a distinct finding likely to improve future project work. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. When a new conclusion semantically depends on trusted blackboard knowledge, pin each exact entryId and revision in premises; premises are checked live, do not count as direct evidence, and do not confer sourceVerified. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&record_schema())
@@ -304,12 +306,12 @@ impl BlackboardBatchRecordTool {
         Self {
             recorder: BlackboardRecordTool::new(
                 project_id.clone(),
-                thread_id.clone(),
+                thread_id,
                 services.clone(),
                 projects,
                 event_sink.clone(),
             ),
-            relator: BlackboardRelateTool::new(project_id, thread_id, services, event_sink),
+            relator: BlackboardRelateTool::new(project_id, services, event_sink),
         }
     }
 
@@ -488,7 +490,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings and up to {MAX_BATCH_RELATIONS} navigational relationships in one bounded call. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals instead of compressing the batch to the immediate answer. Pin an existing trusted entry's exact revision in premises when a finding semantically depends on it; do not substitute an unversioned dependsOn relation. Relations reference record idempotencyKey values from this same call through fromRecordKey and toRecordKey, avoiding opaque entry-ID copying. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this after one evidence-review pass."
+                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings and up to {MAX_BATCH_RELATIONS} navigational relationships in one bounded call. A lookup or read-only citation answer is not record-worthy merely because it was requested; record it only if it is a distinct finding likely to improve future project work. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals instead of compressing the batch to the immediate answer. Pin an existing trusted entry's exact revision in premises when a finding semantically depends on it; do not substitute an unversioned dependsOn relation. Relations reference record idempotencyKey values from this same call through fromRecordKey and toRecordKey, avoiding opaque entry-ID copying. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this after one evidence-review pass."
             ),
             strict: false,
             defer_loading: None,
@@ -580,7 +582,6 @@ struct RelateArguments {
 
 pub(super) struct BlackboardRelateTool {
     project_id: String,
-    thread_id: String,
     services: ProjectIntelligenceServices,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
@@ -588,13 +589,11 @@ pub(super) struct BlackboardRelateTool {
 impl BlackboardRelateTool {
     pub(super) fn new(
         project_id: String,
-        thread_id: String,
         services: ProjectIntelligenceServices,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
             project_id,
-            thread_id,
             services,
             event_sink,
         }
@@ -627,25 +626,32 @@ impl BlackboardRelateTool {
             &arguments.idempotency_key,
         ))
         .map_err(respond)?;
-        let value = NewBlackboardRelation {
-            project_id: self.project_id.clone(),
-            from_entry_id: BlackboardEntryId::parse(arguments.from_entry_id).map_err(respond)?,
-            to_entry_id: BlackboardEntryId::parse(arguments.to_entry_id).map_err(respond)?,
-            kind: arguments.kind,
-            note: arguments.note,
-            confidence: ConfidenceScore::from_basis_points(arguments.confidence_basis_points)
-                .map_err(respond)?,
-            provenance: BlackboardProvenance {
-                kind: BlackboardProvenanceKind::Agent,
-                source_id: source_id.to_string(),
-            },
-        };
-        let store = self.services.blackboard().await.map_err(respond)?;
-        let relation =
-            match attributed_run_id(&self.project_id, &self.thread_id, &self.services).await? {
-                Some(run_id) => store.relate_for_agent_run(&run_id, id, value).await,
-                None => store.create_relation(id, value).await,
-            }
+        let relation = self
+            .services
+            .blackboard()
+            .await
+            .map_err(respond)?
+            .create_relation(
+                id,
+                NewBlackboardRelation {
+                    project_id: self.project_id.clone(),
+                    from_entry_id: BlackboardEntryId::parse(arguments.from_entry_id)
+                        .map_err(respond)?,
+                    to_entry_id: BlackboardEntryId::parse(arguments.to_entry_id)
+                        .map_err(respond)?,
+                    kind: arguments.kind,
+                    note: arguments.note,
+                    confidence: ConfidenceScore::from_basis_points(
+                        arguments.confidence_basis_points,
+                    )
+                    .map_err(respond)?,
+                    provenance: BlackboardProvenance {
+                        kind: BlackboardProvenanceKind::Agent,
+                        source_id: source_id.to_string(),
+                    },
+                },
+            )
+            .await
             .map_err(respond)?;
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::BlackboardUpdated {

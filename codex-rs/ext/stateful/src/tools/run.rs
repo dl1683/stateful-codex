@@ -6,7 +6,6 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
-use codex_project_intelligence::AgentKnowledgeChange;
 use codex_project_intelligence::CompletionFence;
 use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::ObligationPacket;
@@ -176,18 +175,14 @@ impl StatefulRunUpdateTool {
                     "completionDisposition noReusableLearning completes with the result only; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
                 ));
             }
-            let knowledge_change = fence
+            let knowledge_changed = fence
                 .insert(self.acquire_fence().await?)
-                .agent_knowledge_for_run(
-                    &self.project_id,
-                    &current.id.to_string(),
-                    current.created_at_ms,
-                )
+                .agent_knowledge_changed_since(&self.project_id, current.created_at_ms)
                 .await
                 .map_err(respond)?;
-            if !matches!(knowledge_change, AgentKnowledgeChange::Unchanged) {
+            if knowledge_changed {
                 return Err(FunctionCallError::RespondToModel(
-                    "project knowledge was recorded or changed during this run, so completion must use durableLearning and select the material finding (promote it first with blackboard_update_batch setRootPromotion if it is not in the root)".to_string(),
+                    "agent-written project knowledge changed in this project during this run, so completion must use durableLearning and select the material finding (promote it first with blackboard_update_batch setRootPromotion if it is not in the root)".to_string(),
                 ));
             }
             if result
@@ -401,7 +396,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: format!("Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed records finalObligation and the terminal result together in one atomic storage transaction: finish every blackboard, relationship, steering, and verification operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority current E aliases and at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact historical entry revisions directly material to the outcome; then supply completionIdempotencyKey, finalObligation, and the result in this single final Stateful mutation. If finalObligation.learning contains reusable project knowledge, completion requires at least one selected current or historical blackboard finding so that learning cannot disappear when the bounded recent-outcome window advances. Completion is rejected while any user steering remains submitted or acknowledged. Full source fingerprints in result or finalObligation must belong to a selected current or historical finding; the host renders selected evidence identifiers into the durable completion basis. The tool rejects changed run or root revisions before persistence and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
+            description: format!("Completion is proportional: use noReusableLearning for a lookup or read-only citation answer unless it produced a distinct finding likely to improve future project work; never create, revise, relate, or promote blackboard knowledge merely to qualify for durableLearning. Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed records finalObligation and the terminal result together in one atomic storage transaction: finish every blackboard, relationship, steering, and verification operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority current E aliases and at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact historical entry revisions directly material to the outcome; then supply completionIdempotencyKey, finalObligation, and the result in this single final Stateful mutation. If finalObligation.learning contains reusable project knowledge, completion requires at least one selected current or historical blackboard finding so that learning cannot disappear when the bounded recent-outcome window advances. Completion is rejected while any user steering remains submitted or acknowledged. Full source fingerprints in result or finalObligation must belong to a selected current or historical finding; the host renders selected evidence identifiers into the durable completion basis. The tool rejects changed run or root revisions before persistence and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -416,7 +411,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "materialHistoricalFindings": {"type": "array", "items": {"type": "object", "properties": {"entryId": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}}, "required": ["entryId", "revision"], "additionalProperties": false}, "maxItems": MAX_MATERIAL_HISTORICAL_FINDINGS, "description": format!("Optional for completed. Select at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact superseded or tombstoned entry IDs and revisions returned by blackboard_query or copy historicalFinding from a successful blackboard_update_batch lifecycle result. Use the latest returned revision; do not query the same entry again. The host renders stored source fingerprints; do not copy opaque fingerprints manually.")},
                     "completionIdempotencyKey": {"type": "string", "description": "Required for completed. Reuse only when retrying this identical final obligation and terminal result."},
                     "finalObligation": super::obligation::obligation_packet_schema(),
-                    "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning. Use noReusableLearning with status completed and a result only (no rootRevision, findings, idempotency key, or finalObligation) when the run answered from existing project state or produced nothing worth reusing, such as a lookup; do not record or promote anything first just to complete."}
+                    "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning. With status completed, use noReusableLearning and provide only result when the run produced no distinct finding likely to improve future project work. This is normally the right disposition for a lookup or read-only citation answer from existing project state or source material."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false

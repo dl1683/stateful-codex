@@ -424,6 +424,38 @@ impl BlackboardStore {
     }
 }
 
+/// Whether any agent wrote project knowledge at or after `since_ms`: any historical
+/// entry revision (not only current ones) or relation with agent provenance.
+pub(super) async fn agent_knowledge_changed_since_on_connection(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    since_ms: i64,
+) -> Result<bool, BlackboardStoreError> {
+    // Migration 0014 added run-attribution columns, indexes, and metadata that may
+    // already exist in migrated databases. They are intentionally not consulted:
+    // noReusableLearning conservatively rejects after any project-wide agent write
+    // at or after the run start.
+    let changed = sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(
+             SELECT 1
+             FROM blackboard_entry_revisions AS revision
+             JOIN blackboard_entries AS entry ON entry.id = revision.entry_id
+             WHERE entry.project_id = ? AND revision.provenance_kind = 'agent'
+               AND revision.recorded_at_ms >= ?
+         ) OR EXISTS(
+             SELECT 1 FROM blackboard_relations
+             WHERE project_id = ? AND provenance_kind = 'agent' AND created_at_ms >= ?
+         )",
+    )
+    .bind(project_id)
+    .bind(since_ms)
+    .bind(project_id)
+    .bind(since_ms)
+    .fetch_one(&mut *connection)
+    .await?;
+    Ok(changed != 0)
+}
+
 pub(super) async fn agent_knowledge_for_run_on_connection(
     connection: &mut SqliteConnection,
     project_id: &str,

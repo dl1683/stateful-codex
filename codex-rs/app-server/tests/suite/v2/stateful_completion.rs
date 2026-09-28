@@ -433,7 +433,9 @@ async fn model_completes_a_lookup_without_durable_learning_ceremony() -> Result<
 #[tokio::test]
 async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Result<()> {
     let (output, status) = complete_lookup_after_recording(ProjectShape::Indexed).await?;
-    assert!(output.contains("project knowledge was recorded or changed during this run"));
+    assert!(
+        output.contains("agent-written project knowledge changed in this project during this run")
+    );
     assert_eq!(status, StatefulRunStatus::Running);
     Ok(())
 }
@@ -637,7 +639,9 @@ async fn user_confirmation_does_not_hide_the_runs_own_write() -> Result<()> {
     let output =
         complete_without_learning(&responses_server, &mut server, &thread_id, run_revision).await?;
 
-    assert!(output.contains("project knowledge was recorded or changed during this run"));
+    assert!(
+        output.contains("agent-written project knowledge changed in this project during this run")
+    );
     assert_eq!(
         run_status(&mut server, run_id).await?,
         StatefulRunStatus::Running
@@ -646,7 +650,7 @@ async fn user_confirmation_does_not_hide_the_runs_own_write() -> Result<()> {
 }
 
 #[tokio::test]
-async fn another_runs_write_does_not_block_a_lookup_completion() -> Result<()> {
+async fn another_runs_agent_write_conservatively_requires_durable_learning() -> Result<()> {
     let (responses_server, _codex_home, _project_root, mut server, project_id) =
         indexed_project("other-run-write").await?;
     let (writer_thread, _, _) =
@@ -681,10 +685,12 @@ async fn another_runs_write_does_not_block_a_lookup_completion() -> Result<()> {
     )
     .await?;
 
-    assert!(output.contains(r#""status":"completed""#), "{output}");
+    assert!(
+        output.contains("agent-written project knowledge changed in this project during this run")
+    );
     assert_eq!(
         run_status(&mut server, lookup_run).await?,
-        StatefulRunStatus::Completed
+        StatefulRunStatus::Running
     );
     Ok(())
 }

@@ -225,3 +225,42 @@ fn completion_basis_is_not_repeated_in_the_continuity_view() {
     );
     assert!(!rendered.body().contains("Durable completion basis"));
 }
+
+#[test]
+fn five_maximal_outcomes_stay_bounded_in_full_and_delta_form() {
+    let long = |label: &str| format!("{label} “quoted” détail. ").repeat(700);
+    let outcomes = (1..=5)
+        .map(|index| {
+            outcome(
+                &format!("run-{index}"),
+                &long("Goal"),
+                &long("Result"),
+                &long("Learning"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let previous = project_outcomes_world_state_section(available(Vec::new()));
+    let current = project_outcomes_world_state_section(available(outcomes));
+
+    let full = current
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("full render");
+    let delta = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("delta render");
+
+    assert_eq!(
+        delta.markers(),
+        (
+            "<stateful_project_outcomes_update>",
+            "</stateful_project_outcomes_update>"
+        )
+    );
+    for fragment in [&full, &delta] {
+        assert_fragment_bounded(fragment);
+        assert!(
+            fragment.body().contains("…"),
+            "per-outcome shortening is marked"
+        );
+    }
+}

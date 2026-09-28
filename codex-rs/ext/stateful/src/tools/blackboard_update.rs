@@ -30,7 +30,6 @@ use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
 
-use super::attributed_run_id;
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
 use super::blackboard_evidence::resolve_evidence;
@@ -400,15 +399,9 @@ impl BlackboardUpdateTool {
                 update.state = BlackboardEntryState::Tombstoned;
             }
         }
-        let entry =
-            match attributed_run_id(&self.project_id, &self.thread_id, &self.services).await? {
-                Some(run_id) => {
-                    store
-                        .update_for_agent_run(&run_id, &self.project_id, &id, update)
-                        .await
-                }
-                None => store.update_entry(&self.project_id, &id, update).await,
-            }
+        let entry = store
+            .update_entry(&self.project_id, &id, update)
+            .await
             .map_err(respond)?;
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::BlackboardUpdated {

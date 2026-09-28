@@ -1218,3 +1218,73 @@ async fn run_older_than_a_fresh_database_is_not_legacy_without_unattributed_writ
         AgentKnowledgeChange::Unchanged
     );
 }
+
+#[tokio::test]
+async fn fenced_query_sees_any_agent_write_since_the_run_started() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
+    let since_ms = source.updated_at_ms + 1;
+    let changed = |store: BlackboardStore, since_ms: i64| async move {
+        let mut fence = store
+            .acquire_completion_fence(Duration::from_secs(1))
+            .await
+            .expect("fence acquires");
+        let changed = fence
+            .agent_knowledge_changed_since("project-1", since_ms)
+            .await
+            .expect("fenced query succeeds");
+        fence.release().await.expect("fence releases");
+        changed
+    };
+    let write = |id: &str, kind: BlackboardProvenanceKind| {
+        let mut value = source.value.clone();
+        value.content = format!("Written as {id}.");
+        value.provenance = BlackboardProvenance {
+            kind,
+            source_id: id.to_string(),
+        };
+        (BlackboardEntryId::parse(id).expect("valid entry ID"), value)
+    };
+    tokio::time::sleep(Duration::from_millis(2)).await;
+    for (id, kind) in [
+        ("user-write", BlackboardProvenanceKind::User),
+        ("maintenance-write", BlackboardProvenanceKind::Maintenance),
+        ("import-write", BlackboardProvenanceKind::Import),
+    ] {
+        let (id, value) = write(id, kind);
+        blackboard
+            .create_entry(id, value)
+            .await
+            .expect("entry inserts");
+    }
+    assert!(!changed(blackboard.clone(), since_ms).await);
+
+    let (id, value) = write("agent-write", BlackboardProvenanceKind::Agent);
+    let agent = blackboard
+        .create_entry(id.clone(), value)
+        .await
+        .expect("agent entry inserts");
+    let mut confirmed_value = agent.value.clone();
+    confirmed_value.verification = BlackboardVerification::UserConfirmed;
+    confirmed_value.provenance = BlackboardProvenance {
+        kind: BlackboardProvenanceKind::User,
+        source_id: "user-confirmation".to_string(),
+    };
+    blackboard
+        .update_entry(
+            "project-1",
+            &id,
+            entry_update(confirmed_value, agent.revision),
+        )
+        .await
+        .expect("user confirms the agent entry");
+
+    assert_eq!(
+        (
+            changed(blackboard.clone(), since_ms).await,
+            changed(blackboard.clone(), agent.created_at_ms).await,
+            changed(blackboard.clone(), agent.created_at_ms + 60_000).await,
+        ),
+        (true, true, false)
+    );
+}

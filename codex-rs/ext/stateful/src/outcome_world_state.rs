@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::limits::MAX_MODEL_ITEM_BYTES;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
@@ -13,7 +14,10 @@ const START_MARKER: &str = "<stateful_project_outcomes>";
 const END_MARKER: &str = "</stateful_project_outcomes>";
 const UPDATE_START_MARKER: &str = "<stateful_project_outcomes_update>";
 const UPDATE_END_MARKER: &str = "</stateful_project_outcomes_update>";
-const MAX_BODY_BYTES: usize = 10 * 1024;
+/// Body bound under the larger (update) marker pair, so full and delta fragments both
+/// stay within the model item bound.
+const MAX_BODY_BYTES: usize =
+    MAX_MODEL_ITEM_BYTES - UPDATE_START_MARKER.len() - UPDATE_END_MARKER.len();
 const MAX_GOAL_BYTES: usize = 320;
 const MAX_RESULT_BYTES: usize = 600;
 const MAX_PACKET_ITEM_BYTES: usize = 240;
