@@ -11,6 +11,8 @@ use crate::ExtractionLimit;
 use crate::ExtractionLimits;
 use crate::ExtractionNotice;
 use crate::ExtractionStatus;
+use crate::UnsupportedElement;
+use crate::UnsupportedPartCategory;
 use crate::archive;
 
 mod package;
@@ -41,7 +43,7 @@ fn parse_document(
     limits: &ExtractionLimits,
     original_fingerprint: String,
     original_bytes: u64,
-    unsupported_parts: Vec<String>,
+    unsupported_parts: Vec<(UnsupportedPartCategory, u16)>,
 ) -> Result<ExtractedDocument, ExtractionError> {
     if limits.max_canonical_block_bytes == 0 {
         return Err(ExtractionError::LimitExceeded(
@@ -50,8 +52,8 @@ fn parse_document(
     }
 
     let mut state = ParserState::new(limits);
-    for part in unsupported_parts {
-        state.add_notice(ExtractionNotice::UnsupportedPart { part });
+    for (category, count) in unsupported_parts {
+        state.add_notice(ExtractionNotice::UnsupportedPart { category, count });
     }
 
     let mut reader = NsReader::from_reader(document_xml);
@@ -411,8 +413,10 @@ impl<'a> ParserState<'a> {
     }
 
     fn add_unsupported_element(&mut self, element: &Element) {
-        let part = String::from_utf8_lossy(&element.name).into_owned();
-        let notice = ExtractionNotice::UnsupportedPart { part };
+        let Some(element) = unsupported_element(element) else {
+            return;
+        };
+        let notice = ExtractionNotice::UnsupportedElement { element };
         self.add_notice(notice.clone());
         if let Some(paragraph) = self.paragraph.as_mut()
             && !paragraph.notices.contains(&notice)
@@ -457,6 +461,20 @@ fn is_unsupported_element(element: &Element) -> bool {
         || element.is_word(b"pict")
         || element.is_word(b"object")
         || element.is_word(b"txbxContent")
+}
+
+fn unsupported_element(element: &Element) -> Option<UnsupportedElement> {
+    if element.is_word(b"drawing") {
+        Some(UnsupportedElement::Drawing)
+    } else if element.is_word(b"pict") {
+        Some(UnsupportedElement::Pict)
+    } else if element.is_word(b"object") {
+        Some(UnsupportedElement::Object)
+    } else if element.is_word(b"txbxContent") {
+        Some(UnsupportedElement::TextboxContent)
+    } else {
+        None
+    }
 }
 
 fn byte_slices(

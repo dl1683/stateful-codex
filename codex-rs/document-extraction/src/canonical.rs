@@ -36,9 +36,14 @@ fn push_notices(output: &mut Vec<u8>, notices: &[ExtractionNotice]) {
     for notice in notices {
         match notice {
             ExtractionNotice::TrackedChanges => push(output, "tracked-changes"),
-            ExtractionNotice::UnsupportedPart { part } => {
+            ExtractionNotice::UnsupportedPart { category, count } => {
                 push(output, "unsupported-part");
-                push(output, part);
+                push(output, &format!("{category:?}"));
+                output.extend_from_slice(&(*count as u64).to_le_bytes());
+            }
+            ExtractionNotice::UnsupportedElement { element } => {
+                push(output, "unsupported-element");
+                push(output, &format!("{element:?}"));
             }
             ExtractionNotice::LimitReached { limit } => {
                 push(output, "limit-reached");

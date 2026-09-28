@@ -15,6 +15,8 @@ use crate::ExtractionLimits;
 use crate::ExtractionNotice;
 use crate::ExtractionStatus;
 use crate::ExtractorIdentity;
+use crate::UnsupportedElement;
+use crate::UnsupportedPartCategory;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -92,9 +94,14 @@ fn push_canonical_notices(output: &mut Vec<u8>, notices: &[ExtractionNotice]) {
     for notice in notices {
         match notice {
             ExtractionNotice::TrackedChanges => push_canonical(output, "tracked-changes"),
-            ExtractionNotice::UnsupportedPart { part } => {
+            ExtractionNotice::UnsupportedPart { category, count } => {
                 push_canonical(output, "unsupported-part");
-                push_canonical(output, part);
+                push_canonical(output, &format!("{category:?}"));
+                output.extend_from_slice(&(*count as u64).to_le_bytes());
+            }
+            ExtractionNotice::UnsupportedElement { element } => {
+                push_canonical(output, "unsupported-element");
+                push_canonical(output, &format!("{element:?}"));
             }
             ExtractionNotice::LimitReached { limit } => {
                 push_canonical(output, "limit-reached");
@@ -229,7 +236,12 @@ fn marks_unsupported_parts_and_tracked_changes_partial() {
         ),
         &[
             ("word/header1.xml", "header"),
+            ("word/header2.xml", "header"),
             ("word/comments.xml", "comment"),
+            ("word/footnotes.xml", "footnote"),
+            ("word/endnotes.xml", "endnote"),
+            ("word/media/image.png", "image"),
+            ("word/embeddings/oleObject1.bin", "object"),
         ],
     );
 
@@ -242,14 +254,24 @@ fn marks_unsupported_parts_and_tracked_changes_partial() {
             ExtractionStatus::Partial,
             vec![
                 ExtractionNotice::UnsupportedPart {
-                    part: "word/header1.xml".to_owned(),
+                    category: UnsupportedPartCategory::HeadersFooters,
+                    count: 2,
                 },
                 ExtractionNotice::UnsupportedPart {
-                    part: "word/comments.xml".to_owned(),
+                    category: UnsupportedPartCategory::Comments,
+                    count: 1,
+                },
+                ExtractionNotice::UnsupportedPart {
+                    category: UnsupportedPartCategory::FootnotesEndnotes,
+                    count: 2,
+                },
+                ExtractionNotice::UnsupportedPart {
+                    category: UnsupportedPartCategory::DrawingsEmbeddedObjects,
+                    count: 2,
                 },
                 ExtractionNotice::TrackedChanges,
-                ExtractionNotice::UnsupportedPart {
-                    part: "w:drawing".to_owned(),
+                ExtractionNotice::UnsupportedElement {
+                    element: UnsupportedElement::Drawing,
                 },
             ],
             vec![ExtractedBlock {
@@ -260,13 +282,36 @@ fn marks_unsupported_parts_and_tracked_changes_partial() {
                 text: "inserted".to_owned(),
                 notices: vec![
                     ExtractionNotice::TrackedChanges,
-                    ExtractionNotice::UnsupportedPart {
-                        part: "w:drawing".to_owned(),
+                    ExtractionNotice::UnsupportedElement {
+                        element: UnsupportedElement::Drawing,
                     },
                 ],
             }],
         )
     );
+}
+
+#[test]
+fn never_serializes_archive_entry_names_in_notices() {
+    let entry_name = format!(
+        "word/header{}.xml",
+        "x".repeat(65_535 - "word/header.xml".len())
+    );
+    let bytes = package(
+        &document(r#"<w:p><w:r><w:t>safe</w:t></w:r></w:p>"#),
+        &[(&entry_name, "header")],
+    );
+
+    let result = extractor().extract(DocumentFormat::Docx, &bytes).unwrap();
+    assert_eq!(
+        result.notices,
+        vec![ExtractionNotice::UnsupportedPart {
+            category: UnsupportedPartCategory::HeadersFooters,
+            count: 1,
+        }]
+    );
+    let serialized = serde_json::to_string(&result).unwrap();
+    assert!(!serialized.contains(&entry_name));
 }
 
 #[test]
@@ -508,8 +553,8 @@ fn ignored_subtrees_preserve_real_structure() {
         expected_document(
             &bytes,
             ExtractionStatus::Partial,
-            vec![ExtractionNotice::UnsupportedPart {
-                part: "w:drawing".to_owned(),
+            vec![ExtractionNotice::UnsupportedElement {
+                element: UnsupportedElement::Drawing,
             }],
             vec![
                 ExtractedBlock {
@@ -518,8 +563,8 @@ fn ignored_subtrees_preserve_real_structure() {
                         locator: "body/tbl[1]/tr[1]/tc[1]/p[1]".to_owned(),
                     },
                     text: "beforeafter".to_owned(),
-                    notices: vec![ExtractionNotice::UnsupportedPart {
-                        part: "w:drawing".to_owned(),
+                    notices: vec![ExtractionNotice::UnsupportedElement {
+                        element: UnsupportedElement::Drawing,
                     }],
                 },
                 ExtractedBlock {

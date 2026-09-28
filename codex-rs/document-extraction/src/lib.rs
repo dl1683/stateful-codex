@@ -24,8 +24,44 @@ pub enum DocumentFormat {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ExtractionNotice {
     TrackedChanges,
-    UnsupportedPart { part: String },
-    LimitReached { limit: ExtractionLimit },
+    UnsupportedPart {
+        category: UnsupportedPartCategory,
+        count: u16,
+    },
+    UnsupportedElement {
+        element: UnsupportedElement,
+    },
+    LimitReached {
+        limit: ExtractionLimit,
+    },
+}
+
+/// A stable category for an unsupported part of an Office package.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum UnsupportedPartCategory {
+    #[serde(rename = "headers/footers")]
+    HeadersFooters,
+    #[serde(rename = "comments")]
+    Comments,
+    #[serde(rename = "footnotes/endnotes")]
+    FootnotesEndnotes,
+    #[serde(rename = "drawings/embedded-objects")]
+    DrawingsEmbeddedObjects,
+    #[serde(rename = "other")]
+    Other,
+}
+
+/// A stable, bounded name for an unsupported WordprocessingML element.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum UnsupportedElement {
+    #[serde(rename = "w:drawing")]
+    Drawing,
+    #[serde(rename = "w:pict")]
+    Pict,
+    #[serde(rename = "w:object")]
+    Object,
+    #[serde(rename = "w:txbxContent")]
+    TextboxContent,
 }
 
 /// The identity of the extractor and representation rules that produced a result.

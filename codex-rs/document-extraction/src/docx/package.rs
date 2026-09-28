@@ -4,10 +4,11 @@ use std::io::Read;
 use zip::ZipArchive;
 
 use crate::ExtractionError;
+use crate::UnsupportedPartCategory;
 
 pub(super) struct Package {
     pub(super) document_xml: Vec<u8>,
-    pub(super) unsupported_parts: Vec<String>,
+    pub(super) unsupported_parts: Vec<(UnsupportedPartCategory, u16)>,
 }
 
 pub(super) fn read(bytes: &[u8]) -> Result<Package, ExtractionError> {
@@ -22,28 +23,35 @@ pub(super) fn read(bytes: &[u8]) -> Result<Package, ExtractionError> {
 
 fn collect_unsupported_parts<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
-) -> Result<Vec<String>, ExtractionError> {
-    let mut parts = Vec::new();
+) -> Result<Vec<(UnsupportedPartCategory, u16)>, ExtractionError> {
+    let mut parts = std::collections::BTreeMap::<UnsupportedPartCategory, u16>::new();
     for index in 0..archive.len() {
         let entry = archive
             .by_index(index)
             .map_err(|_| ExtractionError::Corrupt)?;
         let name = entry.name();
-        if is_unsupported_part(name) {
-            parts.push(name.to_owned());
+        if let Some(category) = unsupported_part_category(name) {
+            parts
+                .entry(category)
+                .and_modify(|count| *count = count.saturating_add(1))
+                .or_insert(1);
         }
     }
-    Ok(parts)
+    Ok(parts.into_iter().collect())
 }
 
-fn is_unsupported_part(name: &str) -> bool {
-    name.starts_with("word/header")
-        || name.starts_with("word/footer")
-        || name == "word/comments.xml"
-        || name == "word/footnotes.xml"
-        || name == "word/endnotes.xml"
-        || name.starts_with("word/embeddings/")
-        || name.starts_with("word/media/")
+fn unsupported_part_category(name: &str) -> Option<UnsupportedPartCategory> {
+    if name.starts_with("word/header") || name.starts_with("word/footer") {
+        Some(UnsupportedPartCategory::HeadersFooters)
+    } else if name == "word/comments.xml" {
+        Some(UnsupportedPartCategory::Comments)
+    } else if name == "word/footnotes.xml" || name == "word/endnotes.xml" {
+        Some(UnsupportedPartCategory::FootnotesEndnotes)
+    } else if name.starts_with("word/embeddings/") || name.starts_with("word/media/") {
+        Some(UnsupportedPartCategory::DrawingsEmbeddedObjects)
+    } else {
+        None
+    }
 }
 
 fn read_document_xml<R: Read + std::io::Seek>(
