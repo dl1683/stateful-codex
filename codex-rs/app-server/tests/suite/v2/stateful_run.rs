@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
@@ -70,6 +72,9 @@ use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::sqlite::SqlitePoolOptions;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -1700,6 +1705,364 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
     assert!(omitted > 0);
     assert_eq!(omitted, 16 - returned_checklist);
     assert!(completion["finalObligationCursor"].is_string());
+    Ok(())
+}
+
+async fn completion_fence_fixture(
+    responses_server: &wiremock::MockServer,
+) -> Result<(
+    TempDir,
+    TestAppServer,
+    String,
+    String,
+    String,
+    u64,
+    u64,
+    HierarchyNodeId,
+)> {
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Completion fence".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "completion-fence-project".to_string(),
+            },
+        })
+        .await?;
+    let project_node_id = HierarchyNodeId::parse(format!("project-node-{}", project.project.id))?;
+    let sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    HierarchyStore::open(&sqlite)
+        .await?
+        .create_node(
+            project_node_id.clone(),
+            NewHierarchyNode {
+                project_id: project.project.id.clone(),
+                parent_id: None,
+                kind: NodeKind::Project,
+                project_root: None,
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
+    let root_revision = BlackboardStore::open(&sqlite)
+        .await?
+        .root_projection(RootBlackboardQuery {
+            project_id: project.project.id.clone(),
+            max_entries: 256,
+        })
+        .await?
+        .revision;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id.clone(),
+                thread_id: thread.thread.id.clone(),
+                goal: "Prove completion ordering.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "completion-fence-run".to_string(),
+            },
+        })
+        .await?;
+    Ok((
+        codex_home,
+        server,
+        project.project.id,
+        thread.thread.id,
+        started.run.id,
+        started.run.revision,
+        root_revision,
+        project_node_id,
+    ))
+}
+
+fn agent_entry(
+    project_id: &str,
+    node_id: &HierarchyNodeId,
+    id: &str,
+) -> Result<NewBlackboardEntry> {
+    Ok(NewBlackboardEntry {
+        project_id: project_id.to_string(),
+        node_id: node_id.clone(),
+        kind: BlackboardKind::Fact,
+        content: format!("Agent mutation {id}"),
+        structured_value: None,
+        confidence: ConfidenceScore::from_basis_points(10_000)?,
+        verification: BlackboardVerification::UserConfirmed,
+        importance: BlackboardImportance::Normal,
+        root_promotion: RootPromotion::NotPromoted,
+        evidence: Vec::new(),
+        premises: Vec::new(),
+        provenance: BlackboardProvenance {
+            kind: BlackboardProvenanceKind::User,
+            source_id: id.to_string(),
+        },
+    })
+}
+
+async fn held_runtime_transaction(
+    codex_home: &TempDir,
+) -> Result<(SqlitePool, sqlx::Transaction<'static, sqlx::Sqlite>)> {
+    let runtime_path = codex_home.path().join("stateful_runtime_1.sqlite");
+    let runtime_pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(runtime_path)
+                .create_if_missing(false),
+        )
+        .await?;
+    let transaction = runtime_pool.begin_with("BEGIN IMMEDIATE").await?;
+    Ok((runtime_pool, transaction))
+}
+
+async fn mount_delayed_sse_once(responses_server: &wiremock::MockServer, body: String) {
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path_regex(".*/responses$"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body)
+                .set_delay(Duration::from_millis(200)),
+        )
+        .up_to_n_times(1)
+        .mount(responses_server)
+        .await;
+}
+
+async fn wait_for_response_request(responses_server: &wiremock::MockServer) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if !responses_server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("initial model request arrives");
+}
+
+#[tokio::test]
+async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let (codex_home, mut server, project_id, thread_id, run_id, revision, root_revision, node_id) =
+        completion_fence_fixture(&responses_server).await?;
+    let sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    let blackboard = BlackboardStore::open(&sqlite).await?;
+    let completion_call = responses::sse(vec![
+        responses::ev_function_call(
+            "complete",
+            "stateful_run_update",
+            &json!({
+                "expectedRevision": revision,
+                "status": "completed",
+                "result": "Completion committed.",
+                "rootRevision": root_revision,
+                "materialRootFindings": [],
+                "completionIdempotencyKey": "completion-fence-success",
+                "finalObligation": {"implication": ["Completion ordering is durable."]}
+            })
+            .to_string(),
+        ),
+        responses::ev_completed("complete-response"),
+    ]);
+    mount_delayed_sse_once(&responses_server, completion_call).await;
+    let mut completion = Box::pin(server.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: thread_id.clone(),
+        input: vec![UserInput::Text {
+            text: "Complete the run.".to_string(),
+            text_elements: Vec::new(),
+        }],
+        ..Default::default()
+    }));
+    tokio::select! {
+        result = &mut completion => panic!("completion finished before the runtime lock: {result:?}"),
+        () = wait_for_response_request(&responses_server) => {}
+    }
+    let (_runtime_pool, runtime_transaction) = held_runtime_transaction(&codex_home).await?;
+    responses_server.reset().await;
+    let completion_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![responses::sse(vec![
+            responses::ev_assistant_message("completed", "Completed."),
+            responses::ev_completed("completed-response"),
+        ])],
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert!(matches!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            blackboard.acquire_completion_fence(Duration::from_millis(50)),
+        )
+        .await,
+        Ok(Err(_)) | Err(_)
+    ));
+    let mutation = blackboard.create_entry(
+        BlackboardEntryId::parse("completion-fence-agent-mutation")?,
+        agent_entry(&project_id, &node_id, "completion-fence-agent-mutation")?,
+    );
+    tokio::pin!(mutation);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut mutation)
+            .await
+            .is_err()
+    );
+    runtime_transaction.commit().await?;
+    completion.await?;
+    let completion: Value = serde_json::from_str(
+        &completion_log
+            .function_call_output_text("complete")
+            .expect("completion output"),
+    )?;
+    assert_eq!(completion["status"], json!("completed"));
+    assert_eq!(mutation.await?.revision, 1);
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(run_id),
+                thread_id: None,
+            },
+        })
+        .await?;
+    assert_eq!(
+        read.run.expect("completed run").status,
+        StatefulRunStatus::Completed
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let (codex_home, mut server, project_id, thread_id, run_id, revision, root_revision, node_id) =
+        completion_fence_fixture(&responses_server).await?;
+    let sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    let blackboard = BlackboardStore::open(&sqlite).await?;
+    let completion_call = responses::sse(vec![
+        responses::ev_function_call(
+            "conflict",
+            "stateful_run_update",
+            &json!({
+                "expectedRevision": revision,
+                "status": "completed",
+                "result": "Should not commit.",
+                "rootRevision": root_revision,
+                "materialRootFindings": [],
+                "completionIdempotencyKey": "completion-fence-conflict",
+                "finalObligation": {"implication": ["Conflict is expected."]}
+            })
+            .to_string(),
+        ),
+        responses::ev_completed("conflict-response"),
+    ]);
+    mount_delayed_sse_once(&responses_server, completion_call).await;
+    let mut completion = Box::pin(server.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: thread_id.clone(),
+        input: vec![UserInput::Text {
+            text: "Complete the run.".to_string(),
+            text_elements: Vec::new(),
+        }],
+        ..Default::default()
+    }));
+    tokio::select! {
+        result = &mut completion => panic!("completion finished before the runtime lock: {result:?}"),
+        () = wait_for_response_request(&responses_server) => {}
+    }
+    let (_runtime_pool, mut runtime_transaction) = held_runtime_transaction(&codex_home).await?;
+    responses_server.reset().await;
+    let completion_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![responses::sse(vec![
+            responses::ev_assistant_message("conflict-done", "Conflict handled."),
+            responses::ev_completed("conflict-done-response"),
+        ])],
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert!(matches!(
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            blackboard.acquire_completion_fence(Duration::from_millis(50)),
+        )
+        .await,
+        Ok(Err(_)) | Err(_)
+    ));
+    sqlx::query("UPDATE stateful_runs SET revision = revision + 1 WHERE id = ?")
+        .bind(&run_id)
+        .execute(&mut *runtime_transaction)
+        .await?;
+    runtime_transaction.commit().await?;
+    completion.await?;
+    assert!(
+        completion_log
+            .function_call_output_text("conflict")
+            .expect("conflict output")
+            .contains("revision conflict")
+    );
+    blackboard
+        .acquire_completion_fence(Duration::from_millis(100))
+        .await
+        .expect("fence released")
+        .release()
+        .await
+        .expect("fence releases");
+    assert_eq!(
+        blackboard
+            .create_entry(
+                BlackboardEntryId::parse("completion-fence-conflict-agent-mutation")?,
+                agent_entry(
+                    &project_id,
+                    &node_id,
+                    "completion-fence-conflict-agent-mutation"
+                )?,
+            )
+            .await?
+            .revision,
+        1
+    );
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(run_id),
+                thread_id: None,
+            },
+        })
+        .await?;
+    assert_eq!(
+        read.run.expect("nonterminal run").status,
+        StatefulRunStatus::Running
+    );
     Ok(())
 }
 
