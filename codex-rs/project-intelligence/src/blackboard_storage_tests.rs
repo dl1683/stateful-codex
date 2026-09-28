@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
@@ -38,6 +40,24 @@ use crate::RootBlackboardQuery;
 
 fn fingerprint(value: &str) -> SourceFingerprint {
     SourceFingerprint::parse(value).expect("valid fingerprint")
+}
+
+fn entry_update(value: NewBlackboardEntry, expected_revision: u64) -> BlackboardEntryUpdate {
+    BlackboardEntryUpdate {
+        expected_revision,
+        kind: value.kind,
+        content: value.content,
+        structured_value: value.structured_value,
+        confidence: value.confidence,
+        verification: value.verification,
+        importance: value.importance,
+        root_promotion: value.root_promotion,
+        evidence: value.evidence,
+        premises: value.premises,
+        state: BlackboardEntryState::Active,
+        superseded_by: None,
+        provenance: value.provenance,
+    }
 }
 
 async fn fixture(temp_dir: &TempDir) -> (HierarchyStore, BlackboardStore, BlackboardEntry, u64) {
@@ -976,21 +996,185 @@ async fn blackboard_relations_are_project_scoped_idempotent_and_queryable() {
 }
 
 #[tokio::test]
-async fn agent_knowledge_change_is_reported_only_after_the_given_time() {
+async fn agent_knowledge_query_uses_run_attribution_and_legacy_cutoff() {
     let temp_dir = TempDir::new().expect("tempdir created");
     let (_hierarchy, blackboard, entry, _) = fixture(&temp_dir).await;
 
     assert_eq!(
-        (
-            blackboard
-                .agent_knowledge_changed_since("project-1", entry.updated_at_ms)
-                .await
-                .expect("query succeeds"),
-            blackboard
-                .agent_knowledge_changed_since("project-1", entry.updated_at_ms + 1)
-                .await
-                .expect("query succeeds"),
-        ),
-        (true, false)
+        blackboard
+            .agent_knowledge_for_run("project-1", "run-1", entry.updated_at_ms)
+            .await
+            .expect("query succeeds"),
+        AgentKnowledgeChange::Unchanged
     );
+    assert_eq!(
+        blackboard
+            .agent_knowledge_for_run("project-1", "run-1", 0)
+            .await
+            .expect("query succeeds"),
+        AgentKnowledgeChange::AttributionUnknownLegacy
+    );
+}
+
+#[tokio::test]
+async fn agent_attribution_survives_historical_user_confirmation_and_restart() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
+    let mut value = source.value.clone();
+    value.content = "Run A recorded this durable fact.".to_string();
+    value.provenance.source_id = "run-a-call".to_string();
+    let id = BlackboardEntryId::parse("run-a-fact").expect("valid entry ID");
+    let recorded = blackboard
+        .record_for_agent_run("run-a", id.clone(), value.clone())
+        .await
+        .expect("attributed entry inserts");
+    assert_eq!(
+        blackboard
+            .record_for_agent_run("run-b", id.clone(), value)
+            .await
+            .expect("idempotent write succeeds"),
+        recorded
+    );
+    let mut confirmed_value = recorded.value.clone();
+    confirmed_value.verification = BlackboardVerification::UserConfirmed;
+    confirmed_value.provenance.kind = BlackboardProvenanceKind::User;
+    confirmed_value.provenance.source_id = "user-confirmation".to_string();
+    let confirmed = blackboard
+        .update_entry(
+            "project-1",
+            &id,
+            entry_update(confirmed_value, recorded.revision),
+        )
+        .await
+        .expect("user confirmation updates the entry");
+    assert_eq!(
+        blackboard
+            .agent_knowledge_for_run("project-1", "run-a", confirmed.created_at_ms)
+            .await
+            .expect("run A query succeeds"),
+        AgentKnowledgeChange::Changed
+    );
+    assert_eq!(
+        blackboard
+            .agent_knowledge_for_run("project-1", "run-b", confirmed.created_at_ms)
+            .await
+            .expect("run B query succeeds"),
+        AgentKnowledgeChange::Unchanged
+    );
+    assert_eq!(
+        blackboard
+            .agent_knowledge_for_run("project-1", "run-b", confirmed.created_at_ms)
+            .await
+            .expect("run B query succeeds after no-op"),
+        AgentKnowledgeChange::Unchanged
+    );
+    let failed_update = entry_update(confirmed.value.clone(), recorded.revision);
+    assert!(
+        blackboard
+            .update_entry("project-1", &confirmed.id, failed_update)
+            .await
+            .is_err()
+    );
+    drop(blackboard);
+    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(temp_dir.path().abs()))
+        .await
+        .expect("blackboard reopens");
+    assert_eq!(
+        reopened
+            .agent_knowledge_for_run("project-1", "run-a", confirmed.created_at_ms)
+            .await
+            .expect("reopened run query succeeds"),
+        AgentKnowledgeChange::Changed
+    );
+}
+
+#[tokio::test]
+async fn agent_relation_attribution_is_learning() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
+    let mut target_value = source.value.clone();
+    target_value.content = "A second fact for the attributed relation.".to_string();
+    target_value.verification = BlackboardVerification::Unverified;
+    target_value.evidence.clear();
+    target_value.provenance.source_id = "target".to_string();
+    let target = blackboard
+        .create_entry(
+            BlackboardEntryId::parse("relation-target").expect("valid entry ID"),
+            target_value,
+        )
+        .await
+        .expect("target inserts");
+    let relation = blackboard
+        .relate_for_agent_run(
+            "run-relation",
+            BlackboardRelationId::parse("run-relation-link").expect("valid relation ID"),
+            NewBlackboardRelation {
+                project_id: "project-1".to_string(),
+                from_entry_id: source.id,
+                to_entry_id: target.id,
+                kind: BlackboardRelationKind::Supports,
+                note: Some("Run A connected these facts.".to_string()),
+                confidence: ConfidenceScore::from_basis_points(8_000).expect("valid confidence"),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "run-relation-call".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("attributed relation inserts");
+    assert_eq!(
+        blackboard
+            .agent_knowledge_for_run("project-1", "run-relation", relation.created_at_ms)
+            .await
+            .expect("relation query succeeds"),
+        AgentKnowledgeChange::Changed
+    );
+}
+
+#[tokio::test]
+async fn completion_fence_blocks_other_store_and_times_out() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let other_store = BlackboardStore::open(&sqlite)
+        .await
+        .expect("second store opens");
+    let mut fence = blackboard
+        .acquire_completion_fence(Duration::from_secs(1))
+        .await
+        .expect("completion fence acquires");
+    assert_eq!(
+        fence
+            .agent_knowledge_for_run("project-1", "run-fence", source.created_at_ms)
+            .await
+            .expect("fenced query succeeds"),
+        AgentKnowledgeChange::Unchanged
+    );
+    assert!(matches!(
+        other_store
+            .acquire_completion_fence(Duration::from_millis(50))
+            .await,
+        Err(BlackboardStoreError::CompletionFenceTimeout)
+    ));
+    let mut mutation = tokio::spawn(async move {
+        let mut value = source.value;
+        value.content = "Mutation waits for completion persistence.".to_string();
+        other_store
+            .create_entry(
+                BlackboardEntryId::parse("fence-mutation").expect("valid entry ID"),
+                value,
+            )
+            .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut mutation)
+            .await
+            .is_err()
+    );
+    fence.release().await.expect("completion fence releases");
+    mutation
+        .await
+        .expect("mutation task joins")
+        .expect("mutation commits after release");
 }

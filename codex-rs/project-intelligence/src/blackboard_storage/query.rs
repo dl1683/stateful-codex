@@ -35,6 +35,13 @@ struct RootEntryCounts {
     candidates: i64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentKnowledgeChange {
+    Unchanged,
+    Changed,
+    AttributionUnknownLegacy,
+}
+
 #[derive(FromRow)]
 struct StoredRouteKnowledge {
     context_map_entry_id: String,
@@ -327,33 +334,20 @@ impl BlackboardStore {
         Ok(BlackboardQueryResult { data, truncated })
     }
 
-    /// Whether an agent wrote or changed any blackboard entry or relation in the project
-    /// at or after `since_ms`. Used to decide whether a run produced durable knowledge.
-    pub async fn agent_knowledge_changed_since(
+    pub async fn agent_knowledge_for_run(
         &self,
         project_id: &str,
-        since_ms: i64,
-    ) -> Result<bool, BlackboardStoreError> {
-        let changed = sqlx::query_scalar::<_, i64>(
-            "SELECT EXISTS(
-                 SELECT 1
-                 FROM blackboard_entries AS entry
-                 JOIN blackboard_entry_revisions AS revision
-                   ON revision.entry_id = entry.id AND revision.revision = entry.revision
-                 WHERE entry.project_id = ? AND entry.updated_at_ms >= ?
-                   AND revision.provenance_kind = 'agent'
-             ) OR EXISTS(
-                 SELECT 1 FROM blackboard_relations
-                 WHERE project_id = ? AND created_at_ms >= ? AND provenance_kind = 'agent'
-             )",
+        agent_run_id: &str,
+        run_created_at_ms: i64,
+    ) -> Result<AgentKnowledgeChange, BlackboardStoreError> {
+        let mut connection = self.pool.acquire().await?;
+        agent_knowledge_for_run_on_connection(
+            &mut connection,
+            project_id,
+            agent_run_id,
+            run_created_at_ms,
         )
-        .bind(project_id)
-        .bind(since_ms)
-        .bind(project_id)
-        .bind(since_ms)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(changed != 0)
+        .await
     }
 
     /// The project's current intelligence revision (0 before the first mutation).
@@ -428,6 +422,46 @@ impl BlackboardStore {
                 .map_err(|_| BlackboardStoreError::CountOverflow)?,
         })
     }
+}
+
+pub(super) async fn agent_knowledge_for_run_on_connection(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    agent_run_id: &str,
+    run_created_at_ms: i64,
+) -> Result<AgentKnowledgeChange, BlackboardStoreError> {
+    let enabled_at_ms = sqlx::query_scalar::<_, i64>(
+        "SELECT attribution_enabled_at_ms
+         FROM blackboard_attribution_metadata
+         WHERE id = 1",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    if run_created_at_ms < enabled_at_ms {
+        return Ok(AgentKnowledgeChange::AttributionUnknownLegacy);
+    }
+    let changed = sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(
+             SELECT 1
+             FROM blackboard_entry_revisions AS revision
+             JOIN blackboard_entries AS entry ON entry.id = revision.entry_id
+             WHERE entry.project_id = ? AND revision.agent_run_id = ?
+         ) OR EXISTS(
+             SELECT 1 FROM blackboard_relations
+             WHERE project_id = ? AND agent_run_id = ?
+         )",
+    )
+    .bind(project_id)
+    .bind(agent_run_id)
+    .bind(project_id)
+    .bind(agent_run_id)
+    .fetch_one(&mut *connection)
+    .await?;
+    Ok(if changed == 0 {
+        AgentKnowledgeChange::Unchanged
+    } else {
+        AgentKnowledgeChange::Changed
+    })
 }
 
 pub(super) async fn query_entry_ids(

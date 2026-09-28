@@ -6,6 +6,7 @@ use crate::NewBlackboardEntry;
 
 use super::BlackboardStore;
 use super::BlackboardStoreError;
+use super::RevisionMetadata;
 use super::load_entry;
 use super::unix_timestamp_millis;
 use super::validate_evidence;
@@ -15,6 +16,28 @@ use super::write_revision;
 impl BlackboardStore {
     pub async fn update_entry(
         &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        update: BlackboardEntryUpdate,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.update_with_agent_run(None, project_id, id, update)
+            .await
+    }
+
+    pub async fn update_for_agent_run(
+        &self,
+        agent_run_id: &str,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        update: BlackboardEntryUpdate,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.update_with_agent_run(Some(agent_run_id), project_id, id, update)
+            .await
+    }
+
+    async fn update_with_agent_run(
+        &self,
+        agent_run_id: Option<&str>,
         project_id: &str,
         id: &BlackboardEntryId,
         update: BlackboardEntryUpdate,
@@ -112,8 +135,11 @@ impl BlackboardStore {
             next_revision,
             &value,
             update.state,
-            update.superseded_by.as_ref(),
-            now,
+            RevisionMetadata {
+                superseded_by: update.superseded_by.as_ref(),
+                recorded_at_ms: now,
+                agent_run_id,
+            },
         )
         .await?;
         let entry = load_entry(&mut transaction, project_id, id)

@@ -7,6 +7,7 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_project_intelligence::AgentKnowledgeChange;
 use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRunStatus;
@@ -152,15 +153,19 @@ impl StatefulRunUpdateTool {
                     "completionDisposition noReusableLearning completes with the result only; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
                 ));
             }
-            let knowledge_changed = self
+            let knowledge_change = self
                 .services
                 .blackboard()
                 .await
                 .map_err(respond)?
-                .agent_knowledge_changed_since(&self.project_id, current.created_at_ms)
+                .agent_knowledge_for_run(
+                    &self.project_id,
+                    &current.id.to_string(),
+                    current.created_at_ms,
+                )
                 .await
                 .map_err(respond)?;
-            if knowledge_changed {
+            if !matches!(knowledge_change, AgentKnowledgeChange::Unchanged) {
                 return Err(FunctionCallError::RespondToModel(
                     "project knowledge was recorded or changed during this run, so completion must use durableLearning and select the material finding (promote it first with blackboard_update_batch setRootPromotion if it is not in the root)".to_string(),
                 ));
