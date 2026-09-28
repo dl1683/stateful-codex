@@ -1853,7 +1853,7 @@ async fn mount_delayed_sse_once(responses_server: &wiremock::MockServer, body: S
 }
 
 async fn wait_for_response_request(responses_server: &wiremock::MockServer) {
-    tokio::time::timeout(Duration::from_secs(1), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             if !responses_server
                 .received_requests()
@@ -1863,7 +1863,7 @@ async fn wait_for_response_request(responses_server: &wiremock::MockServer) {
             {
                 break;
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
@@ -1917,15 +1917,7 @@ async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() 
         ])],
     )
     .await;
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    assert!(matches!(
-        tokio::time::timeout(
-            Duration::from_millis(100),
-            blackboard.acquire_completion_fence(Duration::from_millis(50)),
-        )
-        .await,
-        Ok(Err(_)) | Err(_)
-    ));
+    wait_until_completion_holds_fence(&blackboard).await?;
     let mutation = blackboard.create_entry(
         BlackboardEntryId::parse("completion-fence-agent-mutation")?,
         agent_entry(&project_id, &node_id, "completion-fence-agent-mutation")?,
@@ -2008,15 +2000,7 @@ async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> R
         ])],
     )
     .await;
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    assert!(matches!(
-        tokio::time::timeout(
-            Duration::from_millis(100),
-            blackboard.acquire_completion_fence(Duration::from_millis(50)),
-        )
-        .await,
-        Ok(Err(_)) | Err(_)
-    ));
+    wait_until_completion_holds_fence(&blackboard).await?;
     sqlx::query("UPDATE stateful_runs SET revision = revision + 1 WHERE id = ?")
         .bind(&run_id)
         .execute(&mut *runtime_transaction)
@@ -2299,4 +2283,29 @@ async fn long_goal_and_strategy_survive_compaction_and_restart_exactly() -> Resu
     .await?;
     assert_eq!((paged_goal, paged_strategy), (goal, strategy));
     Ok(())
+}
+
+/// Probes the project fence until the in-flight completion demonstrably holds it: a
+/// probe that still acquires the fence proves nothing yet, so it is released and
+/// retried; a probe that times out does. Avoids a timing guess under load.
+async fn wait_until_completion_holds_fence(blackboard: &BlackboardStore) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        match tokio::time::timeout(
+            Duration::from_millis(100),
+            blackboard.acquire_completion_fence(Duration::from_millis(50)),
+        )
+        .await
+        {
+            Ok(Ok(probe)) => {
+                probe.release().await?;
+                anyhow::ensure!(
+                    tokio::time::Instant::now() < deadline,
+                    "completion never took the project fence"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Ok(Err(_)) | Err(_) => return Ok(()),
+        }
+    }
 }
