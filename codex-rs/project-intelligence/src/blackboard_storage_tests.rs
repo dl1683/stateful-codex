@@ -1165,3 +1165,91 @@ async fn fenced_query_sees_any_agent_write_since_the_run_started() {
         .expect("agent relation inserts");
     assert!(changed(blackboard.clone(), agent.created_at_ms + 1).await);
 }
+
+fn now_ms() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_millis(),
+    )
+    .expect("millis fit i64")
+}
+
+#[tokio::test]
+async fn creation_queued_behind_a_fence_is_stamped_after_it() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
+    let other_store = BlackboardStore::open(&SqliteConfig::new_for_testing(temp_dir.path().abs()))
+        .await
+        .expect("second store opens");
+    let fence = blackboard
+        .acquire_completion_fence(Duration::from_secs(1))
+        .await
+        .expect("fence acquires");
+    let mut value = source.value.clone();
+    value.content = "Queued behind the completion fence.".to_string();
+    value.provenance.kind = BlackboardProvenanceKind::Agent;
+    let writer = other_store.create_entry(
+        BlackboardEntryId::parse("queued-agent-write").expect("valid entry ID"),
+        value,
+    );
+    tokio::pin!(writer);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), writer.as_mut())
+            .await
+            .is_err()
+    );
+    let since_ms = now_ms();
+    fence.release().await.expect("fence releases");
+    writer.await.expect("queued write commits");
+
+    let mut check = blackboard
+        .acquire_completion_fence(Duration::from_secs(1))
+        .await
+        .expect("fence acquires");
+    assert!(
+        check
+            .agent_knowledge_changed_since("project-1", since_ms)
+            .await
+            .expect("fenced query succeeds")
+    );
+    check.release().await.expect("fence releases");
+}
+
+#[tokio::test]
+async fn idempotent_retry_creates_no_revision_and_no_knowledge_change() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
+    let mut value = source.value.clone();
+    value.content = "Recorded before the run started.".to_string();
+    value.provenance.kind = BlackboardProvenanceKind::Agent;
+    let id = BlackboardEntryId::parse("seeded-agent-entry").expect("valid entry ID");
+    let seeded = blackboard
+        .create_entry(id.clone(), value.clone())
+        .await
+        .expect("seed inserts");
+    tokio::time::sleep(Duration::from_millis(2)).await;
+    let run_started_ms = now_ms();
+
+    let retried = blackboard
+        .create_entry(id, value)
+        .await
+        .expect("identical retry succeeds");
+
+    let mut fence = blackboard
+        .acquire_completion_fence(Duration::from_secs(1))
+        .await
+        .expect("fence acquires");
+    assert_eq!(
+        (
+            retried,
+            fence
+                .agent_knowledge_changed_since("project-1", run_started_ms)
+                .await
+                .expect("fenced query succeeds"),
+        ),
+        (seeded, false)
+    );
+    fence.release().await.expect("fence releases");
+}

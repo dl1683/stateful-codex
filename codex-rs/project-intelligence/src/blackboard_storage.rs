@@ -62,7 +62,6 @@ impl BlackboardStore {
         value: NewBlackboardEntry,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
         value.validate()?;
-        let now = unix_timestamp_millis()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
             if existing.value != value
@@ -79,6 +78,9 @@ impl BlackboardStore {
             .ok_or_else(|| BlackboardStoreError::NodeNotFound(value.node_id.to_string()))?;
         validate_evidence(&mut transaction, &value).await?;
         validate_premises(&mut transaction, &id, &value).await?;
+        // Sampled only once the writer lock is held, so a creation queued behind another
+        // writer (such as a completion fence) is never stamped earlier than that writer.
+        let now = unix_timestamp_millis()?;
         sqlx::query(
             "INSERT INTO blackboard_entries (
                 id, project_id, node_id, revision, created_at_ms, updated_at_ms
