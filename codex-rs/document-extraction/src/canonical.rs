@@ -11,7 +11,10 @@ pub(crate) fn digest_bytes(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn limits_digest(limits: &ExtractionLimits) -> String {
-    let bytes = serde_json::to_vec(limits).expect("extraction limits are serializable");
+    let bytes = match serde_json::to_vec(limits) {
+        Ok(bytes) => bytes,
+        Err(error) => unreachable!("extraction limits are serializable: {error}"),
+    };
     digest_bytes(&bytes)
 }
 

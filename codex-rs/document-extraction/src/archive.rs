@@ -36,10 +36,22 @@ fn contains_encrypted_entry(bytes: &[u8]) -> bool {
     if end + 20 > bytes.len() {
         return false;
     }
-    let central_offset =
-        u32::from_le_bytes(bytes[end + 16..end + 20].try_into().unwrap()) as usize;
-    let central_size =
-        u32::from_le_bytes(bytes[end + 12..end + 16].try_into().unwrap()) as usize;
+    let Some(central_offset) = bytes
+        .get(end + 16..end + 20)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .map(|value| value as usize)
+    else {
+        return false;
+    };
+    let Some(central_size) = bytes
+        .get(end + 12..end + 16)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .map(|value| value as usize)
+    else {
+        return false;
+    };
     let Some(central_end) = central_offset.checked_add(central_size) else {
         return false;
     };
@@ -48,16 +60,40 @@ fn contains_encrypted_entry(bytes: &[u8]) -> bool {
     }
     let mut position = central_offset;
     while position + 46 <= central_end && bytes[position..].starts_with(b"PK\x01\x02") {
-        let flags = u16::from_le_bytes(bytes[position + 8..position + 10].try_into().unwrap());
+        let Some(flags) = bytes
+            .get(position + 8..position + 10)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+        else {
+            return false;
+        };
         if flags & 1 != 0 {
             return true;
         }
-        let name_length =
-            u16::from_le_bytes(bytes[position + 28..position + 30].try_into().unwrap()) as usize;
-        let extra_length =
-            u16::from_le_bytes(bytes[position + 30..position + 32].try_into().unwrap()) as usize;
-        let comment_length =
-            u16::from_le_bytes(bytes[position + 32..position + 34].try_into().unwrap()) as usize;
+        let Some(name_length) = bytes
+            .get(position + 28..position + 30)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(|value| value as usize)
+        else {
+            return false;
+        };
+        let Some(extra_length) = bytes
+            .get(position + 30..position + 32)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(|value| value as usize)
+        else {
+            return false;
+        };
+        let Some(comment_length) = bytes
+            .get(position + 32..position + 34)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(|value| value as usize)
+        else {
+            return false;
+        };
         let Some(next) = position
             .checked_add(46)
             .and_then(|value| value.checked_add(name_length))

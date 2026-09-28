@@ -678,10 +678,7 @@ fn rejects_missing_document_xml_and_malformed_xml() {
         Err(ExtractionError::Corrupt)
     ));
 
-    let malformed = package(
-        &document(r#"<w:p><w:r><w:t>bad</w:r></w:p>"#),
-        &[],
-    );
+    let malformed = package(&document(r#"<w:p><w:r><w:t>bad</w:r></w:p>"#), &[]);
     assert!(matches!(
         extractor.extract(DocumentFormat::Docx, &malformed),
         Err(ExtractionError::Corrupt)
