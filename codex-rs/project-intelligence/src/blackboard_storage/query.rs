@@ -327,6 +327,18 @@ impl BlackboardStore {
         Ok(BlackboardQueryResult { data, truncated })
     }
 
+    /// The project's current intelligence revision (0 before the first mutation).
+    pub async fn project_revision(&self, project_id: &str) -> Result<u64, BlackboardStoreError> {
+        let revision = sqlx::query_scalar::<_, i64>(
+            "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
+        )
+        .bind(project_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_default();
+        Ok(u64::try_from(revision).unwrap_or_default())
+    }
+
     pub async fn root_projection(
         &self,
         query: RootBlackboardQuery,

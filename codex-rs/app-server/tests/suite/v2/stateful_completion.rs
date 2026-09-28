@@ -422,3 +422,124 @@ async fn model_completes_a_lookup_without_durable_learning_ceremony() -> Result<
     assert_eq!(obligations.data, Vec::new());
     Ok(())
 }
+
+#[tokio::test]
+async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Proportional completion guard".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "proportional-guard-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: "Answer a lookup.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "proportional-guard-run".to_string(),
+            },
+        })
+        .await?;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "record-gate",
+                    "blackboard_record_batch",
+                    &json!({"records": [{
+                        "idempotencyKey": "release-gate-note",
+                        "kind": "fact",
+                        "content": "The release gate is build C7-42.",
+                        "importance": "high",
+                        "confidenceBasisPoints": 9000,
+                        "verification": "unverified",
+                        "rootPromotion": "candidate"
+                    }]})
+                    .to_string(),
+                ),
+                responses::ev_completed("record-gate-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "lookup-complete",
+                    "stateful_run_update",
+                    &json!({
+                        "expectedRevision": started.run.revision,
+                        "status": "completed",
+                        "completionDisposition": "noReusableLearning",
+                        "result": "The release gate is build C7-42."
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("lookup-complete-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("guarded", "I must select the recorded finding."),
+                responses::ev_completed("guarded-response"),
+            ]),
+        ],
+    )
+    .await;
+
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id,
+            input: vec![UserInput::Text {
+                text: "What is the release gate?".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests[2]
+            .function_call_output("lookup-complete")
+            .to_string()
+            .contains("this run recorded or changed project knowledge")
+    );
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(started.run.id),
+                thread_id: None,
+            },
+        })
+        .await?;
+    assert_eq!(
+        read.run.expect("run remains readable").status,
+        StatefulRunStatus::Running
+    );
+    Ok(())
+}

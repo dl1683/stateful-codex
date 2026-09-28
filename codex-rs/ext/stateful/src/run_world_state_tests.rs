@@ -136,7 +136,12 @@ fn run_world_state_discloses_omitted_detail() {
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
         .expect("first contribution renders");
-    assert!(rendered.body().contains("Stateful run state truncated"));
+    assert!(
+        rendered
+            .body()
+            .contains("[goal shortened; the full goal is in the run record]")
+    );
+    assert!(rendered.body().contains("Semantic checkpoint: current."));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
 }
 
@@ -297,4 +302,94 @@ fn due_checkpoint_renders_one_line_that_changes_only_per_epoch() {
             .render_diff(PreviousWorldStateSection::Known(due.snapshot()))
             .is_none()
     );
+}
+
+fn run_with_obligation(obligation_id: &str, learning: Vec<String>) -> RunWorldStateStatus {
+    let run_id = StatefulRunId::parse("run-1").expect("valid run id");
+    RunWorldStateStatus::Available {
+        run: Box::new(StatefulRun {
+            id: run_id.clone(),
+            value: NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "Find the decisive source constraint.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+            status: StatefulRunStatus::Running,
+            strategy: None,
+            strategy_revision: 0,
+            result: None,
+            continuations_used: 0,
+            revision: 2,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        }),
+        obligation: Some(Box::new(StatefulObligation {
+            id: obligation_id.to_string(),
+            value: NewObligation {
+                project_id: "project-1".to_string(),
+                run_id,
+                packet: ObligationPacket {
+                    learning,
+                    next: vec!["Check the lease consent.".to_string()],
+                    ..Default::default()
+                },
+                provenance_source_id: "turn-1".to_string(),
+            },
+            sequence: 1,
+            revision: 1,
+            created_at_ms: 2,
+        })),
+        steering: Vec::new(),
+        steering_complete: true,
+        checkpoint_due: None,
+    }
+}
+
+#[test]
+fn deletion_only_obligation_change_still_replaces_the_block() {
+    let previous = run_world_state_section(run_with_obligation(
+        "obligation-1",
+        vec![
+            "The permit was never transferred.".to_string(),
+            "The landlord consent is missing.".to_string(),
+        ],
+    ));
+    let current = run_world_state_section(run_with_obligation(
+        "obligation-2",
+        vec!["The permit was never transferred.".to_string()],
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("a removed obligation item must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_run_update>", "</stateful_run_update>")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("Semantic obligation (replaces the previous obligation entirely):")
+    );
+    assert!(!rendered.body().contains("The landlord consent is missing."));
+}
+
+#[test]
+fn unknown_previous_run_state_renders_the_full_packet() {
+    let section = run_world_state_section(run_with_obligation(
+        "obligation-1",
+        vec!["The permit was never transferred.".to_string()],
+    ));
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Unknown)
+        .expect("unknown retained state must render");
+
+    assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
 }

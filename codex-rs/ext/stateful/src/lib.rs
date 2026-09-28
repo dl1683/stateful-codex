@@ -125,6 +125,7 @@ struct StatefulExtension {
     autonomous: Option<AutonomousContinuation>,
     attribution: attribution::StatefulAttributionTracker,
     visible_root: visible_root::VisibleRootRegistry,
+    run_activity: checkpoint::RunActivityRegistry,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -166,25 +167,17 @@ impl ContextContributor for StatefulExtension {
                     }
                 }
             };
-            let (project_section, visible_root) = project_world_state_section(status);
-            if let Some(visible_root) = visible_root {
-                self.visible_root
-                    .record(&input.thread_id.to_string(), visible_root);
-            }
-            let mut sections = vec![project_section];
+            let thread_id = input.thread_id.to_string();
+            let mut sections = vec![project_world_state_section(
+                status,
+                Some((self.visible_root.clone(), thread_id.clone())),
+            )];
             if let Some(outcomes) = self.project_outcomes(selected.project_id()).await {
                 sections.push(project_outcomes_world_state_section(outcomes));
             }
-            let checkpoint_due = input
-                .thread_store
-                .get::<checkpoint::CheckpointCounter>()
-                .and_then(|counter| counter.due_epoch());
+            let run_activity = self.run_activity.for_thread(&thread_id);
             if let Some(run_status) = self
-                .run_world_state(
-                    selected.project_id(),
-                    &input.thread_id.to_string(),
-                    checkpoint_due,
-                )
+                .run_world_state(selected.project_id(), &thread_id, &run_activity)
                 .await
             {
                 sections.push(run_world_state_section(run_status));
@@ -419,7 +412,7 @@ impl StatefulExtension {
         &self,
         project_id: &str,
         thread_id: &str,
-        checkpoint_due: Option<u64>,
+        run_activity: &checkpoint::RunActivity,
     ) -> Option<RunWorldStateStatus> {
         let services = self.services.as_ref()?;
         let store = match services.runtime().await {
@@ -452,6 +445,8 @@ impl StatefulExtension {
                 project_id: project_id.to_string(),
             });
         }
+        run_activity.observe_run(run.id.as_str());
+        let checkpoint_due = run_activity.due_epoch();
         let obligation = match store.latest_obligation(&run.id).await {
             Ok(obligation) => obligation,
             Err(error) => {
@@ -514,6 +509,7 @@ impl ToolContributor for StatefulExtension {
             self.projects.clone(),
             self.event_sink.clone(),
             self.visible_root.clone(),
+            self.run_activity.clone(),
         )
     }
 }
@@ -533,6 +529,7 @@ pub fn install<C: Sync>(
         autonomous,
         attribution: attribution::StatefulAttributionTracker::default(),
         visible_root: visible_root::VisibleRootRegistry::default(),
+        run_activity: checkpoint::RunActivityRegistry::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());

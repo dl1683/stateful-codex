@@ -19,6 +19,13 @@ impl VisibleRootRegistry {
             .insert(thread_id.to_string(), root);
     }
 
+    pub(crate) fn clear(&self, thread_id: &str) {
+        self.threads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(thread_id);
+    }
+
     pub(crate) fn get(&self, thread_id: &str) -> Option<VisibleRoot> {
         self.threads
             .lock()

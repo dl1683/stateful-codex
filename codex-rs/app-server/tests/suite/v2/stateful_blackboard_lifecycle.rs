@@ -512,16 +512,26 @@ async fn model_can_enumerate_active_knowledge_affected_by_a_changed_route() -> R
             "nodeId": node_id,
             "revision": 1,
             "state": "active",
-            "rootAlias": "E1",
-            "contentInRoot": true,
+            "supersededBy": null,
             "kind": "fact",
+            "content": "The approval threshold is 10.",
+            "structuredValue": null,
+            "confidenceBasisPoints": 9800,
             "declaredVerification": "sourceVerified",
             "effectiveVerification": "stale",
             "evidenceFreshness": "stale",
-            "premiseFreshness": "notApplicable",
+            "storedEvidenceFreshness": "stale",
             "importance": "high",
             "rootPromotion": "promoted",
-            "detailsOmitted": ["content", "structuredValue", "evidence", "premises", "provenance", "relations"]
+            "evidenceCount": 1,
+            "premises": [],
+            "premiseFreshness": "notApplicable",
+            "storedPremiseFreshness": "notApplicable",
+            "provenance": {
+                "kind": "agent",
+                "sourceId": "record-authority"
+            },
+            "detailsOmitted": ["evidenceLocators", "relations"]
         }])
     );
     assert_eq!(dependent_query_output["truncated"], false);

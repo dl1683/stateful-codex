@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ToolCallOutcome;
+use codex_extension_api::ToolCallSource;
 use codex_extension_api::ToolFinishInput;
 use codex_extension_api::ToolLifecycleContributor;
 use codex_extension_api::ToolLifecycleFuture;
@@ -16,7 +17,6 @@ use crate::SelectedProject;
 use crate::SelectedThread;
 use crate::StatefulEvent;
 use crate::StatefulExtension;
-use crate::checkpoint::CheckpointCounter;
 use crate::source_freshness::EvidenceAudit;
 use codex_stateful_runtime::StatefulRunId;
 
@@ -282,10 +282,13 @@ impl ToolLifecycleContributor for StatefulExtension {
 
     fn on_tool_finish<'a>(&'a self, input: ToolFinishInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
-            input
-                .thread_store
-                .get_or_init(CheckpointCounter::default)
-                .record(stateful_tool_name(input.tool_name), input.outcome);
+            if let Some(thread) = input.thread_store.get::<SelectedThread>() {
+                self.run_activity.for_thread(&thread.thread_id).record(
+                    matches!(input.source, ToolCallSource::Direct),
+                    stateful_tool_name(input.tool_name),
+                    input.outcome,
+                );
+            }
             if let Some(tool_name) = stateful_tool_name(input.tool_name) {
                 self.attribution.record_tool_outcome(
                     input.turn_id,

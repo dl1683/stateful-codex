@@ -33,7 +33,7 @@ use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 
 fn section(status: ProjectIntelligenceStatus) -> WorldStateSectionContribution {
-    project_world_state_section(status).0
+    project_world_state_section(status, /*visible_root*/ None)
 }
 
 fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
@@ -102,9 +102,10 @@ fn incomplete_refresh_health_is_visible_and_changes_project_context() {
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
         .expect("changed refresh health must be visible");
 
+    // The earlier refresh-health line no longer applies and cannot be retracted by a delta.
     assert_eq!(
         rendered.markers(),
-        ("<stateful_project_update>", "</stateful_project_update>")
+        ("<stateful_project>", "</stateful_project>")
     );
     assert!(rendered.body().contains("inventoryComplete=false"));
     assert!(rendered.body().contains("filesSkipped=1"));
@@ -284,7 +285,7 @@ fn revision_only_change_renders_a_compact_update() {
 }
 
 #[test]
-fn semantic_root_change_renders_only_the_changed_lines() {
+fn rewritten_status_line_renders_the_full_packet() {
     let previous = section(available_at_revision(
         project("Research", Vec::new()),
         /*revision*/ 7,
@@ -300,17 +301,16 @@ fn semantic_root_change_renders_only_the_changed_lines() {
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
         .expect("changed root knowledge must render");
 
+    // The earlier candidate-count line no longer applies and cannot be retracted by a delta.
     assert_eq!(
         rendered.markers(),
-        ("<stateful_project_update>", "</stateful_project_update>")
+        ("<stateful_project>", "</stateful_project>")
     );
-    assert!(rendered.body().contains("revision advanced from 7 to 11"));
     assert!(
         rendered
             .body()
             .contains("3 active candidate entries await an explicit project-relevance decision")
     );
-    assert!(!rendered.body().contains("Project roots:"));
 }
 
 #[test]

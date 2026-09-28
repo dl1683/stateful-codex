@@ -196,17 +196,30 @@ async fn material_root_checklist(
     let mut selected = Vec::with_capacity(requested_references.len());
     for reference in requested_references {
         let Some(raw_index) = reference.strip_prefix('E') else {
-            return Err(invalid_root_alias(reference, expected_root_revision));
+            return Err(invalid_root_alias(
+                reference,
+                expected_root_revision,
+                projection.data.len(),
+            ));
         };
         let Ok(index) = raw_index.parse::<usize>() else {
-            return Err(invalid_root_alias(reference, expected_root_revision));
+            return Err(invalid_root_alias(
+                reference,
+                expected_root_revision,
+                projection.data.len(),
+            ));
         };
         if index == 0 || raw_index.starts_with('0') {
-            return Err(invalid_root_alias(reference, expected_root_revision));
+            return Err(invalid_root_alias(
+                reference,
+                expected_root_revision,
+                projection.data.len(),
+            ));
         }
         let Some(hit) = projection.data.get(index - 1) else {
             return Err(respond(format!(
-                "unknown material root finding alias {reference} at root revision {expected_root_revision}"
+                "unknown material root finding alias {reference} at root revision {expected_root_revision}: {}",
+                root_alias_guidance(projection.data.len())
             )));
         };
         selected.push((reference, hit));
@@ -327,10 +340,26 @@ fn premise_freshness_name(freshness: AuditedPremiseFreshness) -> &'static str {
     }
 }
 
-fn invalid_root_alias(reference: &str, expected_root_revision: u64) -> FunctionCallError {
+fn invalid_root_alias(
+    reference: &str,
+    expected_root_revision: u64,
+    root_entries: usize,
+) -> FunctionCallError {
     respond(format!(
-        "invalid material root finding alias {reference}; use aliases such as E1 from root revision {expected_root_revision}"
+        "invalid material root finding alias {reference} at root revision {expected_root_revision}; materialRootFindings takes E aliases, not entry IDs: {}",
+        root_alias_guidance(root_entries)
     ))
+}
+
+fn root_alias_guidance(root_entries: usize) -> String {
+    let aliases = match root_entries {
+        0 => "the root currently has no promoted entries".to_string(),
+        1 => "the root currently has only E1".to_string(),
+        count => format!("the root currently has E1..E{count}"),
+    };
+    format!(
+        "{aliases}. Only root-promoted entries have E aliases; promote a recorded candidate or deeper finding with blackboard_update_batch setRootPromotion before selecting it, or complete with completionDisposition noReusableLearning when nothing reusable was learned."
+    )
 }
 
 async fn material_historical_checklist(

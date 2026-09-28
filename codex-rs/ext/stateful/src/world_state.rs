@@ -17,6 +17,7 @@ use crate::root_blackboard::RootLayout;
 use crate::root_blackboard::render_root_blackboard;
 use crate::root_blackboard::short_digest;
 use crate::visible_root::VisibleRoot;
+use crate::visible_root::VisibleRootRegistry;
 
 const WORLD_STATE_ID: &str = "stateful_project";
 const START_MARKER: &str = "<stateful_project>";
@@ -26,6 +27,7 @@ const UPDATE_END_MARKER: &str = "</stateful_project_update>";
 pub(super) const MAX_BODY_BYTES: usize = 24 * 1024;
 pub(super) const MAX_ESTIMATED_TOKENS: usize = 8 * 1024;
 const MAX_PROJECT_ROOT_BYTES: usize = 4 * 1024;
+const MAX_DELTA_BYTES: usize = 8 * 1024;
 
 pub(super) enum ProjectIntelligenceStatus {
     Available {
@@ -226,12 +228,16 @@ fn render_refresh_status(output: &mut String, refresh: Option<&ProjectRefreshSta
     }
 }
 
+/// Builds the project section. When `visible_root` is supplied, the render closure
+/// records what the model will actually hold: a full render records the fully shown
+/// root entries, while a delta clears the record so tools stop compacting.
 pub(super) fn project_world_state_section(
     status: ProjectIntelligenceStatus,
-) -> (WorldStateSectionContribution, Option<VisibleRoot>) {
+    visible_root: Option<(VisibleRootRegistry, String)>,
+) -> WorldStateSectionContribution {
     let (body, layout) = status.render();
     let snapshot = status.snapshot(&body, &layout);
-    let visible_root = snapshot
+    let shown_root = snapshot
         .get("rootRevision")
         .and_then(Value::as_u64)
         .map(|revision| {
@@ -243,7 +249,23 @@ pub(super) fn project_world_state_section(
         });
     let project_id = status.project_id().to_string();
     let delta_input = DeltaInput::new(&project_id, &body, &layout);
-    let section = WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
+    let record_full = {
+        let visible_root = visible_root.clone();
+        move || {
+            if let Some((registry, thread_id)) = &visible_root {
+                match &shown_root {
+                    Some(shown) => registry.record(thread_id, shown.clone()),
+                    None => registry.clear(thread_id),
+                }
+            }
+        }
+    };
+    let clear_visible = move || {
+        if let Some((registry, thread_id)) = &visible_root {
+            registry.clear(thread_id);
+        }
+    };
+    WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
             PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
             PreviousWorldStateSection::Known(previous)
@@ -272,6 +294,7 @@ pub(super) fn project_world_state_section(
             PreviousWorldStateSection::Known(previous)
                 if let Some(delta) = delta_input.render(previous, &snapshot) =>
             {
+                clear_visible();
                 Some(RenderedWorldStateFragment::new(
                     "developer",
                     (UPDATE_START_MARKER, UPDATE_END_MARKER),
@@ -281,6 +304,7 @@ pub(super) fn project_world_state_section(
             PreviousWorldStateSection::Absent
             | PreviousWorldStateSection::Unknown
             | PreviousWorldStateSection::Known(_) => {
+                record_full();
                 Some(RenderedWorldStateFragment::new(
                     "developer",
                     (START_MARKER, END_MARKER),
@@ -293,8 +317,7 @@ pub(super) fn project_world_state_section(
         let project_id = project_id.clone();
         move |role, text| is_project_fragment(role, text, &project_id)
     })
-    .with_retained_fragment_matcher(move |role, text| is_project_fragment(role, text, &project_id));
-    (section, visible_root)
+    .with_retained_fragment_matcher(move |role, text| is_project_fragment(role, text, &project_id))
 }
 
 /// Current packet material needed to describe a root change as a bounded delta
@@ -335,6 +358,18 @@ impl DeltaInput {
             .iter()
             .filter_map(Value::as_str)
             .collect::<HashSet<_>>();
+        let current_other = self
+            .other
+            .iter()
+            .map(|line| short_digest(line))
+            .collect::<HashSet<_>>();
+        // A removed or rewritten status line cannot be retracted by appending text.
+        if previous_other
+            .iter()
+            .any(|digest| !current_other.contains(*digest))
+        {
+            return None;
+        }
         let revision = |snapshot: &Value| {
             snapshot
                 .get("rootRevision")
@@ -361,7 +396,7 @@ impl DeltaInput {
                 delta.push_str(line);
             }
         }
-        (delta.len() <= self.body_len / 2).then_some(delta)
+        (delta.len() <= (self.body_len / 2).min(MAX_DELTA_BYTES)).then_some(delta)
     }
 }
 

@@ -141,7 +141,23 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             root.evidence_audit.as_ref(),
         );
         if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
-            if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
+            let references_rendered = hit
+                .entry
+                .value
+                .evidence
+                .iter()
+                .all(|link| evidence_aliases.contains_key(&link.context_map_entry_id))
+                && hit
+                    .entry
+                    .value
+                    .premises
+                    .iter()
+                    .all(|premise| entry_aliases.contains_key(premise.entry_id.as_str()))
+                && hit.relations.iter().all(|relation| {
+                    entry_aliases.contains_key(relation.value.from_entry_id.as_str())
+                        && entry_aliases.contains_key(relation.value.to_entry_id.as_str())
+                });
+            if references_rendered && !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
                 complete_entries.push((
                     hit.entry.id.to_string(),
                     format!("E{}", index + 1),
@@ -372,7 +388,7 @@ fn render_hit(
 
 pub(super) fn short_digest(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
-    digest[..4]
+    digest[..16]
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()

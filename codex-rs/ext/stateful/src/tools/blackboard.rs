@@ -100,9 +100,10 @@ impl BlackboardQueryTool {
             limit,
             detail,
         } = parse_arguments(&call)?;
-        let visible_root = (detail == QueryDetail::Compact)
-            .then(|| self.visible_root.get(&self.thread_id))
-            .flatten();
+        let visible_root = (detail == QueryDetail::Compact
+            && evidence_context_map_entry_ids.is_none())
+        .then(|| self.visible_root.get(&self.thread_id))
+        .flatten();
         let within_node = within_node_id
             .map(HierarchyNodeId::parse)
             .transpose()
@@ -202,6 +203,16 @@ impl BlackboardQueryTool {
                 }
             };
             Some(observe_evidence(&self.services, &self.project_id, &roots, evidence_ids).await)
+        };
+        // Compact only while nothing changed since the full root render the model holds.
+        let visible_root = match visible_root {
+            Some(visible) => blackboard
+                .project_revision(&self.project_id)
+                .await
+                .ok()
+                .filter(|revision| *revision == visible.project_revision)
+                .map(|_| visible),
+            None => None,
         };
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let hit_count = result.data.len();

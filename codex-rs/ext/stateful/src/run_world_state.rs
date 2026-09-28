@@ -23,6 +23,7 @@ const UPDATE_END_MARKER: &str = "</stateful_run_update>";
 const MAX_BODY_BYTES: usize = 8 * 1024;
 const MAX_ESTIMATED_TOKENS: usize = 3 * 1024;
 const MAX_RENDERED_STEERING: usize = 5;
+const MAX_RENDERED_GOAL_BYTES: usize = 2 * 1024;
 const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
 const TRUNCATION_MARKER: &str =
     "\n[Stateful run state truncated; query exact tool state before relying on omitted detail.]";
@@ -134,7 +135,16 @@ impl RunWorldStateStatus {
                         None => line(&mut output, "Semantic checkpoint: current."),
                     }
                 }
-                field(&mut output, "Goal", &run.value.goal);
+                let (goal, goal_shortened) = bounded_text(&run.value.goal, MAX_RENDERED_GOAL_BYTES);
+                field(
+                    &mut output,
+                    "Goal",
+                    &if goal_shortened {
+                        format!("{goal} [goal shortened; the full goal is in the run record]")
+                    } else {
+                        goal.to_string()
+                    },
+                );
                 if run.value.mode == WorkflowMode::Autonomous {
                     field(
                         &mut output,
@@ -167,7 +177,7 @@ impl RunWorldStateStatus {
                 }
                 line(
                     &mut output,
-                    "Semantic progress: call obligation_update whenever learning, strategy, uncertainty, blockers, or next work materially change while work remains; explain meaning, not activity. Completion: after all durable writes, finish with one stateful_run_update. Use completionDisposition noReusableLearning with only the result when the run answered from existing project state or learned nothing reusable; otherwise carry completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings (completion rejects reusable learning with no selected blackboard finding). Completion must be the final Stateful mutation.",
+                    "Semantic progress: call obligation_update whenever learning, strategy, uncertainty, blockers, or next work materially change while work remains; explain meaning, not activity. Stateful write tools (blackboard_record, blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. Completion: after all durable writes, finish with one stateful_run_update. Use completionDisposition noReusableLearning with only the result when the run answered from existing project state or learned nothing reusable; otherwise carry completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings (completion rejects reusable learning with no selected blackboard finding). Completion must be the final Stateful mutation.",
                 );
                 if let Some(strategy) = run.strategy.as_deref() {
                     field(&mut output, "Current strategy", strategy);
@@ -255,7 +265,9 @@ pub(super) fn run_world_state_section(
     let snapshot = json!({
         "fingerprint": status.fingerprint(),
         "runId": run_id,
-        "lines": body.lines().map(line_digest).collect::<Vec<_>>(),
+        "fields": block_lines(&body, RunBlockKind::Field).map(line_digest).collect::<Vec<_>>(),
+        "steering": line_digest(&block_lines(&body, RunBlockKind::Steering).collect::<Vec<_>>().join("\n")),
+        "obligation": line_digest(&block_lines(&body, RunBlockKind::Obligation).collect::<Vec<_>>().join("\n")),
     });
     WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
@@ -264,7 +276,6 @@ pub(super) fn run_world_state_section(
             {
                 None
             }
-            PreviousWorldStateSection::Unknown => None,
             PreviousWorldStateSection::Known(previous)
                 if let Some(delta) = run_delta(previous, &snapshot, &body) =>
             {
@@ -274,13 +285,13 @@ pub(super) fn run_world_state_section(
                     delta,
                 ))
             }
-            PreviousWorldStateSection::Absent | PreviousWorldStateSection::Known(_) => {
-                Some(RenderedWorldStateFragment::new(
-                    "developer",
-                    (START_MARKER, END_MARKER),
-                    body.clone(),
-                ))
-            }
+            PreviousWorldStateSection::Absent
+            | PreviousWorldStateSection::Unknown
+            | PreviousWorldStateSection::Known(_) => Some(RenderedWorldStateFragment::new(
+                "developer",
+                (START_MARKER, END_MARKER),
+                body.clone(),
+            )),
         }
     })
     .with_legacy_matcher({
@@ -301,72 +312,72 @@ fn run_delta(previous: &Value, current: &Value, body: &str) -> Option<String> {
     if previous.get("runId") != current.get("runId") || current.get("runId")?.is_null() {
         return None;
     }
-    let previous_lines = previous
-        .get("lines")?
+    let previous_fields = previous
+        .get("fields")?
         .as_array()?
         .iter()
         .filter_map(Value::as_str)
         .collect::<std::collections::HashSet<_>>();
-    let mut fields = Vec::new();
-    let mut steering = Vec::new();
-    let mut obligation = Vec::new();
-    let mut steering_changed = false;
-    let mut obligation_changed = false;
-    for current_line in body.lines() {
-        let changed = !previous_lines.contains(line_digest(current_line).as_str());
-        match run_block(current_line) {
-            RunBlock::Steering => {
-                steering_changed |= changed;
-                steering.push(current_line);
-            }
-            RunBlock::Obligation => {
-                obligation_changed |= changed;
-                obligation.push(current_line);
-            }
-            RunBlock::Field if changed => fields.push(current_line),
-            RunBlock::Field => {}
-        }
+    let current_fields = block_lines(body, RunBlockKind::Field).collect::<Vec<_>>();
+    // A field that disappeared cannot be expressed as a replacement line.
+    if current_fields.len() < previous_fields.len() {
+        return None;
     }
     let project_line = body.lines().nth(1).unwrap_or_default();
     let run_id = current.get("runId")?.as_str()?;
     let mut delta = format!(
         "{project_line}. Run ID: {run_id}. These lines replace the matching fields of the retained <stateful_run> packet."
     );
-    for field in fields {
+    for field in current_fields
+        .iter()
+        .filter(|field| !previous_fields.contains(line_digest(field).as_str()))
+    {
         delta.push('\n');
         delta.push_str(field);
     }
-    if steering_changed {
-        delta.push_str("\nUnresolved steering (replaces the previous steering view):");
-        for line in &steering {
+    for (kind, key, heading) in [
+        (
+            RunBlockKind::Steering,
+            "steering",
+            "Unresolved steering (replaces the previous steering view):",
+        ),
+        (
+            RunBlockKind::Obligation,
+            "obligation",
+            "Semantic obligation (replaces the previous obligation entirely):",
+        ),
+    ] {
+        if previous.get(key) != current.get(key) {
             delta.push('\n');
-            delta.push_str(line);
-        }
-    }
-    if obligation_changed {
-        delta.push_str("\nSemantic obligation (replaces the previous obligation entirely):");
-        for line in &obligation {
-            delta.push('\n');
-            delta.push_str(line);
+            delta.push_str(heading);
+            for line in block_lines(body, kind) {
+                delta.push('\n');
+                delta.push_str(line);
+            }
         }
     }
     (delta.len() <= body.len() / 2).then_some(delta)
 }
 
-enum RunBlock {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunBlockKind {
     Field,
     Steering,
     Obligation,
 }
 
-fn run_block(line: &str) -> RunBlock {
+fn block_lines(body: &str, kind: RunBlockKind) -> impl Iterator<Item = &str> {
+    body.lines().filter(move |line| run_block(line) == kind)
+}
+
+fn run_block(line: &str) -> RunBlockKind {
     if line.starts_with("Unresolved user steering")
         || line.starts_with("- [id ")
         || line.starts_with("This current unresolved steering")
         || line.starts_with("This bounded view omitted")
         || line.starts_with("Acknowledge and visibly")
     {
-        RunBlock::Steering
+        RunBlockKind::Steering
     } else if line.starts_with("Current semantic obligation")
         || line.starts_with("Current obligation:")
         || [
@@ -384,15 +395,15 @@ fn run_block(line: &str) -> RunBlock {
         .iter()
         .any(|prefix| line.starts_with(prefix))
     {
-        RunBlock::Obligation
+        RunBlockKind::Obligation
     } else {
-        RunBlock::Field
+        RunBlockKind::Field
     }
 }
 
 fn line_digest(line: &str) -> String {
     let digest = Sha256::digest(line.as_bytes());
-    digest[..4]
+    digest[..16]
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()

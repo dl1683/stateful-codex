@@ -2,28 +2,47 @@ use codex_extension_api::ToolCallOutcome;
 use pretty_assertions::assert_eq;
 
 use super::CHECKPOINT_TOOL_CALLS;
-use super::CheckpointCounter;
+use super::RunActivity;
 
 const DONE: ToolCallOutcome = ToolCallOutcome::Completed { success: true };
 
 #[test]
-fn checkpoint_epochs_advance_only_at_thresholds_and_reset_on_obligation() {
-    let counter = CheckpointCounter::default();
+fn checkpoint_counts_successful_direct_calls_per_run() {
+    let activity = RunActivity::default();
+    activity.observe_run("run-1");
     let mut epochs = Vec::new();
     for _ in 0..(CHECKPOINT_TOOL_CALLS * 2) {
-        counter.record(/*stateful_tool*/ None, DONE);
-        epochs.push(counter.due_epoch());
+        activity.record(/*direct*/ true, /*stateful_tool*/ None, DONE);
+        activity.record(/*direct*/ false, /*stateful_tool*/ None, DONE);
+        activity.record(
+            /*direct*/ true,
+            /*stateful_tool*/ None,
+            ToolCallOutcome::Completed { success: false },
+        );
+        epochs.push(activity.due_epoch());
     }
-    assert_eq!(epochs[6], None);
-    assert_eq!(epochs[7], Some(1));
-    assert_eq!(epochs[14], Some(1));
-    assert_eq!(epochs[15], Some(2));
-
-    counter.record(
-        Some("obligation_update"),
-        ToolCallOutcome::Completed { success: false },
+    assert_eq!(
+        (epochs[6], epochs[7], epochs[14], epochs[15]),
+        (None, Some(1), Some(1), Some(2))
     );
-    assert_eq!(counter.due_epoch(), Some(2));
-    counter.record(Some("obligation_update"), DONE);
-    assert_eq!(counter.due_epoch(), None);
+
+    activity.record(/*direct*/ true, Some("stateful_run_update"), DONE);
+    assert_eq!(activity.due_epoch(), Some(2));
+    activity.record(/*direct*/ true, Some("obligation_update"), DONE);
+    assert_eq!(activity.due_epoch(), None);
+}
+
+#[test]
+fn durable_writes_and_counts_reset_when_a_new_run_starts() {
+    let activity = RunActivity::default();
+    activity.observe_run("run-1");
+    activity.record(/*direct*/ true, Some("blackboard_record_batch"), DONE);
+    assert!(activity.wrote_durable_state());
+    activity.observe_run("run-1");
+    assert!(activity.wrote_durable_state());
+    activity.observe_run("run-2");
+    assert_eq!(
+        (activity.wrote_durable_state(), activity.due_epoch()),
+        (false, None)
+    );
 }
