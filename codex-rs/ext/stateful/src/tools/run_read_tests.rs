@@ -12,7 +12,10 @@ use super::Section;
 use super::obligation_text;
 use super::read_page;
 
-/// Pages `text` from the start the way the tool does, returning every page.
+const DIGEST: &str = "0123456789abcdef0123456789abcdef";
+
+/// Pages `text` from the start with the tool's envelope and cursor shape, returning
+/// every page.
 fn pages(text: &str, budget: usize) -> Vec<Value> {
     let mut pages = Vec::new();
     let mut offset = 0;
@@ -21,17 +24,79 @@ fn pages(text: &str, budget: usize) -> Vec<Value> {
             text,
             offset,
             budget,
-            |end| (end < text.len()).then(|| end.to_string()),
-            |content, next_cursor| json!({"content": content, "nextCursor": next_cursor}),
+            |end| {
+                (end < text.len()).then(|| {
+                    ReadCursor {
+                        section: Section::Goal,
+                        run_id: "run-0123456789".to_string(),
+                        digest: DIGEST.to_string(),
+                        length: text.len(),
+                        offset: end,
+                    }
+                    .encode()
+                })
+            },
+            |content, next_cursor| {
+                json!({
+                    "section": "goal",
+                    "runId": "run-0123456789",
+                    "totalBytes": text.len(),
+                    "offset": offset,
+                    "content": content,
+                    "nextCursor": next_cursor,
+                })
+            },
         )
         .expect("a page fits");
-        let next = page["nextCursor"].as_str().map(str::to_string);
+        let next = page["nextCursor"]
+            .as_str()
+            .map(|cursor| ReadCursor::decode(cursor).expect("valid cursor").offset);
         pages.push(page);
         match next {
-            Some(next) => offset = next.parse().expect("offset cursor"),
+            Some(next) => offset = next,
             None => return pages,
         }
     }
+}
+
+fn assert_pages_rebuild(text: &str, budget: usize) {
+    let pages = pages(text, budget);
+    assert!(pages.iter().all(|page| page.to_string().len() <= budget));
+    assert!(
+        pages
+            .iter()
+            .all(|page| !page["content"].as_str().expect("content").is_empty())
+    );
+    let rebuilt = pages
+        .iter()
+        .map(|page| page["content"].as_str().expect("content").to_string())
+        .collect::<String>();
+    assert_eq!(rebuilt, text);
+}
+
+#[test]
+fn escape_heavy_text_pages_back_exactly_with_no_empty_pages() {
+    for text in [
+        "\u{1}".repeat(16 * 1024),
+        "\"".repeat(16 * 1024),
+        "\\".repeat(16 * 1024),
+        "a😀".repeat(3_000),
+    ] {
+        assert_pages_rebuild(&text, /*budget*/ 9_000);
+    }
+}
+
+#[test]
+fn page_at_the_end_is_an_empty_terminal_page() {
+    let text = "done";
+    let page = read_page(
+        text,
+        text.len(),
+        /*budget*/ 9_000,
+        |_| None,
+        |content, next_cursor| json!({"content": content, "nextCursor": next_cursor}),
+    );
+    assert_eq!(page, Some(json!({"content": "", "nextCursor": null})));
 }
 
 #[test]
@@ -54,7 +119,14 @@ fn escape_heavy_unicode_text_pages_back_exactly_within_budget() {
 fn empty_text_is_a_single_complete_page() {
     assert_eq!(
         pages("", /*budget*/ 9_000),
-        vec![json!({"content": "", "nextCursor": null})]
+        vec![json!({
+            "section": "goal",
+            "runId": "run-0123456789",
+            "totalBytes": 0,
+            "offset": 0,
+            "content": "",
+            "nextCursor": null,
+        })]
     );
 }
 

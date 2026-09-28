@@ -343,7 +343,12 @@ impl StatefulRunReadTool {
 }
 
 /// Returns the largest page starting at `offset` whose serialized envelope fits the
-/// budget, or `None` when not even an empty page with a continuation fits.
+/// budget. A nonterminal page is never empty; `None` means not even one character (or
+/// the empty terminal page at the end of the text) fits.
+///
+/// Serialized size grows with the page end for every page that carries a continuation
+/// cursor, so those ends are binary-searched over UTF-8 boundaries. The terminal page
+/// swaps the cursor for `null` and can be smaller, so it is checked on its own first.
 fn read_page(
     text: &str,
     offset: usize,
@@ -351,23 +356,43 @@ fn read_page(
     next_cursor: impl Fn(usize) -> Option<String>,
     envelope: impl Fn(&str, Option<String>) -> Value,
 ) -> Option<Value> {
-    let mut end = text.len();
-    loop {
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
+    let fitting = |end: usize| {
         let page = envelope(&text[offset..end], next_cursor(end));
-        let size = page.to_string().len();
-        if size <= budget {
-            return (end > offset || offset == text.len()).then_some(page);
-        }
-        if end == offset {
-            return None;
-        }
-        // Escaping never makes a byte serialize smaller, so dropping the excess in raw
-        // bytes always makes progress toward the budget.
-        end = end.saturating_sub(size - budget).max(offset);
+        (page.to_string().len() <= budget).then_some(page)
+    };
+    if let Some(page) = fitting(text.len()) {
+        return Some(page);
     }
+    if offset == text.len() {
+        return None;
+    }
+    let floor = |mut index: usize| {
+        while !text.is_char_boundary(index) {
+            index -= 1;
+        }
+        index
+    };
+    let ceil = |mut index: usize| {
+        while index < text.len() && !text.is_char_boundary(index) {
+            index += 1;
+        }
+        index
+    };
+    let mut best = None;
+    let mut low = ceil(offset + 1);
+    let mut high = floor(text.len() - 1);
+    while low <= high && low < text.len() {
+        let middle = floor(low + (high - low) / 2).max(low);
+        match fitting(middle) {
+            Some(page) => {
+                best = Some(page);
+                low = ceil(middle + 1);
+            }
+            None if middle == low => break,
+            None => high = floor(middle - 1),
+        }
+    }
+    best
 }
 
 impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunReadTool {
