@@ -10,7 +10,7 @@ use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
-use crate::context_map_storage::upsert_indexed_entry;
+use crate::context_map_indexed_storage::upsert_indexed_entry;
 use crate::storage::kind_name;
 use crate::storage::lifecycle_name;
 use crate::storage::load_node;

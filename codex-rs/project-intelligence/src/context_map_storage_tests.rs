@@ -248,6 +248,181 @@ async fn office_region_attestation_round_trips_and_serializes_separately_from_an
 }
 
 #[tokio::test]
+async fn migration_0015_upgrades_a_populated_0014_database() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    create_file(&hierarchy).await;
+    let entry_id = ContextMapEntryId::parse("map-populated").expect("valid entry ID");
+    let entry = context_map
+        .create_entry(entry_id.clone(), new_entry("sha256:abc"))
+        .await
+        .expect("populated entry should insert");
+    sqlx::query("DROP TABLE region_extraction_attestations")
+        .execute(&context_map.pool)
+        .await
+        .expect("0015 table should drop for upgrade simulation");
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 15")
+        .execute(&context_map.pool)
+        .await
+        .expect("0015 migration marker should delete");
+    drop(context_map);
+    drop(hierarchy);
+
+    let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
+    let reopened = ContextMapStore::open(&sqlite)
+        .await
+        .expect("0014 database should upgrade");
+    let reopened_entry = reopened
+        .get_entry("project-1", &entry_id)
+        .await
+        .expect("populated entry should survive upgrade");
+    assert_eq!(reopened_entry, Some(entry));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'region_extraction_attestations'",
+        )
+        .fetch_one(&reopened.pool)
+        .await
+        .expect("upgraded table should exist"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn corrupt_partial_and_all_null_attestation_rows_are_rejected() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    let file = create_file(&hierarchy).await;
+    let region_id = HierarchyNodeId::parse("node-corrupt-region").expect("valid region ID");
+    hierarchy
+        .create_node(
+            region_id.clone(),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(file.id),
+                kind: NodeKind::Region,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("README.md").expect("valid path"),
+                region_anchor: Some(
+                    RegionAnchor::new("docx-paragraph", "body/p[1]").expect("valid anchor"),
+                ),
+                source_fingerprint: Some(fingerprint("sha256:abc")),
+            },
+        )
+        .await
+        .expect("region should insert");
+    let entry_id = ContextMapEntryId::parse("map-corrupt-region").expect("valid entry ID");
+    context_map
+        .create_entry(
+            entry_id.clone(),
+            NewContextMapEntry {
+                project_id: "project-1".to_string(),
+                node_id: region_id.clone(),
+                source_fingerprint: fingerprint("sha256:abc"),
+                description: "corrupt attestation fixture".to_string(),
+                routing_terms: Vec::new(),
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("region entry should insert");
+    sqlx::query(
+        "INSERT INTO region_extraction_attestations (
+             region_node_id, extractor_name, extractor_version,
+             canonical_representation_digest
+         ) VALUES (?, ?, ?, ?)",
+    )
+    .bind(region_id.as_str())
+    .bind("codex-docx")
+    .bind("")
+    .bind("sha256:digest")
+    .execute(&context_map.pool)
+    .await
+    .expect("partial invalid row should persist for read validation");
+    assert!(matches!(
+        context_map.get_hit("project-1", &entry_id).await,
+        Err(ContextMapStoreError::CorruptEntry(id)) if id == region_id.as_str()
+    ));
+    let all_null = sqlx::query(
+        "INSERT INTO region_extraction_attestations (
+             region_node_id, extractor_name, extractor_version,
+             canonical_representation_digest
+         ) VALUES (?, NULL, NULL, NULL)",
+    )
+    .bind("node-all-null")
+    .execute(&context_map.pool)
+    .await;
+    assert!(all_null.is_err());
+}
+
+#[test]
+fn evidence_routes_serialize_the_three_locator_shapes_exactly() {
+    let context_map_entry_id = ContextMapEntryId::parse("map-route").expect("valid entry ID");
+    let source_fingerprint = fingerprint("sha256:source");
+    let extraction = IndexedExtraction::new("codex-docx", "2", "sha256:representation")
+        .expect("valid extraction");
+    let file_route = EvidenceRoute {
+        context_map_entry_id: context_map_entry_id.clone(),
+        source_fingerprint: source_fingerprint.clone(),
+        line_range: None,
+        region_anchor: None,
+        indexed_extraction: None,
+    };
+    let text_route = EvidenceRoute {
+        context_map_entry_id: context_map_entry_id.clone(),
+        source_fingerprint: source_fingerprint.clone(),
+        line_range: Some(EvidenceLineRange { start: 4, end: 6 }),
+        region_anchor: None,
+        indexed_extraction: None,
+    };
+    let docx_route = EvidenceRoute {
+        context_map_entry_id,
+        source_fingerprint,
+        line_range: None,
+        region_anchor: Some(
+            RegionAnchor::new("docx-paragraph", "body/p[2]").expect("valid DOCX anchor"),
+        ),
+        indexed_extraction: Some(extraction),
+    };
+
+    assert_eq!(
+        serde_json::to_value(file_route).expect("file route should serialize"),
+        serde_json::json!({
+            "contextMapEntryId": "map-route",
+            "sourceFingerprint": "sha256:source",
+            "lineRange": null,
+            "regionAnchor": null,
+            "indexedExtraction": null,
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(text_route).expect("text route should serialize"),
+        serde_json::json!({
+            "contextMapEntryId": "map-route",
+            "sourceFingerprint": "sha256:source",
+            "lineRange": {"start": 4, "end": 6},
+            "regionAnchor": null,
+            "indexedExtraction": null,
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(docx_route).expect("DOCX route should serialize"),
+        serde_json::json!({
+            "contextMapEntryId": "map-route",
+            "sourceFingerprint": "sha256:source",
+            "lineRange": null,
+            "regionAnchor": {"scheme": "docx-paragraph", "locator": "body/p[2]"},
+            "indexedExtraction": {
+                "extractorName": "codex-docx",
+                "extractorVersion": "2",
+                "canonicalRepresentationDigest": "sha256:representation",
+            },
+        })
+    );
+}
+
+#[tokio::test]
 async fn bounded_query_returns_current_and_then_stale_routing_metadata() {
     let temp_dir = TempDir::new().expect("tempdir should be created");
     let (hierarchy, context_map) = stores(&temp_dir).await;
