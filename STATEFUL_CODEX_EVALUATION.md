@@ -3400,8 +3400,38 @@ recorded below as they land. Planning records live outside the repository in the
 - **BixBench gate re-grade** (retrospective; debug-base environment; Luna judge through the unmodified official
   grader): smoke 1/1, single-capsule five 5/5, ten-capsule breadth 3/10, repair re-runs 1/2. Unofficial proxy scores.
 
-### Planned portfolio (subject to the running plan)
+### Planned portfolio (agreed 2026-09-28)
 
-Memory and learning first (Horizon public tasks, AMA-Bench, further memory benchmarks under evaluation), then science
-(BixBench v1.5 on an unmodified pinned environment), research reports (DeepResearch Bench II and I), long-horizon
-software (SWE-Marathon's locally runnable tasks) and SWE-bench Verified and Multilingual pilots.
+The memory track leads. Its benchmarks were chosen because they test knowledge that must survive separate sessions,
+carry provenance, be revised or superseded, and cover the agent's own prior actions and failures:
+
+1. **Read-only project knowledge (product gate, SC-PKRO-001).** Memory benchmarks require completed memory to be
+   frozen at test time; a prompt instruction is not enough. Stateful Codex gains a general, process-wide mode in which
+   project knowledge can be read but not changed (useful for reviewers, CI replay and shared knowledge snapshots). No
+   memory benchmark is scored before it passes its acceptance tests.
+2. **DolphinBench** (mem0ai/dolphinbench): about 500K tokens of dated history per persona, delivered as one fresh
+   conversation per history message (3,400 / 5,011 / 5,128 conversations), then 200 action-graded tests per persona,
+   each in a fresh conversation against frozen memory. Run at the published reasoning setting (high). First a
+   100-message calibration, then one full persona, then all three. Published reference rows (Hermes harness, same
+   model): built-in memory 394/600, Mem0 424/600. Every comparison is labelled a cross-harness descriptive comparison:
+   the published systems differ in both agent harness and memory implementation, so no causal memory effect is
+   claimed from it. No raw copy of the history is placed in the project; the agent keeps only what its own memory
+   recorded.
+3. **AgentMemoryBench** pilot (continual learning, replay, transfer and repair after wrong feedback).
+4. **SC-MEM-REUSE-001, the causal study.** Twelve public task chains, each target run in four Stateful conditions:
+   cold project; placebo history (matched volume of unrelated prior work); relevant persistent history (prior work,
+   verifier failure and correction in separate sessions); explicit replay (fresh project given the exact prior
+   transcripts). Relevant versus placebo isolates useful memory from "more state"; relevant versus replay measures
+   whether persistent memory keeps quality while cutting input. This, not any leaderboard delta, is the experiment
+   that can substantiate a memory advantage.
+5. Then MINTEval (revision and interference), MemoryAgentBench (conflict resolution slice), and AMA-Bench as a
+   regression suite.
+
+Horizon (orinlabs) is deferred: its no-network task policy needs an nftables feature
+(`CONFIG_NFT_FIB_INET`) that the local WSL2 kernel lacks. It resumes on a dedicated Linux VM, not by weakening the
+task policy. After the memory track: BixBench v1.5 on an unmodified pinned environment, DeepResearch Bench II and I,
+SWE-Marathon's locally runnable tasks, and SWE-bench Verified and Multilingual pilots.
+
+Every memory run uses one isolated project and store per persona or episode, never resumes a conversation, freezes
+and hashes state before evaluation, gives each test a fresh copy of that state and a fresh runtime database, and
+publishes the world state shown to every session, per-response token usage, trajectories and integrity hashes.
