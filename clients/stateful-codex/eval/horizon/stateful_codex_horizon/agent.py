@@ -21,7 +21,6 @@ INGESTION_BUDGET_SECONDS = 360
 INGESTION_SESSION_BUDGET_SECONDS = 120
 MAX_INGESTION_CHUNKS = 3
 REMOTE_INGESTION_ROOT = PurePosixPath("/tmp/stateful-horizon-ingestion")
-REMOTE_PHASE_ROOT = PurePosixPath("/tmp/stateful-horizon-phases")
 
 
 class StatefulCodexHorizon(StatefulCodex):
@@ -56,7 +55,7 @@ class StatefulCodexHorizon(StatefulCodex):
         await self.exec_as_agent(
             environment,
             f"mkdir -p {shlex.quote(REMOTE_INGESTION_ROOT.as_posix())} "
-            f"{shlex.quote(REMOTE_PHASE_ROOT.as_posix())}",
+            f"{shlex.quote((self.environment_logs_dir / 'phases').as_posix())}",
         )
 
         for chunk in chunks:
@@ -213,8 +212,8 @@ class StatefulCodexHorizon(StatefulCodex):
         phase_name: str,
         record: dict[str, Any],
     ) -> None:
-        phase_dir = REMOTE_PHASE_ROOT / phase_name
         root = self.environment_logs_dir
+        phase_dir = root / "phases" / phase_name
         metadata = shlex.quote(json.dumps(record, sort_keys=True))
         command = (
             f"mkdir -p {shlex.quote(phase_dir.as_posix())}; "
