@@ -7,6 +7,7 @@ use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::AgentKnowledgeChange;
+use codex_project_intelligence::CompletionFence;
 use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRunStatus;
@@ -34,6 +35,7 @@ use super::run_read::submitted_result_cursor;
 use super::stable_id;
 use super::thread_run;
 
+const COMPLETION_FENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const PAGED_RESULT_INSTRUCTION: &str = "The completed result is too large to return here. Read it exactly with stateful_run_read using section \"submittedResult\" and cursor submittedResultCursor, following nextCursor until it is null, then return it as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. Copy opaque evidence identifiers only from finalAnswerChecklist; if omittedChecklistItems is nonzero, also use finalObligation from this call.";
 const TOOL_NAME: &str = "stateful_run_update";
 #[derive(Deserialize)]
@@ -97,6 +99,20 @@ impl StatefulRunUpdateTool {
         }
     }
 
+    async fn acquire_fence(&self) -> Result<CompletionFence, FunctionCallError> {
+        self.services
+            .blackboard()
+            .await
+            .map_err(respond)?
+            .acquire_completion_fence(COMPLETION_FENCE_TIMEOUT)
+            .await
+            .map_err(|error| {
+                FunctionCallError::RespondToModel(format!(
+                    "completion could not lock project knowledge ({error}); nothing changed, retry the same stateful_run_update"
+                ))
+            })
+    }
+
     async fn handle_call(
         &self,
         call: ToolCall<'_>,
@@ -146,6 +162,9 @@ impl StatefulRunUpdateTool {
                     .to_string(),
             ));
         }
+        // Terminal completion holds the project database's writer lock from validation
+        // through the runtime commit, so no project mutation can land in between.
+        let mut fence = None;
         let (completion, final_obligation) = if no_reusable_learning {
             if material_root_findings.is_some()
                 || root_revision.is_some()
@@ -157,11 +176,8 @@ impl StatefulRunUpdateTool {
                     "completionDisposition noReusableLearning completes with the result only; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
                 ));
             }
-            let knowledge_change = self
-                .services
-                .blackboard()
-                .await
-                .map_err(respond)?
+            let knowledge_change = fence
+                .insert(self.acquire_fence().await?)
                 .agent_knowledge_for_run(
                     &self.project_id,
                     &current.id.to_string(),
@@ -241,6 +257,7 @@ impl StatefulRunUpdateTool {
                 .iter()
                 .map(|root| std::path::PathBuf::from(&root.path))
                 .collect::<Vec<_>>();
+            fence = Some(self.acquire_fence().await?);
             let visible_root = self.visible_root.get(&self.thread_id);
             let completion = prepare_completion(
                 &self.services,
@@ -304,6 +321,12 @@ impl StatefulRunUpdateTool {
                 None,
             )
         };
+        if let Some(fence) = fence
+            && let Err(error) = fence.release().await
+        {
+            // The run is already terminal; an unreleased fence is closed on drop.
+            tracing::warn!("failed to release the Stateful completion fence: {error}");
+        }
         if let Some(event_sink) = &self.event_sink {
             if let Some(obligation) = &final_obligation {
                 event_sink.emit(StatefulEvent::ObligationUpdated {

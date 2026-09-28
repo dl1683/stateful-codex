@@ -1,6 +1,8 @@
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
+use codex_app_server_protocol::BlackboardConfirmParams;
+use codex_app_server_protocol::BlackboardConfirmResponse;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ContextMapRefreshParams;
 use codex_app_server_protocol::ContextMapRefreshResponse;
@@ -25,6 +27,7 @@ use codex_features::Feature;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -438,7 +441,7 @@ async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Res
 #[tokio::test]
 async fn lookup_completion_is_allowed_when_every_record_failed() -> Result<()> {
     let (output, status) = complete_lookup_after_recording(ProjectShape::Unindexed).await?;
-    assert!(output.contains(r#"\"status\":\"completed\""#));
+    assert!(output.contains(r#"\"status\":\"completed\""#), "{output}");
     assert_eq!(status, StatefulRunStatus::Completed);
     Ok(())
 }
@@ -584,4 +587,263 @@ async fn complete_lookup_after_recording(
             .to_string(),
         read.run.expect("run remains readable").status,
     ))
+}
+
+#[tokio::test]
+async fn user_confirmation_does_not_hide_the_runs_own_write() -> Result<()> {
+    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+        indexed_project("confirmed-write").await?;
+    let (thread_id, run_id, run_revision) =
+        start_lookup_run(&mut server, &project_id, "confirmed-write-run").await?;
+    let record_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "record",
+                    "blackboard_record_batch",
+                    &release_gate_batch(),
+                ),
+                responses::ev_completed("record-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("recorded", "Recorded the gate."),
+                responses::ev_completed("recorded-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_lookup_turn(&mut server, &thread_id).await?;
+    let recorded: Value = serde_json::from_str(
+        &record_log
+            .function_call_output_text("record")
+            .expect("record output should be text"),
+    )?;
+    let entry_id = recorded["results"][0]["entryId"]
+        .as_str()
+        .expect("entry recorded")
+        .to_string();
+    let _: BlackboardConfirmResponse = server
+        .request(|request_id| ClientRequest::BlackboardConfirm {
+            request_id,
+            params: BlackboardConfirmParams {
+                project_id: project_id.clone(),
+                entry_id,
+                expected_revision: 1,
+            },
+        })
+        .await?;
+
+    let output =
+        complete_without_learning(&responses_server, &mut server, &thread_id, run_revision).await?;
+
+    assert!(output.contains("project knowledge was recorded or changed during this run"));
+    assert_eq!(
+        run_status(&mut server, run_id).await?,
+        StatefulRunStatus::Running
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn another_runs_write_does_not_block_a_lookup_completion() -> Result<()> {
+    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+        indexed_project("other-run-write").await?;
+    let (writer_thread, _, _) =
+        start_lookup_run(&mut server, &project_id, "other-run-writer").await?;
+    let (lookup_thread, lookup_run, lookup_revision) =
+        start_lookup_run(&mut server, &project_id, "other-run-lookup").await?;
+    responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "record",
+                    "blackboard_record_batch",
+                    &release_gate_batch(),
+                ),
+                responses::ev_completed("record-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("recorded", "Recorded the gate."),
+                responses::ev_completed("recorded-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_lookup_turn(&mut server, &writer_thread).await?;
+
+    let output = complete_without_learning(
+        &responses_server,
+        &mut server,
+        &lookup_thread,
+        lookup_revision,
+    )
+    .await?;
+
+    assert!(output.contains(r#""status":"completed""#), "{output}");
+    assert_eq!(
+        run_status(&mut server, lookup_run).await?,
+        StatefulRunStatus::Completed
+    );
+    Ok(())
+}
+
+fn release_gate_batch() -> String {
+    json!({"records": [{
+        "idempotencyKey": "release-gate-note",
+        "kind": "fact",
+        "content": "The release gate is build C7-42.",
+        "importance": "high",
+        "confidenceBasisPoints": 9000,
+        "verification": "unverified",
+        "rootPromotion": "candidate"
+    }]})
+    .to_string()
+}
+
+/// A project with an indexed (empty) root, so blackboard records succeed.
+async fn indexed_project(
+    name: &str,
+) -> Result<(
+    wiremock::MockServer,
+    TempDir,
+    TempDir,
+    TestAppServer,
+    String,
+)> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: name.to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: None,
+                idempotency_key: format!("{name}-project"),
+            },
+        })
+        .await?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: project.project.id.clone(),
+            },
+        })
+        .await?;
+    Ok((
+        responses_server,
+        codex_home,
+        project_root,
+        server,
+        project.project.id,
+    ))
+}
+
+async fn start_lookup_run(
+    server: &mut TestAppServer,
+    project_id: &str,
+    key: &str,
+) -> Result<(String, String, u64)> {
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project_id.to_string(),
+                thread_id: thread.thread.id.clone(),
+                goal: "Answer a lookup.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: key.to_string(),
+            },
+        })
+        .await?;
+    Ok((thread.thread.id, started.run.id, started.run.revision))
+}
+
+async fn run_lookup_turn(server: &mut TestAppServer, thread_id: &str) -> Result<()> {
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread_id.to_string(),
+            input: vec![UserInput::Text {
+                text: "What is the release gate?".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    Ok(())
+}
+
+/// Runs one turn in which the model completes with `noReusableLearning`, returning the
+/// completion tool output.
+async fn complete_without_learning(
+    responses_server: &wiremock::MockServer,
+    server: &mut TestAppServer,
+    thread_id: &str,
+    expected_revision: u64,
+) -> Result<String> {
+    let log = responses::mount_sse_sequence(
+        responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "lookup-complete",
+                    "stateful_run_update",
+                    &json!({
+                        "expectedRevision": expected_revision,
+                        "status": "completed",
+                        "completionDisposition": "noReusableLearning",
+                        "result": "The release gate is build C7-42."
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("lookup-complete-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done", "The release gate is build C7-42."),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_lookup_turn(server, thread_id).await?;
+    Ok(log
+        .function_call_output_text("lookup-complete")
+        .expect("completion output should be text"))
+}
+
+async fn run_status(server: &mut TestAppServer, run_id: String) -> Result<StatefulRunStatus> {
+    let read: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(run_id),
+                thread_id: None,
+            },
+        })
+        .await?;
+    Ok(read.run.expect("run remains readable").status)
 }

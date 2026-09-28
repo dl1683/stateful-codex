@@ -70,6 +70,7 @@ pub(super) fn project_intelligence_tools(
         )),
         Arc::new(blackboard_write::BlackboardRelateTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             event_sink.clone(),
         )),
@@ -228,6 +229,24 @@ async fn thread_run(
         ));
     }
     Ok(run)
+}
+
+/// The thread's active run in this project, if any. Agent writes made while it runs
+/// are attributed to it, which is what decides whether it produced reusable learning.
+async fn attributed_run_id(
+    project_id: &str,
+    thread_id: &str,
+    services: &ProjectIntelligenceServices,
+) -> Result<Option<String>, FunctionCallError> {
+    Ok(services
+        .runtime()
+        .await
+        .map_err(respond)?
+        .run_for_thread(thread_id)
+        .await
+        .map_err(respond)?
+        .filter(|run| run.value.project_id == project_id)
+        .map(|run| run.id.to_string()))
 }
 
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
