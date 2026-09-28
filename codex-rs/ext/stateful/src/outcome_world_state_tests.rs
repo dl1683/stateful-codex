@@ -13,7 +13,11 @@ use codex_stateful_runtime::WorkflowMode;
 use pretty_assertions::assert_eq;
 
 use super::MAX_BODY_BYTES;
+use super::MAX_GOAL_BYTES;
+use super::MAX_PACKET_ITEM_BYTES;
+use super::MAX_RESULT_BYTES;
 use super::ProjectOutcomesStatus;
+use super::TRUNCATION_MARKER;
 use super::project_outcomes_world_state_section;
 
 fn assert_fragment_bounded(fragment: &RenderedWorldStateFragment) {
@@ -228,16 +232,8 @@ fn completion_basis_is_not_repeated_in_the_continuity_view() {
 
 #[test]
 fn five_maximal_outcomes_stay_bounded_in_full_and_delta_form() {
-    let long = |label: &str| format!("{label} “quoted” détail. ").repeat(700);
     let outcomes = (1..=5)
-        .map(|index| {
-            outcome(
-                &format!("run-{index}"),
-                &long("Goal"),
-                &long("Result"),
-                &long("Learning"),
-            )
-        })
+        .map(|index| maximal_outcome(&format!("run-{index}")))
         .collect::<Vec<_>>();
     let previous = project_outcomes_world_state_section(available(Vec::new()));
     let current = project_outcomes_world_state_section(available(outcomes));
@@ -258,9 +254,23 @@ fn five_maximal_outcomes_stay_bounded_in_full_and_delta_form() {
     );
     for fragment in [&full, &delta] {
         assert_fragment_bounded(fragment);
-        assert!(
-            fragment.body().contains("…"),
-            "per-outcome shortening is marked"
-        );
+        assert!(fragment.body().ends_with(TRUNCATION_MARKER));
+        assert_eq!(fragment.body().matches(TRUNCATION_MARKER).count(), 1);
     }
+}
+
+fn maximal_outcome(id: &str) -> StatefulRunOutcome {
+    let mut outcome = outcome(id, "goal", "result", "learning");
+    outcome.run.value.goal = "G".repeat(MAX_GOAL_BYTES);
+    outcome.run.result = Some("R".repeat(MAX_RESULT_BYTES));
+    outcome
+        .final_obligation
+        .as_mut()
+        .expect("final obligation")
+        .value
+        .packet = ObligationPacket {
+        learning: vec!["L".repeat(MAX_PACKET_ITEM_BYTES); 4],
+        ..Default::default()
+    };
+    outcome
 }

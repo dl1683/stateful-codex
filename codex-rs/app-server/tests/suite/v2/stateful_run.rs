@@ -64,6 +64,7 @@ use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_project_intelligence::RootPromotion;
 use codex_state::SqliteConfig;
+use codex_stateful_runtime::ObligationPacket;
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
@@ -1581,7 +1582,7 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
             .repeat(150)
             .trim_end()
             .to_string();
-    let learning = (0..16)
+    let learning = (0..15)
         .map(|index| {
             format!(
                 "Learning {index}: {}",
@@ -1647,7 +1648,14 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
         .expect("run remains readable")
         .result
         .expect("stored result");
-    assert!(stored.starts_with(&result) && stored.len() > result.len());
+    let bounded_learning = learning
+        .iter()
+        .map(|item| format!("\n- Learning: {}…", &item[..637]))
+        .collect::<String>();
+    let durable_suffix = format!(
+        "\n\nDurable completion basis:\n- Root finding: E1 [critical; verification=userConfirmed; evidence=notApplicable; premises=notApplicable] The indemnity cap is 15% of the purchase price.{bounded_learning}"
+    );
+    assert_eq!(stored, format!("{result}{durable_suffix}"));
 
     let paged_result = read_every_page(
         &responses_server,
@@ -1674,10 +1682,24 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
         ),
     )
     .await?;
+    let expected_packet = ObligationPacket {
+        learning,
+        ..Default::default()
+    };
     assert_eq!(
-        serde_json::from_str::<Value>(&paged_obligation)?["learning"],
-        json!(learning)
+        serde_json::from_str::<ObligationPacket>(&paged_obligation)?,
+        expected_packet
     );
+    let omitted = completion["omittedChecklistItems"]
+        .as_u64()
+        .expect("omitted checklist count");
+    let returned_checklist = completion["finalAnswerChecklist"]
+        .as_array()
+        .expect("final checklist")
+        .len() as u64;
+    assert!(omitted > 0);
+    assert_eq!(omitted, 16 - returned_checklist);
+    assert!(completion["finalObligationCursor"].is_string());
     Ok(())
 }
 

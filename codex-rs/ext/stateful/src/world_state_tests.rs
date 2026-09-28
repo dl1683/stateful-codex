@@ -725,3 +725,37 @@ fn non_content_semantic_changes_reach_the_model_as_changes() {
         );
     }
 }
+
+#[test]
+fn entry_freshness_change_reaches_the_root_delta() {
+    let mut entry = hit(
+        "entry-freshness",
+        "The source-backed finding remains relevant.",
+    );
+    entry.entry.value.verification = BlackboardVerification::SourceVerified;
+    let previous = section(with_entries(
+        /*revision*/ 3,
+        vec![BlackboardHit::new(
+            entry.entry.clone(),
+            BlackboardEvidenceFreshness::Current,
+        )],
+    ));
+    let current = section(with_entries(
+        /*revision*/ 4,
+        vec![BlackboardHit::new(
+            entry.entry,
+            BlackboardEvidenceFreshness::Stale,
+        )],
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("freshness-only root change must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project_update>", "</stateful_project_update>")
+    );
+    assert!(rendered.body().contains("evidence=stale"));
+    assert!(rendered.body().contains("verification=stale"));
+}
