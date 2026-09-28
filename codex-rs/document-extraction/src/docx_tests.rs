@@ -383,3 +383,307 @@ fn rejects_corrupt_zip_and_xml_depth() {
         Err(ExtractionError::LimitExceeded(ExtractionLimit::XmlDepth))
     ));
 }
+
+#[test]
+fn empty_structural_elements_preserve_ordinals() {
+    let (_directory, extractor) = extractor();
+    let bytes = package(
+        &document(
+            r#"<w:p/><w:p><w:r><w:t>body</w:t></w:r></w:p><w:tbl/><w:tbl><w:tr/><w:tr><w:tc/><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+        ),
+        &[],
+    );
+
+    let result = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+    assert_eq!(
+        result,
+        expected_document(
+            &bytes,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/p[2]".to_owned(),
+                    },
+                    text: "body".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[2]/tr[2]/tc[2]/p[1]".to_owned(),
+                    },
+                    text: "cell".to_owned(),
+                    notices: Vec::new(),
+                },
+            ],
+        )
+    );
+}
+
+#[test]
+fn empty_body_and_expanded_inline_controls_are_structural() {
+    let (_directory, extractor) = extractor();
+    let bytes = package(
+        r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>a</w:t><w:tab></w:tab><w:br></w:br><w:cr></w:cr><w:t>b</w:t></w:r></w:p></w:body></w:document>"#,
+        &[],
+    );
+    let result = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+    assert_eq!(
+        result,
+        expected_document(
+            &bytes,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![ExtractedBlock {
+                anchor: ExtractionAnchor {
+                    scheme: "docx-paragraph".to_owned(),
+                    locator: "body/p[1]".to_owned(),
+                },
+                text: "a\t\n\nb".to_owned(),
+                notices: Vec::new(),
+            }],
+        )
+    );
+
+    let empty_body = package(
+        r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>"#,
+        &[],
+    );
+    let result = extractor
+        .extract(DocumentFormat::Docx, &empty_body)
+        .unwrap();
+    assert_eq!(
+        result,
+        expected_document(
+            &empty_body,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            Vec::new()
+        )
+    );
+}
+
+#[test]
+fn transparent_wrappers_and_nested_tables_have_unique_locators() {
+    let (_directory, extractor) = extractor();
+    let bytes = package(
+        &document(
+            r#"<w:sdt><w:sdtContent><w:p><w:r><w:t>wrapped</w:t></w:r></w:p><w:customXml><w:smartTag><w:p><w:r><w:t>deep</w:t></w:r></w:p></w:smartTag></w:customXml></w:sdtContent></w:sdt><w:tbl><w:tr><w:tc><w:p><w:r><w:t>outer</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>nested</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc><w:tc><w:p><w:r><w:t>second</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+        ),
+        &[],
+    );
+    let result = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+    assert_eq!(
+        result,
+        expected_document(
+            &bytes,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/p[1]".to_owned(),
+                    },
+                    text: "wrapped".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/p[2]".to_owned(),
+                    },
+                    text: "deep".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[1]/tc[1]/p[1]".to_owned(),
+                    },
+                    text: "outer".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[1]/tc[1]/tbl[1]/tr[1]/tc[1]/p[1]".to_owned(),
+                    },
+                    text: "nested".to_owned(),
+                    notices: Vec::new(),
+                },
+                ExtractedBlock {
+                    anchor: ExtractionAnchor {
+                        scheme: "docx-paragraph".to_owned(),
+                        locator: "body/tbl[1]/tr[1]/tc[2]/p[1]".to_owned(),
+                    },
+                    text: "second".to_owned(),
+                    notices: Vec::new(),
+                },
+            ],
+        )
+    );
+}
+
+#[test]
+fn accepts_alternate_word_namespace_prefixes() {
+    let (_directory, extractor) = extractor();
+    let bytes = package(
+        r#"<d:document xmlns:d="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><d:body><d:p><d:hyperlink><d:r><d:t>linked</d:t></d:r></d:hyperlink></d:p></d:body></d:document>"#,
+        &[],
+    );
+    let result = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+    assert_eq!(
+        result,
+        expected_document(
+            &bytes,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![ExtractedBlock {
+                anchor: ExtractionAnchor {
+                    scheme: "docx-paragraph".to_owned(),
+                    locator: "body/p[1]".to_owned(),
+                },
+                text: "linked".to_owned(),
+                notices: Vec::new(),
+            }],
+        )
+    );
+}
+
+#[test]
+fn normalizes_xml_lines_and_reads_cdata() {
+    let (_directory, extractor) = extractor();
+    let bytes = package(
+        &document("<w:p><w:r><w:t>a\r\nb<![CDATA[<raw>\r\nc]]></w:t></w:r></w:p>"),
+        &[],
+    );
+    let bom_bytes = package(
+        &format!(
+            "\u{feff}{}",
+            document(r#"<w:p><w:r><w:t>bom</w:t></w:r></w:p>"#)
+        ),
+        &[],
+    );
+    let result = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+    assert_eq!(
+        result,
+        expected_document(
+            &bytes,
+            ExtractionStatus::Complete,
+            Vec::new(),
+            vec![ExtractedBlock {
+                anchor: ExtractionAnchor {
+                    scheme: "docx-paragraph".to_owned(),
+                    locator: "body/p[1]".to_owned(),
+                },
+                text: "a\nb<raw>\nc".to_owned(),
+                notices: Vec::new(),
+            }],
+        )
+    );
+    let result = extractor.extract(DocumentFormat::Docx, &bom_bytes).unwrap();
+    assert_eq!(result.blocks[0].text, "bom");
+}
+
+#[test]
+fn enforces_attribute_text_block_and_original_limits() {
+    let bytes = package(
+        &document(r#"<w:p a="1" b="2"><w:r><w:t>abc</w:t></w:r></w:p>"#),
+        &[],
+    );
+    let directory = tempdir().unwrap();
+    let extractor = DocumentExtractor::with_limits(
+        directory.path().join("cache"),
+        ExtractionLimits {
+            max_attributes_per_element: 1,
+            ..ExtractionLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        extractor.extract(DocumentFormat::Docx, &bytes),
+        Err(ExtractionError::LimitExceeded(
+            ExtractionLimit::XmlAttributes
+        ))
+    ));
+
+    let directory = tempdir().unwrap();
+    let extractor = DocumentExtractor::with_limits(
+        directory.path().join("cache"),
+        ExtractionLimits {
+            max_extracted_text_bytes: 2,
+            ..ExtractionLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        extractor.extract(DocumentFormat::Docx, &bytes),
+        Err(ExtractionError::LimitExceeded(
+            ExtractionLimit::ExtractedTextBytes
+        ))
+    ));
+
+    let directory = tempdir().unwrap();
+    let extractor = DocumentExtractor::with_limits(
+        directory.path().join("cache"),
+        ExtractionLimits {
+            max_extracted_blocks: 1,
+            max_canonical_block_bytes: 1,
+            ..ExtractionLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        extractor.extract(DocumentFormat::Docx, &bytes),
+        Err(ExtractionError::LimitExceeded(
+            ExtractionLimit::ExtractedBlocks
+        ))
+    ));
+
+    let directory = tempdir().unwrap();
+    let extractor = DocumentExtractor::with_limits(
+        directory.path().join("cache"),
+        ExtractionLimits {
+            max_original_bytes: 1,
+            ..ExtractionLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        extractor.extract(DocumentFormat::Docx, &bytes),
+        Err(ExtractionError::LimitExceeded(
+            ExtractionLimit::OriginalBytes
+        ))
+    ));
+}
+
+#[test]
+fn rejects_missing_document_xml_and_malformed_xml() {
+    let (_directory, extractor) = extractor();
+    let mut missing = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut missing));
+        writer
+            .start_file("word/styles.xml", SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"styles").unwrap();
+        writer.finish().unwrap();
+    }
+    assert!(matches!(
+        extractor.extract(DocumentFormat::Docx, &missing),
+        Err(ExtractionError::Corrupt)
+    ));
+
+    let malformed = package(
+        &document(r#"<w:p><w:r><w:t>bad</w:r></w:p>"#),
+        &[],
+    );
+    assert!(matches!(
+        extractor.extract(DocumentFormat::Docx, &malformed),
+        Err(ExtractionError::Corrupt)
+    ));
+}
