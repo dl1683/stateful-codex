@@ -996,143 +996,6 @@ async fn blackboard_relations_are_project_scoped_idempotent_and_queryable() {
 }
 
 #[tokio::test]
-async fn agent_knowledge_query_uses_run_attribution_and_legacy_cutoff() {
-    let temp_dir = TempDir::new().expect("tempdir created");
-    let (_hierarchy, blackboard, entry, _) = fixture(&temp_dir).await;
-
-    assert_eq!(
-        blackboard
-            .agent_knowledge_for_run("project-1", "run-1", entry.updated_at_ms)
-            .await
-            .expect("query succeeds"),
-        AgentKnowledgeChange::Unchanged
-    );
-    assert_eq!(
-        blackboard
-            .agent_knowledge_for_run("project-1", "run-1", 0)
-            .await
-            .expect("query succeeds"),
-        AgentKnowledgeChange::AttributionUnknownLegacy
-    );
-}
-
-#[tokio::test]
-async fn agent_attribution_survives_historical_user_confirmation_and_restart() {
-    let temp_dir = TempDir::new().expect("tempdir created");
-    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
-    let mut value = source.value.clone();
-    value.content = "Run A recorded this durable fact.".to_string();
-    value.provenance.source_id = "run-a-call".to_string();
-    let id = BlackboardEntryId::parse("run-a-fact").expect("valid entry ID");
-    let recorded = blackboard
-        .record_for_agent_run("run-a", id.clone(), value.clone())
-        .await
-        .expect("attributed entry inserts");
-    assert_eq!(
-        blackboard
-            .record_for_agent_run("run-b", id.clone(), value)
-            .await
-            .expect("idempotent write succeeds"),
-        recorded
-    );
-    let mut confirmed_value = recorded.value.clone();
-    confirmed_value.verification = BlackboardVerification::UserConfirmed;
-    confirmed_value.provenance.kind = BlackboardProvenanceKind::User;
-    confirmed_value.provenance.source_id = "user-confirmation".to_string();
-    let confirmed = blackboard
-        .update_entry(
-            "project-1",
-            &id,
-            entry_update(confirmed_value, recorded.revision),
-        )
-        .await
-        .expect("user confirmation updates the entry");
-    assert_eq!(
-        blackboard
-            .agent_knowledge_for_run("project-1", "run-a", confirmed.created_at_ms)
-            .await
-            .expect("run A query succeeds"),
-        AgentKnowledgeChange::Changed
-    );
-    assert_eq!(
-        blackboard
-            .agent_knowledge_for_run("project-1", "run-b", confirmed.created_at_ms)
-            .await
-            .expect("run B query succeeds"),
-        AgentKnowledgeChange::Unchanged
-    );
-    assert_eq!(
-        blackboard
-            .agent_knowledge_for_run("project-1", "run-b", confirmed.created_at_ms)
-            .await
-            .expect("run B query succeeds after no-op"),
-        AgentKnowledgeChange::Unchanged
-    );
-    let failed_update = entry_update(confirmed.value.clone(), recorded.revision);
-    assert!(
-        blackboard
-            .update_entry("project-1", &confirmed.id, failed_update)
-            .await
-            .is_err()
-    );
-    drop(blackboard);
-    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(temp_dir.path().abs()))
-        .await
-        .expect("blackboard reopens");
-    assert_eq!(
-        reopened
-            .agent_knowledge_for_run("project-1", "run-a", confirmed.created_at_ms)
-            .await
-            .expect("reopened run query succeeds"),
-        AgentKnowledgeChange::Changed
-    );
-}
-
-#[tokio::test]
-async fn agent_relation_attribution_is_learning() {
-    let temp_dir = TempDir::new().expect("tempdir created");
-    let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
-    let mut target_value = source.value.clone();
-    target_value.content = "A second fact for the attributed relation.".to_string();
-    target_value.verification = BlackboardVerification::Unverified;
-    target_value.evidence.clear();
-    target_value.provenance.source_id = "target".to_string();
-    let target = blackboard
-        .create_entry(
-            BlackboardEntryId::parse("relation-target").expect("valid entry ID"),
-            target_value,
-        )
-        .await
-        .expect("target inserts");
-    let relation = blackboard
-        .relate_for_agent_run(
-            "run-relation",
-            BlackboardRelationId::parse("run-relation-link").expect("valid relation ID"),
-            NewBlackboardRelation {
-                project_id: "project-1".to_string(),
-                from_entry_id: source.id,
-                to_entry_id: target.id,
-                kind: BlackboardRelationKind::Supports,
-                note: Some("Run A connected these facts.".to_string()),
-                confidence: ConfidenceScore::from_basis_points(8_000).expect("valid confidence"),
-                provenance: BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::Agent,
-                    source_id: "run-relation-call".to_string(),
-                },
-            },
-        )
-        .await
-        .expect("attributed relation inserts");
-    assert_eq!(
-        blackboard
-            .agent_knowledge_for_run("project-1", "run-relation", relation.created_at_ms)
-            .await
-            .expect("relation query succeeds"),
-        AgentKnowledgeChange::Changed
-    );
-}
-
-#[tokio::test]
 async fn completion_fence_blocks_other_store_and_times_out() {
     let temp_dir = TempDir::new().expect("tempdir created");
     let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
@@ -1144,12 +1007,11 @@ async fn completion_fence_blocks_other_store_and_times_out() {
         .acquire_completion_fence(Duration::from_secs(1))
         .await
         .expect("completion fence acquires");
-    assert_eq!(
-        fence
-            .agent_knowledge_for_run("project-1", "run-fence", source.created_at_ms)
+    assert!(
+        !fence
+            .agent_knowledge_changed_since("project-1", source.created_at_ms + 1)
             .await
-            .expect("fenced query succeeds"),
-        AgentKnowledgeChange::Unchanged
+            .expect("fenced query succeeds")
     );
     assert!(matches!(
         other_store
@@ -1201,22 +1063,6 @@ async fn completion_fence_dropped_without_release_frees_the_writer_lock() {
     .await
     .expect("write does not wait on the abandoned fence")
     .expect("write commits");
-}
-
-#[tokio::test]
-async fn run_older_than_a_fresh_database_is_not_legacy_without_unattributed_writes() {
-    let temp_dir = TempDir::new().expect("tempdir created");
-    let blackboard = BlackboardStore::open(&SqliteConfig::new_for_testing(temp_dir.path().abs()))
-        .await
-        .expect("fresh store opens");
-
-    assert_eq!(
-        blackboard
-            .agent_knowledge_for_run("project-1", "run-before-open", /*run_created_at_ms*/ 0)
-            .await
-            .expect("query succeeds"),
-        AgentKnowledgeChange::Unchanged
-    );
 }
 
 #[tokio::test]
@@ -1287,4 +1133,35 @@ async fn fenced_query_sees_any_agent_write_since_the_run_started() {
         ),
         (true, true, false)
     );
+
+    let mut relation_value = source.value.clone();
+    relation_value.content = "Relation target.".to_string();
+    relation_value.provenance.kind = BlackboardProvenanceKind::User;
+    let target = blackboard
+        .create_entry(
+            BlackboardEntryId::parse("relation-target").expect("valid entry ID"),
+            relation_value,
+        )
+        .await
+        .expect("user entry inserts");
+    assert!(!changed(blackboard.clone(), agent.created_at_ms + 1).await);
+    blackboard
+        .create_relation(
+            BlackboardRelationId::parse("agent-relation").expect("valid relation ID"),
+            NewBlackboardRelation {
+                project_id: "project-1".to_string(),
+                from_entry_id: source.id.clone(),
+                to_entry_id: target.id,
+                kind: BlackboardRelationKind::Supports,
+                note: None,
+                confidence: ConfidenceScore::from_basis_points(8_000).expect("valid confidence"),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "agent-relation".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("agent relation inserts");
+    assert!(changed(blackboard.clone(), agent.created_at_ms + 1).await);
 }

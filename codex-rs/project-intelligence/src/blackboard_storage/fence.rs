@@ -1,9 +1,7 @@
 use std::time::Duration;
 
-use super::AgentKnowledgeChange;
 use super::BlackboardStoreError;
 use super::query::agent_knowledge_changed_since_on_connection;
-use super::query::agent_knowledge_for_run_on_connection;
 use sqlx::Sqlite;
 use sqlx::SqlitePool;
 use sqlx::pool::PoolConnection;
@@ -55,21 +53,6 @@ impl CompletionFence {
     ) -> Result<bool, BlackboardStoreError> {
         agent_knowledge_changed_since_on_connection(&mut self.connection, project_id, since_ms)
             .await
-    }
-
-    pub async fn agent_knowledge_for_run(
-        &mut self,
-        project_id: &str,
-        agent_run_id: &str,
-        run_created_at_ms: i64,
-    ) -> Result<AgentKnowledgeChange, BlackboardStoreError> {
-        agent_knowledge_for_run_on_connection(
-            &mut self.connection,
-            project_id,
-            agent_run_id,
-            run_created_at_ms,
-        )
-        .await
     }
 
     pub async fn release(mut self) -> Result<(), BlackboardStoreError> {

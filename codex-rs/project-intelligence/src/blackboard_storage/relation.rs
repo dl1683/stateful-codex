@@ -24,24 +24,6 @@ impl BlackboardStore {
         id: BlackboardRelationId,
         value: NewBlackboardRelation,
     ) -> Result<BlackboardRelation, BlackboardStoreError> {
-        self.relate(None, id, value).await
-    }
-
-    pub async fn relate_for_agent_run(
-        &self,
-        agent_run_id: &str,
-        id: BlackboardRelationId,
-        value: NewBlackboardRelation,
-    ) -> Result<BlackboardRelation, BlackboardStoreError> {
-        self.relate(Some(agent_run_id), id, value).await
-    }
-
-    async fn relate(
-        &self,
-        agent_run_id: Option<&str>,
-        id: BlackboardRelationId,
-        value: NewBlackboardRelation,
-    ) -> Result<BlackboardRelation, BlackboardStoreError> {
         value.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = load_relation(&mut transaction, &value.project_id, &id).await? {
@@ -68,8 +50,8 @@ impl BlackboardStore {
             "INSERT INTO blackboard_relations (
                 id, project_id, from_entry_id, to_entry_id, kind, note,
                 confidence_basis_points, provenance_kind, provenance_source_id,
-                revision, created_at_ms, updated_at_ms, agent_run_id
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                revision, created_at_ms, updated_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.as_str())
         .bind(&value.project_id)
@@ -83,7 +65,6 @@ impl BlackboardStore {
         .bind(INITIAL_REVISION)
         .bind(now)
         .bind(now)
-        .bind(agent_run_id)
         .execute(&mut *transaction)
         .await?;
         let relation = load_relation(&mut transaction, &value.project_id, &id)

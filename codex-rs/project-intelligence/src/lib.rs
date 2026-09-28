@@ -43,7 +43,6 @@ pub use blackboard::NewBlackboardRelation;
 pub use blackboard::RootBlackboardProjection;
 pub use blackboard::RootBlackboardQuery;
 pub use blackboard::RootPromotion;
-pub use blackboard_storage::AgentKnowledgeChange;
 pub use blackboard_storage::BlackboardStore;
 pub use blackboard_storage::BlackboardStoreError;
 pub use blackboard_storage::CompletionFence;

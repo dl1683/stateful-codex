@@ -34,7 +34,6 @@ mod relation;
 mod update;
 
 pub use fence::CompletionFence;
-pub use query::AgentKnowledgeChange;
 
 const INITIAL_REVISION: i64 = 1;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -59,24 +58,6 @@ impl BlackboardStore {
 
     pub async fn create_entry(
         &self,
-        id: BlackboardEntryId,
-        value: NewBlackboardEntry,
-    ) -> Result<BlackboardEntry, BlackboardStoreError> {
-        self.record_entry(None, id, value).await
-    }
-
-    pub async fn record_for_agent_run(
-        &self,
-        agent_run_id: &str,
-        id: BlackboardEntryId,
-        value: NewBlackboardEntry,
-    ) -> Result<BlackboardEntry, BlackboardStoreError> {
-        self.record_entry(Some(agent_run_id), id, value).await
-    }
-
-    async fn record_entry(
-        &self,
-        agent_run_id: Option<&str>,
         id: BlackboardEntryId,
         value: NewBlackboardEntry,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
@@ -117,11 +98,8 @@ impl BlackboardStore {
             INITIAL_REVISION,
             &value,
             BlackboardEntryState::Active,
-            RevisionMetadata {
-                superseded_by: None,
-                recorded_at_ms: now,
-                agent_run_id,
-            },
+            None,
+            now,
         )
         .await?;
         let entry = load_entry(&mut transaction, &value.project_id, &id)
@@ -406,27 +384,21 @@ async fn validate_premises(
     Ok(())
 }
 
-struct RevisionMetadata<'a> {
-    superseded_by: Option<&'a BlackboardEntryId>,
-    recorded_at_ms: i64,
-    agent_run_id: Option<&'a str>,
-}
-
 async fn write_revision(
     connection: &mut SqliteConnection,
     id: &BlackboardEntryId,
     revision: i64,
     value: &NewBlackboardEntry,
     state: BlackboardEntryState,
-    metadata: RevisionMetadata<'_>,
+    superseded_by: Option<&BlackboardEntryId>,
+    now: i64,
 ) -> Result<(), BlackboardStoreError> {
     sqlx::query(
         "INSERT INTO blackboard_entry_revisions (
             entry_id, revision, kind, content, structured_value, structured_unit,
             confidence_basis_points, verification, importance, root_promotion,
-            state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms,
-            agent_run_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id.as_str())
     .bind(revision)
@@ -444,11 +416,10 @@ async fn write_revision(
     .bind(importance_name(value.importance))
     .bind(promotion_name(value.root_promotion))
     .bind(state_name(state))
-    .bind(metadata.superseded_by.map(BlackboardEntryId::as_str))
+    .bind(superseded_by.map(BlackboardEntryId::as_str))
     .bind(provenance_name(value.provenance.kind))
     .bind(&value.provenance.source_id)
-    .bind(metadata.recorded_at_ms)
-    .bind(metadata.agent_run_id)
+    .bind(now)
     .execute(&mut *connection)
     .await?;
     for (position, link) in value.evidence.iter().enumerate() {
