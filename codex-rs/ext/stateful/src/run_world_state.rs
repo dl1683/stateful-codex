@@ -232,7 +232,9 @@ impl RunWorldStateStatus {
                         &mut output,
                         "Current strategy",
                         &if strategy_shortened {
-                            format!("{strategy} [strategy shortened here]")
+                            format!(
+                                "{strategy} [strategy shortened; call stateful_run_read with section=\"strategy\" and follow nextCursor before relying on omitted detail.]"
+                            )
                         } else {
                             strategy.to_string()
                         },

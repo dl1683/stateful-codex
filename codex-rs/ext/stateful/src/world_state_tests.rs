@@ -687,3 +687,41 @@ fn edited_tail_of_a_long_entry_is_sent_as_a_change() {
 
     assert!(rendered.body().contains("TAIL-NEW"));
 }
+
+#[test]
+fn non_content_semantic_changes_reach_the_model_as_changes() {
+    let base = || hit("entry-a", "The approval threshold applies.");
+    let mut verified = base();
+    verified.entry.value.verification = BlackboardVerification::Disputed;
+    let mut valued = base();
+    valued.entry.value.structured_value =
+        Some(codex_project_intelligence::BlackboardStructuredValue {
+            value: "6".to_string(),
+            unit: Some("members".to_string()),
+        });
+    let pinned = |revision: u64| {
+        let mut pinned = base();
+        pinned.entry.value.premises = vec![BlackboardPremiseLink {
+            entry_id: BlackboardEntryId::parse("entry-deeper").expect("valid entry ID"),
+            revision,
+        }];
+        pinned
+    };
+    let previous = section(with_entries(/*revision*/ 3, vec![base()]));
+    let previous_pin = section(with_entries(/*revision*/ 3, vec![pinned(1)]));
+
+    for (label, previous, changed, expected) in [
+        ("verification", &previous, verified, "verification=disputed"),
+        ("structured value", &previous, valued, "value=6 members"),
+        ("premise pin", &previous_pin, pinned(2), "@r2"),
+    ] {
+        let rendered = section(with_entries(/*revision*/ 4, vec![changed]))
+            .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+            .unwrap_or_else(|| panic!("a {label} change must render"));
+        assert!(
+            rendered.body().contains(expected),
+            "{label}: {}",
+            rendered.body()
+        );
+    }
+}

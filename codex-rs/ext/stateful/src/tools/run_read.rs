@@ -1,10 +1,10 @@
 //! `stateful_run_read`: exact, paged reads of run state that World State may shorten.
 //!
-//! The run packet bounds the goal and the current obligation, and neither is guaranteed
-//! to survive in retained thread history. This tool returns the stored text exactly,
-//! one serialized-size-bounded page at a time. A cursor binds the run, the section, a
-//! digest of the text it pages, and a UTF-8 boundary offset, so a stale or foreign cursor
-//! is rejected instead of silently restarting.
+//! The run packet bounds the goal, strategy and current obligation, and none of them is
+//! guaranteed to survive in retained thread history. This tool returns the stored text
+//! exactly, one serialized-size-bounded page at a time. A cursor binds the section, the
+//! run, the paged text's identity and length, and a UTF-8 boundary offset, so a stale or
+//! foreign cursor is rejected instead of silently restarting.
 
 use codex_extension_api::FunctionCallError;
 use codex_extension_api::ResponsesApiTool;
@@ -14,7 +14,7 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
-use codex_stateful_runtime::ObligationPacket;
+use codex_stateful_runtime::StatefulObligation;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStatus;
@@ -37,6 +37,7 @@ const TOOL_NAME: &str = "stateful_run_read";
 #[serde(rename_all = "camelCase")]
 enum Section {
     Goal,
+    Strategy,
     Obligation,
     SubmittedResult,
 }
@@ -45,6 +46,7 @@ impl Section {
     fn name(self) -> &'static str {
         match self {
             Self::Goal => "goal",
+            Self::Strategy => "strategy",
             Self::Obligation => "obligation",
             Self::SubmittedResult => "submittedResult",
         }
@@ -53,6 +55,7 @@ impl Section {
     fn parse(value: &str) -> Option<Self> {
         match value {
             "goal" => Some(Self::Goal),
+            "strategy" => Some(Self::Strategy),
             "obligation" => Some(Self::Obligation),
             "submittedResult" => Some(Self::SubmittedResult),
             _ => None,
@@ -72,31 +75,116 @@ struct ReadCursor {
     section: Section,
     run_id: String,
     digest: String,
+    length: usize,
     offset: usize,
 }
 
+/// Cursor format version; a cursor from any other version is rejected.
+const CURSOR_VERSION: &str = "v1";
+/// Hex length of `short_digest`.
+const DIGEST_HEX_LEN: usize = 32;
+
 impl ReadCursor {
+    /// `v1.<section>.<run id>.<digest>.<length>.<offset>`; lengths and offsets are UTF-8
+    /// byte counts. The run ID may itself contain dots, so it is the middle remainder.
     fn encode(&self) -> String {
         format!(
-            "{}.{}.{}.{}",
+            "{CURSOR_VERSION}.{}.{}.{}.{}.{}",
             self.section.name(),
             self.run_id,
             self.digest,
+            self.length,
             self.offset
         )
     }
 
     fn decode(value: &str) -> Option<Self> {
-        let (rest, offset) = value.rsplit_once('.')?;
+        let rest = value.strip_prefix(CURSOR_VERSION)?.strip_prefix('.')?;
+        let (rest, offset) = rest.rsplit_once('.')?;
+        let (rest, length) = rest.rsplit_once('.')?;
         let (rest, digest) = rest.rsplit_once('.')?;
         let (section, run_id) = rest.split_once('.')?;
+        let digest_is_valid = digest.len() == DIGEST_HEX_LEN
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        if !digest_is_valid || run_id.is_empty() {
+            return None;
+        }
         Some(Self {
             section: Section::parse(section)?,
             run_id: run_id.to_string(),
             digest: digest.to_string(),
+            length: length.parse().ok()?,
             offset: offset.parse().ok()?,
         })
     }
+}
+
+/// The exact text a section pages, and the identity its cursors are bound to.
+struct SectionText {
+    identity: String,
+    text: String,
+}
+
+impl SectionText {
+    fn digest(&self) -> String {
+        short_digest(&format!("{}\0{}", self.identity, self.text))
+    }
+
+    fn cursor(&self, section: Section, run: &StatefulRun, offset: usize) -> String {
+        ReadCursor {
+            section,
+            run_id: run.id.to_string(),
+            digest: self.digest(),
+            length: self.text.len(),
+            offset,
+        }
+        .encode()
+    }
+}
+
+fn goal_text(run: &StatefulRun) -> SectionText {
+    SectionText {
+        identity: "goal".to_string(),
+        text: run.value.goal.clone(),
+    }
+}
+
+fn strategy_text(run: &StatefulRun) -> Option<SectionText> {
+    Some(SectionText {
+        identity: format!("strategy@{}", run.strategy_revision),
+        text: run.strategy.clone()?,
+    })
+}
+
+/// Canonical JSON of the packet: unambiguous, so distinct packets never page as the
+/// same text.
+fn obligation_text(obligation: &StatefulObligation) -> Result<SectionText, FunctionCallError> {
+    Ok(SectionText {
+        identity: format!("obligation:{}@{}", obligation.id, obligation.revision),
+        text: serde_json::to_string(&obligation.value.packet).map_err(respond)?,
+    })
+}
+
+/// The first `length` bytes of a completed run's stored result: the result the model
+/// submitted, without any suffix completion appended for durability.
+fn submitted_result_text(run: &StatefulRun, length: usize) -> Option<SectionText> {
+    if run.status != StatefulRunStatus::Completed {
+        return None;
+    }
+    let stored = run.result.as_deref()?;
+    Some(SectionText {
+        identity: format!("submittedResult@{}", run.revision),
+        text: stored.get(..length)?.to_string(),
+    })
+}
+
+/// First-page cursor for the submitted result of a just-completed run, for a completion
+/// response too large to carry the result itself.
+pub(super) fn submitted_result_cursor(run: &StatefulRun, submitted: &str) -> Option<String> {
+    let section = submitted_result_text(run, submitted.len())?;
+    (section.text == submitted).then(|| section.cursor(Section::SubmittedResult, run, 0))
 }
 
 pub(super) struct StatefulRunReadTool {
@@ -123,35 +211,40 @@ impl StatefulRunReadTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: Arguments = parse_arguments(&call)?;
+        let section = arguments.section;
         let cursor = arguments
             .cursor
             .as_deref()
             .map(|cursor| {
                 ReadCursor::decode(cursor)
-                    .filter(|cursor| cursor.section == arguments.section)
+                    .filter(|cursor| cursor.section == section)
                     .ok_or_else(|| {
                         FunctionCallError::RespondToModel(format!(
                             "cursor is not a {} cursor from stateful_run_read; omit it to start from the beginning",
-                            arguments.section.name()
+                            section.name()
                         ))
                     })
             })
             .transpose()?;
         let run = match &cursor {
             Some(cursor) => self.cursor_run(&cursor.run_id).await?,
-            None if arguments.section == Section::SubmittedResult => {
+            None if section == Section::SubmittedResult => {
                 return Err(FunctionCallError::RespondToModel(
                     "submittedResult is read only with the cursor returned by the completing stateful_run_update".to_string(),
                 ));
             }
             None => thread_run(&self.project_id, &self.thread_id, &self.services).await?,
         };
-        let text = match arguments.section {
-            Section::Goal => run.value.goal.clone(),
-            Section::SubmittedResult => submitted_result(&run).ok_or_else(|| {
-                FunctionCallError::RespondToModel(
-                    "this run has no completed result to read".to_string(),
-                )
+        let stale = || {
+            FunctionCallError::RespondToModel(format!(
+                "the run {} changed after this cursor was issued; read it again without a cursor",
+                section.name()
+            ))
+        };
+        let paged = match section {
+            Section::Goal => goal_text(&run),
+            Section::Strategy => strategy_text(&run).ok_or_else(|| {
+                FunctionCallError::RespondToModel("this run has no strategy yet".to_string())
             })?,
             Section::Obligation => {
                 let obligation = self
@@ -167,18 +260,23 @@ impl StatefulRunReadTool {
                             "this run has no recorded obligation yet".to_string(),
                         )
                     })?;
-                obligation_text(&obligation.value.packet)
+                obligation_text(&obligation)?
             }
+            Section::SubmittedResult => cursor
+                .as_ref()
+                .and_then(|cursor| submitted_result_text(&run, cursor.length))
+                .ok_or_else(stale)?,
         };
-        let digest = section_digest(arguments.section, &run, &text);
-        let offset = match cursor {
-            Some(cursor) if cursor.digest != digest => {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "the run {} changed after this cursor was issued; read it again without a cursor",
-                    arguments.section.name()
-                )));
+        let offset = match &cursor {
+            Some(cursor)
+                if cursor.digest != paged.digest() || cursor.length != paged.text.len() =>
+            {
+                return Err(stale());
             }
-            Some(cursor) if cursor.offset > text.len() || !text.is_char_boundary(cursor.offset) => {
+            Some(cursor)
+                if cursor.offset > paged.text.len()
+                    || !paged.text.is_char_boundary(cursor.offset) =>
+            {
                 return Err(FunctionCallError::RespondToModel(
                     "cursor offset is not a valid position in this text".to_string(),
                 ));
@@ -187,25 +285,15 @@ impl StatefulRunReadTool {
             None => 0,
         };
         let page = read_page(
-            &text,
+            &paged.text,
             offset,
             call.response_byte_budget(MAX_RESPONSE_BYTES),
-            |end| {
-                (end < text.len()).then(|| {
-                    ReadCursor {
-                        section: arguments.section,
-                        run_id: run.id.to_string(),
-                        digest: digest.clone(),
-                        offset: end,
-                    }
-                    .encode()
-                })
-            },
+            |end| (end < paged.text.len()).then(|| paged.cursor(section, &run, end)),
             |content, next_cursor| {
                 json!({
-                    "section": arguments.section.name(),
+                    "section": section.name(),
                     "runId": run.id.as_str(),
-                    "totalBytes": text.len(),
+                    "totalBytes": paged.text.len(),
                     "offset": offset,
                     "content": content,
                     "nextCursor": next_cursor,
@@ -244,59 +332,6 @@ impl StatefulRunReadTool {
         }
         Ok(run)
     }
-}
-
-/// The stored result of a completed run.
-fn submitted_result(run: &StatefulRun) -> Option<String> {
-    (run.status == StatefulRunStatus::Completed)
-        .then(|| run.result.clone())
-        .flatten()
-}
-
-/// A submitted-result cursor also binds the completed run revision.
-fn section_digest(section: Section, run: &StatefulRun, text: &str) -> String {
-    match section {
-        Section::Goal | Section::Obligation => short_digest(text),
-        Section::SubmittedResult => short_digest(&format!("{}\0{text}", run.revision)),
-    }
-}
-
-/// Mints the first-page cursor for a completed run's stored result, for a completion
-/// response too large to carry the result itself.
-pub(super) fn submitted_result_cursor(run: &StatefulRun) -> Option<String> {
-    let text = submitted_result(run)?;
-    Some(
-        ReadCursor {
-            section: Section::SubmittedResult,
-            run_id: run.id.to_string(),
-            digest: section_digest(Section::SubmittedResult, run, &text),
-            offset: 0,
-        }
-        .encode(),
-    )
-}
-
-/// Canonical text of an obligation packet: one `Label: value` line per item, values
-/// exact (including any interior newlines).
-fn obligation_text(packet: &ObligationPacket) -> String {
-    let mut text = String::new();
-    for (label, values) in [
-        ("Examined", &packet.examined),
-        ("Why it matters", &packet.rationale),
-        ("Learned", &packet.learning),
-        ("Implication", &packet.implication),
-        ("Strategy", &packet.strategy),
-        ("Changed", &packet.changed),
-        ("Next", &packet.next),
-        ("Uncertainty", &packet.uncertainty),
-        ("Blockers", &packet.blockers),
-        ("Useful user judgment", &packet.requested_judgment),
-    ] {
-        for value in values {
-            text.push_str(&format!("{label}: {value}\n"));
-        }
-    }
-    text
 }
 
 /// Returns the largest page starting at `offset` whose serialized envelope fits the
@@ -339,13 +374,13 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read the exact stored goal or current semantic obligation of the selected thread's Stateful run, one bounded page at a time, or a completed run's submitted result with the cursor its completion returned. Use it when <stateful_run> says the goal or obligation was shortened, or when earlier detail may no longer be in context. Follow nextCursor until it is null to read the whole text.".to_string(),
+            description: "Read the exact stored goal, strategy, or current semantic obligation (as JSON) of the selected thread's Stateful run, one bounded page at a time; or a completed run's submitted result or final obligation with the cursor its completion returned. Use it when <stateful_run> says a section was shortened, or when earlier detail may no longer be in context. Follow nextCursor until it is null to read the whole text.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "section": {"type": "string", "enum": ["goal", "obligation", "submittedResult"]},
+                    "section": {"type": "string", "enum": ["goal", "strategy", "obligation", "submittedResult"]},
                     "cursor": {"type": "string"}
                 },
                 "required": ["section"],

@@ -361,7 +361,9 @@ impl StatefulRunUpdateTool {
         // items drop from the end with an honest omitted count.
         let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         if output.to_string().len() > budget
-            && let Some(cursor) = submitted_result_cursor(&run)
+            && let Some(cursor) = submitted_result
+                .as_deref()
+                .and_then(|submitted| submitted_result_cursor(&run, submitted))
         {
             output["submittedResult"] = Value::Null;
             output["submittedResultCursor"] = json!(cursor);

@@ -1025,7 +1025,7 @@ async fn model_reads_a_long_goal_exactly_and_rejects_a_foreign_cursor() -> Resul
                 responses::ev_function_call(
                     "foreign-cursor",
                     "stateful_run_read",
-                    &json!({"section": "goal", "cursor": "goal.run-elsewhere.00ff.10"}).to_string(),
+                    &json!({"section": "goal", "cursor": "v1.goal.run-elsewhere.0123456789abcdef0123456789abcdef.10.0"}).to_string(),
                 ),
                 responses::ev_completed("foreign-cursor-response"),
             ]),
