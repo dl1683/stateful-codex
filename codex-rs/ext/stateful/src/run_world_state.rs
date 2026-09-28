@@ -20,13 +20,20 @@ const START_MARKER: &str = "<stateful_run>";
 const END_MARKER: &str = "</stateful_run>";
 const UPDATE_START_MARKER: &str = "<stateful_run_update>";
 const UPDATE_END_MARKER: &str = "</stateful_run_update>";
-const MAX_BODY_BYTES: usize = 8 * 1024;
+/// Markers plus body stay within the 9,000-byte model item bound (one byte per token
+/// is the worst case).
+const MAX_BODY_BYTES: usize = 9_000 - START_MARKER.len() - END_MARKER.len();
+/// Independent budgets, rendered obligation first, so neither steering nor descriptive
+/// text can crowd the current obligation out of the packet.
+const MAX_OBLIGATION_BYTES: usize = 3 * 1024;
+const MAX_STEERING_BYTES: usize = 5 * 512;
+const OBLIGATION_SHORTENED: &str = "Obligation shortened: later items are omitted here. Call stateful_run_read with section=\"obligation\" and follow nextCursor for the exact current obligation.";
+const STEERING_SHORTENED: &str = "This bounded view omitted or shortened unresolved steering. Use steering_query to retrieve the exact remaining detail before choosing or revising strategy.";
 const MAX_ESTIMATED_TOKENS: usize = 3 * 1024;
 const MAX_RENDERED_STEERING: usize = 5;
 const MAX_RENDERED_GOAL_BYTES: usize = 2 * 1024;
 const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
-const TRUNCATION_MARKER: &str =
-    "\n[Stateful run state truncated; query exact tool state before relying on omitted detail.]";
+const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 
 pub(super) enum RunWorldStateStatus {
     Available {
@@ -124,15 +131,29 @@ impl RunWorldStateStatus {
                 field(&mut output, "Mode", mode_name(run.value.mode));
                 field(&mut output, "Status", status_name(run.status));
                 if run.status == StatefulRunStatus::Running {
+                    // The counter is process-local and advisory: after a restart or a run
+                    // switch it cannot know earlier calls, so the wording says exactly that.
+                    // An unanswered checkpoint escalates, because a soft nudge alone is
+                    // frequently ignored.
                     match checkpoint_due {
-                        Some(epoch) => line(
+                        Some(epoch @ 0..=1) => line(
                             &mut output,
                             &format!(
-                                "Semantic checkpoint: due (checkpoint {epoch}); at least {} tool calls completed since the last obligation update. Call obligation_update only if the goal, strategy, findings, uncertainty, blockers, or next decisive step materially changed; otherwise continue.",
+                                "Semantic checkpoint: advisory due (process-local checkpoint {epoch}); this process observed at least {} successful direct tool calls since the counter was last reset. Calls before a restart are unknown. Update the obligation if semantic state materially changed.",
                                 epoch * CHECKPOINT_TOOL_CALLS
                             ),
                         ),
-                        None => line(&mut output, "Semantic checkpoint: current."),
+                        Some(epoch) => line(
+                            &mut output,
+                            &format!(
+                                "Semantic checkpoint: overdue (process-local checkpoint {epoch}); this process observed at least {} successful direct tool calls with no obligation update. Call obligation_update now with what was learned, changed, or is still uncertain since the last update; if nothing material changed, record only the next decisive step.",
+                                epoch * CHECKPOINT_TOOL_CALLS
+                            ),
+                        ),
+                        None => line(
+                            &mut output,
+                            "Semantic checkpoint: none due from successful direct tool calls observed by this process. Earlier calls may be unknown after a restart or a run switch; semantic change, not this counter, decides whether obligation_update is warranted.",
+                        ),
                     }
                 }
                 if run.value.mode == WorkflowMode::Autonomous {
@@ -169,15 +190,26 @@ impl RunWorldStateStatus {
                     &mut output,
                     "Semantic progress: call obligation_update whenever learning, strategy, uncertainty, blockers, or next work materially change while work remains; explain meaning, not activity. Stateful write tools (blackboard_record, blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. Completion: after all durable writes, finish with one stateful_run_update. Use completionDisposition noReusableLearning with only the result when the run answered from existing project state or learned nothing reusable; otherwise carry completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings (completion rejects reusable learning with no selected blackboard finding). Completion must be the final Stateful mutation.",
                 );
-                render_steering(&mut output, steering, *steering_complete);
-                if let Some(obligation) = obligation {
-                    render_packet(&mut output, &obligation.value.packet);
-                } else {
-                    line(
-                        &mut output,
-                        "Current obligation: no semantic update has been recorded yet. Record one after the first meaningful learning or strategy decision.",
-                    );
-                }
+                append_segment(
+                    &mut output,
+                    MAX_OBLIGATION_BYTES,
+                    OBLIGATION_SHORTENED,
+                    |segment| match obligation {
+                        Some(obligation) => render_packet(segment, &obligation.value.packet),
+                        None => line(
+                            segment,
+                            "Current obligation: no semantic update has been recorded yet. Record one after the first meaningful learning or strategy decision.",
+                        ),
+                    },
+                );
+                append_segment(
+                    &mut output,
+                    MAX_STEERING_BYTES,
+                    STEERING_SHORTENED,
+                    |segment| {
+                        render_steering(segment, steering, *steering_complete);
+                    },
+                );
                 // Descriptive text comes last so a long goal or strategy can never crowd
                 // out the binding obligation and steering above.
                 let (goal, goal_shortened) = bounded_text(&run.value.goal, MAX_RENDERED_GOAL_BYTES);
@@ -407,6 +439,7 @@ fn run_block(line: &str) -> RunBlockKind {
         RunBlockKind::Steering
     } else if line.starts_with("Current semantic obligation")
         || line.starts_with("Current obligation:")
+        || line.starts_with("Obligation shortened:")
         || [
             "- Examined:",
             "- Why it matters:",
@@ -459,6 +492,41 @@ fn render_packet(output: &mut String, packet: &ObligationPacket) {
         for value in values {
             line(output, &format!("- {label}: {}", single_line(value)));
         }
+    }
+}
+
+/// Renders one block into its own byte budget and appends it whole. A block over budget
+/// keeps its leading lines and ends with `shortened`, which names the exact read.
+fn append_segment(
+    output: &mut String,
+    maximum: usize,
+    shortened: &str,
+    render: impl FnOnce(&mut String),
+) {
+    let mut segment = String::new();
+    render(&mut segment);
+    if segment.len() > maximum {
+        const CUT: &str = " …";
+        let mut limit = maximum.saturating_sub(shortened.len() + 1 + CUT.len());
+        while !segment.is_char_boundary(limit) {
+            limit -= 1;
+        }
+        // Prefer whole lines, but cut inside a line rather than drop most of the budget
+        // to one oversized item.
+        match segment[..limit].rfind('\n') {
+            Some(keep) if keep >= limit / 2 => segment.truncate(keep),
+            _ => {
+                segment.truncate(limit);
+                segment.push_str(CUT);
+            }
+        }
+        if !segment.is_empty() {
+            segment.push('\n');
+        }
+        segment.push_str(shortened);
+    }
+    for value in segment.lines() {
+        line(output, value);
     }
 }
 

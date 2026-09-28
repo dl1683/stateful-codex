@@ -1,12 +1,16 @@
 use codex_extension_api::PreviousWorldStateSection;
 use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::NewStatefulRun;
+use codex_stateful_runtime::NewSteeringInstruction;
 use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulObligation;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStatus;
+use codex_stateful_runtime::StatefulSteering;
+use codex_stateful_runtime::SteeringId;
+use codex_stateful_runtime::SteeringStatus;
 use codex_stateful_runtime::WorkflowMode;
 
 use super::RunWorldStateStatus;
@@ -141,7 +145,7 @@ fn run_world_state_discloses_omitted_detail() {
             .body()
             .contains("Call stateful_run_read with section=\"goal\" and follow nextCursor")
     );
-    assert!(rendered.body().contains("Semantic checkpoint: current."));
+    assert!(rendered.body().contains("Semantic checkpoint: none due"));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
 }
 
@@ -294,7 +298,7 @@ fn due_checkpoint_renders_one_line_that_changes_only_per_epoch() {
     assert!(
         rendered
             .body()
-            .contains("Semantic checkpoint: due (checkpoint 1)")
+            .contains("Semantic checkpoint: advisory due (process-local checkpoint 1)")
     );
     assert!(!rendered.body().contains("Goal:"));
     assert!(
@@ -455,4 +459,119 @@ fn multiline_obligation_items_stay_inside_the_obligation_block() {
     assert!(rendered.body().contains(
         "- Learned: The permit was never transferred. It is still in the seller's name."
     ));
+}
+
+#[test]
+fn maximal_run_state_keeps_the_obligation_ahead_of_steering_within_bounds() {
+    let run_id = StatefulRunId::parse(format!("run-{}", "r".repeat(500))).expect("valid run id");
+    let project_id = format!("project-{}", "p".repeat(500));
+    let item = "Learned clause detail \"quoted\" ".repeat(250);
+    let steering = (0..5)
+        .map(|index| StatefulSteering {
+            id: SteeringId::parse(format!("steering-{index}-{}", "s".repeat(490)))
+                .expect("valid steering id"),
+            value: NewSteeringInstruction {
+                project_id: project_id.clone(),
+                run_id: run_id.clone(),
+                input: "Prefer the signed schedule. ".repeat(600),
+                affected_obligation_ids: Vec::new(),
+            },
+            status: SteeringStatus::Submitted,
+            resulting_strategy_revision: None,
+            reason: None,
+            revision: 1,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        })
+        .collect::<Vec<_>>();
+    let section = run_world_state_section(RunWorldStateStatus::Available {
+        run: Box::new(StatefulRun {
+            id: run_id.clone(),
+            value: NewStatefulRun {
+                project_id: project_id.clone(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "Review the agreement. ".repeat(700),
+                mode: WorkflowMode::Autonomous,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+            status: StatefulRunStatus::Running,
+            strategy: Some("Compare the schedules. ".repeat(700)),
+            strategy_revision: 1,
+            result: None,
+            continuations_used: 0,
+            revision: 2,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        }),
+        obligation: Some(Box::new(StatefulObligation {
+            id: "obligation-1".to_string(),
+            value: NewObligation {
+                project_id,
+                run_id,
+                packet: ObligationPacket {
+                    learning: vec![item.clone(); 32],
+                    next: vec![item; 32],
+                    ..Default::default()
+                },
+                provenance_source_id: "turn-1".to_string(),
+            },
+            sequence: 1,
+            revision: 1,
+            created_at_ms: 2,
+        })),
+        steering,
+        steering_complete: true,
+        checkpoint_due: Some(3),
+    });
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("first contribution renders");
+    let body = rendered.body();
+    let (start, end) = rendered.markers();
+    let obligation_at = body
+        .find("Current semantic obligation:")
+        .expect("obligation heading");
+    let steering_at = body
+        .find("Unresolved user steering:")
+        .expect("steering heading");
+
+    assert!(start.len() + body.len() + end.len() <= 9_000);
+    assert!(obligation_at < steering_at);
+    assert!(steering_at - obligation_at >= 2 * 1024);
+    assert!(body.contains("Obligation shortened:"));
+    assert!(body.contains("section=\"obligation\""));
+    assert!(body.contains("This bounded view omitted or shortened unresolved steering."));
+    assert!(body.contains("Semantic checkpoint: overdue (process-local checkpoint 3)"));
+}
+
+#[test]
+fn unanswered_checkpoint_escalates_through_a_delta() {
+    let status = |checkpoint_due: Option<u64>| {
+        let mut status = run_with_obligation("obligation-1", vec!["Found the permit.".to_string()]);
+        let RunWorldStateStatus::Available {
+            checkpoint_due: due,
+            ..
+        } = &mut status
+        else {
+            unreachable!("fixture is available");
+        };
+        *due = checkpoint_due;
+        status
+    };
+    let advisory = run_world_state_section(status(Some(1)));
+    let overdue = run_world_state_section(status(Some(2)));
+
+    let rendered = overdue
+        .render_diff(PreviousWorldStateSection::Known(advisory.snapshot()))
+        .expect("escalation must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_run_update>", "</stateful_run_update>")
+    );
+    assert!(rendered.body().contains("Call obligation_update now"));
 }
