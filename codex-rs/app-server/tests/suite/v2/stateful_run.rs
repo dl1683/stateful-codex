@@ -37,8 +37,13 @@ use codex_app_server_protocol::SteeringListResponse;
 use codex_app_server_protocol::SteeringSubmitParams;
 use codex_app_server_protocol::SteeringSubmitResponse;
 use codex_app_server_protocol::SteeringUpdatedNotification;
+use codex_app_server_protocol::ThreadCompactStartParams;
+use codex_app_server_protocol::ThreadCompactStartResponse;
+use codex_app_server_protocol::ThreadResumeParams;
+use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
@@ -1393,9 +1398,11 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
         &mut server,
         &thread.thread.id,
         "submittedResult",
-        completion["submittedResultCursor"]
-            .as_str()
-            .expect("result cursor"),
+        Some(
+            completion["submittedResultCursor"]
+                .as_str()
+                .expect("result cursor"),
+        ),
     )
     .await?;
     assert_eq!(paged_result, result);
@@ -1404,9 +1411,11 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
         &mut server,
         &thread.thread.id,
         "obligation",
-        completion["finalObligationCursor"]
-            .as_str()
-            .expect("obligation cursor"),
+        Some(
+            completion["finalObligationCursor"]
+                .as_str()
+                .expect("obligation cursor"),
+        ),
     )
     .await?;
     assert_eq!(
@@ -1437,12 +1446,12 @@ async fn read_every_page(
     server: &mut TestAppServer,
     thread_id: &str,
     section: &str,
-    first_cursor: &str,
+    first_cursor: Option<&str>,
 ) -> Result<String> {
     let mut content = String::new();
-    let mut cursor = Some(first_cursor.to_string());
+    let mut cursor = first_cursor.map(str::to_string);
     let mut page_index = 0;
-    while let Some(current) = cursor {
+    loop {
         let call_id = format!("read-{section}-{page_index}");
         let log = responses::mount_sse_sequence(
             responses_server,
@@ -1451,7 +1460,7 @@ async fn read_every_page(
                     responses::ev_function_call(
                         &call_id,
                         "stateful_run_read",
-                        &json!({"section": section, "cursor": current}).to_string(),
+                        &json!({"section": section, "cursor": cursor}).to_string(),
                     ),
                     responses::ev_completed(&format!("{call_id}-response")),
                 ]),
@@ -1475,6 +1484,150 @@ async fn read_every_page(
         content.push_str(page["content"].as_str().expect("page content"));
         cursor = page["nextCursor"].as_str().map(str::to_string);
         page_index += 1;
+        if cursor.is_none() {
+            return Ok(content);
+        }
     }
-    Ok(content)
+}
+
+#[tokio::test]
+async fn long_goal_and_strategy_survive_compaction_and_restart_exactly() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Long run state".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "long-run-state-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let body = |label: &str| format!("{label} clause “détail” \"quoted\".\n").repeat(205);
+    let goal = format!(
+        "GOAL-HEAD {} GOAL-MIDDLE {} GOAL-TAIL: never cite the draft schedule.",
+        body("Review"),
+        body("Check")
+    );
+    let strategy = format!(
+        "STRATEGY-HEAD {} STRATEGY-MIDDLE {} STRATEGY-TAIL: verify the signed schedule first.",
+        body("Compare"),
+        body("Trace")
+    );
+    assert!(goal.len() > 15_000 && goal.len() <= 16 * 1024);
+    assert!(strategy.len() > 15_000 && strategy.len() <= 16 * 1024);
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id,
+                thread_id: thread.thread.id.clone(),
+                goal: goal.clone(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "long-run-state-run".to_string(),
+            },
+        })
+        .await?;
+    responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "set-strategy",
+                    "stateful_run_update",
+                    &json!({
+                        "expectedRevision": started.run.revision,
+                        "status": "running",
+                        "strategy": strategy,
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("set-strategy-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("strategy-set", "Strategy recorded."),
+                responses::ev_completed("strategy-set-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("summary", "COMPACTED_SUMMARY"),
+                responses::ev_completed("summary-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_simple_turn(&mut server, &thread.thread.id).await?;
+    let compact_id = server
+        .send_thread_compact_start_request(ThreadCompactStartParams {
+            thread_id: thread.thread.id.clone(),
+        })
+        .await?;
+    let _: ThreadCompactStartResponse = server.read_response(compact_id).await?;
+    let _: TurnCompletedNotification = server.read_notification("turn/completed").await?;
+    drop(server);
+
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let resume_id = server
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread.thread.id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let _: ThreadResumeResponse = server.read_response(resume_id).await?;
+    let attached: StatefulRunReadResponse = server
+        .request(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: None,
+                thread_id: Some(thread.thread.id.clone()),
+            },
+        })
+        .await?;
+    let attached = attached
+        .run
+        .expect("the resumed thread keeps its active run");
+    assert_eq!(
+        (attached.id.as_str(), attached.status),
+        (started.run.id.as_str(), StatefulRunStatus::Running)
+    );
+
+    let paged_goal = read_every_page(
+        &responses_server,
+        &mut server,
+        &thread.thread.id,
+        "goal",
+        None,
+    )
+    .await?;
+    let paged_strategy = read_every_page(
+        &responses_server,
+        &mut server,
+        &thread.thread.id,
+        "strategy",
+        None,
+    )
+    .await?;
+    assert_eq!((paged_goal, paged_strategy), (goal, strategy));
+    Ok(())
 }

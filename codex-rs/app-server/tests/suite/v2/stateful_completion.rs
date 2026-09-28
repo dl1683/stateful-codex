@@ -3,6 +3,14 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server_protocol::BlackboardConfirmParams;
 use codex_app_server_protocol::BlackboardConfirmResponse;
+use codex_app_server_protocol::BlackboardImportance;
+use codex_app_server_protocol::BlackboardKind;
+use codex_app_server_protocol::BlackboardProvenance;
+use codex_app_server_protocol::BlackboardProvenanceKind;
+use codex_app_server_protocol::BlackboardRootPromotion;
+use codex_app_server_protocol::BlackboardUpsertParams;
+use codex_app_server_protocol::BlackboardUpsertResponse;
+use codex_app_server_protocol::BlackboardVerification;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ContextMapRefreshParams;
 use codex_app_server_protocol::ContextMapRefreshResponse;
@@ -852,4 +860,80 @@ async fn run_status(server: &mut TestAppServer, run_id: String) -> Result<Statef
         })
         .await?;
     Ok(read.run.expect("run remains readable").status)
+}
+
+#[tokio::test]
+async fn public_agent_write_before_completion_requires_durable_learning() -> Result<()> {
+    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+        indexed_project("public-write-first").await?;
+    let (thread_id, run_id, run_revision) =
+        start_lookup_run(&mut server, &project_id, "public-write-first-run").await?;
+    upsert_agent_note(&mut server, &project_id, "public-write-first-note").await?;
+
+    let output =
+        complete_without_learning(&responses_server, &mut server, &thread_id, run_revision).await?;
+
+    assert!(
+        output.contains("agent-written project knowledge changed in this project during this run")
+    );
+    assert_eq!(
+        run_status(&mut server, run_id).await?,
+        StatefulRunStatus::Running
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn completion_before_a_public_agent_write_stands() -> Result<()> {
+    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+        indexed_project("completion-first").await?;
+    let (thread_id, run_id, run_revision) =
+        start_lookup_run(&mut server, &project_id, "completion-first-run").await?;
+
+    let output =
+        complete_without_learning(&responses_server, &mut server, &thread_id, run_revision).await?;
+    upsert_agent_note(&mut server, &project_id, "completion-first-note").await?;
+
+    assert!(output.contains(r#""status":"completed""#), "{output}");
+    assert_eq!(
+        run_status(&mut server, run_id).await?,
+        StatefulRunStatus::Completed
+    );
+    Ok(())
+}
+
+/// Writes an agent-provenance note through the public v2 API, as an external agent or an
+/// older process would.
+async fn upsert_agent_note(
+    server: &mut TestAppServer,
+    project_id: &str,
+    entry_id: &str,
+) -> Result<()> {
+    let _: BlackboardUpsertResponse = server
+        .request(|request_id| ClientRequest::BlackboardUpsert {
+            request_id,
+            params: BlackboardUpsertParams {
+                project_id: project_id.to_string(),
+                entry_id: entry_id.to_string(),
+                expected_revision: None,
+                node_id: None,
+                kind: BlackboardKind::Fact,
+                content: "An external agent noted the release gate.".to_string(),
+                structured_value: None,
+                confidence_basis_points: 8_000,
+                verification: BlackboardVerification::Unverified,
+                importance: BlackboardImportance::Normal,
+                root_promotion: BlackboardRootPromotion::Candidate,
+                evidence: Vec::new(),
+                premises: None,
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "external-agent".to_string(),
+                },
+                state: None,
+                superseded_by: None,
+            },
+        })
+        .await?;
+    Ok(())
 }
