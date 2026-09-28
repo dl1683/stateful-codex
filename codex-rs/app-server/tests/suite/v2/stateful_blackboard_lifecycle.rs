@@ -524,6 +524,9 @@ async fn model_can_enumerate_active_knowledge_affected_by_a_changed_route() -> R
             "importance": "high",
             "rootPromotion": "promoted",
             "evidenceCount": 1,
+            "premises": [],
+            "premiseFreshness": "notApplicable",
+            "storedPremiseFreshness": "notApplicable",
             "provenance": {
                 "kind": "agent",
                 "sourceId": "record-authority"
