@@ -176,6 +176,27 @@ fn docx_region_budget_marks_coverage_partial() {
 }
 
 #[test]
+fn renamed_office_packages_are_indexed_as_office_regions() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    fs::write(
+        temp_dir.path().join("renamed.txt"),
+        generated_docx(r#"<w:p><w:r><w:t>Office content</w:t></w:r></w:p>"#),
+    )
+    .expect("renamed Office fixture should write");
+
+    let file = scan_file(temp_dir.path(), &temp_dir.path().join("renamed.txt"))
+        .expect("renamed Office file should scan");
+
+    assert!(!file.regions.is_empty());
+    assert!(
+        file.regions
+            .iter()
+            .all(|region| region.anchor.scheme == "docx-paragraph")
+    );
+    assert_eq!(file.coverage, ContextMapCoverage::Complete);
+}
+
+#[test]
 fn truncated_docx_descriptions_mark_region_and_file_coverage_partial() {
     let temp_dir = TempDir::new().expect("tempdir should be created");
     fs::write(

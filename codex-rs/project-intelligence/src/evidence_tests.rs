@@ -1,5 +1,7 @@
+use std::future::Future;
 use std::io::Cursor;
 use std::io::Write;
+use std::task::Poll;
 
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -106,9 +108,13 @@ fn utf8_valid_docx() -> Vec<u8> {
 }
 
 async fn indexed_utf8_docx() -> (TempDir, TempDir, ContextMapStore, ContextMapHit) {
+    indexed_utf8_docx_named("fixture.docx").await
+}
+
+async fn indexed_utf8_docx_named(name: &str) -> (TempDir, TempDir, ContextMapStore, ContextMapHit) {
     let home = TempDir::new().expect("temporary state home");
     let root = TempDir::new().expect("temporary project root");
-    std::fs::write(root.path().join("fixture.docx"), utf8_valid_docx())
+    std::fs::write(root.path().join(name), utf8_valid_docx())
         .expect("write UTF-8-valid DOCX fixture");
     let sqlite = SqliteConfig::new_for_testing(home.path().abs());
     let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
@@ -125,7 +131,7 @@ async fn indexed_utf8_docx() -> (TempDir, TempDir, ContextMapStore, ContextMapHi
     let hit = context_map
         .file_hits_for_path(
             "project-1",
-            &ProjectRelativePath::parse("fixture.docx").expect("relative path"),
+            &ProjectRelativePath::parse(name).expect("relative path"),
         )
         .await
         .expect("file hit")
@@ -392,6 +398,31 @@ async fn reads_exact_docx_region_with_provenance_and_budget_truncation() {
 }
 
 #[tokio::test]
+async fn third_office_read_waits_until_a_permit_is_released() {
+    let (_home, root, context_map, hit) = indexed_docx().await;
+    let route = EvidenceRoute::from_hit(&hit).expect("DOCX route");
+    let permits = OFFICE_READS
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_OFFICE_READS)))
+        .clone()
+        .acquire_many_owned(MAX_CONCURRENT_OFFICE_READS as u32)
+        .await
+        .expect("all Office permits should be available");
+    let reader = EvidenceReader::new(context_map);
+    let mut read = Box::pin(reader.read(EvidenceReadRequest {
+        project_id: "project-1".to_string(),
+        project_roots: vec![root.path().to_path_buf()],
+        locator: EvidenceReadLocator::ContextMapRoute(route),
+        max_bytes: 64 * 1024,
+    }));
+    let pending =
+        std::future::poll_fn(|context| Poll::Ready(read.as_mut().poll(context).is_pending())).await;
+    assert!(pending, "third Office read should wait for a permit");
+    drop(permits);
+    read.await
+        .expect("Office read should proceed after release");
+}
+
+#[tokio::test]
 async fn office_file_routes_are_rejected_before_raw_utf8_reads() {
     let (_home, root, context_map, hit) = indexed_utf8_docx().await;
     let bytes = std::fs::read(root.path().join("fixture.docx")).expect("read DOCX fixture");
@@ -441,6 +472,97 @@ async fn office_file_routes_are_rejected_before_raw_utf8_reads() {
     assert!(matches!(route_error, EvidenceReadError::OfficeSourceRoute));
 
     assert_eq!(hit.source.region_anchor, None);
+}
+
+#[tokio::test]
+async fn renamed_office_file_routes_are_rejected_before_raw_utf8_reads() {
+    let (_home, root, context_map, hit) = indexed_utf8_docx_named("fixture.txt").await;
+    let reader = EvidenceReader::new(context_map);
+    for line_range in [None, Some(EvidenceLineRange { start: 1, end: 1 })] {
+        let error = reader
+            .read(EvidenceReadRequest {
+                project_id: "project-1".to_string(),
+                project_roots: vec![root.path().to_path_buf()],
+                locator: EvidenceReadLocator::Source {
+                    project_root: None,
+                    relative_path: ProjectRelativePath::parse("fixture.txt")
+                        .expect("relative path"),
+                    line_range,
+                },
+                max_bytes: 64 * 1024,
+            })
+            .await
+            .expect_err("renamed Office source reads must be rejected");
+        assert!(matches!(error, EvidenceReadError::OfficeSourceRoute));
+    }
+
+    let route = EvidenceRoute::from_hit(&hit).expect("renamed Office file route");
+    let error = reader
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect_err("renamed Office file routes must be rejected");
+    assert!(matches!(error, EvidenceReadError::OfficeSourceRoute));
+}
+
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn in_root_symlink_to_renamed_office_is_rejected() {
+    let (home, root, context_map, _) = indexed_utf8_docx_named("target.txt").await;
+    let link = root.path().join("link.txt");
+    let target = root.path().join("target.txt");
+    let symlink_result = {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target, &link)
+        }
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_file(&target, &link)
+        }
+    };
+    if symlink_result.is_err() {
+        return;
+    }
+    ProjectIndexer::new(
+        HierarchyStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+            .await
+            .expect("hierarchy"),
+        context_map.clone(),
+    )
+    .refresh_file(ProjectIndexFileRequest {
+        project_id: "project-1".to_string(),
+        project_root: root.path().to_path_buf(),
+        relative_path: ProjectRelativePath::parse("link.txt").expect("link path"),
+    })
+    .await
+    .expect("symlink should be indexed");
+    let hit = context_map
+        .file_hits_for_path(
+            "project-1",
+            &ProjectRelativePath::parse("link.txt").expect("link path"),
+        )
+        .await
+        .expect("symlink file hit")
+        .into_iter()
+        .next()
+        .expect("symlink file route");
+    let error = EvidenceReader::new(context_map)
+        .read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(
+                EvidenceRoute::from_hit(&hit).expect("symlink route"),
+            ),
+            max_bytes: 64 * 1024,
+        })
+        .await
+        .expect_err("symlink Office file route must be rejected");
+    assert!(matches!(error, EvidenceReadError::OfficeSourceRoute));
 }
 
 #[tokio::test]

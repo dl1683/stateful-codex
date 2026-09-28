@@ -204,8 +204,9 @@ fn scan_file_with_office_limit(
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut excerpt = Vec::with_capacity(EXCERPT_BYTES);
-    let office_format = DocumentExtractor::format_for_path(path);
-    let mut office_bytes = (office_format == Some(DocumentFormat::Docx)).then(Vec::new);
+    let path_office_format = DocumentExtractor::format_for_path(path);
+    let mut office_bytes = path_office_format.is_some().then(Vec::new);
+    let mut office_candidate = path_office_format.is_some();
     let mut buffer = [0_u8; 64 * 1024];
     let mut total_bytes = 0_u64;
     loop {
@@ -213,14 +214,22 @@ fn scan_file_with_office_limit(
         if read == 0 {
             break;
         }
+        if total_bytes == 0 && buffer[..read].starts_with(b"PK\x03\x04") {
+            office_candidate = true;
+            office_bytes.get_or_insert_with(Vec::new);
+        }
+        if !office_candidate {
+            office_bytes = None;
+        }
         total_bytes = total_bytes
             .saturating_add(u64::try_from(read).map_err(|_| ProjectIndexerError::CountOverflow)?);
         hasher.update(&buffer[..read]);
-        if total_bytes <= max_office_bytes {
+        if total_bytes <= max_office_bytes && office_candidate {
             if let Some(bytes) = office_bytes.as_mut() {
                 bytes.extend_from_slice(&buffer[..read]);
             }
-        } else if office_bytes.is_some() {
+        } else if office_candidate {
+            office_candidate = false;
             office_bytes = None;
         }
         if excerpt.len() < EXCERPT_BYTES {
@@ -230,8 +239,25 @@ fn scan_file_with_office_limit(
     }
     let fingerprint =
         SourceFingerprint::parse(format!("sha256:{}", hex_digest(hasher.finalize())))?;
+    let office_format = office_bytes
+        .as_deref()
+        .and_then(DocumentExtractor::format_for_bytes)
+        .or(path_office_format);
     if office_format == Some(DocumentFormat::Docx) {
         return scan_docx(root, relative_path, fingerprint, office_bytes);
+    }
+    if office_format.is_some() {
+        let (description, _) = describe_file(&relative_path, None);
+        let routing_terms = routing_terms(&relative_path, None);
+        return Ok(ScannedFile {
+            project_root: root.display().to_string(),
+            relative_path,
+            fingerprint,
+            description,
+            routing_terms,
+            coverage: ContextMapCoverage::Partial,
+            regions: Vec::new(),
+        });
     }
     let exact_text = !excerpt.contains(&0) && std::str::from_utf8(&excerpt).is_ok();
     let text = (!excerpt.contains(&0)).then(|| String::from_utf8_lossy(&excerpt).into_owned());

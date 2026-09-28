@@ -10,8 +10,10 @@ pub use limits::ExtractionLimits;
 
 use serde::Deserialize;
 use serde::Serialize;
+use std::io::Cursor;
 use std::path::Path;
 use thiserror::Error;
+use zip::ZipArchive;
 
 /// An Office format supported by the extraction boundary.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -160,6 +162,36 @@ impl DocumentExtractor {
         }
     }
 
+    /// Returns the supported Office format identified from an OOXML package's contents.
+    ///
+    /// This is intentionally independent of the filename so callers can guard renamed files and
+    /// symlink targets before treating their bytes as generic source text.
+    pub fn format_for_bytes(bytes: &[u8]) -> Option<DocumentFormat> {
+        if !bytes.starts_with(b"PK\x03\x04") {
+            return None;
+        }
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).ok()?;
+        let mut has_word_document = false;
+        let mut has_workbook = false;
+        for index in 0..archive.len() {
+            let name = archive.by_index(index).ok()?.name().to_owned();
+            has_word_document |= name == "word/document.xml";
+            has_workbook |= name == "xl/workbook.xml";
+        }
+        if has_word_document {
+            Some(DocumentFormat::Docx)
+        } else if has_workbook {
+            Some(DocumentFormat::Xlsx)
+        } else {
+            None
+        }
+    }
+
+    /// Returns whether the bytes are a supported OOXML Office package, regardless of extension.
+    pub fn is_office_package(bytes: &[u8]) -> bool {
+        Self::format_for_bytes(bytes).is_some()
+    }
+
     /// Hashes and extracts an original Office byte sequence.
     pub fn extract(
         &self,
@@ -186,6 +218,16 @@ impl DocumentExtractor {
         document.canonical_representation_digest = canonical::representation_digest(&document);
         Ok(document)
     }
+}
+
+/// Returns the supported Office format identified from an OOXML package's contents.
+pub fn format_for_bytes(bytes: &[u8]) -> Option<DocumentFormat> {
+    DocumentExtractor::format_for_bytes(bytes)
+}
+
+/// Returns whether the bytes are a supported OOXML Office package, regardless of extension.
+pub fn is_office_package(bytes: &[u8]) -> bool {
+    DocumentExtractor::is_office_package(bytes)
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 
 use codex_document_extraction::DocumentExtractor;
 use codex_document_extraction::ExtractionError;
+use codex_document_extraction::is_office_package;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
@@ -358,12 +359,25 @@ fn read_source(
     let mut first_line = None;
     let mut last_line = None;
     let mut truncated = false;
+    let mut office_bytes = Vec::new();
+    let mut office_candidate = true;
     loop {
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         let bytes = &buffer[..read];
+        if total_bytes == 0 && !bytes.starts_with(b"PK\x03\x04") {
+            office_candidate = false;
+        }
+        if office_candidate {
+            if office_bytes.len().saturating_add(read) <= 64 * 1024 * 1024 {
+                office_bytes.extend_from_slice(bytes);
+            } else {
+                office_candidate = false;
+                office_bytes.clear();
+            }
+        }
         hasher.update(bytes);
         total_bytes = total_bytes
             .checked_add(u64::try_from(read).map_err(|_| EvidenceReadError::CountOverflow)?)
@@ -388,6 +402,9 @@ fn read_source(
                     .ok_or(EvidenceReadError::CountOverflow)?;
             }
         }
+    }
+    if office_candidate && is_office_package(&office_bytes) {
+        return Err(EvidenceReadError::OfficeSourceRoute);
     }
     let total_lines = if !saw_bytes {
         0

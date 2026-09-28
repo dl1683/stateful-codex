@@ -31,6 +31,7 @@ use codex_project_intelligence::HierarchyNode;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::NodeKind;
 use codex_project_intelligence::NodeLifecycle;
+use codex_project_intelligence::is_office_package;
 use codex_state::SqliteConfig;
 use codex_thread_store::StoredProject;
 use codex_thread_store::ThreadStore;
@@ -444,6 +445,8 @@ async fn read_and_fingerprint(
     let mut total_lines = 0_u64;
     let mut saw_bytes = false;
     let mut ended_with_newline = false;
+    let mut office_candidate = true;
+    let mut office_bytes = Vec::new();
     loop {
         let read = file
             .read(&mut buffer)
@@ -451,6 +454,17 @@ async fn read_and_fingerprint(
             .map_err(|error| invalid_params(format!("failed to read evidence source: {error}")))?;
         if read == 0 {
             break;
+        }
+        if total_bytes == 0 && !buffer[..read].starts_with(b"PK\x03\x04") {
+            office_candidate = false;
+        }
+        if office_candidate {
+            if office_bytes.len().saturating_add(read) <= 64 * 1024 * 1024 {
+                office_bytes.extend_from_slice(&buffer[..read]);
+            } else {
+                office_candidate = false;
+                office_bytes.clear();
+            }
         }
         total_bytes = total_bytes
             .checked_add(
@@ -473,6 +487,11 @@ async fn read_and_fingerprint(
         total_lines = total_lines
             .checked_add(1)
             .ok_or_else(|| internal_error("evidence line count overflow"))?;
+    }
+    if office_candidate && is_office_package(&office_bytes) {
+        return Err(invalid_params(
+            "Office evidence files must be read through region reads",
+        ));
     }
     Ok((
         returned,

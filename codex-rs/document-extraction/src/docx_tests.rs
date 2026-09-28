@@ -17,6 +17,7 @@ use crate::ExtractionStatus;
 use crate::ExtractorIdentity;
 use crate::UnsupportedElement;
 use crate::UnsupportedPartCategory;
+use crate::is_office_package;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -47,6 +48,28 @@ fn document(body: &str) -> String {
 
 fn extractor() -> DocumentExtractor {
     DocumentExtractor::production()
+}
+
+#[test]
+fn detects_office_packages_from_internal_parts() {
+    let docx = package(&document(""), &[]);
+    assert_eq!(
+        DocumentExtractor::format_for_bytes(&docx),
+        Some(DocumentFormat::Docx)
+    );
+    assert!(is_office_package(&docx));
+
+    let mut non_office = Vec::new();
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut non_office));
+    writer
+        .start_file("notes.txt", zip::write::SimpleFileOptions::default())
+        .expect("non-Office entry should start");
+    writer
+        .write_all(b"ordinary ZIP")
+        .expect("non-Office entry should write");
+    writer.finish().expect("non-Office ZIP should finish");
+    assert_eq!(DocumentExtractor::format_for_bytes(&non_office), None);
+    assert!(!is_office_package(&non_office));
 }
 
 fn expected_document(

@@ -39,7 +39,8 @@ pub(super) fn read_region(
     if fingerprint != expected_fingerprint {
         return Err(EvidenceReadError::SourceChanged);
     }
-    let format = DocumentExtractor::format_for_path(&path)
+    let format = DocumentExtractor::format_for_bytes(&original)
+        .or_else(|| DocumentExtractor::format_for_path(&path))
         .ok_or_else(|| EvidenceReadError::UnsupportedRegionAnchor(anchor.scheme.clone()))?;
     let document = DocumentExtractor::production().extract(format, &original)?;
     let current_extraction = IndexedExtraction::new(

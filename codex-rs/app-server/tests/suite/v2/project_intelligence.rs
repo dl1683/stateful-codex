@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::io::Cursor;
+use std::io::Write;
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
@@ -31,6 +33,23 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
+
+fn generated_docx() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+    writer
+        .start_file("word/document.xml", SimpleFileOptions::default())
+        .expect("document part should start");
+    writer
+        .write_all(
+            br#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Office content</w:t></w:r></w:p></w:body></w:document>"#,
+        )
+        .expect("document part should write");
+    writer.finish().expect("package should finish");
+    bytes
+}
 
 #[tokio::test]
 async fn project_status_and_evidence_read_report_only_current_exact_source() -> Result<()> {
@@ -205,6 +224,103 @@ async fn project_status_and_evidence_read_report_only_current_exact_source() -> 
         error.error.message,
         "evidence source changed after indexing; refresh the context map"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn evidence_read_rejects_content_detected_office_file_entries() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    let office = generated_docx();
+    std::fs::write(project_root.path().join("fixture.docx"), &office)?;
+    std::fs::write(project_root.path().join("renamed.txt"), &office)?;
+    std::fs::write(project_root.path().join("ordinary.txt"), "ordinary text")?;
+    let project_root_path = AbsolutePathBuf::try_from(project_root.path().to_path_buf())?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Office evidence project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: project_root_path,
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "office-evidence-project".to_string(),
+            },
+        })
+        .await?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    let context_map = ContextMapStore::open(&SqliteConfig::new_for_testing(
+        AbsolutePathBuf::try_from(codex_home.path().to_path_buf())?,
+    ))
+    .await?;
+
+    for relative_path in ["fixture.docx", "renamed.txt"] {
+        let hit = context_map
+            .file_hits_for_path(
+                &created.project.id,
+                &ProjectRelativePath::parse(relative_path)?,
+            )
+            .await?
+            .into_iter()
+            .find(|hit| hit.source.region_anchor.is_none())
+            .expect("Office file entry should be indexed");
+        let request_id = server
+            .send_request(
+                "evidence/read",
+                Some(json!({
+                    "projectId": created.project.id,
+                    "contextMapEntryId": hit.entry.id,
+                    "maxBytes": 64 * 1024,
+                })),
+            )
+            .await?;
+        let error = server
+            .read_stream_until_error_message(RequestId::Integer(request_id))
+            .await?;
+        assert_eq!(error.error.code, INVALID_PARAMS_ERROR_CODE);
+        assert_eq!(
+            error.error.message,
+            "Office evidence files must be read through region reads"
+        );
+    }
+
+    let text_hit = context_map
+        .file_hits_for_path(
+            &created.project.id,
+            &ProjectRelativePath::parse("ordinary.txt")?,
+        )
+        .await?
+        .into_iter()
+        .find(|hit| hit.source.region_anchor.is_none())
+        .expect("text file entry should be indexed");
+    let evidence: EvidenceReadResponse = server
+        .request(|request_id| ClientRequest::EvidenceRead {
+            request_id,
+            params: EvidenceReadParams {
+                project_id: created.project.id,
+                context_map_entry_id: text_hit.entry.id.to_string(),
+                line_range: None,
+                max_bytes: Some(64),
+            },
+        })
+        .await?;
+    assert_eq!(evidence.content, "ordinary text");
     Ok(())
 }
 

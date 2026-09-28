@@ -1086,6 +1086,89 @@ async fn model_reads_current_and_legacy_text_and_docx_routes_with_provenance() -
 }
 
 #[tokio::test]
+async fn model_text_response_between_eight_and_nine_kibibytes_keeps_its_receipt() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "large-text-read",
+                    "evidence_read",
+                    &json!({
+                        "relativePath": "large.txt",
+                        "lineRange": {"start": 1, "end": 1},
+                        "maxBytes": 12_288
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("large-text-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("large-text-done", "Large text read"),
+                responses::ev_completed("large-text-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(project_root.path().join("large.txt"), "x".repeat(8_200))?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Large text evidence project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "large-text-evidence-project".to_string(),
+            },
+        })
+        .await?;
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let output: serde_json::Value = serde_json::from_str(
+        &response_log
+            .function_call_output_text("large-text-read")
+            .expect("large text output should be text"),
+    )?;
+    assert!(output.to_string().len() > 8_192);
+    assert!(output.to_string().len() <= 9_000);
+    assert_eq!(output["truncated"], false);
+    assert!(
+        output["blackboardEvidence"]["readReceiptId"]
+            .as_str()
+            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn context_refresh_returns_bounded_source_routes_to_the_model() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let response_log = responses::mount_sse_sequence(

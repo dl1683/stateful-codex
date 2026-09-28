@@ -48,6 +48,7 @@ pub use blackboard::RootPromotion;
 pub use blackboard_storage::BlackboardStore;
 pub use blackboard_storage::BlackboardStoreError;
 pub use blackboard_storage::CompletionFence;
+pub use codex_document_extraction::is_office_package;
 pub use context_map::ContextMapCoverage;
 pub use context_map::ContextMapEntry;
 pub use context_map::ContextMapEntryId;

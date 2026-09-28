@@ -30,6 +30,7 @@ use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
 
+use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
@@ -165,7 +166,11 @@ impl EvidenceReadTool {
             .read_with_refresh(project_roots, locator, max_bytes)
             .await?;
 
-        let byte_budget = call.response_byte_budget(EVIDENCE_RESPONSE_BYTES);
+        let byte_budget = if result.extraction.is_some() {
+            call.response_byte_budget(EVIDENCE_RESPONSE_BYTES)
+        } else {
+            call.response_byte_budget(MAX_RESPONSE_BYTES)
+        };
         let context_map_entry_id = result.hit.entry.id.to_string();
         let returned_line_range = match (result.first_line, result.last_line) {
             (Some(start), Some(end)) if !result.truncated => Some(EvidenceLineRange { start, end }),
