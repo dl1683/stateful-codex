@@ -3,6 +3,7 @@ use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
@@ -41,6 +42,18 @@ struct Arguments {
     material_historical_findings: Option<Vec<HistoricalFindingArguments>>,
     completion_idempotency_key: Option<String>,
     final_obligation: Option<ObligationPacket>,
+    #[serde(default)]
+    completion_disposition: CompletionDisposition,
+}
+
+/// Whether a completed run carries reusable project learning. Lookups and answers
+/// built entirely from existing state complete without the durable-learning ritual.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum CompletionDisposition {
+    #[default]
+    DurableLearning,
+    NoReusableLearning,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +102,7 @@ impl StatefulRunUpdateTool {
             material_historical_findings,
             completion_idempotency_key,
             final_obligation,
+            completion_disposition,
         } = parse_arguments(&call)?;
         if !matches!(
             status,
@@ -113,7 +127,37 @@ impl StatefulRunUpdateTool {
         let submitted_result = (status == StatefulRunStatus::Completed)
             .then(|| result.clone())
             .flatten();
-        let (completion, final_obligation) = if status == StatefulRunStatus::Completed {
+        let no_reusable_learning = status == StatefulRunStatus::Completed
+            && completion_disposition == CompletionDisposition::NoReusableLearning;
+        if completion_disposition == CompletionDisposition::NoReusableLearning
+            && status != StatefulRunStatus::Completed
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "completionDisposition noReusableLearning is only valid when status is completed"
+                    .to_string(),
+            ));
+        }
+        let (completion, final_obligation) = if no_reusable_learning {
+            if material_root_findings.is_some()
+                || root_revision.is_some()
+                || material_historical_findings.is_some()
+                || completion_idempotency_key.is_some()
+                || final_obligation.is_some()
+            {
+                return Err(FunctionCallError::RespondToModel(
+                    "completionDisposition noReusableLearning completes with the result only; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
+                ));
+            }
+            if result
+                .as_deref()
+                .is_none_or(|result| result.trim().is_empty())
+            {
+                return Err(FunctionCallError::RespondToModel(
+                    "completed requires a final evidence-grounded result".to_string(),
+                ));
+            }
+            (None, None)
+        } else if status == StatefulRunStatus::Completed {
             if current.revision != expected_revision {
                 return Err(FunctionCallError::RespondToModel(format!(
                     "run revision conflict: expected {expected_revision}, found {}",
@@ -274,6 +318,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
         ToolName::plain(TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Prose-bearing mutations stay out of nested code mode: model-written JS
+        // string literals break on quotes inside long semantic fields.
+        ToolExposure::DirectModelOnly
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
@@ -291,7 +341,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": format!("Required for completed. Select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases shown at rootRevision that are directly material to the requested outcome. If finalObligation.learning is non-empty, this or materialHistoricalFindings must identify at least one reusable blackboard finding. Use [] only when the run produced no reusable project learning.")},
                     "materialHistoricalFindings": {"type": "array", "items": {"type": "object", "properties": {"entryId": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}}, "required": ["entryId", "revision"], "additionalProperties": false}, "maxItems": MAX_MATERIAL_HISTORICAL_FINDINGS, "description": format!("Optional for completed. Select at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact superseded or tombstoned entry IDs and revisions returned by blackboard_query or copy historicalFinding from a successful blackboard_update_batch lifecycle result. Use the latest returned revision; do not query the same entry again. The host renders stored source fingerprints; do not copy opaque fingerprints manually.")},
                     "completionIdempotencyKey": {"type": "string", "description": "Required for completed. Reuse only when retrying this identical final obligation and terminal result."},
-                    "finalObligation": super::obligation::obligation_packet_schema()
+                    "finalObligation": super::obligation::obligation_packet_schema(),
+                    "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning. Use noReusableLearning with status completed and a result only (no rootRevision, findings, idempotency key, or finalObligation) when the run answered from existing project state or produced nothing worth reusing, such as a lookup; do not record or promote anything first just to complete."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false

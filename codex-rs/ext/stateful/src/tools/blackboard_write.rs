@@ -6,6 +6,7 @@ use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
@@ -252,6 +253,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
         ToolName::plain(RECORD_TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Prose-bearing mutations stay out of nested code mode: model-written JS
+        // string literals break on quotes inside long semantic fields.
+        ToolExposure::DirectModelOnly
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECORD_TOOL_NAME.to_string(),
@@ -433,6 +440,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolName::plain(BATCH_RECORD_TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Prose-bearing mutations stay out of nested code mode: model-written JS
+        // string literals break on quotes inside long semantic fields.
+        ToolExposure::DirectModelOnly
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
@@ -612,6 +625,12 @@ impl BlackboardRelateTool {
 impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRelateTool {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(RELATE_TOOL_NAME)
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        // Prose-bearing mutations stay out of nested code mode: model-written JS
+        // string literals break on quotes inside long semantic fields.
+        ToolExposure::DirectModelOnly
     }
 
     fn spec(&self) -> ToolSpec {

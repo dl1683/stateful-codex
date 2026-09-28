@@ -159,10 +159,10 @@ async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::R
         vec![
             responses::sse(vec![
                 responses::ev_response_created("response-1"),
-                responses::ev_custom_tool_call(
+                responses::ev_function_call(
                     "finish-first-run",
-                    "exec",
-                    r#"const result = await tools.stateful_run_update({expectedRevision: 1, status: "failed", result: "test terminal result"}); text(JSON.stringify(result));"#,
+                    "stateful_run_update",
+                    r#"{"expectedRevision": 1, "status": "failed", "result": "test terminal result"}"#,
                 ),
                 responses::ev_completed_with_tokens("response-1", /*total_tokens*/ 60),
             ]),
@@ -251,10 +251,10 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
             ]),
             responses::sse(vec![
                 responses::ev_response_created("response-2"),
-                responses::ev_custom_tool_call(
+                responses::ev_function_call(
                     "complete-autonomous-run",
-                    "exec",
-                    r#"const result = await tools.stateful_run_update({expectedRevision: 2, status: "completed", result: "The autonomous investigation is complete.", rootRevision: 0, materialRootFindings: [], completionIdempotencyKey: "autonomous-final", finalObligation: {learning: [], implication: ["No further continuation is required."]}}); text(JSON.stringify(result));"#,
+                    "stateful_run_update",
+                    r#"{"expectedRevision": 2, "status": "completed", "result": "The autonomous investigation is complete.", "rootRevision": 0, "materialRootFindings": [], "completionIdempotencyKey": "autonomous-final", "finalObligation": {"learning": [], "implication": ["No further continuation is required."]}}"#,
                 ),
                 responses::ev_completed("response-2"),
             ]),

@@ -122,6 +122,7 @@ mod session_end;
 mod skills_list;
 mod sleep;
 mod stateful_blackboard_lifecycle;
+mod stateful_code_mode;
 mod stateful_completion;
 mod stateful_modes;
 mod stateful_project_context;

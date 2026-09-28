@@ -6,6 +6,7 @@ use codex_extension_api::JsonToolOutput;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
@@ -385,6 +386,12 @@ impl BlackboardUpdateTool {
 impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(UPDATE_TOOL_NAME)
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        // Prose-bearing mutations stay out of nested code mode: model-written JS
+        // string literals break on quotes inside long semantic fields.
+        ToolExposure::DirectModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
