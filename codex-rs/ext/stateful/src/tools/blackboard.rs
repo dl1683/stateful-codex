@@ -26,6 +26,7 @@ use crate::source_freshness::audited_blackboard_freshness;
 use crate::source_freshness::audited_premise_freshness;
 use crate::source_freshness::audited_verification;
 use crate::source_freshness::observe_evidence;
+use crate::visible_root::VisibleRootRegistry;
 
 use super::MAX_RESPONSE_BYTES;
 use super::fits_response;
@@ -46,24 +47,41 @@ struct QueryArguments {
     expected_project_revision: Option<u64>,
     after_entry_id: Option<String>,
     limit: Option<u32>,
+    #[serde(default)]
+    detail: QueryDetail,
+}
+
+/// Whether hits already shown in full in the root packet repeat their content.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum QueryDetail {
+    #[default]
+    Compact,
+    Full,
 }
 
 pub(super) struct BlackboardQueryTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
+    visible_root: VisibleRootRegistry,
 }
 
 impl BlackboardQueryTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
+        visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             projects,
+            visible_root,
         }
     }
 
@@ -80,7 +98,11 @@ impl BlackboardQueryTool {
             expected_project_revision,
             after_entry_id,
             limit,
+            detail,
         } = parse_arguments(&call)?;
+        let visible_root = (detail == QueryDetail::Compact)
+            .then(|| self.visible_root.get(&self.thread_id))
+            .flatten();
         let within_node = within_node_id
             .map(HierarchyNodeId::parse)
             .transpose()
@@ -194,46 +216,68 @@ impl BlackboardQueryTool {
                 premise_freshness,
             );
             let evidence_count = hit.entry.value.evidence.len();
-            let mut item = json!({
-                "entryId": hit.entry.id.to_string(),
-                "nodeId": hit.entry.value.node_id.to_string(),
-                "revision": hit.entry.revision,
-                "state": hit.entry.state,
-                "supersededBy": hit.entry.superseded_by.map(|id| id.to_string()),
-                "kind": hit.entry.value.kind,
-                "content": hit.entry.value.content,
-                "structuredValue": hit.entry.value.structured_value,
-                "confidenceBasisPoints": hit.entry.value.confidence.basis_points(),
-                "declaredVerification": hit.entry.value.verification,
-                "effectiveVerification": effective_verification,
-                "evidenceFreshness": evidence_freshness,
-                "storedEvidenceFreshness": hit.evidence_freshness,
-                "premiseFreshness": premise_freshness,
-                "storedPremiseFreshness": hit.premise_freshness,
-                "importance": hit.entry.value.importance,
-                "rootPromotion": hit.entry.value.root_promotion,
-                "evidence": hit.entry.value.evidence.into_iter().map(|link| json!({
-                    "contextMapEntryId": link.context_map_entry_id.to_string(),
-                    "sourceFingerprint": link.source_fingerprint.to_string(),
-                    "lineRange": link.line_range,
-                })).collect::<Vec<_>>(),
-                "premises": hit.entry.value.premises.into_iter().map(|link| json!({
-                    "entryId": link.entry_id.to_string(),
-                    "revision": link.revision,
-                })).collect::<Vec<_>>(),
-                "provenance": hit.entry.value.provenance,
-                "relations": hit.relations.into_iter().map(|relation| json!({
-                    "relationId": relation.id.to_string(),
-                    "revision": relation.revision,
-                    "fromEntryId": relation.value.from_entry_id.to_string(),
-                    "toEntryId": relation.value.to_entry_id.to_string(),
-                    "kind": relation.value.kind,
-                    "note": relation.value.note,
-                    "confidenceBasisPoints": relation.value.confidence.basis_points(),
-                    "provenance": relation.value.provenance,
-                })).collect::<Vec<_>>(),
-            });
-            if evidence_query {
+            let root_alias = visible_root
+                .as_ref()
+                .and_then(|visible| visible.alias_for(hit.entry.id.as_str(), hit.entry.revision));
+            let mut item = if let Some(root_alias) = root_alias {
+                json!({
+                    "entryId": hit.entry.id.to_string(),
+                    "nodeId": hit.entry.value.node_id.to_string(),
+                    "revision": hit.entry.revision,
+                    "state": hit.entry.state,
+                    "rootAlias": root_alias,
+                    "contentInRoot": true,
+                    "kind": hit.entry.value.kind,
+                    "declaredVerification": hit.entry.value.verification,
+                    "effectiveVerification": effective_verification,
+                    "evidenceFreshness": evidence_freshness,
+                    "premiseFreshness": premise_freshness,
+                    "importance": hit.entry.value.importance,
+                    "rootPromotion": hit.entry.value.root_promotion,
+                    "detailsOmitted": ["content", "structuredValue", "evidence", "premises", "provenance", "relations"],
+                })
+            } else {
+                json!({
+                    "entryId": hit.entry.id.to_string(),
+                    "nodeId": hit.entry.value.node_id.to_string(),
+                    "revision": hit.entry.revision,
+                    "state": hit.entry.state,
+                    "supersededBy": hit.entry.superseded_by.map(|id| id.to_string()),
+                    "kind": hit.entry.value.kind,
+                    "content": hit.entry.value.content,
+                    "structuredValue": hit.entry.value.structured_value,
+                    "confidenceBasisPoints": hit.entry.value.confidence.basis_points(),
+                    "declaredVerification": hit.entry.value.verification,
+                    "effectiveVerification": effective_verification,
+                    "evidenceFreshness": evidence_freshness,
+                    "storedEvidenceFreshness": hit.evidence_freshness,
+                    "premiseFreshness": premise_freshness,
+                    "storedPremiseFreshness": hit.premise_freshness,
+                    "importance": hit.entry.value.importance,
+                    "rootPromotion": hit.entry.value.root_promotion,
+                    "evidence": hit.entry.value.evidence.into_iter().map(|link| json!({
+                        "contextMapEntryId": link.context_map_entry_id.to_string(),
+                        "sourceFingerprint": link.source_fingerprint.to_string(),
+                        "lineRange": link.line_range,
+                    })).collect::<Vec<_>>(),
+                    "premises": hit.entry.value.premises.into_iter().map(|link| json!({
+                        "entryId": link.entry_id.to_string(),
+                        "revision": link.revision,
+                    })).collect::<Vec<_>>(),
+                    "provenance": hit.entry.value.provenance,
+                    "relations": hit.relations.into_iter().map(|relation| json!({
+                        "relationId": relation.id.to_string(),
+                        "revision": relation.revision,
+                        "fromEntryId": relation.value.from_entry_id.to_string(),
+                        "toEntryId": relation.value.to_entry_id.to_string(),
+                        "kind": relation.value.kind,
+                        "note": relation.value.note,
+                        "confidenceBasisPoints": relation.value.confidence.basis_points(),
+                        "provenance": relation.value.provenance,
+                    })).collect::<Vec<_>>(),
+                })
+            };
+            if evidence_query && root_alias.is_none() {
                 let serde_json::Value::Object(item) = &mut item else {
                     unreachable!("static blackboard query item should be an object");
                 };
@@ -315,7 +359,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
                     "evidenceContextMapEntryIds": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}, "description": "Exact contextMapEntryId values returned by evidence_read. Each ID expands to the source file and all its file or region routes. Combine only with entryScope, expectedProjectRevision, afterEntryId, and limit."},
                     "expectedProjectRevision": {"type": "integer", "minimum": 0, "description": "For continuation pages, copy projectRevision from the first affected-source page. Omit on the first page; a mismatch fails closed and requires restarting enumeration."},
                     "afterEntryId": {"type": "string", "description": "Continuation returned as nextAfterEntryId by an affected-source query. Requires evidenceContextMapEntryIds; copy it unchanged."},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Maximum records to return. Use the smallest useful value."}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Maximum records to return. Use the smallest useful value."},
+                    "detail": {"type": "string", "enum": ["compact", "full"], "description": "Defaults to compact: an entry already shown in full in the root packet at the same revision returns its rootAlias and freshness instead of repeating its content, evidence, and relations. Use full only when you need those fields verbatim."}
                 },
                 "additionalProperties": false
             }))

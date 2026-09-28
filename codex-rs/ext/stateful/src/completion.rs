@@ -19,6 +19,7 @@ use crate::source_freshness::audited_blackboard_freshness;
 use crate::source_freshness::audited_premise_freshness;
 use crate::source_freshness::audited_verification;
 use crate::source_freshness::observe_evidence;
+use crate::visible_root::VisibleRoot;
 
 const MAX_FINAL_CHECKLIST_ITEMS: usize = 16;
 const MAX_FINAL_CHECKLIST_ITEM_BYTES: usize = 640;
@@ -44,11 +45,17 @@ pub(crate) struct CompletionRequest<'a> {
     pub(crate) root_revision: u64,
     pub(crate) material_root_findings: &'a [String],
     pub(crate) material_historical_findings: &'a [HistoricalFindingReference],
+    /// The root the model was last shown; selected findings shown in full at the
+    /// same revision are echoed back by alias instead of repeating their prose.
+    pub(crate) visible_root: Option<&'a VisibleRoot>,
 }
 
 struct ChecklistItem {
     category: &'static str,
     text: String,
+    /// Tool-output form for a finding already visible in full; the durable result
+    /// always keeps `text`.
+    compact_text: Option<String>,
 }
 
 struct MaterialChecklist {
@@ -68,6 +75,7 @@ pub(crate) async fn prepare_completion(
         root_revision,
         material_root_findings,
         material_historical_findings,
+        visible_root,
     } = request;
     if material_root_findings.len() > MAX_MATERIAL_ROOT_FINDINGS {
         return Err(respond(format!(
@@ -104,6 +112,7 @@ pub(crate) async fn prepare_completion(
         project_roots,
         root_revision,
         material_root_findings,
+        visible_root,
     )
     .await?;
     let historical =
@@ -149,7 +158,12 @@ pub(crate) async fn prepare_completion(
         result: durable_result,
         checklist: checklist
             .into_iter()
-            .map(|item| json!({"category": item.category, "text": item.text}))
+            .map(|item| {
+                json!({
+                    "category": item.category,
+                    "text": item.compact_text.unwrap_or(item.text),
+                })
+            })
             .collect(),
         omitted_checklist_items,
     })
@@ -161,6 +175,7 @@ async fn material_root_checklist(
     project_roots: &[PathBuf],
     expected_root_revision: u64,
     requested_references: &[String],
+    visible_root: Option<&VisibleRoot>,
 ) -> Result<MaterialChecklist, FunctionCallError> {
     let projection = services
         .blackboard()
@@ -277,16 +292,26 @@ async fn material_root_checklist(
         } else {
             format!(" sources=[{}]", sources.join(","))
         };
+        let labels = format!(
+            "{reference} [{}; verification={}; evidence={}; premises={}]",
+            importance_name(hit.entry.value.importance),
+            verification_name(effective_verification),
+            freshness_name(evidence_freshness),
+            premise_freshness_name(premise_freshness),
+        );
+        let shown_in_root = visible_root.is_some_and(|visible| {
+            visible.project_revision == expected_root_revision
+                && visible.alias_for(hit.entry.id.as_str(), hit.entry.revision)
+                    == Some(reference.as_str())
+        });
         material.items.push(ChecklistItem {
             category: "rootFinding",
-            text: bounded_item(&format!(
-                "{reference} [{}; verification={}; evidence={}; premises={}] {}{sources}",
-                importance_name(hit.entry.value.importance),
-                verification_name(effective_verification),
-                freshness_name(evidence_freshness),
-                premise_freshness_name(premise_freshness),
-                hit.entry.value.content,
-            )),
+            text: bounded_item(&format!("{labels} {}{sources}", hit.entry.value.content)),
+            compact_text: shown_in_root.then(|| {
+                bounded_item(&format!(
+                    "{labels} (content as shown in the root packet){sources}"
+                ))
+            }),
         });
     }
     Ok(material)
@@ -387,6 +412,7 @@ async fn material_historical_checklist(
                 verification_name(entry.value.verification),
                 entry.value.content,
             )),
+            compact_text: None,
         });
     }
     Ok(material)
@@ -438,6 +464,7 @@ fn packet_checklist(packet: &ObligationPacket) -> Vec<ChecklistItem> {
         items.iter().map(move |item| ChecklistItem {
             category,
             text: bounded_item(item),
+            compact_text: None,
         })
     })
     .collect()

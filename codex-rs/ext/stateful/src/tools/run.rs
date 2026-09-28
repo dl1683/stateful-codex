@@ -23,6 +23,7 @@ use crate::completion::MAX_MATERIAL_HISTORICAL_FINDINGS;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
+use crate::visible_root::VisibleRootRegistry;
 
 use super::parse_arguments;
 use super::respond;
@@ -69,6 +70,7 @@ pub(super) struct StatefulRunUpdateTool {
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
+    visible_root: VisibleRootRegistry,
 }
 
 impl StatefulRunUpdateTool {
@@ -78,6 +80,7 @@ impl StatefulRunUpdateTool {
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
+        visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
             project_id,
@@ -85,6 +88,7 @@ impl StatefulRunUpdateTool {
             services,
             projects,
             event_sink,
+            visible_root,
         }
     }
 
@@ -215,6 +219,7 @@ impl StatefulRunUpdateTool {
                 .iter()
                 .map(|root| std::path::PathBuf::from(&root.path))
                 .collect::<Vec<_>>();
+            let visible_root = self.visible_root.get(&self.thread_id);
             let completion = prepare_completion(
                 &self.services,
                 CompletionRequest {
@@ -225,6 +230,7 @@ impl StatefulRunUpdateTool {
                     root_revision,
                     material_root_findings: &material_root_findings,
                     material_historical_findings: &material_historical_findings,
+                    visible_root: visible_root.as_ref(),
                 },
             )
             .await?;

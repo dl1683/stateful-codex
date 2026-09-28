@@ -21,6 +21,7 @@ use sha2::Sha256;
 
 use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
+use crate::visible_root::VisibleRootRegistry;
 
 const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 
@@ -30,12 +31,15 @@ pub(super) fn project_intelligence_tools(
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
+    visible_root: VisibleRootRegistry,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
         Arc::new(blackboard::BlackboardQueryTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             projects.clone(),
+            visible_root.clone(),
         )),
         Arc::new(blackboard_write::BlackboardRecordTool::new(
             project_id.clone(),
@@ -93,6 +97,7 @@ pub(super) fn project_intelligence_tools(
             services.clone(),
             projects,
             event_sink.clone(),
+            visible_root,
         )),
         Arc::new(steering::SteeringQueryTool::new(
             project_id.clone(),

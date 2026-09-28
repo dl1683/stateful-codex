@@ -33,6 +33,7 @@ use super::HistoricalFindingReference;
 use super::prepare_completion;
 use super::sha256_references;
 use crate::services::ProjectIntelligenceServices;
+use crate::visible_root::VisibleRoot;
 
 const PROJECT_ID: &str = "project-1";
 const SOURCE_FINGERPRINT: &str =
@@ -234,6 +235,7 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
                 entry_id: entry_id.to_string(),
                 revision: historical.revision,
             }],
+            visible_root: None,
         },
     )
     .await
@@ -242,6 +244,113 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
     assert!(completion.result.contains(SOURCE_FINGERPRINT));
     assert!(completion.result.contains("facts.md:L4-L7"));
     assert_eq!(completion.checklist[0]["category"], "historicalFinding");
+}
+
+#[tokio::test]
+async fn completion_echoes_findings_already_shown_in_full_by_alias() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    let source_path = project_root.path().join("policy.md");
+    std::fs::write(&source_path, "threshold=10\n").expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    ProjectIndexer::new(
+        services.hierarchy().await.expect("hierarchy").clone(),
+        services.context_map().await.expect("context map").clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: PROJECT_ID.to_string(),
+        roots: vec![project_root.path().to_path_buf()],
+    })
+    .await
+    .expect("index source");
+    let context_hit = services
+        .context_map()
+        .await
+        .expect("context map")
+        .file_hits_for_path(
+            PROJECT_ID,
+            &ProjectRelativePath::parse("policy.md").expect("relative path"),
+        )
+        .await
+        .expect("source lookup")
+        .into_iter()
+        .next()
+        .expect("indexed source");
+    let blackboard = services.blackboard().await.expect("blackboard");
+    blackboard
+        .create_entry(
+            BlackboardEntryId::parse("current-threshold").expect("entry ID"),
+            NewBlackboardEntry {
+                project_id: PROJECT_ID.to_string(),
+                node_id: context_hit.entry.value.node_id,
+                kind: BlackboardKind::Number,
+                content: "The policy threshold is 10.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(10_000).expect("confidence"),
+                verification: BlackboardVerification::SourceVerified,
+                importance: BlackboardImportance::High,
+                root_promotion: RootPromotion::Promoted,
+                evidence: vec![BlackboardEvidenceLink {
+                    context_map_entry_id: context_hit.entry.id,
+                    source_fingerprint: context_hit.entry.value.source_fingerprint,
+                    line_range: None,
+                }],
+                premises: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "turn-1".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("create root knowledge");
+    let root_revision = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: PROJECT_ID.to_string(),
+            max_entries: 256,
+        })
+        .await
+        .expect("root projection")
+        .revision;
+    let projection = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: PROJECT_ID.to_string(),
+            max_entries: 256,
+        })
+        .await
+        .expect("root projection");
+    let shown = &projection.data[0].entry;
+    let mut visible_root = VisibleRoot::new(root_revision);
+    visible_root.insert(shown.id.to_string(), "E1".to_string(), shown.revision);
+
+    let completion = prepare_completion(
+        &services,
+        CompletionRequest {
+            project_id: PROJECT_ID,
+            project_roots: &[project_root.path().to_path_buf()],
+            result: "Threshold remains 10.",
+            packet: &ObligationPacket {
+                learning: vec!["The threshold controls the decision.".to_string()],
+                ..Default::default()
+            },
+            root_revision,
+            material_root_findings: &["E1".to_string()],
+            material_historical_findings: &[],
+            visible_root: Some(&visible_root),
+        },
+    )
+    .await
+    .expect("current shown finding completes");
+
+    let echoed = completion.checklist[0]["text"]
+        .as_str()
+        .expect("checklist text")
+        .to_string();
+    assert!(echoed.starts_with("E1 ["));
+    assert!(echoed.contains("(content as shown in the root packet)"));
+    assert!(!echoed.contains(&shown.value.content));
+    assert!(completion.result.contains(&shown.value.content));
 }
 
 #[tokio::test]
@@ -326,6 +435,7 @@ async fn completion_rejects_material_root_finding_changed_after_world_state_audi
             root_revision,
             material_root_findings: &["E1".to_string()],
             material_historical_findings: &[],
+            visible_root: None,
         },
     )
     .await;

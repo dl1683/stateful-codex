@@ -28,6 +28,7 @@ use crate::world_state::try_append_line;
 const MAX_ENTRY_BYTES: usize = 3 * 1024;
 const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 12 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
+const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
 
 pub(super) enum RootBlackboardStatus {
     Available(ResolvedRootBlackboard),
@@ -41,6 +42,8 @@ pub(super) enum RootBlackboardStatus {
 pub(super) struct RootLayout {
     pub(super) entries: Vec<LaidOutLine>,
     pub(super) sources: Vec<LaidOutLine>,
+    /// Entries shown in full (entry ID, alias, entry revision).
+    pub(super) complete_entries: Vec<(String, String, u64)>,
 }
 
 pub(super) struct LaidOutLine {
@@ -127,6 +130,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         .map(|route| (route.clone(), route.to_string()))
         .collect::<HashMap<_, _>>();
     let mut entries = Vec::with_capacity(projection.data.len());
+    let mut complete_entries = Vec::with_capacity(projection.data.len());
     let mut omitted = projection.omitted_entries;
     for (index, hit) in projection.data.iter().enumerate() {
         let line = render_hit(
@@ -137,6 +141,13 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             root.evidence_audit.as_ref(),
         );
         if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
+            if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
+                complete_entries.push((
+                    hit.entry.id.to_string(),
+                    format!("E{}", index + 1),
+                    hit.entry.revision,
+                ));
+            }
             let canonical = render_hit(
                 hit.entry.id.as_str(),
                 hit,
@@ -182,7 +193,11 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             "At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, first ensure at least one selected current root or exact historical finding preserves that reusable learning; use an empty alias list only when the run produced no reusable project learning. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
         ),
     );
-    RootLayout { entries, sources }
+    RootLayout {
+        entries,
+        sources,
+        complete_entries,
+    }
 }
 
 fn render_evidence_catalog(
@@ -347,7 +362,7 @@ fn render_hit(
         relations,
     );
     if line.len() > MAX_ENTRY_BYTES {
-        let marker = format!("… [{alias} truncated; query blackboard by content]");
+        let marker = format!("… [{alias}{TRUNCATED_ENTRY_SUFFIX}");
         let maximum = MAX_ENTRY_BYTES.saturating_sub(marker.len());
         line.truncate(floor_char_boundary(&line, maximum));
         line.push_str(&marker);

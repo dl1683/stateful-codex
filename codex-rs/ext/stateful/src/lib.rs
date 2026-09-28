@@ -12,6 +12,7 @@ mod services;
 mod socratic;
 mod source_freshness;
 mod tools;
+mod visible_root;
 mod world_state;
 
 use std::sync::Arc;
@@ -122,6 +123,7 @@ struct StatefulExtension {
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     autonomous: Option<AutonomousContinuation>,
     attribution: attribution::StatefulAttributionTracker,
+    visible_root: visible_root::VisibleRootRegistry,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -163,7 +165,12 @@ impl ContextContributor for StatefulExtension {
                     }
                 }
             };
-            let mut sections = vec![project_world_state_section(status)];
+            let (project_section, visible_root) = project_world_state_section(status);
+            if let Some(visible_root) = visible_root {
+                self.visible_root
+                    .record(&input.thread_id.to_string(), visible_root);
+            }
+            let mut sections = vec![project_section];
             if let Some(outcomes) = self.project_outcomes(selected.project_id()).await {
                 sections.push(project_outcomes_world_state_section(outcomes));
             }
@@ -495,6 +502,7 @@ impl ToolContributor for StatefulExtension {
             services.clone(),
             self.projects.clone(),
             self.event_sink.clone(),
+            self.visible_root.clone(),
         )
     }
 }
@@ -513,6 +521,7 @@ pub fn install<C: Sync>(
         event_sink,
         autonomous,
         attribution: attribution::StatefulAttributionTracker::default(),
+        visible_root: visible_root::VisibleRootRegistry::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());

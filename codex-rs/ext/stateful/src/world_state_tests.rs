@@ -2,6 +2,7 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::PromptCacheAffinity;
+use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryState;
@@ -30,6 +31,10 @@ use super::semantic_fingerprint;
 use crate::SelectedProject;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
+
+fn section(status: ProjectIntelligenceStatus) -> WorldStateSectionContribution {
+    project_world_state_section(status).0
+}
 
 fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
     StoredProject {
@@ -74,7 +79,7 @@ fn available_at_revision(
 #[test]
 fn incomplete_refresh_health_is_visible_and_changes_project_context() {
     let base_project = project("Research", Vec::new());
-    let previous = project_world_state_section(available(base_project.clone()));
+    let previous = section(available(base_project.clone()));
     let mut current = available(base_project);
     let ProjectIntelligenceStatus::Available { last_refresh, .. } = &mut current else {
         unreachable!("test status should be available");
@@ -91,7 +96,7 @@ fn incomplete_refresh_health_is_visible_and_changes_project_context() {
         publication_duration_ms: 34,
         completed_at_ms: 56,
     });
-    let current = project_world_state_section(current);
+    let current = section(current);
 
     let rendered = current
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
@@ -112,7 +117,7 @@ fn incomplete_refresh_health_is_visible_and_changes_project_context() {
 
 #[test]
 fn renders_selected_project_as_bounded_typed_world_state() {
-    let section = project_world_state_section(available(project(
+    let section = section(available(project(
         "Research\nProject",
         vec![StoredProjectRoot {
             path: "C:\\work\\research".to_string(),
@@ -197,7 +202,7 @@ fn renders_selected_project_as_bounded_typed_world_state() {
 
 #[test]
 fn unchanged_snapshot_does_not_repeat_project_context() {
-    let section = project_world_state_section(available(project("Research", Vec::new())));
+    let section = section(available(project("Research", Vec::new())));
     let snapshot = section.snapshot().clone();
 
     assert!(
@@ -212,8 +217,8 @@ fn invisible_project_metadata_change_does_not_repeat_project_context() {
     let previous_project = project("Research", Vec::new());
     let mut current_project = previous_project.clone();
     current_project.updated_at_ms += 1;
-    let previous = project_world_state_section(available(previous_project));
-    let current = project_world_state_section(available(current_project));
+    let previous = section(available(previous_project));
+    let current = section(available(current_project));
 
     assert!(
         current
@@ -224,7 +229,7 @@ fn invisible_project_metadata_change_does_not_repeat_project_context() {
 
 #[test]
 fn unknown_legacy_snapshot_renders_the_full_current_packet() {
-    let current = project_world_state_section(available(project("Research", Vec::new())));
+    let current = section(available(project("Research", Vec::new())));
 
     let rendered = current
         .render_diff(PreviousWorldStateSection::Unknown)
@@ -252,12 +257,12 @@ fn unchecked_audit_label_changes_semantic_fingerprint() {
 
 #[test]
 fn revision_only_change_renders_a_compact_update() {
-    let previous = project_world_state_section(available_at_revision(
+    let previous = section(available_at_revision(
         project("Research", Vec::new()),
         /*revision*/ 7,
         /*candidate_entries*/ 2,
     ));
-    let current = project_world_state_section(available_at_revision(
+    let current = section(available_at_revision(
         project("Research", Vec::new()),
         /*revision*/ 11,
         /*candidate_entries*/ 2,
@@ -280,12 +285,12 @@ fn revision_only_change_renders_a_compact_update() {
 
 #[test]
 fn semantic_root_change_renders_only_the_changed_lines() {
-    let previous = project_world_state_section(available_at_revision(
+    let previous = section(available_at_revision(
         project("Research", Vec::new()),
         /*revision*/ 7,
         /*candidate_entries*/ 2,
     ));
-    let current = project_world_state_section(available_at_revision(
+    let current = section(available_at_revision(
         project("Research", Vec::new()),
         /*revision*/ 11,
         /*candidate_entries*/ 3,
@@ -311,14 +316,14 @@ fn semantic_root_change_renders_only_the_changed_lines() {
 #[test]
 fn promoted_entry_change_sends_only_new_lines_and_alias_moves() {
     let unchanged = hit("entry-b", "The approval threshold is 10.");
-    let previous = project_world_state_section(with_entries(
+    let previous = section(with_entries(
         /*revision*/ 3,
         vec![
             unchanged.clone(),
             hit("entry-c", "Rollback runs on staging."),
         ],
     ));
-    let current = project_world_state_section(with_entries(
+    let current = section(with_entries(
         /*revision*/ 4,
         vec![
             hit("entry-a", "The permit UTH-0441 was never transferred."),
@@ -344,14 +349,14 @@ fn promoted_entry_change_sends_only_new_lines_and_alias_moves() {
 
 #[test]
 fn snapshot_without_root_layout_falls_back_to_the_full_packet() {
-    let previous = project_world_state_section(with_entries(
+    let previous = section(with_entries(
         /*revision*/ 3,
         vec![hit("entry-b", "The approval threshold is 10.")],
     ));
     let mut legacy = previous.snapshot().clone();
     let legacy_object = legacy.as_object_mut().expect("snapshot is an object");
     legacy_object.remove("rootEntries");
-    let current = project_world_state_section(with_entries(
+    let current = section(with_entries(
         /*revision*/ 4,
         vec![hit("entry-a", "A new decisive fact.")],
     ));
@@ -368,7 +373,7 @@ fn snapshot_without_root_layout_falls_back_to_the_full_packet() {
 
 #[test]
 fn wholesale_root_change_renders_the_full_packet() {
-    let previous = project_world_state_section(with_entries(
+    let previous = section(with_entries(
         /*revision*/ 3,
         vec![hit("entry-a", "Old fact.")],
     ));
@@ -380,7 +385,7 @@ fn wholesale_root_change_renders_the_full_packet() {
             )
         })
         .collect();
-    let current = project_world_state_section(with_entries(/*revision*/ 4, replacement));
+    let current = section(with_entries(/*revision*/ 4, replacement));
 
     let rendered = current
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
@@ -444,7 +449,7 @@ fn with_entries(revision: u64, data: Vec<BlackboardHit>) -> ProjectIntelligenceS
 
 #[test]
 fn long_project_metadata_is_truncated_on_utf8_boundaries() {
-    let section = project_world_state_section(available(project(
+    let section = section(available(project(
         &"🙂".repeat(500),
         vec![StoredProjectRoot {
             path: "x".repeat(4_000),

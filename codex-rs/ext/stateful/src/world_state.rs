@@ -16,6 +16,7 @@ use crate::root_blackboard::RootBlackboardStatus;
 use crate::root_blackboard::RootLayout;
 use crate::root_blackboard::render_root_blackboard;
 use crate::root_blackboard::short_digest;
+use crate::visible_root::VisibleRoot;
 
 const WORLD_STATE_ID: &str = "stateful_project";
 const START_MARKER: &str = "<stateful_project>";
@@ -227,12 +228,22 @@ fn render_refresh_status(output: &mut String, refresh: Option<&ProjectRefreshSta
 
 pub(super) fn project_world_state_section(
     status: ProjectIntelligenceStatus,
-) -> WorldStateSectionContribution {
+) -> (WorldStateSectionContribution, Option<VisibleRoot>) {
     let (body, layout) = status.render();
     let snapshot = status.snapshot(&body, &layout);
+    let visible_root = snapshot
+        .get("rootRevision")
+        .and_then(Value::as_u64)
+        .map(|revision| {
+            let mut visible = VisibleRoot::new(revision);
+            for (entry_id, alias, entry_revision) in &layout.complete_entries {
+                visible.insert(entry_id.clone(), alias.clone(), *entry_revision);
+            }
+            visible
+        });
     let project_id = status.project_id().to_string();
     let delta_input = DeltaInput::new(&project_id, &body, &layout);
-    WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
+    let section = WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
             PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
             PreviousWorldStateSection::Known(previous)
@@ -282,7 +293,8 @@ pub(super) fn project_world_state_section(
         let project_id = project_id.clone();
         move |role, text| is_project_fragment(role, text, &project_id)
     })
-    .with_retained_fragment_matcher(move |role, text| is_project_fragment(role, text, &project_id))
+    .with_retained_fragment_matcher(move |role, text| is_project_fragment(role, text, &project_id));
+    (section, visible_root)
 }
 
 /// Current packet material needed to describe a root change as a bounded delta

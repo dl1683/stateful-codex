@@ -74,6 +74,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         event_sink: None,
         autonomous: None,
         attribution: Default::default(),
+        visible_root: Default::default(),
     };
     let project = StoredProject {
         id: "project-1".to_string(),

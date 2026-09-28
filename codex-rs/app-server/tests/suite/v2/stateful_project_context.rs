@@ -526,7 +526,10 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     let blackboard_output = requests[1]
         .function_call_output("blackboard-call")
         .to_string();
-    assert!(blackboard_output.contains("A decisive project fact survives every thread view."));
+    assert!(requests[0].body_contains_text("A decisive project fact survives every thread view."));
+    assert!(blackboard_output.contains(r#"\"rootAlias\":\"E1\""#));
+    assert!(blackboard_output.contains(r#"\"contentInRoot\":true"#));
+    assert!(!blackboard_output.contains("A decisive project fact survives every thread view."));
     assert!(blackboard_output.contains(&created.project.id));
     let context_map_output = requests[2]
         .function_call_output("context-map-call")
@@ -1095,7 +1098,7 @@ async fn model_can_reuse_file_learning_from_a_child_region_without_rereading() -
                 responses::ev_function_call(
                     "query-call",
                     "blackboard_query",
-                    &json!({"text": "durable project state"}).to_string(),
+                    &json!({"text": "durable project state", "detail": "full"}).to_string(),
                 ),
                 responses::ev_completed("query-response"),
             ]),
