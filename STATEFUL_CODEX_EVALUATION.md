@@ -3362,3 +3362,46 @@ In q06, a finding that was present in the stateful arm's injected summary (a rea
 - durable state plus the compacted replacement does not yet preserve enough prior conclusions to prevent rebuild reading.
 
 SC-EVAL-024 had already exposed a compaction-cost pathology under an artificial limit; this probe shows a related one under default limits.
+
+## External benchmark program (from 2026-09-28)
+
+Status: program defined on 2026-09-28; the portfolio is being planned with an independent reviewer, and results are
+recorded below as they land. Planning records live outside the repository in the dogfood campaign notes.
+
+### Rules
+
+- **Stateful Codex only.** Ordinary Codex results already exist publicly, so no Stateful-off arm is run. Every
+  comparison against a published score is descriptive and names the different build; it is never presented as a
+  matched control or a causal effect of Stateful.
+- **Agentic benchmarks with a real comparator.** A benchmark qualifies only if it has an official harness able to run
+  a custom agent, or a published evaluation of Codex itself.
+- **Partial and unofficial runs are allowed.** A runnable subset is reported with its exact task list, labelled
+  unofficial or partial, and compared against published results on the same tasks where available. Vetted results are
+  offered to the benchmark maintainers.
+- **Judging.** Where an official LLM judge requires an API credential that is not used here, the judge is
+  `gpt-5.6-luna` via ChatGPT login, in a fresh isolated session per judging unit, with the official grader prompt and
+  schema unchanged. Such scores are labelled "Luna judge, not the official judge; unofficial proxy score". A judge is
+  never rerun because of an unfavourable result.
+- **Publish everything.** For every run, all per-task outputs (answers, patches, notebooks), full recorded
+  trajectories, tool logs, and every judge input and output are published so anyone can re-grade with the official
+  judge. Only authentication material is redacted. No post-result filtering.
+- **No benchmark-specific tuning.** Stateful Codex contains no benchmark-specific branches, prompts, answer tables or
+  cue rules; harness changes are limited to integrity boundaries (pinned environments, network isolation) that are
+  disclosed.
+- **Memory is the headline track.** Priority goes to benchmarks where durable, cross-session, evidence-backed memory
+  can show a difference.
+
+### Results so far
+
+- **Terminal-Bench 2.1 regression check** (one attempt x 89 tasks, maximum effort, bundle at the Phase A freeze
+  candidate): 68/89 (76.40%), against the earlier Stateful breadth screen of 70/89 (78.65%) and the published ordinary
+  Codex result of 75.73% (different build). The two-task difference is inside single-attempt noise; session logs show
+  no Stateful-attributable failure in the nine tasks that flipped from pass to fail.
+- **BixBench gate re-grade** (retrospective; debug-base environment; Luna judge through the unmodified official
+  grader): smoke 1/1, single-capsule five 5/5, ten-capsule breadth 3/10, repair re-runs 1/2. Unofficial proxy scores.
+
+### Planned portfolio (subject to the running plan)
+
+Memory and learning first (Horizon public tasks, AMA-Bench, further memory benchmarks under evaluation), then science
+(BixBench v1.5 on an unmodified pinned environment), research reports (DeepResearch Bench II and I), long-horizon
+software (SWE-Marathon's locally runnable tasks) and SWE-bench Verified and Multilingual pilots.
