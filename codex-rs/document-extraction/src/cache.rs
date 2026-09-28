@@ -177,6 +177,10 @@ fn replace_file(temp: &Path, destination: &Path) -> std::io::Result<()> {
     fs::rename(temp, destination)
 }
 
+#[cfg(test)]
+#[path = "cache_tests.rs"]
+mod tests;
+
 #[cfg(windows)]
 fn replace_file(temp: &Path, destination: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;

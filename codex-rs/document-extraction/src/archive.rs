@@ -8,6 +8,9 @@ use crate::ExtractionLimit;
 use crate::ExtractionLimits;
 
 pub(crate) fn preflight(bytes: &[u8], limits: &ExtractionLimits) -> Result<(), ExtractionError> {
+    if contains_encrypted_entry(bytes) {
+        return Err(ExtractionError::Encrypted);
+    }
     let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| ExtractionError::Corrupt)?;
     if archive.len() > limits.max_zip_entries {
         return Err(ExtractionError::LimitExceeded(ExtractionLimit::ZipEntries));
@@ -24,6 +27,48 @@ pub(crate) fn preflight(bytes: &[u8], limits: &ExtractionLimits) -> Result<(), E
         read_bounded(&mut entry, limits.max_entry_bytes, &mut total, limits)?;
     }
     Ok(())
+}
+
+fn contains_encrypted_entry(bytes: &[u8]) -> bool {
+    let Some(end) = bytes.windows(4).rposition(|window| window == b"PK\x05\x06") else {
+        return false;
+    };
+    if end + 20 > bytes.len() {
+        return false;
+    }
+    let central_offset =
+        u32::from_le_bytes(bytes[end + 16..end + 20].try_into().unwrap()) as usize;
+    let central_size =
+        u32::from_le_bytes(bytes[end + 12..end + 16].try_into().unwrap()) as usize;
+    let Some(central_end) = central_offset.checked_add(central_size) else {
+        return false;
+    };
+    if central_end > bytes.len() {
+        return false;
+    }
+    let mut position = central_offset;
+    while position + 46 <= central_end && bytes[position..].starts_with(b"PK\x01\x02") {
+        let flags = u16::from_le_bytes(bytes[position + 8..position + 10].try_into().unwrap());
+        if flags & 1 != 0 {
+            return true;
+        }
+        let name_length =
+            u16::from_le_bytes(bytes[position + 28..position + 30].try_into().unwrap()) as usize;
+        let extra_length =
+            u16::from_le_bytes(bytes[position + 30..position + 32].try_into().unwrap()) as usize;
+        let comment_length =
+            u16::from_le_bytes(bytes[position + 32..position + 34].try_into().unwrap()) as usize;
+        let Some(next) = position
+            .checked_add(46)
+            .and_then(|value| value.checked_add(name_length))
+            .and_then(|value| value.checked_add(extra_length))
+            .and_then(|value| value.checked_add(comment_length))
+        else {
+            return false;
+        };
+        position = next;
+    }
+    false
 }
 
 fn read_bounded<R: Read>(

@@ -113,7 +113,7 @@ fn parse_document(
             | Ok((_, Event::Comment(_)))
             | Ok((_, Event::DocType(_)))
             | Ok((_, Event::GeneralRef(_))) => {}
-            _ => {}
+            Err(_) => return Err(ExtractionError::Corrupt),
         }
         buffer.clear();
     }
