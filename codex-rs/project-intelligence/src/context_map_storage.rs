@@ -20,6 +20,7 @@ use crate::ContextMapQuery;
 use crate::ContextMapQueryResult;
 use crate::HierarchyNode;
 use crate::HierarchyNodeId;
+use crate::IndexedExtraction;
 use crate::NewContextMapEntry;
 use crate::NodeKind;
 use crate::NodeLifecycle;
@@ -498,12 +499,43 @@ async fn load_hit(
         .await?
         .ok_or_else(|| ContextMapStoreError::NodeNotFound(entry.value.node_id.to_string()))?;
     let freshness = entry.freshness_against(&node)?;
-    let source = entry.source_route(&node)?;
+    let indexed_extraction = load_indexed_extraction(connection, &node).await?;
+    let source = entry.source_route(&node, indexed_extraction)?;
     Ok(Some(ContextMapHit {
         entry,
         source,
         freshness,
     }))
+}
+
+async fn load_indexed_extraction(
+    connection: &mut SqliteConnection,
+    node: &HierarchyNode,
+) -> Result<Option<IndexedExtraction>, ContextMapStoreError> {
+    let row = sqlx::query_as::<_, StoredIndexedExtraction>(
+        "SELECT extractor_name, extractor_version, canonical_representation_digest
+         FROM region_extraction_attestations WHERE region_node_id = ?",
+    )
+    .bind(node.id.as_str())
+    .fetch_optional(&mut *connection)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    IndexedExtraction::new(
+        row.extractor_name,
+        row.extractor_version,
+        row.canonical_representation_digest,
+    )
+    .map(Some)
+    .map_err(|_| ContextMapStoreError::CorruptEntry(node.id.to_string()))
+}
+
+#[derive(FromRow)]
+struct StoredIndexedExtraction {
+    extractor_name: String,
+    extractor_version: String,
+    canonical_representation_digest: String,
 }
 
 pub(crate) async fn upsert_indexed_entry(

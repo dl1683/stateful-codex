@@ -4,6 +4,7 @@ use sqlx::SqliteConnection;
 
 use crate::ContextMapEntryId;
 use crate::HierarchyNodeId;
+use crate::IndexedExtraction;
 use crate::NewContextMapEntry;
 use crate::NewHierarchyNode;
 use crate::NodeKind;
@@ -80,6 +81,12 @@ pub(super) async fn publish_file(
             source_fingerprint: Some(file.fingerprint.clone()),
         };
         upsert_indexed_node(&mut transaction, &region_id, region_node).await?;
+        write_region_extraction(
+            &mut transaction,
+            &region_id,
+            region.indexed_extraction.as_ref(),
+        )
+        .await?;
         let context_id = ContextMapEntryId::parse(stable_id_text(
             "context",
             &[
@@ -107,6 +114,40 @@ pub(super) async fn publish_file(
     }
     retire_absent_regions(&mut transaction, project_id, file_id, &active_region_ids).await?;
     transaction.commit().await?;
+    Ok(())
+}
+
+async fn write_region_extraction(
+    connection: &mut SqliteConnection,
+    region_id: &HierarchyNodeId,
+    extraction: Option<&IndexedExtraction>,
+) -> Result<(), ProjectIndexerError> {
+    match extraction {
+        Some(extraction) => {
+            sqlx::query(
+                "INSERT INTO region_extraction_attestations (
+                     region_node_id, extractor_name, extractor_version,
+                     canonical_representation_digest
+                 ) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(region_node_id) DO UPDATE SET
+                     extractor_name = excluded.extractor_name,
+                     extractor_version = excluded.extractor_version,
+                     canonical_representation_digest = excluded.canonical_representation_digest",
+            )
+            .bind(region_id.as_str())
+            .bind(&extraction.extractor_name)
+            .bind(&extraction.extractor_version)
+            .bind(&extraction.canonical_representation_digest)
+            .execute(&mut *connection)
+            .await?;
+        }
+        None => {
+            sqlx::query("DELETE FROM region_extraction_attestations WHERE region_node_id = ?")
+                .bind(region_id.as_str())
+                .execute(&mut *connection)
+                .await?;
+        }
+    }
     Ok(())
 }
 

@@ -5,8 +5,10 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::ContextMapSource;
+use crate::EvidenceRoute;
 use crate::HierarchySourceUpdate;
 use crate::HierarchyStore;
+use crate::IndexedExtraction;
 use crate::NewHierarchyNode;
 use crate::ProjectRelativePath;
 use crate::RegionAnchor;
@@ -92,6 +94,7 @@ fn readme_source() -> ContextMapSource {
         project_root: "C:\\workspace".to_string(),
         relative_path: ProjectRelativePath::parse("README.md").expect("valid path"),
         region_anchor: None,
+        indexed_extraction: None,
     }
 }
 
@@ -171,6 +174,77 @@ async fn context_map_rejects_a_stale_source_fingerprint() {
         error,
         ContextMapStoreError::SourceNotCurrent(ContextMapFreshness::Stale)
     ));
+}
+
+#[tokio::test]
+async fn office_region_attestation_round_trips_and_serializes_separately_from_anchor() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    let file = create_file(&hierarchy).await;
+    let region_id = HierarchyNodeId::parse("node-docx-region").expect("valid region ID");
+    hierarchy
+        .create_node(
+            region_id.clone(),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(file.id),
+                kind: NodeKind::Region,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("README.md").expect("valid path"),
+                region_anchor: Some(
+                    RegionAnchor::new("docx-paragraph", "body/p[1]").expect("valid anchor"),
+                ),
+                source_fingerprint: Some(fingerprint("sha256:abc")),
+            },
+        )
+        .await
+        .expect("region should insert");
+    let extraction = IndexedExtraction::new("codex-docx", "2", "sha256:representation")
+        .expect("valid extraction");
+    sqlx::query(
+        "INSERT INTO region_extraction_attestations (
+             region_node_id, extractor_name, extractor_version,
+             canonical_representation_digest
+         ) VALUES (?, ?, ?, ?)",
+    )
+    .bind(region_id.as_str())
+    .bind(&extraction.extractor_name)
+    .bind(&extraction.extractor_version)
+    .bind(&extraction.canonical_representation_digest)
+    .execute(&context_map.pool)
+    .await
+    .expect("attestation should insert");
+    let entry = context_map
+        .create_entry(
+            ContextMapEntryId::parse("map-docx-region").expect("valid entry ID"),
+            NewContextMapEntry {
+                project_id: "project-1".to_string(),
+                node_id: region_id,
+                source_fingerprint: fingerprint("sha256:abc"),
+                description: "distinctive office clause".to_string(),
+                routing_terms: Vec::new(),
+                coverage: ContextMapCoverage::Complete,
+            },
+        )
+        .await
+        .expect("region entry should insert");
+    let hit = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "distinctive office clause".to_string(),
+            max_results: 1,
+        })
+        .await
+        .expect("region query should succeed")
+        .data
+        .pop()
+        .expect("region hit should exist");
+    assert_eq!(hit.entry, entry);
+    assert_eq!(hit.source.indexed_extraction, Some(extraction.clone()));
+    let route = EvidenceRoute::from_hit(&hit).expect("route should build");
+    assert_eq!(route.region_anchor, hit.source.region_anchor);
+    assert_eq!(route.indexed_extraction, Some(extraction));
+    assert_eq!(route.line_range, None);
 }
 
 #[tokio::test]
@@ -752,6 +826,7 @@ async fn query_scans_past_prior_generation_regions_to_find_a_current_route() {
                 project_root: "C:\\workspace".to_string(),
                 relative_path: ProjectRelativePath::parse("CURRENT.md").expect("valid path"),
                 region_anchor: None,
+                indexed_extraction: None,
             },
             freshness: ContextMapFreshness::Current,
         }]

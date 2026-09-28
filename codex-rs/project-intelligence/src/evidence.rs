@@ -13,6 +13,7 @@ use crate::ContextMapFreshness;
 use crate::ContextMapHit;
 use crate::ContextMapStore;
 use crate::ContextMapStoreError;
+use crate::IndexedExtraction;
 use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
 
@@ -59,6 +60,8 @@ pub struct EvidenceRoute {
     pub context_map_entry_id: ContextMapEntryId,
     pub source_fingerprint: SourceFingerprint,
     pub line_range: Option<EvidenceLineRange>,
+    pub region_anchor: Option<crate::RegionAnchor>,
+    pub indexed_extraction: Option<IndexedExtraction>,
 }
 
 impl EvidenceRoute {
@@ -67,12 +70,15 @@ impl EvidenceRoute {
             .source
             .region_anchor
             .as_ref()
+            .filter(|anchor| anchor.scheme == "lines")
             .map(parse_line_anchor)
             .transpose()?;
         Ok(Self {
             context_map_entry_id: hit.entry.id.clone(),
             source_fingerprint: hit.entry.value.source_fingerprint.clone(),
             line_range,
+            region_anchor: hit.source.region_anchor.clone(),
+            indexed_extraction: hit.source.indexed_extraction.clone(),
         })
     }
 }

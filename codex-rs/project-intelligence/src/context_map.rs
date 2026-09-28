@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::HierarchyNode;
 use crate::HierarchyNodeId;
+use crate::IndexedExtraction;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
@@ -170,6 +171,7 @@ pub struct ContextMapSource {
     pub project_root: String,
     pub relative_path: ProjectRelativePath,
     pub region_anchor: Option<RegionAnchor>,
+    pub indexed_extraction: Option<IndexedExtraction>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -205,8 +207,20 @@ impl ContextMapEntry {
         }
     }
 
-    pub fn source_route(&self, node: &HierarchyNode) -> Result<ContextMapSource, ContextMapError> {
+    pub fn source_route(
+        &self,
+        node: &HierarchyNode,
+        indexed_extraction: Option<IndexedExtraction>,
+    ) -> Result<ContextMapSource, ContextMapError> {
         self.freshness_against(node)?;
+        match (&node.value.region_anchor, &indexed_extraction) {
+            (None, None) => {}
+            (Some(anchor), None) if anchor.scheme == "lines" => {}
+            (Some(anchor), Some(_)) if anchor.scheme != "lines" => {}
+            _ => {
+                return Err(ContextMapError::InvalidIndexedExtraction);
+            }
+        }
         Ok(ContextMapSource {
             project_root: node
                 .value
@@ -215,6 +229,7 @@ impl ContextMapEntry {
                 .ok_or(ContextMapError::MissingSourceRoute)?,
             relative_path: node.value.relative_path.clone(),
             region_anchor: node.value.region_anchor.clone(),
+            indexed_extraction,
         })
     }
 }
@@ -243,6 +258,8 @@ pub enum ContextMapError {
     NoSearchTerms,
     #[error("context-map hierarchy node is missing its exact source route")]
     MissingSourceRoute,
+    #[error("region anchor and indexed extraction must be present together except for text lines")]
+    InvalidIndexedExtraction,
 }
 
 fn validate_identity(value: &str, maximum_bytes: usize) -> Result<(), ()> {

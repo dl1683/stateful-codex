@@ -84,6 +84,7 @@ async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
         hits[0].source.region_anchor,
         Some(RegionAnchor::new("lines", "65-70").expect("valid anchor"))
     );
+    assert_eq!(hits[0].source.indexed_extraction, None);
 
     indexer
         .refresh(request.clone())
@@ -226,6 +227,7 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
     let conflicting_region = |description: &str| super::regions::ScannedRegion {
         start_line: 1,
         end_line: 1,
+        indexed_extraction: None,
         description: description.to_string(),
         coverage: ContextMapCoverage::Complete,
     };

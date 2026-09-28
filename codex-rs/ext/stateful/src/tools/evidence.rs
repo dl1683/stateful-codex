@@ -122,6 +122,8 @@ impl EvidenceReadTool {
                         start: range.start,
                         end: range.end,
                     }),
+                    region_anchor: None,
+                    indexed_extraction: None,
                 })
             }
             (None, Some(relative_path)) => EvidenceReadLocator::Source {
