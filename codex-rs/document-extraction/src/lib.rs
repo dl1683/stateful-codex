@@ -8,11 +8,9 @@ mod limits;
 pub use limits::ExtractionLimit;
 pub use limits::ExtractionLimits;
 
-use std::path::Path;
-use std::path::PathBuf;
-
 use serde::Deserialize;
 use serde::Serialize;
+use std::path::Path;
 use thiserror::Error;
 
 /// An Office format supported by the extraction boundary.
@@ -97,8 +95,6 @@ pub enum ExtractionError {
     Corrupt,
     #[error("extraction limit exceeded: {0:?}")]
     LimitExceeded(ExtractionLimit),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
 }
 
 /// The extractor owns immutable production limits.
@@ -109,17 +105,13 @@ pub struct DocumentExtractor {
 
 impl DocumentExtractor {
     /// Creates an extractor using the production safety limits.
-    pub fn production(cache_root: PathBuf) -> Result<Self, ExtractionError> {
-        Self::with_limits(cache_root, ExtractionLimits::default())
+    pub fn production() -> Self {
+        Self::with_limits(ExtractionLimits::default())
     }
 
     /// Creates an extractor with explicit limits, primarily for bounded tests.
-    pub fn with_limits(
-        cache_root: PathBuf,
-        limits: ExtractionLimits,
-    ) -> Result<Self, ExtractionError> {
-        let _ = cache_root;
-        Ok(Self { limits })
+    pub fn with_limits(limits: ExtractionLimits) -> Self {
+        Self { limits }
     }
 
     /// Returns the Office format identified by a path extension.

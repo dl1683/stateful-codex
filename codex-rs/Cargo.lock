@@ -3234,11 +3234,8 @@ dependencies = [
  "pretty_assertions",
  "quick-xml 0.41.0",
  "serde",
- "serde_json",
  "sha2 0.10.9",
- "tempfile",
  "thiserror 2.0.18",
- "windows-sys 0.52.0",
  "zip",
 ]
 

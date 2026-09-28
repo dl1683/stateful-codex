@@ -17,8 +17,6 @@ pub enum ExtractionLimit {
     XlsxCells,
     XlsxSharedStrings,
     XlsxUsedArea,
-    CacheEntryBytes,
-    CacheBytes,
 }
 
 /// Production limits for archive preflight and canonical extraction.
@@ -37,8 +35,6 @@ pub struct ExtractionLimits {
     pub max_xlsx_cells: usize,
     pub max_xlsx_shared_strings: usize,
     pub max_xlsx_used_area: u64,
-    pub max_cache_entry_bytes: u64,
-    pub max_cache_bytes: u64,
 }
 
 impl Default for ExtractionLimits {
@@ -57,8 +53,6 @@ impl Default for ExtractionLimits {
             max_xlsx_cells: 250_000,
             max_xlsx_shared_strings: 100_000,
             max_xlsx_used_area: 1_000_000,
-            max_cache_entry_bytes: 24 * 1024 * 1024,
-            max_cache_bytes: 512 * 1024 * 1024,
         }
     }
 }

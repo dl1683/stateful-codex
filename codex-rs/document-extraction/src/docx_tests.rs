@@ -1,7 +1,6 @@
 use std::io::Write;
 
 use pretty_assertions::assert_eq;
-use tempfile::tempdir;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
@@ -44,10 +43,8 @@ fn document(body: &str) -> String {
     )
 }
 
-fn extractor() -> (tempfile::TempDir, DocumentExtractor) {
-    let directory = tempdir().unwrap();
-    let extractor = DocumentExtractor::production(directory.path().join("cache")).unwrap();
-    (directory, extractor)
+fn extractor() -> DocumentExtractor {
+    DocumentExtractor::production()
 }
 
 fn expected_document(
@@ -110,7 +107,7 @@ fn push_canonical_notices(output: &mut Vec<u8>, notices: &[ExtractionNotice]) {
 
 #[test]
 fn extracts_visible_text_across_runs_with_controls() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         &document(
             r#"<w:p><w:r><w:t xml:space="preserve">  Café</w:t></w:r><w:r><w:tab/><w:br/><w:t>fin</w:t></w:r></w:p><w:p/>"#,
@@ -140,7 +137,7 @@ fn extracts_visible_text_across_runs_with_controls() {
 
 #[test]
 fn locates_each_non_empty_table_paragraph() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         &document(
             r#"<w:tbl><w:tr><w:tc><w:p><w:r><w:t>one</w:t></w:r></w:p><w:p><w:r><w:t>two</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>three</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
@@ -188,7 +185,7 @@ fn locates_each_non_empty_table_paragraph() {
 
 #[test]
 fn splits_long_paragraphs_at_utf8_boundaries() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let text = format!("{}x", "é".repeat(3_072));
     let xml = document(&format!(r#"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"#));
     let bytes = package(&xml, &[]);
@@ -225,7 +222,7 @@ fn splits_long_paragraphs_at_utf8_boundaries() {
 
 #[test]
 fn marks_unsupported_parts_and_tracked_changes_partial() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         &document(
             r#"<w:p><w:ins><w:r><w:t>inserted</w:t></w:r></w:ins><w:del><w:r><w:delText>removed</w:delText></w:r></w:del><w:drawing><w:txbxContent><w:p><w:r><w:t>hidden</w:t></w:r></w:p></w:txbxContent></w:drawing></w:p>"#,
@@ -274,7 +271,7 @@ fn marks_unsupported_parts_and_tracked_changes_partial() {
 
 #[test]
 fn repeated_extraction_matches_as_a_whole_document() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(&document(r#"<w:p><w:r><w:t>cached</w:t></w:r></w:p>"#), &[]);
 
     let cold = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
@@ -285,7 +282,7 @@ fn repeated_extraction_matches_as_a_whole_document() {
 
 #[test]
 fn rejects_corrupt_zip_and_xml_depth() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     assert!(matches!(
         extractor.extract(DocumentFormat::Docx, b"not a zip"),
         Err(ExtractionError::Corrupt)
@@ -295,8 +292,7 @@ fn rejects_corrupt_zip_and_xml_depth() {
         max_xml_depth: 3,
         ..ExtractionLimits::default()
     };
-    let directory = tempdir().unwrap();
-    let extractor = DocumentExtractor::with_limits(directory.path().join("cache"), limits).unwrap();
+    let extractor = DocumentExtractor::with_limits(limits);
     let bytes = package(
         &document(r#"<w:p><w:r><w:t>too deep</w:t></w:r></w:p>"#),
         &[],
@@ -310,7 +306,7 @@ fn rejects_corrupt_zip_and_xml_depth() {
 
 #[test]
 fn empty_structural_elements_preserve_ordinals() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         &document(
             r#"<w:p/><w:p><w:r><w:t>body</w:t></w:r></w:p><w:tbl/><w:tbl><w:tr/><w:tr><w:tc/><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
@@ -349,7 +345,7 @@ fn empty_structural_elements_preserve_ordinals() {
 
 #[test]
 fn empty_body_and_expanded_inline_controls_are_structural() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>a</w:t><w:tab></w:tab><w:br></w:br><w:cr></w:cr><w:t>b</w:t></w:r></w:p></w:body></w:document>"#,
         &[],
@@ -392,7 +388,7 @@ fn empty_body_and_expanded_inline_controls_are_structural() {
 
 #[test]
 fn transparent_wrappers_and_nested_tables_have_unique_locators() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         &document(
             r#"<w:sdt><w:sdtContent><w:p><w:r><w:t>wrapped</w:t></w:r></w:p><w:customXml><w:smartTag><w:p><w:r><w:t>deep</w:t></w:r></w:p></w:smartTag></w:customXml></w:sdtContent></w:sdt><w:tbl><w:tr><w:tc><w:p><w:r><w:t>outer</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>nested</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc><w:tc><w:p><w:r><w:t>second</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
@@ -454,7 +450,7 @@ fn transparent_wrappers_and_nested_tables_have_unique_locators() {
 
 #[test]
 fn accepts_alternate_word_namespace_prefixes() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let transitional = package(
         r#"<d:document xmlns:d="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><d:body><d:p><d:hyperlink><d:r><d:t>linked</d:t></d:r></d:hyperlink></d:p></d:body></d:document>"#,
         &[],
@@ -488,13 +484,16 @@ fn accepts_alternate_word_namespace_prefixes() {
         result.canonical_representation_digest,
         transitional_result.canonical_representation_digest
     );
-    assert_ne!(result.original_fingerprint, transitional_result.original_fingerprint);
+    assert_ne!(
+        result.original_fingerprint,
+        transitional_result.original_fingerprint
+    );
     assert_ne!(result.original_bytes, transitional_result.original_bytes);
 }
 
 #[test]
 fn ignored_subtrees_preserve_real_structure() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         &document(
             r#"<w:tbl><w:tr><w:tc><w:p><w:r><w:t>before</w:t></w:r><w:drawing><w:tbl><w:tr><w:tc><w:p><w:r><w:t>hidden</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:drawing><w:r><w:t>after</w:t></w:r></w:p><w:p><w:r><w:t>second</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>nested</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc><w:tc><w:p><w:r><w:t>next-cell</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>next-row</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>tail</w:t></w:r></w:p>"#,
@@ -574,15 +573,10 @@ fn ignored_subtrees_still_enforce_xml_limits() {
         &document(r#"<w:p><w:drawing><w:a><w:b><w:c><w:d/></w:c></w:b></w:a></w:drawing></w:p>"#),
         &[],
     );
-    let deep_directory = tempdir().unwrap();
-    let deep_extractor = DocumentExtractor::with_limits(
-        deep_directory.path().join("cache"),
-        ExtractionLimits {
-            max_xml_depth: 5,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
+    let deep_extractor = DocumentExtractor::with_limits(ExtractionLimits {
+        max_xml_depth: 5,
+        ..ExtractionLimits::default()
+    });
     assert!(matches!(
         deep_extractor.extract(DocumentFormat::Docx, &deep),
         Err(ExtractionError::LimitExceeded(ExtractionLimit::XmlDepth))
@@ -592,15 +586,10 @@ fn ignored_subtrees_still_enforce_xml_limits() {
         &document(r#"<w:p><w:drawing><w:fake a="1" b="2"/></w:drawing></w:p>"#),
         &[],
     );
-    let attribute_directory = tempdir().unwrap();
-    let attribute_extractor = DocumentExtractor::with_limits(
-        attribute_directory.path().join("cache"),
-        ExtractionLimits {
-            max_attributes_per_element: 1,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
+    let attribute_extractor = DocumentExtractor::with_limits(ExtractionLimits {
+        max_attributes_per_element: 1,
+        ..ExtractionLimits::default()
+    });
     assert!(matches!(
         attribute_extractor.extract(DocumentFormat::Docx, &attributes),
         Err(ExtractionError::LimitExceeded(
@@ -612,15 +601,10 @@ fn ignored_subtrees_still_enforce_xml_limits() {
 #[test]
 fn refuses_scalars_larger_than_the_block_limit() {
     for (limit, text) in [(1, "é"), (3, "😀"), (3, "a😀b")] {
-        let directory = tempdir().unwrap();
-        let extractor = DocumentExtractor::with_limits(
-            directory.path().join("cache"),
-            ExtractionLimits {
-                max_canonical_block_bytes: limit,
-                ..ExtractionLimits::default()
-            },
-        )
-        .unwrap();
+        let extractor = DocumentExtractor::with_limits(ExtractionLimits {
+            max_canonical_block_bytes: limit,
+            ..ExtractionLimits::default()
+        });
         let bytes = package(
             &document(&format!(r#"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"#)),
             &[],
@@ -636,19 +620,11 @@ fn refuses_scalars_larger_than_the_block_limit() {
 
 #[test]
 fn splits_at_utf8_boundaries_without_exceeding_the_limit() {
-    let directory = tempdir().unwrap();
-    let extractor = DocumentExtractor::with_limits(
-        directory.path().join("cache"),
-        ExtractionLimits {
-            max_canonical_block_bytes: 4,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
-    let bytes = package(
-        &document(r#"<w:p><w:r><w:t>a😀b</w:t></w:r></w:p>"#),
-        &[],
-    );
+    let extractor = DocumentExtractor::with_limits(ExtractionLimits {
+        max_canonical_block_bytes: 4,
+        ..ExtractionLimits::default()
+    });
+    let bytes = package(&document(r#"<w:p><w:r><w:t>a😀b</w:t></w:r></w:p>"#), &[]);
 
     assert_eq!(
         extractor.extract(DocumentFormat::Docx, &bytes).unwrap(),
@@ -706,7 +682,7 @@ fn splits_at_utf8_boundaries_without_exceeding_the_limit() {
 
 #[test]
 fn normalizes_xml_lines_and_reads_cdata() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let bytes = package(
         &document("<w:p><w:r><w:t>a\r\nb<![CDATA[<raw>\r\nc]]></w:t></w:r></w:p>"),
         &[],
@@ -760,15 +736,10 @@ fn enforces_attribute_text_block_and_original_limits() {
         &document(r#"<w:p a="1" b="2"><w:r><w:t>abc</w:t></w:r></w:p>"#),
         &[],
     );
-    let directory = tempdir().unwrap();
-    let extractor = DocumentExtractor::with_limits(
-        directory.path().join("cache"),
-        ExtractionLimits {
-            max_attributes_per_element: 1,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
+    let extractor = DocumentExtractor::with_limits(ExtractionLimits {
+        max_attributes_per_element: 1,
+        ..ExtractionLimits::default()
+    });
     assert!(matches!(
         extractor.extract(DocumentFormat::Docx, &bytes),
         Err(ExtractionError::LimitExceeded(
@@ -776,15 +747,10 @@ fn enforces_attribute_text_block_and_original_limits() {
         ))
     ));
 
-    let directory = tempdir().unwrap();
-    let extractor = DocumentExtractor::with_limits(
-        directory.path().join("cache"),
-        ExtractionLimits {
-            max_extracted_text_bytes: 2,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
+    let extractor = DocumentExtractor::with_limits(ExtractionLimits {
+        max_extracted_text_bytes: 2,
+        ..ExtractionLimits::default()
+    });
     assert!(matches!(
         extractor.extract(DocumentFormat::Docx, &bytes),
         Err(ExtractionError::LimitExceeded(
@@ -792,16 +758,11 @@ fn enforces_attribute_text_block_and_original_limits() {
         ))
     ));
 
-    let directory = tempdir().unwrap();
-    let extractor = DocumentExtractor::with_limits(
-        directory.path().join("cache"),
-        ExtractionLimits {
-            max_extracted_blocks: 1,
-            max_canonical_block_bytes: 1,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
+    let extractor = DocumentExtractor::with_limits(ExtractionLimits {
+        max_extracted_blocks: 1,
+        max_canonical_block_bytes: 1,
+        ..ExtractionLimits::default()
+    });
     assert!(matches!(
         extractor.extract(DocumentFormat::Docx, &bytes),
         Err(ExtractionError::LimitExceeded(
@@ -809,15 +770,10 @@ fn enforces_attribute_text_block_and_original_limits() {
         ))
     ));
 
-    let directory = tempdir().unwrap();
-    let extractor = DocumentExtractor::with_limits(
-        directory.path().join("cache"),
-        ExtractionLimits {
-            max_original_bytes: 1,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
+    let extractor = DocumentExtractor::with_limits(ExtractionLimits {
+        max_original_bytes: 1,
+        ..ExtractionLimits::default()
+    });
     assert!(matches!(
         extractor.extract(DocumentFormat::Docx, &bytes),
         Err(ExtractionError::LimitExceeded(
@@ -828,7 +784,7 @@ fn enforces_attribute_text_block_and_original_limits() {
 
 #[test]
 fn rejects_missing_document_xml_and_malformed_xml() {
-    let (_directory, extractor) = extractor();
+    let extractor = extractor();
     let mut missing = Vec::new();
     {
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut missing));
