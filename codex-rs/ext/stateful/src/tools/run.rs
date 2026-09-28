@@ -17,7 +17,6 @@ use serde_json::json;
 
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
-use crate::checkpoint::RunActivityRegistry;
 use crate::completion::CompletionRequest;
 use crate::completion::HistoricalFindingReference;
 use crate::completion::MAX_MATERIAL_HISTORICAL_FINDINGS;
@@ -72,7 +71,6 @@ pub(super) struct StatefulRunUpdateTool {
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
-    run_activity: RunActivityRegistry,
 }
 
 impl StatefulRunUpdateTool {
@@ -83,7 +81,6 @@ impl StatefulRunUpdateTool {
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
         visible_root: VisibleRootRegistry,
-        run_activity: RunActivityRegistry,
     ) -> Self {
         Self {
             project_id,
@@ -92,7 +89,6 @@ impl StatefulRunUpdateTool {
             projects,
             event_sink,
             visible_root,
-            run_activity,
         }
     }
 
@@ -156,13 +152,17 @@ impl StatefulRunUpdateTool {
                     "completionDisposition noReusableLearning completes with the result only; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
                 ));
             }
-            if self
-                .run_activity
-                .for_thread(&self.thread_id)
-                .wrote_durable_state()
-            {
+            let knowledge_changed = self
+                .services
+                .blackboard()
+                .await
+                .map_err(respond)?
+                .agent_knowledge_changed_since(&self.project_id, current.created_at_ms)
+                .await
+                .map_err(respond)?;
+            if knowledge_changed {
                 return Err(FunctionCallError::RespondToModel(
-                    "this run recorded or changed project knowledge, so completion must use durableLearning and select the material finding (promote it first with blackboard_update_batch setRootPromotion if it is not in the root)".to_string(),
+                    "project knowledge was recorded or changed during this run, so completion must use durableLearning and select the material finding (promote it first with blackboard_update_batch setRootPromotion if it is not in the root)".to_string(),
                 ));
             }
             if result

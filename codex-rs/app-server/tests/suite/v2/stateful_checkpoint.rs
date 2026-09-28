@@ -96,7 +96,7 @@ async fn tool_work_without_obligation_raises_one_checkpoint_nudge() -> Result<()
 
     let requests = response_log.requests();
     assert!(requests[0].body_contains_text("Semantic checkpoint: current."));
-    assert!(!requests[0].body_contains_text("Semantic checkpoint due"));
-    assert!(requests[1].body_contains_text("Semantic checkpoint due (checkpoint 1)"));
+    assert!(!requests[0].body_contains_text("Semantic checkpoint: due"));
+    assert!(requests[1].body_contains_text("Semantic checkpoint: due (checkpoint 1)"));
     Ok(())
 }

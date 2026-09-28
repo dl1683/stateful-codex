@@ -136,11 +136,9 @@ fn run_world_state_discloses_omitted_detail() {
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
         .expect("first contribution renders");
-    assert!(
-        rendered
-            .body()
-            .contains("[goal shortened; the full goal is in the run record]")
-    );
+    assert!(rendered.body().contains(
+        "[goal shortened here; the full text is the user's original request in this thread]"
+    ));
     assert!(rendered.body().contains("Semantic checkpoint: current."));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
 }
@@ -294,7 +292,7 @@ fn due_checkpoint_renders_one_line_that_changes_only_per_epoch() {
     assert!(
         rendered
             .body()
-            .contains("Semantic checkpoint due (checkpoint 1)")
+            .contains("Semantic checkpoint: due (checkpoint 1)")
     );
     assert!(!rendered.body().contains("Goal:"));
     assert!(
@@ -392,4 +390,67 @@ fn unknown_previous_run_state_renders_the_full_packet() {
         .expect("unknown retained state must render");
 
     assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
+}
+
+#[test]
+fn swapping_one_field_for_another_renders_the_full_packet() {
+    let status = |mode: WorkflowMode, strategy: Option<&str>, revision: u64| {
+        RunWorldStateStatus::Available {
+            run: Box::new(StatefulRun {
+                id: StatefulRunId::parse("run-1").expect("valid run id"),
+                value: NewStatefulRun {
+                    project_id: "project-1".to_string(),
+                    thread_ids: vec!["thread-1".to_string()],
+                    goal: "Find the decisive source constraint.".to_string(),
+                    mode,
+                    budget: RunBudget {
+                        max_continuations: 12,
+                        max_elapsed_seconds: 3_600,
+                    },
+                },
+                status: StatefulRunStatus::Running,
+                strategy: strategy.map(str::to_string),
+                strategy_revision: 1,
+                result: None,
+                continuations_used: 0,
+                revision,
+                created_at_ms: 1,
+                updated_at_ms: 2,
+            }),
+            obligation: None,
+            steering: Vec::new(),
+            steering_complete: true,
+            checkpoint_due: None,
+        }
+    };
+    let previous =
+        run_world_state_section(status(WorkflowMode::Autonomous, None, /*revision*/ 2));
+    let current = run_world_state_section(status(
+        WorkflowMode::Collaborative,
+        Some("Compare the controlling sources."),
+        /*revision*/ 3,
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("a mode change must render");
+
+    assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
+    assert!(!rendered.body().contains("Autonomous continuation budget"));
+}
+
+#[test]
+fn multiline_obligation_items_stay_inside_the_obligation_block() {
+    let section = run_world_state_section(run_with_obligation(
+        "obligation-1",
+        vec!["The permit was never transferred.\nIt is still in the seller's name.".to_string()],
+    ));
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("first contribution renders");
+
+    assert!(rendered.body().contains(
+        "- Learned: The permit was never transferred. It is still in the seller's name."
+    ));
 }

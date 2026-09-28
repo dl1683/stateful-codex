@@ -327,6 +327,35 @@ impl BlackboardStore {
         Ok(BlackboardQueryResult { data, truncated })
     }
 
+    /// Whether an agent wrote or changed any blackboard entry or relation in the project
+    /// at or after `since_ms`. Used to decide whether a run produced durable knowledge.
+    pub async fn agent_knowledge_changed_since(
+        &self,
+        project_id: &str,
+        since_ms: i64,
+    ) -> Result<bool, BlackboardStoreError> {
+        let changed = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM blackboard_entries AS entry
+                 JOIN blackboard_entry_revisions AS revision
+                   ON revision.entry_id = entry.id AND revision.revision = entry.revision
+                 WHERE entry.project_id = ? AND entry.updated_at_ms >= ?
+                   AND revision.provenance_kind = 'agent'
+             ) OR EXISTS(
+                 SELECT 1 FROM blackboard_relations
+                 WHERE project_id = ? AND created_at_ms >= ? AND provenance_kind = 'agent'
+             )",
+        )
+        .bind(project_id)
+        .bind(since_ms)
+        .bind(project_id)
+        .bind(since_ms)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(changed != 0)
+    }
+
     /// The project's current intelligence revision (0 before the first mutation).
     pub async fn project_revision(&self, project_id: &str) -> Result<u64, BlackboardStoreError> {
         let revision = sqlx::query_scalar::<_, i64>(

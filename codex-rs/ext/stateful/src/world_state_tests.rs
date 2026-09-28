@@ -10,6 +10,7 @@ use codex_project_intelligence::BlackboardEvidenceFreshness;
 use codex_project_intelligence::BlackboardHit;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
+use codex_project_intelligence::BlackboardPremiseLink;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardVerification;
@@ -31,6 +32,7 @@ use super::semantic_fingerprint;
 use crate::SelectedProject;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
+use crate::visible_root::VisibleRootRegistry;
 
 fn section(status: ProjectIntelligenceStatus) -> WorldStateSectionContribution {
     project_world_state_section(status, /*visible_root*/ None)
@@ -102,10 +104,15 @@ fn incomplete_refresh_health_is_visible_and_changes_project_context() {
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
         .expect("changed refresh health must be visible");
 
-    // The earlier refresh-health line no longer applies and cannot be retracted by a delta.
+    // Status lines are replaced as one block, so no stale health line survives.
     assert_eq!(
         rendered.markers(),
-        ("<stateful_project>", "</stateful_project>")
+        ("<stateful_project_update>", "</stateful_project_update>")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("Current status lines (replace every earlier status line):")
     );
     assert!(rendered.body().contains("inventoryComplete=false"));
     assert!(rendered.body().contains("filesSkipped=1"));
@@ -285,7 +292,7 @@ fn revision_only_change_renders_a_compact_update() {
 }
 
 #[test]
-fn rewritten_status_line_renders_the_full_packet() {
+fn rewritten_status_line_replaces_the_status_block() {
     let previous = section(available_at_revision(
         project("Research", Vec::new()),
         /*revision*/ 7,
@@ -301,11 +308,16 @@ fn rewritten_status_line_renders_the_full_packet() {
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
         .expect("changed root knowledge must render");
 
-    // The earlier candidate-count line no longer applies and cannot be retracted by a delta.
     assert_eq!(
         rendered.markers(),
-        ("<stateful_project>", "</stateful_project>")
+        ("<stateful_project_update>", "</stateful_project_update>")
     );
+    assert!(
+        rendered
+            .body()
+            .contains("Current status lines (replace every earlier status line):")
+    );
+    assert!(!rendered.body().contains("Project roots:"));
     assert!(
         rendered
             .body()
@@ -492,5 +504,55 @@ fn selected_project_keeps_cache_affinity_in_sync() {
         data.get::<PromptCacheAffinity>()
             .and_then(|affinity| affinity.key()),
         None
+    );
+}
+
+#[test]
+fn visible_root_tracks_only_what_the_model_holds_in_full() {
+    let registry = VisibleRootRegistry::default();
+    let tracked = |status| {
+        project_world_state_section(status, Some((registry.clone(), "thread-1".to_string())))
+    };
+    let mut derived = hit("entry-derived", "The launch is blocked by the permit.");
+    derived.entry.value.premises = vec![BlackboardPremiseLink {
+        entry_id: BlackboardEntryId::parse("entry-deeper").expect("valid entry ID"),
+        revision: 1,
+    }];
+    let first = tracked(with_entries(
+        /*revision*/ 3,
+        vec![hit("entry-a", "The permit was never transferred."), derived],
+    ));
+    first.render_diff(PreviousWorldStateSection::Absent);
+    let shown = registry
+        .get("thread-1")
+        .expect("full render records the root");
+    assert_eq!(
+        (
+            shown.alias_for("entry-a", /*revision*/ 1),
+            shown.alias_for("entry-derived", /*revision*/ 1),
+        ),
+        (Some("E1"), None)
+    );
+
+    let same = tracked(with_entries(
+        /*revision*/ 4,
+        vec![hit("entry-a", "The permit was never transferred.")],
+    ));
+    same.render_diff(PreviousWorldStateSection::Known(first.snapshot()));
+    assert_eq!(registry.get("thread-1"), None);
+
+    let full = tracked(with_entries(
+        /*revision*/ 5,
+        vec![hit("entry-a", "The permit was never transferred.")],
+    ));
+    full.render_diff(PreviousWorldStateSection::Absent);
+    let advanced = tracked(with_entries(
+        /*revision*/ 6,
+        vec![hit("entry-a", "The permit was never transferred.")],
+    ));
+    advanced.render_diff(PreviousWorldStateSection::Known(full.snapshot()));
+    assert_eq!(
+        registry.get("thread-1").map(|shown| shown.project_revision),
+        Some(6)
     );
 }

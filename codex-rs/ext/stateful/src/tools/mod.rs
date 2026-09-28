@@ -20,7 +20,6 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::StatefulEventSink;
-use crate::checkpoint::RunActivityRegistry;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
 
@@ -33,7 +32,6 @@ pub(super) fn project_intelligence_tools(
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
-    run_activity: RunActivityRegistry,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
         Arc::new(blackboard::BlackboardQueryTool::new(
@@ -100,7 +98,6 @@ pub(super) fn project_intelligence_tools(
             projects,
             event_sink.clone(),
             visible_root,
-            run_activity,
         )),
         Arc::new(steering::SteeringQueryTool::new(
             project_id.clone(),

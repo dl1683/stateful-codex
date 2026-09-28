@@ -130,7 +130,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         .map(|route| (route.clone(), route.to_string()))
         .collect::<HashMap<_, _>>();
     let mut entries = Vec::with_capacity(projection.data.len());
-    let mut complete_entries = Vec::with_capacity(projection.data.len());
+    let mut shown = Vec::with_capacity(projection.data.len());
     let mut omitted = projection.omitted_entries;
     for (index, hit) in projection.data.iter().enumerate() {
         let line = render_hit(
@@ -141,28 +141,8 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             root.evidence_audit.as_ref(),
         );
         if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
-            let references_rendered = hit
-                .entry
-                .value
-                .evidence
-                .iter()
-                .all(|link| evidence_aliases.contains_key(&link.context_map_entry_id))
-                && hit
-                    .entry
-                    .value
-                    .premises
-                    .iter()
-                    .all(|premise| entry_aliases.contains_key(premise.entry_id.as_str()))
-                && hit.relations.iter().all(|relation| {
-                    entry_aliases.contains_key(relation.value.from_entry_id.as_str())
-                        && entry_aliases.contains_key(relation.value.to_entry_id.as_str())
-                });
-            if references_rendered && !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
-                complete_entries.push((
-                    hit.entry.id.to_string(),
-                    format!("E{}", index + 1),
-                    hit.entry.revision,
-                ));
+            if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
+                shown.push((index, format!("E{}", index + 1)));
             }
             let canonical = render_hit(
                 hit.entry.id.as_str(),
@@ -209,6 +189,33 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             "At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, first ensure at least one selected current root or exact historical finding preserves that reusable learning; use an empty alias list only when the run produced no reusable project learning. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
         ),
     );
+    // Certify an entry as fully shown only after layout, against entries actually
+    // rendered: every evidence and premise reference must resolve in the packet, and
+    // relation-bearing entries are never certified (relation detail is not rendered).
+    let rendered_entries = shown
+        .iter()
+        .map(|(index, _)| projection.data[*index].entry.id.to_string())
+        .collect::<std::collections::HashSet<_>>();
+    let complete_entries = shown
+        .into_iter()
+        .filter_map(|(index, alias)| {
+            let hit = &projection.data[index];
+            let complete = hit.relations.is_empty()
+                && hit
+                    .entry
+                    .value
+                    .evidence
+                    .iter()
+                    .all(|link| evidence_aliases.contains_key(&link.context_map_entry_id))
+                && hit
+                    .entry
+                    .value
+                    .premises
+                    .iter()
+                    .all(|premise| rendered_entries.contains(premise.entry_id.as_str()));
+            complete.then(|| (hit.entry.id.to_string(), alias, hit.entry.revision))
+        })
+        .collect();
     RootLayout {
         entries,
         sources,

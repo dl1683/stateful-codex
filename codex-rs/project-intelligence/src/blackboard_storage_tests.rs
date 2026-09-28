@@ -974,3 +974,23 @@ async fn blackboard_relations_are_project_scoped_idempotent_and_queryable() {
         .expect("related entry query succeeds");
     assert_eq!(hit.data[0].relations, vec![created]);
 }
+
+#[tokio::test]
+async fn agent_knowledge_change_is_reported_only_after_the_given_time() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let (_hierarchy, blackboard, entry, _) = fixture(&temp_dir).await;
+
+    assert_eq!(
+        (
+            blackboard
+                .agent_knowledge_changed_since("project-1", entry.updated_at_ms)
+                .await
+                .expect("query succeeds"),
+            blackboard
+                .agent_knowledge_changed_since("project-1", entry.updated_at_ms + 1)
+                .await
+                .expect("query succeeds"),
+        ),
+        (true, false)
+    );
+}

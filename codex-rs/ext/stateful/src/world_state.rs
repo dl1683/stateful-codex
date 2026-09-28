@@ -95,9 +95,19 @@ impl ProjectIntelligenceStatus {
             "otherLines".to_string(),
             Value::Array(
                 other_lines(body, layout)
+                    .filter(|line| !is_status_line(line))
                     .map(|line| Value::String(short_digest(line)))
                     .collect(),
             ),
+        );
+        snapshot.insert(
+            "statusLines".to_string(),
+            Value::String(short_digest(
+                &other_lines(body, layout)
+                    .filter(|line| is_status_line(line))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )),
         );
         if let Self::Available {
             root_blackboard, ..
@@ -260,6 +270,7 @@ pub(super) fn project_world_state_section(
             }
         }
     };
+    let visible_for_revision = visible_root.clone();
     let clear_visible = move || {
         if let Some((registry, thread_id)) = &visible_root {
             registry.clear(thread_id);
@@ -274,6 +285,12 @@ pub(super) fn project_world_state_section(
             {
                 if previous.get("rootRevision") == snapshot.get("rootRevision") {
                     return None;
+                }
+                if let (Some((registry, thread_id)), Some(revision)) = (
+                    &visible_for_revision,
+                    snapshot.get("rootRevision").and_then(Value::as_u64),
+                ) {
+                    registry.advance_revision(thread_id, revision);
                 }
                 let previous_revision = previous
                     .get("rootRevision")
@@ -361,6 +378,7 @@ impl DeltaInput {
         let current_other = self
             .other
             .iter()
+            .filter(|line| !is_status_line(line))
             .map(|line| short_digest(line))
             .collect::<HashSet<_>>();
         // A removed or rewritten status line cannot be retracted by appending text.
@@ -387,11 +405,27 @@ impl DeltaInput {
         let changed_other = self
             .other
             .iter()
+            .filter(|line| !is_status_line(line))
             .filter(|line| !previous_other.contains(short_digest(line).as_str()))
             .collect::<Vec<_>>();
         if !changed_other.is_empty() {
             delta.push_str("\nOther changed packet lines:");
             for line in changed_other {
+                delta.push('\n');
+                delta.push_str(line);
+            }
+        }
+        if previous.get("statusLines") != current.get("statusLines") {
+            delta.push_str("\nCurrent status lines (replace every earlier status line):");
+            let status = self
+                .other
+                .iter()
+                .filter(|line| is_status_line(line))
+                .collect::<Vec<_>>();
+            if status.is_empty() {
+                delta.push_str("\n(none)");
+            }
+            for line in status {
                 delta.push('\n');
                 delta.push_str(line);
             }
@@ -454,6 +488,15 @@ fn describe_changes(
             delta.push_str(line);
         }
     }
+}
+
+/// Status lines are replaced as one block in a delta instead of forcing a full render.
+fn is_status_line(line: &str) -> bool {
+    line.starts_with("Source-map refresh health:")
+        || line.starts_with("Warning:")
+        || line.starts_with("- No knowledge has been promoted")
+        || line.contains("active candidate entries await")
+        || line.contains("root entries omitted by the context bound")
 }
 
 fn laid_out_keys(lines: &[LaidOutLine]) -> Value {

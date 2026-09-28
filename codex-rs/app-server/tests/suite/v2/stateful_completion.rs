@@ -2,10 +2,13 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ContextMapRefreshParams;
+use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ObligationListParams;
 use codex_app_server_protocol::ObligationListResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
@@ -19,6 +22,7 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -425,8 +429,34 @@ async fn model_completes_a_lookup_without_durable_learning_ceremony() -> Result<
 
 #[tokio::test]
 async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Result<()> {
+    let (output, status) = complete_lookup_after_recording(ProjectShape::Indexed).await?;
+    assert!(output.contains("project knowledge was recorded or changed during this run"));
+    assert_eq!(status, StatefulRunStatus::Running);
+    Ok(())
+}
+
+#[tokio::test]
+async fn lookup_completion_is_allowed_when_every_record_failed() -> Result<()> {
+    let (output, status) = complete_lookup_after_recording(ProjectShape::Unindexed).await?;
+    assert!(output.contains(r#"\"status\":\"completed\""#));
+    assert_eq!(status, StatefulRunStatus::Completed);
+    Ok(())
+}
+
+/// Whether the project has an indexed hierarchy, which blackboard records require.
+enum ProjectShape {
+    Indexed,
+    Unindexed,
+}
+
+/// Records one finding, then attempts a `noReusableLearning` completion. Returns the
+/// completion tool output and the run status afterwards.
+async fn complete_lookup_after_recording(
+    shape: ProjectShape,
+) -> Result<(String, StatefulRunStatus)> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -434,17 +464,34 @@ async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Res
         .with_codex_home(codex_home.path())
         .build_initialized()
         .await?;
+    let roots = match shape {
+        ProjectShape::Indexed => vec![ProjectRoot {
+            path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                .expect("temporary project root should be absolute"),
+        }],
+        ProjectShape::Unindexed => Vec::new(),
+    };
     let project: ProjectCreateResponse = server
         .request(|request_id| ClientRequest::ProjectCreate {
             request_id,
             params: ProjectCreateParams {
                 name: "Proportional completion guard".to_string(),
-                roots: Vec::new(),
+                roots,
                 metadata: None,
                 idempotency_key: "proportional-guard-project".to_string(),
             },
         })
         .await?;
+    if let ProjectShape::Indexed = shape {
+        server
+            .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+                request_id,
+                params: ContextMapRefreshParams {
+                    project_id: project.project.id.clone(),
+                },
+            })
+            .await?;
+    }
     let thread = server
         .start_thread(ThreadStartParams {
             project_id: Some(project.project.id.clone()),
@@ -502,8 +549,8 @@ async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Res
                 responses::ev_completed("lookup-complete-response"),
             ]),
             responses::sse(vec![
-                responses::ev_assistant_message("guarded", "I must select the recorded finding."),
-                responses::ev_completed("guarded-response"),
+                responses::ev_assistant_message("done", "The release gate is build C7-42."),
+                responses::ev_completed("done-response"),
             ]),
         ],
     )
@@ -522,12 +569,6 @@ async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Res
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 3);
-    assert!(
-        requests[2]
-            .function_call_output("lookup-complete")
-            .to_string()
-            .contains("this run recorded or changed project knowledge")
-    );
     let read: StatefulRunReadResponse = server
         .request(|request_id| ClientRequest::StatefulRunRead {
             request_id,
@@ -537,9 +578,10 @@ async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Res
             },
         })
         .await?;
-    assert_eq!(
+    Ok((
+        requests[2]
+            .function_call_output("lookup-complete")
+            .to_string(),
         read.run.expect("run remains readable").status,
-        StatefulRunStatus::Running
-    );
-    Ok(())
+    ))
 }

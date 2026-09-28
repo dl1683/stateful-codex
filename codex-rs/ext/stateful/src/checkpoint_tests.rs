@@ -33,16 +33,14 @@ fn checkpoint_counts_successful_direct_calls_per_run() {
 }
 
 #[test]
-fn durable_writes_and_counts_reset_when_a_new_run_starts() {
+fn counts_reset_when_a_new_run_starts() {
     let activity = RunActivity::default();
     activity.observe_run("run-1");
-    activity.record(/*direct*/ true, Some("blackboard_record_batch"), DONE);
-    assert!(activity.wrote_durable_state());
+    for _ in 0..CHECKPOINT_TOOL_CALLS {
+        activity.record(/*direct*/ true, /*stateful_tool*/ None, DONE);
+    }
     activity.observe_run("run-1");
-    assert!(activity.wrote_durable_state());
+    assert_eq!(activity.due_epoch(), Some(1));
     activity.observe_run("run-2");
-    assert_eq!(
-        (activity.wrote_durable_state(), activity.due_epoch()),
-        (false, None)
-    );
+    assert_eq!(activity.due_epoch(), None);
 }

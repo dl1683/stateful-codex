@@ -128,23 +128,13 @@ impl RunWorldStateStatus {
                         Some(epoch) => line(
                             &mut output,
                             &format!(
-                                "Semantic checkpoint due (checkpoint {epoch}): at least {} tool calls completed since the last obligation update. Call obligation_update only if the goal, strategy, findings, uncertainty, blockers, or next decisive step materially changed; otherwise continue.",
+                                "Semantic checkpoint: due (checkpoint {epoch}); at least {} tool calls completed since the last obligation update. Call obligation_update only if the goal, strategy, findings, uncertainty, blockers, or next decisive step materially changed; otherwise continue.",
                                 epoch * CHECKPOINT_TOOL_CALLS
                             ),
                         ),
                         None => line(&mut output, "Semantic checkpoint: current."),
                     }
                 }
-                let (goal, goal_shortened) = bounded_text(&run.value.goal, MAX_RENDERED_GOAL_BYTES);
-                field(
-                    &mut output,
-                    "Goal",
-                    &if goal_shortened {
-                        format!("{goal} [goal shortened; the full goal is in the run record]")
-                    } else {
-                        goal.to_string()
-                    },
-                );
                 if run.value.mode == WorkflowMode::Autonomous {
                     field(
                         &mut output,
@@ -179,9 +169,6 @@ impl RunWorldStateStatus {
                     &mut output,
                     "Semantic progress: call obligation_update whenever learning, strategy, uncertainty, blockers, or next work materially change while work remains; explain meaning, not activity. Stateful write tools (blackboard_record, blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. Completion: after all durable writes, finish with one stateful_run_update. Use completionDisposition noReusableLearning with only the result when the run answered from existing project state or learned nothing reusable; otherwise carry completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings (completion rejects reusable learning with no selected blackboard finding). Completion must be the final Stateful mutation.",
                 );
-                if let Some(strategy) = run.strategy.as_deref() {
-                    field(&mut output, "Current strategy", strategy);
-                }
                 render_steering(&mut output, steering, *steering_complete);
                 if let Some(obligation) = obligation {
                     render_packet(&mut output, &obligation.value.packet);
@@ -189,6 +176,33 @@ impl RunWorldStateStatus {
                     line(
                         &mut output,
                         "Current obligation: no semantic update has been recorded yet. Record one after the first meaningful learning or strategy decision.",
+                    );
+                }
+                // Descriptive text comes last so a long goal or strategy can never crowd
+                // out the binding obligation and steering above.
+                let (goal, goal_shortened) = bounded_text(&run.value.goal, MAX_RENDERED_GOAL_BYTES);
+                field(
+                    &mut output,
+                    "Goal",
+                    &if goal_shortened {
+                        format!(
+                            "{goal} [goal shortened here; the full text is the user's original request in this thread]"
+                        )
+                    } else {
+                        goal.to_string()
+                    },
+                );
+                if let Some(strategy) = run.strategy.as_deref() {
+                    let (strategy, strategy_shortened) =
+                        bounded_text(strategy, MAX_RENDERED_GOAL_BYTES);
+                    field(
+                        &mut output,
+                        "Current strategy",
+                        &if strategy_shortened {
+                            format!("{strategy} [strategy shortened here]")
+                        } else {
+                            strategy.to_string()
+                        },
                     );
                 }
             }
@@ -233,8 +247,10 @@ fn render_steering(output: &mut String, steering: &[StatefulSteering], steering_
         line(
             output,
             &format!(
-                "- [id {}; {status}; revision {}] {input}{suffix}",
-                instruction.id, instruction.revision
+                "- [id {}; {status}; revision {}] {}{suffix}",
+                instruction.id,
+                instruction.revision,
+                single_line(input)
             ),
         );
     }
@@ -266,6 +282,7 @@ pub(super) fn run_world_state_section(
         "fingerprint": status.fingerprint(),
         "runId": run_id,
         "fields": block_lines(&body, RunBlockKind::Field).map(line_digest).collect::<Vec<_>>(),
+        "fieldKeys": block_lines(&body, RunBlockKind::Field).map(field_key).collect::<Vec<_>>(),
         "steering": line_digest(&block_lines(&body, RunBlockKind::Steering).collect::<Vec<_>>().join("\n")),
         "obligation": line_digest(&block_lines(&body, RunBlockKind::Obligation).collect::<Vec<_>>().join("\n")),
     });
@@ -320,7 +337,17 @@ fn run_delta(previous: &Value, current: &Value, body: &str) -> Option<String> {
         .collect::<std::collections::HashSet<_>>();
     let current_fields = block_lines(body, RunBlockKind::Field).collect::<Vec<_>>();
     // A field that disappeared cannot be expressed as a replacement line.
-    if current_fields.len() < previous_fields.len() {
+    let current_keys = current_fields
+        .iter()
+        .map(|field| field_key(field))
+        .collect::<std::collections::HashSet<_>>();
+    if previous
+        .get("fieldKeys")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|key| !current_keys.contains(key))
+    {
         return None;
     }
     let project_line = body.lines().nth(1).unwrap_or_default();
@@ -401,6 +428,12 @@ fn run_block(line: &str) -> RunBlockKind {
     }
 }
 
+fn field_key(line: &str) -> String {
+    line.split_once(':')
+        .map_or(line, |(key, _)| key)
+        .to_string()
+}
+
 fn line_digest(line: &str) -> String {
     let digest = Sha256::digest(line.as_bytes());
     digest[..16]
@@ -424,13 +457,24 @@ fn render_packet(output: &mut String, packet: &ObligationPacket) {
         ("Useful user judgment", &packet.requested_judgment),
     ] {
         for value in values {
-            line(output, &format!("- {label}: {value}"));
+            line(output, &format!("- {label}: {}", single_line(value)));
         }
     }
 }
 
 fn field(output: &mut String, label: &str, value: &str) {
-    line(output, &format!("{label}: {value}"));
+    line(output, &format!("{label}: {}", single_line(value)));
+}
+
+/// Keeps every rendered item on one line so block classification cannot drift.
+fn single_line(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\r' | '\n' => ' ',
+            _ => character,
+        })
+        .collect()
 }
 
 fn line(output: &mut String, value: &str) {

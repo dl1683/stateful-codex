@@ -19,6 +19,19 @@ impl VisibleRootRegistry {
             .insert(thread_id.to_string(), root);
     }
 
+    /// Keeps the shown entries when only the project revision advanced without any
+    /// model-visible change.
+    pub(crate) fn advance_revision(&self, thread_id: &str, project_revision: u64) {
+        if let Some(root) = self
+            .threads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(thread_id)
+        {
+            root.project_revision = project_revision;
+        }
+    }
+
     pub(crate) fn clear(&self, thread_id: &str) {
         self.threads
             .lock()

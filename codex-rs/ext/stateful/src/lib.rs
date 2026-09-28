@@ -509,7 +509,6 @@ impl ToolContributor for StatefulExtension {
             self.projects.clone(),
             self.event_sink.clone(),
             self.visible_root.clone(),
-            self.run_activity.clone(),
         )
     }
 }
