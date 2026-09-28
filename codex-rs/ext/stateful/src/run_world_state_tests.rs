@@ -55,6 +55,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
         })),
         steering: Vec::new(),
         steering_complete: true,
+        checkpoint_due: None,
     });
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
@@ -129,6 +130,7 @@ fn run_world_state_discloses_omitted_detail() {
         obligation: None,
         steering: Vec::new(),
         steering_complete: true,
+        checkpoint_due: None,
     });
 
     let rendered = section
@@ -181,6 +183,7 @@ fn obligation_change_replaces_only_the_obligation_block() {
         })),
         steering: Vec::new(),
         steering_complete: true,
+        checkpoint_due: None,
     };
     let previous = run_world_state_section(status("The permit was never transferred.", 1));
     let current = run_world_state_section(status("The landlord consent is also missing.", 2));
@@ -230,6 +233,7 @@ fn different_run_renders_the_full_packet() {
             obligation: None,
             steering: Vec::new(),
             steering_complete: true,
+            checkpoint_due: None,
         })
     };
     let previous = section("run-1");
@@ -240,4 +244,57 @@ fn different_run_renders_the_full_packet() {
         .expect("a new run must render");
 
     assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
+}
+
+#[test]
+fn due_checkpoint_renders_one_line_that_changes_only_per_epoch() {
+    let status = |checkpoint_due: Option<u64>| RunWorldStateStatus::Available {
+        run: Box::new(StatefulRun {
+            id: StatefulRunId::parse("run-1").expect("valid run id"),
+            value: NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "Document the harness.".to_string(),
+                mode: WorkflowMode::Autonomous,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+            status: StatefulRunStatus::Running,
+            strategy: None,
+            strategy_revision: 0,
+            result: None,
+            continuations_used: 0,
+            revision: 1,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        }),
+        obligation: None,
+        steering: Vec::new(),
+        steering_complete: true,
+        checkpoint_due,
+    };
+    let current = run_world_state_section(status(None));
+    let due = run_world_state_section(status(Some(1)));
+
+    let rendered = due
+        .render_diff(PreviousWorldStateSection::Known(current.snapshot()))
+        .expect("a due checkpoint must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_run_update>", "</stateful_run_update>")
+    );
+    assert!(
+        rendered
+            .body()
+            .contains("Semantic checkpoint due (checkpoint 1)")
+    );
+    assert!(!rendered.body().contains("Goal:"));
+    assert!(
+        run_world_state_section(status(Some(1)))
+            .render_diff(PreviousWorldStateSection::Known(due.snapshot()))
+            .is_none()
+    );
 }

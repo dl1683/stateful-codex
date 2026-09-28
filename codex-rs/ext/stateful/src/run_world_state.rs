@@ -9,6 +9,8 @@ use codex_stateful_runtime::StatefulSteering;
 use codex_stateful_runtime::SteeringStatus;
 use codex_stateful_runtime::WorkflowMode;
 use serde_json::Value;
+
+use crate::checkpoint::CHECKPOINT_TOOL_CALLS;
 use serde_json::json;
 use sha2::Digest;
 use sha2::Sha256;
@@ -31,6 +33,8 @@ pub(super) enum RunWorldStateStatus {
         obligation: Option<Box<StatefulObligation>>,
         steering: Vec<StatefulSteering>,
         steering_complete: bool,
+        /// Checkpoint epoch once enough tool calls passed since the last obligation.
+        checkpoint_due: Option<u64>,
     },
     Unavailable {
         project_id: String,
@@ -62,8 +66,10 @@ impl RunWorldStateStatus {
                 obligation,
                 steering,
                 steering_complete,
+                checkpoint_due,
             } => {
                 hash(&mut hasher, run.id.as_str());
+                hasher.update(checkpoint_due.unwrap_or_default().to_be_bytes());
                 hasher.update(run.revision.to_be_bytes());
                 hasher.update(run.strategy_revision.to_be_bytes());
                 if let Some(obligation) = obligation {
@@ -98,6 +104,7 @@ impl RunWorldStateStatus {
                 obligation,
                 steering,
                 steering_complete,
+                checkpoint_due,
             } => {
                 field(&mut output, "Run ID", run.id.as_str());
                 field(&mut output, "Run revision", &run.revision.to_string());
@@ -115,6 +122,18 @@ impl RunWorldStateStatus {
                 );
                 field(&mut output, "Mode", mode_name(run.value.mode));
                 field(&mut output, "Status", status_name(run.status));
+                if run.status == StatefulRunStatus::Running {
+                    match checkpoint_due {
+                        Some(epoch) => line(
+                            &mut output,
+                            &format!(
+                                "Semantic checkpoint due (checkpoint {epoch}): at least {} tool calls completed since the last obligation update. Call obligation_update only if the goal, strategy, findings, uncertainty, blockers, or next decisive step materially changed; otherwise continue.",
+                                epoch * CHECKPOINT_TOOL_CALLS
+                            ),
+                        ),
+                        None => line(&mut output, "Semantic checkpoint: current."),
+                    }
+                }
                 field(&mut output, "Goal", &run.value.goal);
                 if run.value.mode == WorkflowMode::Autonomous {
                     field(

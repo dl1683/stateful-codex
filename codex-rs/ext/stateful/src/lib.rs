@@ -2,6 +2,7 @@
 
 mod attribution;
 mod autonomy;
+mod checkpoint;
 mod completion;
 mod events;
 mod outcome_world_state;
@@ -174,8 +175,16 @@ impl ContextContributor for StatefulExtension {
             if let Some(outcomes) = self.project_outcomes(selected.project_id()).await {
                 sections.push(project_outcomes_world_state_section(outcomes));
             }
+            let checkpoint_due = input
+                .thread_store
+                .get::<checkpoint::CheckpointCounter>()
+                .and_then(|counter| counter.due_epoch());
             if let Some(run_status) = self
-                .run_world_state(selected.project_id(), &input.thread_id.to_string())
+                .run_world_state(
+                    selected.project_id(),
+                    &input.thread_id.to_string(),
+                    checkpoint_due,
+                )
                 .await
             {
                 sections.push(run_world_state_section(run_status));
@@ -410,6 +419,7 @@ impl StatefulExtension {
         &self,
         project_id: &str,
         thread_id: &str,
+        checkpoint_due: Option<u64>,
     ) -> Option<RunWorldStateStatus> {
         let services = self.services.as_ref()?;
         let store = match services.runtime().await {
@@ -479,6 +489,7 @@ impl StatefulExtension {
             obligation: obligation.map(Box::new),
             steering,
             steering_complete,
+            checkpoint_due,
         })
     }
 }
