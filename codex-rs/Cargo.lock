@@ -3228,6 +3228,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-document-extraction"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "quick-xml 0.41.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "zip",
+]
+
+[[package]]
 name = "codex-exec"
 version = "0.0.0"
 dependencies = [

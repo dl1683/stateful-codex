@@ -39,6 +39,7 @@ members = [
     "config",
     "config-schema",
     "context-fragments",
+    "document-extraction",
     "shell-command",
     "shell-escalation",
     "skills",
@@ -210,6 +211,7 @@ codex-core = { path = "core" }
 codex-core-api = { path = "core-api" }
 codex-core-plugins = { path = "core-plugins" }
 codex-diagnostics = { path = "diagnostics" }
+codex-document-extraction = { path = "document-extraction" }
 codex-exec = { path = "exec" }
 codex-file-system = { path = "file-system" }
 codex-exec-server-protocol = { path = "exec-server-protocol" }
