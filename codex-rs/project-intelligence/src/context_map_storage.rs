@@ -283,6 +283,10 @@ impl ContextMapStore {
         let mut source_hits = HashMap::new();
         let mut directory_hits = HashMap::new();
         let mut entry_ids = Vec::with_capacity(max_results.saturating_add(1));
+        // Diversity caps order results; they never make a match unreachable. Capped
+        // candidates are deferred and backfill any remaining room in rank order, so
+        // `truncated` stays true whenever a queryable match was not returned.
+        let mut deferred_ids = Vec::new();
         for candidate in candidates {
             if !matches!(candidate.kind.as_str(), "file" | "region") {
                 return Err(ContextMapStoreError::CorruptEntry(candidate.id));
@@ -292,13 +296,12 @@ impl ContextMapStore {
                 continue;
             }
             let hits = source_hits.entry(source_key).or_insert(0_usize);
-            if *hits == MAX_QUERY_HITS_PER_SOURCE {
-                continue;
-            }
             let directory_hits = directory_hits
                 .entry(candidate.directory_key())
                 .or_insert(0_usize);
-            if *directory_hits == MAX_QUERY_HITS_PER_DIRECTORY {
+            if *hits == MAX_QUERY_HITS_PER_SOURCE || *directory_hits == MAX_QUERY_HITS_PER_DIRECTORY
+            {
+                deferred_ids.push(candidate.id);
                 continue;
             }
             *hits += 1;
@@ -308,6 +311,8 @@ impl ContextMapStore {
                 break;
             }
         }
+        let backfill = (max_results + 1).saturating_sub(entry_ids.len());
+        entry_ids.extend(deferred_ids.into_iter().take(backfill));
         let truncated = entry_ids.len() > max_results || !search_exhausted;
         entry_ids.truncate(max_results);
         let mut hits = Vec::with_capacity(entry_ids.len());
@@ -461,8 +466,8 @@ impl SearchCandidate {
     fn directory_key(&self) -> (String, String) {
         let directory = self
             .relative_path
-            .split_once('/')
-            .map_or(self.relative_path.as_str(), |(directory, _)| directory);
+            .rsplit_once('/')
+            .map_or("", |(directory, _)| directory);
         (self.project_root.clone(), directory.to_string())
     }
 }

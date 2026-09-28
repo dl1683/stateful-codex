@@ -377,12 +377,26 @@ async fn query_prefers_bounded_regions_without_one_source_crowding_results() {
         .await
         .expect("query should succeed")
         .data;
-    assert_eq!(hits.len(), 4);
+    // One source cannot crowd out others: README's capped fourth region is ordered
+    // after every other source and only backfills because the result still has room.
+    assert_eq!(hits.len(), 5);
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.source.relative_path.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "OTHER.md",
+            "README.md",
+            "README.md",
+            "README.md",
+            "README.md"
+        ]
+    );
     assert_eq!(
         hits.iter()
             .filter(|hit| hit.source.relative_path.as_str() == "README.md")
             .count(),
-        3
+        4
     );
     assert!(
         hits.iter()
@@ -534,9 +548,15 @@ async fn query_preserves_results_beyond_one_busy_top_level_directory() {
             "reviews/1.md",
             "reviews/10.md",
             "docs/guide.md",
+            "reviews/100.md",
+            "reviews/101.md",
+            "reviews/102.md",
+            "reviews/103.md",
+            "reviews/104.md",
+            "reviews/105.md",
         ]
     );
-    assert!(!result.truncated);
+    assert!(result.truncated);
 
     let limited = context_map
         .query(ContextMapQuery {
@@ -555,6 +575,80 @@ async fn query_preserves_results_beyond_one_busy_top_level_directory() {
         vec!["reviews/0.md", "reviews/1.md", "reviews/10.md"]
     );
     assert!(limited.truncated);
+}
+
+#[tokio::test]
+async fn query_returns_every_match_in_one_directory_when_room_remains() {
+    let temp_dir = TempDir::new().expect("tempdir should be created");
+    let (hierarchy, context_map) = stores(&temp_dir).await;
+    create_file(&hierarchy).await;
+    hierarchy
+        .create_node(
+            HierarchyNodeId::parse("node-src").expect("valid directory ID"),
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: Some(HierarchyNodeId::parse("node-root").expect("valid root ID")),
+                kind: NodeKind::Directory,
+                project_root: Some("C:\\workspace".to_string()),
+                relative_path: ProjectRelativePath::parse("src").expect("valid path"),
+                region_anchor: None,
+                source_fingerprint: Some(fingerprint("sha256:directory")),
+            },
+        )
+        .await
+        .expect("directory should insert");
+    for index in 0..5 {
+        let node_id = HierarchyNodeId::parse(format!("node-src-{index}")).expect("valid file ID");
+        hierarchy
+            .create_node(
+                node_id.clone(),
+                NewHierarchyNode {
+                    project_id: "project-1".to_string(),
+                    parent_id: Some(HierarchyNodeId::parse("node-src").expect("valid ID")),
+                    kind: NodeKind::File,
+                    project_root: Some("C:\\workspace".to_string()),
+                    relative_path: ProjectRelativePath::parse(format!("src/{index}.rs"))
+                        .expect("valid path"),
+                    region_anchor: None,
+                    source_fingerprint: Some(fingerprint("sha256:src")),
+                },
+            )
+            .await
+            .expect("source file should insert");
+        context_map
+            .create_entry(
+                ContextMapEntryId::parse(format!("map-src-{index}")).expect("valid entry ID"),
+                NewContextMapEntry {
+                    project_id: "project-1".to_string(),
+                    node_id,
+                    source_fingerprint: fingerprint("sha256:src"),
+                    description: "decisive invariant".to_string(),
+                    routing_terms: Vec::new(),
+                    coverage: ContextMapCoverage::Complete,
+                },
+            )
+            .await
+            .expect("source route should insert");
+    }
+
+    let result = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "decisive invariant".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("query should succeed");
+
+    assert_eq!(
+        result
+            .data
+            .iter()
+            .map(|hit| hit.source.relative_path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["src/0.rs", "src/1.rs", "src/2.rs", "src/3.rs", "src/4.rs"]
+    );
+    assert!(!result.truncated);
 }
 
 #[tokio::test]
