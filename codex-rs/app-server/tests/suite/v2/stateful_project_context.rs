@@ -867,7 +867,7 @@ async fn model_guarded_route_rejects_shifted_source_until_requeried() -> Result<
 }
 
 #[tokio::test]
-async fn model_reads_text_routes_and_rejects_legacy_and_docx_routes() -> Result<()> {
+async fn model_reads_current_and_legacy_text_routes_and_rejects_docx_routes() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
