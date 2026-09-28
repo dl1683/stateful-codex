@@ -18,9 +18,11 @@ use codex_project_intelligence::EvidenceReadRequest;
 use codex_project_intelligence::EvidenceReadResult;
 use codex_project_intelligence::EvidenceReader;
 use codex_project_intelligence::EvidenceRoute;
+use codex_project_intelligence::IndexedExtraction;
 use codex_project_intelligence::ProjectIndexFileRequest;
 use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
+use codex_project_intelligence::RegionAnchor;
 use codex_project_intelligence::SourceFingerprint;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
@@ -53,6 +55,8 @@ struct EvidenceRouteArguments {
     context_map_entry_id: String,
     source_fingerprint: String,
     line_range: Option<LineRangeArguments>,
+    region_anchor: Option<RegionAnchor>,
+    indexed_extraction: Option<IndexedExtraction>,
 }
 
 #[derive(Deserialize)]
@@ -122,8 +126,8 @@ impl EvidenceReadTool {
                         start: range.start,
                         end: range.end,
                     }),
-                    region_anchor: None,
-                    indexed_extraction: None,
+                    region_anchor: route.region_anchor,
+                    indexed_extraction: route.indexed_extraction,
                 })
             }
             (None, Some(relative_path)) => EvidenceReadLocator::Source {
@@ -338,6 +342,25 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
                                     "end": {"type": "integer", "minimum": 1}
                                 },
                                 "required": ["start", "end"],
+                                "additionalProperties": false
+                            },
+                            "regionAnchor": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                    "scheme": {"type": "string"},
+                                    "locator": {"type": "string"}
+                                },
+                                "required": ["scheme", "locator"],
+                                "additionalProperties": false
+                            },
+                            "indexedExtraction": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                    "extractorName": {"type": "string"},
+                                    "extractorVersion": {"type": "string"},
+                                    "canonicalRepresentationDigest": {"type": "string"}
+                                },
+                                "required": ["extractorName", "extractorVersion", "canonicalRepresentationDigest"],
                                 "additionalProperties": false
                             }
                         },

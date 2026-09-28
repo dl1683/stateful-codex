@@ -77,8 +77,21 @@ impl EvidenceRoute {
             context_map_entry_id: hit.entry.id.clone(),
             source_fingerprint: hit.entry.value.source_fingerprint.clone(),
             line_range,
-            region_anchor: hit.source.region_anchor.clone(),
-            indexed_extraction: hit.source.indexed_extraction.clone(),
+            region_anchor: hit
+                .source
+                .region_anchor
+                .clone()
+                .filter(|anchor| anchor.scheme != "lines"),
+            indexed_extraction: hit
+                .source
+                .indexed_extraction
+                .clone()
+                .filter(|_| {
+                    hit.source
+                        .region_anchor
+                        .as_ref()
+                        .is_some_and(|anchor| anchor.scheme != "lines")
+                }),
         })
     }
 }
@@ -142,6 +155,13 @@ impl EvidenceReader {
                     })?;
                 if EvidenceRoute::from_hit(&hit)? != *route {
                     return Err(EvidenceReadError::RouteChanged);
+                }
+                if route.line_range.is_none()
+                    && let Some(anchor) = &route.region_anchor
+                {
+                    return Err(EvidenceReadError::UnsupportedRegionAnchor(
+                        anchor.scheme.clone(),
+                    ));
                 }
                 let requested_path = hit.source.relative_path.to_string();
                 (vec![hit], None, requested_path, route.line_range)

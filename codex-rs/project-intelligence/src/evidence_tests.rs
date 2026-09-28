@@ -168,6 +168,9 @@ async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
         .next()
         .expect("decisive region");
     let route = EvidenceRoute::from_hit(&hit).expect("guarded evidence route");
+    assert!(route.line_range.is_some());
+    assert_eq!(route.region_anchor, None);
+    assert_eq!(route.indexed_extraction, None);
     let reader = EvidenceReader::new(context_map.clone());
     let request = EvidenceReadRequest {
         project_id: "project-1".to_string(),
