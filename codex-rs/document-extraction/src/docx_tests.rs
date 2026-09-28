@@ -1,6 +1,4 @@
-use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
 
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
@@ -50,24 +48,6 @@ fn extractor() -> (tempfile::TempDir, DocumentExtractor) {
     let directory = tempdir().unwrap();
     let extractor = DocumentExtractor::production(directory.path().join("cache")).unwrap();
     (directory, extractor)
-}
-
-fn one_cache_json(root: &std::path::Path) -> PathBuf {
-    let mut pending = vec![root.to_owned()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(directory).unwrap().flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-            {
-                return path;
-            }
-        }
-    }
-    panic!("expected a cache entry")
 }
 
 fn expected_document(
@@ -293,70 +273,14 @@ fn marks_unsupported_parts_and_tracked_changes_partial() {
 }
 
 #[test]
-fn cache_hit_matches_cold_extraction_as_a_whole_document() {
+fn repeated_extraction_matches_as_a_whole_document() {
     let (_directory, extractor) = extractor();
     let bytes = package(&document(r#"<w:p><w:r><w:t>cached</w:t></w:r></w:p>"#), &[]);
 
     let cold = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
-    let cached = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
+    let second = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
 
-    assert_eq!(cached, cold);
-}
-
-#[test]
-fn cache_hits_are_isolated_by_current_limits_policy() {
-    let directory = tempdir().unwrap();
-    let cache_root = directory.path().join("cache");
-    let permissive = DocumentExtractor::production(cache_root.clone()).unwrap();
-    let bytes = package(&document(r#"<w:p><w:r><w:t>strict</w:t></w:r></w:p>"#), &[]);
-    permissive.extract(DocumentFormat::Docx, &bytes).unwrap();
-
-    let strict = DocumentExtractor::with_limits(
-        cache_root,
-        ExtractionLimits {
-            max_extracted_text_bytes: 1,
-            ..ExtractionLimits::default()
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        strict.extract(DocumentFormat::Docx, &bytes),
-        Err(ExtractionError::LimitExceeded(
-            ExtractionLimit::ExtractedTextBytes
-        ))
-    ));
-}
-
-#[test]
-fn corrupt_and_mismatched_cache_entries_fall_back_to_extraction() {
-    let directory = tempdir().unwrap();
-    let cache_root = directory.path().join("cache");
-    let extractor = DocumentExtractor::production(cache_root.clone()).unwrap();
-    let bytes = package(&document(r#"<w:p><w:r><w:t>cache</w:t></w:r></w:p>"#), &[]);
-    let expected = extractor.extract(DocumentFormat::Docx, &bytes).unwrap();
-    let cache_path = one_cache_json(&cache_root);
-
-    fs::write(&cache_path, b"not json").unwrap();
-    assert_eq!(
-        extractor.extract(DocumentFormat::Docx, &bytes).unwrap(),
-        expected
-    );
-
-    let mut mismatched = expected.clone();
-    mismatched.original_fingerprint = "sha256:wrong".to_owned();
-    fs::write(&cache_path, serde_json::to_vec(&mismatched).unwrap()).unwrap();
-    assert_eq!(
-        extractor.extract(DocumentFormat::Docx, &bytes).unwrap(),
-        expected
-    );
-
-    let mut bad_digest = expected.clone();
-    bad_digest.canonical_representation_digest = "sha256:wrong".to_owned();
-    fs::write(&cache_path, serde_json::to_vec(&bad_digest).unwrap()).unwrap();
-    assert_eq!(
-        extractor.extract(DocumentFormat::Docx, &bytes).unwrap(),
-        expected
-    );
+    assert_eq!(second, cold);
 }
 
 #[test]

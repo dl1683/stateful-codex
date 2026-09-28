@@ -1,7 +1,6 @@
 //! Bounded, deterministic extraction of Office document representations.
 
 mod archive;
-mod cache;
 mod canonical;
 mod docx;
 mod limits;
@@ -102,10 +101,9 @@ pub enum ExtractionError {
     Io(#[from] std::io::Error),
 }
 
-/// The extractor owns a persistent cache and immutable production limits.
+/// The extractor owns immutable production limits.
 #[derive(Clone)]
 pub struct DocumentExtractor {
-    cache: cache::ExtractionCache,
     limits: ExtractionLimits,
 }
 
@@ -120,11 +118,8 @@ impl DocumentExtractor {
         cache_root: PathBuf,
         limits: ExtractionLimits,
     ) -> Result<Self, ExtractionError> {
-        std::fs::create_dir_all(&cache_root)?;
-        Ok(Self {
-            cache: cache::ExtractionCache::new(cache_root),
-            limits,
-        })
+        let _ = cache_root;
+        Ok(Self { limits })
     }
 
     /// Returns the Office format identified by a path extension.
@@ -137,7 +132,7 @@ impl DocumentExtractor {
         }
     }
 
-    /// Hashes, extracts, and cache-validates an original Office byte sequence.
+    /// Hashes and extracts an original Office byte sequence.
     pub fn extract(
         &self,
         format: DocumentFormat,
@@ -150,20 +145,6 @@ impl DocumentExtractor {
         }
 
         let original_fingerprint = canonical::digest_bytes(original_bytes);
-        let identity = ExtractorIdentity::for_format(format);
-        if let Some(document) = self
-            .cache
-            .load(&original_fingerprint, &identity, &self.limits)
-            .filter(|document| {
-                document.original_fingerprint == original_fingerprint
-                    && document.original_bytes == original_bytes.len() as u64
-                    && document.extractor == identity
-                    && canonical::representation_digest(document)
-                        == document.canonical_representation_digest
-            })
-        {
-            return Ok(document);
-        }
 
         let mut document = match format {
             DocumentFormat::Docx => docx::extract(
@@ -175,7 +156,6 @@ impl DocumentExtractor {
             DocumentFormat::Xlsx => return Err(ExtractionError::UnsupportedFormat),
         };
         document.canonical_representation_digest = canonical::representation_digest(&document);
-        self.cache.store(&document, &self.limits);
         Ok(document)
     }
 }
