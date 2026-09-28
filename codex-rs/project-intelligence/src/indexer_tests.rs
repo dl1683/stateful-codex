@@ -5,6 +5,8 @@ use std::io::Write;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
+use sha2::Digest;
+use sha2::Sha256;
 use tempfile::TempDir;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
@@ -120,11 +122,8 @@ async fn docx_indexing_publishes_structural_regions_and_v2_attestation() {
 async fn over_limit_docx_is_published_as_one_partial_file_without_skips_or_regions() {
     let home = TempDir::new().expect("temporary state home");
     let root = TempDir::new().expect("temporary project root");
-    fs::write(
-        root.path().join("bounded.docx"),
-        generated_docx(r#"<w:p><w:r><w:t>bounded content</w:t></w:r></w:p>"#),
-    )
-    .expect("DOCX fixture should write");
+    let fixture = generated_docx(r#"<w:p><w:r><w:t>bounded content</w:t></w:r></w:p>"#);
+    fs::write(root.path().join("bounded.docx"), &fixture).expect("DOCX fixture should write");
     let sqlite = SqliteConfig::new_for_testing(home.path().abs());
     let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
     let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
@@ -164,6 +163,10 @@ async fn over_limit_docx_is_published_as_one_partial_file_without_skips_or_regio
         .expect("partial file should be queryable");
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].entry.value.coverage, ContextMapCoverage::Partial);
+    assert_eq!(
+        files[0].entry.value.source_fingerprint.as_str(),
+        format!("sha256:{:x}", Sha256::digest(&fixture))
+    );
     assert!(
         hierarchy
             .list_children("project-1", &files[0].entry.value.node_id)

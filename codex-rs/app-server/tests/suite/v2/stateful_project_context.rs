@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::io::Cursor;
+use std::io::Write;
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
@@ -62,6 +64,26 @@ use serde_json::json;
 use sha2::Digest;
 use sha2::Sha256;
 use tempfile::TempDir;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
+
+fn generated_docx(body: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+    writer
+        .start_file("word/document.xml", SimpleFileOptions::default())
+        .expect("document part should start");
+    writer
+        .write_all(
+            format!(
+                r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>{body}</w:body></w:document>"#
+            )
+            .as_bytes(),
+        )
+        .expect("document part should write");
+    writer.finish().expect("package should finish");
+    bytes
+}
 
 #[tokio::test]
 async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> {
@@ -841,6 +863,203 @@ async fn model_guarded_route_rejects_shifted_source_until_requeried() -> Result<
             .as_str()
             .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn model_reads_text_routes_and_rejects_legacy_and_docx_routes() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("notes.md"),
+        "shared_boundary_term\ntext evidence content\n",
+    )?;
+    std::fs::write(
+        project_root.path().join("fixture.docx"),
+        generated_docx(
+            r#"<w:p><w:r><w:t>shared_boundary_term and docx evidence content</w:t></w:r></w:p>"#,
+        ),
+    )?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Evidence route boundary project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-evidence-route-boundary-project".to_string(),
+            },
+        })
+        .await?;
+    let project_id = created.project.id;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: project_id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 2);
+    assert_eq!(refreshed.regions_indexed, 2);
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id),
+            ..Default::default()
+        })
+        .await?;
+
+    let query_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "route-query",
+                    "context_map_query",
+                    &json!({"text": "shared_boundary_term", "limit": 10}).to_string(),
+                ),
+                responses::ev_completed("route-query-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("route-query-done", "Routes found"),
+                responses::ev_completed("route-query-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let query_output: serde_json::Value = serde_json::from_str(
+        &query_log
+            .function_call_output_text("route-query")
+            .expect("context query output should be text"),
+    )?;
+    let routes = query_output["data"]
+        .as_array()
+        .expect("context query should return routes");
+    let text_route = routes
+        .iter()
+        .find(|route| route["source"]["relativePath"] == "notes.md")
+        .and_then(|route| route.get("evidenceRoute"))
+        .cloned()
+        .expect("text evidence route should be returned");
+    let docx_route = routes
+        .iter()
+        .find(|route| route["source"]["relativePath"] == "fixture.docx")
+        .and_then(|route| route.get("evidenceRoute"))
+        .cloned()
+        .expect("DOCX evidence route should be returned");
+    assert_eq!(docx_route["regionAnchor"]["scheme"], "docx-paragraph");
+    assert!(docx_route["indexedExtraction"].is_object());
+
+    let text_read = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "text-read",
+                    "evidence_read",
+                    &json!({"evidenceRoute": text_route}).to_string(),
+                ),
+                responses::ev_completed("text-read-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("text-read-done", "Text evidence read"),
+                responses::ev_completed("text-read-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let text_output: serde_json::Value = serde_json::from_str(
+        &text_read
+            .function_call_output_text("text-read")
+            .expect("text read output should be text"),
+    )?;
+    assert_eq!(
+        text_output["content"],
+        "shared_boundary_term\ntext evidence content\n"
+    );
+    assert!(
+        text_output["blackboardEvidence"]["readReceiptId"]
+            .as_str()
+            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+    );
+
+    let legacy_route = json!({
+        "contextMapEntryId": text_route["contextMapEntryId"],
+        "sourceFingerprint": text_route["sourceFingerprint"],
+        "lineRange": text_route["lineRange"],
+    });
+    let legacy_read = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "legacy-read",
+                    "evidence_read",
+                    &json!({"evidenceRoute": legacy_route}).to_string(),
+                ),
+                responses::ev_completed("legacy-read-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("legacy-read-done", "Legacy route read"),
+                responses::ev_completed("legacy-read-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let legacy_output: serde_json::Value = serde_json::from_str(
+        &legacy_read
+            .function_call_output_text("legacy-read")
+            .expect("legacy read output should be text"),
+    )?;
+    assert_eq!(
+        legacy_output["content"],
+        "shared_boundary_term\ntext evidence content\n"
+    );
+    assert!(
+        legacy_output["blackboardEvidence"]["readReceiptId"]
+            .as_str()
+            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+    );
+
+    let docx_read = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "docx-read",
+                    "evidence_read",
+                    &json!({"evidenceRoute": docx_route}).to_string(),
+                ),
+                responses::ev_completed("docx-read-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("docx-read-done", "DOCX route rejected"),
+                responses::ev_completed("docx-read-done-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &started.thread.id).await?;
+    let docx_output = docx_read
+        .function_call_output_text("docx-read")
+        .expect("DOCX read output should be text");
+    assert!(docx_output.contains("context-map region anchor is not supported for evidence reads"));
+    assert!(!docx_output.contains("content"));
+    assert!(!docx_output.contains("stateful-read-"));
     Ok(())
 }
 
