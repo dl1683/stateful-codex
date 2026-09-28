@@ -1,14 +1,14 @@
 use crate::ContextMapCoverage;
 use crate::IndexedExtraction;
+use crate::RegionAnchor;
 
 const LINES_PER_REGION: usize = 64;
-const MAX_REGIONS_PER_FILE: usize = 64;
+pub(super) const MAX_REGIONS_PER_FILE: usize = 64;
 pub(super) const MAX_REGION_DESCRIPTION_BYTES: usize = 4_096;
 pub(super) const MAX_PROJECT_REGIONS: usize = 50_000;
 
 pub(super) struct ScannedRegion {
-    pub(super) start_line: usize,
-    pub(super) end_line: usize,
+    pub(super) anchor: RegionAnchor,
     pub(super) indexed_extraction: Option<IndexedExtraction>,
     pub(super) description: String,
     pub(super) coverage: ContextMapCoverage,
@@ -57,8 +57,10 @@ pub(super) fn scan_regions(
             .find_map(|line| line.trim().starts_with('#').then(|| line.trim()))
             .or(heading);
         regions.push(ScannedRegion {
-            start_line,
-            end_line: end_index,
+            anchor: RegionAnchor {
+                scheme: "lines".to_owned(),
+                locator: format!("{start_line}-{end_index}"),
+            },
             indexed_extraction: None,
             description,
             coverage: if complete {

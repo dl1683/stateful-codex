@@ -4,17 +4,26 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
+use codex_document_extraction::DocumentExtractor;
+use codex_document_extraction::DocumentFormat;
+use codex_document_extraction::ExtractionError;
+use codex_document_extraction::ExtractionLimit;
+use codex_document_extraction::ExtractionStatus;
 use ignore::WalkBuilder;
 use sha2::Digest;
 use sha2::Sha256;
 
 use crate::ContextMapCoverage;
+use crate::IndexedExtraction;
 use crate::ProjectRelativePath;
+use crate::RegionAnchor;
 use crate::SourceFingerprint;
 
 use super::ProjectIndexerError;
 use super::hex_digest;
 use super::regions::MAX_PROJECT_REGIONS;
+use super::regions::MAX_REGION_DESCRIPTION_BYTES;
+use super::regions::MAX_REGIONS_PER_FILE;
 use super::regions::ScannedRegion;
 use super::regions::scan_regions;
 
@@ -23,6 +32,7 @@ const EXCERPT_BYTES: usize = 64 * 1024;
 const MAX_DESCRIPTION_BYTES: usize = 2_048;
 const MAX_ROUTING_TERMS: usize = 32;
 const MAX_ROUTING_TERM_BYTES: usize = 128;
+const MAX_OFFICE_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(super) struct ScanResult {
     pub(super) files: Vec<ScannedFile>,
@@ -159,6 +169,8 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut excerpt = Vec::with_capacity(EXCERPT_BYTES);
+    let office_format = DocumentExtractor::format_for_path(path);
+    let mut office_bytes = (office_format == Some(DocumentFormat::Docx)).then(Vec::new);
     let mut buffer = [0_u8; 64 * 1024];
     let mut total_bytes = 0_u64;
     loop {
@@ -169,6 +181,13 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
         total_bytes = total_bytes
             .saturating_add(u64::try_from(read).map_err(|_| ProjectIndexerError::CountOverflow)?);
         hasher.update(&buffer[..read]);
+        if total_bytes <= MAX_OFFICE_BYTES {
+            if let Some(bytes) = office_bytes.as_mut() {
+                bytes.extend_from_slice(&buffer[..read]);
+            }
+        } else if office_bytes.is_some() {
+            office_bytes = None;
+        }
         if excerpt.len() < EXCERPT_BYTES {
             let remaining = EXCERPT_BYTES - excerpt.len();
             excerpt.extend_from_slice(&buffer[..read.min(remaining)]);
@@ -176,6 +195,9 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
     }
     let fingerprint =
         SourceFingerprint::parse(format!("sha256:{}", hex_digest(hasher.finalize())))?;
+    if office_format == Some(DocumentFormat::Docx) {
+        return scan_docx(root, relative_path, fingerprint, office_bytes);
+    }
     let exact_text = !excerpt.contains(&0) && std::str::from_utf8(&excerpt).is_ok();
     let text = (!excerpt.contains(&0)).then(|| String::from_utf8_lossy(&excerpt).into_owned());
     let (description, description_complete) = describe_file(&relative_path, text.as_deref());
@@ -203,6 +225,141 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
         coverage,
         regions,
     })
+}
+
+fn scan_docx(
+    root: &Path,
+    relative_path: String,
+    fingerprint: SourceFingerprint,
+    office_bytes: Option<Vec<u8>>,
+) -> Result<ScannedFile, ProjectIndexerError> {
+    let extraction = office_bytes.as_deref().map_or_else(
+        || {
+            Err(ExtractionError::LimitExceeded(
+                ExtractionLimit::OriginalBytes,
+            ))
+        },
+        |bytes| DocumentExtractor::production().extract(DocumentFormat::Docx, bytes),
+    );
+    let (description, routing_terms, regions, coverage) = match extraction {
+        Ok(document) => {
+            let indexed_extraction = IndexedExtraction::new(
+                document.extractor.name.clone(),
+                document.extractor.version.clone(),
+                document.canonical_representation_digest.clone(),
+            )
+            .map_err(|_| ProjectIndexerError::InvalidExtractionIdentity)?;
+            let (regions, regions_truncated) =
+                scan_office_regions(&relative_path, &document, indexed_extraction)?;
+            let summary = document
+                .blocks
+                .iter()
+                .take(3)
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let description = describe_office_file(&relative_path, &summary, document.status);
+            let coverage = if document.status == ExtractionStatus::Complete && !regions_truncated {
+                ContextMapCoverage::Complete
+            } else {
+                ContextMapCoverage::Partial
+            };
+            (
+                description,
+                routing_terms(
+                    &relative_path,
+                    (!summary.is_empty()).then_some(summary.as_str()),
+                ),
+                regions,
+                coverage,
+            )
+        }
+        Err(error) => (
+            extraction_failure_description(&relative_path, &error),
+            routing_terms(&relative_path, None),
+            Vec::new(),
+            ContextMapCoverage::Partial,
+        ),
+    };
+    Ok(ScannedFile {
+        project_root: root.display().to_string(),
+        relative_path,
+        fingerprint,
+        description,
+        routing_terms,
+        coverage,
+        regions,
+    })
+}
+
+fn scan_office_regions(
+    relative_path: &str,
+    document: &codex_document_extraction::ExtractedDocument,
+    indexed_extraction: IndexedExtraction,
+) -> Result<(Vec<ScannedRegion>, bool), ProjectIndexerError> {
+    let truncated = document.blocks.len() > MAX_REGIONS_PER_FILE;
+    let regions = document
+        .blocks
+        .iter()
+        .take(MAX_REGIONS_PER_FILE)
+        .map(|block| {
+            let anchor = RegionAnchor::new(&block.anchor.scheme, &block.anchor.locator)?;
+            let mut description = format!("{relative_path} | {}", block.text);
+            let complete = document.status == ExtractionStatus::Complete;
+            description.truncate(description.floor_char_boundary(MAX_REGION_DESCRIPTION_BYTES));
+            Ok(ScannedRegion {
+                anchor,
+                indexed_extraction: Some(indexed_extraction.clone()),
+                description,
+                coverage: if complete {
+                    ContextMapCoverage::Complete
+                } else {
+                    ContextMapCoverage::Partial
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, ProjectIndexerError>>()?;
+    Ok((regions, truncated))
+}
+
+fn describe_office_file(relative_path: &str, summary: &str, status: ExtractionStatus) -> String {
+    let suffix = match status {
+        ExtractionStatus::Complete => summary,
+        ExtractionStatus::Partial if summary.is_empty() => "partial extraction",
+        ExtractionStatus::Partial => summary,
+    };
+    let separator = if suffix.is_empty() { "" } else { " | " };
+    truncate_description(&format!("{relative_path}{separator}{suffix}"))
+}
+
+fn extraction_failure_description(relative_path: &str, error: &ExtractionError) -> String {
+    let code = match error {
+        ExtractionError::UnsupportedFormat => "unsupported-format",
+        ExtractionError::Encrypted => "encrypted",
+        ExtractionError::Corrupt => "corrupt",
+        ExtractionError::LimitExceeded(limit) => match limit {
+            ExtractionLimit::OriginalBytes => "limit-original-bytes",
+            ExtractionLimit::ZipEntries => "limit-zip-entries",
+            ExtractionLimit::ZipEntryBytes => "limit-zip-entry-bytes",
+            ExtractionLimit::ZipTotalBytes => "limit-zip-total-bytes",
+            ExtractionLimit::XmlDepth => "limit-xml-depth",
+            ExtractionLimit::XmlAttributes => "limit-xml-attributes",
+            ExtractionLimit::ExtractedBlocks => "limit-extracted-blocks",
+            ExtractionLimit::ExtractedTextBytes => "limit-extracted-text-bytes",
+            ExtractionLimit::CanonicalBlockBytes => "limit-canonical-block-bytes",
+            ExtractionLimit::XlsxSheets => "limit-xlsx-sheets",
+            ExtractionLimit::XlsxCells => "limit-xlsx-cells",
+            ExtractionLimit::XlsxSharedStrings => "limit-xlsx-shared-strings",
+            ExtractionLimit::XlsxUsedArea => "limit-xlsx-used-area",
+        },
+    };
+    truncate_description(&format!(
+        "{relative_path} | office extraction failed: {code}"
+    ))
+}
+
+fn truncate_description(value: &str) -> String {
+    truncate_utf8(value, MAX_DESCRIPTION_BYTES).to_string()
 }
 
 fn describe_file(relative_path: &str, text: Option<&str>) -> (String, bool) {

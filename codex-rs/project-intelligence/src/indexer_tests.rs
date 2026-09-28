@@ -1,16 +1,157 @@
 use std::fs;
+use std::io::Cursor;
+use std::io::Write;
 
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 use super::*;
 use crate::ContextMapCoverage;
 use crate::ContextMapFreshness;
+use crate::ContextMapListQuery;
 use crate::ContextMapQuery;
 use crate::RegionAnchor;
 use crate::SourceFingerprint;
+
+fn generated_docx(body: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+    writer
+        .start_file("word/document.xml", SimpleFileOptions::default())
+        .expect("document part should start");
+    writer
+        .write_all(
+            format!(
+                r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>{body}</w:body></w:document>"#
+            )
+            .as_bytes(),
+        )
+        .expect("document part should write");
+    writer.finish().expect("package should finish");
+    bytes
+}
+
+#[tokio::test]
+async fn docx_indexing_publishes_structural_regions_and_v2_attestation() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(
+        root.path().join("purchase-agreement.docx"),
+        generated_docx(
+            r#"<w:p><w:r><w:t>body clause</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>distinctive table clause</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+        ),
+    )
+    .expect("DOCX fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let report = indexer
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("DOCX project should index");
+    assert_eq!(report.files_indexed, 1);
+    assert_eq!(report.regions_indexed, 2);
+    assert_eq!(report.files_skipped, 0);
+    assert!(report.region_coverage_complete);
+
+    let root_text = root.path().display().to_string();
+    let file_id = stable_id(
+        "file",
+        &["project-1", &root_text, "purchase-agreement.docx"],
+    )
+    .expect("stable file ID");
+    let regions = hierarchy
+        .list_children("project-1", &file_id)
+        .await
+        .expect("DOCX regions should load");
+    assert_eq!(
+        regions
+            .iter()
+            .map(|region| region.value.region_anchor.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Some(RegionAnchor::new("docx-paragraph", "body/p[1]").expect("body anchor")),
+            Some(
+                RegionAnchor::new("docx-paragraph", "body/tbl[1]/tr[1]/tc[1]/p[1]")
+                    .expect("table anchor")
+            ),
+        ]
+    );
+    let hit = context_map
+        .query(ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "distinctive table clause".to_string(),
+            max_results: 1,
+        })
+        .await
+        .expect("table clause should be searchable")
+        .data
+        .pop()
+        .expect("table region should be returned");
+    assert_eq!(
+        hit.source.region_anchor,
+        Some(RegionAnchor::new("docx-paragraph", "body/tbl[1]/tr[1]/tc[1]/p[1]").expect("anchor"))
+    );
+    assert_eq!(
+        hit.source
+            .indexed_extraction
+            .as_ref()
+            .map(|extraction| (&extraction.extractor_name, &extraction.extractor_version)),
+        Some((&"codex-docx".to_string(), &"2".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn failed_docx_is_published_as_a_partial_file_without_a_skip() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(
+        root.path().join("broken.docx"),
+        b"not a zip and never an archive entry name",
+    )
+    .expect("corrupt DOCX fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let report = indexer
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("failed DOCX should still index");
+    assert_eq!(report.files_indexed, 1);
+    assert_eq!(report.regions_indexed, 0);
+    assert_eq!(report.files_skipped, 0);
+    assert!(!report.region_coverage_complete);
+    let files = context_map
+        .list_project(ContextMapListQuery {
+            project_id: "project-1".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("partial file should be queryable");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].entry.value.coverage, ContextMapCoverage::Partial);
+    assert!(files[0].entry.value.description.contains("corrupt"));
+    assert_eq!(
+        hierarchy
+            .list_children("project-1", &files[0].entry.value.node_id)
+            .await
+            .expect("file children should load")
+            .len(),
+        0
+    );
+}
 
 #[tokio::test]
 async fn refresh_builds_stable_regions_and_retires_removed_ranges() {
@@ -225,8 +366,7 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
         .expect("file should load")
         .expect("file should exist");
     let conflicting_region = |description: &str| super::regions::ScannedRegion {
-        start_line: 1,
-        end_line: 1,
+        anchor: RegionAnchor::new("lines", "1-1").expect("valid anchor"),
         indexed_extraction: None,
         description: description.to_string(),
         coverage: ContextMapCoverage::Complete,

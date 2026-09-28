@@ -548,6 +548,8 @@ pub enum ProjectIndexerError {
     IdentityConflict(String),
     #[error("project index count overflow")]
     CountOverflow,
+    #[error("document extractor produced an invalid indexed identity")]
+    InvalidExtractionIdentity,
     #[error("project refresh was superseded by a newer generation")]
     SupersededRefresh,
     #[error(transparent)]

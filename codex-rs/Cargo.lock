@@ -4317,6 +4317,7 @@ dependencies = [
 name = "codex-project-intelligence"
 version = "0.0.0"
 dependencies = [
+ "codex-document-extraction",
  "codex-state",
  "codex-utils-absolute-path",
  "ignore",
@@ -4328,6 +4329,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "zip",
 ]
 
 [[package]]

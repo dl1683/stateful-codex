@@ -10,7 +10,6 @@ use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
-use crate::RegionAnchor;
 use crate::context_map_storage::upsert_indexed_entry;
 use crate::storage::kind_name;
 use crate::storage::lifecycle_name;
@@ -66,7 +65,6 @@ pub(super) async fn publish_file(
     let mut active_region_ids = HashSet::with_capacity(file.regions.len());
     for (cell_index, region) in file.regions.iter().enumerate() {
         let cell = cell_index.to_string();
-        let locator = format!("{}-{}", region.start_line, region.end_line);
         let region_id = stable_id(
             "region",
             &[project_id, &file.project_root, &file.relative_path, &cell],
@@ -77,7 +75,7 @@ pub(super) async fn publish_file(
             kind: NodeKind::Region,
             project_root: Some(file.project_root.clone()),
             relative_path: relative_path.clone(),
-            region_anchor: Some(RegionAnchor::new("lines", locator)?),
+            region_anchor: Some(region.anchor.clone()),
             source_fingerprint: Some(file.fingerprint.clone()),
         };
         upsert_indexed_node(&mut transaction, &region_id, region_node).await?;
