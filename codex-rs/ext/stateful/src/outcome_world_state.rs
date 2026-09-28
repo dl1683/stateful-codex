@@ -15,9 +15,9 @@ const UPDATE_START_MARKER: &str = "<stateful_project_outcomes_update>";
 const UPDATE_END_MARKER: &str = "</stateful_project_outcomes_update>";
 const MAX_BODY_BYTES: usize = 10 * 1024;
 const MAX_GOAL_BYTES: usize = 320;
-const MAX_RESULT_BYTES: usize = 1_024;
-const MAX_PACKET_ITEM_BYTES: usize = 320;
-const MAX_PACKET_ITEMS: usize = 6;
+const MAX_RESULT_BYTES: usize = 600;
+const MAX_PACKET_ITEM_BYTES: usize = 240;
+const MAX_PACKET_ITEMS: usize = 4;
 const TRUNCATION_MARKER: &str =
     "\n[Older or longer outcome detail omitted by the bounded continuity view.]";
 
@@ -158,6 +158,15 @@ fn render_outcome(output: &mut String, outcome: &StatefulRunOutcome) {
         .result
         .as_deref()
         .unwrap_or("No result recorded.");
+    // The appended completion basis repeats root findings already visible in the
+    // project packet; keep the continuity view to the narrative result.
+    let result = result
+        .split_once(
+            "
+
+Durable completion basis:",
+        )
+        .map_or(result, |(narrative, _)| narrative);
     line(
         output,
         &format!(

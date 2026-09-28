@@ -35,6 +35,22 @@ pub(super) enum RootBlackboardStatus {
     Unavailable,
 }
 
+/// Root lines that reached the model-visible packet, with alias-independent digests
+/// so a later render can describe only what changed.
+#[derive(Default)]
+pub(super) struct RootLayout {
+    pub(super) entries: Vec<LaidOutLine>,
+    pub(super) sources: Vec<LaidOutLine>,
+}
+
+pub(super) struct LaidOutLine {
+    /// Short stable identity (entry or route ID digest).
+    pub(super) key: String,
+    /// Digest of the line rendered with identities instead of positional aliases.
+    pub(super) digest: String,
+    pub(super) line: String,
+}
+
 pub(super) struct ResolvedRootBlackboard {
     pub(super) projection: RootBlackboardProjection,
     pub(super) evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
@@ -60,21 +76,30 @@ impl RootBlackboardStatus {
     }
 }
 
-pub(super) fn render_root_blackboard(output: &mut String, status: &RootBlackboardStatus) {
+pub(super) fn render_root_blackboard(
+    output: &mut String,
+    status: &RootBlackboardStatus,
+) -> RootLayout {
     match status {
         RootBlackboardStatus::Available(root) => render_projection(output, root),
-        RootBlackboardStatus::NotConfigured => append_line(
-            output,
-            "Project intelligence is unavailable because persistent state is disabled. Use source files as ground truth and do not claim memory readiness.",
-        ),
-        RootBlackboardStatus::Unavailable => append_line(
-            output,
-            "Project intelligence could not be loaded. Use source files as ground truth and do not claim memory or evidence readiness.",
-        ),
+        RootBlackboardStatus::NotConfigured => {
+            append_line(
+                output,
+                "Project intelligence is unavailable because persistent state is disabled. Use source files as ground truth and do not claim memory readiness.",
+            );
+            RootLayout::default()
+        }
+        RootBlackboardStatus::Unavailable => {
+            append_line(
+                output,
+                "Project intelligence could not be loaded. Use source files as ground truth and do not claim memory or evidence readiness.",
+            );
+            RootLayout::default()
+        }
     }
 }
 
-fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
+fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> RootLayout {
     let projection = &root.projection;
     append_line(
         output,
@@ -90,20 +115,41 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
         .enumerate()
         .map(|(index, hit)| (hit.entry.id.to_string(), format!("E{}", index + 1)))
         .collect::<HashMap<_, _>>();
-    let evidence_aliases = render_evidence_catalog(output, root);
+    let (evidence_aliases, sources) = render_evidence_catalog(output, root);
+    let identity_aliases = projection
+        .data
+        .iter()
+        .map(|hit| (hit.entry.id.to_string(), hit.entry.id.to_string()))
+        .collect::<HashMap<_, _>>();
+    let identity_evidence = root
+        .evidence_routes
+        .keys()
+        .map(|route| (route.clone(), route.to_string()))
+        .collect::<HashMap<_, _>>();
+    let mut entries = Vec::with_capacity(projection.data.len());
     let mut omitted = projection.omitted_entries;
     for (index, hit) in projection.data.iter().enumerate() {
-        if !try_append_line(
-            output,
-            &render_hit(
-                &format!("E{}", index + 1),
+        let line = render_hit(
+            &format!("E{}", index + 1),
+            hit,
+            &entry_aliases,
+            &evidence_aliases,
+            root.evidence_audit.as_ref(),
+        );
+        if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
+            let canonical = render_hit(
+                hit.entry.id.as_str(),
                 hit,
-                &entry_aliases,
-                &evidence_aliases,
+                &identity_aliases,
+                &identity_evidence,
                 root.evidence_audit.as_ref(),
-            ),
-            ROOT_FOOTER_RESERVE_BYTES,
-        ) {
+            );
+            entries.push(LaidOutLine {
+                key: short_digest(hit.entry.id.as_str()),
+                digest: short_digest(&canonical),
+                line,
+            });
+        } else {
             omitted = omitted.saturating_add(1);
         }
     }
@@ -136,12 +182,13 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) {
             "At completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, first ensure at least one selected current root or exact historical finding preserves that reusable learning; use an empty alias list only when the run produced no reusable project learning. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
         ),
     );
+    RootLayout { entries, sources }
 }
 
 fn render_evidence_catalog(
     output: &mut String,
     root: &ResolvedRootBlackboard,
-) -> HashMap<ContextMapEntryId, String> {
+) -> (HashMap<ContextMapEntryId, String>, Vec<LaidOutLine>) {
     let mut ordered_routes = Vec::new();
     for evidence in root.projection.data.iter().flat_map(|hit| {
         hit.entry
@@ -159,7 +206,7 @@ fn render_evidence_catalog(
         }
     }
     if ordered_routes.is_empty() {
-        return HashMap::new();
+        return (HashMap::new(), Vec::new());
     }
 
     append_line(output, "Exact-source aliases:");
@@ -177,6 +224,7 @@ fn render_evidence_catalog(
     }
 
     let mut evidence_aliases = HashMap::new();
+    let mut sources = Vec::new();
     for entry_id in ordered_routes {
         let route = &root.evidence_routes[&entry_id];
         let Some(root_alias) = root_aliases.get(&route.source.project_root) else {
@@ -200,10 +248,19 @@ fn render_evidence_catalog(
             route.source.relative_path,
         );
         if try_append_line(output, &line, ROOT_KNOWLEDGE_RESERVE_BYTES) {
+            let canonical = format!(
+                "{entry_id}|{}|{}{anchor}|{freshness}",
+                route.source.project_root, route.source.relative_path
+            );
+            sources.push(LaidOutLine {
+                key: short_digest(entry_id.as_str()),
+                digest: short_digest(&canonical),
+                line,
+            });
             evidence_aliases.insert(entry_id, alias);
         }
     }
-    evidence_aliases
+    (evidence_aliases, sources)
 }
 
 fn render_hit(
@@ -296,6 +353,14 @@ fn render_hit(
         line.push_str(&marker);
     }
     line
+}
+
+pub(super) fn short_digest(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    digest[..4]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn rendered_premise_freshness_name(freshness: AuditedPremiseFreshness) -> &'static str {

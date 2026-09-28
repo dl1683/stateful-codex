@@ -9,12 +9,15 @@ use codex_stateful_runtime::StatefulSteering;
 use codex_stateful_runtime::SteeringStatus;
 use codex_stateful_runtime::WorkflowMode;
 use serde_json::Value;
+use serde_json::json;
 use sha2::Digest;
 use sha2::Sha256;
 
 const WORLD_STATE_ID: &str = "stateful_run";
 const START_MARKER: &str = "<stateful_run>";
 const END_MARKER: &str = "</stateful_run>";
+const UPDATE_START_MARKER: &str = "<stateful_run_update>";
+const UPDATE_END_MARKER: &str = "</stateful_run_update>";
 const MAX_BODY_BYTES: usize = 8 * 1024;
 const MAX_ESTIMATED_TOKENS: usize = 3 * 1024;
 const MAX_RENDERED_STEERING: usize = 5;
@@ -145,7 +148,7 @@ impl RunWorldStateStatus {
                 }
                 line(
                     &mut output,
-                    "Proportional completion: when the run answered from existing project state or produced nothing worth reusing, complete directly with stateful_run_update status completed, completionDisposition noReusableLearning, and the result; do not record, promote, or refresh anything just to complete. Persistence order for durable learning: after evidence review, finish every blackboard, relationship, steering, and verification operation. If finalObligation.learning will contain reusable project knowledge, first record and promote the smallest durable conclusion or retain its exact historical finding revision; completion rejects learning with no selected blackboard finding. Then complete with one stateful_run_update call carrying completionIdempotencyKey, finalObligation, result, rootRevision, materialRootFindings, and any exact materialHistoricalFindings returned by blackboard_query or as historicalFinding from blackboard_update_batch. Copy the latest host-returned entry ID and revision after a lifecycle update; do not query the same entry again. Never manually reconstruct opaque source fingerprints; select the historical entry ID and revision so the host renders them. finalObligation must contain every material conclusion, implication, uncertainty, and blocker the result and answer must preserve. Do not spend a separate model turn on obligation_update when the work is already ready to complete; every intermediate update requires meaningful semantic change plus substantive remaining next work, a blocker, or requested user judgment. Summarizing, synthesizing, or comparing already-reviewed evidence solely to prepare the current answer does not qualify. A new cross-source conclusion, resolved contradiction, or changed strategy may qualify when more investigation or execution still follows. Completion records the final obligation and run result atomically, removes the active-run binding, returns the bounded final-answer checklist, and must be the final Stateful mutation.",
+                    "Semantic progress: call obligation_update whenever learning, strategy, uncertainty, blockers, or next work materially change while work remains; explain meaning, not activity. Completion: after all durable writes, finish with one stateful_run_update. Use completionDisposition noReusableLearning with only the result when the run answered from existing project state or learned nothing reusable; otherwise carry completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings (completion rejects reusable learning with no selected blackboard finding). Completion must be the final Stateful mutation.",
                 );
                 if let Some(strategy) = run.strategy.as_deref() {
                     field(&mut output, "Current strategy", strategy);
@@ -227,14 +230,31 @@ fn render_steering(output: &mut String, steering: &[StatefulSteering], steering_
 pub(super) fn run_world_state_section(
     status: RunWorldStateStatus,
 ) -> WorldStateSectionContribution {
-    let fingerprint = Value::String(status.fingerprint());
     let body = status.render();
     let project_id = status.project_id().to_string();
     let run_id = status.run_id().map(str::to_string);
-    WorldStateSectionContribution::new(WORLD_STATE_ID, fingerprint.clone(), move |previous| {
+    let snapshot = json!({
+        "fingerprint": status.fingerprint(),
+        "runId": run_id,
+        "lines": body.lines().map(line_digest).collect::<Vec<_>>(),
+    });
+    WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
-            PreviousWorldStateSection::Known(previous) if previous == &fingerprint => None,
+            PreviousWorldStateSection::Known(previous)
+                if previous.get("fingerprint") == snapshot.get("fingerprint") =>
+            {
+                None
+            }
             PreviousWorldStateSection::Unknown => None,
+            PreviousWorldStateSection::Known(previous)
+                if let Some(delta) = run_delta(previous, &snapshot, &body) =>
+            {
+                Some(RenderedWorldStateFragment::new(
+                    "developer",
+                    (UPDATE_START_MARKER, UPDATE_END_MARKER),
+                    delta,
+                ))
+            }
             PreviousWorldStateSection::Absent | PreviousWorldStateSection::Known(_) => {
                 Some(RenderedWorldStateFragment::new(
                     "developer",
@@ -252,6 +272,111 @@ pub(super) fn run_world_state_section(
     .with_retained_fragment_matcher(move |role, text| {
         matches_fragment(role, text, &project_id, run_id.as_deref())
     })
+}
+
+/// Renders only what changed in the same run: changed header fields line by line,
+/// and the whole obligation or steering block when any of its lines changed, so a
+/// replaced packet never mixes with stale items. Returns `None` when a full render
+/// is required (different run, legacy snapshot, or no cheaper description).
+fn run_delta(previous: &Value, current: &Value, body: &str) -> Option<String> {
+    if previous.get("runId") != current.get("runId") || current.get("runId")?.is_null() {
+        return None;
+    }
+    let previous_lines = previous
+        .get("lines")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let mut fields = Vec::new();
+    let mut steering = Vec::new();
+    let mut obligation = Vec::new();
+    let mut steering_changed = false;
+    let mut obligation_changed = false;
+    for current_line in body.lines() {
+        let changed = !previous_lines.contains(line_digest(current_line).as_str());
+        match run_block(current_line) {
+            RunBlock::Steering => {
+                steering_changed |= changed;
+                steering.push(current_line);
+            }
+            RunBlock::Obligation => {
+                obligation_changed |= changed;
+                obligation.push(current_line);
+            }
+            RunBlock::Field if changed => fields.push(current_line),
+            RunBlock::Field => {}
+        }
+    }
+    let project_line = body.lines().nth(1).unwrap_or_default();
+    let run_id = current.get("runId")?.as_str()?;
+    let mut delta = format!(
+        "{project_line}. Run ID: {run_id}. These lines replace the matching fields of the retained <stateful_run> packet."
+    );
+    for field in fields {
+        delta.push('\n');
+        delta.push_str(field);
+    }
+    if steering_changed {
+        delta.push_str("\nUnresolved steering (replaces the previous steering view):");
+        for line in &steering {
+            delta.push('\n');
+            delta.push_str(line);
+        }
+    }
+    if obligation_changed {
+        delta.push_str("\nSemantic obligation (replaces the previous obligation entirely):");
+        for line in &obligation {
+            delta.push('\n');
+            delta.push_str(line);
+        }
+    }
+    (delta.len() <= body.len() / 2).then_some(delta)
+}
+
+enum RunBlock {
+    Field,
+    Steering,
+    Obligation,
+}
+
+fn run_block(line: &str) -> RunBlock {
+    if line.starts_with("Unresolved user steering")
+        || line.starts_with("- [id ")
+        || line.starts_with("This current unresolved steering")
+        || line.starts_with("This bounded view omitted")
+        || line.starts_with("Acknowledge and visibly")
+    {
+        RunBlock::Steering
+    } else if line.starts_with("Current semantic obligation")
+        || line.starts_with("Current obligation:")
+        || [
+            "- Examined:",
+            "- Why it matters:",
+            "- Learned:",
+            "- Implication:",
+            "- Strategy:",
+            "- Changed:",
+            "- Next:",
+            "- Uncertainty:",
+            "- Blockers:",
+            "- Useful user judgment:",
+        ]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+    {
+        RunBlock::Obligation
+    } else {
+        RunBlock::Field
+    }
+}
+
+fn line_digest(line: &str) -> String {
+    let digest = Sha256::digest(line.as_bytes());
+    digest[..4]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn render_packet(output: &mut String, packet: &ObligationPacket) {

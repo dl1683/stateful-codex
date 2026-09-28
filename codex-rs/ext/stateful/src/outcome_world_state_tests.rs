@@ -194,3 +194,24 @@ fn verbose_learning_cannot_hide_uncertainty_or_blockers() {
     assert!(!rendered.body().contains("Learned conclusion 5."));
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
 }
+
+#[test]
+fn completion_basis_is_not_repeated_in_the_continuity_view() {
+    let section = project_outcomes_world_state_section(available(vec![outcome(
+        "run-1",
+        "Determine the controlling threshold.",
+        "The controlling threshold is six.\n\nDurable completion basis:\n- E1 [high fact] The threshold is six.",
+        "The current policy replaced the prior threshold.",
+    )]));
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("recent outcomes should render");
+
+    assert!(
+        rendered
+            .body()
+            .contains("Result: The controlling threshold is six.")
+    );
+    assert!(!rendered.body().contains("Durable completion basis"));
+}

@@ -77,24 +77,18 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
-            .contains("one stateful_run_update call carrying completionIdempotencyKey")
+            .contains("Semantic progress: call obligation_update whenever learning")
     );
     assert!(
         rendered
             .body()
-            .contains("historicalFinding from blackboard_update_batch")
+            .contains("completionDisposition noReusableLearning with only the result")
     );
     assert!(
         rendered
             .body()
-            .contains("every intermediate update requires meaningful semantic change")
+            .contains("Completion must be the final Stateful mutation.")
     );
-    assert!(
-        rendered
-            .body()
-            .contains("synthesizing, or comparing already-reviewed evidence")
-    );
-    assert!(rendered.body().contains("run result atomically"));
     assert!(
         rendered
             .body()
@@ -142,4 +136,108 @@ fn run_world_state_discloses_omitted_detail() {
         .expect("first contribution renders");
     assert!(rendered.body().contains("Stateful run state truncated"));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
+}
+
+#[test]
+fn obligation_change_replaces_only_the_obligation_block() {
+    let run_id = StatefulRunId::parse("run-1").expect("valid run id");
+    let status = |learning: &str, revision: u64| RunWorldStateStatus::Available {
+        run: Box::new(StatefulRun {
+            id: run_id.clone(),
+            value: NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "Find the decisive source constraint.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+            status: StatefulRunStatus::Running,
+            strategy: Some("Compare the controlling sources.".to_string()),
+            strategy_revision: 1,
+            result: None,
+            continuations_used: 0,
+            revision: 2,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        }),
+        obligation: Some(Box::new(StatefulObligation {
+            id: format!("obligation-{revision}"),
+            value: NewObligation {
+                project_id: "project-1".to_string(),
+                run_id: run_id.clone(),
+                packet: ObligationPacket {
+                    learning: vec![learning.to_string()],
+                    next: vec!["Check the lease consent.".to_string()],
+                    ..Default::default()
+                },
+                provenance_source_id: "turn-1".to_string(),
+            },
+            sequence: revision,
+            revision: 1,
+            created_at_ms: 2,
+        })),
+        steering: Vec::new(),
+        steering_complete: true,
+    };
+    let previous = run_world_state_section(status("The permit was never transferred.", 1));
+    let current = run_world_state_section(status("The landlord consent is also missing.", 2));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("obligation change must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_run_update>", "</stateful_run_update>")
+    );
+    let body = rendered.body();
+    assert!(body.contains("Run ID: run-1"));
+    assert!(body.contains("Semantic obligation (replaces the previous obligation entirely):"));
+    assert!(body.contains("- Learned: The landlord consent is also missing."));
+    assert!(body.contains("- Next: Check the lease consent."));
+    assert!(!body.contains("Goal:"));
+    assert!(!body.contains("Semantic progress:"));
+}
+
+#[test]
+fn different_run_renders_the_full_packet() {
+    let section = |id: &str| {
+        run_world_state_section(RunWorldStateStatus::Available {
+            run: Box::new(StatefulRun {
+                id: StatefulRunId::parse(id).expect("valid run id"),
+                value: NewStatefulRun {
+                    project_id: "project-1".to_string(),
+                    thread_ids: vec!["thread-1".to_string()],
+                    goal: "Answer the question.".to_string(),
+                    mode: WorkflowMode::Collaborative,
+                    budget: RunBudget {
+                        max_continuations: 12,
+                        max_elapsed_seconds: 3_600,
+                    },
+                },
+                status: StatefulRunStatus::Running,
+                strategy: None,
+                strategy_revision: 0,
+                result: None,
+                continuations_used: 0,
+                revision: 1,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            }),
+            obligation: None,
+            steering: Vec::new(),
+            steering_complete: true,
+        })
+    };
+    let previous = section("run-1");
+    let current = section("run-2");
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("a new run must render");
+
+    assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
 }

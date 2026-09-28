@@ -3,13 +3,19 @@ use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::ProjectRefreshStatus;
 use codex_thread_store::StoredProject;
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use serde_json::Map;
 use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::root_blackboard::LaidOutLine;
 use crate::root_blackboard::RootBlackboardStatus;
+use crate::root_blackboard::RootLayout;
 use crate::root_blackboard::render_root_blackboard;
+use crate::root_blackboard::short_digest;
 
 const WORLD_STATE_ID: &str = "stateful_project";
 const START_MARKER: &str = "<stateful_project>";
@@ -73,12 +79,22 @@ impl ProjectIntelligenceStatus {
         format!("{:x}", hasher.finalize())
     }
 
-    fn snapshot(&self, body: &str) -> Value {
+    fn snapshot(&self, body: &str, layout: &RootLayout) -> Value {
         let mut snapshot = Map::new();
         snapshot.insert("fingerprint".to_string(), Value::String(self.fingerprint()));
         snapshot.insert(
             "semanticFingerprint".to_string(),
             Value::String(semantic_fingerprint(body)),
+        );
+        snapshot.insert("rootEntries".to_string(), laid_out_keys(&layout.entries));
+        snapshot.insert("rootSources".to_string(), laid_out_keys(&layout.sources));
+        snapshot.insert(
+            "otherLines".to_string(),
+            Value::Array(
+                other_lines(body, layout)
+                    .map(|line| Value::String(short_digest(line)))
+                    .collect(),
+            ),
         );
         if let Self::Available {
             root_blackboard, ..
@@ -93,8 +109,9 @@ impl ProjectIntelligenceStatus {
         Value::Object(snapshot)
     }
 
-    fn render(&self) -> String {
+    fn render(&self) -> (String, RootLayout) {
         let mut body = String::with_capacity(MAX_BODY_BYTES);
+        let mut layout = RootLayout::default();
         append_line(
             &mut body,
             "The user explicitly selected this durable project. Treat threads as views over the same project intelligence; do not infer or switch projects.",
@@ -139,7 +156,7 @@ impl ProjectIntelligenceStatus {
                     );
                 }
                 render_refresh_status(&mut body, last_refresh.as_ref());
-                render_root_blackboard(&mut body, root_blackboard);
+                layout = render_root_blackboard(&mut body, root_blackboard);
             }
             Self::Missing { .. } => append_line(
                 &mut body,
@@ -150,7 +167,7 @@ impl ProjectIntelligenceStatus {
                 "The project catalog is temporarily unavailable. Do not claim project-memory or evidence readiness until it can be resolved.",
             ),
         }
-        body
+        (body, layout)
     }
 }
 
@@ -211,9 +228,10 @@ fn render_refresh_status(output: &mut String, refresh: Option<&ProjectRefreshSta
 pub(super) fn project_world_state_section(
     status: ProjectIntelligenceStatus,
 ) -> WorldStateSectionContribution {
-    let body = status.render();
-    let snapshot = status.snapshot(&body);
+    let (body, layout) = status.render();
+    let snapshot = status.snapshot(&body, &layout);
     let project_id = status.project_id().to_string();
+    let delta_input = DeltaInput::new(&project_id, &body, &layout);
     WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
             PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
@@ -240,6 +258,15 @@ pub(super) fn project_world_state_section(
                     ),
                 ))
             }
+            PreviousWorldStateSection::Known(previous)
+                if let Some(delta) = delta_input.render(previous, &snapshot) =>
+            {
+                Some(RenderedWorldStateFragment::new(
+                    "developer",
+                    (UPDATE_START_MARKER, UPDATE_END_MARKER),
+                    delta,
+                ))
+            }
             PreviousWorldStateSection::Absent
             | PreviousWorldStateSection::Unknown
             | PreviousWorldStateSection::Known(_) => {
@@ -256,6 +283,162 @@ pub(super) fn project_world_state_section(
         move |role, text| is_project_fragment(role, text, &project_id)
     })
     .with_retained_fragment_matcher(move |role, text| is_project_fragment(role, text, &project_id))
+}
+
+/// Current packet material needed to describe a root change as a bounded delta
+/// against the previously rendered packet instead of replaying the whole root.
+struct DeltaInput {
+    project_id: String,
+    body_len: usize,
+    entries: Vec<(String, String, String)>,
+    sources: Vec<(String, String, String)>,
+    other: Vec<String>,
+}
+
+impl DeltaInput {
+    fn new(project_id: &str, body: &str, layout: &RootLayout) -> Self {
+        let triples = |lines: &[LaidOutLine]| {
+            lines
+                .iter()
+                .map(|line| (line.key.clone(), line.digest.clone(), line.line.clone()))
+                .collect()
+        };
+        Self {
+            project_id: project_id.to_string(),
+            body_len: body.len(),
+            entries: triples(&layout.entries),
+            sources: triples(&layout.sources),
+            other: other_lines(body, layout).map(str::to_string).collect(),
+        }
+    }
+
+    /// Describes the change from `previous` in at most half the full packet, or
+    /// returns `None` when only a full render is honest or cheaper.
+    fn render(&self, previous: &Value, current: &Value) -> Option<String> {
+        let previous_entries = parse_keys(previous.get("rootEntries")?)?;
+        let previous_sources = parse_keys(previous.get("rootSources")?)?;
+        let previous_other = previous
+            .get("otherLines")?
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<HashSet<_>>();
+        let revision = |snapshot: &Value| {
+            snapshot
+                .get("rootRevision")
+                .and_then(Value::as_u64)
+                .map_or_else(|| "unknown".to_string(), |revision| revision.to_string())
+        };
+        let current_revision = revision(current);
+        let mut delta = format!(
+            "Project ID: {}. Project intelligence revision advanced from {} to {current_revision}. This update amends the retained <stateful_project> packet: read both together, apply alias changes to every earlier reference, and use rootRevision {current_revision} for completion.",
+            self.project_id,
+            revision(previous),
+        );
+        describe_changes(&mut delta, "E", &previous_entries, &self.entries);
+        describe_changes(&mut delta, "S", &previous_sources, &self.sources);
+        let changed_other = self
+            .other
+            .iter()
+            .filter(|line| !previous_other.contains(short_digest(line).as_str()))
+            .collect::<Vec<_>>();
+        if !changed_other.is_empty() {
+            delta.push_str("\nOther changed packet lines:");
+            for line in changed_other {
+                delta.push('\n');
+                delta.push_str(line);
+            }
+        }
+        (delta.len() <= self.body_len / 2).then_some(delta)
+    }
+}
+
+fn describe_changes(
+    delta: &mut String,
+    prefix: &str,
+    previous: &[(String, String)],
+    current: &[(String, String, String)],
+) {
+    let previous_positions = previous
+        .iter()
+        .enumerate()
+        .map(|(index, (key, digest))| (key.as_str(), (index + 1, digest.as_str())))
+        .collect::<HashMap<_, _>>();
+    let current_keys = current
+        .iter()
+        .map(|(key, _, _)| key.as_str())
+        .collect::<HashSet<_>>();
+    let mut renumbered = Vec::new();
+    let mut changed = Vec::new();
+    for (index, (key, digest, line)) in current.iter().enumerate() {
+        match previous_positions.get(key.as_str()) {
+            Some((previous_index, previous_digest)) if previous_digest == digest => {
+                if *previous_index != index + 1 {
+                    renumbered.push(format!("{prefix}{previous_index}->{prefix}{}", index + 1));
+                }
+            }
+            _ => changed.push(line.as_str()),
+        }
+    }
+    let removed = previous
+        .iter()
+        .enumerate()
+        .filter(|(_, (key, _))| !current_keys.contains(key.as_str()))
+        .map(|(index, _)| format!("former {prefix}{}", index + 1))
+        .collect::<Vec<_>>();
+    if !renumbered.is_empty() {
+        delta.push_str(&format!(
+            "\n{prefix} alias changes (same content, renumbered): {}",
+            renumbered.join(", ")
+        ));
+    }
+    if !removed.is_empty() {
+        delta.push_str(&format!(
+            "\nNo longer shown in the root packet (demoted, superseded, retired, or omitted by the context bound): {}",
+            removed.join(", ")
+        ));
+    }
+    if !changed.is_empty() {
+        delta.push_str(&format!(
+            "\nNew or changed {prefix} lines (current aliases):"
+        ));
+        for line in changed {
+            delta.push('\n');
+            delta.push_str(line);
+        }
+    }
+}
+
+fn laid_out_keys(lines: &[LaidOutLine]) -> Value {
+    Value::Array(
+        lines
+            .iter()
+            .map(|line| Value::String(format!("{}:{}", line.key, line.digest)))
+            .collect(),
+    )
+}
+
+fn parse_keys(value: &Value) -> Option<Vec<(String, String)>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|item| {
+            let (key, digest) = item.as_str()?.split_once(':')?;
+            Some((key.to_string(), digest.to_string()))
+        })
+        .collect()
+}
+
+fn other_lines<'a>(body: &'a str, layout: &'a RootLayout) -> impl Iterator<Item = &'a str> {
+    let laid_out = layout
+        .entries
+        .iter()
+        .chain(&layout.sources)
+        .map(|line| line.line.as_str())
+        .collect::<HashSet<_>>();
+    body.lines().filter(move |line| {
+        !laid_out.contains(line) && !line.starts_with("Project intelligence revision: ")
+    })
 }
 
 fn semantic_fingerprint(body: &str) -> String {

@@ -2,8 +2,22 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::PromptCacheAffinity;
+use codex_project_intelligence::BlackboardEntry;
+use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardEntryState;
+use codex_project_intelligence::BlackboardEvidenceFreshness;
+use codex_project_intelligence::BlackboardHit;
+use codex_project_intelligence::BlackboardImportance;
+use codex_project_intelligence::BlackboardKind;
+use codex_project_intelligence::BlackboardProvenance;
+use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::ProjectRefreshStatus;
 use codex_project_intelligence::RootBlackboardProjection;
+use codex_project_intelligence::RootPromotion;
 use codex_thread_store::StoredProject;
 use codex_thread_store::StoredProjectRoot;
 use pretty_assertions::assert_eq;
@@ -85,7 +99,7 @@ fn incomplete_refresh_health_is_visible_and_changes_project_context() {
 
     assert_eq!(
         rendered.markers(),
-        ("<stateful_project>", "</stateful_project>")
+        ("<stateful_project_update>", "</stateful_project_update>")
     );
     assert!(rendered.body().contains("inventoryComplete=false"));
     assert!(rendered.body().contains("filesSkipped=1"));
@@ -265,7 +279,7 @@ fn revision_only_change_renders_a_compact_update() {
 }
 
 #[test]
-fn semantic_root_change_renders_the_full_current_packet() {
+fn semantic_root_change_renders_only_the_changed_lines() {
     let previous = project_world_state_section(available_at_revision(
         project("Research", Vec::new()),
         /*revision*/ 7,
@@ -283,18 +297,149 @@ fn semantic_root_change_renders_the_full_current_packet() {
 
     assert_eq!(
         rendered.markers(),
-        ("<stateful_project>", "</stateful_project>")
+        ("<stateful_project_update>", "</stateful_project_update>")
     );
-    assert!(
-        rendered
-            .body()
-            .contains("Project intelligence revision: 11")
-    );
+    assert!(rendered.body().contains("revision advanced from 7 to 11"));
     assert!(
         rendered
             .body()
             .contains("3 active candidate entries await an explicit project-relevance decision")
     );
+    assert!(!rendered.body().contains("Project roots:"));
+}
+
+#[test]
+fn promoted_entry_change_sends_only_new_lines_and_alias_moves() {
+    let unchanged = hit("entry-b", "The approval threshold is 10.");
+    let previous = project_world_state_section(with_entries(
+        /*revision*/ 3,
+        vec![
+            unchanged.clone(),
+            hit("entry-c", "Rollback runs on staging."),
+        ],
+    ));
+    let current = project_world_state_section(with_entries(
+        /*revision*/ 4,
+        vec![
+            hit("entry-a", "The permit UTH-0441 was never transferred."),
+            unchanged,
+        ],
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("root change must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project_update>", "</stateful_project_update>")
+    );
+    let body = rendered.body();
+    assert!(body.contains("revision advanced from 3 to 4"));
+    assert!(body.contains("The permit UTH-0441 was never transferred."));
+    assert!(body.contains("E alias changes (same content, renumbered): E1->E2"));
+    assert!(body.contains("former E2"));
+    assert!(!body.contains("The approval threshold is 10."));
+}
+
+#[test]
+fn snapshot_without_root_layout_falls_back_to_the_full_packet() {
+    let previous = project_world_state_section(with_entries(
+        /*revision*/ 3,
+        vec![hit("entry-b", "The approval threshold is 10.")],
+    ));
+    let mut legacy = previous.snapshot().clone();
+    let legacy_object = legacy.as_object_mut().expect("snapshot is an object");
+    legacy_object.remove("rootEntries");
+    let current = project_world_state_section(with_entries(
+        /*revision*/ 4,
+        vec![hit("entry-a", "A new decisive fact.")],
+    ));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(&legacy))
+        .expect("root change must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project>", "</stateful_project>")
+    );
+}
+
+#[test]
+fn wholesale_root_change_renders_the_full_packet() {
+    let previous = project_world_state_section(with_entries(
+        /*revision*/ 3,
+        vec![hit("entry-a", "Old fact.")],
+    ));
+    let replacement = (0..6)
+        .map(|index| {
+            hit(
+                &format!("entry-new-{index}"),
+                &"decisive detail ".repeat(60),
+            )
+        })
+        .collect();
+    let current = project_world_state_section(with_entries(/*revision*/ 4, replacement));
+
+    let rendered = current
+        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .expect("root change must render");
+
+    assert_eq!(
+        rendered.markers(),
+        ("<stateful_project>", "</stateful_project>")
+    );
+}
+
+fn hit(id: &str, content: &str) -> BlackboardHit {
+    BlackboardHit::new(
+        BlackboardEntry {
+            id: BlackboardEntryId::parse(id).expect("valid entry ID"),
+            value: NewBlackboardEntry {
+                project_id: "project-1".to_string(),
+                node_id: HierarchyNodeId::parse("node-root").expect("valid node ID"),
+                kind: BlackboardKind::Fact,
+                content: content.to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(9_000).expect("valid confidence"),
+                verification: BlackboardVerification::Unverified,
+                importance: BlackboardImportance::High,
+                root_promotion: RootPromotion::Promoted,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "test".to_string(),
+                },
+            },
+            state: BlackboardEntryState::Active,
+            superseded_by: None,
+            revision: 1,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+        },
+        BlackboardEvidenceFreshness::NotApplicable,
+    )
+}
+
+fn with_entries(revision: u64, data: Vec<BlackboardHit>) -> ProjectIntelligenceStatus {
+    let mut status = available_at_revision(
+        project("Research", Vec::new()),
+        revision,
+        /*candidate_entries*/ 0,
+    );
+    let ProjectIntelligenceStatus::Available {
+        root_blackboard, ..
+    } = &mut status
+    else {
+        unreachable!("test status should be available");
+    };
+    let RootBlackboardStatus::Available(root) = root_blackboard.as_mut() else {
+        unreachable!("test root should be available");
+    };
+    root.projection.data = data;
+    status
 }
 
 #[test]
