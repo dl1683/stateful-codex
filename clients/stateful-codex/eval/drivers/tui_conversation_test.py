@@ -9,12 +9,13 @@ class ConversationDriverTests(unittest.TestCase):
         self.assertFalse(is_busy("Ask Codex >"))
 
     def test_approval_detection_does_not_accept_arbitrary_text(self):
-        self.assertTrue(approval_prompt("Would you like me to run this command?"))
+        self.assertTrue(approval_prompt("Would you like to run the following command?"))
         self.assertFalse(approval_prompt("The report would you like to see this?"))
 
     def test_idle_requires_visible_screen_and_quiet_period(self):
         self.assertFalse(stable_idle("", 30, 16))
         self.assertFalse(stable_idle("Working (1s)", 30, 16))
+        self.assertFalse(stable_idle("Press enter to confirm or esc to cancel", 30, 16))
         self.assertTrue(stable_idle("Ask Codex >", 16, 16))
 
 

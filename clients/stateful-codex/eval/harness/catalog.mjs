@@ -29,7 +29,7 @@ export async function validateScenario(scenario, { env = process.env, checkFixtu
   try { source = resolveEnv(fixture.source, env); } catch (error) { errors.push(error.message); }
   const conversation = scenario.conversation ?? {};
   if (!conversation.mode || !conversation.initialMessage || !Array.isArray(conversation.turns) || conversation.turns.some((turn) => typeof turn !== "string" || !turn)) errors.push("conversation messages");
-  if (!Number.isInteger(conversation.turnTimeoutSeconds) || !Number.isInteger(conversation.idleStableSeconds)) errors.push("conversation timeouts");
+  if (!Number.isInteger(conversation.turnTimeoutSeconds) || conversation.turnTimeoutSeconds < 1 || !Number.isInteger(conversation.idleStableSeconds) || conversation.idleStableSeconds < 1) errors.push("conversation timeouts");
   if (!Array.isArray(scenario.capture) || ![...REQUIRED_CAPTURE].every((item) => scenario.capture.includes(item))) errors.push("capture");
   if (scenario.grading?.adapter !== "tui-evidence" || !scenario.grading?.observations?.length) errors.push("grading");
   if (fixture.private && fixture.type !== "external") errors.push("private fixture must be external");

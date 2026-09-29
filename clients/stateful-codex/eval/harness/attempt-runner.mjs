@@ -21,10 +21,9 @@ export async function runAttempt({ attemptRoot, scenario, codex, fixtureRoot, au
   const child = spawn(codex, args, { cwd: workspace, env: isolatedEnvironment(homes), windowsHide: true });
   child.stdout.pipe(stdout);
   child.stderr.pipe(stderr);
+  const outputDone = Promise.all([finished(stdout), finished(stderr)]);
   const result = await waitForChild(child, timeoutSeconds * 1000);
-  stdout.end();
-  stderr.end();
-  await Promise.all([finished(stdout), finished(stderr)]);
+  await outputDone;
   const manifest = {
     schemaVersion: 1,
     scenarioId: scenario.id,
