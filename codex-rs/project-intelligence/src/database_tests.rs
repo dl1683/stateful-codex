@@ -282,3 +282,325 @@ async fn read_only_open_accepts_complete_existing_database() {
     database.pool.close().await;
 }
 
+fn read_only_error(operation: ProjectKnowledgeOperation) -> ProjectKnowledgeReadOnlyError {
+    ProjectKnowledgeReadOnlyError {
+        operation,
+        project_id: "project-1".to_string(),
+    }
+}
+
+fn assert_hierarchy_guard<T>(
+    result: Result<T, HierarchyStoreError>,
+    operation: ProjectKnowledgeOperation,
+) {
+    assert!(matches!(
+        result,
+        Err(HierarchyStoreError::ReadOnly(error)) if error == read_only_error(operation)
+    ));
+}
+
+fn assert_context_map_guard<T>(
+    result: Result<T, ContextMapStoreError>,
+    operation: ProjectKnowledgeOperation,
+) {
+    assert!(matches!(
+        result,
+        Err(ContextMapStoreError::ReadOnly(error)) if error == read_only_error(operation)
+    ));
+}
+
+fn assert_blackboard_guard<T>(
+    result: Result<T, BlackboardStoreError>,
+    operation: ProjectKnowledgeOperation,
+) {
+    assert!(matches!(
+        result,
+        Err(BlackboardStoreError::ReadOnly(error)) if error == read_only_error(operation)
+    ));
+}
+
+fn assert_indexer_guard<T>(
+    result: Result<T, ProjectIndexerError>,
+    operation: ProjectKnowledgeOperation,
+) {
+    assert!(matches!(
+        result,
+        Err(ProjectIndexerError::ReadOnly(error)) if error == read_only_error(operation)
+    ));
+}
+
+#[tokio::test]
+async fn read_only_mutations_return_typed_errors_before_work() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let sqlite = sqlite_config(&temp_dir);
+    let writable = seed_database(&sqlite).await;
+    writable.pool.close().await;
+    let database = ProjectKnowledgeDatabase::open(&sqlite, ProjectKnowledgeAccess::ReadOnly)
+        .await
+        .expect("database should open read-only");
+    let hierarchy = database.hierarchy_store();
+    let context_map = database.context_map_store();
+    let blackboard = database.blackboard_store();
+    let indexer = database.indexer();
+    let project_node = HierarchyNodeId::parse("node-project").expect("valid node ID");
+    let entry_id = BlackboardEntryId::parse("entry-1").expect("valid entry ID");
+    let project_root = PathBuf::from("C:\\project");
+    let source_fingerprint = SourceFingerprint::parse("sha256:source").expect("valid fingerprint");
+    let new_node = NewHierarchyNode {
+        project_id: "project-1".to_string(),
+        parent_id: None,
+        kind: NodeKind::Project,
+        project_root: None,
+        relative_path: ProjectRelativePath::root(),
+        region_anchor: None,
+        source_fingerprint: None,
+    };
+    assert_hierarchy_guard(
+        hierarchy.create_node(project_node.clone(), new_node).await,
+        ProjectKnowledgeOperation::HierarchyCreateNode,
+    );
+    assert_hierarchy_guard(
+        hierarchy
+            .update_source_state(
+                "project-1",
+                &project_node,
+                HierarchySourceUpdate {
+                    expected_revision: 0,
+                    lifecycle: NodeLifecycle::Active,
+                    source_fingerprint: None,
+                },
+            )
+            .await,
+        ProjectKnowledgeOperation::HierarchyUpdateSourceState,
+    );
+    assert_hierarchy_guard(
+        hierarchy
+            .update_region_source(
+                "project-1",
+                &project_node,
+                HierarchyRegionSourceUpdate {
+                    expected_revision: 0,
+                    lifecycle: NodeLifecycle::Active,
+                    region_anchor: RegionAnchor::new("lines", "1-1").expect("valid anchor"),
+                    source_fingerprint: source_fingerprint.clone(),
+                },
+            )
+            .await,
+        ProjectKnowledgeOperation::HierarchyUpdateRegionSource,
+    );
+    assert_context_map_guard(
+        context_map
+            .create_entry(
+                ContextMapEntryId::parse("map-1").expect("valid map ID"),
+                NewContextMapEntry {
+                    project_id: "project-1".to_string(),
+                    node_id: project_node.clone(),
+                    source_fingerprint: source_fingerprint.clone(),
+                    description: "description".to_string(),
+                    routing_terms: vec!["term".to_string()],
+                    coverage: ContextMapCoverage::Complete,
+                },
+            )
+            .await,
+        ProjectKnowledgeOperation::ContextMapCreateEntry,
+    );
+    assert_context_map_guard(
+        context_map
+            .update_entry(
+                "project-1",
+                &ContextMapEntryId::parse("map-1").expect("valid map ID"),
+                ContextMapEntryUpdate {
+                    expected_revision: 0,
+                    source_fingerprint: source_fingerprint.clone(),
+                    description: "description".to_string(),
+                    routing_terms: vec!["term".to_string()],
+                    coverage: ContextMapCoverage::Complete,
+                },
+            )
+            .await,
+        ProjectKnowledgeOperation::ContextMapUpdateEntry,
+    );
+    let new_entry = NewBlackboardEntry {
+        project_id: "project-1".to_string(),
+        node_id: project_node.clone(),
+        kind: BlackboardKind::Fact,
+        content: "content".to_string(),
+        structured_value: None,
+        confidence: ConfidenceScore::from_basis_points(5_000).expect("valid confidence"),
+        verification: BlackboardVerification::Unverified,
+        importance: BlackboardImportance::Normal,
+        root_promotion: RootPromotion::NotPromoted,
+        evidence: Vec::new(),
+        premises: Vec::new(),
+        provenance: BlackboardProvenance {
+            kind: BlackboardProvenanceKind::Agent,
+            source_id: "test".to_string(),
+        },
+    };
+    assert_blackboard_guard(
+        blackboard
+            .create_entry(entry_id.clone(), new_entry.clone())
+            .await,
+        ProjectKnowledgeOperation::BlackboardCreateEntry,
+    );
+    assert_blackboard_guard(
+        blackboard
+            .update_entry(
+                "project-1",
+                &entry_id,
+                BlackboardEntryUpdate {
+                    expected_revision: 0,
+                    kind: new_entry.kind,
+                    content: new_entry.content.clone(),
+                    structured_value: None,
+                    confidence: new_entry.confidence,
+                    verification: new_entry.verification,
+                    importance: new_entry.importance,
+                    root_promotion: new_entry.root_promotion,
+                    evidence: Vec::new(),
+                    premises: Vec::new(),
+                    state: BlackboardEntryState::Active,
+                    superseded_by: None,
+                    provenance: new_entry.provenance.clone(),
+                },
+            )
+            .await,
+        ProjectKnowledgeOperation::BlackboardUpdateEntry,
+    );
+    assert_blackboard_guard(
+        blackboard
+            .create_relation(
+                BlackboardRelationId::parse("relation-1").expect("valid relation ID"),
+                NewBlackboardRelation {
+                    project_id: "project-1".to_string(),
+                    from_entry_id: entry_id.clone(),
+                    to_entry_id: BlackboardEntryId::parse("entry-2").expect("valid entry ID"),
+                    kind: BlackboardRelationKind::RelatedTo,
+                    note: None,
+                    confidence: new_entry.confidence,
+                    provenance: new_entry.provenance.clone(),
+                },
+            )
+            .await,
+        ProjectKnowledgeOperation::BlackboardCreateRelation,
+    );
+    assert!(matches!(
+        blackboard
+            .acquire_completion_fence("project-1", Duration::from_millis(10))
+            .await,
+        Err(BlackboardStoreError::ReadOnly(error))
+            if error == read_only_error(ProjectKnowledgeOperation::BlackboardAcquireCompletionFence)
+    ));
+    assert_indexer_guard(
+        indexer
+            .refresh(ProjectIndexRequest {
+                project_id: "project-1".to_string(),
+                roots: vec![project_root.clone()],
+            })
+            .await,
+        ProjectKnowledgeOperation::ContextMapRefresh,
+    );
+    assert_indexer_guard(
+        indexer
+            .refresh_file(ProjectIndexFileRequest {
+                project_id: "project-1".to_string(),
+                project_root,
+                relative_path: ProjectRelativePath::parse("missing.md").expect("valid path"),
+            })
+            .await,
+        ProjectKnowledgeOperation::ContextMapRefreshFile,
+    );
+}
+
+#[tokio::test]
+async fn read_only_queries_do_not_change_database_files_or_sidecars() {
+    let temp_dir = TempDir::new().expect("tempdir created");
+    let sqlite = sqlite_config(&temp_dir);
+    let writable = seed_database(&sqlite).await;
+    writable.pool.close().await;
+    let path = sqlite.home().join(DATABASE_NAME);
+    let before = database_files(sqlite.home());
+    let database = ProjectKnowledgeDatabase::open(&sqlite, ProjectKnowledgeAccess::ReadOnly)
+        .await
+        .expect("database should open read-only");
+    let hierarchy = database.hierarchy_store();
+    let context_map = database.context_map_store();
+    let blackboard = database.blackboard_store();
+    assert_eq!(
+        hierarchy
+            .project_node("project-1")
+            .await
+            .expect("hierarchy read should succeed"),
+        None
+    );
+    assert_eq!(
+        context_map
+            .query(ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "query".to_string(),
+                max_results: 1,
+            })
+            .await
+            .expect("context-map read should succeed")
+            .data,
+        Vec::new()
+    );
+    assert_eq!(
+        blackboard
+            .query(BlackboardQuery {
+                project_id: "project-1".to_string(),
+                text: None,
+                within_node: None,
+                root_promotion: None,
+                entry_scope: BlackboardEntryScope::Active,
+                max_results: 1,
+            })
+            .await
+            .expect("blackboard read should succeed")
+            .data,
+        Vec::new()
+    );
+    assert_eq!(
+        blackboard
+            .root_projection(RootBlackboardQuery {
+                project_id: "project-1".to_string(),
+                max_entries: 1,
+            })
+            .await
+            .expect("root projection should succeed")
+            .data,
+        Vec::new()
+    );
+    assert_eq!(
+        hierarchy
+            .project_intelligence_status("project-1")
+            .await
+            .expect("status read should succeed")
+            .initialized,
+        false
+    );
+    drop((hierarchy, context_map, blackboard, database));
+    let after = database_files(sqlite.home());
+    assert_eq!(
+        before.keys().collect::<Vec<_>>(),
+        after.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        sha2::Sha256::digest(&before[&DATABASE_NAME.to_string()]),
+        sha2::Sha256::digest(&after[&DATABASE_NAME.to_string()])
+    );
+    assert!(path.is_file());
+}
+
+fn database_files(home: &std::path::Path) -> BTreeMap<String, Vec<u8>> {
+    fs::read_dir(home)
+        .expect("database home should be readable")
+        .map(|entry| {
+            let entry = entry.expect("directory entry should read");
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                fs::read(entry.path()).expect("database file should read"),
+            )
+        })
+        .collect()
+}
