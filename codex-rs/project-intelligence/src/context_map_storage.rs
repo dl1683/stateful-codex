@@ -1,11 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use codex_state::SqliteConfig;
 use sqlx::FromRow;
 use sqlx::SqliteConnection;
-use sqlx::SqlitePool;
-use sqlx::migrate::MigrateError;
 use thiserror::Error;
 
 use crate::ContextMapCoverage;
@@ -23,11 +20,15 @@ use crate::HierarchyNodeId;
 use crate::NewContextMapEntry;
 use crate::NodeKind;
 use crate::NodeLifecycle;
+use crate::ProjectKnowledgeAccess;
+use crate::ProjectKnowledgeDatabase;
+use crate::ProjectKnowledgeDatabaseError;
+use crate::ProjectKnowledgeOperation;
+use crate::ProjectKnowledgeReadOnlyError;
 use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
 use crate::search::literal_expression;
 use crate::search::literal_prefix_expression;
-use crate::storage::DATABASE_NAME;
 use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
@@ -37,7 +38,6 @@ const MAX_QUERY_HITS_PER_SOURCE: usize = 3;
 const MAX_QUERY_HITS_PER_DIRECTORY: usize = 3;
 const CANDIDATE_OVERFETCH_FACTOR: u32 = 16;
 const CANDIDATE_SCAN_FACTOR: i64 = 16;
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(FromRow)]
 struct SearchCandidate {
@@ -56,26 +56,26 @@ struct SearchCandidate {
 
 #[derive(Clone)]
 pub struct ContextMapStore {
-    pool: SqlitePool,
+    pub(crate) database: ProjectKnowledgeDatabase,
 }
 
 impl ContextMapStore {
-    pub async fn open(sqlite: &SqliteConfig) -> Result<Self, ContextMapStoreError> {
-        tokio::fs::create_dir_all(sqlite.home()).await?;
-        let pool = sqlite
-            .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
-            .await?;
-        if let Err(error) = sqlite.run_migrations(&pool, &MIGRATOR).await {
-            pool.close().await;
-            return Err(error.into());
-        }
-        Ok(Self { pool })
+    pub async fn open(sqlite: &codex_state::SqliteConfig) -> Result<Self, ContextMapStoreError> {
+        Ok(
+            ProjectKnowledgeDatabase::open(sqlite, ProjectKnowledgeAccess::ReadWrite)
+                .await?
+                .context_map_store(),
+        )
+    }
+
+    pub(crate) fn from_database(database: ProjectKnowledgeDatabase) -> Self {
+        Self { database }
     }
 
     pub(crate) async fn begin_immediate(
         &self,
     ) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>, sqlx::Error> {
-        self.pool.begin_with("BEGIN IMMEDIATE").await
+        self.database.pool().begin_with("BEGIN IMMEDIATE").await
     }
 
     pub async fn create_entry(
@@ -83,9 +83,13 @@ impl ContextMapStore {
         id: ContextMapEntryId,
         value: NewContextMapEntry,
     ) -> Result<ContextMapEntry, ContextMapStoreError> {
+        self.database.require_write(
+            ProjectKnowledgeOperation::ContextMapCreateEntry,
+            &value.project_id,
+        )?;
         value.validate()?;
         let now = unix_timestamp_millis()?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
             if existing.value != value {
                 return Err(ContextMapStoreError::EntryIdentityConflict(id.to_string()));
@@ -128,7 +132,7 @@ impl ContextMapStore {
         project_id: &str,
         id: &ContextMapEntryId,
     ) -> Result<Option<ContextMapEntry>, ContextMapStoreError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let entry = load_entry(&mut transaction, project_id, id).await?;
         transaction.commit().await?;
         Ok(entry)
@@ -139,7 +143,7 @@ impl ContextMapStore {
         project_id: &str,
         id: &ContextMapEntryId,
     ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let hit = load_hit(&mut transaction, project_id, id).await?;
         transaction.commit().await?;
         Ok(hit)
@@ -151,7 +155,7 @@ impl ContextMapStore {
         id: &ContextMapEntryId,
         expected_fingerprint: &SourceFingerprint,
     ) -> Result<Option<ContextMapHit>, ContextMapStoreError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let hit = load_hit(&mut transaction, project_id, id).await?;
         let Some(hit) = hit else {
             transaction.commit().await?;
@@ -194,7 +198,7 @@ impl ContextMapStore {
         project_id: &str,
         relative_path: &ProjectRelativePath,
     ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let raw_ids = sqlx::query_scalar::<_, String>(
             "SELECT entry.id
              FROM context_map_entries AS entry
@@ -234,7 +238,7 @@ impl ContextMapStore {
         let candidate_probe_limit = candidate_scan_limit.saturating_add(1);
         let candidate_scan_limit =
             usize::try_from(candidate_scan_limit).map_err(|_| ContextMapError::InvalidQuery)?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let candidates = sqlx::query_as::<_, SearchCandidate>(
             "SELECT entry.id, node.project_root, node.relative_path, node.kind,
                     node.lifecycle, node.source_fingerprint AS node_source_fingerprint,
@@ -338,7 +342,7 @@ impl ContextMapStore {
     ) -> Result<Vec<ContextMapHit>, ContextMapStoreError> {
         query.validate()?;
         let limit = i64::from(query.max_results);
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let entry_ids = sqlx::query_scalar::<_, String>(
             "SELECT entry.id
              FROM context_map_entries AS entry
@@ -373,9 +377,11 @@ impl ContextMapStore {
         id: &ContextMapEntryId,
         update: ContextMapEntryUpdate,
     ) -> Result<ContextMapEntry, ContextMapStoreError> {
+        self.database
+            .require_write(ProjectKnowledgeOperation::ContextMapUpdateEntry, project_id)?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| ContextMapStoreError::RevisionOverflow)?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         let current = load_entry(&mut transaction, project_id, id)
             .await?
             .ok_or_else(|| ContextMapStoreError::EntryNotFound(id.to_string()))?;
@@ -748,9 +754,9 @@ pub enum ContextMapStoreError {
     #[error(transparent)]
     Storage(#[from] sqlx::Error),
     #[error(transparent)]
-    Migration(#[from] MigrateError),
+    ReadOnly(#[from] ProjectKnowledgeReadOnlyError),
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Database(#[from] ProjectKnowledgeDatabaseError),
     #[error("hierarchy node not found for context map: {0}")]
     NodeNotFound(String),
     #[error("context-map source is not current: {0:?}")]

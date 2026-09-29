@@ -48,7 +48,7 @@ impl BlackboardStore {
         project_id: &str,
         entry_id: &BlackboardEntryId,
     ) -> Result<Option<BlackboardHit>, BlackboardStoreError> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let entry = load_entry(&mut transaction, project_id, entry_id).await?;
         let hit = match entry {
             Some(entry) => {
@@ -75,7 +75,7 @@ impl BlackboardStore {
         query: BlackboardEvidenceDependentsQuery,
     ) -> Result<BlackboardEvidenceDependentsResult, BlackboardStoreError> {
         query.validate()?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let project_revision = sqlx::query_scalar::<_, i64>(
             "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
         )
@@ -282,7 +282,7 @@ impl BlackboardStore {
         );
         let rows = builder
             .build_query_as::<StoredRouteKnowledge>()
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await?;
         rows.into_iter()
             .map(|row| {
@@ -307,7 +307,7 @@ impl BlackboardStore {
         query: BlackboardQuery,
     ) -> Result<BlackboardQueryResult, BlackboardStoreError> {
         query.validate()?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         if let Some(node_id) = query.within_node.as_ref()
             && load_node(&mut transaction, &query.project_id, node_id)
                 .await?
@@ -333,7 +333,7 @@ impl BlackboardStore {
             "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
         )
         .bind(project_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await?
         .unwrap_or_default();
         Ok(u64::try_from(revision).unwrap_or_default())
@@ -344,7 +344,7 @@ impl BlackboardStore {
         query: RootBlackboardQuery,
     ) -> Result<RootBlackboardProjection, BlackboardStoreError> {
         query.validate()?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.database.pool().begin().await?;
         let counts = sqlx::query_as::<_, RootEntryCounts>(
             "SELECT
                 COALESCE(SUM(CASE WHEN revision.root_promotion = 'promoted' THEN 1 ELSE 0 END), 0)

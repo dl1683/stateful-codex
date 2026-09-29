@@ -128,7 +128,7 @@ impl HierarchyStore {
         .bind(project_id)
         .bind(project_id)
         .bind(project_id)
-        .fetch_one(&self.pool)
+        .fetch_one(self.database.pool())
         .await?;
         let count =
             |value: i64| u64::try_from(value).map_err(|_| HierarchyStoreError::CorruptCount);

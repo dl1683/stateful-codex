@@ -1,9 +1,11 @@
 //! Project-scoped structured knowledge for Stateful Codex.
 
+mod access;
 mod blackboard;
 mod blackboard_storage;
 mod context_map;
 mod context_map_storage;
+mod database;
 mod evidence;
 mod hierarchy;
 mod indexer;
@@ -11,6 +13,9 @@ mod search;
 mod status;
 mod storage;
 
+pub use access::ProjectKnowledgeAccess;
+pub use access::ProjectKnowledgeOperation;
+pub use access::ProjectKnowledgeReadOnlyError;
 pub use blackboard::BlackboardEntry;
 pub use blackboard::BlackboardEntryId;
 pub use blackboard::BlackboardEntryScope;
@@ -60,6 +65,8 @@ pub use context_map::ContextMapSource;
 pub use context_map::NewContextMapEntry;
 pub use context_map_storage::ContextMapStore;
 pub use context_map_storage::ContextMapStoreError;
+pub use database::ProjectKnowledgeDatabase;
+pub use database::ProjectKnowledgeDatabaseError;
 pub use evidence::EvidenceLineRange;
 pub use evidence::EvidenceReadError;
 pub use evidence::EvidenceReadLocator;

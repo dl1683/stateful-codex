@@ -30,6 +30,8 @@ use crate::HierarchyStoreError;
 use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
+use crate::ProjectKnowledgeOperation;
+use crate::ProjectKnowledgeReadOnlyError;
 use crate::ProjectRelativePath;
 use crate::storage::create_node_in_transaction;
 use crate::storage::unix_timestamp_millis;
@@ -84,6 +86,10 @@ impl ProjectIndexer {
         &self,
         request: ProjectIndexRequest,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
+        self.hierarchy.database.require_write(
+            ProjectKnowledgeOperation::ContextMapRefresh,
+            &request.project_id,
+        )?;
         validate_request(&request)?;
         let project_id = request.project_id.clone();
         let generation = generation::claim(self, &project_id).await?;
@@ -221,6 +227,10 @@ impl ProjectIndexer {
         &self,
         request: ProjectIndexFileRequest,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
+        self.hierarchy.database.require_write(
+            ProjectKnowledgeOperation::ContextMapRefreshFile,
+            &request.project_id,
+        )?;
         validate_file_request(&request)?;
         let project_id = request.project_id;
         let project_root = request.project_root;
@@ -536,6 +546,8 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
 
 #[derive(Debug, Error)]
 pub enum ProjectIndexerError {
+    #[error(transparent)]
+    ReadOnly(#[from] ProjectKnowledgeReadOnlyError),
     #[error("project index request requires a project ID and at least one absolute root")]
     InvalidRequest,
     #[error("project index roots must be absolute and contain only supported paths")]

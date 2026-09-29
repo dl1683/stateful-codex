@@ -8,6 +8,7 @@ use crate::BlackboardRelationId;
 use crate::BlackboardRelationKind;
 use crate::ConfidenceScore;
 use crate::NewBlackboardRelation;
+use crate::ProjectKnowledgeOperation;
 
 use super::BlackboardStore;
 use super::BlackboardStoreError;
@@ -24,8 +25,12 @@ impl BlackboardStore {
         id: BlackboardRelationId,
         value: NewBlackboardRelation,
     ) -> Result<BlackboardRelation, BlackboardStoreError> {
+        self.database.require_write(
+            ProjectKnowledgeOperation::BlackboardCreateRelation,
+            &value.project_id,
+        )?;
         value.validate()?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = load_relation(&mut transaction, &value.project_id, &id).await? {
             if existing.value != value {
                 return Err(BlackboardStoreError::RelationIdentityConflict(
@@ -83,7 +88,7 @@ impl BlackboardStore {
         if max_results == 0 || max_results > 256 {
             return Err(crate::BlackboardError::InvalidRelationQuery.into());
         }
-        let mut connection = self.pool.acquire().await?;
+        let mut connection = self.database.pool().acquire().await?;
         if load_entry(&mut connection, project_id, entry_id)
             .await?
             .is_none()

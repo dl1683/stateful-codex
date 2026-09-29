@@ -3,6 +3,7 @@ use crate::BlackboardEntryId;
 use crate::BlackboardEntryState;
 use crate::BlackboardEntryUpdate;
 use crate::NewBlackboardEntry;
+use crate::ProjectKnowledgeOperation;
 
 use super::BlackboardStore;
 use super::BlackboardStoreError;
@@ -19,13 +20,15 @@ impl BlackboardStore {
         id: &BlackboardEntryId,
         update: BlackboardEntryUpdate,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.database
+            .require_write(ProjectKnowledgeOperation::BlackboardUpdateEntry, project_id)?;
         update.validate(id)?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| BlackboardStoreError::RevisionOverflow)?;
         let next_revision = expected_revision
             .checked_add(1)
             .ok_or(BlackboardStoreError::RevisionOverflow)?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         let current = load_entry(&mut transaction, project_id, id)
             .await?
             .ok_or_else(|| BlackboardStoreError::EntryNotFound(id.to_string()))?;

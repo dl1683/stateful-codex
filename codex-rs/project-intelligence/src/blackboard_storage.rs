@@ -1,8 +1,5 @@
-use codex_state::SqliteConfig;
 use sqlx::FromRow;
 use sqlx::SqliteConnection;
-use sqlx::SqlitePool;
-use sqlx::migrate::MigrateError;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -21,9 +18,13 @@ use crate::BlackboardVerification;
 use crate::ConfidenceScore;
 use crate::ContextMapEntryId;
 use crate::NewBlackboardEntry;
+use crate::ProjectKnowledgeAccess;
+use crate::ProjectKnowledgeDatabase;
+use crate::ProjectKnowledgeDatabaseError;
+use crate::ProjectKnowledgeOperation;
+use crate::ProjectKnowledgeReadOnlyError;
 use crate::RootPromotion;
 use crate::SourceFingerprint;
-use crate::storage::DATABASE_NAME;
 use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
@@ -36,24 +37,23 @@ mod update;
 pub use fence::CompletionFence;
 
 const INITIAL_REVISION: i64 = 1;
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
 pub struct BlackboardStore {
-    pool: SqlitePool,
+    pub(crate) database: ProjectKnowledgeDatabase,
 }
 
 impl BlackboardStore {
-    pub async fn open(sqlite: &SqliteConfig) -> Result<Self, BlackboardStoreError> {
-        tokio::fs::create_dir_all(sqlite.home()).await?;
-        let pool = sqlite
-            .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
-            .await?;
-        if let Err(error) = sqlite.run_migrations(&pool, &MIGRATOR).await {
-            pool.close().await;
-            return Err(error.into());
-        }
-        Ok(Self { pool })
+    pub async fn open(sqlite: &codex_state::SqliteConfig) -> Result<Self, BlackboardStoreError> {
+        Ok(
+            ProjectKnowledgeDatabase::open(sqlite, ProjectKnowledgeAccess::ReadWrite)
+                .await?
+                .blackboard_store(),
+        )
+    }
+
+    pub(crate) fn from_database(database: ProjectKnowledgeDatabase) -> Self {
+        Self { database }
     }
 
     pub async fn create_entry(
@@ -61,8 +61,12 @@ impl BlackboardStore {
         id: BlackboardEntryId,
         value: NewBlackboardEntry,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.database.require_write(
+            ProjectKnowledgeOperation::BlackboardCreateEntry,
+            &value.project_id,
+        )?;
         value.validate()?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
             if existing.value != value
                 || existing.state != BlackboardEntryState::Active
@@ -113,9 +117,14 @@ impl BlackboardStore {
 
     pub async fn acquire_completion_fence(
         &self,
+        project_id: &str,
         timeout: Duration,
     ) -> Result<CompletionFence, BlackboardStoreError> {
-        CompletionFence::acquire(&self.pool, timeout).await
+        self.database.require_write(
+            ProjectKnowledgeOperation::BlackboardAcquireCompletionFence,
+            project_id,
+        )?;
+        CompletionFence::acquire(self.database.pool(), timeout).await
     }
 
     pub async fn get_entry(
@@ -123,7 +132,7 @@ impl BlackboardStore {
         project_id: &str,
         id: &BlackboardEntryId,
     ) -> Result<Option<BlackboardEntry>, BlackboardStoreError> {
-        let mut connection = self.pool.acquire().await?;
+        let mut connection = self.database.pool().acquire().await?;
         load_entry(&mut connection, project_id, id).await
     }
 }
@@ -520,15 +529,15 @@ enum_codec!(provenance_name, parse_provenance, BlackboardProvenanceKind, {
 #[derive(Debug, Error)]
 pub enum BlackboardStoreError {
     #[error(transparent)]
+    ReadOnly(#[from] ProjectKnowledgeReadOnlyError),
+    #[error(transparent)]
     InvalidEntry(#[from] BlackboardError),
     #[error(transparent)]
     Hierarchy(#[from] HierarchyStoreError),
     #[error(transparent)]
     Storage(#[from] sqlx::Error),
     #[error(transparent)]
-    Migration(#[from] MigrateError),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Database(#[from] ProjectKnowledgeDatabaseError),
     #[error("hierarchy node not found for blackboard entry: {0}")]
     NodeNotFound(String),
     #[error("blackboard entry not found: {0}")]

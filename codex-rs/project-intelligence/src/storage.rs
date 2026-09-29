@@ -1,11 +1,8 @@
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use codex_state::SqliteConfig;
 use sqlx::FromRow;
 use sqlx::SqliteConnection;
-use sqlx::SqlitePool;
-use sqlx::migrate::MigrateError;
 use thiserror::Error;
 
 use crate::HierarchyError;
@@ -14,17 +11,20 @@ use crate::HierarchyNodeId;
 use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::NodeLifecycle;
+use crate::ProjectKnowledgeAccess;
+use crate::ProjectKnowledgeDatabase;
+use crate::ProjectKnowledgeDatabaseError;
+use crate::ProjectKnowledgeOperation;
+use crate::ProjectKnowledgeReadOnlyError;
 use crate::ProjectRelativePath;
 use crate::RegionAnchor;
 use crate::SourceFingerprint;
 
-pub(crate) const DATABASE_NAME: &str = "project_intelligence_1.sqlite";
 const INITIAL_REVISION: i64 = 1;
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
 pub struct HierarchyStore {
-    pub(crate) pool: SqlitePool,
+    pub(crate) database: ProjectKnowledgeDatabase,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,16 +43,16 @@ pub struct HierarchyRegionSourceUpdate {
 }
 
 impl HierarchyStore {
-    pub async fn open(sqlite: &SqliteConfig) -> Result<Self, HierarchyStoreError> {
-        tokio::fs::create_dir_all(sqlite.home()).await?;
-        let pool = sqlite
-            .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
-            .await?;
-        if let Err(error) = sqlite.run_migrations(&pool, &MIGRATOR).await {
-            pool.close().await;
-            return Err(error.into());
-        }
-        Ok(Self { pool })
+    pub async fn open(sqlite: &codex_state::SqliteConfig) -> Result<Self, HierarchyStoreError> {
+        Ok(
+            ProjectKnowledgeDatabase::open(sqlite, ProjectKnowledgeAccess::ReadWrite)
+                .await?
+                .hierarchy_store(),
+        )
+    }
+
+    pub(crate) fn from_database(database: ProjectKnowledgeDatabase) -> Self {
+        Self { database }
     }
 
     pub async fn create_node(
@@ -60,7 +60,11 @@ impl HierarchyStore {
         id: HierarchyNodeId,
         value: NewHierarchyNode,
     ) -> Result<HierarchyNode, HierarchyStoreError> {
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        self.database.require_write(
+            ProjectKnowledgeOperation::HierarchyCreateNode,
+            &value.project_id,
+        )?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         let node = create_node_in_transaction(&mut transaction, &id, value).await?;
         transaction.commit().await?;
         Ok(node)
@@ -71,7 +75,7 @@ impl HierarchyStore {
         project_id: &str,
         id: &HierarchyNodeId,
     ) -> Result<Option<HierarchyNode>, HierarchyStoreError> {
-        let mut connection = self.pool.acquire().await?;
+        let mut connection = self.database.pool().acquire().await?;
         load_node(&mut connection, project_id, id).await
     }
 
@@ -85,7 +89,7 @@ impl HierarchyStore {
              ORDER BY id LIMIT 1",
         )
         .bind(project_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await?;
         stored.map(TryInto::try_into).transpose()
     }
@@ -102,7 +106,7 @@ impl HierarchyStore {
         )
         .bind(project_id)
         .bind(parent_id.as_str())
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await?;
         rows.into_iter().map(TryInto::try_into).collect()
     }
@@ -130,7 +134,7 @@ impl HierarchyStore {
         .bind(project_id)
         .bind(i64::from(max_results))
         .bind(i64::from(offset))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await?;
         rows.into_iter().map(TryInto::try_into).collect()
     }
@@ -141,9 +145,13 @@ impl HierarchyStore {
         id: &HierarchyNodeId,
         update: HierarchySourceUpdate,
     ) -> Result<HierarchyNode, HierarchyStoreError> {
+        self.database.require_write(
+            ProjectKnowledgeOperation::HierarchyUpdateSourceState,
+            project_id,
+        )?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| HierarchyStoreError::RevisionOverflow)?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         let current = load_node(&mut transaction, project_id, id)
             .await?
             .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))?;
@@ -192,9 +200,13 @@ impl HierarchyStore {
         id: &HierarchyNodeId,
         update: HierarchyRegionSourceUpdate,
     ) -> Result<HierarchyNode, HierarchyStoreError> {
+        self.database.require_write(
+            ProjectKnowledgeOperation::HierarchyUpdateRegionSource,
+            project_id,
+        )?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| HierarchyStoreError::RevisionOverflow)?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut transaction = self.database.pool().begin_with("BEGIN IMMEDIATE").await?;
         let current = load_node(&mut transaction, project_id, id)
             .await?
             .ok_or_else(|| HierarchyStoreError::NodeNotFound(id.to_string()))?;
@@ -464,13 +476,13 @@ pub(crate) fn unix_timestamp_millis() -> Result<i64, HierarchyStoreError> {
 #[derive(Debug, Error)]
 pub enum HierarchyStoreError {
     #[error(transparent)]
+    ReadOnly(#[from] ProjectKnowledgeReadOnlyError),
+    #[error(transparent)]
     InvalidNode(#[from] HierarchyError),
     #[error(transparent)]
     Storage(#[from] sqlx::Error),
     #[error(transparent)]
-    Migration(#[from] MigrateError),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Database(#[from] ProjectKnowledgeDatabaseError),
     #[error("hierarchy parent not found: {0}")]
     ParentNotFound(String),
     #[error("node {kind:?} cannot be a child of hierarchy node {parent}")]

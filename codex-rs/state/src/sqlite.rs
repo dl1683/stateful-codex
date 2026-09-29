@@ -357,6 +357,7 @@ impl SqliteConfig {
             .filename(path)
             .create_if_missing(false)
             .read_only(true)
+            .immutable(true)
             .log_statements(LevelFilter::Off);
         if let Some(busy_timeout) = busy_timeout {
             options = options.busy_timeout(busy_timeout);
