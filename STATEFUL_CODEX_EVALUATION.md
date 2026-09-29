@@ -3400,6 +3400,10 @@ recorded below as they land. Planning records live outside the repository in the
 - **BixBench gate re-grade** (retrospective; debug-base environment; Luna judge through the unmodified official
   grader): smoke 1/1, single-capsule five 5/5, ten-capsule breadth 3/10, repair re-runs 1/2. Unofficial proxy scores.
 
+- **Memory-benchmark track status**: DolphinBench and the other external memory benchmarks are queued behind the
+  read-only project-knowledge gate (SC-PKRO-001), whose first stage is implemented and under repair. The matched
+  internal study below (SC-EVAL-033) was run first to understand behaviour before external scoring.
+
 ### Planned portfolio (agreed 2026-09-28)
 
 The memory track leads. Its benchmarks were chosen because they test knowledge that must survive separate sessions,
@@ -3435,3 +3439,73 @@ SWE-Marathon's locally runnable tasks, and SWE-bench Verified and Multilingual p
 Every memory run uses one isolated project and store per persona or episode, never resumes a conversation, freezes
 and hashes state before evaluation, gives each test a fresh copy of that state and a fresh runtime database, and
 publishes the world state shown to every session, per-response token usage, trajectories and integrity hashes.
+
+## Benchmark SC-EVAL-033: matched behaviour study at the Phase A freeze (Campaign II, 2026-09-28/29)
+
+Status: internal study, not a public benchmark. Every comparison uses the same freeze binary with and without
+`--stateful`, the same model and reasoning setting (Luna, high), isolated project copies and state stores, host memories
+disabled, and preregistered hidden checks written before the arms ran. LLM-judged scores use a fresh blinded Luna
+session per memo with shuffled labels and two independent passes. Single runs of the same arm can move by 5-10 rubric
+points, so only results replicated three times are stated as findings; the rest are labelled.
+
+Arms: *ordinary continuous* (one thread, `exec resume`), *Stateful continuous* (one thread), *Stateful fresh-thread*
+(a new thread every session, continuity only from project state — the intended workflow), and where noted *ordinary
+fresh-thread + NOTES.md* (the agent is told every session to keep and read a notes file).
+
+### Results replicated three times
+
+| Study | Ordinary continuous | Stateful continuous | Stateful fresh-thread | Ordinary fresh + NOTES.md |
+|---|---:|---:|---:|---:|
+| M&A data room, 5 sessions, 14 text documents, 48-criterion blinded rubric (mean of 6 scores) | 13.5 | 14.3 | **18.2** | 16.8 |
+| Uncached + output tokens per run (range) | 236-275k | 428-444k | 402-465k | 435-624k |
+| Trivial asks after one state-building question (10 asks; answers correct) | 10/10 | 10/10 | — | — |
+| Model responses / uncached tokens on those asks | 1x / 1x | ~2.2x / ~2x | — | — |
+
+- On the data room the fresh-thread Stateful workflow was consistently best (range 16-22) and far less variable than an
+  ordinary continuous thread (10-17). When the ordinary thread lost, it lost early decisive, cross-document findings to
+  compaction. One continuous Stateful thread was not reliably better than ordinary Codex. Against a disciplined
+  hand-kept notes file the edge is small (+1.4, within noise) but Stateful was ~20% cheaper and needed no per-session
+  process prompting.
+- Every trivial ask paid a fixed Stateful cost (an extra model round trip and the completion ritual) without consulting
+  memory.
+
+### Results replicated twice or once (labelled)
+
+- **Code study** (5 sessions on `pallets/click`, final design review graded against a 32-fact rubric written before any
+  run; two runs): ordinary 18/16 then 9/7, Stateful continuous 12/12 then 7/8, Stateful fresh 8/9 then 13/12 — the
+  ranking flipped between runs: no reliable difference; ordinary Codex was cheaper in both. A post-hoc late
+  "re-verify and rewrite" session made the ordinary thread compact twice and fall to 4/3 while Stateful held.
+- **Six-session tool build** with a standing rule and a reversal (three variants incl. forced compaction): all arms
+  passed every hidden check; Stateful cost 10-34% more uncached tokens.
+- **Lifetime cost of re-asked facts** (12 fresh sessions, 6 facts asked then re-asked): on text files Stateful was
+  35-40% more expensive in both halves (ordinary Codex answers with three cheap targeted reads); on the original
+  Office files Stateful answered repeats from memory with no reads and was 52% cheaper on repeats (break-even after
+  about two re-asks per fact) while ordinary Codex re-extracted the files each time.
+- **Standing user instructions** given once: carried into the next two fresh sessions in 4/4 runs, but stored as a
+  durable instruction entry in only 1 of 4 runs; they otherwise survive through the bounded recent-results window,
+  which dropped a style rule three sessions later in one data-room run.
+- **Integrity**: two projects sharing one store showed zero leakage; a planted vendor falsehood was stored as an
+  attributed claim with a `contradicts` relation, an injected AI-directed instruction was not stored, and a user
+  correction was dated and linked (but stored with agent provenance).
+- **Crash recovery**: a run killed at 150 s had persisted nothing (knowledge is written near the end), the killed run
+  stayed `running`, and ordinary `resume` recovered more.
+
+### Surface findings (same freeze)
+
+- **Web UI** delivers the charter's transparency and steering: live obligation packets, durable steering applied in
+  ~30 s, a durable completion basis with evidence fingerprints, exact evidence, and user confirmation that later
+  headless sessions honour. Gaps: Begin execution and Resume change status without starting a turn; thread listing
+  fails during a state-database backfill and the error is hidden; the hierarchy is flattened by a CSP-blocked inline
+  style; approvals appear at the bottom of the page without a reason; no busy state on Open workspace.
+- **TUI** shows almost none of the Stateful layer: obligation updates are written but never rendered, only the first
+  message of a session becomes a Stateful run, steering is not recorded durably, a Socratic run cannot be moved to
+  execution, `--stateful` requires a prompt at launch, and `resume --stateful` is unusable.
+- **Headless**: no per-response timeout (one run hung for over an hour); an isolated `CODEX_HOME` without the Windows
+  sandbox state silently degrades `workspace-write` to read-only or hangs.
+
+### What this establishes
+
+Project state measurably improves multi-session, multi-document synthesis when work is split across fresh threads, and
+it reduces cost where re-reading is expensive. It does not yet improve short or single-thread work, it costs more on
+cheap lookups, standing instructions are not captured deterministically, and the TUI does not expose it. Detailed
+findings, repro paths and the ranked improvement backlog are kept in the campaign notes outside the repository.
