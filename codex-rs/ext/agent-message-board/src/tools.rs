@@ -20,6 +20,7 @@ use crate::ThreadQuery;
 use crate::ThreadSort;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
+use codex_protocol::openai_models::MultiAgentToolMessages;
 use codex_tools::FunctionCallError;
 use codex_tools::JsonToolOutput;
 use codex_tools::ToolCall;
@@ -39,19 +40,50 @@ const MAX_RESPONSE_BYTES: usize = 8_000;
 
 /// Creates tools without registering or enabling the extension.
 /// The caller and its path must come from the host's authoritative tree metadata.
+/// Namespace metadata must match the host's other multi-agent tools.
 pub fn message_board_tools(
     board: Arc<dyn AgentMessageBoard>,
     caller: ThreadId,
     caller_path: AgentPath,
+    namespace: Option<&str>,
+    namespace_description: &str,
+) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
+    message_board_tools_with_descriptions(
+        board,
+        caller,
+        caller_path,
+        namespace,
+        namespace_description,
+        /*tool_messages*/ None,
+    )
+}
+
+pub(crate) fn message_board_tools_with_descriptions(
+    board: Arc<dyn AgentMessageBoard>,
+    caller: ThreadId,
+    caller_path: AgentPath,
+    namespace: Option<&str>,
+    namespace_description: &str,
+    tool_messages: Option<&MultiAgentToolMessages>,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     spec::NAMES
         .into_iter()
         .map(|name| {
+            let tool_message = tool_messages.and_then(|tools| tools.by_name(name));
+            if tool_message.is_some_and(|tool| tool.parameters.is_some()) {
+                tracing::warn!(
+                    tool = name,
+                    "Channel tool parameters cannot be overridden; using bundled parameters"
+                );
+            }
             Arc::new(BoardTool {
                 board: board.clone(),
                 caller,
                 caller_path: caller_path.clone(),
                 name,
+                namespace: namespace.map(str::to_owned),
+                namespace_description: namespace_description.to_owned(),
+                description: tool_message.and_then(|tool| tool.description.clone()),
             }) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>
         })
         .collect()
@@ -62,14 +94,22 @@ struct BoardTool {
     caller: ThreadId,
     caller_path: AgentPath,
     name: &'static str,
+    namespace: Option<String>,
+    namespace_description: String,
+    description: Option<String>,
 }
 
 impl<'call> ToolExecutor<ToolCall<'call>> for BoardTool {
     fn tool_name(&self) -> ToolName {
-        ToolName::namespaced("collaboration", self.name)
+        ToolName::new(self.namespace.clone(), self.name)
     }
     fn spec(&self) -> ToolSpec {
-        spec::tool(self.name)
+        spec::tool(
+            self.name,
+            self.namespace.as_deref(),
+            &self.namespace_description,
+            self.description.as_deref(),
+        )
     }
     fn supports_parallel_tool_calls(&self) -> bool {
         matches!(
@@ -111,12 +151,12 @@ impl BoardTool {
     ) -> Result<Value, FunctionCallError> {
         let board = &self.board;
         let caller = self.caller;
-        let page = |limit: Option<NonZeroU32>, cursor, scale| PageRequest {
-            limit: nonzero(limit.map_or(20, NonZeroU32::get).min(50) / scale),
+        let page_limit = |limit: Option<NonZeroU32>| limit.map_or(20, NonZeroU32::get).min(50);
+        let preview_limit =
+            |limit: Option<NonZeroU32>| limit.map_or(1000, NonZeroU32::get).min(20_000);
+        let page = |limit, cursor, scale| PageRequest {
+            limit: nonzero(limit / scale),
             cursor,
-        };
-        let preview = |requested: Option<NonZeroU32>, scale| {
-            nonzero(requested.map_or(1000, NonZeroU32::get).min(20_000) / scale)
         };
         let direction = |recent_first: Option<bool>| {
             if recent_first.unwrap_or(true) {
@@ -155,7 +195,8 @@ impl BoardTool {
                     limit,
                     cursor,
                 } = serde_json::from_str(raw).map_err(model_error)?;
-                bounded_read(budget, |scale| {
+                let limit = page_limit(limit);
+                bounded_read(budget, limit, |scale| {
                     board.list_channels(
                         caller,
                         ChannelQuery {
@@ -176,14 +217,16 @@ impl BoardTool {
                     cursor,
                     max_chars_per_post,
                 } = serde_json::from_str(raw).map_err(model_error)?;
-                bounded_read(budget, |scale| {
+                let limit = page_limit(limit);
+                let max_chars_per_post = preview_limit(max_chars_per_post);
+                bounded_read(budget, limit.max(max_chars_per_post), |scale| {
                     board.list_threads(
                         caller,
                         ThreadQuery {
                             channel_name: channel_name.clone(),
                             sort: sort.unwrap_or(ThreadSort::Created),
                             direction: direction(recent_first),
-                            max_chars_per_post: preview(max_chars_per_post, scale),
+                            max_chars_per_post: nonzero(max_chars_per_post / scale),
                             page: page(limit, cursor.clone(), scale),
                         },
                     )
@@ -204,7 +247,9 @@ impl BoardTool {
                     .map(|path| self.caller_path.resolve(&path))
                     .transpose()
                     .map_err(model_error)?;
-                bounded_read(budget, |scale| {
+                let limit = page_limit(limit);
+                let max_chars_per_post = preview_limit(max_chars_per_post);
+                bounded_read(budget, limit.max(max_chars_per_post), |scale| {
                     board.search_posts(
                         caller,
                         PostQuery {
@@ -212,7 +257,7 @@ impl BoardTool {
                             query: query.clone(),
                             after_message_id,
                             author: author.clone(),
-                            max_chars_per_post: preview(max_chars_per_post, scale),
+                            max_chars_per_post: nonzero(max_chars_per_post / scale),
                             page: page(limit, cursor.clone(), scale),
                         },
                     )
@@ -226,12 +271,14 @@ impl BoardTool {
                     cursor,
                     max_chars_per_post,
                 } = serde_json::from_str(raw).map_err(model_error)?;
-                bounded_read(budget, |scale| {
+                let limit = page_limit(limit);
+                let max_chars_per_post = preview_limit(max_chars_per_post);
+                bounded_read(budget, limit.max(max_chars_per_post), |scale| {
                     board.read_thread(
                         caller,
                         ReadThreadRequest {
                             thread_id,
-                            max_chars_per_post: preview(max_chars_per_post, scale),
+                            max_chars_per_post: nonzero(max_chars_per_post / scale),
                             page: page(limit, cursor.clone(), scale),
                         },
                     )
@@ -244,15 +291,14 @@ impl BoardTool {
                     offset_chars,
                     limit_chars,
                 } = serde_json::from_str(raw).map_err(model_error)?;
-                bounded_read(budget, |scale| {
+                let limit_chars = limit_chars.map_or(20_000, NonZeroU32::get).min(20_000);
+                bounded_read(budget, limit_chars, |scale| {
                     board.read_post(
                         caller,
                         ReadPostRequest {
                             message_id,
                             offset_chars: offset_chars.unwrap_or_default(),
-                            limit_chars: nonzero(
-                                limit_chars.map_or(20_000, NonZeroU32::get).min(20_000) / scale,
-                            ),
+                            limit_chars: nonzero(limit_chars / scale),
                         },
                     )
                 })
@@ -360,16 +406,22 @@ impl BoardTool {
 
 /// Try the requested read first. Halve limits only when its serialized output is too large.
 /// Reissuing the read lets each backend generate a cursor for exactly the returned page.
+/// Stop once every limit has reached one; another read would repeat the same request.
 async fn bounded_read<'a, T: Serialize>(
     budget: usize,
+    largest_limit: u32,
     fetch: impl Fn(u32) -> BoxFuture<'a, codex_protocol::error::Result<T>>,
 ) -> Result<Value, FunctionCallError> {
-    // Read limits are capped at 20,000, so the final attempt asks for one character/item.
-    for shift in 0..=15 {
-        let result = encode(fetch(1 << shift).await)?;
+    let mut scale = 1;
+    loop {
+        let result = encode(fetch(scale).await)?;
         if result.to_string().len() <= budget {
             return Ok(result);
         }
+        if largest_limit / scale <= 1 {
+            break;
+        }
+        scale *= 2;
     }
     Err(model_error(
         "The output budget is too small for this result's metadata.",

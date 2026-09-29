@@ -5,12 +5,15 @@ mod prompt_cache_affinity;
 mod registry;
 mod session_isolation;
 mod state;
+mod tool_policy;
 mod turn_admission;
 mod user_instructions;
 
 pub use allowed_tools::AllowedTools;
 pub use prompt_cache_affinity::PromptCacheAffinity;
+pub use session_isolation::IsolatedSessionExtensions;
 pub use session_isolation::SessionIsolation;
+pub use tool_policy::ToolPolicy;
 
 pub use capabilities::ConversationHistorySnapshot;
 pub use capabilities::ExtensionEventSink;
@@ -64,6 +67,8 @@ pub use contributors::PreviousWorldStateSection;
 pub use contributors::PromptFragment;
 pub use contributors::PromptSlot;
 pub use contributors::RenderedWorldStateFragment;
+pub use contributors::SelectedPlugin;
+pub use contributors::SelectedPluginContribution;
 pub use contributors::SelectedPluginIdentity;
 pub use contributors::SelectedPluginSnapshot;
 pub use contributors::SkillInvocationContributor;
@@ -88,6 +93,8 @@ pub use contributors::ToolPolicyContributor;
 pub use contributors::ToolPolicyDecision;
 pub use contributors::ToolPolicyInput;
 pub use contributors::ToolStartInput;
+pub use contributors::ToolTimingBoundary;
+pub use contributors::ToolTimingInput;
 pub use contributors::TurnAbortInput;
 pub use contributors::TurnContextContributionInput;
 pub use contributors::TurnErrorInput;
@@ -112,3 +119,14 @@ pub use user_instructions::LoadInstructionsFuture;
 pub use user_instructions::LoadedUserInstructions;
 pub use user_instructions::ThreadInstructionsProvider;
 pub use user_instructions::UserInstructionsProvider;
+
+pub use contributors::ToolDispatchInput;
+
+mod model_request;
+pub use model_request::ModelRequestContributor;
+pub use model_request::ModelRequestInput;
+pub use model_request::ModelRequestKind;
+pub use model_request::ModelResponseError;
+pub use model_request::ModelResponseInterceptor;
+pub use model_request::ModelResponseStream;
+pub use model_request::ResponseEvent;

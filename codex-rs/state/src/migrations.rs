@@ -2,16 +2,17 @@ use std::borrow::Cow;
 
 use sqlx::AssertSqlSafe;
 use sqlx::SqlSafeStr;
-use sqlx::SqlitePool;
 use sqlx::migrate::Migration;
 use sqlx::migrate::Migrator;
+use sqlx_sqlite::SqlitePool;
 
-pub(crate) static STATE_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
-pub(crate) static LOGS_MIGRATOR: Migrator = sqlx::migrate!("./logs_migrations");
-pub(crate) static GOALS_MIGRATOR: Migrator = sqlx::migrate!("./goals_migrations");
-pub(crate) static MEMORIES_MIGRATOR: Migrator = sqlx::migrate!("./memory_migrations");
-pub(crate) static QUEUE_MIGRATOR: Migrator = sqlx::migrate!("./queue_migrations");
-pub(crate) static THREAD_HISTORY_MIGRATOR: Migrator = sqlx::migrate!("./thread_history_migrations");
+pub(crate) static STATE_MIGRATOR: Migrator = sqlx_macros::migrate!("./migrations");
+pub(crate) static LOGS_MIGRATOR: Migrator = sqlx_macros::migrate!("./logs_migrations");
+pub(crate) static GOALS_MIGRATOR: Migrator = sqlx_macros::migrate!("./goals_migrations");
+pub(crate) static MEMORIES_MIGRATOR: Migrator = sqlx_macros::migrate!("./memory_migrations");
+pub(crate) static QUEUE_MIGRATOR: Migrator = sqlx_macros::migrate!("./queue_migrations");
+pub(crate) static THREAD_HISTORY_MIGRATOR: Migrator =
+    sqlx_macros::migrate!("./thread_history_migrations");
 
 /// Allow an older Codex binary to open a database that has already been
 /// migrated by a newer binary running in parallel.
@@ -134,6 +135,76 @@ WHERE version = ?
     .bind(38_i64)
     .bind(legacy_checksum)
     .bind(recency_migration.version)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Reconcile the fork's unreleased version-56 owner-token migration with the
+/// upstream version-56 creator-identity migration.
+///
+/// The fork migration is preserved semantically as version 59. A database
+/// that already applied the fork migration has the owner-token column and a
+/// version-56 row but no creator columns; move that row to 59 after replaying
+/// its reset so upstream 56-58 can run normally. This is an explicit
+/// compatibility repair, not a silent rewrite of a released migration.
+pub(crate) async fn repair_legacy_backfill_owner_migration_version(
+    pool: &SqlitePool,
+    migrator: &Migrator,
+) -> anyhow::Result<()> {
+    let Some(owner_migration) = migrator
+        .migrations
+        .iter()
+        .find(|migration| migration.version == 59)
+    else {
+        return Ok(());
+    };
+    let migration_table_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    if !migration_table_exists {
+        return Ok(());
+    }
+    let has_owner_token = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('backfill_state') WHERE name = 'owner_token'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    let has_creator_identity = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM pragma_table_info('threads') WHERE name = 'creator_user_id'",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    if !has_owner_token || has_creator_identity {
+        return Ok(());
+    }
+    let legacy_version_applied = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM _sqlx_migrations WHERE version = 56 AND success = 1",
+    )
+    .fetch_optional(pool)
+    .await?
+    .is_some();
+    if !legacy_version_applied {
+        return Ok(());
+    }
+
+    sqlx::query(
+        "UPDATE backfill_state SET status = 'pending', last_watermark = NULL, last_success_at = NULL, owner_token = NULL, updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = 1",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE _sqlx_migrations SET version = ?, description = ?, checksum = ? WHERE version = 56 AND success = 1 AND NOT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version = ?)",
+    )
+    .bind(owner_migration.version)
+    .bind(owner_migration.description.as_ref())
+    .bind(owner_migration.checksum.to_vec())
+    .bind(owner_migration.version)
     .execute(pool)
     .await?;
     Ok(())

@@ -1,7 +1,9 @@
 //! SQLite-backed boards. The tree ID scopes every read and write.
 //!
 //! Immediate transactions serialize mutations across independently opened handles.
-//! Accepted posts survive runtime unload and process restart.
+//! Live handles in this process share one connection pool per database path.
+//! Accepted posts survive runtime unload and process restart, but cannot recreate
+//! a board after its root has been permanently deleted.
 
 use crate::ChannelSummary;
 use crate::CreateChannelRequest;
@@ -30,18 +32,34 @@ use serde::Serialize;
 use sqlx::Row;
 use sqlx::SqliteConnection;
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::LazyLock;
+use std::sync::Weak;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
+mod lifecycle;
 mod paging;
 mod queries;
+
+#[cfg(test)]
+#[path = "local/pools_tests.rs"]
+mod pools_tests;
 
 const MAX_POST_BYTES: usize = 64 * 1024;
 const MAX_CHANNEL_BYTES: usize = 128;
 const MAX_READ_CHARS: usize = 20_000;
+const DATABASE_FILE: &str = "agent_message_board_1.sqlite";
+
+// Weak entries let the last board handle release its pool. Initialization and
+// recovery share one lock so concurrent starts cannot open duplicate or stale pools.
+static POOLS: LazyLock<Mutex<HashMap<PathBuf, Weak<SqlitePool>>>> = LazyLock::new(Mutex::default);
 
 const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS deleted_boards (board TEXT PRIMARY KEY NOT NULL);
 CREATE TABLE IF NOT EXISTS channels (
  board TEXT NOT NULL, name TEXT NOT NULL, name_search TEXT NOT NULL, created_at TEXT NOT NULL, timestamp INTEGER NOT NULL, author TEXT NOT NULL,
  PRIMARY KEY(board,name)
@@ -55,10 +73,15 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS posts_board_channel ON posts(board,channel,seq);
 CREATE INDEX IF NOT EXISTS posts_board_channel_timestamp ON posts(board,channel,timestamp,seq);
+CREATE INDEX IF NOT EXISTS posts_roots_created ON posts(board,channel,timestamp,seq) WHERE id=root;
 CREATE INDEX IF NOT EXISTS posts_board_root ON posts(board,root,seq);
 CREATE INDEX IF NOT EXISTS posts_board_root_timestamp ON posts(board,root,timestamp,seq);
 CREATE INDEX IF NOT EXISTS posts_board_timestamp ON posts(board,timestamp,seq);
 CREATE TABLE IF NOT EXISTS subscriptions (
+ board TEXT NOT NULL, target TEXT NOT NULL, agent TEXT NOT NULL,
+ PRIMARY KEY(board,target,agent)
+);
+CREATE TABLE IF NOT EXISTS subscription_opt_outs (
  board TEXT NOT NULL, target TEXT NOT NULL, agent TEXT NOT NULL,
  PRIMARY KEY(board,target,agent)
 );";
@@ -66,7 +89,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 #[derive(Clone)]
 pub struct LocalAgentMessageBoard {
     identity: SessionId,
-    pool: SqlitePool,
+    pool: Arc<SqlitePool>,
     host: Arc<dyn MessageBoardHost>,
 }
 
@@ -79,20 +102,40 @@ struct StoredPost {
 impl LocalAgentMessageBoard {
     /// Reopens the same board for a root, child or resumed runtime. The shared
     /// SQLite configuration preserves the host's connection and journal policy.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "pool creation and schema initialization stay serialized to avoid duplicate pools"
+    )]
     pub async fn open(
         sqlite: &SqliteConfig,
         identity: SessionId,
         host: Arc<dyn MessageBoardHost>,
     ) -> Result<Self> {
         tokio::fs::create_dir_all(sqlite.home()).await?;
-        let pool = sqlite
-            .open_read_write_pool(&sqlite.home().join("agent_message_board_1.sqlite"))
-            .await
-            .map_err(storage_error)?;
-        sqlx::raw_sql(SCHEMA)
-            .execute(&pool)
-            .await
-            .map_err(storage_error)?;
+        let path = tokio::fs::canonicalize(sqlite.home())
+            .await?
+            .join(DATABASE_FILE);
+        let mut pools = POOLS.lock().await;
+        pools.retain(|_, pool| pool.strong_count() > 0);
+        let pool = if let Some(pool) = pools
+            .get(&path)
+            .and_then(Weak::upgrade)
+            .filter(|pool| !pool.is_closed())
+        {
+            pool
+        } else {
+            let pool = sqlite
+                .open_read_write_pool(&path)
+                .await
+                .map_err(storage_error)?;
+            sqlx::raw_sql(SCHEMA)
+                .execute(&pool)
+                .await
+                .map_err(storage_error)?;
+            let pool = Arc::new(pool);
+            pools.insert(path, Arc::downgrade(&pool));
+            pool
+        };
         Ok(Self {
             identity,
             pool,
@@ -108,11 +151,7 @@ impl LocalAgentMessageBoard {
         validate_channel(&request.channel_name)?;
         let author = self.host.agent_path(caller).await?;
         let now = self.host.current_time(caller).await?;
-        let mut tx = self
-            .pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(storage_error)?;
+        let mut tx = self.begin_write().await?;
         self.insert_channel(&mut tx, &request.channel_name, &author, now)
             .await?;
         if request.subscription == SubscriptionChange::Subscribe {
@@ -166,11 +205,7 @@ impl LocalAgentMessageBoard {
             recipients.insert(self.host.resolve_agent(path.clone()).await?);
         }
         let now = self.host.current_time(caller).await?;
-        let mut tx = self
-            .pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(storage_error)?;
+        let mut tx = self.begin_write().await?;
         if let Some(post) = self
             .existing_post(&mut tx, &request_id, &request_json)
             .await?
@@ -200,6 +235,12 @@ impl LocalAgentMessageBoard {
             PostDestination::NewChannel(channel) => {
                 validate_channel(channel)?;
                 self.insert_channel(&mut tx, channel, &author, now).await?;
+                self.subscribe(
+                    &mut tx,
+                    &SubscriptionTarget::Channel(channel.clone()),
+                    caller,
+                )
+                .await?;
                 (
                     channel.clone(),
                     id,
@@ -218,17 +259,21 @@ impl LocalAgentMessageBoard {
                 )
             }
         };
+        // Return one JSON array to avoid handing each subscriber row across
+        // SQLite's worker thread while the write transaction is held.
         let subscribed = sqlx::query_scalar::<_, String>(
-            "SELECT agent FROM subscriptions WHERE board=? AND target=?",
+            "SELECT json_group_array(agent) FROM subscriptions WHERE board=? AND target=?",
         )
         .bind(self.identity.to_string())
         .bind(target_key(&target)?)
-        .fetch_all(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(storage_error)?;
+        let subscribed: Vec<String> = serde_json::from_str(&subscribed).map_err(storage_error)?;
         for recipient in subscribed {
             recipients.insert(ThreadId::from_string(&recipient).map_err(storage_error)?);
         }
+        recipients.remove(&caller);
         let post = StoredPost {
             metadata: PostMetadata {
                 message_id: id,
@@ -244,16 +289,18 @@ impl LocalAgentMessageBoard {
             .bind(author.to_string()).bind(now.timestamp_micros()).bind(default_case_fold_str(&request.text))
             .bind(serde_json::to_string(&post).map_err(storage_error)?).bind(request_id).bind(request_json)
             .execute(&mut *tx).await.map_err(storage_error)?;
+        // Participation subscribes by default, without overriding an explicit opt-out.
         self.subscribe(&mut tx, &SubscriptionTarget::Thread(root), caller)
             .await?;
         tx.commit().await.map_err(storage_error)?;
 
         // A committed post succeeds even if a best-effort notice cannot be delivered.
+        let notice = paging::preview(post.clone(), /*max_chars*/ 150);
         futures::stream::iter(recipients)
             .for_each_concurrent(/*limit*/ 16, |recipient| {
-                let metadata = post.metadata.clone();
+                let notice = notice.clone();
                 async move {
-                    if let Err(error) = self.host.notify(recipient, metadata).await {
+                    if let Err(error) = self.host.notify(recipient, notice).await {
                         tracing::warn!(%recipient, %error, "Failed to deliver message-board notification");
                     }
                 }
@@ -270,11 +317,7 @@ impl LocalAgentMessageBoard {
         let caller_path = self.host.agent_path(caller).await?;
         let target_path = request.target_agent.unwrap_or(caller_path);
         let target_agent = self.host.resolve_agent(target_path.clone()).await?;
-        let mut tx = self
-            .pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(storage_error)?;
+        let mut tx = self.begin_write().await?;
         let (channel, root, last) = match &request.target {
             SubscriptionTarget::Channel(name) => {
                 let summary = self.channel_summary(&mut tx, name).await?;
@@ -295,20 +338,26 @@ impl LocalAgentMessageBoard {
             }
         };
         let enabled = request.change == SubscriptionChange::Subscribe;
-        match request.change {
-            SubscriptionChange::Subscribe => {
-                self.subscribe(&mut tx, &request.target, target_agent)
-                    .await?
-            }
-            SubscriptionChange::Unsubscribe => {
-                sqlx::query("DELETE FROM subscriptions WHERE board=? AND target=? AND agent=?")
-                    .bind(self.identity.to_string())
-                    .bind(target_key(&request.target)?)
-                    .bind(target_agent.to_string())
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(storage_error)?;
-            }
+        // Keep active subscriptions readable by older binaries. Opt-outs only
+        // prevent implicit subscription when this agent participates again.
+        let statements = match request.change {
+            SubscriptionChange::Subscribe => [
+                "DELETE FROM subscription_opt_outs WHERE board=? AND target=? AND agent=?",
+                "INSERT OR IGNORE INTO subscriptions(board,target,agent) VALUES(?,?,?)",
+            ],
+            SubscriptionChange::Unsubscribe => [
+                "DELETE FROM subscriptions WHERE board=? AND target=? AND agent=?",
+                "INSERT OR IGNORE INTO subscription_opt_outs(board,target,agent) VALUES(?,?,?)",
+            ],
+        };
+        for statement in statements {
+            sqlx::query(statement)
+                .bind(self.identity.to_string())
+                .bind(target_key(&request.target)?)
+                .bind(target_agent.to_string())
+                .execute(&mut *tx)
+                .await
+                .map_err(storage_error)?;
         }
         tx.commit().await.map_err(storage_error)?;
         Ok(SubscriptionState {
@@ -367,7 +416,7 @@ impl LocalAgentMessageBoard {
         target: &SubscriptionTarget,
         agent: ThreadId,
     ) -> Result<()> {
-        sqlx::query("INSERT OR IGNORE INTO subscriptions(board,target,agent) VALUES(?,?,?)")
+        sqlx::query("INSERT OR IGNORE INTO subscriptions(board,target,agent) SELECT ?1,?2,?3 WHERE NOT EXISTS(SELECT 1 FROM subscription_opt_outs WHERE board=?1 AND target=?2 AND agent=?3)")
             .bind(self.identity.to_string())
             .bind(target_key(target)?)
             .bind(agent.to_string())

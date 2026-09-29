@@ -151,6 +151,7 @@ async fn native_startup_attaches_the_selected_project_and_starts_the_run() -> Re
         ThreadParamsMode::Embedded,
         /*remote_cwd_override*/ None,
         ThreadToolTransport::Disabled,
+        /*model_provider_override*/ None,
         StatefulStartup::from_cli(
             Some(StatefulModeCliArg::Collaborative),
             None,
@@ -203,6 +204,7 @@ async fn native_startup_attaches_the_selected_project_and_starts_the_run() -> Re
         ThreadParamsMode::Embedded,
         /*remote_cwd_override*/ None,
         ThreadToolTransport::Disabled,
+        /*model_provider_override*/ None,
         StatefulStartup::from_cli(
             Some(StatefulModeCliArg::Socratic),
             None,
