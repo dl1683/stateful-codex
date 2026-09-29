@@ -176,7 +176,12 @@ async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
         entry_scope: BlackboardEntryScope::Active,
         max_results: 10,
     };
-    let mut reader = blackboard.pool.begin().await.expect("reader begins");
+    let mut reader = blackboard
+        .database
+        .pool()
+        .begin()
+        .await
+        .expect("reader begins");
     let entry_ids = query_entry_ids(&mut reader, &query, 11)
         .await
         .expect("candidate IDs load");
@@ -1004,7 +1009,7 @@ async fn completion_fence_blocks_other_store_and_times_out() {
         .await
         .expect("second store opens");
     let mut fence = blackboard
-        .acquire_completion_fence(Duration::from_secs(1))
+        .acquire_completion_fence("project-1", Duration::from_secs(1))
         .await
         .expect("completion fence acquires");
     assert!(
@@ -1015,7 +1020,7 @@ async fn completion_fence_blocks_other_store_and_times_out() {
     );
     assert!(matches!(
         other_store
-            .acquire_completion_fence(Duration::from_millis(50))
+            .acquire_completion_fence("project-1", Duration::from_millis(50))
             .await,
         Err(BlackboardStoreError::CompletionFenceTimeout)
     ));
@@ -1046,7 +1051,7 @@ async fn completion_fence_dropped_without_release_frees_the_writer_lock() {
     let temp_dir = TempDir::new().expect("tempdir created");
     let (_hierarchy, blackboard, source, _) = fixture(&temp_dir).await;
     let fence = blackboard
-        .acquire_completion_fence(Duration::from_secs(1))
+        .acquire_completion_fence("project-1", Duration::from_secs(1))
         .await
         .expect("completion fence acquires");
     drop(fence);
@@ -1072,7 +1077,7 @@ async fn fenced_query_sees_any_agent_write_since_the_run_started() {
     let since_ms = source.updated_at_ms + 1;
     let changed = |store: BlackboardStore, since_ms: i64| async move {
         let mut fence = store
-            .acquire_completion_fence(Duration::from_secs(1))
+            .acquire_completion_fence("project-1", Duration::from_secs(1))
             .await
             .expect("fence acquires");
         let changed = fence
@@ -1184,7 +1189,7 @@ async fn creation_queued_behind_a_fence_is_stamped_after_it() {
         .await
         .expect("second store opens");
     let fence = blackboard
-        .acquire_completion_fence(Duration::from_secs(1))
+        .acquire_completion_fence("project-1", Duration::from_secs(1))
         .await
         .expect("fence acquires");
     let mut value = source.value.clone();
@@ -1205,7 +1210,7 @@ async fn creation_queued_behind_a_fence_is_stamped_after_it() {
     writer.await.expect("queued write commits");
 
     let mut check = blackboard
-        .acquire_completion_fence(Duration::from_secs(1))
+        .acquire_completion_fence("project-1", Duration::from_secs(1))
         .await
         .expect("fence acquires");
     assert!(
@@ -1238,7 +1243,7 @@ async fn idempotent_retry_creates_no_revision_and_no_knowledge_change() {
         .expect("identical retry succeeds");
 
     let mut fence = blackboard
-        .acquire_completion_fence(Duration::from_secs(1))
+        .acquire_completion_fence("project-1", Duration::from_secs(1))
         .await
         .expect("fence acquires");
     assert_eq!(

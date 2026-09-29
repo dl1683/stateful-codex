@@ -104,7 +104,7 @@ impl StatefulRunUpdateTool {
             .blackboard()
             .await
             .map_err(respond)?
-            .acquire_completion_fence(COMPLETION_FENCE_TIMEOUT)
+            .acquire_completion_fence(&self.project_id, COMPLETION_FENCE_TIMEOUT)
             .await
             .map_err(|error| {
                 FunctionCallError::RespondToModel(format!(

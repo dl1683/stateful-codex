@@ -1917,7 +1917,7 @@ async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() 
         ])],
     )
     .await;
-    wait_until_completion_holds_fence(&blackboard).await?;
+    wait_until_completion_holds_fence(&blackboard, &project_id).await?;
     let mutation = blackboard.create_entry(
         BlackboardEntryId::parse("completion-fence-agent-mutation")?,
         agent_entry(&project_id, &node_id, "completion-fence-agent-mutation")?,
@@ -2000,7 +2000,7 @@ async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> R
         ])],
     )
     .await;
-    wait_until_completion_holds_fence(&blackboard).await?;
+    wait_until_completion_holds_fence(&blackboard, &project_id).await?;
     sqlx::query("UPDATE stateful_runs SET revision = revision + 1 WHERE id = ?")
         .bind(&run_id)
         .execute(&mut *runtime_transaction)
@@ -2014,7 +2014,7 @@ async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> R
             .contains("revision conflict")
     );
     blackboard
-        .acquire_completion_fence(Duration::from_millis(100))
+        .acquire_completion_fence(&project_id, Duration::from_millis(100))
         .await
         .expect("fence released")
         .release()
@@ -2288,12 +2288,15 @@ async fn long_goal_and_strategy_survive_compaction_and_restart_exactly() -> Resu
 /// Probes the project fence until the in-flight completion demonstrably holds it: a
 /// probe that still acquires the fence proves nothing yet, so it is released and
 /// retried; a probe that times out does. Avoids a timing guess under load.
-async fn wait_until_completion_holds_fence(blackboard: &BlackboardStore) -> Result<()> {
+async fn wait_until_completion_holds_fence(
+    blackboard: &BlackboardStore,
+    project_id: &str,
+) -> Result<()> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
         match tokio::time::timeout(
             Duration::from_millis(100),
-            blackboard.acquire_completion_fence(Duration::from_millis(50)),
+            blackboard.acquire_completion_fence(project_id, Duration::from_millis(50)),
         )
         .await
         {

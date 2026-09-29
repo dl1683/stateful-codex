@@ -401,8 +401,7 @@ fn project_error(error: ThreadStoreError) -> JSONRPCErrorError {
 fn blackboard_error(error: BlackboardStoreError) -> JSONRPCErrorError {
     match error {
         BlackboardStoreError::Storage(_)
-        | BlackboardStoreError::Migration(_)
-        | BlackboardStoreError::Io(_)
+        | BlackboardStoreError::Database(_)
         | BlackboardStoreError::CorruptEntry(_)
         | BlackboardStoreError::CorruptEnum(_) => {
             internal_error(format!("failed to access blackboard: {error}"))

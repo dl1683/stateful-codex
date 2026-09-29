@@ -241,7 +241,12 @@ async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
         )
         .await
         .expect("context-map entry should insert");
-    let mut reader = context_map.pool.begin().await.expect("reader begins");
+    let mut reader = context_map
+        .database
+        .pool()
+        .begin()
+        .await
+        .expect("reader begins");
     let candidate_ids = sqlx::query_scalar::<_, String>(
         "SELECT entry.id
          FROM context_map_search AS search
