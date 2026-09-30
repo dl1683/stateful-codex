@@ -177,7 +177,10 @@ fn deduplicates_by_source_revision_and_rejects_inconsistent_metadata() {
         roomy(),
     )
     .expect("merged");
-    assert_eq!(packet.records(), [first, other_thread, revised].as_slice());
+    assert_eq!(
+        packet.records(),
+        [first.clone(), other_thread, revised].as_slice()
+    );
 
     let moved = record_with(
         THREAD,
@@ -203,6 +206,26 @@ fn deduplicates_by_source_revision_and_rejects_inconsistent_metadata() {
         AssistantCommentary,
         "The value is 0.0230.",
     );
+    let same_position = record_with(
+        THREAD,
+        "m2",
+        "rev_b",
+        2,
+        AssistantFinal,
+        "The value is 0.0625.",
+    );
+    for candidates in [
+        [first.clone(), same_position.clone()],
+        [same_position.clone(), first.clone()],
+    ] {
+        assert_eq!(
+            pack(None, &candidates, roomy())
+                .expect("same-position revisions")
+                .records(),
+            [first.clone(), same_position.clone()].as_slice()
+        );
+    }
+
     for inconsistent in [moved, reworded, rekinded] {
         let sequence = inconsistent.sequence();
         assert_eq!(
@@ -363,9 +386,22 @@ fn the_returned_packet_fits_with_its_final_coverage() {
     let history: Vec<ConversationPacketRecord> = (1..=12)
         .map(|n| record(n, AssistantFinal, &"z".repeat(10)))
         .collect();
+    let mut smallest_fitting = None;
     for limit in 40..400 {
         let tight = budget(limit, 10_000, 64);
-        if let Ok(packet) = pack_with(99, BoundedWindow, None, &history, tight) {
+        let packet = match pack_with(99, BoundedWindow, None, &history, tight) {
+            Err(error) => {
+                assert_eq!(
+                    (error, smallest_fitting),
+                    (ConversationPacketError::HeaderExceedsBudget, None),
+                    "budget {limit} failed"
+                );
+                continue;
+            }
+            Ok(packet) => packet,
+        };
+        smallest_fitting.get_or_insert(limit);
+        {
             let size = measure(&packet);
             assert!(
                 size.rendered_bytes <= limit,
@@ -379,6 +415,7 @@ fn the_returned_packet_fits_with_its_final_coverage() {
             assert_eq!(coverage.input_coverage(), BoundedWindow);
         }
     }
+    assert!(smallest_fitting.is_some_and(|limit| limit < 100));
 }
 
 #[test]
@@ -394,11 +431,12 @@ fn skips_incomplete_sources_without_truncating_others() {
         User,
         shortened.text().to_string(),
     );
-    let long = record(2, AssistantFinal, &"x".repeat(400));
+    // The oversized latest final is attempted first; packing must continue past it.
     let short = record(3, AssistantFinal, "short answer");
+    let long = record(4, AssistantFinal, &"x".repeat(400));
     let packet = pack(
         None,
-        &[shortened, long, short.clone()],
+        &[shortened, short.clone(), long],
         budget(200, 10_000, 32),
     )
     .expect("packs");
