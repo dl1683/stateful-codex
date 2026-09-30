@@ -29,6 +29,12 @@ export function applyWorkspaceEvent(state, message) {
     ];
     return { render: true, refresh: false };
   }
+  if (message.method === "gateway/pendingRequests") {
+    // Authoritative on (re)connect: requests answered elsewhere while away disappear.
+    if (message.params?.threadId !== state.threadId) return { render: false, refresh: false };
+    state.pendingRequests = [...(message.params?.requests ?? [])];
+    return { render: true, refresh: false };
+  }
   if (message.method === "gateway/error") {
     state.notice = message.params?.message ?? null;
     return { render: true, refresh: false };

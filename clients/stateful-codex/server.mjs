@@ -117,6 +117,7 @@ class AppServerBridge {
   fail(error) {
     for (const request of this.pending.values()) request.reject(error);
     this.pending.clear();
+    this.router.clear();
     this.router.route({
       method: "gateway/error",
       params: { message: error.message },

@@ -1,3 +1,5 @@
+import { interpretReplyResult } from "./reply-result.mjs";
+
 const sessionToken = document
   .querySelector('meta[name="stateful-session"]')
   .getAttribute("content");
@@ -46,8 +48,6 @@ export async function reply(threadId, response) {
     },
     body: JSON.stringify({ threadId, response }),
   });
-  if (!result.ok) {
-    const body = await result.json();
-    throw new Error(body.error?.message ?? body.reason ?? "Codex reply failed");
-  }
+  const body = result.ok ? null : await result.json().catch(() => null);
+  return interpretReplyResult(result.status, body);
 }

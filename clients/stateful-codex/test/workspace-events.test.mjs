@@ -125,3 +125,24 @@ test("gateway errors reach every workspace", () => {
   applyWorkspaceEvent(state, { method: "gateway/error", params: { message: "Reconnecting" } });
   assert.equal(state.notice, "Reconnecting");
 });
+
+test("a pending-request snapshot replaces this thread's drawer and ignores other threads", () => {
+  const state = workspaceState();
+  state.pendingRequests = [
+    { id: 1, method: "item/fileChange/requestApproval", params: { threadId: "thread-a" } },
+  ];
+  const kept = { id: 2, method: "item/fileChange/requestApproval", params: { threadId: "thread-a" } };
+  assert.deepEqual(
+    applyWorkspaceEvent(state, {
+      method: "gateway/pendingRequests",
+      params: { threadId: "thread-b", requests: [] },
+    }),
+    { render: false, refresh: false },
+  );
+  assert.equal(state.pendingRequests.length, 1);
+  applyWorkspaceEvent(state, {
+    method: "gateway/pendingRequests",
+    params: { threadId: "thread-a", requests: [kept] },
+  });
+  assert.deepEqual(state.pendingRequests, [kept]);
+});
