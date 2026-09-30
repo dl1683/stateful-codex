@@ -7,17 +7,18 @@ use sqlx::migrate::Migrator;
 use tempfile::TempDir;
 
 use super::*;
-use crate::HierarchyNodeId;
-use crate::HierarchyStore;
-use crate::NewHierarchyNode;
-use crate::NodeKind;
-use crate::ProjectRelativePath;
 
 const SHA1: &str = "0123456789abcdef0123456789abcdef01234567";
 const SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn sqlite(temp_dir: &TempDir) -> SqliteConfig {
     SqliteConfig::new_for_testing(temp_dir.path().abs())
+}
+
+async fn open_store(temp_dir: &TempDir) -> RepositoryObservationStore {
+    RepositoryObservationStore::open(&sqlite(temp_dir))
+        .await
+        .expect("store should open")
 }
 
 fn observation_id(value: &str) -> RepositoryObservationId {
@@ -52,7 +53,8 @@ fn not_git_root(project_root: &str) -> RepositoryRootObservation {
     }
 }
 
-/// Clean branch, detached SHA-256 with uncollected dirty content, unborn, and non-Git roots.
+/// Clean branch, detached SHA-256 with uncollected dirty content, unborn, and a
+/// non-Git root whose spelling contains a newline.
 fn multi_root_observation(id: &str, project_id: &str) -> RepositoryObservation {
     RepositoryObservation {
         id: observation_id(id),
@@ -63,7 +65,7 @@ fn multi_root_observation(id: &str, project_id: &str) -> RepositoryObservation {
         roots_coverage: RepositoryRootsCoverage::Complete,
         omitted_root_count: 0,
         roots: vec![
-            not_git_root("C:\\workspace\\notes"),
+            not_git_root("/srv/notes\nwith newline"),
             root(
                 "C:\\workspace\\app",
                 RepositoryHead::Commit {
@@ -109,9 +111,7 @@ async fn multi_root_observation_round_trips_across_reopen() {
     let expected = sorted(observation.clone());
     let id = observation.id.clone();
 
-    let store = RepositoryObservationStore::open(&sqlite(&temp_dir))
-        .await
-        .expect("store should open");
+    let store = open_store(&temp_dir).await;
     store.record(observation).await.expect("record");
     assert_eq!(
         store.get("project-1", &id).await.expect("get"),
@@ -120,9 +120,7 @@ async fn multi_root_observation_round_trips_across_reopen() {
     assert_eq!(store.get("project-2", &id).await.expect("get"), None);
     store.pool.close().await;
 
-    let reopened = RepositoryObservationStore::open(&sqlite(&temp_dir))
-        .await
-        .expect("store should reopen");
+    let reopened = open_store(&temp_dir).await;
     assert_eq!(
         reopened.get("project-1", &id).await.expect("get"),
         Some(expected)
@@ -132,9 +130,7 @@ async fn multi_root_observation_round_trips_across_reopen() {
 #[tokio::test]
 async fn identical_retry_succeeds_and_different_data_conflicts() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let store = RepositoryObservationStore::open(&sqlite(&temp_dir))
-        .await
-        .expect("store should open");
+    let store = open_store(&temp_dir).await;
     let observation = multi_root_observation("observation-1", "project-1");
     let id = observation.id.clone();
     store.record(observation.clone()).await.expect("record");
@@ -166,9 +162,7 @@ async fn identical_retry_succeeds_and_different_data_conflicts() {
 #[tokio::test]
 async fn invalid_observations_are_rejected_before_storage() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let store = RepositoryObservationStore::open(&sqlite(&temp_dir))
-        .await
-        .expect("store should open");
+    let store = open_store(&temp_dir).await;
     let mut conflicting_reasons = multi_root_observation("observation-1", "project-1");
     conflicting_reasons.roots[0].worktree = RepositoryWorktree::Unknown {
         reason: RepositoryUnknownReason::Timeout,
@@ -188,7 +182,7 @@ async fn invalid_observations_are_rejected_before_storage() {
         errors,
         [
             Some(RepositoryObservationError::ConflictingUnknownReasons(
-                "C:\\workspace\\notes".to_string()
+                "/srv/notes\nwith newline".to_string()
             )),
             Some(RepositoryObservationError::OmittedRootsWithCompleteCoverage),
         ]
@@ -196,48 +190,7 @@ async fn invalid_observations_are_rejected_before_storage() {
 }
 
 #[tokio::test]
-async fn recording_does_not_advance_the_intelligence_revision() {
-    let temp_dir = TempDir::new().expect("temp dir");
-    let hierarchy = HierarchyStore::open(&sqlite(&temp_dir))
-        .await
-        .expect("hierarchy store should open");
-    hierarchy
-        .create_node(
-            HierarchyNodeId::parse("node-project").expect("valid node ID"),
-            NewHierarchyNode {
-                project_id: "project-1".to_string(),
-                parent_id: None,
-                kind: NodeKind::Project,
-                project_root: None,
-                relative_path: ProjectRelativePath::root(),
-                region_anchor: None,
-                source_fingerprint: None,
-            },
-        )
-        .await
-        .expect("project node should insert");
-    let before = hierarchy
-        .project_intelligence_status("project-1")
-        .await
-        .expect("status");
-
-    let store = RepositoryObservationStore::open(&sqlite(&temp_dir))
-        .await
-        .expect("store should open");
-    store
-        .record(multi_root_observation("observation-1", "project-1"))
-        .await
-        .expect("record");
-
-    let after = hierarchy
-        .project_intelligence_status("project-1")
-        .await
-        .expect("status");
-    assert_eq!((before.revision, after), (1, before));
-}
-
-#[tokio::test]
-async fn opening_upgrades_a_database_created_by_earlier_migrations() {
+async fn upgraded_database_records_without_advancing_the_intelligence_revision() {
     let temp_dir = TempDir::new().expect("temp dir");
     let sqlite = sqlite(&temp_dir);
     tokio::fs::create_dir_all(sqlite.home())
@@ -264,7 +217,7 @@ async fn opening_upgrades_a_database_created_by_earlier_migrations() {
         .expect("legacy migrations");
     sqlx::query("INSERT INTO project_intelligence_revisions (project_id, revision) VALUES (?, ?)")
         .bind("project-1")
-        .bind(7_i64)
+        .bind(/*value*/ 7_i64)
         .execute(&pool)
         .await
         .expect("legacy revision");

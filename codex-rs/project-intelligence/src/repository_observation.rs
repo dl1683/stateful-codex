@@ -5,7 +5,7 @@ use thiserror::Error;
 
 const MAX_ID_BYTES: usize = 512;
 const MAX_PROJECT_ID_BYTES: usize = 512;
-const MAX_PATH_BYTES: usize = 4096;
+const MAX_ROOT_BYTES: usize = 32_768;
 const MAX_REF_BYTES: usize = 1024;
 const MAX_DIGEST_BYTES: usize = 512;
 /// Maximum roots one project observation may collect; excess roots are omitted.
@@ -171,14 +171,17 @@ impl RepositoryObservation {
 
 impl RepositoryRootObservation {
     fn validate(&self) -> Result<(), RepositoryObservationError> {
-        let invalid_path = || RepositoryObservationError::InvalidPath(self.project_root.clone());
-        if !is_bounded_text(&self.project_root, MAX_PATH_BYTES) {
-            return Err(invalid_path());
-        }
-        if let Some(worktree_root) = &self.git_worktree_root
-            && !is_bounded_text(worktree_root, MAX_PATH_BYTES)
+        let valid_root =
+            |root: &str| !root.is_empty() && root.len() <= MAX_ROOT_BYTES && !root.contains('\0');
+        if !valid_root(&self.project_root)
+            || self
+                .git_worktree_root
+                .as_deref()
+                .is_some_and(|root| !valid_root(root))
         {
-            return Err(invalid_path());
+            return Err(RepositoryObservationError::InvalidPath(
+                self.project_root.clone(),
+            ));
         }
         let head_ref = match &self.head {
             RepositoryHead::Commit { oid, head_ref } => {

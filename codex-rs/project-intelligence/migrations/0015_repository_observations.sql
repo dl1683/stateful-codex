@@ -31,6 +31,7 @@ CREATE TABLE repository_root_observations (
     )),
     PRIMARY KEY (observation_id, project_root),
     CHECK ((head_state = 'commit') = (head_oid IS NOT NULL)),
+    CHECK (head_oid IS NULL OR (length(head_oid) IN (40, 64) AND head_oid NOT GLOB '*[^0-9a-f]*')),
     CHECK (head_state <> 'unknown' OR head_ref IS NULL),
     CHECK (worktree_state <> 'clean' OR dirty_coverage = 'complete'),
     CHECK (worktree_state <> 'unknown' OR dirty_coverage = 'unknown'),

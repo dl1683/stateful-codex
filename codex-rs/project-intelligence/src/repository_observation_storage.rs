@@ -198,7 +198,7 @@ async fn load_observation(
         "unknown" => RepositoryRootsCoverage::Unknown,
         _ => return Err(corrupt()),
     };
-    Ok(Some(RepositoryObservation {
+    let observation = RepositoryObservation {
         id: id.clone(),
         project_id: stored.project_id,
         started_at_ms: stored.started_at_ms,
@@ -210,7 +210,9 @@ async fn load_observation(
             .into_iter()
             .map(|root| decode_root(root).ok_or_else(corrupt))
             .collect::<Result<_, _>>()?,
-    }))
+    };
+    observation.validate().map_err(|_| corrupt())?;
+    Ok(Some(observation))
 }
 
 fn decode_root(root: StoredRoot) -> Option<RepositoryRootObservation> {
