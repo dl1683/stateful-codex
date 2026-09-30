@@ -12,7 +12,15 @@ export function applyWorkspaceEvent(state, message) {
     projectId: state.projectId,
     runId: state.run?.id ?? null,
   };
-  if (!belongsToWorkspace(scope, owner)) return { render: false, refresh: false };
+  if (!belongsToWorkspace(scope, owner)) {
+    // Another thread's event can still invalidate shared project data (for example a sibling
+    // thread's attribution changes the project-wide measurement totals): refresh, never render.
+    const sharedInvalidation =
+      scope.kind === "thread" &&
+      message.params?.projectId === state.projectId &&
+      REFRESH_METHODS.test(message.method ?? "");
+    return { render: false, refresh: sharedInvalidation };
+  }
 
   if (scope.kind === "threadRequest") {
     state.pendingRequests = [

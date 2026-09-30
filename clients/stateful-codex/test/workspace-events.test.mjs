@@ -102,6 +102,24 @@ test("only this workspace's run and project changes trigger a refresh", () => {
   );
 });
 
+test("a sibling thread's attribution refreshes shared project data without rendering its content", () => {
+  const state = workspaceState();
+  const attribution = (projectId, threadId) => ({
+    method: "statefulAttribution/completed",
+    params: { projectId, threadId, turnId: "t", status: "completed", durationMs: 1, counters: {} },
+  });
+  assert.deepEqual(applyWorkspaceEvent(state, attribution("project-1", "thread-b")), {
+    render: false,
+    refresh: true,
+  });
+  assert.deepEqual(applyWorkspaceEvent(state, attribution("project-2", "thread-b")), {
+    render: false,
+    refresh: false,
+  });
+  assert.equal(state.liveText, "");
+  assert.deepEqual(state.pendingRequests, []);
+});
+
 test("gateway errors reach every workspace", () => {
   const state = workspaceState();
   applyWorkspaceEvent(state, { method: "gateway/error", params: { message: "Reconnecting" } });
