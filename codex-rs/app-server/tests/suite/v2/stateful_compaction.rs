@@ -1,11 +1,12 @@
 //! Stateful project context across compaction boundaries.
 //!
-//! The full project root must be present exactly once in every model request: installed inside
-//! the replacement history by mid-turn compaction, not repeated on an unchanged step, updated by a
-//! delta when the root changes, reinjected after a checkpoint that dropped it, and preserved by a
-//! cold resume.
+//! Every model request must carry exactly one full project root: installed in the replacement
+//! history by mid-turn compaction, not repeated on an unchanged step, amended by one update when the
+//! root changes, left out of a manual checkpoint and reinjected on the next turn, and reinjected
+//! once when a thread is cold-resumed from either a compacted or an already repaired history.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
@@ -27,15 +28,18 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
+use serde_json::json;
 use tempfile::TempDir;
 
 use super::stateful_project_context::promote_root_fact;
 use super::stateful_project_context::seed_root_blackboard;
 
-const FULL_ROOT: &str = "<stateful_project>";
-const ROOT_UPDATE: &str = "<stateful_project_update>";
+const ROOT: (&str, &str) = ("<stateful_project>", "</stateful_project>");
+const UPDATE: (&str, &str) = ("<stateful_project_update>", "</stateful_project_update>");
 const SEEDED_FACT: &str = "A decisive project fact survives every thread view.";
 const LATER_FACT: &str = "A later project decision changes the root.";
+const COMPACT_PROMPT: &str = "Summarize the Stateful conversation.";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn project_root_appears_once_across_compaction_revision_and_resume() -> Result<()> {
@@ -59,8 +63,9 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
             reply("unchanged-step", /*total_tokens*/ 120),
             reply("revised-step", /*total_tokens*/ 120),
             reply("manual-summary", /*total_tokens*/ 200),
-            reply("after-checkpoint", /*total_tokens*/ 120),
-            reply("after-resume", /*total_tokens*/ 120),
+            reply("resumed-from-checkpoint", /*total_tokens*/ 120),
+            reply("unchanged-after-resume", /*total_tokens*/ 120),
+            reply("resumed-from-repaired", /*total_tokens*/ 120),
         ],
     )
     .await;
@@ -68,13 +73,12 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
     let project_root = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
         .enable_feature(Feature::Sqlite)
-        .with_root_config("model_auto_compact_token_limit = 200000")
+        .with_root_config(&format!(
+            "compact_prompt = \"{COMPACT_PROMPT}\"\nmodel_auto_compact_token_limit = 200000"
+        ))
         .with_provider_config("supports_websockets = false")
         .write(codex_home.path())?;
-    let mut app = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
+    let mut app = start_app(codex_home.path()).await?;
     let created: ProjectCreateResponse = app
         .request(|request_id| ClientRequest::ProjectCreate {
             request_id,
@@ -91,14 +95,15 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
         .await?;
     let project_id = created.project.id;
     seed_root_blackboard(codex_home.path(), &project_id).await?;
-    let thread_id = app
+    let thread = app
         .start_thread(ThreadStartParams {
             project_id: Some(project_id.clone()),
             ..Default::default()
         })
         .await?
-        .thread
-        .id;
+        .thread;
+    let thread_id = thread.id;
+    let rollout = thread.path.expect("thread should be persisted");
 
     run_turn(&mut app, &thread_id).await?;
     run_turn(&mut app, &thread_id).await?;
@@ -117,111 +122,239 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
         .await?;
     let _: ThreadCompactStartResponse = app.read_response(compact_request).await?;
     let _: TurnCompletedNotification = app.read_notification("turn/completed").await?;
-    run_turn(&mut app, &thread_id).await?;
 
+    // Restart straight from the manual checkpoint, whose history holds no root.
     drop(app);
-    let mut app = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let resumed: ThreadResumeResponse = app
-        .request(|request_id| ClientRequest::ThreadResume {
-            request_id,
-            params: ThreadResumeParams {
-                thread_id: thread_id.clone(),
-                ..Default::default()
-            },
-        })
-        .await?;
-    run_turn(&mut app, &resumed.thread.id).await?;
+    let mut app = start_app(codex_home.path()).await?;
+    resume(&mut app, &thread_id).await?;
+    run_turn(&mut app, &thread_id).await?;
+    run_turn(&mut app, &thread_id).await?;
+    // Restart again from history that already carries the reinjected root.
+    drop(app);
+    let mut app = start_app(codex_home.path()).await?;
+    resume(&mut app, &thread_id).await?;
+    run_turn(&mut app, &thread_id).await?;
 
     let requests = mock.requests();
     let [
         over_limit,
-        _mid_turn_summary,
+        mid_turn_summary,
         mid_turn_continuation,
         unchanged_step,
         revised_step,
-        _manual_summary,
-        after_checkpoint,
-        after_resume,
+        manual_summary,
+        resumed_from_checkpoint,
+        unchanged_after_resume,
+        resumed_from_repaired,
     ] = requests.as_slice()
     else {
-        panic!("expected eight model requests, got {}", requests.len());
+        panic!("expected nine model requests, got {}", requests.len());
     };
+
+    assert_eq!(
+        [mid_turn_summary, manual_summary].map(compaction_metadata),
+        [
+            json!({
+                "request_kind": "compaction",
+                "trigger": "auto",
+                "phase": "mid_turn",
+                "implementation": "responses",
+                "prompt": true,
+            }),
+            json!({
+                "request_kind": "compaction",
+                "trigger": "manual",
+                "phase": "standalone_turn",
+                "implementation": "responses",
+                "prompt": true,
+            }),
+        ]
+    );
+
+    let seeded = RootView::of(over_limit, &project_id);
+    let revised = RootView::of(revised_step, &project_id);
     assert_eq!(
         [
             over_limit,
+            mid_turn_summary,
             mid_turn_continuation,
             unchanged_step,
             revised_step,
-            after_checkpoint,
-            after_resume,
+            manual_summary,
+            resumed_from_checkpoint,
+            unchanged_after_resume,
+            resumed_from_repaired,
         ]
         .map(|request| RootView::of(request, &project_id)),
         [
-            RootView::seeded(/*updates*/ 0),
-            RootView::seeded(/*updates*/ 0),
-            RootView::seeded(/*updates*/ 0),
-            RootView::revised(/*updates*/ 1),
-            RootView::revised(/*updates*/ 0),
-            RootView::revised(/*updates*/ 0),
+            RootView::seeded(seeded.root_revision),
+            RootView::seeded(seeded.root_revision),
+            RootView::seeded(seeded.root_revision),
+            RootView::seeded(seeded.root_revision),
+            RootView::amended(seeded.root_revision, revised.update_revision),
+            RootView::amended(seeded.root_revision, revised.update_revision),
+            RootView::revised(revised.update_revision),
+            RootView::revised(revised.update_revision),
+            RootView::revised(revised.update_revision),
         ]
     );
+    assert!(seeded.root_revision.is_some() && revised.update_revision > seeded.root_revision);
+
+    // The mid-turn checkpoint installs the root; the manual checkpoint leaves it to the next turn.
+    assert_eq!(checkpoint_root_counts(&rollout)?, vec![1, 0]);
     Ok(())
 }
 
-/// What one model request shows of the project root.
+/// What one model request shows of the project root, read only from recognized fragments.
 #[derive(Debug, PartialEq, Eq)]
 struct RootView {
+    /// Developer-role fragments opened and closed by the full-root markers.
     full_roots: usize,
+    /// Developer-role fragments opened and closed by the update markers.
     updates: usize,
-    has_project_id: bool,
-    has_seeded_fact: bool,
-    has_later_fact: bool,
+    /// Fragments opened by either marker with another role or without their closing marker.
+    malformed: usize,
+    root_has_project_id: bool,
+    root_has_seeded_fact: bool,
+    root_has_later_fact: bool,
+    update_has_later_fact: bool,
+    root_revision: Option<u64>,
+    update_revision: Option<u64>,
 }
 
 impl RootView {
     fn of(request: &ResponsesRequest, project_id: &str) -> Self {
         let body = request.body_json();
-        // Count fragments by their opening marker; update prose may mention the root marker.
-        let fragments_opening_with = |marker: &str| {
-            body["input"]
-                .as_array()
+        let messages = body["input"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|item| {
+                let role = item["role"].as_str().unwrap_or_default().to_string();
+                item["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|content| content["text"].as_str())
+                    .map(move |text| (role.clone(), text.trim().to_string()))
+            })
+            .collect::<Vec<_>>();
+        let mut malformed = 0;
+        let mut fragments = |(open, close): (&str, &str)| {
+            let (valid, invalid): (Vec<_>, Vec<_>) = messages
+                .iter()
+                .filter(|(_, text)| text.starts_with(open))
+                .partition(|(role, text)| role == "developer" && text.ends_with(close));
+            malformed += invalid.len();
+            valid
                 .into_iter()
-                .flatten()
-                .filter_map(|item| item["content"].as_array())
-                .flatten()
-                .filter_map(|content| content["text"].as_str())
-                .filter(|text| text.trim_start().starts_with(marker))
-                .count()
+                .map(|(_, text)| text.clone())
+                .collect::<Vec<_>>()
         };
-        let body_text = body.to_string();
+        let roots = fragments(ROOT);
+        let updates = fragments(UPDATE);
+        let root_text = roots.join("\n");
+        let update_text = updates.join("\n");
         Self {
-            full_roots: fragments_opening_with(FULL_ROOT),
-            updates: fragments_opening_with(ROOT_UPDATE),
-            has_project_id: body_text.contains(&format!("Project ID: {project_id}")),
-            has_seeded_fact: body_text.contains(SEEDED_FACT),
-            has_later_fact: body_text.contains(LATER_FACT),
+            full_roots: roots.len(),
+            updates: updates.len(),
+            malformed,
+            root_has_project_id: root_text.contains(&format!("Project ID: {project_id}")),
+            root_has_seeded_fact: root_text.contains(SEEDED_FACT),
+            root_has_later_fact: root_text.contains(LATER_FACT),
+            update_has_later_fact: update_text.contains(LATER_FACT),
+            root_revision: number_after(&root_text, "Project intelligence revision: "),
+            update_revision: number_after(&update_text, "rootRevision "),
         }
     }
 
-    fn seeded(updates: usize) -> Self {
+    fn seeded(root_revision: Option<u64>) -> Self {
         Self {
             full_roots: 1,
-            updates,
-            has_project_id: true,
-            has_seeded_fact: true,
-            has_later_fact: false,
+            updates: 0,
+            malformed: 0,
+            root_has_project_id: true,
+            root_has_seeded_fact: true,
+            root_has_later_fact: false,
+            update_has_later_fact: false,
+            root_revision,
+            update_revision: None,
         }
     }
 
-    fn revised(updates: usize) -> Self {
+    fn amended(root_revision: Option<u64>, update_revision: Option<u64>) -> Self {
         Self {
-            has_later_fact: true,
-            ..Self::seeded(updates)
+            updates: 1,
+            update_has_later_fact: true,
+            update_revision,
+            ..Self::seeded(root_revision)
         }
     }
+
+    fn revised(root_revision: Option<u64>) -> Self {
+        Self {
+            root_has_later_fact: true,
+            ..Self::seeded(root_revision)
+        }
+    }
+}
+
+fn number_after(text: &str, label: &str) -> Option<u64> {
+    let (_, rest) = text.split_once(label)?;
+    rest.split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn compaction_metadata(request: &ResponsesRequest) -> Value {
+    let metadata: Value = serde_json::from_str(
+        &request
+            .header("x-codex-turn-metadata")
+            .expect("compaction request should carry turn metadata"),
+    )
+    .expect("turn metadata should be JSON");
+    json!({
+        "request_kind": metadata["request_kind"],
+        "trigger": metadata["compaction"]["trigger"],
+        "phase": metadata["compaction"]["phase"],
+        "implementation": metadata["compaction"]["implementation"],
+        "prompt": request.body_json().to_string().contains(COMPACT_PROMPT),
+    })
+}
+
+/// Counts full-root fragments in each persisted compaction checkpoint, oldest first.
+fn checkpoint_root_counts(rollout: &Path) -> Result<Vec<usize>> {
+    let mut counts = Vec::new();
+    for line in std::fs::read_to_string(rollout)?.lines() {
+        let item: Value = serde_json::from_str(line)?;
+        if item["type"] != "compacted" {
+            continue;
+        }
+        let history = item["payload"]["replacement_history"].to_string();
+        counts.push(history.matches(&format!("\"{}", ROOT.0)).count());
+    }
+    Ok(counts)
+}
+
+async fn start_app(codex_home: &Path) -> Result<TestAppServer> {
+    TestAppServer::builder()
+        .with_codex_home(codex_home)
+        .build_initialized()
+        .await
+}
+
+async fn resume(app: &mut TestAppServer, thread_id: &str) -> Result<()> {
+    let _: ThreadResumeResponse = app
+        .request(|request_id| ClientRequest::ThreadResume {
+            request_id,
+            params: ThreadResumeParams {
+                thread_id: thread_id.to_string(),
+                ..Default::default()
+            },
+        })
+        .await?;
+    Ok(())
 }
 
 async fn run_turn(app: &mut TestAppServer, thread_id: &str) -> Result<()> {
