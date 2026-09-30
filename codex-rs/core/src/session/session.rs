@@ -987,6 +987,16 @@ impl Session {
         thread_extension_init.insert(model_info);
         let tool_policy = thread_extension_init
             .get::<codex_extension_api::ToolPolicy>()
+            .or_else(|| {
+                thread_extension_init
+                    .get::<codex_extension_api::AllowedTools>()
+                    .map(|allowed_tools| {
+                        Arc::new(codex_extension_api::ToolPolicy {
+                            allowed_tools: Some(allowed_tools.0.clone()),
+                            ..Default::default()
+                        })
+                    })
+            })
             .unwrap_or_else(|| {
                 // Older reviewer rollouts predate the explicit startup policy.
                 if crate::guardian::is_basic_session_source(&session_configuration.session_source) {

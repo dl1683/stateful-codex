@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::Context;
 use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
+use codex_extension_api::AllowedTools;
 use codex_extension_api::SessionIsolation;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolPolicy;
@@ -250,10 +251,12 @@ async fn owner_cancellation_closes_agent_and_preserves_history_and_parent() -> a
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[test_case(vec![ToolName::namespaced("functions", "update_plan")]; "selected_tool")]
-#[test_case(vec![]; "no_tools")]
+#[test_case(vec![ToolName::namespaced("functions", "update_plan")], false; "selected_tool")]
+#[test_case(vec![], false; "no_tools")]
+#[test_case(vec![ToolName::namespaced("functions", "update_plan")], true; "legacy_allowed_tools")]
 async fn startup_allowlist_controls_advertising_and_execution(
     tools: Vec<ToolName>,
+    legacy_allowed_tools: bool,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -273,10 +276,16 @@ async fn startup_allowlist_controls_advertising_and_execution(
     options
         .thread_extension_init
         .insert(SessionIsolation::Isolated);
-    options.thread_extension_init.insert(ToolPolicy {
-        allowed_tools: Some(tools.clone()),
-        ..Default::default()
-    });
+    if legacy_allowed_tools {
+        options
+            .thread_extension_init
+            .insert(AllowedTools(tools.clone()));
+    } else {
+        options.thread_extension_init.insert(ToolPolicy {
+            allowed_tools: Some(tools.clone()),
+            ..Default::default()
+        });
+    }
     let cancelled = CancellationToken::new();
     let tasks = TaskTracker::new();
     let agent = fixture
