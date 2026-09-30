@@ -43,3 +43,7 @@ required an `available: true` wrapper that the native Stateful export does not
 emit. Post-run regrading with the corrected `stateful-project-state-v1`
 check produced the final 12/12 result. The corrected scorecard and each sealed
 attempt's evidence directory are retained under the R7 run root.
+
+## Independent review (2026-09-30)
+
+A fresh read-only review confirmed the infrastructure: every scripted message was a distinct turn, each rollout matched its recorded thread, all 12 workspaces were isolated git repositories at their baselines, and all 19 approvals were genuine. It corrected the headline: **12/12 infrastructure-valid, 11/12 with non-empty durable Stateful state.** The Stateful `socratic-begin-execution` attempt is a genuine export of an empty pending run: the known Socratic dead end reproduced by the harness, not a harness failure. Open harness risks noted by the review: `composer_pending()` searches the whole screen (stale scrollback could trigger a second Enter), `dedupeAdjacent()` could hide an adjacent duplicate submission, and `infraFailure` checks only `screen-final.txt`.
