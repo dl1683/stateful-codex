@@ -27,7 +27,7 @@ export async function gradeAttempt({ attemptRoot, scenario, attempt }) {
     rolloutNonempty: files["rollout.jsonl"].bytes > 0 && rollout.events > 0,
     requestedStateReadable: stateValid,
     evidenceNonPlaceholder: missing.length === 0 && empty.length === 0 && transcriptRecords.length > 0 && actionRecords.length >= expected.length,
-    workspaceIsolated: Boolean(attempt.workspace?.baseline) && path.resolve(attempt.workspace.path) !== path.resolve(attemptRoot, "workspace"),
+    workspaceIsolated: Boolean(attempt.workspace?.baseline && attempt.workspace?.path) && path.resolve(attempt.workspace.path) !== path.resolve(attemptRoot, "workspace"),
     storeSnapshotSealed: snapshot?.consistent === true,
   };
   const failures = Object.entries(gate).filter(([, passed]) => !passed).map(([name]) => name);

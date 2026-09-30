@@ -14,7 +14,7 @@ export async function runTui({ attemptRoot, workspace, scenario, codex, arm = "s
   const stderr = createWriteStream(path.join(attemptRoot, "stderr.txt"));
   const tuiEnv = { ...env };
   delete tuiEnv.TERM;
-  const child = spawn(python, args, { cwd: path.join(attemptRoot, "workspace"), env: tuiEnv, windowsHide: true });
+  const child = spawn(python, args, { cwd: workspace, env: tuiEnv, windowsHide: true });
   child.stdout.pipe(stdout); child.stderr.pipe(stderr);
   const outputDone = Promise.all([finished(stdout), finished(stderr)]);
   const result = await waitForChild(child, (timeoutSeconds ?? scenario.conversation.turnTimeoutSeconds) * 1000);

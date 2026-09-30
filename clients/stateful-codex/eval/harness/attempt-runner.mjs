@@ -15,7 +15,12 @@ export async function runAttempt({ scenario, rep, attemptDirectory = String(rep)
   await mkdir(attemptRoot);
   const evidence = path.join(attemptRoot, "evidence");
   await mkdir(evidence);
-  const prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, attemptDirectory) });
+  let prepared;
+  try {
+    prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, attemptDirectory) });
+  } catch (error) {
+    return sealFailure({ attemptRoot, evidence, scenario, rep, arm, codex, error, reason: "setupFailed" });
+  }
   const homes = await prepareIsolatedHome(attemptRoot, authHome);
   const sandbox = await sandboxPreflight(prepared.workspace, homes.codexHome);
   await writeJson(path.join(evidence, "sandbox-preflight.json"), sandbox);
@@ -49,6 +54,28 @@ export async function runAttempt({ scenario, rep, attemptDirectory = String(rep)
     exitReason: adapterResult.exitReason ?? (adapterResult.code === 0 ? "processExited" : "driverFailed"),
     retryClassification: classifyRetry(adapterResult, error),
     capture,
+    evidence: await inventory(attemptRoot),
+  };
+  await atomicJson(path.join(attemptRoot, "attempt.json"), attempt);
+  const grade = await gradeAttempt({ attemptRoot, scenario, attempt });
+  await writeJson(path.join(attemptRoot, "grade.json"), grade);
+  return { attempt, grade };
+}
+
+async function sealFailure({ attemptRoot, evidence, scenario, rep, arm, codex, error, reason }) {
+  const attempt = {
+    schemaVersion: 1,
+    scenarioId: scenario.id,
+    repetition: rep,
+    arm,
+    fixtureSha256: scenario.fixture.sha256,
+    executableSha256: await safeFileHash(codex),
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    workspace: null,
+    process: { code: null, signal: null, exitReason: reason, error: error.message },
+    exitReason: reason,
+    retryClassification: "none",
     evidence: await inventory(attemptRoot),
   };
   await atomicJson(path.join(attemptRoot, "attempt.json"), attempt);
@@ -166,6 +193,7 @@ async function findFiles(root, predicate) {
 }
 
 async function fileHash(file) { return `sha256:${createHash("sha256").update(await readFile(file)).digest("hex")}`; }
+async function safeFileHash(file) { try { return await fileHash(file); } catch { return null; } }
 function hashText(value) { return createHash("sha256").update(value).digest("hex"); }
 async function writeJson(file, value) { await writeFile(file, `${JSON.stringify(value, null, 2)}\n`); }
 async function atomicJson(file, value) { const temporary = `${file}.tmp-${process.pid}`; await writeJson(temporary, value); await rename(temporary, file); }
