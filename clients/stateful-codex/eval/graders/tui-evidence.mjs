@@ -18,7 +18,7 @@ export async function gradeAttempt({ attemptRoot, scenario, attempt }) {
   const state = await json(path.join(evidence, "project-state.json"), null);
   const snapshot = await json(path.join(evidence, "store-snapshot.json"), null);
   const infraFailure = /model:\s*loading|sandbox setup failed|code-mode host closed|read-only behavior/i.test(await textFile(evidence, "screen-final.txt"));
-  const stateValid = attempt.arm === "base" ? state?.applicable === false : state?.available === true && state?.run?.id && state?.projectId;
+  const stateValid = attempt.arm === "base" ? state?.applicable === false : Boolean(state?.formatVersion === "stateful-project-state-v1" && state?.run?.id && state?.projectId);
   const gate = {
     adapterSuccess: attempt.exitReason === "processExited" && attempt.process?.code === 0,
     infrastructureValid: !infraFailure,

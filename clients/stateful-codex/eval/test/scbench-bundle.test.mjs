@@ -43,3 +43,19 @@ test("ignores startup loading frames and environment context when grading a roll
   assert.equal(grade.validity.gate.infrastructureValid, true);
   assert.equal(grade.validity.gate.messageBoundariesConfirmed, true);
 });
+
+test("accepts the native Stateful project-state export shape", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "scbench-state-"));
+  const evidence = path.join(root, "evidence"); await mkdir(evidence);
+  for (const file of ["actions.jsonl", "approvals.jsonl", "transcript.jsonl", "transcript.txt", "screen-final.txt", "workspace.patch", "rollout.jsonl"]) await writeFile(path.join(evidence, file), "{}\n");
+  await writeFile(path.join(evidence, "turns.json"), "[]");
+  await writeFile(path.join(evidence, "store-inventory.json"), "{}");
+  await writeFile(path.join(evidence, "store-snapshot.json"), JSON.stringify({ consistent: true }));
+  await writeFile(path.join(evidence, "sandbox-preflight.json"), JSON.stringify({ writable: true, seeded: true }));
+  await writeFile(path.join(evidence, "workspace-before.json"), "[]");
+  await writeFile(path.join(evidence, "workspace-after.json"), "[]");
+  await writeFile(path.join(evidence, "rollout-source.json"), JSON.stringify({ threadId: "thread", candidates: [{ path: "rollout", threadId: "thread" }] }));
+  await writeFile(path.join(evidence, "project-state.json"), JSON.stringify({ formatVersion: "stateful-project-state-v1", projectId: "project", run: { id: "run" } }));
+  const grade = await gradeAttempt({ attemptRoot: root, scenario: { id: "surface.tui.test", conversation: { initialMessage: "next", turns: [] } }, attempt: { scenarioId: "surface.tui.test", repetition: 1, arm: "stateful", exitReason: "processExited", process: { code: 0 }, workspace: { path: "C:/workspace", baseline: "baseline" } } });
+  assert.equal(grade.validity.gate.requestedStateReadable, true);
+});
