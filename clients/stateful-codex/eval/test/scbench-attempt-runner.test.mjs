@@ -16,11 +16,16 @@ test("seeds an isolated home and hard-links only auth.json", async () => {
   await mkdir(path.join(auth, ".sandbox-bin"), { recursive: true });
   await writeFile(path.join(auth, "auth.json"), "auth");
   await writeFile(path.join(auth, "cap_sid"), "sid");
-  const { codexHome } = await prepareIsolatedHome(path.join(root, "attempt"), auth);
+  const { codexHome } = await prepareIsolatedHome(path.join(root, "attempt"), auth, { workspace: "C:/workspace" });
   assert.equal((await readFile(path.join(codexHome, "auth.json"), "utf8")), "auth");
   assert.equal(existsSync(path.join(codexHome, ".sandbox")), true);
   assert.equal(existsSync(path.join(codexHome, ".sandbox-bin")), true);
   assert.equal(existsSync(path.join(codexHome, "cap_sid")), true);
+  const config = await readFile(path.join(codexHome, "config.toml"), "utf8");
+  assert.match(config, /model = "gpt-5\.6-luna"/);
+  assert.match(config, /\[windows\]\s+sandbox = "unelevated"/);
+  assert.match(config, /\[features\]\s+memories = false/);
+  assert.match(config, /\[projects\."C:\/workspace"\]\s+trust_level = "trusted"/);
 });
 
 test("records a timeout and retains stdout, stderr, and an atomic manifest", async () => {

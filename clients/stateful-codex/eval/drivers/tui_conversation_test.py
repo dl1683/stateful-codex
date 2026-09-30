@@ -1,6 +1,6 @@
 import unittest
 
-from tui_conversation import approval_prompt, is_busy, stable_idle
+from tui_conversation import approval_prompt, composer_pending, is_busy, stable_idle
 
 
 class ConversationDriverTests(unittest.TestCase):
@@ -17,6 +17,14 @@ class ConversationDriverTests(unittest.TestCase):
         self.assertFalse(stable_idle("Working (1s)", 30, 16))
         self.assertFalse(stable_idle("Press enter to confirm or esc to cancel", 30, 16))
         self.assertTrue(stable_idle("Ask Codex >", 16, 16))
+
+    def test_mcp_enter_to_submit_is_an_approval(self):
+        self.assertTrue(approval_prompt("Allow the local MCP server to run tool foo? enter to submit"))
+
+    def test_composer_recovery_detects_typed_and_pasted_content(self):
+        self.assertTrue(composer_pending("Ask Codex › next message", "next message"))
+        self.assertTrue(composer_pending("Ask Codex › [Pasted Content 42 chars]", "next message"))
+        self.assertFalse(composer_pending("Ask Codex", "next message"))
 
 
 if __name__ == "__main__":

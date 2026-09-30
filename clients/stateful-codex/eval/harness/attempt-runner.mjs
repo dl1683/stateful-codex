@@ -19,7 +19,7 @@ export async function runAttempt({ scenario, rep, attemptDirectory = String(rep)
   let homes;
   try {
     prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, attemptDirectory) });
-    homes = await prepareIsolatedHome(attemptRoot, authHome);
+    homes = await prepareIsolatedHome(attemptRoot, authHome, { workspace: prepared.workspace });
   } catch (error) {
     return sealFailure({ attemptRoot, evidence, scenario, rep, arm, codex, error, reason: "setupFailed" });
   }

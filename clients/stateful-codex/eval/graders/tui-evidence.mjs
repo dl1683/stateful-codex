@@ -17,7 +17,7 @@ export async function gradeAttempt({ attemptRoot, scenario, attempt }) {
   const transcriptRecords = await jsonl(path.join(evidence, "transcript.jsonl"));
   const state = await json(path.join(evidence, "project-state.json"), null);
   const snapshot = await json(path.join(evidence, "store-snapshot.json"), null);
-  const infraFailure = /model:\s*loading|sandbox setup failed|code-mode host closed|read-only behavior/i.test(await textFiles(evidence));
+  const infraFailure = /model:\s*loading|sandbox setup failed|code-mode host closed|read-only behavior/i.test(await textFile(evidence, "screen-final.txt"));
   const stateValid = attempt.arm === "base" ? state?.applicable === false : state?.available === true && state?.run?.id && state?.projectId;
   const gate = {
     adapterSuccess: attempt.exitReason === "processExited" && attempt.process?.code === 0,
@@ -56,10 +56,15 @@ async function rolloutMessages(file) {
   const messages = [];
   for (const event of events) {
     const item = event.payload;
-    if (event.type === "response_item" && item?.role === "user") messages.push(item.content?.filter(({ type }) => type === "input_text").map(({ text }) => text).join("\n") ?? "");
+    if (event.type === "response_item" && item?.role === "user" && userTextItem(event)) messages.push(item.content?.filter(({ type }) => type === "input_text").map(({ text }) => text).join("\n") ?? "");
     if (event.type === "event_msg" && item?.type === "item_completed" && item.item?.type === "UserMessage") messages.push(item.item.content?.map(({ text }) => text ?? "").join("\n") ?? "");
   }
   return { events: events.length, messages: dedupeAdjacent(messages) };
+}
+
+function userTextItem(event) {
+  const kinds = event.payload?.internal_chat_message_metadata_passthrough?.content_item_kinds;
+  return kinds?.includes("user.text") || (!kinds && !event.payload.content?.some(({ text }) => text?.startsWith("<environment_context>")));
 }
 
 function dedupeAdjacent(values) {
@@ -91,4 +96,9 @@ async function textFiles(root) {
     try { return await readFile(path.join(root, file), "utf8"); }
     catch { return ""; }
   }))).join("\n");
+}
+
+async function textFile(root, file) {
+  try { return await readFile(path.join(root, file), "utf8"); }
+  catch { return ""; }
 }

@@ -25,12 +25,14 @@ APPROVAL_PATTERNS = (
     ("trust-folder", re.compile(r"Trust this folder", re.I)),
     ("command", re.compile(r"Would you like to run the following command\?", re.I)),
     ("confirm", re.compile(r"Press enter to confirm(?: or esc to cancel)?", re.I)),
-    ("mcp", re.compile(r"Allow the .+ MCP server to run tool .+\?", re.I)),
+    ("mcp", re.compile(r"Allow the .+ MCP server.*(?:run tool|enter to submit)", re.I | re.S)),
 )
 SETUP_FAILURE_MARKERS = (
     "Set up the Codex agent sandbox",
     "Use non-admin sandbox",
 )
+QUEUE_MARKER = "tab to queue"
+PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\]", re.I)
 
 
 def is_busy(screen):
@@ -70,7 +72,16 @@ def setup_failure(screen):
 
 
 def ready_screen(screen):
-    return bool(screen.strip()) and "Ask Codex" in screen and not is_busy(screen)
+    return bool(screen.strip()) and "Ask Codex" in screen and not is_busy(screen) and QUEUE_MARKER not in screen
+
+
+def composer_pending(screen, message):
+    if PASTED_CONTENT.search(screen):
+        return True
+    if not message:
+        return False
+    preview = " ".join(message.split())[:40]
+    return preview and any(marker in screen for marker in (f"› {preview}", f"> {preview}"))
 
 
 def stable_idle(screen, quiet_seconds, required_seconds, seen_busy=True):
@@ -131,7 +142,7 @@ def drive(options):
                 turns.append(turn)
                 raise RuntimeError(f"scripted message was not delivered: {turn['id']}")
             record_action(options.session, turn["id"], message, ["enter"], "delivered")
-            succeeded, state = wait_turn(options, driver, turn["id"])
+            succeeded, state = wait_turn(options, driver, turn["id"], message)
             turn["state"] = state
             turn["status"] = "idle" if succeeded else state
             turn["after"] = snapshot(options.session, f"turn-{number:02d}-after.txt")
@@ -156,6 +167,7 @@ def drive(options):
 def wait_ready(options, driver):
     deadline = time.time() + options.turn_timeout
     quiet_since = None
+    seen_busy = False
     seen = set()
     while time.time() < deadline and driver.poll() is None:
         screen = read_screen(options.session)
@@ -165,16 +177,19 @@ def wait_ready(options, driver):
             quiet_since = None
             continue
         if is_busy(screen):
+            seen_busy = True
             quiet_since = None
         elif ready_screen(screen):
             quiet_since = quiet_since or time.time()
-        if quiet_since and time.time() - quiet_since >= min(3, options.idle_stable):
+        else:
+            quiet_since = None
+        if quiet_since and seen_busy and time.time() - quiet_since >= min(3, options.idle_stable):
             return "awaitingInput"
         time.sleep(0.25)
     return terminal_status(driver, timed_out=True)
 
 
-def wait_turn(options, driver, turn_id):
+def wait_turn(options, driver, turn_id, message):
     deadline = time.time() + options.turn_timeout
     quiet_since = None
     seen_busy = False
@@ -191,6 +206,12 @@ def wait_turn(options, driver, turn_id):
             quiet_since = None
         elif ready_screen(screen):
             quiet_since = quiet_since or time.time()
+        else:
+            quiet_since = None
+        if quiet_since and composer_pending(screen, message) and not seen_busy:
+            if send(options, driver, {"id": f"resubmit-{turn_id}", "keys": ["enter"], "recovery": "composer"}):
+                quiet_since = None
+                continue
         if quiet_since and stable_idle(screen, time.time() - quiet_since, options.idle_stable, seen_busy):
             return True, "idle"
         time.sleep(0.25)
