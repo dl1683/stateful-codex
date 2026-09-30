@@ -212,7 +212,8 @@ struct RootView {
     full_roots: usize,
     /// Developer-role fragments opened and closed by the update markers.
     updates: usize,
-    /// Fragments opened by either marker with another role or without their closing marker.
+    /// Fragments opened by either marker with another role, without their closing marker, or
+    /// holding more than one pair of their markers.
     malformed: usize,
     root_has_project_id: bool,
     root_has_seeded_fact: bool,
@@ -244,7 +245,12 @@ impl RootView {
             let (valid, invalid): (Vec<_>, Vec<_>) = messages
                 .iter()
                 .filter(|(_, text)| text.starts_with(open))
-                .partition(|(role, text)| role == "developer" && text.ends_with(close));
+                .partition(|(role, text)| {
+                    role == "developer"
+                        && text.ends_with(close)
+                        && text.matches(open).count() == 1
+                        && text.matches(close).count() == 1
+                });
             malformed += invalid.len();
             valid
                 .into_iter()
@@ -331,8 +337,18 @@ fn checkpoint_root_counts(rollout: &Path) -> Result<Vec<usize>> {
         if item["type"] != "compacted" {
             continue;
         }
-        let history = item["payload"]["replacement_history"].to_string();
-        counts.push(history.matches(&format!("\"{}", ROOT.0)).count());
+        // Count root markers inside root fragments, so two roots in one text count twice.
+        let roots = item["payload"]["replacement_history"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item["content"].as_array())
+            .flatten()
+            .filter_map(|content| content["text"].as_str())
+            .filter(|text| text.trim_start().starts_with(ROOT.0))
+            .map(|text| text.matches(ROOT.0).count())
+            .sum();
+        counts.push(roots);
     }
     Ok(counts)
 }
