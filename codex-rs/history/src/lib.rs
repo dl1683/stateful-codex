@@ -27,6 +27,7 @@ pub use conversation_packet::ConversationPacketSize;
 pub use conversation_packet::ConversationRecordKind;
 pub use conversation_packet::MAX_PACKET_CANDIDATE_BYTES;
 pub use conversation_packet::MAX_PACKET_CANDIDATES;
+pub use conversation_packet::pack_conversation_packet;
 
 use std::borrow::Borrow;
 use std::ops::Deref;

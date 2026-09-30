@@ -177,10 +177,7 @@ fn deduplicates_by_source_revision_and_rejects_inconsistent_metadata() {
         roomy(),
     )
     .expect("merged");
-    assert_eq!(
-        packet.records(),
-        [first, other_thread, revised].as_slice()
-    );
+    assert_eq!(packet.records(), [first, other_thread, revised].as_slice());
 
     let moved = record_with(
         THREAD,
