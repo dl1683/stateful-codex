@@ -131,6 +131,7 @@ mod sleep;
 mod stateful_blackboard_lifecycle;
 mod stateful_checkpoint;
 mod stateful_code_mode;
+mod stateful_compaction;
 mod stateful_completion;
 mod stateful_modes;
 mod stateful_project_context;

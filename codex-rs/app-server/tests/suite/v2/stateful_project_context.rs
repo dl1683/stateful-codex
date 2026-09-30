@@ -1220,13 +1220,14 @@ async fn assert_latest_request_has_project(
     Ok(())
 }
 
-async fn seed_root_blackboard(codex_home: &std::path::Path, project_id: &str) -> Result<()> {
-    let sqlite = SqliteConfig::new_for_testing(codex_home.abs());
-    let hierarchy = HierarchyStore::open(&sqlite).await?;
-    let project_node_id = HierarchyNodeId::parse(format!("project-node-{project_id}"))?;
-    hierarchy
+pub(super) async fn seed_root_blackboard(
+    codex_home: &std::path::Path,
+    project_id: &str,
+) -> Result<()> {
+    HierarchyStore::open(&SqliteConfig::new_for_testing(codex_home.abs()))
+        .await?
         .create_node(
-            project_node_id.clone(),
+            HierarchyNodeId::parse(format!("project-node-{project_id}"))?,
             NewHierarchyNode {
                 project_id: project_id.to_string(),
                 parent_id: None,
@@ -1238,15 +1239,31 @@ async fn seed_root_blackboard(codex_home: &std::path::Path, project_id: &str) ->
             },
         )
         .await?;
-    BlackboardStore::open(&sqlite)
+    promote_root_fact(
+        codex_home,
+        project_id,
+        &format!("project-fact-{project_id}"),
+        "A decisive project fact survives every thread view.",
+    )
+    .await
+}
+
+/// Adds a promoted, unverified root fact to a project seeded by `seed_root_blackboard`.
+pub(super) async fn promote_root_fact(
+    codex_home: &std::path::Path,
+    project_id: &str,
+    entry_id: &str,
+    content: &str,
+) -> Result<()> {
+    BlackboardStore::open(&SqliteConfig::new_for_testing(codex_home.abs()))
         .await?
         .create_entry(
-            BlackboardEntryId::parse(format!("project-fact-{project_id}"))?,
+            BlackboardEntryId::parse(entry_id)?,
             NewBlackboardEntry {
                 project_id: project_id.to_string(),
-                node_id: project_node_id,
+                node_id: HierarchyNodeId::parse(format!("project-node-{project_id}"))?,
                 kind: BlackboardKind::Fact,
-                content: "A decisive project fact survives every thread view.".to_string(),
+                content: content.to_string(),
                 structured_value: None,
                 confidence: ConfidenceScore::from_basis_points(8_500)?,
                 verification: BlackboardVerification::Unverified,
