@@ -190,7 +190,7 @@ fn prepare_powershell_command_for_windows_sandbox_with_fallback(
         command[0] = fallback.shell_path.to_string_lossy().to_string();
     }
 
-    if windows_sandbox == WindowsSandboxSelection::RestrictedToken {
+    if windows_sandbox != WindowsSandboxSelection::Elevated {
         return command;
     }
 
