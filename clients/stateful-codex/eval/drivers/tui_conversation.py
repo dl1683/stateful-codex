@@ -1,6 +1,11 @@
-"""Drive a scripted multi-turn conversation through the ConPTY session."""
+"""Drive a real TUI conversation through a Windows pseudo-console.
+
+The driver records transport state only. Product success is decided later from
+the exact rollout and the sealed evidence bundle.
+"""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -8,10 +13,19 @@ import subprocess
 import sys
 import time
 
-BUSY = ("esc to interrupt", "Working (", "Starting MCP", "Resuming session", "Running ")
-APPROVAL = re.compile(
-    r"Trust this folder|Would you like to run the following command\?|Press enter to confirm(?: or esc to cancel)?",
-    re.I,
+BUSY = (
+    "esc to interrupt",
+    "Working (",
+    "Starting MCP",
+    "Resuming session",
+    "Running ",
+    "model: loading",
+)
+APPROVAL_PATTERNS = (
+    ("trust-folder", re.compile(r"Trust this folder", re.I)),
+    ("command", re.compile(r"Would you like to run the following command\?", re.I)),
+    ("confirm", re.compile(r"Press enter to confirm(?: or esc to cancel)?", re.I)),
+    ("mcp", re.compile(r"Allow the .+ MCP server to run tool .+\?", re.I)),
 )
 
 
@@ -20,13 +34,30 @@ def is_busy(screen):
 
 
 def approval_prompt(screen):
-    return APPROVAL.search(screen) is not None
+    return approval_identity(screen) is not None
 
 
-def stable_idle(screen, quiet_seconds, required_seconds):
+def approval_identity(screen):
+    for kind, pattern in APPROVAL_PATTERNS:
+        match = pattern.search(screen)
+        if match:
+            excerpt = " ".join(screen[max(0, match.start() - 240) : match.end() + 500].split())
+            return {
+                "kind": kind,
+                "id": hashlib.sha256(f"{kind}:{excerpt}".encode()).hexdigest()[:20],
+                "excerpt": excerpt,
+            }
+    return None
+
+
+def ready_screen(screen):
+    return bool(screen.strip()) and "Ask Codex" in screen and not is_busy(screen)
+
+
+def stable_idle(screen, quiet_seconds, required_seconds, seen_busy=True):
     return (
-        bool(screen.strip())
-        and not is_busy(screen)
+        seen_busy
+        and ready_screen(screen)
         and not approval_prompt(screen)
         and quiet_seconds >= required_seconds
     )
@@ -37,100 +68,128 @@ def append_jsonl(path, value):
         stream.write(json.dumps(value, ensure_ascii=False) + "\n")
 
 
+def append_transcript(session, value):
+    append_jsonl(os.path.join(session, "transcript.jsonl"), value)
+    with open(os.path.join(session, "transcript.txt"), "a", encoding="utf-8") as stream:
+        stream.write(f"\n===== {value['type']} {value.get('id', '')} =====\n")
+        if value.get("message"):
+            stream.write(f"USER: {value['message']}\n")
+        if value.get("status"):
+            stream.write(f"STATE: {value['status']}\n")
+
+
 def drive(options):
     os.makedirs(options.session, exist_ok=True)
     with open(options.conversation, encoding="utf-8") as file:
         conversation = json.load(file)
     session_script = os.path.join(os.path.dirname(__file__), "tui_session.py")
-    command = [
-        sys.executable,
-        session_script,
-        options.session,
-        options.workspace,
-        options.codex,
-        "--stateful",
-        options.mode,
-        "-C",
-        options.workspace,
-        conversation["initialMessage"],
-    ]
+    command = [sys.executable, session_script, options.session, options.workspace, options.codex]
+    if options.arm == "stateful":
+        command += ["--stateful", options.mode]
+    command += ["-C", options.workspace, conversation["initialMessage"]]
     driver = subprocess.Popen(command, env=os.environ.copy())
     turns = []
     try:
-        if not wait_idle(options, driver):
-            raise RuntimeError("initial TUI state did not become idle")
-        record_action(options.session, "initial", conversation["initialMessage"], [])
+        initial = wait_ready(options, driver)
+        append_transcript(options.session, {"type": "session", "status": initial})
+        if initial != "awaitingInput":
+            raise RuntimeError(f"initial TUI state was {initial}, not awaitingInput")
+        record_action(options.session, "initial", conversation["initialMessage"], [], "submitted")
         for number, message in enumerate(conversation["turns"], 1):
             turn = {
                 "id": f"turn-{number:02d}",
                 "message": message,
                 "status": "sent",
+                "state": "submitted",
                 "startedAt": time.time(),
             }
             turn["before"] = snapshot(options.session, f"turn-{number:02d}-before.txt")
-            if not send(
-                options, driver, {"id": turn["id"], "send": message, "keys": ["enter"]}
-            ):
-                turn["status"] = (
-                    "processExited" if driver.poll() is not None else "timedOut"
-                )
+            append_transcript(options.session, {"type": "user", "id": turn["id"], "message": message, "status": "sent"})
+            if not send(options, driver, {"id": turn["id"], "send": message, "keys": ["enter"]}):
+                turn.update(status=terminal_status(driver), state="processExited" if driver.poll() else "timedOut")
                 turns.append(turn)
                 raise RuntimeError(f"scripted message was not delivered: {turn['id']}")
-            if not wait_idle(options, driver):
-                turn["status"] = (
-                    "processExited" if driver.poll() is not None else "timedOut"
-                )
-                turns.append(turn)
-                raise RuntimeError(f"turn did not become idle: {turn['id']}")
-            turn["status"] = "idle"
+            record_action(options.session, turn["id"], message, ["enter"], "delivered")
+            succeeded, state = wait_turn(options, driver, turn["id"])
+            turn["state"] = state
+            turn["status"] = "idle" if succeeded else state
             turn["after"] = snapshot(options.session, f"turn-{number:02d}-after.txt")
             turn["endedAt"] = time.time()
             turns.append(turn)
+            append_transcript(options.session, {"type": "turn", "id": turn["id"], "status": turn["status"], "state": state})
+            if not succeeded:
+                raise RuntimeError(f"turn did not become terminal and idle: {turn['id']} ({state})")
         snapshot(options.session, "screen-final.txt")
         send(options, driver, {"id": "quit", "quit": True})
-        driver.wait(timeout=60)
+        driver.wait(timeout=30)
         return True
     finally:
-        with open(
-            os.path.join(options.session, "turns.json"), "w", encoding="utf-8"
-        ) as file:
+        with open(os.path.join(options.session, "turns.json"), "w", encoding="utf-8") as file:
             json.dump(turns, file, indent=2)
         if driver.poll() is None:
             driver.terminate()
 
 
-def wait_idle(options, driver):
-    quiet_since = None
+def wait_ready(options, driver):
     deadline = time.time() + options.turn_timeout
+    quiet_since = None
+    seen = set()
     while time.time() < deadline and driver.poll() is None:
         screen = read_screen(options.session)
-        if approval_prompt(screen):
-            append_jsonl(
-                os.path.join(options.session, "approvals.jsonl"),
-                {
-                    "timestamp": time.time(),
-                    "screenExcerpt": screen[-600:],
-                    "response": "enter",
-                },
-            )
-            send(
-                options,
-                driver,
-                {
-                    "id": f"approval-{int(time.time() * 1000)}",
-                    "keys": ["enter"],
-                    "approval": True,
-                },
-            )
+        if handle_approval(options, driver, screen, seen):
             quiet_since = None
             continue
         if is_busy(screen):
             quiet_since = None
-        elif screen.strip():
+        elif ready_screen(screen):
             quiet_since = quiet_since or time.time()
-        if quiet_since and stable_idle(
-            screen, time.time() - quiet_since, options.idle_stable
-        ):
+        if quiet_since and time.time() - quiet_since >= min(3, options.idle_stable):
+            return "awaitingInput"
+        time.sleep(0.25)
+    return terminal_status(driver, timed_out=True)
+
+
+def wait_turn(options, driver, turn_id):
+    deadline = time.time() + options.turn_timeout
+    quiet_since = None
+    seen_busy = False
+    seen = set()
+    while time.time() < deadline and driver.poll() is None:
+        screen = read_screen(options.session)
+        if handle_approval(options, driver, screen, seen):
+            quiet_since = None
+            continue
+        if is_busy(screen):
+            seen_busy = True
+            quiet_since = None
+        elif ready_screen(screen):
+            quiet_since = quiet_since or time.time()
+        if quiet_since and stable_idle(screen, time.time() - quiet_since, options.idle_stable, seen_busy):
+            return True, "idle"
+        time.sleep(0.25)
+    return False, terminal_status(driver, timed_out=True)
+
+
+def handle_approval(options, driver, screen, seen):
+    identity = approval_identity(screen)
+    if identity is None or identity["id"] in seen:
+        return False
+    seen.add(identity["id"])
+    record = {"timestamp": time.time(), "dialogId": identity["id"], "kind": identity["kind"], "screenExcerpt": identity["excerpt"], "response": "enter" if options.approve else "none"}
+    if options.approve:
+        if not send(options, driver, {"id": f"approval-{identity['id']}", "keys": ["enter"], "approval": True}):
+            record["response"] = "deliveryFailed"
+        else:
+            record["disappeared"] = wait_dialog_gone(options, identity["id"])
+    append_jsonl(os.path.join(options.session, "approvals.jsonl"), record)
+    return True
+
+
+def wait_dialog_gone(options, dialog_id):
+    deadline = time.time() + min(10, options.idle_stable)
+    while time.time() < deadline:
+        identity = approval_identity(read_screen(options.session))
+        if identity is None or identity["id"] != dialog_id:
             return True
         time.sleep(0.25)
     return False
@@ -151,11 +210,10 @@ def send(options, driver, command):
         return True
     ack = os.path.join(options.session, "acknowledgements.jsonl")
     while time.time() < deadline and driver.poll() is None:
-        if os.path.exists(ack) and any(
-            json.loads(line).get("id") == command.get("id")
-            for line in open(ack, encoding="utf-8")
-        ):
-            return True
+        if os.path.exists(ack):
+            with open(ack, encoding="utf-8") as file:
+                if any(json.loads(line).get("id") == command.get("id") for line in file):
+                    return True
         time.sleep(0.05)
     return False
 
@@ -169,17 +227,19 @@ def read_screen(session):
 
 
 def snapshot(session, name):
-    screen = read_screen(session)
     with open(os.path.join(session, name), "w", encoding="utf-8") as file:
-        file.write(screen)
+        file.write(read_screen(session))
     return name
 
 
-def record_action(session, identifier, message, keys):
-    append_jsonl(
-        os.path.join(session, "actions.jsonl"),
-        {"timestamp": time.time(), "id": identifier, "send": message, "keys": keys},
-    )
+def record_action(session, identifier, message, keys, status):
+    append_jsonl(os.path.join(session, "actions.jsonl"), {"timestamp": time.time(), "id": identifier, "send": message, "keys": keys, "status": status})
+
+
+def terminal_status(driver, timed_out=False):
+    if timed_out and driver.poll() is None:
+        return "timedOut"
+    return "processExited"
 
 
 def parse_args():
@@ -189,6 +249,8 @@ def parse_args():
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--codex", required=True)
     parser.add_argument("--mode", required=True)
+    parser.add_argument("--arm", choices=("base", "stateful"), default="stateful")
+    parser.add_argument("--approve", action="store_true", default=True)
     parser.add_argument("--turn-timeout", type=float, default=2700)
     parser.add_argument("--idle-stable", type=float, default=16)
     return parser.parse_args()

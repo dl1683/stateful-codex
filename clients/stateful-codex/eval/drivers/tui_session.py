@@ -84,15 +84,6 @@ def run(session, workdir, exe, extra):
                 for key in command.get("keys", []):
                     proc.write(KEYS.get(key, key))
                 append_jsonl(
-                    os.path.join(session, "actions.jsonl"),
-                    {
-                        **stamp,
-                        "id": command.get("id"),
-                        "send": command.get("send"),
-                        "keys": command.get("keys", []),
-                    },
-                )
-                append_jsonl(
                     os.path.join(session, "acknowledgements.jsonl"),
                     {**stamp, "id": command.get("id"), "delivered": True},
                 )
