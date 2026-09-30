@@ -4127,6 +4127,7 @@ impl Session {
                     last_started_turn_id: state.last_started_turn_id.clone(),
                     previous_turn_settings: state.previous_turn_settings(),
                 }),
+                conversation_packet: None,
             }
         };
 

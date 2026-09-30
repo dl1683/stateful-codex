@@ -308,6 +308,9 @@ pub struct CompactedItem {
     /// Resume metadata for values not represented by the companion rollout records.
     /// Presence distinguishes explicitly persisted values from legacy fallback reconstruction.
     pub resume_metadata: Option<CompactionResumeMetadata>,
+    /// Original conversation deliveries retained at this compaction boundary. This is host data,
+    /// not provider input; it must be validated before it is trusted or rendered.
+    pub conversation_packet: Option<ConversationPacket>,
 }
 
 impl Serialize for CompactedItem {

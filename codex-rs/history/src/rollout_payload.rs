@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use super::CodexHarnessMetadata;
 use super::CompactedItem;
+use super::ConversationPacket;
 use super::EventMsg;
 use super::InterAgentCommunication;
 use super::McpResourceOriginCheckpoint;
@@ -263,6 +264,8 @@ pub(super) struct CompactedItemWire<'a> {
     latest_token_usage_record: Option<Cow<'a, TokenUsageRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resume_metadata: Option<Cow<'a, crate::CompactionResumeMetadata>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    conversation_packet: Option<Cow<'a, ConversationPacket>>,
 }
 
 impl<'a> From<&'a CompactedItem> for CompactedItemWire<'a> {
@@ -303,6 +306,7 @@ impl<'a> From<&'a CompactedItem> for CompactedItemWire<'a> {
             compaction_response_id: item.compaction_response_id.as_deref().map(Cow::Borrowed),
             latest_token_usage_record: item.latest_token_usage_record.as_ref().map(Cow::Borrowed),
             resume_metadata: item.resume_metadata.as_ref().map(Cow::Borrowed),
+            conversation_packet: item.conversation_packet.as_ref().map(Cow::Borrowed),
         }
     }
 }
@@ -369,6 +373,7 @@ impl TryFrom<CompactedItemWire<'_>> for CompactedItem {
             compaction_response_id: item.compaction_response_id.map(Cow::into_owned),
             latest_token_usage_record: item.latest_token_usage_record.map(Cow::into_owned),
             resume_metadata: item.resume_metadata.map(Cow::into_owned),
+            conversation_packet: item.conversation_packet.map(Cow::into_owned),
         })
     }
 }
@@ -380,3 +385,7 @@ enum WindowIdWire<'a> {
     Id(Cow<'a, str>),
     LegacyWindowNumber(u64),
 }
+
+#[cfg(test)]
+#[path = "conversation_packet_checkpoint_tests.rs"]
+mod conversation_packet_checkpoint_tests;

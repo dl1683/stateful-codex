@@ -2464,6 +2464,7 @@ async fn reconstruct_history_uses_replacement_history_verbatim() {
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     })];
 
     let reconstructed = session
@@ -3402,6 +3403,7 @@ fn latest_token_usage_record_stops_at_compaction_checkpoint() {
             compaction_response_id: None,
             latest_token_usage_record,
             resume_metadata: None,
+            conversation_packet: None,
         })
     };
 
@@ -13091,6 +13093,7 @@ async fn sample_rollout(
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     }));
 
     let user2 = user_message("second user");
@@ -13126,6 +13129,7 @@ async fn sample_rollout(
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     }));
 
     let user3 = user_message("third user");
