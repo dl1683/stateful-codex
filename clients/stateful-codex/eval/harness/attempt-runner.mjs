@@ -9,13 +9,13 @@ import { writeProjectStateArtifact } from "../export-project-state.mjs";
 import { isolatedEnvironment, prepareIsolatedHome } from "./isolated-home.mjs";
 import { captureWorkspaceDiff, listFiles, prepareWorkspace } from "./workspace.mjs";
 
-export async function runAttempt({ scenario, rep, arm = "stateful", out, workRoot = path.join(os.tmpdir(), "scbench-test-workspaces"), codex, authHome, python, adapter = runTui }) {
-  const attemptRoot = path.join(out, "attempts", scenario.id, arm, String(rep));
+export async function runAttempt({ scenario, rep, attemptDirectory = String(rep), arm = "stateful", out, workRoot = path.join(os.tmpdir(), "scbench-test-workspaces"), codex, authHome, python, adapter = runTui }) {
+  const attemptRoot = path.join(out, "attempts", scenario.id, arm, attemptDirectory);
   await mkdir(path.dirname(attemptRoot), { recursive: true });
   await mkdir(attemptRoot);
   const evidence = path.join(attemptRoot, "evidence");
   await mkdir(evidence);
-  const prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, String(rep)) });
+  const prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, attemptDirectory) });
   const homes = await prepareIsolatedHome(attemptRoot, authHome);
   const before = await listFiles(prepared.workspace);
   await writeJson(path.join(evidence, "workspace-before.json"), before);

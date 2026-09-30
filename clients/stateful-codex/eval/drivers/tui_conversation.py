@@ -80,6 +80,8 @@ def append_transcript(session, value):
 
 def drive(options):
     os.makedirs(options.session, exist_ok=True)
+    for name in ("actions.jsonl", "approvals.jsonl", "transcript.jsonl"):
+        open(os.path.join(options.session, name), "a", encoding="utf-8").close()
     with open(options.conversation, encoding="utf-8") as file:
         conversation = json.load(file)
     session_script = os.path.join(os.path.dirname(__file__), "tui_session.py")
