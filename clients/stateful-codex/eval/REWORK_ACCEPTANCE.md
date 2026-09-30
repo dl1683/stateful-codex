@@ -27,3 +27,19 @@ changes against the independent external Git baselines. SQLite snapshots and
 preflight canaries were retained as capture evidence; they do not make a
 conversation valid. The acceptance must be rerun after the sandbox capability is
 made available to the executable.
+
+## Rebuilt TUI acceptance: 2026-09-30 R7
+
+Run root: `eval/runs/REWORK_DAY_ONE_R7`.
+
+The paired acceptance completed **12/12 valid conversations**: six catalogue
+scenarios, each run once by the base arm and once by the Stateful arm, with at
+most three concurrent conversations. All attempts passed the infrastructure,
+message-boundary, rollout, requested-state, evidence, workspace-isolation, and
+sealed-store gates.
+
+The first in-run scorecard showed 6/12 because its already-loaded grader
+required an `available: true` wrapper that the native Stateful export does not
+emit. Post-run regrading with the corrected `stateful-project-state-v1`
+check produced the final 12/12 result. The corrected scorecard and each sealed
+attempt's evidence directory are retained under the R7 run root.
