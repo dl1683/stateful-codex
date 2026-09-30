@@ -81,7 +81,7 @@ def composer_pending(screen, message):
     if not message:
         return False
     preview = " ".join(message.split())[:40]
-    return preview and any(marker in screen for marker in (f"› {preview}", f"> {preview}"))
+    return preview and any(marker in screen for marker in (f"› {preview}", f"> {preview}", f"� {preview}"))
 
 
 def stable_idle(screen, quiet_seconds, required_seconds, seen_busy=True):
@@ -204,11 +204,13 @@ def wait_turn(options, driver, turn_id, message):
         if is_busy(screen):
             seen_busy = True
             quiet_since = None
+        elif composer_pending(screen, message) and not seen_busy:
+            quiet_since = quiet_since or time.time()
         elif ready_screen(screen):
             quiet_since = quiet_since or time.time()
         else:
             quiet_since = None
-        if quiet_since and composer_pending(screen, message) and not seen_busy:
+        if quiet_since and composer_pending(screen, message) and not seen_busy and time.time() - quiet_since >= min(16, options.idle_stable):
             if send(options, driver, {"id": f"resubmit-{turn_id}", "keys": ["enter"], "recovery": "composer"}):
                 quiet_since = None
                 continue

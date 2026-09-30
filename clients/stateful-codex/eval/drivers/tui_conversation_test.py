@@ -23,6 +23,7 @@ class ConversationDriverTests(unittest.TestCase):
 
     def test_composer_recovery_detects_typed_and_pasted_content(self):
         self.assertTrue(composer_pending("Ask Codex › next message", "next message"))
+        self.assertTrue(composer_pending("� next message", "next message"))
         self.assertTrue(composer_pending("Ask Codex › [Pasted Content 42 chars]", "next message"))
         self.assertFalse(composer_pending("Ask Codex", "next message"))
 
