@@ -41,7 +41,7 @@ let refreshTimer;
 const refresh = createRefreshGate(refreshWorkspace);
 
 async function boot() {
-  subscribe(handleEvent);
+  subscribe(handleEvent, { threadId, projectId });
   try {
     await ensureRun();
     await refresh();
@@ -379,7 +379,7 @@ async function answerApproval(requestId, actionName) {
     (item) => String(item.id) === requestId,
   );
   if (!request) return;
-  await reply({
+  await reply(threadId, {
     id: request.id,
     result: { decision: actionName === "approve" ? "accept" : "decline" },
   });
@@ -401,7 +401,7 @@ async function answerUserRequest(form) {
       { answers: [data.get(question.id)?.toString() ?? ""] },
     ]),
   );
-  await reply({ id: request.id, result: { answers } });
+  await reply(threadId, { id: request.id, result: { answers } });
   state.pendingRequests = state.pendingRequests.filter(
     (item) => item.id !== request.id,
   );

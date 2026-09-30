@@ -21,10 +21,12 @@ export async function rpc(method, params = {}) {
   return body.result;
 }
 
-export function subscribe(onMessage) {
-  const source = new EventSource(
-    `/events?token=${encodeURIComponent(sessionToken)}`,
-  );
+// scope: { threadId, projectId } in a workspace; omit on the setup page (gateway events only).
+export function subscribe(onMessage, scope = {}) {
+  const query = new URLSearchParams({ token: sessionToken });
+  if (scope.threadId) query.set("thread", scope.threadId);
+  if (scope.projectId) query.set("project", scope.projectId);
+  const source = new EventSource(`/events?${query}`);
   source.onmessage = (event) => onMessage(JSON.parse(event.data));
   source.onerror = () =>
     onMessage({
@@ -34,17 +36,18 @@ export function subscribe(onMessage) {
   return () => source.close();
 }
 
-export async function reply(message) {
-  const response = await fetch("/reply", {
+// Answer a server request raised by this workspace's thread; the gateway rejects foreign replies.
+export async function reply(threadId, response) {
+  const result = await fetch("/reply", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Stateful-Session": sessionToken,
     },
-    body: JSON.stringify(message),
+    body: JSON.stringify({ threadId, response }),
   });
-  if (!response.ok) {
-    const body = await response.json();
-    throw new Error(body.error?.message ?? "Codex reply failed");
+  if (!result.ok) {
+    const body = await result.json();
+    throw new Error(body.error?.message ?? body.reason ?? "Codex reply failed");
   }
 }
