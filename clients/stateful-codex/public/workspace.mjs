@@ -1,5 +1,6 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
+import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { renderWorkspace } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
@@ -203,29 +204,9 @@ function render() {
 }
 
 function handleEvent(message) {
-  if (Object.hasOwn(message, "id") && message.method) {
-    state.pendingRequests = [
-      ...state.pendingRequests.filter((item) => item.id !== message.id),
-      message,
-    ];
-    render();
-    return;
-  }
-  if (message.method === "gateway/error") {
-    state.notice = message.params.message;
-    render();
-    return;
-  }
-  if (message.method === "item/agentMessage/delta") {
-    state.liveText += message.params.delta ?? "";
-    render();
-  }
-  if (message.method === "turn/started") state.liveText = "";
-  if (
-    /^(statefulRun|statefulAttribution|obligation|steering|blackboard|project|thread|turn)\//.test(
-      message.method,
-    )
-  ) {
+  const effect = applyWorkspaceEvent(state, message);
+  if (effect.render) render();
+  if (effect.refresh) {
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => refresh().catch(fail), 180);
   }
