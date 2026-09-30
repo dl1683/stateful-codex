@@ -1,11 +1,11 @@
-import { access, mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runAttempt } from "./attempt-runner.mjs";
 import { planScenarios } from "./planner.mjs";
 import { buildScorecard, writeScorecard } from "./scorecard.mjs";
 
-export async function runBundle({ scenarios, codex, out, jobs, reps, tier = "surface", arms = ["base", "stateful"], authHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"), python, workRoot }) {
+export async function runBundle({ scenarios, codex, out, jobs, reps, tier = "surface", arms = ["base", "stateful"], authHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), python, workRoot }) {
   out = path.resolve(out);
   const plan = planScenarios(scenarios, { tier, reps, jobs, arms });
   workRoot = path.resolve(workRoot ?? path.join(os.tmpdir(), "scbench-workspaces", path.basename(out)));

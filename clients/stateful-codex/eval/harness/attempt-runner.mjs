@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
@@ -17,13 +17,16 @@ export async function runAttempt({ scenario, rep, attemptDirectory = String(rep)
   await mkdir(evidence);
   const prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, attemptDirectory) });
   const homes = await prepareIsolatedHome(attemptRoot, authHome);
+  const sandbox = await sandboxPreflight(prepared.workspace, homes.codexHome);
+  await writeJson(path.join(evidence, "sandbox-preflight.json"), sandbox);
   const before = await listFiles(prepared.workspace);
   await writeJson(path.join(evidence, "workspace-before.json"), before);
   const startedAt = new Date().toISOString();
   let adapterResult;
   let error = null;
   try {
-    adapterResult = await adapter({ attemptRoot, workspace: prepared.workspace, scenario, codex, python, arm, env: isolatedEnvironment(homes), timeoutSeconds: scenario.conversation.turnTimeoutSeconds * (scenario.conversation.turns.length + 1) });
+    if (!sandbox.writable || !sandbox.seeded) adapterResult = { code: null, signal: null, exitReason: "sandboxPreflightFailed", error: sandbox.error };
+    else adapterResult = await adapter({ attemptRoot, workspace: prepared.workspace, scenario, codex, python, arm, env: isolatedEnvironment(homes), timeoutSeconds: scenario.conversation.turnTimeoutSeconds * (scenario.conversation.turns.length + 1) });
   } catch (caught) {
     error = caught;
     adapterResult = { code: null, signal: null, exitReason: "runnerError", error: caught.message };
@@ -52,6 +55,20 @@ export async function runAttempt({ scenario, rep, attemptDirectory = String(rep)
   const grade = await gradeAttempt({ attemptRoot, scenario, attempt });
   await writeJson(path.join(attemptRoot, "grade.json"), grade);
   return { attempt, grade };
+}
+
+async function sandboxPreflight(workspace, codexHome) {
+  const canary = path.join(workspace, `.scbench-write-canary-${process.pid}`);
+  const seeded = (await Promise.all([".sandbox", ".sandbox-bin", "cap_sid"].map(async (name) => {
+    try { await access(path.join(codexHome, name)); return true; } catch { return false; }
+  }))).every(Boolean);
+  try {
+    await writeFile(canary, "scbench preflight\n");
+    await unlink(canary);
+    return { writable: true, seeded, canary: "write-read-delete", error: seeded ? null : "sandbox runtime seed is incomplete" };
+  } catch (error) {
+    return { writable: false, seeded, canary: "write-read-delete", error: error.message };
+  }
 }
 
 async function captureStores({ evidence, homes, arm, startedAt, scenario }) {

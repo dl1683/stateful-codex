@@ -1,7 +1,7 @@
 import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-const REQUIRED = ["transcript.txt", "transcript.jsonl", "actions.jsonl", "approvals.jsonl", "turns.json", "screen-final.txt", "rollout.jsonl", "rollout-source.json", "project-state.json", "store-inventory.json", "store-snapshot.json", "workspace-before.json", "workspace-after.json", "workspace.patch"];
+const REQUIRED = ["transcript.txt", "transcript.jsonl", "actions.jsonl", "approvals.jsonl", "turns.json", "screen-final.txt", "rollout.jsonl", "rollout-source.json", "project-state.json", "store-inventory.json", "store-snapshot.json", "sandbox-preflight.json", "workspace-before.json", "workspace-after.json", "workspace.patch"];
 
 export async function gradeAttempt({ attemptRoot, scenario, attempt }) {
   const evidence = path.join(attemptRoot, "evidence");
