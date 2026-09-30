@@ -13,6 +13,21 @@ pub use compaction_resume_metadata::resume_multi_agent_version;
 mod compaction_checkpoint;
 pub use compaction_checkpoint::CompactionCheckpoint;
 
+mod conversation_packet;
+pub use conversation_packet::CONVERSATION_PACKET_VERSION;
+pub use conversation_packet::ConversationInputCoverage;
+pub use conversation_packet::ConversationPacket;
+pub use conversation_packet::ConversationPacketBoundary;
+pub use conversation_packet::ConversationPacketBudget;
+pub use conversation_packet::ConversationPacketCoverage;
+pub use conversation_packet::ConversationPacketError;
+pub use conversation_packet::ConversationPacketInput;
+pub use conversation_packet::ConversationPacketRecord;
+pub use conversation_packet::ConversationPacketSize;
+pub use conversation_packet::ConversationRecordKind;
+pub use conversation_packet::MAX_PACKET_CANDIDATE_BYTES;
+pub use conversation_packet::MAX_PACKET_CANDIDATES;
+
 use std::borrow::Borrow;
 use std::ops::Deref;
 use std::ops::DerefMut;
