@@ -17,6 +17,8 @@ use crate::PINNED_THREAD_SECTION_ID;
 use crate::PINNED_THREAD_SECTION_NAME;
 
 const CUSTOM_THREAD_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf317";
+const PRE_MERGE_STATE_DATABASE: &[u8] =
+    include_bytes!("../testdata/state_v56_from_4ea34e7d10.sqlite");
 
 fn migrator_through(version: i64) -> Migrator {
     Migrator {
@@ -152,6 +154,9 @@ async fn state_database_with_legacy_version_56_owner_migration_opens_and_migrate
     });
     let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
     let state_path = sqlite.state_db_path();
+    tokio::fs::write(&state_path, PRE_MERGE_STATE_DATABASE)
+        .await
+        .expect("pre-merge state database fixture should be copied");
     let pool = sqlite
         .open_read_write_pool(&state_path)
         .await
@@ -161,29 +166,17 @@ async fn state_database_with_legacy_version_56_owner_migration_opens_and_migrate
         .iter()
         .find(|migration| migration.version == 59)
         .expect("owner-token migration should exist");
-    let mut legacy_migrations = STATE_MIGRATOR
-        .migrations
-        .iter()
-        .filter(|migration| migration.version <= 55)
-        .cloned()
-        .collect::<Vec<_>>();
-    legacy_migrations.push(Migration::new(
-        56,
-        owner_migration.description.clone(),
-        owner_migration.migration_type,
-        owner_migration.sql.clone(),
-        owner_migration.no_tx,
-    ));
-    Migrator::with_migrations(legacy_migrations)
-        .run(&pool)
-        .await
-        .expect("legacy owner-token migration should apply as version 56");
-    sqlx::query(
-        "UPDATE backfill_state SET status = 'in_progress', last_watermark = 'legacy-rollout', last_success_at = 1, owner_token = 'legacy-owner', updated_at = 1 WHERE id = 1",
+    let legacy_version_and_checksum = sqlx::query_as::<_, (i64, Vec<u8>)>(
+        "SELECT version, checksum FROM _sqlx_migrations WHERE version = 56",
     )
-    .execute(&pool)
+    .fetch_one(&pool)
     .await
-    .expect("legacy backfill state should update");
+    .expect("pre-merge migration history should load");
+    assert_eq!(legacy_version_and_checksum.0, 56);
+    assert_eq!(
+        legacy_version_and_checksum.1,
+        owner_migration.checksum.to_vec()
+    );
     pool.close().await;
 
     let migrator = runtime_state_migrator();
@@ -254,6 +247,41 @@ async fn state_database_with_legacy_version_56_owner_migration_opens_and_migrate
         .await
         .expect("migrated legacy state database should reopen");
     pool.close().await;
+}
+
+#[tokio::test]
+async fn state_database_with_unknown_legacy_version_56_checksum_is_rejected() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let state_path = sqlite.state_db_path();
+    tokio::fs::write(&state_path, PRE_MERGE_STATE_DATABASE)
+        .await
+        .expect("pre-merge state database fixture should be copied");
+    let pool = sqlite
+        .open_read_write_pool(&state_path)
+        .await
+        .expect("sqlite database should open");
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = 56")
+        .bind(vec![0_u8; 32])
+        .execute(&pool)
+        .await
+        .expect("legacy checksum should be altered");
+    pool.close().await;
+
+    let error = sqlite
+        .open_state_db(&runtime_state_migrator(), /*telemetry_override*/ None)
+        .await
+        .expect_err("unknown legacy checksum must remain a migration error");
+    assert!(error.chain().any(|cause| matches!(
+        cause.downcast_ref::<MigrateError>(),
+        Some(MigrateError::VersionMismatch(56))
+    )));
 }
 
 #[tokio::test]
