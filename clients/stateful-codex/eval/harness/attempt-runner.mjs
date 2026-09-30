@@ -16,12 +16,13 @@ export async function runAttempt({ scenario, rep, attemptDirectory = String(rep)
   const evidence = path.join(attemptRoot, "evidence");
   await mkdir(evidence);
   let prepared;
+  let homes;
   try {
     prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, attemptDirectory) });
+    homes = await prepareIsolatedHome(attemptRoot, authHome);
   } catch (error) {
     return sealFailure({ attemptRoot, evidence, scenario, rep, arm, codex, error, reason: "setupFailed" });
   }
-  const homes = await prepareIsolatedHome(attemptRoot, authHome);
   const sandbox = await sandboxPreflight(prepared.workspace, homes.codexHome);
   await writeJson(path.join(evidence, "sandbox-preflight.json"), sandbox);
   const before = await listFiles(prepared.workspace);

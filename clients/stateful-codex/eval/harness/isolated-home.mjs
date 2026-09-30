@@ -1,4 +1,4 @@
-import { cp, link, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 
 export async function prepareIsolatedHome(root, authHome) {
@@ -11,10 +11,24 @@ export async function prepareIsolatedHome(root, authHome) {
   for (const name of [".sandbox", ".sandbox-bin", "cap_sid"]) {
     const source = path.join(authHome, name);
     const target = path.join(codexHome, name);
-    try { await cp(source, target, { recursive: true, errorOnExist: true }); }
+    try {
+      if (name === "cap_sid") await link(source, target);
+      else await seedRuntimeTree(source, target, name === ".sandbox");
+    }
     catch (error) { throw new Error(`unable to seed ${name}: ${error.message}`); }
   }
   return { codexHome, sqliteHome };
+}
+
+async function seedRuntimeTree(source, target, skipLogs) {
+  await mkdir(target, { recursive: true });
+  for (const entry of await readdir(source, { withFileTypes: true })) {
+    if (skipLogs && entry.name.endsWith(".log")) continue;
+    const sourceEntry = path.join(source, entry.name);
+    const targetEntry = path.join(target, entry.name);
+    if (entry.isDirectory()) await seedRuntimeTree(sourceEntry, targetEntry, skipLogs);
+    else if (entry.isFile()) await link(sourceEntry, targetEntry);
+  }
 }
 
 export function isolatedEnvironment({ codexHome, sqliteHome, extra = {} }) {
