@@ -22,6 +22,7 @@ export async function loadScenarios({ selector = "*", env = process.env, checkFi
 export async function validateScenario(scenario, { env = process.env, checkFixtures = false } = {}) {
   const errors = [];
   if (scenario.schemaVersion !== 1 || scenario.kind !== "surface" || scenario.surface !== "tui") errors.push("schemaVersion/kind/surface");
+  if (scenario.arms !== undefined && (!Array.isArray(scenario.arms) || !scenario.arms.includes("base") || !scenario.arms.includes("stateful"))) errors.push("arms must include base and stateful");
   if (!scenario.id || !/^surface\.tui\.[a-z0-9-]+$/.test(scenario.id)) errors.push("id");
   const fixture = scenario.fixture ?? {};
   if (!/^sha256:[0-9a-f]{64}$/.test(fixture.sha256 ?? "")) errors.push("fixture.sha256");
@@ -39,7 +40,7 @@ export async function validateScenario(scenario, { env = process.env, checkFixtu
     if (actual !== fixture.sha256) errors.push(`fixture hash mismatch: expected ${fixture.sha256}, got ${actual}`);
   }
   if (errors.length) throw new Error(`${scenario.id} invalid: ${errors.join(", ")}`);
-  return { ...scenario, fixture: { ...fixture, resolvedSource: source } };
+  return { ...scenario, arms: scenario.arms ?? ["base", "stateful"], fixture: { ...fixture, resolvedSource: source } };
 }
 
 export function resolveEnv(value, env = process.env) {
