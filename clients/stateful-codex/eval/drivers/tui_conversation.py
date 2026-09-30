@@ -27,6 +27,10 @@ APPROVAL_PATTERNS = (
     ("confirm", re.compile(r"Press enter to confirm(?: or esc to cancel)?", re.I)),
     ("mcp", re.compile(r"Allow the .+ MCP server to run tool .+\?", re.I)),
 )
+SETUP_FAILURE_MARKERS = (
+    "Set up the Codex agent sandbox",
+    "Use non-admin sandbox",
+)
 
 
 def is_busy(screen):
@@ -42,12 +46,27 @@ def approval_identity(screen):
         match = pattern.search(screen)
         if match:
             excerpt = " ".join(screen[max(0, match.start() - 240) : match.end() + 500].split())
+            if kind == "command":
+                command_match = re.search(
+                    r"Environment:\s*local\s*\$\s*(.*?)(?:›|Press enter|$)",
+                    screen,
+                    re.I | re.S,
+                )
+                approval_key = " ".join((command_match.group(1) if command_match else excerpt).split())
+            elif kind == "mcp":
+                approval_key = " ".join(match.group(0).split())
+            else:
+                approval_key = kind
             return {
                 "kind": kind,
-                "id": hashlib.sha256(f"{kind}:{excerpt}".encode()).hexdigest()[:20],
+                "id": hashlib.sha256(f"{kind}:{approval_key}".encode()).hexdigest()[:20],
                 "excerpt": excerpt,
             }
     return None
+
+
+def setup_failure(screen):
+    return any(marker in screen for marker in SETUP_FAILURE_MARKERS)
 
 
 def ready_screen(screen):
@@ -128,6 +147,8 @@ def drive(options):
     finally:
         with open(os.path.join(options.session, "turns.json"), "w", encoding="utf-8") as file:
             json.dump(turns, file, indent=2)
+        if not os.path.exists(os.path.join(options.session, "screen-final.txt")):
+            snapshot(options.session, "screen-final.txt")
         if driver.poll() is None:
             driver.terminate()
 
@@ -138,6 +159,8 @@ def wait_ready(options, driver):
     seen = set()
     while time.time() < deadline and driver.poll() is None:
         screen = read_screen(options.session)
+        if setup_failure(screen):
+            return "sandboxSetupRequired"
         if handle_approval(options, driver, screen, seen):
             quiet_since = None
             continue
@@ -158,6 +181,8 @@ def wait_turn(options, driver, turn_id):
     seen = set()
     while time.time() < deadline and driver.poll() is None:
         screen = read_screen(options.session)
+        if setup_failure(screen):
+            return False, "sandboxSetupRequired"
         if handle_approval(options, driver, screen, seen):
             quiet_since = None
             continue
