@@ -3509,3 +3509,27 @@ Project state measurably improves multi-session, multi-document synthesis when w
 it reduces cost where re-reading is expensive. It does not yet improve short or single-thread work, it costs more on
 cheap lookups, standing instructions are not captured deterministically, and the TUI does not expose it. Detailed
 findings, repro paths and the ranked improvement backlog are kept in the campaign notes outside the repository.
+
+## Benchmark SC-EVAL-034: 25-question model eval, GPT-6.1 Sol, Stateful vs ordinary (2026-09-30)
+
+**Setup.** 25 questions in five batches, run in order in one working directory per arm, same machine, same day: b1 and b2 objective mathematics; b3 grounding in chip repositories; b4 open insight; b5 deep reasoning. Ordinary arm: codex-cli 0.159.2. Stateful arm: the fork at 4ea34e7d10 with the workspace version stamped to 0.159.2 (debug build with the code-mode host), one project store across all five batches. Costs are list-price equivalents computed from session usage records at $2 per 1M uncached input, $0.10 per 1M cached input and $10 per 1M output (ChatGPT login; nothing was billed).
+
+| Batch | Stateful cost | Ordinary cost | Δ cost | Stateful time | Ordinary time | Input tokens (S / O) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| b1 objective | $0.085 | $0.045 | +89% | 127 s | 119 s | 107k / 62k |
+| b2 objective | $0.055 | $0.036 | +55% | 129 s | 80 s | 109k / 61k |
+| b3 repository grounding | $0.363 | $0.482 | −25% | 447 s | 435 s | 1.09M / 1.45M |
+| b4 open insight | $0.384 | $0.492 | −22% | 553 s | 670 s | 1.04M / 1.29M |
+| b5 deep reasoning | $0.535 | $0.586 | −9% | 1,086 s | 1,365 s | 1.44M / 1.10M |
+| **Total** | **$1.422** | **$1.641** | **−13.4%** | **2,342 s** | **2,669 s** | |
+
+**Result.** Same objective score (10/10). Stateful paid its setup overhead on the small one-shot batches and saved once batches worked in the same repositories. On the hardest repository-derivation question it gave the most complete answer of the GPT arms (43-clock abort recovery, with 39 as the overlap minimum). This is the first model on this eval where the Stateful arm was cheaper than ordinary Codex: GPT-5.6 Sol $5.78 vs $5.59 (+3%) and GPT-6 Astra $8.81 vs $7.60 (+16%).
+
+**Limits.** One run per arm, so no variance estimate; only b1 and b2 are objectively scored; a single store accumulated across batches (the intended use, but it also means later batches are not independent). Raw data: `model_eval/sc61_compare.json`, `run_p_61sol/`, `run_s_61sol/` (local). An earlier Stateful 6.1 run on an incomplete binary (missing code-mode host) was invalid and excluded.
+
+### Same-day negative findings (Campaign II continued, 2026-09-30)
+
+- **Stale memory served as current.** After a collaborator committed a change to a project's key status (git status clean), a fresh thread was asked "quick one: current status and next action?". Correct first answers: ordinary Codex 7.5/10, Stateful 0/10 across two experiments and five real projects. Stateful answered from stored findings without opening a file. When challenged, it recovered 4/4 when the changed file was one it had findings about, but only 1/6 when the change was elsewhere (it re-verified only its own sources).
+- **Compaction loses what the agent told the user.** In one continuous thread with forced compaction, "what were the three numbers you gave me earlier?" was answered with the same numbers by ordinary Codex 3/4 and by Stateful 0/4 (3 different, 1 partial), with no uncertainty acknowledged in any thread. Stateful compacted more often (11 vs 6) because of its larger fixed prefix.
+- **Standing instructions are saved but not reliably applied.** "Remember for every future session" was honoured in a later fresh thread 2/4 by each arm. All 4 Stateful stores did capture it as a user-priority instruction entry, so the gap is in applying stored instructions, not capturing them. Ordinary Codex persisted it by writing it into the project's own handoff files. (An earlier version of this line said 0/4 stores contained it; that was a measurement error, corrected here.)
+- **Web UI:** live responses from concurrent sessions on one server leak into each other's pages; "Open workspace" ignores the first click; continuing without a desired outcome silently does nothing.
