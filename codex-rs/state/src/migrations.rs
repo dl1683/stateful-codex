@@ -20,6 +20,14 @@ pub(crate) static THREAD_HISTORY_MIGRATOR: Migrator =
 /// We intentionally ignore applied migration versions that are newer than the
 /// embedded migration set. Known migration versions are still validated by
 /// checksum, so this only relaxes the "database is ahead of me" case.
+///
+/// This does not make migration compatibility bidirectional. The legacy fork
+/// version-56 owner-token row is repaired to version 59 before migration; an
+/// older binary will therefore reject the upgraded database because it still
+/// expects that row at version 56. The supported coexistence window is an old
+/// binary opening an old database before the upgrade and the new binary
+/// completing that upgrade. Rolling back to, or concurrently using, the old
+/// binary after repair is unsupported.
 fn runtime_migrator(base: &'static Migrator) -> Migrator {
     Migrator {
         migrations: Cow::Borrowed(base.migrations.as_ref()),
