@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runTui } from "../adapters/tui.mjs";
@@ -8,17 +7,19 @@ import { isolatedEnvironment, prepareIsolatedHome } from "./isolated-home.mjs";
 import { planScenarios } from "./planner.mjs";
 import { gradeAttempt } from "../graders/tui-evidence.mjs";
 import { buildScorecard, writeScorecard } from "./scorecard.mjs";
+import { captureWorkspaceDiff, listFiles, prepareWorkspace } from "./workspace.mjs";
 
-export async function runBundle({ scenarios, codex, out, jobs, reps = 1, tier = "surface", authHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"), python }) {
+export async function runBundle({ scenarios, codex, out, jobs, reps, tier = "surface", authHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"), python, workRoot }) {
   out = path.resolve(out);
   const plan = planScenarios(scenarios, { tier, reps, jobs });
+  workRoot = path.resolve(workRoot ?? path.join(os.tmpdir(), "scbench-workspaces", path.basename(out)));
   await mkdir(out, { recursive: true });
   await writeJson(path.join(out, "plan.json"), plan);
-  const manifest = { schemaVersion: 1, startedAt: new Date().toISOString(), codex, plan, attempts: [] };
+  const manifest = { schemaVersion: 1, startedAt: new Date().toISOString(), codex, workRoot, plan, attempts: [] };
   await writeJson(path.join(out, "manifest.json"), manifest);
   const work = [];
   for (let rep = 1; rep <= reps; rep += 1) for (const scenario of scenarios) work.push({ scenario, rep });
-  const results = await parallel(work, plan.jobs, async ({ scenario, rep }) => runAttempt({ scenario, rep, out, codex, authHome, python }));
+  const results = await parallel(work, plan.jobs, async ({ scenario, rep }) => runAttempt({ scenario, rep, out, codex, authHome, python, workRoot, arm: "stateful" }));
   manifest.attempts = results.map(({ attempt, grade }) => attempt);
   manifest.finishedAt = new Date().toISOString();
   await writeJson(path.join(out, "manifest.json"), manifest);
@@ -27,23 +28,23 @@ export async function runBundle({ scenarios, codex, out, jobs, reps = 1, tier = 
   return scorecard;
 }
 
-export async function runAttempt({ scenario, rep, out, codex, authHome, python, adapter = runTui }) {
+export async function runAttempt({ scenario, rep, out, codex, authHome, python, workRoot, arm, adapter = runTui }) {
   const attemptRoot = path.join(out, "attempts", scenario.id, String(rep));
-  const workspace = path.join(attemptRoot, "workspace");
   const evidence = path.join(attemptRoot, "evidence");
   await mkdir(evidence, { recursive: true });
-  await cp(scenario.fixture.resolvedSource, workspace, { recursive: true });
+  const prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, String(rep), arm) });
+  const workspace = prepared.workspace;
   const homes = await prepareIsolatedHome(attemptRoot, authHome);
   const before = await inventory(workspace);
   await writeJson(path.join(evidence, "workspace-before.json"), before);
   const startedAt = new Date().toISOString();
-  const adapterResult = await adapter({ attemptRoot, scenario, codex, python, env: isolatedEnvironment(homes) });
+  const adapterResult = await adapter({ attemptRoot, workspace, scenario, codex, python, arm, env: isolatedEnvironment(homes) });
   for (const file of ["transcript.txt", "actions.jsonl", "approvals.jsonl", "turns.json", "screen-final.txt"]) await ensureFile(path.join(evidence, file));
-  const after = await inventory(workspace);
+  const after = await listFiles(prepared.workspace);
   await writeJson(path.join(evidence, "workspace-after.json"), after);
-  await writeFile(path.join(evidence, "workspace.patch"), spawnSync("git", ["-C", workspace, "diff", "--binary"], { encoding: "utf8" }).stdout ?? "");
+  const workspaceChange = await captureWorkspaceDiff(prepared.workspace, path.join(evidence, "workspace.patch"));
   await captureStores(evidence, homes);
-  const attempt = { schemaVersion: 1, scenarioId: scenario.id, repetition: rep, fixtureSha256: scenario.fixture.sha256, executableSha256: await fileHash(codex), startedAt, finishedAt: new Date().toISOString(), process: adapterResult, exitReason: adapterResult.code === 0 ? "processExited" : "driverFailed", retryClassification: "none", evidence: await inventory(attemptRoot) };
+  const attempt = { schemaVersion: 1, scenarioId: scenario.id, repetition: rep, arm, fixtureSha256: scenario.fixture.sha256, executableSha256: await fileHash(codex), startedAt, finishedAt: new Date().toISOString(), workspace: { path: prepared.workspace, baseline: prepared.baseline, before: before.length, after: after.length, status: workspaceChange.status }, process: adapterResult, exitReason: adapterResult.code === 0 ? "processExited" : "driverFailed", retryClassification: "none", evidence: await inventory(attemptRoot) };
   await writeJson(path.join(attemptRoot, "attempt.json"), attempt);
   const grade = await gradeAttempt({ attemptRoot, scenario, attempt });
   await writeJson(path.join(attemptRoot, "grade.json"), grade);

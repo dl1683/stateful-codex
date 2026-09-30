@@ -4,12 +4,12 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export async function runTui({ attemptRoot, scenario, codex, python = process.env.PYTHON ?? "python", env = process.env }) {
+export async function runTui({ attemptRoot, workspace, scenario, codex, arm = "stateful", python = process.env.PYTHON ?? "python", env = process.env }) {
   const evidence = path.join(attemptRoot, "evidence");
   await mkdir(evidence, { recursive: true });
   const conversation = path.join(attemptRoot, "conversation.json");
   await writeFile(conversation, JSON.stringify({ initialMessage: scenario.conversation.initialMessage, turns: scenario.conversation.turns }));
-  const args = [path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../drivers/tui_conversation.py"), "--session", evidence, "--conversation", conversation, "--workspace", path.join(attemptRoot, "workspace"), "--codex", codex, "--mode", scenario.conversation.mode, "--turn-timeout", String(scenario.conversation.turnTimeoutSeconds), "--idle-stable", String(scenario.conversation.idleStableSeconds)];
+  const args = [path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../drivers/tui_conversation.py"), "--session", evidence, "--conversation", conversation, "--workspace", workspace, "--codex", codex, "--mode", scenario.conversation.mode, "--arm", arm, "--turn-timeout", String(scenario.conversation.turnTimeoutSeconds), "--idle-stable", String(scenario.conversation.idleStableSeconds)];
   const stdout = createWriteStream(path.join(attemptRoot, "stdout.txt"));
   const stderr = createWriteStream(path.join(attemptRoot, "stderr.txt"));
   const tuiEnv = { ...env };
@@ -22,8 +22,8 @@ export async function runTui({ attemptRoot, scenario, codex, python = process.en
   return { code, signal, evidenceRoot: evidence };
 }
 
-export function tuiDriverArgs(scenario, attemptRoot, codex) {
-  return { mode: scenario.conversation.mode, workspace: path.join(attemptRoot, "workspace"), codex };
+export function tuiDriverArgs(scenario, workspace, codex) {
+  return { mode: scenario.conversation.mode, workspace, codex };
 }
 
 function finished(stream) { return new Promise((resolve) => stream.once("finish", resolve)); }
