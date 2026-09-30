@@ -2,14 +2,16 @@ import os from "node:os";
 
 const REPS = { surface: 1, smoke: 1, full: 3, claim: 5 };
 
-export function planScenarios(scenarios, { tier = "surface", reps = REPS[tier], jobs, parallelism = os.availableParallelism(), maxWallMinutes, maxAttempts } = {}) {
+export function planScenarios(scenarios, { tier = "surface", reps = REPS[tier], jobs, arms = ["stateful"], parallelism = os.availableParallelism(), maxWallMinutes, maxAttempts } = {}) {
   if (!REPS[tier]) throw new Error(`unknown tier ${tier}`);
   if (!Number.isInteger(reps) || reps < 1) throw new Error("reps must be a positive integer");
-  const attempts = scenarios.length * reps;
+  const selectedArms = arms.filter((arm) => ["base", "stateful"].includes(arm));
+  if (!selectedArms.length) throw new Error("at least one arm is required");
+  const attempts = scenarios.reduce((sum, scenario) => sum + selectedArms.filter((arm) => scenario.arms.includes(arm)).length, 0) * reps;
   const sessions = attempts;
-  const userTurns = scenarios.reduce((sum, scenario) => sum + 1 + scenario.conversation.turns.length, 0) * reps;
+  const userTurns = scenarios.reduce((sum, scenario) => sum + 1 + scenario.conversation.turns.length, 0) * reps * (selectedArms.length === 1 ? 1 : selectedArms.filter((arm) => scenario.arms.includes(arm)).length);
   const effectiveJobs = Math.max(1, Math.min(24, jobs ?? parallelism));
-  const serialMinutes = scenarios.reduce((sum, scenario) => sum + (1 + scenario.conversation.turns.length) * scenario.conversation.turnTimeoutSeconds / 60, 0) * reps;
+  const serialMinutes = scenarios.reduce((sum, scenario) => sum + (1 + scenario.conversation.turns.length) * scenario.conversation.turnTimeoutSeconds / 60, 0) * reps * (selectedArms.length === 1 ? 1 : selectedArms.length);
   const concurrentMinutes = Math.ceil(serialMinutes / effectiveJobs);
   const plan = {
     schemaVersion: 1,
@@ -20,6 +22,7 @@ export function planScenarios(scenarios, { tier = "surface", reps = REPS[tier], 
     userTurns,
     selectedSurfaces: [...new Set(scenarios.map(({ surface }) => surface))],
     selectedModes: [...new Set(scenarios.map(({ conversation: { mode } }) => mode))],
+    selectedArms,
     maximumTheoreticalParallelism: effectiveJobs,
     jobs: effectiveJobs,
     historicalEstimate: null,

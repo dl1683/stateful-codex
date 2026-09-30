@@ -7,7 +7,7 @@ import test from "node:test";
 import { runAttempt } from "../harness/attempt-runner.mjs";
 import { prepareIsolatedHome } from "../harness/isolated-home.mjs";
 
-const scenario = { id: "surface.tui.fake", fixture: { sha256: "sha256:fixture" }, conversation: { turnTimeoutSeconds: 1 } };
+const scenario = { id: "surface.tui.fake", fixture: { sha256: "sha256:fixture" }, conversation: { turns: [], turnTimeoutSeconds: 1 } };
 
 test("seeds an isolated home and hard-links only auth.json", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "scbench-home-"));
@@ -32,11 +32,21 @@ test("records a timeout and retains stdout, stderr, and an atomic manifest", asy
   await mkdir(path.join(auth, ".sandbox-bin"), { recursive: true });
   await writeFile(path.join(auth, "auth.json"), "auth");
   await writeFile(path.join(auth, "cap_sid"), "sid");
-  const attemptRoot = path.join(root, "attempt");
-  const manifest = await runAttempt({ attemptRoot, scenario, codex: process.execPath, fixtureRoot: fixture, authHome: auth, args: ["-e", "setTimeout(() => {}, 5000)"], timeoutSeconds: 0.05 });
+  scenario.fixture.resolvedSource = fixture;
+  const manifestResult = await runAttempt({
+    scenario,
+    rep: 1,
+    out: root,
+    workRoot: path.join(root, "workspaces"),
+    codex: process.execPath,
+    authHome: auth,
+    adapter: async () => ({ exitReason: "timedOut", code: null, signal: "SIGTERM" }),
+  });
+  const manifest = manifestResult.attempt;
+  const attemptRoot = path.join(root, "attempts", scenario.id, "stateful", "1");
   assert.equal(manifest.exitReason, "timedOut");
   assert.equal(manifest.retryClassification, "none");
   assert.deepEqual(JSON.parse(await readFile(path.join(attemptRoot, "attempt.json"), "utf8")), manifest);
-  assert.equal(manifest.evidence.includes("stdout.txt"), true);
-  assert.equal(manifest.evidence.includes("stderr.txt"), true);
+  assert.equal(manifest.evidence.includes("attempt.json"), false);
+  assert.equal(manifest.evidence.includes("evidence/workspace.patch"), true);
 });

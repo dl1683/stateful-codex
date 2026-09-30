@@ -36,13 +36,19 @@ if (!command || !["list", "validate", "plan", "run", "report"].includes(command)
 
 function parseOptions(args) {
   const options = {};
+  const names = new Set(["--tier", "--jobs", "--reps", "--max-wall-minutes", "--max-attempts", "--codex", "--out", "--auth-home", "--python", "--work-root"]);
   for (let index = 0; index < args.length; index += 2) {
     const name = args[index];
     const value = args[index + 1];
     if (!name?.startsWith("--") || value === undefined) throw new Error(`expected value after ${name}`);
-    if (!["--tier", "--jobs", "--reps", "--max-wall-minutes", "--max-attempts", "--codex", "--out", "--auth-home", "--python"].includes(name)) throw new Error(`unknown option ${name}`);
-    const key = name.slice(2).replaceAll("-", "_");
-    options[key] = ["tier", "codex", "out", "auth_home", "python"].includes(key) ? value : Number(value);
+    if (!names.has(name)) throw new Error(`unknown option ${name}`);
+    const key = name.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    if (["tier", "codex", "out", "authHome", "python", "workRoot"].includes(key)) options[key] = value;
+    else {
+      const numeric = Number(value);
+      if (!Number.isInteger(numeric) || numeric < 1) throw new Error(`${name} must be a positive integer`);
+      options[key] = numeric;
+    }
   }
   return options;
 }

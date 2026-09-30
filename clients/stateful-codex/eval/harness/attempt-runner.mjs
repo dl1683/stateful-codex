@@ -1,83 +1,154 @@
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { cp, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { access, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import os from "node:os";
 import path from "node:path";
+import { runTui } from "../adapters/tui.mjs";
+import { gradeAttempt } from "../graders/tui-evidence.mjs";
+import { writeProjectStateArtifact } from "../export-project-state.mjs";
 import { isolatedEnvironment, prepareIsolatedHome } from "./isolated-home.mjs";
+import { captureWorkspaceDiff, listFiles, prepareWorkspace } from "./workspace.mjs";
 
-export async function runAttempt({ attemptRoot, scenario, codex, fixtureRoot, authHome, args = [], timeoutSeconds = scenario.conversation.turnTimeoutSeconds }) {
-  const startedAt = new Date().toISOString();
-  const workspace = path.join(attemptRoot, "workspace");
+export async function runAttempt({ scenario, rep, arm = "stateful", out, workRoot = path.join(os.tmpdir(), "scbench-test-workspaces"), codex, authHome, python, adapter = runTui }) {
+  const attemptRoot = path.join(out, "attempts", scenario.id, arm, String(rep));
+  await mkdir(path.dirname(attemptRoot), { recursive: true });
+  await mkdir(attemptRoot);
   const evidence = path.join(attemptRoot, "evidence");
-  await mkdir(evidence, { recursive: true });
-  if (path.resolve(workspace) === path.resolve(fixtureRoot)) throw new Error("fixture source cannot be the output workspace");
-  await cp(fixtureRoot, workspace, { recursive: true });
+  await mkdir(evidence);
+  const prepared = await prepareWorkspace({ fixtureRoot: scenario.fixture.resolvedSource, workspaceRoot: path.join(workRoot, scenario.id, arm, String(rep)) });
   const homes = await prepareIsolatedHome(attemptRoot, authHome);
-  const executableSha256 = `sha256:${createHash("sha256").update(await readFile(codex)).digest("hex")}`;
-  const stdoutPath = path.join(attemptRoot, "stdout.txt");
-  const stderrPath = path.join(attemptRoot, "stderr.txt");
-  const stdout = createWriteStream(stdoutPath);
-  const stderr = createWriteStream(stderrPath);
-  const child = spawn(codex, args, { cwd: workspace, env: isolatedEnvironment(homes), windowsHide: true });
-  child.stdout.pipe(stdout);
-  child.stderr.pipe(stderr);
-  const outputDone = Promise.all([finished(stdout), finished(stderr)]);
-  const result = await waitForChild(child, timeoutSeconds * 1000);
-  await outputDone;
-  const manifest = {
+  const before = await listFiles(prepared.workspace);
+  await writeJson(path.join(evidence, "workspace-before.json"), before);
+  const startedAt = new Date().toISOString();
+  let adapterResult;
+  let error = null;
+  try {
+    adapterResult = await adapter({ attemptRoot, workspace: prepared.workspace, scenario, codex, python, arm, env: isolatedEnvironment(homes), timeoutSeconds: scenario.conversation.turnTimeoutSeconds * (scenario.conversation.turns.length + 1) });
+  } catch (caught) {
+    error = caught;
+    adapterResult = { code: null, signal: null, exitReason: "runnerError", error: caught.message };
+  }
+  const after = await listFiles(prepared.workspace);
+  await writeJson(path.join(evidence, "workspace-after.json"), after);
+  const workspaceChange = await captureWorkspaceDiff(prepared.workspace, path.join(evidence, "workspace.patch"));
+  const capture = await captureStores({ evidence, homes, arm, startedAt, scenario });
+  const attempt = {
     schemaVersion: 1,
     scenarioId: scenario.id,
-    scenarioSha256: `sha256:${createHash("sha256").update(JSON.stringify(scenario)).digest("hex")}`,
+    repetition: rep,
+    arm,
     fixtureSha256: scenario.fixture.sha256,
-    executableSha256,
+    executableSha256: await fileHash(codex),
     startedAt,
     finishedAt: new Date().toISOString(),
-    process: { pid: child.pid },
-    exitReason: result.exitReason,
-    exitCode: result.code,
-    signal: result.signal,
-    retryClassification: classifyRetry(result.exitReason, await readFile(stderrPath, "utf8")),
+    workspace: { path: prepared.workspace, baseline: prepared.baseline, before: before.length, after: after.length, status: workspaceChange.status },
+    process: adapterResult,
+    exitReason: adapterResult.exitReason ?? (adapterResult.code === 0 ? "processExited" : "driverFailed"),
+    retryClassification: classifyRetry(adapterResult, error),
+    capture,
     evidence: await inventory(attemptRoot),
   };
-  await atomicJson(path.join(attemptRoot, "attempt.json"), manifest);
-  return manifest;
+  await atomicJson(path.join(attemptRoot, "attempt.json"), attempt);
+  const grade = await gradeAttempt({ attemptRoot, scenario, attempt });
+  await writeJson(path.join(attemptRoot, "grade.json"), grade);
+  return { attempt, grade };
 }
 
-function waitForChild(child, timeout) {
-  return new Promise((resolve) => {
-    let timer = setTimeout(() => {
-      child.kill("SIGINT");
-      setTimeout(() => child.kill(), 1000).unref();
-      resolve({ exitReason: "timedOut", code: null, signal: "SIGINT" });
-    }, timeout);
-    child.once("error", (error) => { clearTimeout(timer); resolve({ exitReason: "spawnError", code: null, signal: error.code }); });
-    child.once("exit", (code, signal) => { clearTimeout(timer); resolve({ exitReason: "processExited", code, signal }); });
-  });
+async function captureStores({ evidence, homes, arm, startedAt, scenario }) {
+  const files = await inventory(homes.sqliteHome);
+  await writeJson(path.join(evidence, "store-inventory.json"), { root: homes.sqliteHome, files, capturedAt: new Date().toISOString() });
+  const snapshot = await snapshotSqlite(homes.sqliteHome, path.join(evidence, "store-snapshot"));
+  await writeJson(path.join(evidence, "store-snapshot.json"), snapshot);
+  const rollout = await selectRollout(homes.codexHome, startedAt);
+  if (rollout) {
+    await writeFile(path.join(evidence, "rollout.jsonl"), rollout.content);
+    await writeJson(path.join(evidence, "rollout-source.json"), { path: rollout.path, sha256: hashText(rollout.content), threadId: rollout.threadId, candidates: rollout.candidates });
+  }
+  if (arm === "stateful" && rollout?.threadId) {
+    try {
+      const state = await writeProjectStateArtifact({ sqliteHome: homes.sqliteHome, threadId: rollout.threadId, output: path.join(evidence, "project-state.json"), capturedAtMs: Date.now() });
+      return { rollout: true, threadId: rollout.threadId, state: true, stateSha256: state.snapshotSha256, storeSnapshot: snapshot };
+    } catch (error) {
+      await writeJson(path.join(evidence, "project-state.json"), { available: false, applicable: true, reason: error.message, source: "export-project-state" });
+    }
+  } else {
+    await writeJson(path.join(evidence, "project-state.json"), { available: false, applicable: arm === "stateful", reason: arm === "base" ? "base arm has no Stateful project state" : "rollout thread was not identified" });
+  }
+  return { rollout: Boolean(rollout), threadId: rollout?.threadId ?? null, state: false, storeSnapshot: snapshot };
 }
 
-function classifyRetry(reason, stderr) {
-  if (reason === "spawnError" || /capacity|transport|connection reset|429/i.test(stderr)) return "infrastructure";
-  return "none";
+async function selectRollout(codexHome, startedAt) {
+  const files = await findFiles(path.join(codexHome, "sessions"), (name) => name.endsWith(".jsonl"));
+  const candidates = [];
+  for (const file of files) {
+    const content = await readFile(file, "utf8");
+    if (!content.trim()) continue;
+    const threadId = extractThreadId(content);
+    candidates.push({ path: file, content, threadId, modified: (await import("node:fs/promises")).stat(file).then((value) => value.mtimeMs) });
+  }
+  if (!candidates.length) return null;
+  const resolved = await Promise.all(candidates.map(async (candidate) => ({ ...candidate, modified: await candidate.modified })));
+  resolved.sort((left, right) => right.modified - left.modified);
+  const selected = resolved[0];
+  return { ...selected, candidates: resolved.map(({ path: candidatePath, threadId }) => ({ path: candidatePath, threadId })) };
+}
+
+function extractThreadId(content) {
+  for (const line of content.split(/\r?\n/)) {
+    try {
+      const event = JSON.parse(line);
+      if (event.type === "session_meta") return event.payload?.id ?? event.payload?.session_id ?? null;
+      if (event.thread_id) return event.thread_id;
+    } catch {
+      // Ignore non-JSON rollout lines.
+    }
+  }
+  return null;
+}
+
+async function snapshotSqlite(root, outputRoot) {
+  await mkdir(outputRoot, { recursive: true });
+  const databases = (await inventory(root)).filter((file) => file.endsWith(".sqlite"));
+  const snapshots = [];
+  for (const file of databases) {
+    const source = path.join(root, file);
+    const destination = path.join(outputRoot, file);
+    try {
+      const database = new DatabaseSync(source, { readOnly: true });
+      database.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`);
+      database.close();
+      snapshots.push({ file, path: destination, method: "vacuum-into", sha256: await fileHash(destination) });
+    } catch (error) {
+      snapshots.push({ file, error: error.message });
+    }
+  }
+  return { formatVersion: 1, consistent: snapshots.every(({ error }) => !error), databases: snapshots };
+}
+
+function classifyRetry(result, error) {
+  const text = `${error?.message ?? ""} ${result?.error ?? ""}`;
+  return result?.exitReason === "spawnError" || /capacity|transport|connection reset|429/i.test(text) ? "infrastructure-before-agent" : "none";
 }
 
 async function inventory(root) {
-  const result = [];
-  async function visit(directory, prefix = "") {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const relative = path.join(prefix, entry.name);
-      if (relative === "attempt.json") continue;
-      if (entry.isDirectory()) await visit(path.join(directory, entry.name), relative);
-      else result.push(relative.replaceAll(path.sep, "/"));
-    }
+  const files = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) files.push(...(await inventory(full)).map((name) => path.join(entry.name, name)));
+    else files.push(entry.name);
   }
-  await visit(root);
-  return result.sort();
+  return files.map((file) => file.replaceAll(path.sep, "/")).sort();
 }
 
-async function atomicJson(file, value) {
-  const temporary = `${file}.tmp-${process.pid}`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
-  await rename(temporary, file);
+async function findFiles(root, predicate) {
+  try {
+    return (await inventory(root)).filter(predicate).map((file) => path.join(root, file));
+  } catch {
+    return [];
+  }
 }
 
-function finished(stream) { return new Promise((resolve) => stream.once("finish", resolve)); }
+async function fileHash(file) { return `sha256:${createHash("sha256").update(await readFile(file)).digest("hex")}`; }
+function hashText(value) { return createHash("sha256").update(value).digest("hex"); }
+async function writeJson(file, value) { await writeFile(file, `${JSON.stringify(value, null, 2)}\n`); }
+async function atomicJson(file, value) { const temporary = `${file}.tmp-${process.pid}`; await writeJson(temporary, value); await rename(temporary, file); }
