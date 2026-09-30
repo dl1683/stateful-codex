@@ -725,7 +725,12 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
         let mut side_config = app.config.clone();
         side_config.ephemeral = true;
         let side = server
-            .fork_side_thread(&app.local_settings, side_config.clone(), thread_id)
+            .fork_side_thread(
+                &app.local_settings,
+                side_config.clone(),
+                thread_id,
+                /*selected_profile*/ None,
+            )
             .await?;
         let side_id = side.session.thread_id;
         app.side_threads
@@ -735,7 +740,12 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
             side_config.cwd = side_config.cwd.join("failure");
             assert!(
                 server
-                    .fork_side_thread(&app.local_settings, side_config, thread_id)
+                    .fork_side_thread(
+                        &app.local_settings,
+                        side_config,
+                        thread_id,
+                        /*selected_profile*/ None
+                    )
                     .await
                     .is_err()
             );
@@ -1014,7 +1024,12 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
         let mut side_config = app.config.clone();
         side_config.ephemeral = true;
         let side = server
-            .fork_side_thread(&app.local_settings, side_config, thread_id)
+            .fork_side_thread(
+                &app.local_settings,
+                side_config,
+                thread_id,
+                /*selected_profile*/ None,
+            )
             .await?;
         let side_id = side.session.thread_id;
         app.side_threads
@@ -1079,7 +1094,7 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
 
 #[tokio::test]
 async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() -> Result<()> {
-    let (mut app, events, _ops) = make_test_app_with_channels().await;
+    let (mut app, events, _ops) = Box::pin(make_test_app_with_channels()).await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
     app.config.sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
@@ -1097,15 +1112,14 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         /*failed_thread_name*/ None,
     ))
     .await?;
-    app_server
-        .start_dynamic_tool_mcp(
-            app.config.clone(),
-            app.app_event_tx.clone(),
-            app.dynamic_tool_status_updates.clone(),
-        )
-        .await?;
+    Box::pin(app_server.start_dynamic_tool_mcp(
+        app.config.clone(),
+        app.app_event_tx.clone(),
+        app.dynamic_tool_status_updates.clone(),
+    ))
+    .await?;
 
-    let started = app_server.start_thread(&app.config).await?;
+    let started = Box::pin(app_server.start_thread(&app.config)).await?;
     let thread_id = started.session.thread_id;
     assert!(started.task_tools_available);
     assert!(app_server.task_tools_available(thread_id));
@@ -2535,7 +2549,10 @@ async fn assert_remote_legacy_history_retry(request: LegacyHistoryRequest) -> Re
 
 #[tokio::test]
 async fn remote_legacy_history_resume_retries_generic_method_not_found() -> Result<()> {
-    assert_remote_legacy_history_retry(LegacyHistoryRequest::Resume).await
+    Box::pin(assert_remote_legacy_history_retry(
+        LegacyHistoryRequest::Resume,
+    ))
+    .await
 }
 
 #[tokio::test]
@@ -2545,7 +2562,7 @@ async fn remote_legacy_history_fork_avoids_unsupported_fields() -> Result<()> {
 
 #[tokio::test]
 async fn paginated_fork_survives_post_response_hydration_failure() -> Result<()> {
-    let (app, _codex_home) = make_history_test_app().await?;
+    let (app, _codex_home) = Box::pin(make_history_test_app()).await?;
     let parent_thread_id = create_history_rollout(
         &app.config,
         ThreadHistoryMode::Paginated,
@@ -2561,19 +2578,18 @@ async fn paginated_fork_survives_post_response_hydration_failure() -> Result<()>
     )
     .await?;
 
-    let started = app_server
-        .resume_thread(
-            &app.local_settings,
-            app.config.clone(),
-            parent_thread_id,
-            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
-        )
-        .await?;
+    let started = Box::pin(app_server.resume_thread(
+        &app.local_settings,
+        app.config.clone(),
+        parent_thread_id,
+        crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+    ))
+    .await?;
     assert_eq!(started.session.thread_id, parent_thread_id);
 
-    let forked = app_server
-        .fork_thread(&app.local_settings, app.config.clone(), parent_thread_id)
-        .await?;
+    let forked =
+        Box::pin(app_server.fork_thread(&app.local_settings, app.config.clone(), parent_thread_id))
+            .await?;
 
     assert_ne!(forked.session.thread_id, parent_thread_id);
     assert_eq!(recorded_params(&requests, "thread/fork").len(), 1);
@@ -2824,6 +2840,7 @@ async fn paginated_workflows_never_request_full_thread_history() -> Result<()> {
         &crate::local_settings::LocalSettings::from(&side_config),
         side_config,
         paginated_thread_id,
+        /*selected_profile*/ None,
     ))
     .await?;
 
