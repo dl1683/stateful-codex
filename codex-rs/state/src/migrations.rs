@@ -183,13 +183,15 @@ pub(crate) async fn repair_legacy_backfill_owner_migration_version(
     if !has_owner_token || has_creator_identity {
         return Ok(());
     }
-    let legacy_version_applied = sqlx::query_scalar::<_, i64>(
-        "SELECT 1 FROM _sqlx_migrations WHERE version = 56 AND success = 1",
+    let legacy_checksum = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT checksum FROM _sqlx_migrations WHERE version = 56 AND success = 1",
     )
     .fetch_optional(pool)
-    .await?
-    .is_some();
-    if !legacy_version_applied {
+    .await?;
+    let Some(legacy_checksum) = legacy_checksum else {
+        return Ok(());
+    };
+    if !checksum_is_line_ending_equivalent(owner_migration, &legacy_checksum) {
         return Ok(());
     }
 
@@ -199,11 +201,12 @@ pub(crate) async fn repair_legacy_backfill_owner_migration_version(
     .execute(pool)
     .await?;
     sqlx::query(
-        "UPDATE _sqlx_migrations SET version = ?, description = ?, checksum = ? WHERE version = 56 AND success = 1 AND NOT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version = ?)",
+        "UPDATE _sqlx_migrations SET version = ?, description = ?, checksum = ? WHERE version = 56 AND success = 1 AND checksum = ? AND NOT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version = ?)",
     )
     .bind(owner_migration.version)
     .bind(owner_migration.description.as_ref())
     .bind(owner_migration.checksum.to_vec())
+    .bind(legacy_checksum)
     .bind(owner_migration.version)
     .execute(pool)
     .await?;

@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use super::STATE_MIGRATOR;
 use super::THREAD_HISTORY_MIGRATOR;
 use super::repair_legacy_recency_migration_version;
+use super::runtime_state_migrator;
 use crate::PINNED_THREAD_SECTION_ID;
 use crate::PINNED_THREAD_SECTION_NAME;
 
@@ -137,6 +138,121 @@ async fn backfill_owner_migration_resets_legacy_completion_for_safe_reseed() {
     .await
     .expect("migrated state should load");
     assert_eq!(state, ("pending".to_string(), None, None, None));
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn state_database_with_legacy_version_56_owner_migration_opens_and_migrates() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let state_path = sqlite.state_db_path();
+    let pool = sqlite
+        .open_read_write_pool(&state_path)
+        .await
+        .expect("sqlite database should open");
+    let owner_migration = STATE_MIGRATOR
+        .migrations
+        .iter()
+        .find(|migration| migration.version == 59)
+        .expect("owner-token migration should exist");
+    let mut legacy_migrations = STATE_MIGRATOR
+        .migrations
+        .iter()
+        .filter(|migration| migration.version <= 55)
+        .cloned()
+        .collect::<Vec<_>>();
+    legacy_migrations.push(Migration::new(
+        56,
+        owner_migration.description.clone(),
+        owner_migration.migration_type,
+        owner_migration.sql.clone(),
+        owner_migration.no_tx,
+    ));
+    Migrator::with_migrations(legacy_migrations)
+        .run(&pool)
+        .await
+        .expect("legacy owner-token migration should apply as version 56");
+    sqlx::query(
+        "UPDATE backfill_state SET status = 'in_progress', last_watermark = 'legacy-rollout', last_success_at = 1, owner_token = 'legacy-owner', updated_at = 1 WHERE id = 1",
+    )
+    .execute(&pool)
+    .await
+    .expect("legacy backfill state should update");
+    pool.close().await;
+
+    let migrator = runtime_state_migrator();
+    let pool = sqlite
+        .open_state_db(&migrator, /*telemetry_override*/ None)
+        .await
+        .expect("legacy state database should open and migrate");
+    let applied = sqlx::query(
+        "SELECT version, checksum FROM _sqlx_migrations WHERE version >= 56 ORDER BY version",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("applied migrations should load")
+    .into_iter()
+    .map(|row| {
+        (
+            row.get::<i64, _>("version"),
+            row.get::<Vec<u8>, _>("checksum"),
+        )
+    })
+    .collect::<Vec<_>>();
+    let expected = STATE_MIGRATOR
+        .migrations
+        .iter()
+        .filter(|migration| migration.version >= 56)
+        .map(|migration| (migration.version, migration.checksum.to_vec()))
+        .collect::<Vec<_>>();
+    assert_eq!(applied, expected);
+    let columns = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM pragma_table_info('threads') WHERE name LIKE 'creator_%' UNION ALL SELECT name FROM pragma_table_info('backfill_state') WHERE name = 'owner_token' ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("migrated columns should load");
+    assert_eq!(
+        columns,
+        vec![
+            "creator_account_id".to_string(),
+            "creator_user_id".to_string(),
+            "owner_token".to_string(),
+        ]
+    );
+    let indexes = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_threads_archive_created_at_ms', 'idx_threads_archive_recency_at_ms', 'idx_threads_archive_updated_at_ms') ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("archive indexes should load");
+    assert_eq!(
+        indexes,
+        vec![
+            "idx_threads_archive_created_at_ms".to_string(),
+            "idx_threads_archive_recency_at_ms".to_string(),
+            "idx_threads_archive_updated_at_ms".to_string(),
+        ]
+    );
+    let backfill_state = sqlx::query_as::<_, (String, Option<String>, Option<i64>, Option<String>)>(
+        "SELECT status, last_watermark, last_success_at, owner_token FROM backfill_state WHERE id = 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("backfill state should load");
+    assert_eq!(backfill_state, ("pending".to_string(), None, None, None));
+    pool.close().await;
+
+    let pool = sqlite
+        .open_state_db(&migrator, /*telemetry_override*/ None)
+        .await
+        .expect("migrated legacy state database should reopen");
     pool.close().await;
 }
 
