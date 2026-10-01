@@ -36,7 +36,9 @@ use codex_app_server_protocol::SteeringListResponse;
 use codex_app_server_protocol::SteeringSubmitParams;
 use codex_app_server_protocol::SteeringSubmitResponse;
 use codex_app_server_protocol::SteeringUpdatedNotification;
+use codex_core::ThreadManager;
 use codex_protocol::ThreadId;
+use codex_stateful_extension::RunAdmissionFence;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::NewSteeringInstruction;
 use codex_stateful_runtime::RunBudget;
@@ -69,6 +71,8 @@ pub(crate) struct StatefulRequestProcessor {
     thread_store: Arc<dyn ThreadStore>,
     store: StatefulStoreHandle,
     outgoing: Arc<OutgoingMessageSender>,
+    thread_manager: Arc<ThreadManager>,
+    run_admission: RunAdmissionFence,
 }
 
 impl StatefulRequestProcessor {
@@ -76,11 +80,15 @@ impl StatefulRequestProcessor {
         thread_store: Arc<dyn ThreadStore>,
         store: StatefulStoreHandle,
         outgoing: Arc<OutgoingMessageSender>,
+        thread_manager: Arc<ThreadManager>,
+        run_admission: RunAdmissionFence,
     ) -> Self {
         Self {
             thread_store,
             store,
             outgoing,
+            thread_manager,
+            run_admission,
         }
     }
 
@@ -192,10 +200,40 @@ impl StatefulRequestProcessor {
         Ok(Some(StatefulRunResumeResponse { run: api_run(run) }.into()))
     }
 
+    /// Cancels the run and interrupts its turns that are active in this process.
+    ///
+    /// The admission fence keeps an Autonomous continuation from starting between
+    /// reading the active turns and the cancelled status write. Only turns read before
+    /// that write are interrupted, so a newer user turn is never touched.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the admission fence must span the active-turn read through the status write and interruption"
+    )]
     pub(crate) async fn run_cancel(
         &self,
         params: StatefulRunCancelParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let _admission = self.run_admission.lock().await;
+        let id = parse_run_id(params.run_id.clone())?;
+        let current = self
+            .store()
+            .await?
+            .get_run(&id)
+            .await
+            .map_err(runtime_error)?
+            .ok_or_else(|| invalid_params(format!("run not found: {id}")))?;
+        let mut active_turns = Vec::new();
+        for raw_thread_id in &current.value.thread_ids {
+            let Ok(thread_id) = ThreadId::from_string(raw_thread_id) else {
+                continue;
+            };
+            let Ok(thread) = self.thread_manager.get_thread(thread_id).await else {
+                continue;
+            };
+            if let Some(turn_id) = thread.active_turn_id().await {
+                active_turns.push((thread, turn_id));
+            }
+        }
         let run = self
             .update_status(
                 params.run_id,
@@ -203,7 +241,19 @@ impl StatefulRequestProcessor {
                 StatefulRunStatus::Cancelled,
             )
             .await?;
-        Ok(Some(StatefulRunCancelResponse { run: api_run(run) }.into()))
+        let mut interrupted_turn_ids = Vec::new();
+        for (thread, turn_id) in active_turns {
+            if thread.interrupt_turn(&turn_id).await {
+                interrupted_turn_ids.push(turn_id);
+            }
+        }
+        Ok(Some(
+            StatefulRunCancelResponse {
+                run: api_run(run),
+                interrupted_turn_ids,
+            }
+            .into(),
+        ))
     }
 
     pub(crate) async fn run_set_mode(

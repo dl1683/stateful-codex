@@ -335,6 +335,7 @@ impl MessageProcessor {
         let turn_start_admission: Arc<dyn TurnStartAdmission> = Arc::new(turn_admission.clone());
         let stateful_store =
             StatefulStoreHandle::new(state_db.as_ref().map(|state_db| state_db.sqlite().clone()));
+        let run_admission = codex_stateful_extension::RunAdmissionFence::default();
         let extension_event_sink =
             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
         let stateful_event_sink = app_server_stateful_event_sink(
@@ -373,6 +374,7 @@ impl MessageProcessor {
                     queue_service: queue_service.clone(),
                     turn_start_admission: Some(Arc::clone(&turn_start_admission)),
                     thread_store: Arc::clone(&thread_store),
+                    run_admission: run_admission.clone(),
                 }),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     config.codex_home.clone(),
@@ -546,6 +548,8 @@ impl MessageProcessor {
             Arc::clone(&thread_store),
             stateful_store.clone(),
             outgoing.clone(),
+            Arc::clone(&thread_manager),
+            run_admission,
         );
         let thread_processor = ThreadRequestProcessor::new(
             auth_manager.clone(),

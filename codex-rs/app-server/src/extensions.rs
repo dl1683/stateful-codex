@@ -46,6 +46,7 @@ use codex_stateful_extension::AutonomousContinuationOutcome;
 use codex_stateful_extension::AutonomousContinuationRequest;
 use codex_stateful_extension::AutonomousContinuationSink;
 use codex_stateful_extension::BlackboardEntityKind;
+use codex_stateful_extension::RunAdmissionFence;
 use codex_stateful_extension::StatefulEvent;
 use codex_stateful_extension::StatefulEventSink;
 use codex_stateful_runtime::NewStatefulTurnMeasurement;
@@ -75,6 +76,8 @@ pub(crate) struct ThreadExtensionDependencies {
     pub(crate) queue_service: Option<Arc<QueuedItemService>>,
     pub(crate) turn_start_admission: Option<Arc<dyn TurnStartAdmission>>,
     pub(crate) thread_store: Arc<dyn ThreadStore>,
+    /// Shared with `statefulRun/cancel` so no continuation starts after a cancel.
+    pub(crate) run_admission: RunAdmissionFence,
 }
 
 pub(crate) fn thread_extensions(
@@ -95,6 +98,7 @@ pub(crate) fn thread_extensions(
         queue_service,
         turn_start_admission,
         thread_store,
+        run_admission,
     } = dependencies;
     let stateful_sqlite = state_db.as_ref().map(|state_db| state_db.sqlite().clone());
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
@@ -138,6 +142,7 @@ pub(crate) fn thread_extensions(
         Some(AutonomousContinuation::new(
             format!("app-server-{}", ThreadId::new()),
             Arc::new(AppServerAutonomousContinuationSink { thread_manager }),
+            run_admission,
         )),
     );
     codex_web_search_extension::install(&mut builder, auth_manager.clone());

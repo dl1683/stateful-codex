@@ -130,6 +130,7 @@ mod session_end;
 mod skills_list;
 mod sleep;
 mod stateful_blackboard_lifecycle;
+mod stateful_cancel;
 mod stateful_capture;
 mod stateful_checkpoint;
 mod stateful_code_mode;

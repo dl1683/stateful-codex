@@ -2,6 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use codex_extension_api::CodexErrorDetails;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ThreadIdleCause;
 use codex_extension_api::ThreadIdleInput;
@@ -15,6 +16,9 @@ use codex_extension_api::TurnStopInput;
 use codex_stateful_runtime::AutonomousClaimOutcome;
 use codex_stateful_runtime::AutonomousClaimRequest;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStatus;
+use codex_stateful_runtime::StatefulRunStoreError;
+use codex_stateful_runtime::StatefulRunUpdate;
 
 use crate::SelectedProject;
 use crate::SelectedThread;
@@ -56,11 +60,27 @@ pub trait AutonomousContinuationSink: Send + Sync {
     ) -> AutonomousContinuationFuture<'a>;
 }
 
+/// Process-wide fence between Autonomous continuation admission and run cancellation.
+///
+/// Continuation holds it from claiming a run through starting its turn; cancellation holds
+/// it from reading the run's active turns through the cancelled status write and their
+/// interruption. Either cancellation sees the started turn, or the claim sees the
+/// cancelled status, so no continuation starts after a cancel in this process.
+#[derive(Clone, Default)]
+pub struct RunAdmissionFence(Arc<tokio::sync::Mutex<()>>);
+
+impl RunAdmissionFence {
+    pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.0.lock().await
+    }
+}
+
 /// Process-scoped ownership and host submission service for Autonomous runs.
 #[derive(Clone)]
 pub struct AutonomousContinuation {
     pub(crate) owner_id: String,
     pub(crate) sink: Arc<dyn AutonomousContinuationSink>,
+    pub(crate) admission: RunAdmissionFence,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,8 +90,16 @@ struct ActiveRunTurn {
 }
 
 impl AutonomousContinuation {
-    pub fn new(owner_id: String, sink: Arc<dyn AutonomousContinuationSink>) -> Self {
-        Self { owner_id, sink }
+    pub fn new(
+        owner_id: String,
+        sink: Arc<dyn AutonomousContinuationSink>,
+        admission: RunAdmissionFence,
+    ) -> Self {
+        Self {
+            owner_id,
+            sink,
+            admission,
+        }
     }
 }
 
@@ -206,8 +234,77 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             fail_turn_attribution(self, input.turn_id);
+            if !matches!(input.error_details, CodexErrorDetails::TaskPanicked(_)) {
+                return;
+            }
+            let (Some(active_turn), Some(services)) = (
+                input.thread_store.get::<ActiveRunTurn>(),
+                self.services.as_ref(),
+            ) else {
+                return;
+            };
+            if active_turn.turn_id == input.turn_id {
+                fail_run_after_task_panic(
+                    services,
+                    self.event_sink.as_deref(),
+                    &active_turn.run_id,
+                )
+                .await;
+            }
         })
     }
+}
+
+/// Marks a running run failed after its bound turn's task panicked.
+///
+/// Retries revision conflicts from unrelated updates; never overrides a run that a user or the
+/// model already paused, cancelled, blocked, or completed.
+async fn fail_run_after_task_panic(
+    services: &crate::services::ProjectIntelligenceServices,
+    event_sink: Option<&dyn StatefulEventSink>,
+    run_id: &StatefulRunId,
+) {
+    const ATTEMPTS: usize = 3;
+    let store = match services.runtime().await {
+        Ok(store) => store,
+        Err(error) => {
+            tracing::warn!(%error, "failed to open Stateful run store after a task panic");
+            return;
+        }
+    };
+    for _ in 0..ATTEMPTS {
+        let run = match store.get_run(run_id).await {
+            Ok(Some(run)) if run.status == StatefulRunStatus::Running => run,
+            Ok(_) => return,
+            Err(error) => {
+                tracing::warn!(%run_id, %error, "failed to load the run of a panicked turn");
+                return;
+            }
+        };
+        match store
+            .update_run(
+                run_id,
+                StatefulRunUpdate {
+                    expected_revision: run.revision,
+                    status: StatefulRunStatus::Failed,
+                    strategy: run.strategy,
+                    result: run.result,
+                },
+            )
+            .await
+        {
+            Ok(run) => {
+                emit_run_updated(event_sink, &run);
+                return;
+            }
+            Err(StatefulRunStoreError::RevisionConflict { .. }) => {}
+            Err(error) => {
+                tracing::warn!(%run_id, %error, "failed to mark the run of a panicked turn failed");
+                return;
+            }
+        }
+    }
+    tracing::warn!(%run_id, "run kept changing; it was not marked failed after a task panic");
 }
 
 struct PendingContinuation {
@@ -216,6 +313,10 @@ struct PendingContinuation {
     previous_turn_id: String,
 }
 
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "the admission fence must span the claim through the continuation's turn start"
+)]
 async fn attempt_continuation(
     services: &crate::services::ProjectIntelligenceServices,
     autonomous: &AutonomousContinuation,
@@ -229,6 +330,8 @@ async fn attempt_continuation(
             return None;
         }
     };
+    // Held from the claim's running check through the turn start; see RunAdmissionFence.
+    let _admission = autonomous.admission.lock().await;
     match store
         .claim_autonomous_continuation(
             &request.run_id,
@@ -319,3 +422,7 @@ fn emit_run_updated(
         });
     }
 }
+
+#[cfg(test)]
+#[path = "autonomy_tests.rs"]
+mod tests;

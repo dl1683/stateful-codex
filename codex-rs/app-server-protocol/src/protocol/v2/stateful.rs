@@ -139,7 +139,16 @@ macro_rules! run_control_response {
 
 run_control_response!(StatefulRunPauseResponse);
 run_control_response!(StatefulRunResumeResponse);
-run_control_response!(StatefulRunCancelResponse);
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulRunCancelResponse {
+    pub run: StatefulRun,
+    /// Turns of this run that were active in this app-server and were interrupted.
+    /// A run turn executing in another process is not interrupted; it stops being
+    /// continued because the run is no longer running.
+    pub interrupted_turn_ids: Vec<String>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
