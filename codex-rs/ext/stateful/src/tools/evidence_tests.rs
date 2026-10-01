@@ -15,7 +15,6 @@ use tempfile::TempDir;
 use super::EvidenceExtent;
 use super::EvidenceReadTool;
 use super::NumberedEvidence;
-use super::fits_response;
 use super::pack_evidence;
 use super::source_lines;
 use crate::services::ProjectIntelligenceServices;
@@ -92,6 +91,10 @@ fn response(evidence: &NumberedEvidence) -> serde_json::Value {
     })
 }
 
+fn response_bytes(evidence: &NumberedEvidence) -> usize {
+    response(evidence).to_string().len()
+}
+
 /// Packs `content` as the tool does into `budget` serialized response bytes.
 fn pack(
     content: &str,
@@ -101,7 +104,7 @@ fn pack(
 ) -> Option<NumberedEvidence> {
     let lines = source_lines(content, first_line, read_extent);
     pack_evidence(&lines, read_extent, |evidence| {
-        fits_response(&response(evidence), budget)
+        response_bytes(evidence) <= budget
     })
 }
 
@@ -125,14 +128,20 @@ fn evidence(
 #[test]
 fn complete_read_numbers_every_line_and_preserves_blank_lines() {
     let source = "\"\"\"Amount parsing used by the importers.\"\"\"\n\n\ndef parse_amount(text):\n";
-    let packed = pack(source, Some(1), EvidenceExtent::Complete, 9_000).expect("fits");
+    let packed = pack(
+        source,
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        /*budget*/ 9_000,
+    )
+    .expect("fits");
 
     assert_eq!(
         packed,
         evidence(
             "L1: \"\"\"Amount parsing used by the importers.\"\"\"\nL2: \nL3: \nL4: def parse_amount(text):\n",
             source.len(),
-            Some((1, 4)),
+            /*lines*/ Some((1, 4)),
             /*last_line_partial*/ false,
             EvidenceExtent::Complete,
         )
@@ -147,17 +156,17 @@ fn complete_read_numbers_every_line_and_preserves_blank_lines() {
 fn region_reads_keep_absolute_line_numbers() {
     let packed = pack(
         "line 65\nline 66\n",
-        Some(65),
+        /*first_line*/ Some(65),
         EvidenceExtent::Complete,
-        9_000,
+        /*budget*/ 9_000,
     );
 
     assert_eq!(
         packed,
         Some(evidence(
             "L65: line 65\nL66: line 66\n",
-            16,
-            Some((65, 66)),
+            /*source_bytes*/ 16,
+            /*lines*/ Some((65, 66)),
             /*last_line_partial*/ false,
             EvidenceExtent::Complete,
         ))
@@ -166,14 +175,19 @@ fn region_reads_keep_absolute_line_numbers() {
 
 #[test]
 fn crlf_and_missing_final_newline_do_not_invent_lines() {
-    let packed = pack("first\r\nlast", Some(1), EvidenceExtent::Complete, 9_000);
+    let packed = pack(
+        "first\r\nlast",
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        /*budget*/ 9_000,
+    );
 
     assert_eq!(
         packed,
         Some(evidence(
             "L1: first\r\nL2: last",
-            11,
-            Some((1, 2)),
+            /*source_bytes*/ 11,
+            /*lines*/ Some((1, 2)),
             /*last_line_partial*/ false,
             EvidenceExtent::Complete,
         ))
@@ -182,16 +196,22 @@ fn crlf_and_missing_final_newline_do_not_invent_lines() {
 
 #[test]
 fn empty_read_has_no_lines_and_no_receipt() {
-    let packed = pack("", None, EvidenceExtent::Complete, 9_000).expect("fits");
+    let packed = pack(
+        "",
+        /*first_line*/ None,
+        EvidenceExtent::Complete,
+        /*budget*/ 9_000,
+    )
+    .expect("fits");
 
     assert_eq!(
         packed,
         evidence(
             "",
-            0,
-            None,
+            /*source_bytes*/ 0,
+            /*lines*/ None,
             /*last_line_partial*/ false,
-            EvidenceExtent::Complete
+            EvidenceExtent::Complete,
         )
     );
     assert_eq!(packed.receipt_range(), None);
@@ -199,14 +219,20 @@ fn empty_read_has_no_lines_and_no_receipt() {
 
 #[test]
 fn source_byte_truncation_cuts_between_lines() {
-    let packed = pack("one\ntwo\nthr", Some(3), EvidenceExtent::Truncated, 9_000).expect("fits");
+    let packed = pack(
+        "one\ntwo\nthr",
+        /*first_line*/ Some(3),
+        EvidenceExtent::Truncated,
+        /*budget*/ 9_000,
+    )
+    .expect("fits");
 
     assert_eq!(
         packed,
         evidence(
             "L3: one\nL4: two\n",
-            8,
-            Some((3, 4)),
+            /*source_bytes*/ 8,
+            /*lines*/ Some((3, 4)),
             /*last_line_partial*/ false,
             EvidenceExtent::Truncated,
         )
@@ -216,14 +242,19 @@ fn source_byte_truncation_cuts_between_lines() {
 
 #[test]
 fn an_oversized_line_returns_a_marked_partial_prefix() {
-    let packed = pack("abcdef", Some(7), EvidenceExtent::Truncated, 9_000);
+    let packed = pack(
+        "abcdef",
+        /*first_line*/ Some(7),
+        EvidenceExtent::Truncated,
+        /*budget*/ 9_000,
+    );
 
     assert_eq!(
         packed,
         Some(evidence(
             "L7: abcdef",
-            6,
-            Some((7, 7)),
+            /*source_bytes*/ 6,
+            /*lines*/ Some((7, 7)),
             /*last_line_partial*/ true,
             EvidenceExtent::Truncated,
         ))
@@ -234,18 +265,17 @@ fn an_oversized_line_returns_a_marked_partial_prefix() {
 fn response_budget_truncation_keeps_counters_truthful_and_withholds_receipt() {
     let expected = evidence(
         "L1: alpha\nL2: beta\n",
-        11,
-        Some((1, 2)),
+        /*source_bytes*/ 11,
+        /*lines*/ Some((1, 2)),
         /*last_line_partial*/ false,
         EvidenceExtent::Truncated,
     );
-    let budget = response(&expected).to_string().len();
 
     let packed = pack(
         "alpha\nbeta\ngamma\ndelta\n",
-        Some(1),
+        /*first_line*/ Some(1),
         EvidenceExtent::Complete,
-        budget,
+        response_bytes(&expected),
     )
     .expect("fits");
 
@@ -258,8 +288,15 @@ fn escape_heavy_oversized_line_is_cut_on_a_character_boundary() {
     let source = format!("{}\nnext\n", "\"\\é".repeat(400));
     let budget = 600;
 
-    let packed = pack(&source, Some(1), EvidenceExtent::Complete, budget).expect("fits");
+    let packed = pack(
+        &source,
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        budget,
+    )
+    .expect("fits");
 
+    assert!(response_bytes(&packed) <= budget);
     let prefix = packed
         .content
         .strip_prefix("L1: ")
@@ -271,7 +308,7 @@ fn escape_heavy_oversized_line_is_cut_on_a_character_boundary() {
         evidence(
             &packed.content,
             prefix.len(),
-            Some((1, 1)),
+            /*lines*/ Some((1, 1)),
             /*last_line_partial*/ true,
             EvidenceExtent::Truncated,
         )
@@ -279,6 +316,43 @@ fn escape_heavy_oversized_line_is_cut_on_a_character_boundary() {
 }
 
 #[test]
+fn a_short_partial_line_is_returned_when_empty_metadata_would_not_fit() {
+    let partial = evidence(
+        "L1: a",
+        /*source_bytes*/ 1,
+        /*lines*/ Some((1, 1)),
+        /*last_line_partial*/ true,
+        EvidenceExtent::Truncated,
+    );
+    let empty = evidence(
+        "",
+        /*source_bytes*/ 0,
+        /*lines*/ None,
+        /*last_line_partial*/ false,
+        EvidenceExtent::Truncated,
+    );
+    let budget = response_bytes(&partial);
+    assert!(response_bytes(&empty) > budget);
+
+    let packed = pack(
+        "ab\n",
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        budget,
+    );
+
+    assert_eq!(packed, Some(partial));
+}
+
+#[test]
 fn metadata_that_cannot_fit_returns_nothing() {
-    assert_eq!(pack("one\n", Some(1), EvidenceExtent::Complete, 10), None);
+    assert_eq!(
+        pack(
+            "one\n",
+            /*first_line*/ Some(1),
+            EvidenceExtent::Complete,
+            /*budget*/ 10,
+        ),
+        None
+    );
 }

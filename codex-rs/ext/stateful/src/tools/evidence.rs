@@ -446,8 +446,8 @@ impl NumberedEvidence {
 }
 
 /// Packs the most source that `fits`: every line of a complete read, else the longest
-/// run of complete lines, else a labelled prefix of an oversized first line. Returns
-/// `None` when not even empty evidence fits.
+/// run of complete lines, else a labelled prefix of an oversized first line, else no
+/// source. Returns `None` when nothing fits.
 fn pack_evidence(
     lines: &[SourceLine<'_>],
     read_extent: EvidenceExtent,
@@ -465,42 +465,39 @@ fn pack_evidence(
         }
         EvidenceExtent::Truncated => lines.iter().take_while(|line| line.complete).count(),
     };
-    let empty = truncated(&[]);
-    if !fits(&empty) {
-        return None;
-    }
-    let line_count = largest_fitting(max_complete_lines, |count| {
+    if let Some(line_count) = largest_fitting(max_complete_lines, |count| {
         fits(&truncated(&lines[..count]))
-    });
-    if line_count > 0 {
+    }) {
         return Some(truncated(&lines[..line_count]));
     }
-    let Some(first) = lines.first() else {
-        return Some(empty);
-    };
-    let available = if first.complete {
-        first.text.len().saturating_sub(1)
-    } else {
-        first.text.len()
-    };
-    let prefix = |end: usize| SourceLine {
-        number: first.number,
-        text: &first.text[..first.text.floor_char_boundary(end)],
-        complete: false,
-    };
-    let partial = prefix(largest_fitting(available, |end| {
-        fits(&truncated(&[prefix(end)]))
-    }));
-    if partial.text.is_empty() {
-        return Some(empty);
+    if let Some(first) = lines.first() {
+        let available = if first.complete {
+            first.text.len().saturating_sub(1)
+        } else {
+            first.text.len()
+        };
+        let prefix = |end: usize| SourceLine {
+            number: first.number,
+            text: &first.text[..first.text.ceil_char_boundary(end)],
+            complete: false,
+        };
+        if let Some(end) = largest_fitting(available, |end| fits(&truncated(&[prefix(end)]))) {
+            return Some(truncated(&[prefix(end)]));
+        }
     }
-    Some(truncated(&[partial]))
+    // Empty evidence is tried last: its null line bounds are not always smaller than
+    // a short labelled prefix with numeric bounds.
+    let empty = truncated(&[]);
+    fits(&empty).then_some(empty)
 }
 
-/// Largest `n` in `0..=upper` for which `fits(n)` holds, given that `fits(0)` holds
-/// and `fits` is monotone.
-fn largest_fitting(upper: usize, fits: impl Fn(usize) -> bool) -> usize {
-    let (mut lower, mut upper) = (0, upper);
+/// Largest `n` in `1..=upper` for which the monotone `fits(n)` holds, or `None`
+/// when no such `n` exists.
+fn largest_fitting(upper: usize, fits: impl Fn(usize) -> bool) -> Option<usize> {
+    if upper == 0 || !fits(1) {
+        return None;
+    }
+    let (mut lower, mut upper) = (1, upper);
     while lower < upper {
         let candidate = lower + (upper - lower).div_ceil(2);
         if fits(candidate) {
@@ -509,7 +506,7 @@ fn largest_fitting(upper: usize, fits: impl Fn(usize) -> bool) -> usize {
             upper = candidate - 1;
         }
     }
-    lower
+    Some(lower)
 }
 
 #[cfg(test)]

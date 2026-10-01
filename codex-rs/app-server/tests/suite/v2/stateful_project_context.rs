@@ -651,6 +651,145 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
     Ok(())
 }
 
+/// Both cuts end between labelled lines: a small maxBytes cuts the source read, and a
+/// read larger than the response budget is cut while packing. Neither may carry a
+/// receipt, and every counter must describe exactly the emitted lines.
+#[tokio::test]
+async fn model_truncated_evidence_reads_cut_between_lines_without_receipts() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "source-cut",
+                    "evidence_read",
+                    &json!({"relativePath": "ledger.txt", "maxBytes": 70}).to_string(),
+                ),
+                responses::ev_completed("source-cut-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "response-cut",
+                    "evidence_read",
+                    &json!({"relativePath": "ledger.txt", "maxBytes": 12_288}).to_string(),
+                ),
+                responses::ev_completed("response-cut-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done-message", "Done"),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    let lines = (1..=400)
+        .map(|line| format!("line {line:03} {}\n", "x".repeat(20)))
+        .collect::<Vec<_>>();
+    std::fs::write(project_root.path().join("ledger.txt"), lines.concat())?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Truncated evidence project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-truncated-evidence-project".to_string(),
+            },
+        })
+        .await?;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 3);
+    let labelled = |first: usize, last: usize| {
+        (first..=last)
+            .map(|line| format!("L{line}: {}", lines[line - 1]))
+            .collect::<String>()
+    };
+    let source_bytes = |first: usize, last: usize| lines[first - 1..last].concat().len();
+    let summary = |output: &serde_json::Value| {
+        json!({
+            "content": output["content"],
+            "bytesReturned": output["bytesReturned"],
+            "firstLine": output["firstLine"],
+            "lastLine": output["lastLine"],
+            "lastLinePartial": output["lastLinePartial"],
+            "truncated": output["truncated"],
+            "blackboardEvidence": output["blackboardEvidence"],
+        })
+    };
+
+    let source_cut_text = requests[1]
+        .function_call_output_text("source-cut")
+        .expect("source-cut output should be text");
+    let source_cut: serde_json::Value = serde_json::from_str(&source_cut_text)?;
+    assert_eq!(
+        summary(&source_cut),
+        json!({
+            "content": labelled(1, 2),
+            "bytesReturned": source_bytes(1, 2),
+            "firstLine": 1,
+            "lastLine": 2,
+            "lastLinePartial": false,
+            "truncated": true,
+            "blackboardEvidence": null,
+        })
+    );
+
+    let response_cut_text = requests[2]
+        .function_call_output_text("response-cut")
+        .expect("response-cut output should be text");
+    assert!(response_cut_text.len() <= 9_000);
+    let response_cut: serde_json::Value = serde_json::from_str(&response_cut_text)?;
+    let last_line = response_cut["lastLine"]
+        .as_u64()
+        .and_then(|line| usize::try_from(line).ok())
+        .expect("a response-budget cut still returns whole lines");
+    assert!(last_line < 400);
+    assert_eq!(
+        summary(&response_cut),
+        json!({
+            "content": labelled(1, last_line),
+            "bytesReturned": source_bytes(1, last_line),
+            "firstLine": 1,
+            "lastLine": last_line,
+            "lastLinePartial": false,
+            "truncated": true,
+            "blackboardEvidence": null,
+        })
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn model_guarded_route_rejects_shifted_source_until_requeried() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
