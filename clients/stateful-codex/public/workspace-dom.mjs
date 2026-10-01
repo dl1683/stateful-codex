@@ -13,7 +13,7 @@ import {
 export const ALL_SLOTS = Object.keys(WORKSPACE_SLOTS);
 // A full update also reconciles request cards, whose content can depend on refreshed activity.
 const FULL_UPDATE = [...ALL_SLOTS, "requests"];
-const SCROLLERS = [".tree", ".finding-list", ".activity-list", ".packet"];
+const SCROLLERS = [".tree", ".finding-list", ".activity-list", ".packet", ".approval-diff"];
 
 // Mounts the workspace once and then edits it in place: named slots are replaced only when
 // their markup changes, request cards are reconciled by request ID, and streamed text is
@@ -88,30 +88,9 @@ export function createWorkspaceDom(
   // Replace a slot's content while keeping the user's place: focus, scroll and open details.
   function replaceSlot(name, html) {
     const element = slotElements.get(name);
-    const active = document.activeElement;
-    const focusKey =
-      active && active !== element && element.contains(active)
-        ? elementKey(active)
-        : null;
-    const scrolls = SCROLLERS.flatMap((selector) =>
-      [...element.querySelectorAll(selector)].map((node, index) => [
-        selector,
-        index,
-        node.scrollTop,
-      ]),
-    ).filter(([, , top]) => top);
-    const open = [...element.querySelectorAll("details")].map((details) => details.open);
+    const place = capturePlace(element);
     element.innerHTML = html;
-    for (const [selector, index, top] of scrolls) {
-      const node = element.querySelectorAll(selector)[index];
-      if (node) node.scrollTop = top;
-    }
-    [...element.querySelectorAll("details")].forEach((details, index) => {
-      if (open[index]) details.open = true;
-    });
-    if (focusKey) {
-      [...element.querySelectorAll(focusKey.selector)].find(focusKey.matches)?.focus();
-    }
+    restorePlace(element, place);
   }
 
   function update(state, names = FULL_UPDATE) {
@@ -154,7 +133,12 @@ export function createWorkspaceDom(
       let card = existing.get(key);
       if (!card || cardHtml.get(card) !== html) {
         const fresh = fromHtml(html);
-        if (card) card.remove();
+        if (card) {
+          const place = capturePlace(card);
+          list.insertBefore(fresh, card);
+          card.remove();
+          restorePlace(fresh, place);
+        }
         card = fresh;
         cardHtml.set(card, html);
       }
@@ -325,6 +309,38 @@ export function createDraftTracker(root) {
       if (clear) control.value = "";
     },
   };
+}
+
+// Where the user is inside a container that is about to be re-rendered.
+function capturePlace(container) {
+  const active = container.ownerDocument.activeElement;
+  return {
+    focusKey:
+      active && active !== container && container.contains(active)
+        ? elementKey(active)
+        : null,
+    scrolls: SCROLLERS.flatMap((selector) =>
+      [...container.querySelectorAll(selector)].map((node, index) => [
+        selector,
+        index,
+        node.scrollTop,
+      ]),
+    ).filter(([, , top]) => top),
+    open: [...container.querySelectorAll("details")].map((details) => details.open),
+  };
+}
+
+function restorePlace(container, { focusKey, scrolls, open }) {
+  [...container.querySelectorAll("details")].forEach((details, index) => {
+    if (open[index]) details.open = true;
+  });
+  for (const [selector, index, top] of scrolls) {
+    const node = container.querySelectorAll(selector)[index];
+    if (node) node.scrollTop = top;
+  }
+  if (focusKey) {
+    [...container.querySelectorAll(focusKey.selector)].find(focusKey.matches)?.focus();
+  }
 }
 
 function elementKey(element) {

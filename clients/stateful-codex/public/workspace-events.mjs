@@ -1,7 +1,8 @@
 import { belongsToWorkspace, eventScope } from "./event-scope.mjs";
 
-const REQUEST_ITEM_TYPES = new Set(["fileChange", "commandExecution"]);
 const REQUEST_ITEM_LIMIT = 50;
+// Per remembered item; a larger patch is kept truncated and flagged, never silently.
+const REQUEST_ITEM_DIFF_CHARACTERS = 256 * 1024;
 const FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval";
 
 const REFRESH_METHODS =
@@ -34,18 +35,13 @@ export function applyWorkspaceEvent(state, message) {
       ...state.pendingRequests.filter((item) => item.id !== message.id),
       message,
     ];
-    // A file-change approval names only its item; if that item has not been seen live,
-    // refresh so the recorded activity can supply the changed files.
-    const unknownItem =
-      message.method === FILE_CHANGE_APPROVAL &&
-      !state.requestItems?.has(message.params?.itemId);
-    return { sections: ["requests"], refresh: unknownItem };
+    return { sections: ["requests"], refresh: missingApprovalItems(state) };
   }
   if (message.method === "gateway/pendingRequests") {
     // Authoritative on (re)connect: requests answered elsewhere while away disappear.
     if (message.params?.threadId !== state.threadId) return { sections: [], refresh: false };
     state.pendingRequests = [...(message.params?.requests ?? [])];
-    return { sections: ["requests"], refresh: false };
+    return { sections: ["requests"], refresh: missingApprovalItems(state) };
   }
   if (message.method === "gateway/error") {
     state.notice = message.params?.message ?? null;
@@ -73,16 +69,35 @@ export function applyWorkspaceEvent(state, message) {
   return { sections: [], refresh };
 }
 
-// Keep the latest file-change and command items so approval cards can show what they approve.
+// A file-change approval names only its item. When a pending approval has no complete item,
+// a refresh loads recorded activity, which carries the changed files.
+function missingApprovalItems(state) {
+  return state.pendingRequests.some(
+    (request) =>
+      request.method === FILE_CHANGE_APPROVAL &&
+      !(state.requestItems?.get(request.params?.itemId)?.partial === false) &&
+      !recordedItem(state, request.params?.itemId),
+  );
+}
+
+function recordedItem(state, itemId) {
+  return state.activity?.some((entry) => (entry?.item ?? entry)?.id === itemId) ?? false;
+}
+
+// Keep the latest file-change items, size-bounded, so approval cards can show what they
+// approve. Canonical items (item/started, item/completed) replace streamed partial patches.
 // Returns true when a pending request refers to the updated item.
 function rememberRequestItem(state, message) {
   const params = message.params ?? {};
   let item = null;
   if (["item/started", "item/completed"].includes(message.method)) {
-    if (REQUEST_ITEM_TYPES.has(params.item?.type)) item = params.item;
+    if (params.item?.type === "fileChange") item = { ...boundedItem(params.item), partial: false };
   } else if (message.method === "item/fileChange/patchUpdated") {
-    const known = state.requestItems?.get(params.itemId);
-    item = { ...known, type: "fileChange", id: params.itemId, changes: params.changes };
+    if (state.requestItems?.get(params.itemId)?.partial === false) return false;
+    item = {
+      ...boundedItem({ type: "fileChange", id: params.itemId, changes: params.changes }),
+      partial: true,
+    };
   }
   if (!item?.id) return false;
   state.requestItems ??= new Map();
@@ -92,4 +107,20 @@ function rememberRequestItem(state, message) {
     state.requestItems.delete(state.requestItems.keys().next().value);
   }
   return state.pendingRequests.some((request) => request.params?.itemId === item.id);
+}
+
+function boundedItem(item) {
+  let budget = REQUEST_ITEM_DIFF_CHARACTERS;
+  const changes = (item.changes ?? []).map((change) => {
+    const diff = String(change.diff ?? "");
+    const kept = diff.slice(0, Math.max(budget, 0));
+    budget -= kept.length;
+    return {
+      path: change.path,
+      kind: change.kind,
+      diff: kept,
+      diffTruncated: kept.length < diff.length,
+    };
+  });
+  return { type: "fileChange", id: item.id, status: item.status, changes };
 }

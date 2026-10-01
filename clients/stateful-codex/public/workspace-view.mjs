@@ -395,14 +395,15 @@ function renderRequests(state) {
   return `<aside class="request-drawer" data-requests${requests.length ? "" : " hidden"}><h2>Agent needs input</h2><div data-request-list>${requests.map((request) => renderRequestCard(request, state)).join("")}</div></aside>`;
 }
 
-// The thread item an approval refers to: live item events first, then recorded activity.
+// The thread item an approval refers to: a complete live item, then recorded activity, then a
+// streamed partial patch (which keeps Approve disabled).
 export function requestItem(state, itemId) {
   if (!itemId) return null;
+  const live = state.requestItems?.get(itemId);
+  if (live && !live.partial) return live;
   return (
-    state.requestItems?.get(itemId) ??
-    state.activity
-      .map(normalizeThreadItem)
-      .find((item) => item?.id === itemId) ??
+    state.activity.map(normalizeThreadItem).find((item) => item?.id === itemId) ??
+    live ??
     null
   );
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { displayCommand } from "../public/approval-view.mjs";
+import { displayCommand, splitShellWords } from "../public/approval-view.mjs";
 import { createWorkspaceDom } from "../public/workspace-dom.mjs";
 import { applyWorkspaceEvent } from "../public/workspace-events.mjs";
 import { createDocument } from "./mini-dom.mjs";
@@ -81,14 +81,51 @@ test("an approval whose files are unknown cannot be approved until they arrive",
   assert.match(card().textContent, /changed files for this request are not available yet/);
   assert.equal(card().querySelector('[data-action="decline"]').disabled, false);
 
-  const update = apply({
+  // A streamed patch is shown but cannot be approved; only the canonical item enables it.
+  const partial = apply({
     method: "item/fileChange/patchUpdated",
-    params: { threadId: "thread-a", turnId: "turn-5", itemId: "call-7", changes: fileChangeItem().changes },
+    params: { threadId: "thread-a", turnId: "turn-5", itemId: "call-7", changes: fileChangeItem().changes.slice(0, 1) },
   });
-  assert.deepEqual(update.sections, ["requests"]);
+  assert.deepEqual(partial.sections, ["requests"]);
+  assert.equal(card().querySelector('[data-action="approve"]').disabled, true);
+  assert.match(card().textContent, /still being prepared/);
+
+  apply({
+    method: "item/started",
+    params: { threadId: "thread-a", turnId: "turn-5", item: fileChangeItem(), startedAtMs: 1 },
+  });
   assert.equal(card().querySelector('[data-action="approve"]').disabled, false);
   assert.equal(card().querySelectorAll(".approval-file").length, 2);
-  assert.equal(state.requestItems.get("call-7").type, "fileChange");
+  assert.equal(state.requestItems.get("call-7").partial, false);
+
+  // A late streamed update cannot replace the complete item.
+  apply({
+    method: "item/fileChange/patchUpdated",
+    params: { threadId: "thread-a", turnId: "turn-5", itemId: "call-7", changes: [] },
+  });
+  assert.equal(card().querySelectorAll(".approval-file").length, 2);
+});
+
+test("recorded activity outranks a partial streamed patch", () => {
+  const { apply, card, state } = workspace();
+  apply({
+    method: "item/fileChange/patchUpdated",
+    params: { threadId: "thread-a", turnId: "turn-5", itemId: "call-7", changes: fileChangeItem().changes.slice(1) },
+  });
+  state.activity = [...state.activity, { turnId: "turn-5", item: fileChangeItem() }];
+  apply(fileApproval);
+
+  assert.deepEqual(
+    card().querySelectorAll(".approval-file code").map((code) => code.textContent),
+    ["textkit/legacy/dates.py", "textkit/new_module.py"],
+  );
+  assert.equal(card().querySelector('[data-action="approve"]').disabled, false);
+});
+
+test("a reconnect snapshot with an unknown approval item asks for a refresh", () => {
+  const { apply } = workspace();
+  const snapshot = { method: "gateway/pendingRequests", params: { threadId: "thread-a", requests: [fileApproval] } };
+  assert.deepEqual(apply(snapshot), { sections: ["requests"], refresh: true });
 });
 
 test("recorded activity supplies the changed files after a reconnect", () => {
@@ -124,9 +161,21 @@ test("another thread's items never describe this thread's approvals", () => {
   assert.equal(card().querySelector('[data-action="approve"]').disabled, true);
 });
 
+// The server joins argv with POSIX shell quoting; mirror it so tests use real wire input.
+function shellJoin(words) {
+  return words
+    .map((word) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'"'"'`)}'`))
+    .join(" ");
+}
+
 test("command approvals show the command without its shell wrapper, and its directory", () => {
   const { apply, card } = workspace();
-  const command = `"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe" -NoProfile -Command 'git commit -m ''fix dates'''`;
+  const command = shellJoin([
+    "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    "-NoProfile",
+    "-Command",
+    "git commit -m 'fix dates'",
+  ]);
   apply({
     id: 22,
     method: "item/commandExecution/requestApproval",
@@ -138,23 +187,61 @@ test("command approvals show the command without its shell wrapper, and its dire
   assert.equal(card().querySelector("details .approval-command").textContent, command);
 });
 
-test("shell wrappers are removed only when present", () => {
+test("shell wrappers are removed only for a shell running exactly one script", () => {
+  const script = `python -c "print('ok')"`;
   assert.deepEqual(
     [
-      "pwsh.exe -Command \"Get-ChildItem src\"",
-      "powershell -NoLogo -NoProfile -c dir",
-      "/bin/bash -lc 'pytest -q tests/test_dates.py'",
-      "git status --short",
-      "pwsh.exe script.ps1",
+      shellJoin(["/bin/bash", "-lc", script]),
+      `bash -lc "python -c \\"print('ok')\\""`,
+      shellJoin(["pwsh.exe", "-Command", "Get-ChildItem src"]),
+      shellJoin(["powershell", "-NoLogo", "-NoProfile", "-c", "dir"]),
     ].map(displayCommand),
-    [
-      "Get-ChildItem src",
-      "dir",
-      "pytest -q tests/test_dates.py",
-      "git status --short",
-      "pwsh.exe script.ps1",
-    ],
+    [script, script, "Get-ChildItem src", "dir"],
   );
+  for (const unchanged of [
+    "git status --short",
+    "pwsh.exe script.ps1",
+    "ssh -c aes128-ctr server 'rm -rf ~/Documents'",
+    "mypwsh -Command 'rm -rf /'",
+    "bash -c 'echo one' extra-argument",
+    "pwsh -Command 'Get-Item a' 'Remove-Item b'",
+    "bash -lc 'unterminated",
+  ]) {
+    assert.equal(displayCommand(unchanged), unchanged);
+  }
+  assert.deepEqual(splitShellWords(`a 'b c' "d\\"e" f\\ g`), ["a", "b c", 'd"e', "f g"]);
+});
+
+test("oversized diffs are bounded in memory and on screen, with a warning", () => {
+  const { apply, card, state } = workspace();
+  const huge = { ...fileChangeItem(), changes: [{ path: "big.txt", kind: { type: "add" }, diff: `+${"x".repeat(300 * 1024)}` }] };
+  apply({ method: "item/started", params: { threadId: "thread-a", turnId: "t", item: huge, startedAtMs: 1 } });
+  apply(fileApproval);
+
+  const stored = state.requestItems.get("call-7").changes[0];
+  assert.equal(stored.diff.length, 256 * 1024);
+  assert.equal(stored.diffTruncated, true);
+  assert.equal(card().querySelector(".approval-diff").textContent.length < 500, true);
+  assert.match(card().textContent, /too large to show here/);
+});
+
+test("replacing an approval card keeps an open diff and its focused summary", () => {
+  const { apply, card, state } = workspace();
+  apply({ method: "item/started", params: { threadId: "thread-a", turnId: "t", item: fileChangeItem(45), startedAtMs: 1 } });
+  apply(fileApproval);
+  const details = card().querySelector(".approval-file details");
+  details.open = true;
+  details.querySelector("summary").focus();
+
+  apply({ ...fileApproval, params: { ...fileApproval.params, reason: "Also update the changelog" } });
+
+  assert.equal(card().querySelector(".approval-file details").open, true);
+  assert.equal(
+    card().ownerDocument.activeElement.getAttribute("data-disclosure"),
+    "diff-0",
+  );
+  assert.match(card().textContent, /Also update the changelog/);
+  assert.equal(state.pendingRequests.length, 1);
 });
 
 test("remembered approval items are bounded", () => {
