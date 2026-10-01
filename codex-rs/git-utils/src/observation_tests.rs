@@ -159,6 +159,64 @@ async fn detached_head_has_no_ref() {
 }
 
 #[tokio::test]
+async fn nested_directory_resolves_to_its_worktree() {
+    let temp = TempDir::new().expect("tempdir");
+    let oid = committed_repo(temp.path());
+    let nested = temp.path().join("a").join("b");
+    std::fs::create_dir_all(&nested).expect("mkdir");
+    assert_eq!(
+        observe(&nested).await,
+        on_main(temp.path(), oid, GitWorktreeObservation::Clean)
+    );
+}
+
+#[tokio::test]
+async fn non_git_and_missing_directories_are_unknown() {
+    let temp = TempDir::new().expect("tempdir");
+    let not_git = |failure| GitRepositoryObservation {
+        worktree_root: None,
+        head: GitHeadObservation::Unknown(failure),
+        worktree: GitWorktreeObservation::Unknown(failure),
+    };
+    assert_eq!(
+        observe(temp.path()).await,
+        not_git(GitObservationFailure::CommandFailed {
+            exit_code: Some(128)
+        })
+    );
+    assert_eq!(
+        observe(&temp.path().join("missing")).await,
+        not_git(GitObservationFailure::MissingRoot)
+    );
+}
+
+#[tokio::test]
+async fn corrupt_metadata_is_unknown() {
+    let temp = TempDir::new().expect("tempdir");
+    committed_repo(temp.path());
+    let refs = temp.path().join(".git").join("refs").join("heads");
+    std::fs::write(refs.join("main"), "not an object id\n").expect("corrupt ref");
+    let failure = GitObservationFailure::CommandFailed {
+        exit_code: Some(128),
+    };
+    assert_eq!(
+        observe(temp.path()).await,
+        GitRepositoryObservation {
+            worktree_root: Some(absolute(temp.path())),
+            head: GitHeadObservation::Unknown(failure),
+            worktree: GitWorktreeObservation::Unknown(failure),
+        }
+    );
+
+    std::fs::write(temp.path().join(".git").join("HEAD"), "garbage\n").expect("corrupt HEAD");
+    assert_eq!(
+        observe(temp.path()).await.worktree_root,
+        None,
+        "a repository with an invalid HEAD is not discovered"
+    );
+}
+
+#[tokio::test]
 async fn exhausted_budget_is_unknown_rather_than_clean() {
     let temp = TempDir::new().expect("tempdir");
     let budget = GitObservationBudget::until(Instant::now());
@@ -250,4 +308,107 @@ async fn head_changes_between_samples_are_unstable() {
             }
         );
     }
+}
+
+#[tokio::test]
+async fn linked_worktree_reports_its_own_state() {
+    let temp = TempDir::new().expect("tempdir");
+    let main = temp.path().join("main");
+    let main_oid = committed_repo(&main);
+    let linked = temp.path().join("linked");
+    let linked_arg = linked.to_str().expect("utf-8 path");
+    git(
+        &main,
+        &["worktree", "add", "-q", "-b", "feature", linked_arg],
+    );
+    git(&linked, &["commit", "-q", "--allow-empty", "-m", "feature"]);
+    let linked_oid = GitSha::new(&git(&linked, &["rev-parse", "HEAD"]));
+    std::fs::write(linked.join("tracked.txt"), "changed\n").expect("write");
+
+    assert_eq!(
+        observe(&main).await,
+        on_main(&main, main_oid, GitWorktreeObservation::Clean)
+    );
+    assert_eq!(
+        observe(&linked).await,
+        GitRepositoryObservation {
+            worktree_root: Some(absolute(&linked)),
+            head: GitHeadObservation::Commit {
+                oid: linked_oid,
+                head_ref: Some("refs/heads/feature".to_string()),
+            },
+            worktree: GitWorktreeObservation::Dirty,
+        }
+    );
+}
+
+#[tokio::test]
+async fn sha256_repository_is_observed() {
+    let temp = TempDir::new().expect("tempdir");
+    let supported = std::process::Command::new("git")
+        .args(["init", "-q", "--object-format=sha256", "-b", "main"])
+        .current_dir(temp.path())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !supported {
+        eprintln!("skipping: the local git cannot create SHA-256 repositories");
+        return;
+    }
+    std::fs::write(temp.path().join("tracked.txt"), "one\n").expect("write");
+    git(temp.path(), &["add", "tracked.txt"]);
+    git(temp.path(), &["commit", "-q", "-m", "initial"]);
+    let oid = GitSha::new(&git(temp.path(), &["rev-parse", "HEAD"]));
+    assert_eq!(oid.0.len(), 64);
+    assert_eq!(
+        observe(temp.path()).await,
+        on_main(temp.path(), oid, GitWorktreeObservation::Clean)
+    );
+}
+
+#[tokio::test]
+async fn spaced_and_unicode_paths_survive() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut names = vec![" spaced  repo", "r\u{e9}po \u{65e5}\u{672c}"];
+    if cfg!(unix) {
+        names.push("new\nline");
+    }
+    for name in names {
+        let repo = temp.path().join(name);
+        let oid = committed_repo(&repo);
+        std::fs::write(repo.join("f\u{fc}r mich.txt"), "x").expect("write");
+        assert_eq!(
+            observe(&repo).await,
+            on_main(&repo, oid, GitWorktreeObservation::Dirty),
+            "{name:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn submodule_changes_are_dirty_despite_ignore_configuration() {
+    let temp = TempDir::new().expect("tempdir");
+    let library = temp.path().join("library");
+    committed_repo(&library);
+    let main = temp.path().join("main");
+    committed_repo(&main);
+    let library_arg = library.to_str().expect("utf-8 path");
+    git(&main, &["submodule", "add", "-q", library_arg, "lib"]);
+    git(
+        &main,
+        &["config", "-f", ".gitmodules", "submodule.lib.ignore", "all"],
+    );
+    git(&main, &["config", "diff.ignoreSubmodules", "all"]);
+    git(&main, &["add", ".gitmodules"]);
+    git(&main, &["commit", "-q", "-m", "add submodule"]);
+    let oid = GitSha::new(&git(&main, &["rev-parse", "HEAD"]));
+    assert_eq!(
+        observe(&main).await,
+        on_main(&main, oid.clone(), GitWorktreeObservation::Clean)
+    );
+
+    std::fs::write(main.join("lib").join("tracked.txt"), "changed\n").expect("write");
+    assert_eq!(
+        observe(&main).await,
+        on_main(&main, oid, GitWorktreeObservation::Dirty)
+    );
 }
