@@ -489,25 +489,29 @@ function renderFindings(state) {
   const current = entries.filter((hit) => (hit.entry.state ?? "active") === "active");
   const replaced = entries.filter((hit) => (hit.entry.state ?? "active") !== "active");
   const filtering = Boolean(text || filter.kind);
+  // A capped page is disclosed wherever the list is shown, empty or not: absence from the loaded
+  // page is not absence from the project.
+  const capped = state.blackboardTruncated;
+  const loaded = capped ? "loaded " : "";
   const parts = [
-    filtering ? `${entries.length} of ${inNode.length} match the filter.` : "",
-    entries.some((hit) => entryTime(hit.entry)) ? "Newest first." : "",
-    state.blackboardTruncated
-      ? `Only the ${formatNumber(state.blackboard.length)} understandings the server returned are listed; others exist but are not shown here.`
+    filtering && entries.length ? `${entries.length} of ${inNode.length} ${loaded}match the filter.` : "",
+    entries.some((hit) => entryTime(hit.entry)) ? "Most recently updated first." : "",
+    capped
+      ? `Only the ${formatNumber(state.blackboard.length)} understandings the server returned are loaded; others exist but are not shown here.`
       : "",
   ].filter(Boolean);
   const summary = parts.length ? `<p class="microcopy">${parts.join(" ")}</p>` : "";
   const list = (hits) =>
     `<div class="finding-list">${hits.map((hit) => renderFinding(hit, state)).join("")}</div>`;
   const body = entries.length
-    ? `${summary}${current.length ? list(current) : empty("No current understandings match.")}${replaced.length ? `<details class="superseded"><summary data-disclosure="superseded-findings">Superseded or withdrawn · ${replaced.length}</summary>${list(replaced)}</details>` : ""}`
-    : empty(
+    ? `${summary}${current.length ? list(current) : empty(`No current ${loaded}understandings match.`)}${replaced.length ? `<details class="superseded"><summary data-disclosure="superseded-findings">Superseded or withdrawn · ${replaced.length}</summary>${list(replaced)}</details>` : ""}`
+    : `${empty(
         filtering
-          ? "No saved understandings match the filter."
+          ? `No ${loaded}saved understandings match the filter.`
           : selected
-            ? "No matching findings at this node."
+            ? `No ${loaded}findings at this node.`
             : "No findings have been recorded yet.",
-      );
+      )}${summary}`;
   return panel(
     selected
       ? "Selected-node understanding"
@@ -535,8 +539,8 @@ function renderFindingDate(entry) {
   const changed = entry.updatedAt ? formatDate(entry.updatedAt) : null;
   const label =
     saved && changed && saved !== changed
-      ? `Saved ${saved} · updated ${changed}`
-      : `Saved ${saved ?? changed}`;
+      ? `Saved ${saved} · updated ${changed} (UTC)`
+      : `Saved ${saved ?? changed} (UTC)`;
   return `<small class="finding-date">${escapeHtml(label)}${entry.state && entry.state !== "active" ? ` · ${escapeHtml(entry.state)}` : ""}</small>`;
 }
 

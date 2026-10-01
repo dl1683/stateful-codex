@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDraftTracker, createWorkspaceDom } from "../public/workspace-dom.mjs";
+import {
+  createDraftTracker,
+  createWorkspaceDom,
+  watchFindingFilter,
+} from "../public/workspace-dom.mjs";
 import { WORKSPACE_SLOTS } from "../public/workspace-view.mjs";
 import { assertSameNode, createDocument, type } from "./mini-dom.mjs";
 import { workspaceFixture } from "./workspace-fixture.mjs";
@@ -419,17 +423,31 @@ test("a finished message whose stream was missed still appears, and is trimmed w
   );
 });
 
-test("filtering findings re-renders only the list and keeps the filter field", () => {
-  const { state, view, $ } = mountWorkspace();
+test("typing in the findings filter narrows the list and survives a full refresh", () => {
+  const { state, view, root, document, $ } = mountWorkspace();
+  watchFindingFilter(root, (filter) => {
+    state.findingFilter = filter;
+    view.update(state, ["findings"]);
+  });
   const filter = $('#finding-filter [name="text"]');
-  type(filter, "appendix");
+  const kind = $('#finding-filter [name="kind"]');
   filter.focus();
-  state.findingFilter = { text: "appendix", kind: "" };
-  view.update(state, ["findings"]);
+  type(filter, "threshold");
+  const articles = () => $('[data-slot="findings"]').querySelectorAll("article").length;
+  assert.equal(articles(), 2);
 
+  kind.value = "number";
+  kind.dispatch("change");
+  assert.equal(articles(), 1);
+  filter.focus();
+
+  // A full refresh re-renders every slot; the filter field is outside them all.
+  state.blackboard = state.blackboard.map((hit) => ({ ...hit }));
+  view.update(state);
   assertSameNode($('#finding-filter [name="text"]'), filter);
-  assert.equal(filter.value, "appendix");
-  assert.equal($('[data-slot="findings"]').querySelectorAll("article").length, 1);
+  assertSameNode(document.activeElement, filter);
+  assert.equal(filter.value, "threshold");
+  assert.equal(articles(), 1);
 });
 
 test("a slim pending bar announces waiting requests and takes the keyboard to them", () => {

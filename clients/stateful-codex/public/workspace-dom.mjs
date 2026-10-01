@@ -375,6 +375,21 @@ function liveItemElement(node) {
   return node.nodeType === TEXT_NODE ? node.parentNode : node;
 }
 
+// The findings filter lives outside the re-rendered findings slot and applies as the person
+// types or picks a kind; it never submits.
+export function watchFindingFilter(root, onFilter) {
+  const apply = (event) => {
+    const form = event.target.closest?.("#finding-filter");
+    if (!form) return;
+    onFilter({
+      text: form.querySelector('[name="text"]').value,
+      kind: form.querySelector('[name="kind"]').value,
+    });
+  };
+  root.addEventListener("input", apply);
+  root.addEventListener("change", apply);
+}
+
 // Consecutive text for the same item is one run; each run holds at least one character, so the
 // list never outgrows the bounded tail.
 function recordChunk(chunks, itemId, length) {

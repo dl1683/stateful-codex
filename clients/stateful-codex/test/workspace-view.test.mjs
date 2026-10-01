@@ -251,21 +251,28 @@ test("saved understandings read newest first, dated, with superseded ones set ap
     state: "superseded",
   });
   Object.assign(number.entry, { createdAt: 1_790_000_000 + day, updatedAt: 1_790_000_000 + 3 * day });
-  Object.assign(question.entry, { createdAt: 1_790_000_000 - day, updatedAt: 1_790_000_000 - day });
+  // Created first but updated last among the current cards: ordering follows the update.
+  Object.assign(question.entry, { createdAt: 1_790_000_000 - day, updatedAt: 1_790_000_000 + 4 * day });
   state.blackboardTruncated = true;
 
   const findings = findingsSlot(renderWorkspace(state));
 
   assert.deepEqual(findingOrder(findings), [
+    "Does the missing appendix create an exception?",
     "The operative threshold is 60%, not 40%.",
     "Verify the amended threshold before relying on the earlier conclusion.",
-    "Does the missing appendix create an exception?",
     "The earlier conclusion must be revised.",
   ]);
-  assert.match(findings, /<small class="finding-date">Saved 2026-09-22 · updated 2026-09-24<\/small><p>The operative threshold/);
+  assert.match(findings, /<small class="finding-date">Saved 2026-09-22 · updated 2026-09-24 \(UTC\)<\/small><p>The operative threshold/);
   assert.match(findings, /<summary data-disclosure="superseded-findings">Superseded or withdrawn · 1<\/summary>.*The earlier conclusion must be revised/);
-  assert.match(findings, /Saved 2026-09-21 · updated 2026-09-23 · superseded<\/small>/);
-  assert.match(findings, /Newest first\. Only the 4 understandings the server returned are listed/);
+  assert.match(findings, /Saved 2026-09-21 · updated 2026-09-23 \(UTC\) · superseded<\/small>/);
+  assert.match(findings, /Most recently updated first\. Only the 4 understandings the server returned are loaded/);
+
+  // A record with only a creation time sorts by it.
+  delete strategy.entry.updatedAt;
+  strategy.entry.createdAt = 1_790_000_000 + 5 * day;
+  assert.equal(findingOrder(findingsSlot(renderWorkspace(state)))[0], strategy.entry.content);
+  assert.match(findingsSlot(renderWorkspace(state)), /Saved 2026-09-26 \(UTC\)<\/small><p>Verify the amended/);
 });
 
 test("the findings filter narrows by text and kind and says how many match", () => {
@@ -284,6 +291,16 @@ test("the findings filter narrows by text and kind and says how many match", () 
 
   state.findingFilter = { text: "nothing like this", kind: "" };
   assert.match(findingsSlot(renderWorkspace(state)), /No saved understandings match the filter\./);
+
+  // When the server returned a capped page, an empty result says only the loaded page was searched.
+  state.blackboardTruncated = true;
+  assert.match(
+    findingsSlot(renderWorkspace(state)),
+    /No loaded saved understandings match the filter\.<\/p><p class="microcopy">Only the 4 understandings the server returned are loaded/,
+  );
+  state.findingFilter = { text: "", kind: "" };
+  state.selectedNodeId = "node-dir";
+  assert.match(findingsSlot(renderWorkspace(state)), /No loaded findings at this node\.<\/p><p class="microcopy">Only the 4/);
 });
 
 function findingsSlot(html) {

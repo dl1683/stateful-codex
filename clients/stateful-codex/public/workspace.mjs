@@ -3,7 +3,7 @@ import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { submitSteering } from "./steering-submit.mjs";
 import { startFollowUp } from "./follow-up.mjs";
-import { createWorkspaceDom } from "./workspace-dom.mjs";
+import { createWorkspaceDom, watchFindingFilter } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
 import { describeSourceError, findUnavailableRoots } from "./source-availability.mjs";
 
@@ -280,18 +280,10 @@ function handleEvent(message) {
   }
 }
 
-// The findings filter applies as the person types; it never submits.
-function applyFindingFilter(event) {
-  const form = event.target.closest?.("#finding-filter");
-  if (!form) return;
-  state.findingFilter = {
-    text: form.querySelector('[name="text"]').value,
-    kind: form.querySelector('[name="kind"]').value,
-  };
+watchFindingFilter(app, (filter) => {
+  state.findingFilter = filter;
   render(["findings"]);
-}
-app.addEventListener("input", applyFindingFilter);
-app.addEventListener("change", applyFindingFilter);
+});
 
 app.addEventListener("submit", async (event) => {
   event.preventDefault();
