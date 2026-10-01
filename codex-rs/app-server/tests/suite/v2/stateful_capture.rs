@@ -12,6 +12,7 @@ use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_app_server_protocol::StatefulRunStartParams;
 use codex_app_server_protocol::StatefulRunStartResponse;
+use codex_app_server_protocol::StatefulRunStatus as ApiRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
@@ -20,9 +21,7 @@ use codex_features::Feature;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
-use codex_stateful_runtime::NewObligation;
 use codex_stateful_runtime::NewStatefulRun;
-use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStatus;
@@ -180,18 +179,7 @@ async fn orientation_findings_reach_a_fresh_thread_after_outcome_eviction() -> R
         })
         .await?
         .revision;
-    let run_revision = server
-        .request::<StatefulRunReadResponse>(|request_id| ClientRequest::StatefulRunRead {
-            request_id,
-            params: StatefulRunReadParams {
-                run_id: Some(started.run.id.clone()),
-                thread_id: None,
-            },
-        })
-        .await?
-        .run
-        .expect("orientation run should be readable")
-        .revision;
+    let run_revision = read_run(&mut server, &started.run.id).await?.revision;
     let complete_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -218,7 +206,25 @@ async fn orientation_findings_reach_a_fresh_thread_after_outcome_eviction() -> R
         .expect("completion output should be text");
     let completion: Value = serde_json::from_str(&completion_text)
         .unwrap_or_else(|_| panic!("completion should succeed: {completion_text}"));
-    assert_eq!(completion["status"], json!("completed"));
+    let stored = read_run(&mut server, &started.run.id).await?;
+    let stored_result = stored.result.unwrap_or_default();
+    // The durable basis carries the selected finding and the final learning.
+    assert_eq!(
+        (
+            &completion["status"],
+            stored.status,
+            stored_result.starts_with(ORIENTATION_RESULT),
+            stored_result.contains(CAPTURED_FINDING),
+            stored_result.contains("ORIENTATION_LEARNING_MARKER"),
+        ),
+        (
+            &json!("completed"),
+            ApiRunStatus::Completed,
+            true,
+            true,
+            true
+        )
+    );
 
     // Five newer completed outcomes fill the recent-outcome window.
     let store = StatefulRunStore::open(&sqlite).await?;
@@ -240,23 +246,13 @@ async fn orientation_findings_reach_a_fresh_thread_after_outcome_eviction() -> R
             )
             .await?;
         store
-            .complete_run_with_obligation(
+            .update_run(
                 &run_id,
                 StatefulRunUpdate {
                     expected_revision: run.revision,
                     status: StatefulRunStatus::Completed,
                     strategy: None,
                     result: Some(format!("NEWER_OUTCOME_MARKER {index}")),
-                },
-                format!("newer-outcome-final-{index}"),
-                NewObligation {
-                    project_id: project_id.clone(),
-                    run_id: run_id.clone(),
-                    packet: ObligationPacket {
-                        implication: vec![format!("Routine task {index} needs no follow-up.")],
-                        ..Default::default()
-                    },
-                    provenance_source_id: "newer-outcome-fixture".to_string(),
                 },
             )
             .await?;
@@ -307,6 +303,23 @@ fn assistant(text: &str) -> String {
         responses::ev_assistant_message("assistant-message", text),
         responses::ev_completed("assistant-response"),
     ])
+}
+
+async fn read_run(
+    server: &mut TestAppServer,
+    run_id: &str,
+) -> Result<codex_app_server_protocol::StatefulRun> {
+    Ok(server
+        .request::<StatefulRunReadResponse>(|request_id| ClientRequest::StatefulRunRead {
+            request_id,
+            params: StatefulRunReadParams {
+                run_id: Some(run_id.to_string()),
+                thread_id: None,
+            },
+        })
+        .await?
+        .run
+        .expect("run should be readable"))
 }
 
 async fn run_turn(server: &mut TestAppServer, thread_id: &str, text: &str) -> Result<()> {
