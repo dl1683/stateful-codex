@@ -34,6 +34,7 @@ export const WORKSPACE_SLOTS = {
   "controls-detail": renderControlsDetail,
   measured: (state) => renderMeasuredWork(state.measurementSummary),
   "steering-form": renderSteeringForm,
+  "steering-status": renderSteeringStatus,
   "steering-list": renderSteeringList,
   findings: renderFindings,
 };
@@ -68,7 +69,7 @@ export function renderWorkspaceShell(state, slotHtml) {
         <aside class="stack-panel controls-panel">
           <section class="workspace-panel"><div class="panel-heading"><h2>Run controls</h2></div>${slot("controls-state")}${slot("mode-form")}${slot("controls-detail")}</section>
           ${slot("measured")}
-          <section class="workspace-panel"><div class="panel-heading"><h2>Steer the work</h2></div>${slot("steering-form")}${slot("steering-list")}</section>
+          <section class="workspace-panel"><div class="panel-heading"><h2>Steer the work</h2></div>${slot("steering-form")}${slot("steering-status")}${slot("steering-list")}</section>
         </aside>
         <section class="findings-work">
           ${slot("findings")}
@@ -323,6 +324,12 @@ function renderSteeringForm(state) {
   return isTerminalRun(state.run)
     ? `<p class="microcopy">Steering is closed with this outcome. Start another outcome to continue from the same project intelligence.</p>${newOutcomeLink()}`
     : `<form id="steering-form" class="stack"><textarea name="steering" placeholder="Follow this fact, connect these findings, or change direction…" required></textarea><button class="primary">Submit steering</button></form>`;
+}
+
+function renderSteeringStatus(state) {
+  return state.steeringError
+    ? `<p class="banner error" role="alert">${escapeHtml(state.steeringError)}</p>`
+    : "";
 }
 
 function renderSteeringList(state) {

@@ -76,7 +76,15 @@ export function createWorkspaceDom(
     );
     mounted = true;
     syncMode(state);
+    syncSteering(state);
     if (live.pending.size) scheduleFlush();
+  }
+
+  // Steering needs a run to attach to. The button, not the form markup, reflects that, so a
+  // draft typed while the run is being prepared survives the run's arrival.
+  function syncSteering(state) {
+    const button = slotElements.get("steering-form").querySelector("button");
+    if (button) button.disabled = !state.run;
   }
 
   // Show the persisted mode unless the user has edited the selector since it was last clean.
@@ -114,6 +122,7 @@ export function createWorkspaceDom(
       replaceSlot(name, html);
     }
     if (names.includes("mode-form")) syncMode(state);
+    if (names.includes("steering-form")) syncSteering(state);
   }
 
   // Keep a card's element while its request is pending so a half-typed answer survives.

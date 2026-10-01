@@ -1,6 +1,7 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
+import { submitSteering } from "./steering-submit.mjs";
 import { createWorkspaceDom } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
 
@@ -25,6 +26,7 @@ const state = {
   blackboard: [],
   obligations: [],
   steering: [],
+  steeringError: null,
   measurementSummary: null,
   activity: [],
   contextHits: [],
@@ -124,7 +126,11 @@ async function ensureRun() {
 
 async function refreshWorkspace() {
   state.loading = !state.project;
-  state.error = null;
+  // An action's error stays visible until the user acts again; refreshes clear only their own.
+  if (state.refreshFailed) {
+    state.error = null;
+    state.refreshFailed = false;
+  }
   render(["notices"]);
   const [
     project,
@@ -216,7 +222,14 @@ function handleEvent(message) {
   if (effect.sections.length) render(effect.sections);
   if (effect.refresh) {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => refresh().catch(fail), 180);
+    refreshTimer = setTimeout(
+      () =>
+        refresh().catch((error) => {
+          state.refreshFailed = true;
+          fail(error);
+        }),
+      180,
+    );
   }
 }
 
@@ -225,18 +238,15 @@ app.addEventListener("submit", async (event) => {
   const form = event.target;
   try {
     if (form.id === "steering-form") {
-      await drafts.submit(form.querySelector('[name="steering"]'), (input) =>
-        action("Applying steering", () =>
-          rpc("steering/submit", {
-            runId: state.run.id,
-            input,
-            affectedObligationIds: state.obligations.at(-1)
-              ? [state.obligations.at(-1).id]
-              : [],
-            idempotencyKey: crypto.randomUUID(),
-          }),
-        ),
-      );
+      const saved = await submitSteering({
+        state,
+        control: form.querySelector('[name="steering"]'),
+        drafts,
+        rpc,
+        action,
+      });
+      render(["steering-status", "steering-list"]);
+      if (saved) await refresh();
     } else if (form.id === "message-form") {
       await drafts.submit(form.querySelector('[name="message"]'), (input) =>
         action("Sending instruction", () => sendTurn(input)),
