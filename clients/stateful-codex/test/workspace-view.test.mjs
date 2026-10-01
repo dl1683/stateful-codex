@@ -197,3 +197,59 @@ test("a changed source says why it can't be verified and offers a re-index", () 
   // A finding without linked evidence has nothing to verify, so it offers nothing.
   assert.equal(actual.match(/class="microcopy unverifiable"/g)?.length, 2);
 });
+
+test("saved understandings read newest first, dated, with superseded ones set apart", () => {
+  const state = workspaceFixture();
+  const day = 86_400;
+  const [strategy, decision, number, question] = state.blackboard;
+  Object.assign(strategy.entry, { createdAt: 1_790_000_000, updatedAt: 1_790_000_000 });
+  Object.assign(decision.entry, {
+    createdAt: 1_790_000_000,
+    updatedAt: 1_790_000_000 + 2 * day,
+    state: "superseded",
+  });
+  Object.assign(number.entry, { createdAt: 1_790_000_000 + day, updatedAt: 1_790_000_000 + 3 * day });
+  Object.assign(question.entry, { createdAt: 1_790_000_000 - day, updatedAt: 1_790_000_000 - day });
+  state.blackboardTruncated = true;
+
+  const findings = findingsSlot(renderWorkspace(state));
+
+  assert.deepEqual(findingOrder(findings), [
+    "The operative threshold is 60%, not 40%.",
+    "Verify the amended threshold before relying on the earlier conclusion.",
+    "Does the missing appendix create an exception?",
+    "The earlier conclusion must be revised.",
+  ]);
+  assert.match(findings, /<small class="finding-date">Saved 2026-09-22 · updated 2026-09-24<\/small><p>The operative threshold/);
+  assert.match(findings, /<summary data-disclosure="superseded-findings">Superseded or withdrawn · 1<\/summary>.*The earlier conclusion must be revised/);
+  assert.match(findings, /Saved 2026-09-21 · updated 2026-09-23 · superseded<\/small>/);
+  assert.match(findings, /Newest first\. Only the 4 understandings the server returned are listed/);
+});
+
+test("the findings filter narrows by text and kind and says how many match", () => {
+  const state = workspaceFixture();
+  state.findingFilter = { text: "THRESHOLD", kind: "" };
+  assert.deepEqual(findingOrder(findingsSlot(renderWorkspace(state))), [
+    "Verify the amended threshold before relying on the earlier conclusion.",
+    "The operative threshold is 60%, not 40%.",
+  ]);
+  assert.match(findingsSlot(renderWorkspace(state)), /2 of 4 match the filter\./);
+
+  state.findingFilter = { text: "threshold", kind: "number" };
+  assert.deepEqual(findingOrder(findingsSlot(renderWorkspace(state))), [
+    "The operative threshold is 60%, not 40%.",
+  ]);
+
+  state.findingFilter = { text: "nothing like this", kind: "" };
+  assert.match(findingsSlot(renderWorkspace(state)), /No saved understandings match the filter\./);
+});
+
+function findingsSlot(html) {
+  return html.slice(html.indexOf('data-slot="findings"'));
+}
+
+function findingOrder(html) {
+  return [...html.matchAll(/<\/small><p>([^<]*)<\/p>|<\/div><p>([^<]*)<\/p>/g)].map(
+    (match) => match[1] ?? match[2],
+  );
+}

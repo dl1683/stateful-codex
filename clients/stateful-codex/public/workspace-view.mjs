@@ -75,6 +75,7 @@ export function renderWorkspaceShell(state, slotHtml) {
           <section class="workspace-panel"><div class="panel-heading"><h2>Steer the work</h2></div>${slot("steering-form")}${slot("steering-status")}${slot("steering-list")}</section>
         </aside>
         <section class="findings-work">
+          ${renderFindingFilter()}
           ${slot("findings")}
         </section>
       </div>
@@ -386,26 +387,96 @@ function renderSteeringList(state) {
     : `<p class="microcopy">Your exact instruction and its application state remain visible.</p>`;
 }
 
+const FINDING_KINDS = [
+  "instruction",
+  "fact",
+  "claim",
+  "number",
+  "decision",
+  "strategy",
+  "question",
+  "contradiction",
+  "failure",
+  "rejectedApproach",
+  "signal",
+  "note",
+];
+
+// The filter lives outside the findings slot, so typing in it never loses focus or caret when
+// the list below is re-rendered.
+function renderFindingFilter() {
+  return `<form id="finding-filter" class="inline-form finding-filter" role="search"><input name="text" aria-label="Filter saved understandings" placeholder="Filter saved understandings"/><select name="kind" aria-label="Kind of understanding"><option value="">All kinds</option>${FINDING_KINDS.map((kind) => `<option value="${kind}">${kindLabel(kind)}</option>`).join("")}</select></form>`;
+}
+
+// Newest first, current before superseded, narrowed by the node selection and the filter.
 function renderFindings(state) {
   const selected = state.selectedNodeId;
-  const entries = state.blackboard.filter(
-    (hit) => !selected || hit.entry.nodeId === selected,
-  );
+  const filter = state.findingFilter ?? { text: "", kind: "" };
+  const text = filter.text.trim().toLowerCase();
+  const inNode = state.blackboard.filter((hit) => !selected || hit.entry.nodeId === selected);
+  const entries = inNode
+    .filter(
+      (hit) =>
+        (!filter.kind || hit.entry.kind === filter.kind) &&
+        (!text || hit.entry.content.toLowerCase().includes(text)),
+    )
+    .sort((left, right) => entryTime(right.entry) - entryTime(left.entry));
+  const current = entries.filter((hit) => (hit.entry.state ?? "active") === "active");
+  const replaced = entries.filter((hit) => (hit.entry.state ?? "active") !== "active");
+  const filtering = Boolean(text || filter.kind);
+  const parts = [
+    filtering ? `${entries.length} of ${inNode.length} match the filter.` : "",
+    entries.some((hit) => entryTime(hit.entry)) ? "Newest first." : "",
+    state.blackboardTruncated
+      ? `Only the ${formatNumber(state.blackboard.length)} understandings the server returned are listed; others exist but are not shown here.`
+      : "",
+  ].filter(Boolean);
+  const summary = parts.length ? `<p class="microcopy">${parts.join(" ")}</p>` : "";
+  const list = (hits) =>
+    `<div class="finding-list">${hits.map((hit) => renderFinding(hit, state)).join("")}</div>`;
+  const body = entries.length
+    ? `${summary}${current.length ? list(current) : empty("No current understandings match.")}${replaced.length ? `<details class="superseded"><summary data-disclosure="superseded-findings">Superseded or withdrawn · ${replaced.length}</summary>${list(replaced)}</details>` : ""}`
+    : empty(
+        filtering
+          ? "No saved understandings match the filter."
+          : selected
+            ? "No matching findings at this node."
+            : "No findings have been recorded yet.",
+      );
   return panel(
     selected
       ? "Selected-node understanding"
       : "Project understanding & open signals",
-    entries.length
-      ? `<div class="finding-list">${entries.map((hit) => renderFinding(hit, state)).join("")}</div>`
-      : empty(
-          selected
-            ? "No matching findings at this node."
-            : "No findings have been recorded yet.",
-        ),
+    body,
     selected
-      ? `<button class="text-button" data-action="node" data-node-id="${escapeHtml(selected)}">Clear filter</button>`
+      ? `<button class="text-button" data-action="node" data-node-id="${escapeHtml(selected)}">Show all nodes</button>`
       : "",
   );
+}
+
+function entryTime(entry) {
+  return entry.updatedAt ?? entry.createdAt ?? 0;
+}
+
+function kindLabel(kind) {
+  const words = kind.replace(/([A-Z])/g, " $1").toLowerCase();
+  return `${words[0].toUpperCase()}${words.slice(1)}`;
+}
+
+// Dates come from the record, not from its text: when it was saved and last changed.
+function renderFindingDate(entry) {
+  if (!entry.updatedAt && !entry.createdAt) return "";
+  const saved = entry.createdAt ? formatDate(entry.createdAt) : null;
+  const changed = entry.updatedAt ? formatDate(entry.updatedAt) : null;
+  const label =
+    saved && changed && saved !== changed
+      ? `Saved ${saved} · updated ${changed}`
+      : `Saved ${saved ?? changed}`;
+  return `<small class="finding-date">${escapeHtml(label)}${entry.state && entry.state !== "active" ? ` · ${escapeHtml(entry.state)}` : ""}</small>`;
+}
+
+function formatDate(seconds) {
+  return new Date(seconds * 1000).toISOString().slice(0, 10);
 }
 
 function renderFinding(hit, state) {
@@ -421,7 +492,7 @@ function renderFinding(hit, state) {
     hit.effectiveVerification === "userConfirmed"
       ? ""
       : `<button class="text-button" data-action="confirm-knowledge" data-entry-id="${escapeHtml(entry.id)}" data-revision="${entry.revision}">Confirm this understanding</button>`;
-  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span>${freshnessBadge(freshness)}</div><p>${escapeHtml(entry.content)}</p>${evidence}${entry.evidence.length ? renderUnverifiable(freshness, state) : ""}${renderEvidenceError(state, entry.evidence.map((link) => link.contextMapEntryId))}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
+  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span>${freshnessBadge(freshness)}</div>${renderFindingDate(entry)}<p>${escapeHtml(entry.content)}</p>${evidence}${entry.evidence.length ? renderUnverifiable(freshness, state) : ""}${renderEvidenceError(state, entry.evidence.map((link) => link.contextMapEntryId))}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
 }
 
 // Evidence links do not name their root, so a finding is overridden only when every project

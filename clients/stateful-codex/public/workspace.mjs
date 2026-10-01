@@ -38,6 +38,8 @@ const state = {
   pendingRequests: [],
   requestItems: new Map(),
   selectedNodeId: null,
+  findingFilter: { text: "", kind: "" },
+  blackboardTruncated: false,
   loading: true,
   busyAction: null,
   error: null,
@@ -187,6 +189,7 @@ async function refreshWorkspace() {
   state.status = status;
   state.hierarchy = hierarchy;
   state.blackboard = blackboard.data;
+  state.blackboardTruncated = blackboard.truncated === true;
   state.obligations = obligations.data;
   // The list is read oldest first and capped, so keep steering confirmed in this page view,
   // marked stale when the capped read no longer includes it.
@@ -260,6 +263,19 @@ function handleEvent(message) {
     );
   }
 }
+
+// The findings filter applies as the person types; it never submits.
+function applyFindingFilter(event) {
+  const form = event.target.closest?.("#finding-filter");
+  if (!form) return;
+  state.findingFilter = {
+    text: form.querySelector('[name="text"]').value,
+    kind: form.querySelector('[name="kind"]').value,
+  };
+  render(["findings"]);
+}
+app.addEventListener("input", applyFindingFilter);
+app.addEventListener("change", applyFindingFilter);
 
 app.addEventListener("submit", async (event) => {
   event.preventDefault();

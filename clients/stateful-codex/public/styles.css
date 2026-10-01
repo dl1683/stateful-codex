@@ -423,6 +423,22 @@ textarea {
 .inline-form textarea {
   min-height: 72px;
 }
+.finding-filter {
+  margin-bottom: 10px;
+}
+.finding-date {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.superseded {
+  margin-top: 14px;
+}
+.superseded summary {
+  cursor: pointer;
+  color: var(--muted);
+}
 .route,
 .finding-list article,
 .steering-list article,

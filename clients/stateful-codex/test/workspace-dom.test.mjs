@@ -418,3 +418,16 @@ test("a finished message whose stream was missed still appears, and is trimmed w
     ["b".repeat(50)],
   );
 });
+
+test("filtering findings re-renders only the list and keeps the filter field", () => {
+  const { state, view, $ } = mountWorkspace();
+  const filter = $('#finding-filter [name="text"]');
+  type(filter, "appendix");
+  filter.focus();
+  state.findingFilter = { text: "appendix", kind: "" };
+  view.update(state, ["findings"]);
+
+  assertSameNode($('#finding-filter [name="text"]'), filter);
+  assert.equal(filter.value, "appendix");
+  assert.equal($('[data-slot="findings"]').querySelectorAll("article").length, 1);
+});
