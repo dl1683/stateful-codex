@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use codex_extension_api::CodexErrorDetails;
+use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ThreadIdleCause;
 use codex_extension_api::ThreadIdleInput;
@@ -87,6 +88,15 @@ pub struct AutonomousContinuation {
 struct ActiveRunTurn {
     run_id: StatefulRunId,
     turn_id: String,
+}
+
+/// Returns the turn on this thread that is bound to `run_id`, if any.
+///
+/// The binding is recorded when the turn starts, so a turn that belongs to another
+/// run on the same thread is never reported.
+pub fn bound_run_turn(thread_store: &ExtensionData, run_id: &str) -> Option<String> {
+    let bound = thread_store.get::<ActiveRunTurn>()?;
+    (bound.run_id.as_str() == run_id).then(|| bound.turn_id.clone())
 }
 
 impl AutonomousContinuation {

@@ -39,6 +39,7 @@ use codex_app_server_protocol::SteeringUpdatedNotification;
 use codex_core::ThreadManager;
 use codex_protocol::ThreadId;
 use codex_stateful_extension::RunAdmissionFence;
+use codex_stateful_extension::bound_run_turn;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::NewSteeringInstruction;
 use codex_stateful_runtime::RunBudget;
@@ -223,22 +224,19 @@ impl StatefulRequestProcessor {
             .map_err(runtime_error)?
             .ok_or_else(|| invalid_params(format!("run not found: {id}")))?;
         let mut active_turns = Vec::new();
-        // A thread holds at most one non-terminal run, so while this run is live its
-        // threads' active turns are its own. A terminal run owns no turn: re-cancelling
-        // it must not touch a later run's turn on the same thread.
-        let run_threads = if current.status.is_terminal() {
-            &[][..]
-        } else {
-            &current.value.thread_ids[..]
-        };
-        for raw_thread_id in run_threads {
+        for raw_thread_id in &current.value.thread_ids {
             let Ok(thread_id) = ThreadId::from_string(raw_thread_id) else {
                 continue;
             };
             let Ok(thread) = self.thread_manager.get_thread(thread_id).await else {
                 continue;
             };
-            if let Some(turn_id) = thread.active_turn_id().await {
+            // Only the active turn that started bound to this run is its own; another
+            // run's turn on the same thread is never interrupted.
+            let bound_turn = bound_run_turn(thread.thread_extension_data(), id.as_str());
+            if let Some(turn_id) = thread.active_turn_id().await
+                && bound_turn.as_deref() == Some(turn_id.as_str())
+            {
                 active_turns.push((thread, turn_id));
             }
         }
