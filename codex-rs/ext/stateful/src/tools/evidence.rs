@@ -399,11 +399,18 @@ fn is_route_item_wrapper(arguments: &str) -> bool {
             .keys()
             .all(|key| key == "evidenceRoute" || ROUTE_ITEM_FIELDS.contains(&key.as_str()))
     };
+    // The unwrapped route must itself be valid, so unknown route or range fields keep
+    // the ordinary rejection.
+    let valid_route = |route: &serde_json::Value| {
+        serde_json::from_value::<EvidenceRouteArguments>(route.clone()).is_ok()
+    };
     match arguments.get("evidenceRoute") {
         Some(serde_json::Value::Object(nested)) if nested.contains_key("evidenceRoute") => {
-            only_item_fields(&arguments) && only_item_fields(nested)
+            only_item_fields(&arguments)
+                && only_item_fields(nested)
+                && valid_route(&nested["evidenceRoute"])
         }
-        Some(_) => arguments.len() > 1 && only_item_fields(&arguments),
+        Some(route) => arguments.len() > 1 && only_item_fields(&arguments) && valid_route(route),
         None => false,
     }
 }

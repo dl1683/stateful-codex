@@ -404,25 +404,28 @@ async fn region_route_reports_stale_index_separately_from_a_removed_file() {
         roots: vec![root.path().to_path_buf()],
     };
     indexer.refresh(index.clone()).await.expect("index project");
-    let region = context_map
-        .query(crate::ContextMapQuery {
-            project_id: "project-1".to_string(),
-            text: "region_fact".to_string(),
-            max_results: 10,
-        })
-        .await
-        .expect("query route")
-        .data
-        .into_iter()
-        .find(|hit| hit.source.region_anchor.is_some())
-        .expect("indexed region");
-    let route = EvidenceRoute::from_hit(&region).expect("region route");
-    let reader = EvidenceReader::new(context_map);
-    let read = || {
+    let region_route = || async {
+        let region = context_map
+            .query(crate::ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "region_fact".to_string(),
+                max_results: 10,
+            })
+            .await
+            .expect("query route")
+            .data
+            .into_iter()
+            .find(|hit| hit.source.region_anchor.is_some())
+            .expect("indexed region");
+        (EvidenceRoute::from_hit(&region).expect("region route"), region)
+    };
+    let (route, region) = region_route().await;
+    let reader = EvidenceReader::new(context_map.clone());
+    let read = |route: EvidenceRoute| {
         reader.read(EvidenceReadRequest {
             project_id: "project-1".to_string(),
             project_roots: vec![root.path().to_path_buf()],
-            locator: EvidenceReadLocator::ContextMapRoute(route.clone()),
+            locator: EvidenceReadLocator::ContextMapRoute(route),
             max_bytes: 64,
         })
     };
@@ -454,16 +457,35 @@ async fn region_route_reports_stale_index_separately_from_a_removed_file() {
         )
         .await
         .expect("advance parent state");
-    let stale = format!("{:?}", read().await.err());
+    let stale = format!("{:?}", read(route.clone()).await.err());
 
+    // Reindexing a shrunk file rebinds the entry, so the old route is obsolete.
+    let shrunk = (1..=10)
+        .map(|line| {
+            format!(
+                "region_fact line {line}
+"
+            )
+        })
+        .collect::<String>();
+    std::fs::write(root.path().join("facts.txt"), shrunk).expect("shrink source");
+    indexer
+        .refresh(index.clone())
+        .await
+        .expect("reindex shrunk project");
+    let retired = format!("{:?}", read(route).await.err());
+
+    // A current region route whose file is then removed reports an unavailable source.
+    let (current, _) = region_route().await;
     std::fs::remove_file(root.path().join("facts.txt")).expect("remove source");
     indexer.refresh(index).await.expect("reindex project");
-    let removed = format!("{:?}", read().await.err());
+    let removed = format!("{:?}", read(current).await.err());
 
     assert_eq!(
-        (stale, removed),
+        (stale, retired, removed),
         (
             "Some(SourceNotCurrent(Stale))".to_string(),
+            "Some(RouteFingerprintMismatch)".to_string(),
             "Some(SourceNotCurrent(SourceUnavailable))".to_string(),
         )
     );

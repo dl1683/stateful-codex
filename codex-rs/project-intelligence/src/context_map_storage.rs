@@ -180,15 +180,26 @@ impl ContextMapStore {
             .fetch_one(&mut *transaction)
             .await?;
             if current != 1 {
-                // A region whose own node is missing went with its file; any other
-                // inactive or re-fingerprinted region or parent is stale.
-                let freshness = match hit.freshness {
-                    ContextMapFreshness::SourceUnavailable => {
-                        ContextMapFreshness::SourceUnavailable
-                    }
-                    ContextMapFreshness::Current | ContextMapFreshness::Stale => {
-                        ContextMapFreshness::Stale
-                    }
+                // Only a missing parent file makes the source unavailable; a retired or
+                // re-fingerprinted region under a present file is stale.
+                let parent_lifecycle: Option<String> = sqlx::query_scalar(
+                    "SELECT parent.lifecycle
+                     FROM context_map_entries AS entry
+                     JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+                     JOIN hierarchy_nodes AS parent
+                       ON parent.id = node.parent_id AND parent.project_id = node.project_id
+                     WHERE entry.project_id = ? AND entry.id = ?",
+                )
+                .bind(project_id)
+                .bind(id.as_str())
+                .fetch_optional(&mut *transaction)
+                .await?;
+                let freshness = if parent_lifecycle.as_deref()
+                    == Some(crate::storage::lifecycle_name(NodeLifecycle::Missing))
+                {
+                    ContextMapFreshness::SourceUnavailable
+                } else {
+                    ContextMapFreshness::Stale
                 };
                 return Err(ContextMapStoreError::SourceNotCurrent(freshness));
             }

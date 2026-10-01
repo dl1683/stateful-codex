@@ -151,16 +151,10 @@ text(JSON.stringify({
     assert_eq!(
         observed,
         json!({
-            "routed": "L1: import core
-L2: 
-L3: def main():
-L4:     core.run()
-",
+            "routed": "L1: import core\nL2: \nL3: def main():\nL4:     core.run()\n",
             "routedIdentity": [true, true],
             "routedReceipt": true,
-            "ranged": "L3: def main():
-L4:     core.run()
-",
+            "ranged": "L3: def main():\nL4:     core.run()\n",
             "explicitRoot": "L1: second\n",
             "bothSelectors": true,
             "ambiguous": true,

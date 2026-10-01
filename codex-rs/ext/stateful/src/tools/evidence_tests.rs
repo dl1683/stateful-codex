@@ -494,6 +494,14 @@ fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
             "nested item, inner extra",
             json!({"evidenceRoute": {"extra": 1, "evidenceRoute": route}}),
         ),
+        (
+            "wrapper, route extra",
+            json!({"name": "cli", "evidenceRoute": {"contextMapEntryId": "map-1", "sourceFingerprint": "sha256:00", "lineRange": null, "extra": 1}}),
+        ),
+        (
+            "nested item, range extra",
+            json!({"evidenceRoute": {"headline": "CLI", "evidenceRoute": {"contextMapEntryId": "map-1", "sourceFingerprint": "sha256:00", "lineRange": {"start": 1, "end": 2, "extra": 1}}}}),
+        ),
         ("route only", json!({"evidenceRoute": route})),
         (
             "unrelated field",
@@ -520,6 +528,8 @@ fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
             ("nested item", true),
             ("nested item, outer extra", false),
             ("nested item, inner extra", false),
+            ("wrapper, route extra", false),
+            ("nested item, range extra", false),
             ("route only", false),
             ("unrelated field", false),
             ("mixed fields", false),
