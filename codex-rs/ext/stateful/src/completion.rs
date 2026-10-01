@@ -25,6 +25,9 @@ const MAX_FINAL_CHECKLIST_ITEMS: usize = 16;
 const MAX_FINAL_CHECKLIST_ITEM_BYTES: usize = 640;
 pub(crate) const MAX_MATERIAL_ROOT_FINDINGS: usize = 8;
 pub(crate) const MAX_MATERIAL_HISTORICAL_FINDINGS: usize = 8;
+/// Shared completion-disposition rule, rendered verbatim by the run update tool
+/// and both world-state packets so the model never sees divergent guidance.
+pub(crate) const REUSABLE_LEARNING_RULE: &str = "Choose the completion disposition by what the run learned, not by whether files changed or the answer is short. Use noReusableLearning for an answer drawn from adequate existing project knowledge, a narrow source citation that adds no reusable understanding, or a trivial answer or cheap-to-recompute inventory. Reading sources can produce reusable learning even when no source files change: when an orientation establishes project purpose, module responsibilities and relationships (not a directory listing), or how to run the tests (stating whether that procedure is documented, executed successfully, or blocked), record the findings worth reusing and complete with durableLearning. Do not create duplicate entries or persist routine inventories merely to qualify for completion.";
 
 pub(crate) struct HistoricalFindingReference {
     pub(crate) entry_id: String,

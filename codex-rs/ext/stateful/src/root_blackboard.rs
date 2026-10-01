@@ -165,9 +165,15 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         }
     }
     if projection.data.is_empty() {
+        // The capture reminder needs a truly empty root; omitted entries mean
+        // promoted knowledge exists beyond the context bound.
         append_line(
             output,
-            "- No knowledge has been promoted to the root blackboard yet.",
+            if projection.omitted_entries == 0 {
+                "- No knowledge has been promoted to the root blackboard yet. If this orientation establishes reusable project purpose, module responsibilities, or test instructions, capture those findings for later tasks. An empty root alone does not require a write."
+            } else {
+                "- No knowledge has been promoted to the root blackboard yet."
+            },
         );
     }
     if projection.candidate_entries > 0 {
@@ -190,7 +196,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
     append_line(
         output,
         &format!(
-            "For durableLearning completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, ensure at least one selected current root or exact historical finding preserves that reusable learning. If the run produced no distinct finding likely to improve future project work—especially for a lookup or read-only citation answer from existing project state or source material—do not record or promote an entry merely to obtain an E alias; complete with stateful_run_update passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
+            "For durableLearning completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, ensure at least one selected current root or exact historical finding preserves that reusable learning. Reusable source discoveries, such as project purpose, module responsibilities and relationships, or the test procedure, belong in recorded findings that are promoted when project-wide and selected here, even when no files changed. If the run learned nothing reusable (an answer from adequate existing knowledge, a narrow citation, or a trivial or cheap-to-recompute answer), do not record or promote an entry merely to obtain an E alias; complete with stateful_run_update passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
         ),
     );
     // Certify an entry as fully shown only after layout, against entries actually
