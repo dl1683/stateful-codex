@@ -1134,6 +1134,7 @@ impl MessageProcessor {
             connection_id,
             request_id: codex_request.id().clone(),
         };
+        crate::stateful_user_authority::require_user_authority(&codex_request, session.origin)?;
         let result: Result<Option<ClientResponsePayload>, JSONRPCErrorError> = match codex_request {
             ClientRequest::Initialize { .. } => {
                 panic!("Initialize should be handled before initialized request dispatch");
