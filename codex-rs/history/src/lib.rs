@@ -120,6 +120,11 @@ pub struct CodexHarnessMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_input_order: Option<u64>,
 
+    /// Thread that originally accepted or delivered this message. Host-owned provenance that
+    /// copies and replays keep unchanged; absent on legacy records and copied parent context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_origin_thread_id: Option<ThreadId>,
+
     /// Output generated for compaction is not an original user-visible assistant message.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compaction_output: bool,

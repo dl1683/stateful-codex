@@ -3563,13 +3563,16 @@ impl Session {
                     });
                     // Preserve input acceptance and source-message start order.
                     // Synthetic messages still receive their order here.
-                    envelope
-                        .metadata
-                        .get_or_insert_default()
-                        .user_input_order
-                        .get_or_insert_with(|| {
-                            message_order.unwrap_or_else(|| state.history.reserve_input_order())
-                        });
+                    let metadata = envelope.metadata.get_or_insert_default();
+                    metadata.user_input_order.get_or_insert_with(|| {
+                        message_order.unwrap_or_else(|| state.history.reserve_input_order())
+                    });
+                    // Copied parent context keeps its own provenance, or none.
+                    if !metadata.inherited_user_message {
+                        metadata
+                            .conversation_origin_thread_id
+                            .get_or_insert(self.thread_id());
+                    }
                 }
             }
             state

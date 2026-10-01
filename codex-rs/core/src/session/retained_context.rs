@@ -98,6 +98,7 @@ impl Session {
             item,
             metadata: Some(CodexHarnessMetadata {
                 user_input_order: Some(user_input_order),
+                conversation_origin_thread_id: Some(self.thread_id()),
                 ..Default::default()
             }),
         };

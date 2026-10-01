@@ -2741,6 +2741,79 @@ async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
 }
 
 #[tokio::test]
+async fn recorded_deliveries_stamp_their_origin_thread_and_keep_copied_provenance() {
+    let (mut session, turn_context) = make_session_and_context().await;
+    let rollout_path = attach_thread_persistence(&mut session).await;
+    let parent_thread_id = ThreadId::new();
+    let message = |role: &str, text: &str| ResponseItem::Message {
+        id: None,
+        role: role.to_owned(),
+        content: vec![ContentItem::InputText {
+            text: text.to_owned(),
+        }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    };
+    session
+        .record_annotated_conversation_items(
+            &turn_context,
+            turn_context.model_info(),
+            vec![
+                ResponseItemEnvelope::new(message("user", "local request")),
+                ResponseItemEnvelope::new(message("assistant", "local answer")),
+                ResponseItemEnvelope {
+                    item: message("user", "copied parent request"),
+                    metadata: Some(CodexHarnessMetadata {
+                        inherited_user_message: true,
+                        ..Default::default()
+                    }),
+                },
+                ResponseItemEnvelope {
+                    item: message("assistant", "forked answer"),
+                    metadata: Some(CodexHarnessMetadata {
+                        conversation_origin_thread_id: Some(parent_thread_id),
+                        ..Default::default()
+                    }),
+                },
+            ],
+        )
+        .await;
+    session.flush_rollout().await.expect("rollout flushed");
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let origins = resumed
+        .history
+        .iter()
+        .filter_map(|item| match item {
+            RolloutItem::ResponseItem(ResponseItemEnvelope {
+                item: ResponseItem::Message { content, .. },
+                metadata,
+            }) => Some((
+                crate::compact::content_items_to_text(content).unwrap_or_default(),
+                metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.conversation_origin_thread_id),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let local = Some(session.thread_id());
+    assert_eq!(
+        origins,
+        vec![
+            ("local request".to_owned(), local),
+            ("local answer".to_owned(), local),
+            ("copied parent request".to_owned(), None),
+            ("forked answer".to_owned(), Some(parent_thread_id)),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
     let (mut session, turn_context) = make_session_and_context().await;
     let rollout_path = attach_thread_persistence(&mut session).await;
