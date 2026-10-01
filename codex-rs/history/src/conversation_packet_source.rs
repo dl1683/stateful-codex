@@ -13,6 +13,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ResponseItem;
 
+use crate::AssistantDeliveryClassification;
 use crate::ConversationInputCoverage;
 use crate::ConversationPacket;
 use crate::ConversationPacketBoundary;
@@ -361,11 +362,19 @@ fn history_candidates<'a>(
             gaps.missing_provenance = true;
             continue;
         };
+        let Some(kind) = record_kind(
+            source.id.role,
+            phase.as_ref(),
+            metadata.assistant_delivery_classification,
+        ) else {
+            gaps.bounded = true;
+            continue;
+        };
         candidates.push(Candidate {
             origin,
             source: Cow::Borrowed(source),
             sequence,
-            kind: record_kind(source.id.role, phase.as_ref()),
+            kind,
             text: CandidateText::Content(content),
         });
     }
@@ -408,9 +417,17 @@ fn retained_candidates<'a>(
             gaps.missing_provenance = true;
             continue;
         };
+        let Some(kind) = record_kind(
+            retained_source.id.role,
+            message.phase.as_ref(),
+            message.classification,
+        ) else {
+            gaps.bounded = true;
+            continue;
+        };
         candidates.push(Candidate {
             origin,
-            kind: record_kind(retained_source.id.role, message.phase.as_ref()),
+            kind,
             source: Cow::Owned(retained_source),
             sequence: order,
             text: CandidateText::Retained(&message.text),
@@ -419,15 +436,28 @@ fn retained_candidates<'a>(
     candidates
 }
 
-/// Host classification only: an absent or commentary phase never becomes a final answer.
-fn record_kind(role: RetainedSourceRole, phase: Option<&MessagePhase>) -> ConversationRecordKind {
-    match (role, phase) {
-        (RetainedSourceRole::User, _) => ConversationRecordKind::User,
-        (RetainedSourceRole::Assistant, Some(MessagePhase::FinalAnswer)) => {
-            ConversationRecordKind::AssistantFinal
+/// Host classification only. An explicit phase is authoritative; a phase-less delivery is final
+/// only when the host resolved it so, and legacy phase-less evidence stays commentary. A pending
+/// delivery returns `None`: it must not enter a packet under a kind it could later lose.
+fn record_kind(
+    role: RetainedSourceRole,
+    phase: Option<&MessagePhase>,
+    classification: Option<AssistantDeliveryClassification>,
+) -> Option<ConversationRecordKind> {
+    match (role, phase, classification) {
+        (RetainedSourceRole::User, _, _) => Some(ConversationRecordKind::User),
+        (RetainedSourceRole::Assistant, Some(MessagePhase::FinalAnswer), _)
+        | (RetainedSourceRole::Assistant, None, Some(AssistantDeliveryClassification::Final)) => {
+            Some(ConversationRecordKind::AssistantFinal)
         }
-        (RetainedSourceRole::Assistant, Some(MessagePhase::Commentary) | None) => {
-            ConversationRecordKind::AssistantCommentary
+        (RetainedSourceRole::Assistant, Some(MessagePhase::Commentary), _)
+        | (
+            RetainedSourceRole::Assistant,
+            None,
+            Some(AssistantDeliveryClassification::Commentary) | None,
+        ) => Some(ConversationRecordKind::AssistantCommentary),
+        (RetainedSourceRole::Assistant, None, Some(AssistantDeliveryClassification::Pending)) => {
+            None
         }
     }
 }

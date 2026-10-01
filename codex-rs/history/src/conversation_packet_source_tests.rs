@@ -416,3 +416,42 @@ fn final_evicted_from_retained_buffer_is_still_captured_from_history() {
     assert!(packet.records().contains(&original));
     assert_eq!(coverage(&packet).0, BoundedWindow);
 }
+
+#[test]
+fn phase_less_deliveries_use_host_classification_and_pending_ones_stay_out() {
+    use crate::AssistantDeliveryClassification::Commentary;
+    use crate::AssistantDeliveryClassification::Final;
+    use crate::AssistantDeliveryClassification::Pending;
+    let phase_less = |id: &str, order, classification| {
+        edited(delivered(id, order, AssistantCommentary, id), |metadata| {
+            metadata.assistant_delivery_classification = classification
+        })
+    };
+    // An explicit phase stays authoritative over any host classification.
+    let explicit = edited(
+        delivered("explicit", 4, AssistantFinal, "explicit"),
+        |metadata| metadata.assistant_delivery_classification = Some(Commentary),
+    );
+
+    let packet = first_packet(&[
+        delivered("request", 0, User, "question"),
+        phase_less("legacy", 1, None),
+        phase_less("preamble", 2, Some(Commentary)),
+        phase_less("answer", 3, Some(Final)),
+        explicit,
+        phase_less("unresolved", 5, Some(Pending)),
+    ]);
+
+    assert_eq!(
+        packet.records(),
+        &[
+            record("request", 0, User, "question"),
+            record("legacy", 1, AssistantCommentary, "legacy"),
+            record("preamble", 2, AssistantCommentary, "preamble"),
+            record("answer", 3, AssistantFinal, "answer"),
+            record("explicit", 4, AssistantFinal, "explicit"),
+        ]
+    );
+    // The unresolved delivery is a known omission, not a complete window.
+    assert_eq!(coverage(&packet), (BoundedWindow, 5, 5, 0, 0));
+}

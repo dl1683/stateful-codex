@@ -54,6 +54,20 @@ impl RetainedContext {
             message.message_id.is_some() && entry.value.message_id == message.message_id
         });
         if let Some(index) = previous {
+            // Resolving a delivery does not change its content, so the source revision
+            // and delivery order stay; a changed text is a new revision below.
+            let entry = &mut self.assistant_messages[index];
+            if entry.inherited == inherited
+                && !empty
+                && entry.value.classification != message.classification
+                && (RetainedUserMessage {
+                    classification: entry.value.classification,
+                    ..message.clone()
+                }) == entry.value
+            {
+                entry.value.classification = message.classification;
+                return entry.source(RetainedSourceRole::Assistant);
+            }
             if self.assistant_messages[index].value == message
                 && self.assistant_messages[index].inherited == inherited
                 && !empty

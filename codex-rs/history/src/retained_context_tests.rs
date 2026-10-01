@@ -1,4 +1,5 @@
 use super::*;
+use crate::AssistantDeliveryClassification;
 use crate::CodexHarnessMetadata;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -513,4 +514,36 @@ fn adopted_instructions_preserve_local_order_and_rollback_scope() {
     expected.user_messages.pop_back();
     expected.assistant_messages.pop_back();
     assert_eq!(restored, expected);
+}
+
+#[test]
+fn resolving_a_delivery_keeps_its_source_while_changed_text_mints_a_new_one() {
+    let classified = |text: &str, classification| {
+        let mut event = delivered_message("answer", text, 3);
+        let RetainedContextEvent::DeliveredAssistantMessage { message, .. } = &mut event else {
+            unreachable!("delivered message constructed above");
+        };
+        message.classification = Some(classification);
+        event
+    };
+    let source = |context: &RetainedContext| {
+        let (_, entry) = context.ordered_entries().next().expect("retained answer");
+        context.source(entry).expect("answer source")
+    };
+    let mut context = RetainedContext::default();
+    assert!(context.record(&classified("42", AssistantDeliveryClassification::Pending)));
+    let pending = source(&context);
+
+    assert!(context.record(&classified("42", AssistantDeliveryClassification::Final)));
+    assert_eq!(source(&context), pending);
+    assert!(!context.record(&classified("42", AssistantDeliveryClassification::Final)));
+
+    assert!(context.record(&classified(
+        "Answer: 42",
+        AssistantDeliveryClassification::Final
+    )));
+    let rewritten = source(&context);
+    assert_eq!(rewritten.id, pending.id);
+    assert_ne!(rewritten.revision, pending.revision);
+    assert_eq!(context.ordered_entries().count(), 1);
 }
