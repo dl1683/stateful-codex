@@ -2,6 +2,7 @@ import {
   renderCommandApproval,
   renderFileChangeApproval,
 } from "./approval-view.mjs";
+import { renderMarkdown } from "./markdown.mjs";
 
 const packetSections = [
   ["examined", "Examined"],
@@ -231,7 +232,7 @@ function renderResult(state) {
   if (!state.run?.result) return "";
   return panel(
     "Run result",
-    `<p class="result-copy">${escapeHtml(state.run.result)}</p><p class="microcopy">A result is not automatically verified. Review its linked findings, uncertainty, and exact evidence.</p>`,
+    `<div class="result-copy prose">${renderMarkdown(state.run.result)}</div><p class="microcopy">A result is not automatically verified. Review its linked findings, uncertainty, and exact evidence.</p>`,
   );
 }
 
@@ -240,7 +241,7 @@ export const LIVE_TAIL_CHARACTERS = 64 * 1024;
 // The runtime streams into this panel's text nodes directly; the markup is rendered once.
 function renderLive(state) {
   const text = state.liveText ?? "";
-  return `<section class="workspace-panel" data-live${text ? "" : " hidden"}><div class="panel-heading"><h2>Live response</h2></div><p class="live-copy" data-live-copy>${text ? `<span data-live-item="">${escapeHtml(text)}</span>` : ""}</p><p class="microcopy" data-live-truncated hidden>Showing the latest ${LIVE_TAIL_CHARACTERS / 1024}K characters of streamed text. Each complete message appears under <a href="#recorded-messages">Recorded agent messages</a> once it finishes.</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p></section>`;
+  return `<section class="workspace-panel" data-live${text ? "" : " hidden"}><div class="panel-heading"><h2>Live response</h2></div><div class="live-copy prose" data-live-copy>${text ? `<span data-live-item="">${escapeHtml(text)}</span>` : ""}</div><p class="microcopy" data-live-truncated hidden>Showing the latest ${LIVE_TAIL_CHARACTERS / 1024}K characters of streamed text. Each complete message appears under <a href="#recorded-messages">Recorded agent messages</a> once it finishes.</p><p class="microcopy">The agent's reply as it streams; finished messages are formatted. Structured progress stays in the obligation and project understanding.</p></section>`;
 }
 
 function renderActivity(items) {
@@ -254,7 +255,7 @@ function renderActivity(items) {
 
 // Completed agent messages from the recorded thread history; the live panel shows only a tail.
 function renderRecordedMessages(messages) {
-  return `<details class="workspace-panel" id="recorded-messages"><summary data-disclosure="recorded-messages">Recorded agent messages · ${messages.length} recent</summary>${messages.length ? messages.map((item) => `<p class="recorded-message">${escapeHtml(item.text)}</p>`).join("") : empty("No completed agent messages are recorded yet.")}</details>`;
+  return `<details class="workspace-panel" id="recorded-messages"><summary data-disclosure="recorded-messages">Recorded agent messages · ${messages.length} recent</summary>${messages.length ? messages.map((item) => `<div class="recorded-message prose">${renderMarkdown(item.text)}</div>`).join("") : empty("No completed agent messages are recorded yet.")}</details>`;
 }
 
 function normalizeThreadItem(entry) {

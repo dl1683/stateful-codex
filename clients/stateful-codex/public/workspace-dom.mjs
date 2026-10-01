@@ -1,3 +1,4 @@
+import { renderMarkdown } from "./markdown.mjs";
 import {
   LIVE_TAIL_CHARACTERS,
   WORKSPACE_SLOTS,
@@ -36,6 +37,8 @@ export function createWorkspaceDom(
     turnId: null,
     retiredTurns: new Set(),
     pending: new Map(),
+    // Finished agent messages to format in place on the next frame, by item.
+    completed: new Map(),
     // Item and length of each queued delta run, in arrival order, for the next frame.
     arrivals: [],
     scheduled: false,
@@ -174,8 +177,9 @@ export function createWorkspaceDom(
     if (live.turnId && live.turnId !== turnId) live.retiredTurns.add(live.turnId);
     live.turnId = turnId;
     live.pending.clear();
+    live.completed.clear();
     live.arrivals = [];
-    for (const text of live.items.values()) text.parentNode?.remove();
+    for (const node of live.items.values()) liveItemElement(node)?.remove();
     live.items.clear();
     live.chunks = [];
     live.length = 0;
@@ -200,6 +204,23 @@ export function createWorkspaceDom(
     scheduleFlush();
   }
 
+  // A finished agent message replaces its streamed text with formatted Markdown, in place. One
+  // too long for the live tail keeps its plain streamed text instead.
+  function completeMessage({ turnId = null, itemId = null, text = "" }) {
+    if (!text) return;
+    if (turnId && turnId !== live.turnId) {
+      if (live.retiredTurns.has(turnId)) return;
+      startTurn(turnId);
+    }
+    const key = itemId ?? "";
+    if (text.length > liveLimit) {
+      if (!live.items.has(key) && !live.pending.has(key)) pushDelta({ turnId, itemId, delta: text });
+      return;
+    }
+    live.completed.set(key, text);
+    scheduleFlush();
+  }
+
   function scheduleFlush() {
     if (live.scheduled) return;
     live.scheduled = true;
@@ -212,6 +233,8 @@ export function createWorkspaceDom(
     const copy = root.querySelector("[data-live-copy]");
     for (const [itemId, chunks] of live.pending) {
       let text = live.items.get(itemId);
+      // A formatted message is final; a late delta for it has nothing to add.
+      if (text && text.nodeType !== TEXT_NODE) continue;
       if (!text) {
         const item = document.createElement("span");
         item.setAttribute("data-live-item", itemId);
@@ -229,8 +252,38 @@ export function createWorkspaceDom(
     }
     live.pending.clear();
     live.arrivals = [];
+    for (const [itemId, text] of live.completed) formatItem(copy, itemId, text);
+    live.completed.clear();
     trimLive();
     root.querySelector("[data-live]").hidden = live.length === 0;
+  }
+
+  // The formatted message keeps its place, and its accounting becomes one run at its first
+  // arrival, so trimming still drops the oldest text first.
+  function formatItem(copy, itemId, text) {
+    const existing = live.items.get(itemId);
+    let element;
+    if (existing) {
+      element = liveItemElement(existing);
+    } else {
+      element = document.createElement("span");
+      element.setAttribute("data-live-item", itemId);
+      copy.append(element);
+    }
+    element.setAttribute("data-rendered", "");
+    element.innerHTML = renderMarkdown(text);
+    live.items.set(itemId, element);
+    const first = live.chunks.findIndex((chunk) => chunk.itemId === itemId);
+    let previous = 0;
+    live.chunks = live.chunks.filter((chunk) => {
+      if (chunk.itemId !== itemId) return true;
+      previous += chunk.length;
+      return false;
+    });
+    const run = { itemId, length: text.length };
+    if (first < 0) live.chunks.push(run);
+    else live.chunks.splice(first, 0, run);
+    live.length += text.length - previous;
   }
 
   function trimLive() {
@@ -241,6 +294,15 @@ export function createWorkspaceDom(
     while (excess > 0) {
       const oldest = live.chunks[0];
       const text = live.items.get(oldest.itemId);
+      // Partial Markdown is meaningless, so a formatted message leaves the tail whole.
+      if (text.nodeType !== TEXT_NODE) {
+        text.remove();
+        live.items.delete(oldest.itemId);
+        live.chunks.shift();
+        excess -= oldest.length;
+        live.length -= oldest.length;
+        continue;
+      }
       const removed = Math.min(excess, oldest.length);
       text.deleteData(0, removed);
       oldest.length -= removed;
@@ -275,7 +337,14 @@ export function createWorkspaceDom(
     return container.children[0];
   }
 
-  return { update, selectNode, startTurn, pushDelta, drafts };
+  return { update, selectNode, startTurn, pushDelta, completeMessage, drafts };
+}
+
+const TEXT_NODE = 3;
+
+// A live item is a streamed text node (inside its span) or a formatted span.
+function liveItemElement(node) {
+  return node.nodeType === TEXT_NODE ? node.parentNode : node;
 }
 
 // Consecutive text for the same item is one run; each run holds at least one character, so the

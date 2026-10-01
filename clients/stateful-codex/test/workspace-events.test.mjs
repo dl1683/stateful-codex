@@ -147,3 +147,18 @@ test("a pending-request snapshot replaces this thread's drawer and ignores other
   });
   assert.deepEqual(state.pendingRequests, [kept]);
 });
+
+test("only this thread's finished agent message is passed on for formatting", () => {
+  const state = workspaceState();
+  const completed = (threadId) => ({
+    method: "item/completed",
+    params: { threadId, turnId: "turn", item: { type: "agentMessage", id: "item", text: "**done**" } },
+  });
+
+  assert.equal(applyWorkspaceEvent(state, completed("thread-b")).completedMessage, undefined);
+  assert.deepEqual(applyWorkspaceEvent(state, completed("thread-a")).completedMessage, {
+    turnId: "turn",
+    itemId: "item",
+    text: "**done**",
+  });
+});

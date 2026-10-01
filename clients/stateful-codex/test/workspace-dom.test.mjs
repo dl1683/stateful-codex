@@ -382,3 +382,39 @@ test("a mode edited back while its change is pending is not overwritten, and is 
   view.update(state);
   assert.equal(mode.value, "socratic");
 });
+
+test("a finished agent message replaces its streamed text with formatted Markdown in place", () => {
+  const { view, runFrames, root } = mountWorkspace();
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "**Done** in [cli.py](C:/x/cli.py)" });
+  view.pushDelta({ turnId: "t1", itemId: "b", delta: "next message" });
+  runFrames();
+  view.completeMessage({ turnId: "t1", itemId: "a", text: "**Done** in [cli.py](C:/x/cli.py)" });
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "late duplicate" });
+  runFrames();
+
+  const items = root.querySelectorAll("[data-live-item]");
+  assert.deepEqual(
+    items.map((item) => [item.getAttribute("data-live-item"), item.textContent]),
+    [
+      ["a", "Done in cli.py"],
+      ["b", "next message"],
+    ],
+  );
+  assert.equal(items[0].hasAttribute("data-rendered"), true);
+  assert.equal(items[0].querySelector("strong").textContent, "Done");
+});
+
+test("a finished message whose stream was missed still appears, and is trimmed whole", () => {
+  const { view, runFrames, root, $ } = mountWorkspace({ liveLimit: 100 });
+  view.completeMessage({ turnId: "t1", itemId: "a", text: "a".repeat(60) });
+  runFrames();
+  assert.equal($("[data-live]").hidden, false);
+  assert.equal($("[data-live-copy]").textContent, "a".repeat(60));
+
+  view.pushDelta({ turnId: "t1", itemId: "b", delta: "b".repeat(50) });
+  runFrames();
+  assert.deepEqual(
+    root.querySelectorAll("[data-live-item]").map((item) => item.textContent),
+    ["b".repeat(50)],
+  );
+});

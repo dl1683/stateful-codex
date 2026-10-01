@@ -492,6 +492,74 @@ textarea {
   line-height: 1.6;
   white-space: pre-wrap;
 }
+/* Formatted Markdown: the renderer emits its own line breaks. Streaming text stays pre-wrap. */
+.result-copy.prose,
+.recorded-message.prose,
+.live-copy [data-rendered] {
+  white-space: normal;
+}
+.prose p,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose .md-code,
+.prose .md-table {
+  margin: 0 0 0.7em;
+}
+.prose > :last-child,
+.prose [data-rendered] > :last-child {
+  margin-bottom: 0;
+}
+.prose ul,
+.prose ol {
+  padding-left: 1.4em;
+}
+.prose .md-heading {
+  margin: 0.9em 0 0.4em;
+  font-size: 0.95rem;
+}
+.prose blockquote {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+  color: var(--muted);
+}
+.prose code {
+  border-radius: 5px;
+  background: #090d12;
+  padding: 0.05em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+.prose .md-code {
+  overflow: auto;
+  border-radius: 9px;
+  background: #090d12;
+  padding: 10px;
+  font-size: 0.78rem;
+  white-space: pre;
+}
+.prose .md-code code {
+  background: none;
+  padding: 0;
+}
+.prose .md-table {
+  overflow-x: auto;
+}
+.prose table {
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.prose th,
+.prose td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.prose a {
+  color: var(--accent);
+}
 .recovery {
   border-left: 2px solid var(--accent);
   padding-left: 10px;

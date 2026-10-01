@@ -227,6 +227,7 @@ function handleEvent(message) {
   const effect = applyWorkspaceEvent(state, message);
   if (effect.turnStarted) view.startTurn(effect.turnStarted);
   if (effect.delta) view.pushDelta(effect.delta);
+  if (effect.completedMessage) view.completeMessage(effect.completedMessage);
   if (effect.sections.length) render(effect.sections);
   if (effect.refresh) {
     clearTimeout(refreshTimer);

@@ -10,7 +10,8 @@ const REFRESH_METHODS =
 
 // Apply one app-server message to the workspace state. Returns what the caller should do next:
 // `sections` names the workspace slots to update ("requests" reconciles request cards),
-// `delta` carries streamed text for the live panel, `turnStarted` resets it, and `refresh`
+// `delta` carries streamed text for the live panel, `completedMessage` carries a finished
+// agent message to format in place, `turnStarted` resets the panel, and `refresh`
 // asks for a project refresh. Messages owned by another thread, project, or run leave the
 // state untouched.
 export function applyWorkspaceEvent(state, message) {
@@ -61,6 +62,14 @@ export function applyWorkspaceEvent(state, message) {
   if (message.method === "item/agentMessage/delta") {
     const { turnId = null, itemId = null, delta = "" } = message.params ?? {};
     return { sections: [], refresh, delta: { turnId, itemId, delta } };
+  }
+  if (message.method === "item/completed" && message.params?.item?.type === "agentMessage") {
+    const { turnId = null, item } = message.params;
+    return {
+      sections: [],
+      refresh,
+      completedMessage: { turnId, itemId: item.id ?? null, text: item.text ?? "" },
+    };
   }
   if (message.method === "turn/started") {
     const turnId = message.params?.turn?.id ?? message.params?.turnId ?? null;
