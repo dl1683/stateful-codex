@@ -1805,6 +1805,7 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
     retained.record_user_message(
         codex_history::RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: codex_history::UserInputOrigin::User,
             turn_id: String::new(),
             message_id: None,

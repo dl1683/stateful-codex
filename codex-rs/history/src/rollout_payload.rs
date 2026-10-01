@@ -138,6 +138,7 @@ impl<'a> From<&'a RolloutItem> for RolloutItemWire<'a> {
                     metadata: Some(Cow::Owned(CodexHarnessMetadata {
                         delivered_assistant_message: Some(marker),
                         user_input_order: Some(*acceptance_order),
+                        conversation_origin_thread_id: message.origin_thread_id,
                         ..Default::default()
                     })),
                 }
@@ -195,6 +196,7 @@ impl From<RolloutItemWire<'_>> for RolloutItem {
                                 text: text.to_owned(),
                                 complete,
                                 phase: None,
+                                origin_thread_id: metadata.conversation_origin_thread_id,
                             },
                             acceptance_order,
                         },

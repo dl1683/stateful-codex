@@ -78,6 +78,7 @@ pub(crate) fn record_confirmed_code_mode_send(
         text,
         complete: !truncated,
         phase: None,
+        origin_thread_id: None,
     };
     let _ = session.record_delivered_assistant_message(message);
 }

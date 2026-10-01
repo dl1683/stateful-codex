@@ -198,8 +198,10 @@ impl Session {
     /// Starts recording confirmed delivery synchronously while the tool's admission is held.
     pub(crate) fn record_delivered_assistant_message(
         self: &Arc<Self>,
-        message: RetainedUserMessage,
+        mut message: RetainedUserMessage,
     ) -> (JoinHandle<()>, watch::Receiver<()>) {
+        // This thread confirmed the delivery; replayed events keep their recorded origin.
+        message.origin_thread_id.get_or_insert(self.thread_id());
         let session = Arc::clone(self);
         let persistence_session = Arc::clone(self);
         let (recorded, recording) = watch::channel(());

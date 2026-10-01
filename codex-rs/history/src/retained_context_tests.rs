@@ -27,6 +27,7 @@ fn delivered_message(id: &str, text: &str, acceptance_order: u64) -> RetainedCon
             text: text.to_owned(),
             complete: true,
             phase: None,
+            origin_thread_id: None,
         },
         acceptance_order,
     }
@@ -41,6 +42,7 @@ fn retained_evidence_preserves_order_through_recovery_checkpoint_and_rollback() 
     context.record_user_message(
         RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "revocation-turn".to_owned(),
             message_id: Some("revocation".to_owned()),
@@ -150,6 +152,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
         restored.record_user_message(
             RetainedUserMessage {
                 phase: None,
+                origin_thread_id: None,
                 origin: crate::UserInputOrigin::User,
                 turn_id: "later-turn".to_owned(),
                 message_id: Some(format!("message-{index}")),
@@ -171,6 +174,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
     restored.record_user_message(
         RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "earlier-turn".to_owned(),
             message_id: Some("delayed-message".to_owned()),
@@ -186,6 +190,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
     restored.record_user_message(
         RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "oversized-turn".to_owned(),
             message_id: Some("oversized-message".to_owned()),
@@ -237,6 +242,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
             text: String::new(),
             complete: false,
             phase: None,
+            origin_thread_id: None,
         }
     );
     // Once the omission marker is set, another confirmed delivery still needs
@@ -253,6 +259,7 @@ fn recovered_excerpts_obey_record_and_family_limits() {
         context.record_user_message(
             RetainedUserMessage {
                 phase: None,
+                origin_thread_id: None,
                 origin: crate::UserInputOrigin::User,
                 turn_id: "turn-1".to_owned(),
                 message_id: Some(format!("message-{index}")),
@@ -353,6 +360,7 @@ fn accepted_order_survives_delayed_recording_and_checkpoint_replay() {
     context.record(&event);
     let instruction = RetainedUserMessage {
         phase: None,
+        origin_thread_id: None,
         origin: crate::UserInputOrigin::User,
         turn_id: "turn-1".to_owned(),
         message_id: Some("steer".to_owned()),
@@ -444,6 +452,7 @@ fn adopted_instructions_preserve_local_order_and_rollback_scope() {
     for index in 0..2 {
         let message = RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "parent-turn".to_owned(),
             message_id: Some(format!("parent-{index}")),

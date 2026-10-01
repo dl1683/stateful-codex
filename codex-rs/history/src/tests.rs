@@ -280,6 +280,7 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
                 text: "May I deploy staging?".to_owned(),
                 complete,
                 phase: None,
+                origin_thread_id: Some(codex_protocol::ThreadId::from_u128(3)),
             },
             acceptance_order: 7,
         };
@@ -317,6 +318,7 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
                 text: text.clone(),
                 complete: true,
                 phase: None,
+                origin_thread_id: None,
             },
             RetainedInputSource::Local(metadata.user_input_order),
         );

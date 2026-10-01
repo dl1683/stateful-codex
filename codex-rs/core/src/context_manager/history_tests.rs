@@ -151,6 +151,7 @@ fn delivered_assistant_context_invalidates_reviews_without_changing_authorizatio
             text: "Deploy publicly?".to_owned(),
             complete: true,
             phase: None,
+            origin_thread_id: None,
         },
         acceptance_order: history.reserve_input_order(),
     };
