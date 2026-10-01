@@ -56,6 +56,12 @@ fn every_change_kind_is_dirty() {
         format!("1 .M SC.U 160000 160000 160000 {SHA1} {SHA1} other sub"),
         format!("1 .M S..U 160000 160000 160000 {SHA1} {SHA1} third sub"),
         format!("u UU N... 100644 100644 100644 100644 {SHA1} {SHA1} {SHA1} both.txt"),
+        format!("u DD N... 100644 000000 000000 000000 {SHA1} {ZERO_SHA1} {ZERO_SHA1} gone"),
+        format!("u AU N... 000000 100644 000000 100644 {ZERO_SHA1} {SHA1} {ZERO_SHA1} ours"),
+        format!("u UD N... 100644 100644 000000 000000 {SHA1} {SHA1} {ZERO_SHA1} kept"),
+        format!("u UA N... 000000 000000 100644 100644 {ZERO_SHA1} {ZERO_SHA1} {SHA1} theirs"),
+        format!("u DU N... 100644 000000 100644 100644 {SHA1} {ZERO_SHA1} {SHA1} back"),
+        format!("u AA N... 000000 100644 100644 100644 {ZERO_SHA1} {SHA1} {SHA1} both added"),
         "? new file.txt".to_string(),
     ];
     for entry in entries {
@@ -129,6 +135,33 @@ fn unborn_and_detached_headers_are_recognized() {
 }
 
 #[test]
+fn branch_headers_are_validated_as_full_references() {
+    for head in ["@", "feature/x", "refs/remotes/origin/main"] {
+        let records = [
+            format!("# branch.oid {SHA1}"),
+            format!("# branch.head {head}"),
+        ];
+        assert_eq!(
+            parse_sha1_status(&records),
+            Ok(PorcelainStatus {
+                oid: StatusBranchOid::Commit(GitSha::new(SHA1)),
+                head: StatusBranchHead::Branch(head.to_string()),
+                worktree: StatusWorktree::Clean,
+            }),
+            "{head}"
+        );
+    }
+    let contradictory = [
+        "# branch.oid (initial)".to_string(),
+        "# branch.head (detached)".to_string(),
+    ];
+    assert_eq!(
+        parse_sha1_status(&contradictory),
+        Err(ParseFailure::InvalidOutput)
+    );
+}
+
+#[test]
 fn unresolvable_or_invalid_branch_headers_are_rejected() {
     for head in [
         "(unknown)",
@@ -137,7 +170,8 @@ fn unresolvable_or_invalid_branch_headers_are_rejected() {
         "",
         "a..b",
         "x.lock",
-        "@",
+        "refs/heads/a..b",
+        "a b",
     ] {
         let records = [
             format!("# branch.oid {SHA1}"),
@@ -226,7 +260,7 @@ fn malformed_or_incomplete_status_is_rejected() {
         [
             branch_headers(),
             vec![format!(
-                "2 R. N... 100644 100644 100644 {SHA1} {SHA1} R999 new"
+                "2 R. N... 100644 100644 100644 {SHA1} {SHA1} R101 new"
             )],
             vec!["old".to_string()],
         ]

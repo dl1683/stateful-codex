@@ -121,8 +121,8 @@ pub(super) fn parse_symbolic_ref(output: &[u8]) -> Result<String, ParseFailure> 
     parse_ref_name(line)
 }
 
-/// Accepts a reference name that `git check-ref-format --allow-onelevel`
-/// would accept, as UTF-8.
+/// Accepts a full reference name that `git check-ref-format` would accept,
+/// as UTF-8.
 fn parse_ref_name(name: &[u8]) -> Result<String, ParseFailure> {
     let forbidden = |byte: &u8| byte.is_ascii_control() || b" ~^:?*[\\".contains(byte);
     let valid_component = |component: &[u8]| {
@@ -181,9 +181,18 @@ pub(super) fn parse_porcelain_v2_status(
         }
         worktree = StatusWorktree::Dirty;
     }
+    let (oid, head) = match (oid, head) {
+        // An unborn HEAD always names a branch.
+        (Some(StatusBranchOid::Initial), Some(StatusBranchHead::Detached))
+        | (None, _)
+        | (_, None) => {
+            return Err(ParseFailure::InvalidOutput);
+        }
+        (Some(oid), Some(head)) => (oid, head),
+    };
     Ok(PorcelainStatus {
-        oid: oid.ok_or(ParseFailure::InvalidOutput)?,
-        head: head.ok_or(ParseFailure::InvalidOutput)?,
+        oid,
+        head,
         worktree,
     })
 }
@@ -206,7 +215,10 @@ fn parse_header(
     let parsed_head = || match value {
         b"(detached)" => Ok(StatusBranchHead::Detached),
         b"(unknown)" => Err(ParseFailure::InvalidOutput),
-        _ => parse_ref_name(value).map(StatusBranchHead::Branch),
+        // Branches are printed without `refs/heads/`; other refs in full.
+        _ if value.starts_with(b"refs/") => parse_ref_name(value).map(StatusBranchHead::Branch),
+        _ => parse_ref_name(&[&b"refs/heads/"[..], value].concat())
+            .map(|full| StatusBranchHead::Branch(full["refs/heads/".len()..].to_string())),
     };
     match key {
         b"branch.oid" if oid.is_none() => *oid = Some(parsed_oid()?),
