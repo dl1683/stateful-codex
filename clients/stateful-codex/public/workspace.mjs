@@ -1,7 +1,7 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
-import { createDraftTracker, createWorkspaceDom } from "./workspace-dom.mjs";
+import { createWorkspaceDom } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
@@ -40,7 +40,7 @@ const state = {
 let refreshTimer;
 const refresh = createRefreshGate(refreshWorkspace);
 const view = createWorkspaceDom(app);
-const drafts = createDraftTracker(app);
+const drafts = view.drafts;
 
 async function boot() {
   render();
@@ -241,19 +241,25 @@ app.addEventListener("submit", async (event) => {
         action("Sending instruction", () => sendTurn(input)),
       );
     } else if (form.id === "mode-form") {
-      const mode = form.querySelector('[name="mode"]').value;
-      if (!mode || mode === state.run.mode) return;
-      const response = await action("Changing workflow mode", () =>
-        rpc("statefulRun/setMode", {
-          runId: state.run.id,
-          expectedRevision: state.run.revision,
-          mode,
-        }),
+      await drafts.submit(
+        form.querySelector('[name="mode"]'),
+        async (mode) => {
+          if (mode === state.run.mode) return;
+          const response = await action("Changing workflow mode", () =>
+            rpc("statefulRun/setMode", {
+              runId: state.run.id,
+              expectedRevision: state.run.revision,
+              mode,
+            }),
+          );
+          state.run = response.run;
+          selectedMode = state.run.mode;
+          sessionStorage.setItem("stateful-mode", selectedMode);
+          state.notice = `Mode changed to ${mode}.`;
+        },
+        { clear: false },
       );
-      state.run = response.run;
-      selectedMode = state.run.mode;
-      sessionStorage.setItem("stateful-mode", selectedMode);
-      state.notice = `Mode changed to ${mode}.`;
+      // Refresh after the submission settles, so the clean selector shows the persisted mode.
       await refresh();
     } else if (form.dataset.requestKey) {
       await answerUserRequest(form);

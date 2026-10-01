@@ -28,12 +28,14 @@ export function createWorkspaceDom(
   const slotElements = new Map();
   const slotHtml = new Map();
   const cardHtml = new WeakMap();
-  const appliedModes = new WeakMap();
+  const drafts = createDraftTracker(root);
   const hierarchyMemo = { source: null, signature: null, html: null };
   const live = {
     turnId: null,
     retiredTurns: new Set(),
     pending: new Map(),
+    // Item and length of each queued delta run, in arrival order, for the next frame.
+    arrivals: [],
     scheduled: false,
     items: new Map(),
     // Appended chunks in arrival order, so trimming always drops the oldest text first.
@@ -75,13 +77,10 @@ export function createWorkspaceDom(
     if (live.pending.size) scheduleFlush();
   }
 
-  // Show the persisted mode unless the user has chosen another one that is not yet submitted.
+  // Show the persisted mode unless the user has edited the selector since it was last clean.
   function syncMode(state) {
     const select = slotElements.get("mode-form").querySelector('[name="mode"]');
-    if (!select || !state.run) return;
-    const applied = appliedModes.get(select);
-    if (applied === undefined || select.value === applied) select.value = state.run.mode;
-    appliedModes.set(select, state.run.mode);
+    if (select && state.run && drafts.isClean(select)) select.value = state.run.mode;
   }
 
   // Replace a slot's content while keeping the user's place: focus, scroll and open details.
@@ -180,6 +179,7 @@ export function createWorkspaceDom(
     if (live.turnId && live.turnId !== turnId) live.retiredTurns.add(live.turnId);
     live.turnId = turnId;
     live.pending.clear();
+    live.arrivals = [];
     for (const text of live.items.values()) text.parentNode?.remove();
     live.items.clear();
     live.chunks = [];
@@ -201,6 +201,7 @@ export function createWorkspaceDom(
     const key = itemId ?? "";
     if (!live.pending.has(key)) live.pending.set(key, []);
     live.pending.get(key).push(delta);
+    recordChunk(live.arrivals, key, delta.length);
     scheduleFlush();
   }
 
@@ -226,10 +227,13 @@ export function createWorkspaceDom(
       }
       const chunk = chunks.join("");
       text.appendData(chunk);
-      live.chunks.push({ itemId, length: chunk.length });
       live.length += chunk.length;
     }
+    for (const { itemId, length } of live.arrivals) {
+      recordChunk(live.chunks, itemId, length);
+    }
     live.pending.clear();
+    live.arrivals = [];
     trimLive();
     root.querySelector("[data-live]").hidden = live.length === 0;
   }
@@ -276,19 +280,34 @@ export function createWorkspaceDom(
     return container.children[0];
   }
 
-  return { update, selectNode, startTurn, pushDelta };
+  return { update, selectNode, startTurn, pushDelta, drafts };
 }
 
-// Drafts belong to the user: a successful submission clears a field only when nobody edited
-// it while the request was pending, and a failed one leaves it untouched.
+// Consecutive text for the same item is one run; each run holds at least one character, so the
+// list never outgrows the bounded tail.
+function recordChunk(chunks, itemId, length) {
+  const last = chunks.at(-1);
+  if (last?.itemId === itemId) last.length += length;
+  else chunks.push({ itemId, length });
+}
+
+// Drafts belong to the user: a successful submission settles a field (clearing text fields)
+// only when nobody edited it while the request was pending, and a failed one leaves it
+// untouched. A field is clean when it has no edits since it was last settled.
 export function createDraftTracker(root) {
   const versions = new WeakMap();
+  const settled = new WeakMap();
   const submitting = new WeakSet();
-  root.addEventListener("input", (event) => {
+  const edited = (event) => {
     versions.set(event.target, (versions.get(event.target) ?? 0) + 1);
-  });
+  };
+  root.addEventListener("input", edited);
+  root.addEventListener("change", edited);
   return {
-    async submit(control, operation) {
+    isClean(control) {
+      return (versions.get(control) ?? 0) === (settled.get(control) ?? 0);
+    },
+    async submit(control, operation, { clear = true } = {}) {
       const value = control.value.trim();
       // One submission per field at a time; the field stays editable while it is pending.
       if (!value || submitting.has(control)) return;
@@ -299,13 +318,22 @@ export function createDraftTracker(root) {
       } finally {
         submitting.delete(control);
       }
-      if ((versions.get(control) ?? 0) === version) control.value = "";
+      if ((versions.get(control) ?? 0) !== version) return;
+      settled.set(control, version);
+      if (clear) control.value = "";
     },
   };
 }
 
 function elementKey(element) {
-  const attributes = ["id", "name", "data-action", "data-entry-id", "data-node-id"]
+  const attributes = [
+    "id",
+    "name",
+    "data-action",
+    "data-entry-id",
+    "data-node-id",
+    "data-disclosure",
+  ]
     .map((name) => [name, element.getAttribute(name)])
     .filter(([, value]) => value !== null);
   if (!attributes.length) return null;

@@ -155,7 +155,7 @@ test("completed agent messages stay readable outside the bounded live tail", () 
 
   assert.match(
     actual,
-    /<details class="workspace-panel" id="recorded-messages"><summary>Recorded agent messages · 1 recent<\/summary><p class="recorded-message">The full &lt;final&gt; answer\.<\/p><\/details>/,
+    /<details class="workspace-panel" id="recorded-messages"><summary data-disclosure="recorded-messages">Recorded agent messages · 1 recent<\/summary><p class="recorded-message">The full &lt;final&gt; answer\.<\/p><\/details>/,
   );
   assert.match(actual, /Supporting activity · 1 recent items/);
 });

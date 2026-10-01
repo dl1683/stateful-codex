@@ -188,6 +188,36 @@ test("the live tail drops the oldest text first, across interleaved items", () =
   assert.equal($("[data-live-truncated] a").getAttribute("href"), "#recorded-messages");
 });
 
+test("the live tail keeps the newest text when items interleave within one frame", () => {
+  const { view, runFrames, root } = mountWorkspace({ liveLimit: 100 });
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "a".repeat(50) });
+  view.pushDelta({ turnId: "t1", itemId: "b", delta: "b".repeat(50) });
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "c".repeat(100) });
+  runFrames();
+
+  assert.deepEqual(
+    root.querySelectorAll("[data-live-item]").map((item) => [
+      item.getAttribute("data-live-item"),
+      item.textContent,
+    ]),
+    [["a", "c".repeat(100)]],
+  );
+  assert.equal(root.querySelector("[data-live-item]").childNodes[0].appendCount, 1);
+});
+
+test("refreshing activity keeps focus on a disclosure summary", () => {
+  const { state, view, document, $ } = mountWorkspace();
+  $('[data-disclosure="recorded-messages"]').focus();
+  state.activity = [
+    ...state.activity,
+    { turnId: "turn-4", item: { type: "agentMessage", id: "m1", text: "Done." } },
+  ];
+  view.update(state);
+
+  assertSameNode(document.activeElement, $('[data-disclosure="recorded-messages"]'));
+  assert.match($("#recorded-messages").textContent, /Done\./);
+});
+
 test("the live tail is bounded and says so", () => {
   const { view, runFrames, root, $ } = mountWorkspace({ liveLimit: 100 });
   view.pushDelta({ turnId: "t1", itemId: "a", delta: "a".repeat(80) });
@@ -316,5 +346,39 @@ test("an unsent mode choice survives a refresh; a clean selector follows the per
   state.run = { ...state.run, mode: "autonomous", revision: 10 };
   view.update(state);
   assertSameNode($('[name="mode"]'), mode);
+  assert.equal(mode.value, "socratic");
+});
+
+test("a mode edited back while its change is pending is not overwritten, and is sent once", async () => {
+  const { state, view, $ } = mountWorkspace();
+  const mode = $('[name="mode"]');
+  const sent = [];
+  let release;
+  const setMode = (value) => {
+    sent.push(value);
+    return new Promise((resolve) => (release = resolve));
+  };
+
+  mode.value = "collaborative";
+  mode.dispatch("change");
+  const pending = view.drafts.submit(mode, setMode, { clear: false });
+  await view.drafts.submit(mode, setMode, { clear: false });
+  mode.value = "autonomous";
+  mode.dispatch("change");
+  release();
+  await pending;
+  state.run = { ...state.run, mode: "collaborative", revision: 9 };
+  view.update(state);
+
+  assert.deepEqual(sent, ["collaborative"]);
+  assert.equal(mode.value, "autonomous");
+
+  const settled = view.drafts.submit(mode, setMode, { clear: false });
+  release();
+  await settled;
+  state.run = { ...state.run, mode: "autonomous", revision: 10 };
+  view.update(state);
+  state.run = { ...state.run, mode: "socratic", revision: 11 };
+  view.update(state);
   assert.equal(mode.value, "socratic");
 });

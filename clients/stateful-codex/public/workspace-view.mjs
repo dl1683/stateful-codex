@@ -243,12 +243,12 @@ function renderActivity(items) {
   const messages = normalized
     .filter((item) => item.type === "agentMessage" && item.text)
     .slice(-3);
-  return `${renderRecordedMessages(messages)}<details class="workspace-panel"><summary>Supporting activity · ${recent.length} recent items</summary><div class="activity-list">${recent.length ? recent.map((item) => `<div><span>${escapeHtml(activityLabel(item))}</span><small>${escapeHtml(activityDetail(item))}</small></div>`).join("") : empty("No supporting activity yet.")}</div></details>`;
+  return `${renderRecordedMessages(messages)}<details class="workspace-panel"><summary data-disclosure="activity">Supporting activity · ${recent.length} recent items</summary><div class="activity-list">${recent.length ? recent.map((item) => `<div><span>${escapeHtml(activityLabel(item))}</span><small>${escapeHtml(activityDetail(item))}</small></div>`).join("") : empty("No supporting activity yet.")}</div></details>`;
 }
 
 // Completed agent messages from the recorded thread history; the live panel shows only a tail.
 function renderRecordedMessages(messages) {
-  return `<details class="workspace-panel" id="recorded-messages"><summary>Recorded agent messages · ${messages.length} recent</summary>${messages.length ? messages.map((item) => `<p class="recorded-message">${escapeHtml(item.text)}</p>`).join("") : empty("No completed agent messages are recorded yet.")}</details>`;
+  return `<details class="workspace-panel" id="recorded-messages"><summary data-disclosure="recorded-messages">Recorded agent messages · ${messages.length} recent</summary>${messages.length ? messages.map((item) => `<p class="recorded-message">${escapeHtml(item.text)}</p>`).join("") : empty("No completed agent messages are recorded yet.")}</details>`;
 }
 
 function normalizeThreadItem(entry) {
