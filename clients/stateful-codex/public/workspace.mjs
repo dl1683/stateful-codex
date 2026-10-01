@@ -4,6 +4,7 @@ import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { submitSteering } from "./steering-submit.mjs";
 import { createWorkspaceDom } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
+import { describeSourceError, findUnavailableRoots } from "./source-availability.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
 const threadId = sessionStorage.getItem("stateful-thread");
@@ -32,6 +33,8 @@ const state = {
   activity: [],
   contextHits: [],
   evidence: null,
+  evidenceError: null,
+  unavailableRoots: null,
   pendingRequests: [],
   requestItems: new Map(),
   selectedNodeId: null,
@@ -66,7 +69,9 @@ async function ensureRun() {
   state.project = projectResponse.project;
   state.status = status;
   state.recovery = runResponse.recovery;
-  if (needsProjectRefresh(status)) {
+  state.unavailableRoots = await findUnavailableRoots(rpc, state.project.roots);
+  // Indexing a missing folder cannot succeed; the header explains the condition instead.
+  if (needsProjectRefresh(status) && !allRootsUnavailable()) {
     state.busyAction = status.initialized
       ? "Retrying the incomplete project index"
       : "Indexing the selected project";
@@ -143,6 +148,7 @@ async function refreshWorkspace() {
     steering,
     measurementSummary,
     activity,
+    unavailableRoots,
   ] = await Promise.all([
     rpc("project/read", { projectId }),
     rpc("statefulRun/read", runReadParams()),
@@ -173,6 +179,7 @@ async function refreshWorkspace() {
       if (error.code === -32601) return { data: [] };
       throw error;
     }),
+    findUnavailableRoots(rpc, state.project?.roots),
   ]);
   state.project = project.project;
   state.run = run.run;
@@ -190,10 +197,16 @@ async function refreshWorkspace() {
       .map((saved) => ({ ...saved, statusStale: true })),
   ];
   state.measurementSummary = measurementSummary.summary;
+  state.unavailableRoots = unavailableRoots;
   state.activity = activity.data.reverse();
   state.loading = false;
   state.busyAction = null;
   render();
+}
+
+function allRootsUnavailable() {
+  const roots = state.project?.roots ?? [];
+  return roots.length > 0 && state.unavailableRoots?.size === roots.length;
 }
 
 function runReadParams() {
@@ -315,6 +328,12 @@ app.addEventListener("click", async (event) => {
         await action("Refreshing workspace", refresh);
         break;
       case "refresh-map":
+        if (allRootsUnavailable()) {
+          state.error =
+            "The project folder is missing, so the source map can't be refreshed. Restore the folder at its recorded path first.";
+          render(["notices"]);
+          break;
+        }
         await action("Refreshing source map", async () => {
           await rpc("contextMap/refresh", { projectId });
           await refresh();
@@ -339,15 +358,7 @@ app.addEventListener("click", async (event) => {
               end: Number(button.dataset.lastLine),
             }
           : null;
-        state.evidence = await action("Verifying exact evidence", () =>
-          rpc("evidence/read", {
-            projectId,
-            contextMapEntryId: button.dataset.entryId,
-            lineRange,
-            maxBytes: 32768,
-          }),
-        );
-        render(["routing-results"]);
+        await readEvidence(button.dataset.entryId, lineRange);
         break;
       case "confirm-knowledge":
         await action("Confirming project understanding", () =>
@@ -378,6 +389,32 @@ app.addEventListener("click", async (event) => {
     fail(error);
   }
 });
+
+// Evidence failures are expected conditions (a changed or missing source): explain them beside
+// the button that was clicked, and learn from a missing root.
+async function readEvidence(entryId, lineRange) {
+  state.evidenceError = null;
+  try {
+    state.evidence = await action("Verifying exact evidence", () =>
+      rpc("evidence/read", {
+        projectId,
+        contextMapEntryId: entryId,
+        lineRange,
+        maxBytes: 32768,
+      }),
+    );
+  } catch (error) {
+    const described = describeSourceError(error.message);
+    state.evidence = null;
+    state.evidenceError = { entryId, message: described.message };
+    if (described.rootUnavailable) {
+      state.unavailableRoots = await findUnavailableRoots(rpc, state.project?.roots).catch(
+        () => state.unavailableRoots,
+      );
+    }
+  }
+  render(["header", "intelligence", "routing-results", "findings"]);
+}
 
 async function action(label, operation) {
   state.busyAction = label;

@@ -163,3 +163,20 @@ test("completed agent messages stay readable outside the bounded live tail", () 
 function statefulFindingCount(state) {
   return state.blackboard.length;
 }
+
+test("a missing project folder is explained once and no source is shown as current", () => {
+  const state = workspaceFixture();
+  state.unavailableRoots = new Set(["C:/work/investigation"]);
+  state.evidenceError = { entryId: "map-1", message: "The project folder can't be found on disk." };
+
+  const actual = renderWorkspace(state);
+
+  assert.match(actual, /Project folder not found on disk: <code>C:\/work\/investigation<\/code>/);
+  assert.match(actual, /These counts describe the last index/);
+  assert.doesNotMatch(actual, /badge current/);
+  assert.match(actual, /<span class="badge sourceUnavailable">sourceUnavailable<\/span><\/div><p>Threshold amendment/);
+  assert.match(
+    actual,
+    /data-entry-id="map-1" disabled>Verify exact source<\/button><p class="inline-error" role="alert">The project folder can&#39;t be found on disk\.<\/p>/,
+  );
+});

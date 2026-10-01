@@ -328,6 +328,16 @@ textarea {
   border-color: #7d403c;
   color: var(--danger);
 }
+.banner code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.inline-error {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
 .working {
   display: flex;
   align-items: center;

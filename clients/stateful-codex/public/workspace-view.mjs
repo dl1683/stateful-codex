@@ -3,6 +3,7 @@ import {
   renderFileChangeApproval,
 } from "./approval-view.mjs";
 import { renderMarkdown } from "./markdown.mjs";
+import { effectiveFreshness, rootKey } from "./source-availability.mjs";
 
 const packetSections = [
   ["examined", "Examined"],
@@ -96,9 +97,24 @@ function renderLoading(state) {
 function renderHeader(state) {
   const run = state.run;
   return `<header class="workspace-header">
-    <div><p class="eyebrow">Stateful Codex · ${escapeHtml(run?.mode ?? "preparing")}</p><h1>${escapeHtml(state.project?.name ?? "Project")}</h1><p class="path">${escapeHtml(state.project?.roots?.map((root) => root.path).join(" · ") ?? "")}</p></div>
+    <div><p class="eyebrow">Stateful Codex · ${escapeHtml(run?.mode ?? "preparing")}</p><h1>${escapeHtml(state.project?.name ?? "Project")}</h1><p class="path">${escapeHtml(state.project?.roots?.map((root) => root.path).join(" · ") ?? "")}</p>${renderMissingRoots(state)}</div>
     <div class="run-summary"><span class="badge ${escapeHtml(run?.status ?? "pending")}">${escapeHtml(run?.status ?? "preparing")}</span><span>strategy r${run?.strategyRevision ?? 0}</span><span>${run?.continuationsUsed ?? 0}/${run?.budget?.maxContinuations ?? 0} continuations</span><button class="text-button" data-action="refresh">Refresh</button></div>
   </header>`;
+}
+
+// A missing project folder is a project-level condition: say so once, plainly, at the top.
+function renderMissingRoots(state) {
+  const missing = unavailableRootPaths(state);
+  if (!missing.length) return "";
+  const folders = missing.length === 1 ? "folder" : "folders";
+  return `<p class="banner error project-missing">Project ${folders} not found on disk: ${missing.map((path) => `<code>${escapeHtml(path)}</code>`).join(", ")}. Saved understandings and history are still readable, but sources can't be checked or re-indexed until the ${folders} ${missing.length === 1 ? "is" : "are"} restored at ${missing.length === 1 ? "that path" : "those paths"}.</p>`;
+}
+
+function unavailableRootPaths(state) {
+  if (!state.unavailableRoots?.size) return [];
+  return (state.project?.roots ?? [])
+    .map((root) => root.path)
+    .filter((path) => state.unavailableRoots.has(rootKey(path)));
 }
 
 // Each count names the population it measures. contextMapEntryCount includes file and region
@@ -126,7 +142,7 @@ function renderIntelligence(state) {
   ];
   return panel(
     "Project intelligence",
-    `<div class="metrics">${tiles.join("")}</div>${renderRefreshHealth(refresh)}<p class="microcopy">Knowledge revision ${status.revision}. Root-promoted: ${status.promotedEntryCount}.</p>`,
+    `<div class="metrics">${tiles.join("")}</div>${unavailableRootPaths(state).length ? `<p class="microcopy">These counts describe the last index. The project folder is currently missing, so they may no longer match what is on disk.</p>` : ""}${renderRefreshHealth(refresh)}<p class="microcopy">Knowledge revision ${status.revision}. Root-promoted: ${status.promotedEntryCount}.</p>`,
   );
 }
 
@@ -183,11 +199,19 @@ function renderNode(node, children, depth, state) {
 }
 
 function renderRoutingResults(state) {
-  return `${state.contextHits.length ? state.contextHits.map(renderContextHit).join("") : `<p class="microcopy">Search descriptions and routing terms, then open exact source evidence.</p>`}${state.evidence ? renderEvidence(state.evidence) : ""}`;
+  return `${state.contextHits.length ? state.contextHits.map((hit) => renderContextHit(hit, state)).join("") : `<p class="microcopy">Search descriptions and routing terms, then open exact source evidence.</p>`}${state.evidence ? renderEvidence(state.evidence) : ""}`;
 }
 
-function renderContextHit(hit) {
-  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong><span class="badge ${escapeHtml(hit.freshness)}">${escapeHtml(hit.freshness)}</span></div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" ${hit.freshness !== "current" ? "disabled" : ""}>Verify exact source</button></article>`;
+function renderContextHit(hit, state) {
+  const freshness = effectiveFreshness(hit.freshness, state.unavailableRoots, hit.source.projectRoot);
+  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong><span class="badge ${escapeHtml(freshness)}">${escapeHtml(freshness)}</span></div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" ${freshness !== "current" ? "disabled" : ""}>Verify exact source</button>${renderEvidenceError(state, [hit.entryId])}</article>`;
+}
+
+// An exact-source failure is shown where the person asked for it, not only at the page top.
+function renderEvidenceError(state, entryIds) {
+  const error = state.evidenceError;
+  if (!error || !entryIds.includes(error.entryId)) return "";
+  return `<p class="inline-error" role="alert">${escapeHtml(error.message)}</p>`;
 }
 
 function renderEvidence(evidence) {
@@ -350,7 +374,7 @@ function renderFindings(state) {
       ? "Selected-node understanding"
       : "Project understanding & open signals",
     entries.length
-      ? `<div class="finding-list">${entries.map(renderFinding).join("")}</div>`
+      ? `<div class="finding-list">${entries.map((hit) => renderFinding(hit, state)).join("")}</div>`
       : empty(
           selected
             ? "No matching findings at this node."
@@ -362,19 +386,31 @@ function renderFindings(state) {
   );
 }
 
-function renderFinding(hit) {
+function renderFinding(hit, state) {
   const entry = hit.entry;
+  const freshness = findingFreshness(hit, state);
   const evidence = entry.evidence
     .map(
       (link) =>
-        `<button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(link.contextMapEntryId)}"${link.lineRange ? ` data-first-line="${link.lineRange.start}" data-last-line="${link.lineRange.end}"` : ""} ${hit.evidenceFreshness !== "current" ? "disabled" : ""}>Open evidence${link.lineRange ? ` · lines ${link.lineRange.start}–${link.lineRange.end}` : ""}</button>`,
+        `<button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(link.contextMapEntryId)}"${link.lineRange ? ` data-first-line="${link.lineRange.start}" data-last-line="${link.lineRange.end}"` : ""} ${freshness !== "current" ? "disabled" : ""}>Open evidence${link.lineRange ? ` · lines ${link.lineRange.start}–${link.lineRange.end}` : ""}</button>`,
     )
     .join("");
   const confirm =
     hit.effectiveVerification === "userConfirmed"
       ? ""
       : `<button class="text-button" data-action="confirm-knowledge" data-entry-id="${escapeHtml(entry.id)}" data-revision="${entry.revision}">Confirm this understanding</button>`;
-  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span><span class="badge ${escapeHtml(hit.evidenceFreshness)}">${escapeHtml(hit.evidenceFreshness)}</span></div><p>${escapeHtml(entry.content)}</p>${evidence}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
+  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span><span class="badge ${escapeHtml(freshness)}">${escapeHtml(freshness)}</span></div><p>${escapeHtml(entry.content)}</p>${evidence}${renderEvidenceError(state, entry.evidence.map((link) => link.contextMapEntryId))}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
+}
+
+// Evidence links do not name their root, so a finding is overridden only when every project
+// folder is missing.
+function findingFreshness(hit, state) {
+  const roots = state.project?.roots ?? [];
+  const allMissing =
+    roots.length > 0 && unavailableRootPaths(state).length === roots.length;
+  return allMissing && ["current", "stale"].includes(hit.evidenceFreshness)
+    ? "sourceUnavailable"
+    : hit.evidenceFreshness;
 }
 
 function renderInstructionForm(state) {
