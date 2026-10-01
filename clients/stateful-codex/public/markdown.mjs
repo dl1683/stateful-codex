@@ -448,7 +448,8 @@ function renderEmphasis(text) {
         if (opener.character !== run.character || opener.count === 0) continue;
         const used = opener.count >= 2 && run.count >= 2 ? 2 : 1;
         const tag = used === 2 ? "strong" : "em";
-        opener.opens.unshift(`<${tag}>`);
+        // Later matches are outer tags; serialisation reverses the list (push keeps this linear).
+        opener.opens.push(`<${tag}>`);
         run.closes.push(`</${tag}>`);
         opener.count -= used;
         run.count -= used;
@@ -463,7 +464,7 @@ function renderEmphasis(text) {
     .map((piece) =>
       typeof piece === "string"
         ? piece
-        : `${piece.closes.join("")}${piece.character.repeat(piece.count)}${piece.opens.join("")}`,
+        : `${piece.closes.join("")}${piece.character.repeat(piece.count)}${piece.opens.reverse().join("")}`,
     )
     .join("");
 }

@@ -121,3 +121,10 @@ test("emphasis nests, underscores respect word boundaries, and code spans need e
     "<ul><li>parent<ul><li>child</li></ul>after child</li></ul>",
   );
 });
+
+test("one long opener matched by many closers stays linear", () => {
+  const source = `x ${"*".repeat(20_000)}${"a* ".repeat(20_000)}`;
+  const started = performance.now();
+  renderMarkdown(source);
+  assert.ok(performance.now() - started < 500);
+});

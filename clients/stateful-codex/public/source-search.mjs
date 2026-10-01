@@ -46,7 +46,10 @@ export function createSourceSearch({ state, rpc, action, render, refresh, projec
     let workspaceError = null;
     await action("Refreshing source map", async () => {
       await rpc("contextMap/refresh", { projectId });
-      // Results and source errors from before the re-index no longer describe it.
+      // Results, pending searches, pending evidence reads and source errors from before the
+      // re-index no longer describe it.
+      state.searchGeneration += 1;
+      state.evidenceGeneration = (state.evidenceGeneration ?? 0) + 1;
       state.contextHits = [];
       state.evidenceError = null;
       render(["routing-results", "findings"]);

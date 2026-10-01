@@ -51,6 +51,7 @@ const state = {
   searchError: null,
   searchGeneration: 0,
   latestQuery: null,
+  evidenceGeneration: 0,
   pendingRequests: [],
   requestItems: new Map(),
   selectedNodeId: null,
@@ -461,8 +462,10 @@ app.addEventListener("click", async (event) => {
 // the control that was used, and learn from a missing root.
 async function readEvidence(entryId, lineRange, errorKey, root = null) {
   state.evidenceError = null;
+  // A map refresh while this read is pending makes its answer obsolete.
+  const generation = state.evidenceGeneration;
   try {
-    state.evidence = await action("Verifying exact evidence", () =>
+    const evidence = await action("Verifying exact evidence", () =>
       rpc("evidence/read", {
         projectId,
         contextMapEntryId: entryId,
@@ -470,7 +473,10 @@ async function readEvidence(entryId, lineRange, errorKey, root = null) {
         maxBytes: 32768,
       }),
     );
+    if (generation !== state.evidenceGeneration) return;
+    state.evidence = evidence;
   } catch (error) {
+    if (generation !== state.evidenceGeneration) return;
     const described = describeSourceError(error.message);
     state.evidence = null;
     state.evidenceError = {

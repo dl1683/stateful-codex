@@ -100,3 +100,28 @@ test("a re-index clears old results and errors even when the workspace refresh t
     "The map was refreshed, but repeating the search for \u201calpha\u201d failed (offline). Search again.",
   );
 });
+
+test("a search answered from the old index after a re-index never repopulates results", async () => {
+  let releaseRefresh;
+  const { state, calls, sources, settle } = searchWorkspace({
+    refresh: () => new Promise((resolve) => {
+      releaseRefresh = resolve;
+    }),
+  });
+  state.evidenceGeneration = 0;
+  const old = sources.search("alpha");
+  const refreshing = sources.refreshMap();
+  await settle();
+  calls[1].resolve({});
+  await settle();
+  assert.equal(state.evidenceGeneration, 1);
+  calls[0].resolve(hits("old-index"));
+  await old;
+  assert.deepEqual(state.contextHits, []);
+
+  releaseRefresh();
+  await settle();
+  calls[2].resolve(hits("alpha"));
+  await refreshing;
+  assert.deepEqual(state.contextHits, [{ entryId: "alpha-hit" }]);
+});
