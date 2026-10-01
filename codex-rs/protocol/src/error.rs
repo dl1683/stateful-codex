@@ -184,6 +184,9 @@ pub enum CodexErrorDetails {
     RefreshTokenFailed(RefreshTokenFailedError),
     #[error("Fatal error: {0}")]
     Fatal(String),
+    /// A turn task panicked; the host ended the turn instead of leaving it running.
+    #[error("turn task panicked: {0}")]
+    TaskPanicked(String),
     // -----------------------------------------------------------------
     // Automatic conversions for common external error types
     // -----------------------------------------------------------------
@@ -393,6 +396,7 @@ impl CodexErr {
             | CodexErrorDetails::Interrupted
             | CodexErrorDetails::EnvVar(_)
             | CodexErrorDetails::Fatal(_)
+            | CodexErrorDetails::TaskPanicked(_)
             | CodexErrorDetails::UsageNotIncluded
             | CodexErrorDetails::QuotaExceeded
             | CodexErrorDetails::InvalidImageRequest()
@@ -494,7 +498,8 @@ impl CodexErr {
             CodexErrorDetails::RefreshTokenFailed(_) => CodexErrorInfo::Unauthorized,
             CodexErrorDetails::SessionConfiguredNotFirstEvent
             | CodexErrorDetails::InternalServerError
-            | CodexErrorDetails::InternalAgentDied => CodexErrorInfo::InternalServerError,
+            | CodexErrorDetails::InternalAgentDied
+            | CodexErrorDetails::TaskPanicked(_) => CodexErrorInfo::InternalServerError,
             CodexErrorDetails::UnsupportedOperation(_)
             | CodexErrorDetails::ThreadNotFound(_)
             | CodexErrorDetails::AgentLimitReached { .. } => CodexErrorInfo::BadRequest,
