@@ -585,13 +585,14 @@ dd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* In the main work column, sticky only within that column: it can never cover the steering
+   and control panels in the neighbouring column. */
 .request-drawer {
-  position: fixed;
+  position: sticky;
   z-index: 5;
-  right: 20px;
-  bottom: 20px;
-  width: min(420px, calc(100% - 40px));
-  max-height: calc(100vh - 40px);
+  top: 12px;
+  min-width: 0;
+  max-height: min(70vh, 640px);
   overflow: auto;
   border: 1px solid var(--accent);
   border-radius: 16px;
@@ -662,6 +663,11 @@ dd {
   }
   .main-work {
     grid-row: 1;
+  }
+  /* One column: a sticky card would cover the panels that follow it, steering included. */
+  .request-drawer {
+    position: static;
+    max-height: none;
   }
   .packet {
     grid-template-columns: 1fr;

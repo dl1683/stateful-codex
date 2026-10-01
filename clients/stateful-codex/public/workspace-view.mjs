@@ -59,6 +59,7 @@ export function renderWorkspaceShell(state, slotHtml) {
           <section class="workspace-panel"><div class="panel-heading"><h2>Source routing</h2></div><form id="context-search" class="inline-form"><input name="query" aria-label="Search context map" placeholder="Find likely source material"/><button class="secondary">Search</button></form>${slot("routing-results")}</section>
         </aside>
         <section class="stack-panel main-work">
+          ${renderRequests(state)}
           ${slot("obligation")}
           ${slot("strategy")}
           ${slot("result")}
@@ -75,7 +76,6 @@ export function renderWorkspaceShell(state, slotHtml) {
           ${slot("findings")}
         </section>
       </div>
-      ${renderRequests(state)}
     </main>`;
   return html.replace(/[ \t]+\n/g, "\n");
 }
@@ -397,9 +397,11 @@ function newOutcomeLink() {
   return `<a class="text-button" href="/">Start another outcome</a>`;
 }
 
+// Pending requests sit at the top of the main work column, never over the page, so the
+// steering and control panels beside them stay visible and usable while an approval waits.
 function renderRequests(state) {
   const requests = state.pendingRequests;
-  return `<aside class="request-drawer" data-requests${requests.length ? "" : " hidden"}><h2>Agent needs input</h2><div data-request-list>${requests.map((request) => renderRequestCard(request, state)).join("")}</div></aside>`;
+  return `<aside class="request-drawer" aria-label="Agent needs input" data-requests${requests.length ? "" : " hidden"}><h2>Agent needs input</h2><div data-request-list>${requests.map((request) => renderRequestCard(request, state)).join("")}</div></aside>`;
 }
 
 // The thread item an approval refers to: a complete live item, then recorded activity, then a
