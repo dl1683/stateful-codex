@@ -120,6 +120,7 @@ async fn cancel_interrupts_the_in_flight_turn_and_fences_continuation() -> Resul
             },
         })
         .await?;
+    let cancelled_revision = cancelled.run.revision;
     assert_eq!(
         (cancelled.run.status, cancelled.interrupted_turn_ids),
         (StatefulRunStatus::Cancelled, vec![turn.turn.id.clone()])
@@ -140,5 +141,61 @@ async fn cancel_interrupts_the_in_flight_turn_and_fences_continuation() -> Resul
             .len(),
         1
     );
+
+    // A later run's in-flight turn on the same thread is not the cancelled run's turn.
+    let later: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: started.run.project_id.clone(),
+                thread_id: thread.thread.id.clone(),
+                goal: "Continue differently.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 4,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "later-run".to_string(),
+            },
+        })
+        .await?;
+    let later_turn: TurnStartResponse = server
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "Continue differently.".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    wait_for_model_requests(&responses, /*expected*/ 2).await?;
+    let recancelled: StatefulRunCancelResponse = server
+        .request(|request_id| ClientRequest::StatefulRunCancel {
+            request_id,
+            params: StatefulRunCancelParams {
+                run_id: started.run.id.clone(),
+                expected_revision: cancelled_revision,
+            },
+        })
+        .await?;
+    assert_eq!(
+        (recancelled.run.status, recancelled.interrupted_turn_ids),
+        (StatefulRunStatus::Cancelled, Vec::<String>::new())
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            server.read_notification::<TurnCompletedNotification>("turn/completed"),
+        )
+        .await
+        .is_err(),
+        "the later run's turn {} must keep running",
+        later_turn.turn.id
+    );
+    assert_eq!(later.run.status, StatefulRunStatus::Running);
     Ok(())
 }

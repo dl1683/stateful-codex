@@ -512,17 +512,23 @@ fn emit_compact_metric_records_auto_local() {
     );
 }
 
-/// Returns the error messages and terminal event of the next finished turn.
+/// The next finished turn: its error events, then the completed turn's ID and terminal error.
 async fn next_turn_outcome(
     receiver: &async_channel::Receiver<codex_protocol::protocol::Event>,
-) -> (Vec<String>, &'static str) {
+) -> (Vec<String>, String, Option<String>) {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         let mut errors = Vec::new();
         loop {
             match receiver.recv().await.expect("event").msg {
                 EventMsg::Error(error) => errors.push(error.message),
-                EventMsg::TurnComplete(_) => return (errors, "turnComplete"),
-                EventMsg::TurnAborted(_) => return (errors, "turnAborted"),
+                EventMsg::TurnComplete(complete) => {
+                    return (
+                        errors,
+                        complete.turn_id,
+                        complete.error.map(|error| error.message),
+                    );
+                }
+                EventMsg::TurnAborted(aborted) => panic!("turn was aborted: {aborted:?}"),
                 _ => {}
             }
         }
@@ -545,22 +551,25 @@ async fn panicking_task_ends_its_turn_and_the_session_stays_usable() {
         )
         .await;
     let failed = next_turn_outcome(&receiver).await;
+    let next_turn = session.new_default_turn().await;
     session
         .spawn_task(
-            Arc::clone(&turn_context),
+            Arc::clone(&next_turn),
             Vec::new(),
             PanicOnceTask { panicked },
         )
         .await;
     let reused = next_turn_outcome(&receiver).await;
+    let panic_message = "turn task panicked: injected task failure".to_string();
     assert_eq!(
         (failed, reused),
         (
             (
-                vec!["turn task panicked: injected task failure".to_string()],
-                "turnComplete"
+                vec![panic_message.clone()],
+                turn_context.sub_id.clone(),
+                Some(panic_message),
             ),
-            (Vec::new(), "turnComplete"),
+            (Vec::new(), next_turn.sub_id.clone(), None),
         )
     );
     assert!(session.active_turn.lock().await.is_none());

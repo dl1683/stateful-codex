@@ -223,7 +223,15 @@ impl StatefulRequestProcessor {
             .map_err(runtime_error)?
             .ok_or_else(|| invalid_params(format!("run not found: {id}")))?;
         let mut active_turns = Vec::new();
-        for raw_thread_id in &current.value.thread_ids {
+        // A thread holds at most one non-terminal run, so while this run is live its
+        // threads' active turns are its own. A terminal run owns no turn: re-cancelling
+        // it must not touch a later run's turn on the same thread.
+        let run_threads = if current.status.is_terminal() {
+            &[][..]
+        } else {
+            &current.value.thread_ids[..]
+        };
+        for raw_thread_id in run_threads {
             let Ok(thread_id) = ThreadId::from_string(raw_thread_id) else {
                 continue;
             };
