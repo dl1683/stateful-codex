@@ -355,13 +355,17 @@ async fn run_probe(
         .map_err(|error| match error {
             GitCommandError::Spawn(GitSpawnError::Spawn(error)) => {
                 // Starting a process in a missing directory fails like a
-                // missing executable, so check the directory first.
-                if !cwd.is_dir() {
-                    GitObservationFailure::MissingRoot
-                } else if error.kind() == io::ErrorKind::NotFound {
-                    GitObservationFailure::GitUnavailable
-                } else {
-                    GitObservationFailure::Spawn((&error).into())
+                // missing executable, so check the directory first. Only an
+                // established absence counts as missing.
+                match std::fs::metadata(cwd) {
+                    Ok(metadata) if !metadata.is_dir() => GitObservationFailure::MissingRoot,
+                    Err(metadata_error) if metadata_error.kind() == io::ErrorKind::NotFound => {
+                        GitObservationFailure::MissingRoot
+                    }
+                    Ok(_) if error.kind() == io::ErrorKind::NotFound => {
+                        GitObservationFailure::GitUnavailable
+                    }
+                    Ok(_) | Err(_) => GitObservationFailure::Spawn((&error).into()),
                 }
             }
             GitCommandError::Spawn(GitSpawnError::Containment(error)) => {

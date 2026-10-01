@@ -354,6 +354,16 @@ async fn sha256_repository_is_observed() {
         eprintln!("skipping: the local git cannot create SHA-256 repositories");
         return;
     }
+    assert_eq!(
+        observe(temp.path()).await,
+        GitRepositoryObservation {
+            worktree_root: Some(absolute(temp.path())),
+            head: GitHeadObservation::Unborn {
+                head_ref: "refs/heads/main".to_string(),
+            },
+            worktree: GitWorktreeObservation::Clean,
+        }
+    );
     std::fs::write(temp.path().join("tracked.txt"), "one\n").expect("write");
     git(temp.path(), &["add", "tracked.txt"]);
     git(temp.path(), &["commit", "-q", "-m", "initial"]);
@@ -411,4 +421,73 @@ async fn submodule_changes_are_dirty_despite_ignore_configuration() {
         observe(&main).await,
         on_main(&main, oid, GitWorktreeObservation::Dirty)
     );
+}
+
+#[test]
+fn reconciliation_keeps_independent_failure_reasons() {
+    let oid = GitSha::new("0123456789abcdef0123456789abcdef01234567");
+    let committed = HeadSample::Commit {
+        oid: oid.clone(),
+        head_ref: None,
+    };
+    let unresolved = HeadSample::Unresolved {
+        head_ref: "refs/heads/main".to_string(),
+    };
+    let clean_status = PorcelainStatus {
+        oid: StatusBranchOid::Commit(oid.clone()),
+        head: StatusBranchHead::Detached,
+        worktree: StatusWorktree::Clean,
+    };
+    let status_failure = GitObservationFailure::OutputLimit;
+    let final_failure = GitObservationFailure::CommandFailed {
+        exit_code: Some(128),
+    };
+    let cases = [
+        // A failed status keeps a stable committed HEAD.
+        (
+            committed.clone(),
+            Err(status_failure),
+            Ok(committed.clone()),
+            (
+                GitHeadObservation::Commit {
+                    oid,
+                    head_ref: None,
+                },
+                GitWorktreeObservation::Unknown(status_failure),
+            ),
+        ),
+        // A failed final probe cannot establish a successful status.
+        (
+            committed.clone(),
+            Ok(clean_status),
+            Err(final_failure),
+            (
+                GitHeadObservation::Unknown(final_failure),
+                GitWorktreeObservation::Unknown(final_failure),
+            ),
+        ),
+        // Distinct status and final failures are both preserved.
+        (
+            committed,
+            Err(status_failure),
+            Err(final_failure),
+            (
+                GitHeadObservation::Unknown(final_failure),
+                GitWorktreeObservation::Unknown(status_failure),
+            ),
+        ),
+        // Without a successful status, an unresolved branch is not unborn.
+        (
+            unresolved.clone(),
+            Err(status_failure),
+            Ok(unresolved),
+            (
+                GitHeadObservation::Unknown(status_failure),
+                GitWorktreeObservation::Unknown(status_failure),
+            ),
+        ),
+    ];
+    for (initial, status, last, expected) in cases {
+        assert_eq!(reconcile(initial, status, last), expected);
+    }
 }
