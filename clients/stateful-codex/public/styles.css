@@ -607,6 +607,14 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
 }
+#continue-form .control-row {
+  align-items: end;
+  justify-content: space-between;
+}
+.inline-label {
+  grid-auto-flow: column;
+  align-items: center;
+}
 .mode-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

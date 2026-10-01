@@ -2,6 +2,7 @@ import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { submitSteering } from "./steering-submit.mjs";
+import { startFollowUp } from "./follow-up.mjs";
 import { createWorkspaceDom } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
 import { describeSourceError, findUnavailableRoots } from "./source-availability.mjs";
@@ -291,6 +292,11 @@ app.addEventListener("submit", async (event) => {
       });
       render(["steering-status", "steering-list"]);
       if (saved) await refresh();
+    } else if (form.id === "continue-form") {
+      const mode = form.querySelector('[name="followup-mode"]').value;
+      await drafts.submit(form.querySelector('[name="followup"]'), (goal) =>
+        action("Starting the follow-up", () => continueThread(goal, mode)),
+      );
     } else if (form.id === "message-form") {
       await drafts.submit(form.querySelector('[name="message"]'), (input) =>
         action("Sending instruction", () => sendTurn(input)),
@@ -458,6 +464,12 @@ async function sendTurn(text) {
     threadId,
     input: [{ type: "text", text, text_elements: [] }],
   });
+}
+
+async function continueThread(goal, mode) {
+  await startFollowUp({ state, rpc, storage: sessionStorage, goal, mode, sendTurn });
+  selectedMode = state.run.mode;
+  await refresh();
 }
 
 async function sendInitialTurn() {

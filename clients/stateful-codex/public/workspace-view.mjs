@@ -370,7 +370,7 @@ function renderMeasuredWork(summary) {
 
 function renderSteeringForm(state) {
   return isTerminalRun(state.run)
-    ? `<p class="microcopy">Steering is closed with this outcome. Start another outcome to continue from the same project intelligence.</p>${newOutcomeLink()}`
+    ? `<p class="microcopy">Steering is closed with this outcome. Use Continue in this thread to give the agent a follow-up; steering opens again while it works.</p>`
     : `<form id="steering-form" class="stack"><textarea name="steering" placeholder="Follow this fact, connect these findings, or change direction…" required></textarea><button class="primary">Submit steering</button></form>`;
 }
 
@@ -507,10 +507,12 @@ function findingFreshness(hit, state) {
 }
 
 function renderInstructionForm(state) {
+  // A closed outcome can be followed up in place: the reply starts a new outcome on this same
+  // thread, which keeps the conversation, project intelligence and (by default) the mode.
   if (isTerminalRun(state.run)) {
     return panel(
-      "Continue the work",
-      `<p class="microcopy">Create a new outcome to continue or fork this thread with a fresh explicit goal.</p>${newOutcomeLink()}`,
+      "Continue in this thread",
+      `<form id="continue-form" class="stack"><textarea name="followup" aria-label="Follow-up for this thread" placeholder="Ask a follow-up, correct something, or give the next piece of work…" required></textarea><div class="control-row"><label class="inline-label">Mode<select name="followup-mode">${modeOptions(state.run.mode)}</select></label><button class="primary">Continue</button></div></form><p class="microcopy">Starts a new outcome on this thread with the same project intelligence. To start fresh instead, <a class="text-button" href="/">open a new outcome</a>.</p>`,
     );
   }
   return panel(

@@ -83,6 +83,9 @@ test("terminal workspace preserves the record without accepting dead controls", 
   assert.doesNotMatch(actual, /id="message-form"/);
   assert.doesNotMatch(actual, /data-action="maintain"/);
   assert.match(actual, /Start another outcome/);
+  // The closed outcome can be followed up in place, in its own mode by default.
+  assert.match(actual, /<h2>Continue in this thread<\/h2>.*<form id="continue-form"/);
+  assert.match(actual, /<select name="followup-mode">[^]*?<option value="autonomous" selected>/);
 });
 
 test("intelligence counts are labelled by the population each one measures", () => {
