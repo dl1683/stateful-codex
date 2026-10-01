@@ -33,8 +33,9 @@ export function workspaceFixture() {
         inventoryComplete: true,
         regionCoverageComplete: true,
         filesIndexed: 6,
-        regionsIndexed: 18,
+        regionsIndexed: 12,
         filesSkipped: 0,
+        completedAt: 1790000000,
       },
     },
     hierarchy: [

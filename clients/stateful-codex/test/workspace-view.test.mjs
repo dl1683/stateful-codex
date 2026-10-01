@@ -39,16 +39,13 @@ test("missing terminal trajectory is not rendered as measured zeroes", () => {
 
   const actual = renderWorkspace(state);
 
-  assert.match(actual, /<strong>—<\/strong><span>model responses<\/span>/);
+  assert.match(actual, /aria-label="model responses unavailable"><strong aria-hidden="true">—<\/strong>/);
   assert.match(
     actual,
     /Model-response, model-tool, and tool-output totals are unavailable/,
   );
   assert.match(actual, /Model tool calls and tool-output bytes unavailable/);
-  assert.doesNotMatch(
-    actual,
-    /<strong>0<\/strong><span>model responses<\/span>/,
-  );
+  assert.doesNotMatch(actual, /aria-label="0 model responses"/);
 });
 
 test("already user-confirmed understanding cannot be confirmed again", () => {
@@ -87,6 +84,65 @@ test("terminal workspace preserves the record without accepting dead controls", 
   assert.doesNotMatch(actual, /data-action="maintain"/);
   assert.match(actual, /Start another outcome/);
 });
+
+test("intelligence counts are labelled by the population each one measures", () => {
+  const state = workspaceFixture();
+  state.status = {
+    ...state.status,
+    blackboardEntryCount: 66,
+    contextMapEntryCount: 21135,
+    fileCount: 2864,
+    missingSourceCount: 3,
+    lastRefresh: {
+      ...state.status.lastRefresh,
+      filesIndexed: 2864,
+      regionsIndexed: 18271,
+      completedAt: 1790000000,
+    },
+  };
+
+  const tiles = metricTiles(renderWorkspace(state), "Project intelligence");
+
+  assert.deepEqual(tiles, [
+    ["66 saved understandings (blackboard entries)", "66", "Saved understandings · blackboard entries"],
+    ["21,135 source index entries (file and region routes)", "21,135", "Source index entries · file and region routes"],
+    ["2,864 files mapped", "2,864", "Files mapped"],
+    ["3 missing sources", "3", "Missing sources"],
+    [
+      "18,271 indexed source regions at last refresh (2026-09-21 14:13 UTC)",
+      "18,271",
+      "Indexed source regions at last refresh · 2026-09-21 14:13 UTC",
+    ],
+  ]);
+});
+
+test("region counts carry the last refresh's completeness and are never inferred", () => {
+  const state = workspaceFixture();
+  state.status.lastRefresh.regionCoverageComplete = false;
+  assert.equal(
+    metricTiles(renderWorkspace(state), "Project intelligence")[4][0],
+    "12 indexed source regions at last refresh (2026-09-21 14:13 UTC · region coverage partial)",
+  );
+
+  state.status.lastRefresh = null;
+  const tiles = metricTiles(renderWorkspace(state), "Project intelligence");
+  assert.deepEqual(tiles[4], [
+    "indexed source regions at last refresh unavailable (no completed refresh recorded)",
+    "—",
+    "Indexed source regions at last refresh · no completed refresh recorded",
+  ]);
+  assert.equal(tiles[1][1], "18");
+});
+
+// [accessible name, visible value, visible label] for each metric tile in one panel.
+function metricTiles(html, panelTitle) {
+  const panel = html.split("<h2>").find((part) => part.startsWith(panelTitle));
+  return [
+    ...panel.matchAll(
+      /role="group" aria-label="([^"]*)"><strong aria-hidden="true">([^<]*)<\/strong><span aria-hidden="true">([^<]*)<\/span>/g,
+    ),
+  ].map((match) => match.slice(1));
+}
 
 function statefulFindingCount(state) {
   return state.blackboard.length;

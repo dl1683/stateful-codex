@@ -60,14 +60,41 @@ function renderHeader(state) {
   </header>`;
 }
 
+// Each count names the population it measures. contextMapEntryCount includes file and region
+// routes, so it is never presented as a region count; regions come from the last refresh.
 function renderIntelligence(state) {
   const status = state.status;
+  if (!status) {
+    return panel(
+      "Project intelligence",
+      empty("Project intelligence has not been initialized."),
+    );
+  }
+  const refresh = status.lastRefresh;
+  const tiles = [
+    metric(status.blackboardEntryCount, "saved understandings", "blackboard entries"),
+    metric(status.contextMapEntryCount, "source index entries", "file and region routes"),
+    metric(status.fileCount, "files mapped"),
+    metric(status.missingSourceCount, "missing sources"),
+    metric(
+      refresh ? refresh.regionsIndexed : null,
+      "indexed source regions at last refresh",
+      refreshDetail(refresh),
+      "metric-wide",
+    ),
+  ];
   return panel(
     "Project intelligence",
-    status
-      ? `<div class="metrics"><div><strong>${status.blackboardEntryCount}</strong><span>understandings</span></div><div><strong>${status.contextMapEntryCount}</strong><span>source routes</span></div><div><strong>${status.fileCount}</strong><span>files mapped</span></div><div><strong>${status.missingSourceCount}</strong><span>missing sources</span></div></div>${renderRefreshHealth(status.lastRefresh)}<p class="microcopy">Knowledge revision ${status.revision}. Root-promoted: ${status.promotedEntryCount}.</p>`
-      : empty("Project intelligence has not been initialized."),
+    `<div class="metrics">${tiles.join("")}</div>${renderRefreshHealth(refresh)}<p class="microcopy">Knowledge revision ${status.revision}. Root-promoted: ${status.promotedEntryCount}.</p>`,
   );
+}
+
+function refreshDetail(refresh) {
+  if (!refresh) return "no completed refresh recorded";
+  const when = refresh.completedAt ? formatTimestamp(refresh.completedAt) : "time not recorded";
+  if (!refresh.inventoryComplete) return `${when} · file inventory incomplete`;
+  if (!refresh.regionCoverageComplete) return `${when} · region coverage partial`;
+  return when;
 }
 
 function renderRefreshHealth(refresh) {
@@ -80,7 +107,7 @@ function renderRefreshHealth(refresh) {
   if (!refresh.regionCoverageComplete) {
     return `<p class="banner">File inventory complete, but searchable region coverage is partial. Exact source reads may still be required.</p>`;
   }
-  return `<p class="microcopy">Last full refresh completed: ${refresh.filesIndexed} files and ${refresh.regionsIndexed} searchable regions.</p>`;
+  return `<p class="microcopy">Last full refresh completed: ${formatNumber(refresh.filesIndexed)} files and ${formatNumber(refresh.regionsIndexed)} searchable regions.</p>`;
 }
 
 function renderHierarchy(state) {
@@ -238,7 +265,7 @@ function renderMeasuredWork(summary) {
     : "Model tool calls and tool-output bytes unavailable.";
   return panel(
     "Measured work",
-    `<div class="metrics"><div><strong>${formatNumber(summary.measurementCount)}</strong><span>turn records</span></div><div><strong>${formatNumber(summary.runCount)}</strong><span>runs represented</span></div><div><strong>${trajectory ? formatNumber(trajectory.completedModelResponses) : "—"}</strong><span>model responses</span></div><div><strong>${formatNumber(counters.materialFindingsReused ?? 0)}</strong><span>findings reused</span></div></div><p class="microcopy">Terminal coverage ${summary.terminalMeasurementCount}/${summary.measurementCount} · ${summary.completedTurns} completed · ${summary.failedTurns} failed · ${summary.abortedTurns} aborted · ${formatMilliseconds(summary.durationMs)} measured.${trajectoryCoverage}</p>${usageLine}<p class="microcopy">${trajectoryLine} ${formatNumber(counters.evidenceReadCalls ?? 0)} exact evidence reads.${windowBoundary} Exact observed counts only; no monetary cost is inferred.</p>`,
+    `<div class="metrics">${metric(summary.measurementCount, "turn records")}${metric(summary.runCount, "runs represented")}${metric(trajectory ? trajectory.completedModelResponses : null, "model responses")}${metric(counters.materialFindingsReused ?? 0, "findings reused")}</div><p class="microcopy">Terminal coverage ${summary.terminalMeasurementCount}/${summary.measurementCount} · ${summary.completedTurns} completed · ${summary.failedTurns} failed · ${summary.abortedTurns} aborted · ${formatMilliseconds(summary.durationMs)} measured.${trajectoryCoverage}</p>${usageLine}<p class="microcopy">${trajectoryLine} ${formatNumber(counters.evidenceReadCalls ?? 0)} exact evidence reads.${windowBoundary} Exact observed counts only; no monetary cost is inferred.</p>`,
   );
 }
 
@@ -344,6 +371,19 @@ function renderQuestion(question) {
     )
     .join("");
   return `<label>${escapeHtml(question.header)}<span>${escapeHtml(question.question)}</span>${options ? `<select name="${name}">${options}${question.isOther ? `<option value="Other">Other</option>` : ""}</select>` : `<input name="${name}" type="${question.isSecret ? "password" : "text"}" required/>`}</label>`;
+}
+
+// A value and its label form one named group, so assistive technology and text extraction
+// read "45 saved understandings" rather than a run of values followed by a run of labels.
+function metric(value, label, detail = "", className = "") {
+  const shown = value === null || value === undefined ? "—" : formatNumber(value);
+  const name = value === null || value === undefined ? `${label} unavailable` : `${shown} ${label}`;
+  return `<div class="metric${className ? ` ${className}` : ""}" role="group" aria-label="${escapeHtml(detail ? `${name} (${detail})` : name)}"><strong aria-hidden="true">${shown}</strong><span aria-hidden="true">${escapeHtml(label[0].toUpperCase() + label.slice(1))}${detail ? ` · ${escapeHtml(detail)}` : ""}</span></div>`;
+}
+
+function formatTimestamp(seconds) {
+  const iso = new Date(seconds * 1000).toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 }
 
 function panel(title, content, action = "") {
