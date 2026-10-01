@@ -110,7 +110,8 @@ function rememberRequestItem(state, message) {
 }
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+// ignoreBOM keeps a leading U+FEFF, which is part of an added or deleted file's content.
+const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
 function copyString(text) {
   return decoder.decode(encoder.encode(text));
@@ -121,13 +122,14 @@ function boundedItem(item) {
   const changes = (item.changes ?? []).map((change) => {
     const diff = String(change.diff ?? "");
     // Copy through an encoder: a plain slice can keep the original huge string alive.
-    const kept = copyString(diff.slice(0, Math.max(budget, 0)));
-    budget -= kept.length;
+    const sliced = diff.slice(0, Math.max(budget, 0));
+    const kept = copyString(sliced);
+    budget -= sliced.length;
     return {
       path: change.path,
       kind: change.kind,
       diff: kept,
-      diffTruncated: kept.length < diff.length,
+      diffTruncated: sliced.length < diff.length,
     };
   });
   return { type: "fileChange", id: item.id, status: item.status, changes };

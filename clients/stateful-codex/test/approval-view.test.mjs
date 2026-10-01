@@ -227,6 +227,21 @@ test("oversized diffs are bounded in memory and on screen, with a warning", () =
   assert.match(card().textContent, /too large to show here/);
 });
 
+test("a leading byte-order mark in a diff is kept and is not reported as truncation", () => {
+  const { apply, card, state } = workspace();
+  const bom = { ...fileChangeItem(), changes: [{ path: "bom.py", kind: { type: "add" }, diff: "﻿print(1)" }] };
+  apply({ method: "item/started", params: { threadId: "thread-a", turnId: "t", item: bom, startedAtMs: 1 } });
+  apply(fileApproval);
+
+  assert.deepEqual(state.requestItems.get("call-7").changes[0], {
+    path: "bom.py",
+    kind: { type: "add" },
+    diff: "﻿print(1)",
+    diffTruncated: false,
+  });
+  assert.doesNotMatch(card().textContent, /too large to show here/);
+});
+
 test("replacing an approval card keeps an open diff and its focused summary", () => {
   const { apply, card, state } = workspace();
   apply({ method: "item/started", params: { threadId: "thread-a", turnId: "t", item: fileChangeItem(45), startedAtMs: 1 } });
