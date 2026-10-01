@@ -601,7 +601,9 @@ function newOutcomeLink() {
 // person has scrolled, announces waiting requests, and takes them to the cards.
 function renderPendingBar(state) {
   const count = state.pendingRequests.length;
-  return `<div class="pending-bar" data-pending-bar role="status"${count ? "" : " hidden"}><span data-pending-count>${pendingSummary(count)}</span><button type="button" class="secondary" data-action="show-requests">Review</button></div>`;
+  // The status region is always exposed (only the visual bar hides), so assistive technology
+  // announces the first request as well as later ones.
+  return `<p class="visually-hidden" role="status" data-pending-announcement>${pendingSummary(count)}</p><div class="pending-bar" data-pending-bar${count ? "" : " hidden"}><span aria-hidden="true">${pendingSummary(count)}</span><button type="button" class="secondary" data-action="show-requests">Review</button></div>`;
 }
 
 export function pendingSummary(count) {

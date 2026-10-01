@@ -164,8 +164,10 @@ export function createWorkspaceDom(
     drawer.hidden = wanted.length === 0;
     const bar = root.querySelector("[data-pending-bar]");
     const summary = pendingSummary(wanted.length);
-    const count = bar.querySelector("[data-pending-count]");
-    if (count.textContent !== summary) count.textContent = summary;
+    const announcement = root.querySelector("[data-pending-announcement]");
+    if (announcement.textContent !== summary) announcement.textContent = summary;
+    const visible = bar.querySelector("span");
+    if (visible.textContent !== summary) visible.textContent = summary;
     bar.hidden = wanted.length === 0;
   }
 
@@ -173,8 +175,12 @@ export function createWorkspaceDom(
   function showRequests() {
     const drawer = root.querySelector("[data-requests]");
     if (drawer.hidden) return;
-    drawer.scrollIntoView?.({ block: "start", behavior: "smooth" });
-    drawer.querySelector("select, input, textarea, button:not([disabled])")?.focus({ preventScroll: true });
+    drawer.scrollIntoView?.({ block: "start" });
+    const target = drawer.querySelector("select, input, textarea, button:not([disabled])");
+    if (!target) return;
+    // The drawer scrolls internally; bring the control itself into view before focusing it.
+    target.scrollIntoView?.({ block: "nearest" });
+    target.focus({ preventScroll: true });
   }
 
   function selectNode(state) {

@@ -435,8 +435,10 @@ test("filtering findings re-renders only the list and keeps the filter field", (
 test("a slim pending bar announces waiting requests and takes the keyboard to them", () => {
   const { state, view, document, $ } = mountWorkspace();
   const bar = $("[data-pending-bar]");
+  const announcement = $("[data-pending-announcement]");
   assert.equal(bar.hidden, false);
-  assert.equal($("[data-pending-count]").textContent, "The agent is waiting for your input.");
+  assert.equal(announcement.hidden, false);
+  assert.equal(announcement.textContent, "The agent is waiting for your input.");
 
   state.pendingRequests = [
     ...state.pendingRequests,
@@ -444,10 +446,8 @@ test("a slim pending bar announces waiting requests and takes the keyboard to th
   ];
   view.update(state, ["requests"]);
   assertSameNode($("[data-pending-bar]"), bar);
-  assert.equal(
-    $("[data-pending-count]").textContent,
-    "The agent is waiting for your input on 2 requests.",
-  );
+  assert.equal(announcement.textContent, "The agent is waiting for your input on 2 requests.");
+  assert.equal(bar.querySelector("span").textContent, announcement.textContent);
 
   view.showRequests();
   assertSameNode(document.activeElement, $('[data-request-key] [name="appendix"]'));
@@ -455,7 +455,9 @@ test("a slim pending bar announces waiting requests and takes the keyboard to th
   state.pendingRequests = [];
   view.update(state, ["requests"]);
   assert.equal(bar.hidden, true);
-  assert.equal($("[data-pending-count]").textContent, "");
+  // Only the visual bar hides; the status region stays exposed for the next announcement.
+  assert.equal(announcement.hidden, false);
+  assert.equal(announcement.textContent, "");
 });
 
 test("late deltas for a finished message never disturb the bounded tail", () => {

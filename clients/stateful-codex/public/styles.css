@@ -723,6 +723,22 @@ dd {
 .pending-bar[hidden] {
   display: none;
 }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+/* Clear the sticky pending bar when scrolled into view. */
+.request-drawer,
+.request-drawer button,
+.request-drawer select,
+.request-drawer input,
+.request-drawer textarea {
+  scroll-margin-top: 64px;
+}
 .request-drawer {
   position: sticky;
   z-index: 5;
