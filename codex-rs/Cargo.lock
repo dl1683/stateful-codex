@@ -4665,6 +4665,7 @@ dependencies = [
  "codex-stateful-runtime",
  "codex-thread-store",
  "codex-utils-absolute-path",
+ "codex-utils-output-truncation",
  "codex-utils-string",
  "pretty_assertions",
  "serde",

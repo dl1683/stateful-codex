@@ -93,7 +93,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
-            .contains("completionDisposition noReusableLearning and only the result")
+            .contains("passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result")
     );
     assert!(
         rendered
