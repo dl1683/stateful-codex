@@ -114,7 +114,7 @@ function renderMissingRoots(state) {
   const paths = missing.map((path) => `<code>${escapeHtml(path)}</code>`).join(", ");
   const consequence = all
     ? `Saved understandings and history are still readable, but sources can't be checked or re-indexed until the ${one ? "folder is" : "folders are"} restored at ${one ? "that path" : "those paths"}.`
-    : `Sources under ${one ? "it" : "them"} can't be checked until ${one ? "it is" : "they are"} restored; the project's other folders work normally.`;
+    : `Sources under ${one ? "it" : "them"} can't be checked until ${one ? "it is" : "they are"} restored.`;
   return `<p class="banner error project-missing">${all ? `Project ${one ? "folder" : "folders"}` : `${one ? "One project folder" : "Some project folders"}`} not found on disk: ${paths}. ${consequence}</p>`;
 }
 
@@ -225,7 +225,7 @@ function renderContextHit(hit, state) {
   const freshness = effectiveFreshness(hit.freshness, state.unavailableRoots, hit.source.projectRoot);
   const errorKey = `hit:${hit.entryId}`;
   const missingRoot = isRootUnavailable(state.unavailableRoots, hit.source.projectRoot);
-  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong>${freshnessBadge(freshness)}</div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" data-error-key="${escapeHtml(errorKey)}" ${freshness !== "current" ? "disabled" : ""}>Verify exact source</button>${renderUnverifiable(freshness, { missingRoot, saved: false })}${renderEvidenceError(state, errorKey)}</article>`;
+  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong>${freshnessBadge(freshness)}</div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" data-error-key="${escapeHtml(errorKey)}" data-root="${escapeHtml(hit.source.projectRoot)}" ${freshness !== "current" ? "disabled" : ""}>Verify exact source</button>${renderUnverifiable(freshness, { missingRoot, saved: false })}${renderEvidenceError(state, errorKey)}</article>`;
 }
 
 const FRESHNESS_LABELS = {

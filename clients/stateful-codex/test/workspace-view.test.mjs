@@ -185,7 +185,7 @@ test("a missing project folder is explained once and no source is shown as curre
   assert.match(actual, /<span class="badge sourceUnavailable">source missing<\/span><\/div><p>Threshold amendment/);
   assert.match(
     actual,
-    /data-error-key="hit:map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">Its project folder is missing \(see the notice at the top\)\.<\/p><p class="inline-error" role="alert">The project folder can&#39;t be found on disk\.<\/p>/,
+    /data-error-key="hit:map-1" data-root="C:\/work\/investigation" disabled>Verify exact source<\/button><p class="microcopy unverifiable">Its project folder is missing \(see the notice at the top\)\.<\/p><p class="inline-error" role="alert">The project folder can&#39;t be found on disk\.<\/p>/,
   );
   // The error belongs to the control that was used, not to every card citing the same source.
   assert.equal(actual.match(/class="inline-error"/g)?.length, 1);
@@ -202,7 +202,7 @@ test("with one of two folders missing, only its sources are affected", () => {
 
   assert.match(
     actual,
-    /One project folder not found on disk: <code>D:\/archive<\/code>\. Sources under it can't be checked until it is restored; the project's other folders work normally\./,
+    /One project folder not found on disk: <code>D:\/archive<\/code>\. Sources under it can't be checked until it is restored\.<\/p>/,
   );
   // The hit's own folder exists, so it is offered the re-index rather than blamed on a folder.
   assert.match(actual, /This file is no longer where it was indexed\. <button class="text-button" data-action="refresh-map">Refresh map<\/button>/);
@@ -218,7 +218,7 @@ test("a changed source says why it can't be verified and what can repair it", ()
 
   assert.match(
     actual,
-    /data-error-key="hit:map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index\. <button class="text-button" data-action="refresh-map">Refresh map<\/button> to re-index it\.<\/p>/,
+    /data-error-key="hit:map-1" data-root="C:\/work\/investigation" disabled>Verify exact source<\/button><p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index\. <button class="text-button" data-action="refresh-map">Refresh map<\/button> to re-index it\.<\/p>/,
   );
   // A saved understanding keeps its saved fingerprint: re-indexing cannot repair it.
   assert.match(
