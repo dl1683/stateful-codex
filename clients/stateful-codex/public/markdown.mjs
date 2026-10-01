@@ -105,9 +105,12 @@ function fenceOpening(line) {
 function headingOf(line) {
   const match = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/.exec(line);
   if (!match) return null;
-  // A closing run of # is decoration.
-  const text = (match[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "").replace(/^#+[ \t]*$/, "").trim();
-  return { level: match[1].length, text };
+  // A closing run of # is decoration. Scanned from the end, so long lines stay linear.
+  let text = (match[2] ?? "").trimEnd();
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "#") end -= 1;
+  if (end === 0 || text[end - 1] === " " || text[end - 1] === "\t") text = text.slice(0, end);
+  return { level: match[1].length, text: text.trim() };
 }
 
 function isRule(line) {
@@ -157,8 +160,8 @@ function renderList(lines, start, blocks, depth) {
     const marker = listMarker(lines[index]);
     if (!marker || marker.kind !== first.kind || marker.indent > first.indent + 1) break;
     if (marker.indent < first.indent) break;
-    const text = [lines[index].slice(marker.contentStart)];
-    const children = [];
+    // Text lines and nested lists, in their original order.
+    const parts = [renderInline(lines[index].slice(marker.contentStart))];
     index += 1;
     while (index < lines.length) {
       const line = lines[index];
@@ -175,13 +178,18 @@ function renderList(lines, start, blocks, depth) {
       if (nested && depth < MAX_NESTING) {
         const nestedBlocks = [];
         index = renderList(lines, index, nestedBlocks, depth + 1);
-        children.push(...nestedBlocks);
+        parts.push({ block: nestedBlocks.join("") });
         continue;
       }
-      text.push(line.trim());
+      parts.push(renderInline(line.trim()));
       index += 1;
     }
-    items.push(`<li>${text.map(renderInline).join("<br/>")}${children.join("")}</li>`);
+    let html = "";
+    parts.forEach((part, position) => {
+      if (typeof part !== "string") html += part.block;
+      else html += `${position && typeof parts[position - 1] === "string" ? "<br/>" : ""}${part}`;
+    });
+    items.push(`<li>${html}</li>`);
   }
   const tag = first.kind === "ordered" ? "ol" : "ul";
   blocks.push(`<${tag}>${items.join("")}</${tag}>`);
@@ -202,23 +210,27 @@ function isTableSeparator(line) {
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
 }
 
-// Cells split on pipes outside code spans; an escaped pipe is part of the cell.
+// Cells split on pipes outside code spans (matched backtick runs of equal length); an escaped
+// pipe is part of the cell, inside code spans too.
 function tableCells(line) {
   let text = line.trim();
   if (text.startsWith("|")) text = text.slice(1);
   if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);
+  const spans = new Map(codeSpans(text).map((span) => [span.start, span.end]));
   const cells = [];
   let cell = "";
-  let inCode = false;
   for (let position = 0; position < text.length; position += 1) {
+    const spanEnd = spans.get(position);
+    if (spanEnd !== undefined) {
+      cell += text.slice(position, spanEnd).replaceAll("\\|", "|");
+      position = spanEnd - 1;
+      continue;
+    }
     const character = text[position];
     if (character === "\\" && text[position + 1] === "|") {
       cell += "|";
       position += 1;
-    } else if (character === "`") {
-      inCode = !inCode;
-      cell += character;
-    } else if (character === "|" && !inCode) {
+    } else if (character === "|") {
       cells.push(cell.trim());
       cell = "";
     } else {
@@ -227,6 +239,43 @@ function tableCells(line) {
   }
   cells.push(cell.trim());
   return cells;
+}
+
+// Code spans in one line: a run of N backticks closes at the next run of exactly N. Runs are
+// found in one pass and paired with per-length cursors, so the work is linear.
+function codeSpans(text) {
+  const runs = [];
+  for (let position = text.indexOf("`"); position >= 0; ) {
+    let end = position;
+    while (text[end] === "`") end += 1;
+    runs.push({ start: position, end });
+    position = text.indexOf("`", end);
+  }
+  const byLength = new Map();
+  runs.forEach((run, index) => {
+    const length = run.end - run.start;
+    if (!byLength.has(length)) byLength.set(length, []);
+    byLength.get(length).push(index);
+  });
+  const cursors = new Map();
+  const spans = [];
+  for (let index = 0; index < runs.length; index += 1) {
+    const length = runs[index].end - runs[index].start;
+    const group = byLength.get(length);
+    let cursor = cursors.get(length) ?? 0;
+    while (cursor < group.length && group[cursor] <= index) cursor += 1;
+    cursors.set(length, cursor);
+    if (cursor >= group.length) continue;
+    const close = group[cursor];
+    spans.push({
+      start: runs[index].start,
+      end: runs[close].end,
+      contentStart: runs[index].end,
+      contentEnd: runs[close].start,
+    });
+    index = close;
+  }
+  return spans;
 }
 
 // A table larger than its bounds keeps its excess rows as plain text below it.
@@ -264,29 +313,18 @@ function renderTable(lines, start, blocks) {
 export function renderInline(text) {
   const source = String(text);
   let html = "";
-  let plain = "";
   let position = 0;
-  while (position < source.length) {
-    const tick = source.indexOf("`", position);
-    if (tick < 0) break;
-    let run = tick;
-    while (source[run] === "`") run += 1;
-    const fence = source.slice(tick, run);
-    const close = source.indexOf(fence, run);
-    // An unmatched run of backticks is literal text.
-    if (close < 0 || source[close + fence.length] === "`") {
-      plain += source.slice(position, run);
-      position = run;
-      continue;
-    }
-    plain += source.slice(position, tick);
-    html += renderLinks(plain);
-    plain = "";
-    const content = source.slice(run, close);
-    html += `<code>${escapeHtml(content.length > 2 && content.startsWith(" ") && content.endsWith(" ") ? content.slice(1, -1) : content)}</code>`;
-    position = close + fence.length;
+  for (const span of codeSpans(source)) {
+    html += renderLinks(source.slice(position, span.start));
+    const content = source.slice(span.contentStart, span.contentEnd);
+    const trimmed =
+      content.length > 2 && content.startsWith(" ") && content.endsWith(" ")
+        ? content.slice(1, -1)
+        : content;
+    html += `<code>${escapeHtml(trimmed)}</code>`;
+    position = span.end;
   }
-  return html + renderLinks(plain + source.slice(position));
+  return html + renderLinks(source.slice(position));
 }
 
 // Links are found in one left-to-right pass over "[" and "](" tokens: a link's label is the
@@ -322,10 +360,10 @@ function linkAt(text, open, labelEnd) {
   const limit = Math.min(text.length, position + MAX_LINK_PART);
   let target = "";
   if (text[position] === "<") {
-    const close = text.indexOf(">", position + 1);
-    if (close < 0 || close >= limit) return null;
-    target = text.slice(position + 1, close);
-    position = close + 1;
+    const close = text.slice(position + 1, limit).indexOf(">");
+    if (close < 0) return null;
+    target = text.slice(position + 1, position + 1 + close);
+    position += close + 2;
   } else {
     let depth = 0;
     const begin = position;
@@ -342,10 +380,10 @@ function linkAt(text, open, labelEnd) {
   if (!target) return null;
   // An optional quoted title is accepted and not shown.
   if (text[position] === " ") {
-    const quote = text.indexOf('"', position);
-    const titleEnd = quote === position + 1 ? text.indexOf('"', quote + 1) : -1;
-    if (titleEnd < 0 || titleEnd >= limit) return null;
-    position = titleEnd + 1;
+    if (text[position + 1] !== '"') return null;
+    const titleEnd = text.slice(position + 2, limit).indexOf('"');
+    if (titleEnd < 0) return null;
+    position += titleEnd + 3;
   }
   if (text[position] !== ")") return null;
   return { label, target, end: position + 1 };
@@ -368,46 +406,66 @@ function decodeTarget(target) {
   }
 }
 
-// Bold (**text**) and italic (*text*): delimiters pair left to right, and a delimiter that
-// cannot open or close (next to a space) stays literal. Underscores are never emphasis, so
-// identifiers such as parse_iso_date read correctly.
+// Bold and italic with * and _, matched like CommonMark's delimiter runs (simplified): a run
+// can open when followed by non-space and close when preceded by non-space; an underscore run
+// must also sit at a word boundary, so identifiers such as parse_iso_date stay intact. Each
+// closer looks back through a bounded number of openers, so the work stays linear.
+const MAX_OPENER_LOOKBACK = 32;
+
 function renderEmphasis(text) {
-  return pairDelimiters(escapeHtml(text), "**", "strong", (inner) =>
-    pairDelimiters(inner, "*", "em", (plain) => plain),
-  );
-}
-
-function pairDelimiters(text, delimiter, tag, renderInner) {
-  let html = "";
-  let position = 0;
-  while (position < text.length) {
-    const open = findDelimiter(text, delimiter, position, "open");
-    if (open < 0) break;
-    const close = findDelimiter(text, delimiter, open + delimiter.length, "close");
-    if (close < 0) break;
-    html += renderInner(text.slice(position, open));
-    html += `<${tag}>${renderInner(text.slice(open + delimiter.length, close))}</${tag}>`;
-    position = close + delimiter.length;
+  const source = escapeHtml(text);
+  const pieces = [];
+  const delimiters = [];
+  let last = 0;
+  const runs = /\*+|_+/g;
+  for (let match = runs.exec(source); match; match = runs.exec(source)) {
+    const before = source[match.index - 1];
+    const after = source[match.index + match[0].length];
+    const character = match[0][0];
+    const word = (value) => value !== undefined && /[\p{L}\p{N}]/u.test(value);
+    const space = (value) => value === undefined || /\s/.test(value);
+    let canOpen = !space(after);
+    let canClose = !space(before);
+    if (character === "_") {
+      canOpen &&= !word(before);
+      canClose &&= !word(after);
+    }
+    pieces.push(source.slice(last, match.index));
+    const run = { character, count: match[0].length, canOpen, canClose, opens: [], closes: [] };
+    delimiters.push(run);
+    pieces.push(run);
+    last = match.index + match[0].length;
   }
-  return html + renderInner(text.slice(position));
-}
+  pieces.push(source.slice(last));
 
-// The next delimiter that can open (followed by non-space) or close (preceded by non-space).
-// For a single asterisk, part of a double asterisk never counts.
-function findDelimiter(text, delimiter, from, role) {
-  let position = text.indexOf(delimiter, from);
-  while (position >= 0) {
-    const before = text[position - 1];
-    const after = text[position + delimiter.length];
-    const single = delimiter === "*" && (before === "*" || after === "*");
-    const fits =
-      role === "open"
-        ? after !== undefined && !/\s/.test(after)
-        : position > from && before !== undefined && !/\s/.test(before);
-    if (fits && !single) return position;
-    position = text.indexOf(delimiter, position + 1);
+  const openers = [];
+  for (const run of delimiters) {
+    if (run.canClose) {
+      let searched = 0;
+      for (let index = openers.length - 1; index >= 0 && run.count > 0; index -= 1) {
+        if (++searched > MAX_OPENER_LOOKBACK) break;
+        const opener = openers[index];
+        if (opener.character !== run.character || opener.count === 0) continue;
+        const used = opener.count >= 2 && run.count >= 2 ? 2 : 1;
+        const tag = used === 2 ? "strong" : "em";
+        opener.opens.unshift(`<${tag}>`);
+        run.closes.push(`</${tag}>`);
+        opener.count -= used;
+        run.count -= used;
+        // Openers between this pair can no longer close anything inside it.
+        openers.length = opener.count > 0 ? index + 1 : index;
+        index = openers.length;
+      }
+    }
+    if (run.canOpen && run.count > 0) openers.push(run);
   }
-  return -1;
+  return pieces
+    .map((piece) =>
+      typeof piece === "string"
+        ? piece
+        : `${piece.closes.join("")}${piece.character.repeat(piece.count)}${piece.opens.join("")}`,
+    )
+    .join("");
 }
 
 function escapeHtml(value) {

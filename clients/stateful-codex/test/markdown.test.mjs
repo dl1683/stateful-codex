@@ -86,6 +86,11 @@ test("adversarial agent output renders quickly, without unbounded output or recu
     `${"`".repeat(300)}${"x`".repeat(30_000)}`,
     `${"- a\n\n".repeat(10_000)}`,
     `${"  ".repeat(5_000)}- deep`,
+    `# x${" ".repeat(65_536)}X`,
+    Array.from({ length: 700 }, (_, index) => `${"`".repeat(700 - index)}a`).join(""),
+    "[a](<".repeat(60_000),
+    '[a](b "'.repeat(40_000),
+    "*a _b ".repeat(15_000),
   ];
   for (const source of cases) {
     const started = performance.now();
@@ -103,4 +108,16 @@ test("adversarial agent output renders quickly, without unbounded output or recu
   assert.ok((table.match(/<td>/g)?.length ?? 0) <= 2_000);
   assert.ok(table.length < source.length * 12 + 100_000);
   assert.match(renderMarkdown("# before\u2028after"), /^<h3 class="md-heading">before<\/h3><p>after<\/p>$/);
+});
+
+test("emphasis nests, underscores respect word boundaries, and code spans need equal runs", () => {
+  assert.equal(
+    renderMarkdown("*outer **inner** outer* and __bold__ _it_ in parse_iso_date"),
+    "<p><em>outer <strong>inner</strong> outer</em> and <strong>bold</strong> <em>it</em> in parse_iso_date</p>",
+  );
+  assert.equal(renderMarkdown("Use `a``b`."), "<p>Use <code>a``b</code>.</p>");
+  assert.equal(
+    renderMarkdown("- parent\n  - child\n\n  after child"),
+    "<ul><li>parent<ul><li>child</li></ul>after child</li></ul>",
+  );
 });
