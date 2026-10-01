@@ -457,3 +457,52 @@ test("a slim pending bar announces waiting requests and takes the keyboard to th
   assert.equal(bar.hidden, true);
   assert.equal($("[data-pending-count]").textContent, "");
 });
+
+test("late deltas for a finished message never disturb the bounded tail", () => {
+  const { view, runFrames, root } = mountWorkspace({ liveLimit: 100 });
+  const texts = () => root.querySelectorAll("[data-live-item]").map((item) => item.textContent);
+  view.completeMessage({ turnId: "t1", itemId: "a", text: "a".repeat(60) });
+  runFrames();
+  view.pushDelta({ turnId: "t1", itemId: "b", delta: "b".repeat(40) });
+  runFrames();
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "late" });
+  runFrames();
+  view.pushDelta({ turnId: "t1", itemId: "c", delta: "c".repeat(10) });
+  runFrames();
+  view.pushDelta({ turnId: "t1", itemId: "d", delta: "d".repeat(91) });
+  runFrames();
+  // The formatted message is trimmed whole, then the oldest streamed text.
+  assert.deepEqual(texts(), ["c".repeat(9), "d".repeat(91)]);
+
+  // The formatted message was trimmed away; a later delta for it stays dropped.
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "resurrected" });
+  runFrames();
+  assert.doesNotMatch(texts().join(""), /resurrected/);
+});
+
+test("a finished message keeps its arrival order against streamed text in the same frame", () => {
+  const { view, runFrames, root } = mountWorkspace({ liveLimit: 100 });
+  view.completeMessage({ turnId: "t1", itemId: "a", text: "a".repeat(60) });
+  view.pushDelta({ turnId: "t1", itemId: "b", delta: "b".repeat(50) });
+  runFrames();
+
+  assert.deepEqual(
+    root.querySelectorAll("[data-live-item]").map((item) => [item.getAttribute("data-live-item"), item.textContent]),
+    [["b", "b".repeat(50)]],
+  );
+});
+
+test("a message finished before the workspace mounts is shown once it mounts", () => {
+  const document = createDocument();
+  const root = document.createElement("div");
+  document.body.append(root);
+  const frames = [];
+  const view = createWorkspaceDom(root, { schedule: (callback) => frames.push(callback) });
+  view.update({ loading: true, project: null, error: null });
+  view.completeMessage({ turnId: "t1", itemId: "a", text: "**Ready**" });
+  frames.splice(0).forEach((callback) => callback());
+  view.update({ ...workspaceFixture(), liveText: "" });
+  frames.splice(0).forEach((callback) => callback());
+
+  assert.equal(root.querySelector("[data-live-item] strong").textContent, "Ready");
+});

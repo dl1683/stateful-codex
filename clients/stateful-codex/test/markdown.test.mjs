@@ -57,3 +57,50 @@ test("code spans keep their content literal and identifiers keep their underscor
     "<p>Use <code>**not bold**</code> in parse_iso_date and snake_case_name.</p>",
   );
 });
+
+test("nested lists, escaped table pipes and angle-bracket links keep their meaning", () => {
+  assert.equal(
+    renderMarkdown(["1. Build", "   - compile", "   - link", "2. Test", "   still step two"].join("\n")),
+    "<ol><li>Build<ul><li>compile</li><li>link</li></ul></li><li>Test<br/>still step two</li></ol>",
+  );
+  assert.equal(
+    renderMarkdown(["| Expr | Result |", "| --- | --- |", "| `a \| b` | pass |"].join("\n")),
+    '<div class="md-table"><table><thead><tr><th>Expr</th><th>Result</th></tr></thead><tbody><tr><td><code>a | b</code></td><td>pass</td></tr></tbody></table></div>',
+  );
+  assert.equal(
+    renderMarkdown("[Report](<C:/My Project/report.md>) and [f](C:/a_(1)/f.md)"),
+    '<p><code class="md-path" title="C:/My Project/report.md">Report</code> and <code class="md-path" title="C:/a_(1)/f.md">f</code></p>',
+  );
+});
+
+test("adversarial agent output renders quickly, without unbounded output or recursion", () => {
+  const cases = [
+    "# before\u2028after",
+    "x\u2029# heading",
+    "[".repeat(65_536),
+    "[a](".repeat(16_384),
+    `| a |\n|${" ".repeat(65_536)}X`,
+    `${">".repeat(10_000)}x`,
+    "**a ".repeat(16_384),
+    "*a ".repeat(21_845),
+    `${"`".repeat(300)}${"x`".repeat(30_000)}`,
+    `${"- a\n\n".repeat(10_000)}`,
+    `${"  ".repeat(5_000)}- deep`,
+  ];
+  for (const source of cases) {
+    const started = performance.now();
+    const html = renderMarkdown(source);
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 500, `${JSON.stringify(source.slice(0, 20))} took ${elapsed} ms`);
+    assert.ok(html.length < source.length * 12 + 1_000);
+  }
+
+  const header = `|${" h |".repeat(300)}`;
+  const separator = `|${" --- |".repeat(300)}`;
+  const source = [header, separator, ...Array(5_000).fill("|")].join("\n");
+  const table = renderMarkdown(source);
+  // Rows beyond the bound stay visible as text; the output stays proportional to the input.
+  assert.ok((table.match(/<td>/g)?.length ?? 0) <= 2_000);
+  assert.ok(table.length < source.length * 12 + 100_000);
+  assert.match(renderMarkdown("# before\u2028after"), /^<h3 class="md-heading">before<\/h3><p>after<\/p>$/);
+});

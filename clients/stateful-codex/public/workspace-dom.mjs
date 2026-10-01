@@ -40,6 +40,9 @@ export function createWorkspaceDom(
     pending: new Map(),
     // Finished agent messages to format in place on the next frame, by item.
     completed: new Map(),
+    // Items of this turn whose final text has arrived; later deltas for them are dropped, even
+    // after a formatted item has been trimmed away.
+    finished: new Set(),
     // Item and length of each queued delta run, in arrival order, for the next frame.
     arrivals: [],
     scheduled: false,
@@ -81,7 +84,7 @@ export function createWorkspaceDom(
     mounted = true;
     syncMode(state);
     syncSteering(state);
-    if (live.pending.size) scheduleFlush();
+    if (live.pending.size || live.completed.size) scheduleFlush();
   }
 
   // Steering needs a run to attach to. The button, not the form markup, reflects that, so a
@@ -192,6 +195,7 @@ export function createWorkspaceDom(
     live.turnId = turnId;
     live.pending.clear();
     live.completed.clear();
+    live.finished.clear();
     live.arrivals = [];
     for (const node of live.items.values()) liveItemElement(node)?.remove();
     live.items.clear();
@@ -212,6 +216,11 @@ export function createWorkspaceDom(
       startTurn(turnId);
     }
     const key = itemId ?? "";
+    if (live.finished.has(key)) return;
+    enqueue(key, delta);
+  }
+
+  function enqueue(key, delta) {
     if (!live.pending.has(key)) live.pending.set(key, []);
     live.pending.get(key).push(delta);
     recordChunk(live.arrivals, key, delta.length);
@@ -227,10 +236,11 @@ export function createWorkspaceDom(
       startTurn(turnId);
     }
     const key = itemId ?? "";
-    if (text.length > liveLimit) {
-      if (!live.items.has(key) && !live.pending.has(key)) pushDelta({ turnId, itemId, delta: text });
-      return;
-    }
+    if (live.finished.has(key)) return;
+    live.finished.add(key);
+    // A message whose stream was missed arrives as one delta, so it keeps its arrival order.
+    if (!live.items.has(key) && !live.pending.has(key)) enqueue(key, text);
+    if (text.length > liveLimit) return;
     live.completed.set(key, text);
     scheduleFlush();
   }
@@ -247,8 +257,6 @@ export function createWorkspaceDom(
     const copy = root.querySelector("[data-live-copy]");
     for (const [itemId, chunks] of live.pending) {
       let text = live.items.get(itemId);
-      // A formatted message is final; a late delta for it has nothing to add.
-      if (text && text.nodeType !== TEXT_NODE) continue;
       if (!text) {
         const item = document.createElement("span");
         item.setAttribute("data-live-item", itemId);
