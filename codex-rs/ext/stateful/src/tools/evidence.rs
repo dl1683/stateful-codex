@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -26,6 +27,7 @@ use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::read_receipts::READ_RECEIPT_ID_BYTES;
 use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
@@ -144,74 +146,63 @@ impl EvidenceReadTool {
             .await?;
 
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
-        let context_map_entry_id = result.hit.entry.id.to_string();
-        let returned_line_range = match (result.first_line, result.last_line) {
-            (Some(start), Some(end)) if !result.truncated => Some(EvidenceLineRange { start, end }),
-            _ => None,
+        let hit = &result.hit;
+        let render = |evidence: &NumberedEvidence, receipt_id: Option<&str>| {
+            json!({
+                "projectId": self.project_id,
+                "contextMapEntryId": hit.entry.id.to_string(),
+                "sourceFingerprint": hit.entry.value.source_fingerprint.to_string(),
+                "source": {
+                    "projectRoot": hit.source.project_root,
+                    "relativePath": hit.source.relative_path.to_string(),
+                },
+                "contentFormat": "lineNumbered",
+                "content": evidence.content,
+                "bytesReturned": evidence.source_bytes,
+                "totalBytes": result.total_bytes,
+                "totalLines": result.total_lines,
+                "firstLine": evidence.first_line,
+                "lastLine": evidence.last_line,
+                "lastLinePartial": evidence.last_line_partial,
+                "truncated": evidence.extent == EvidenceExtent::Truncated,
+                "maxBytesApplied": max_bytes,
+                "maxBytesClamped": requested_max_bytes != max_bytes,
+                "sourceRefreshed": source_refreshed,
+                "blackboardEvidence": receipt_id.map(|receipt_id| json!({"readReceiptId": receipt_id})),
+                "revision": hit.entry.revision,
+            })
         };
-        let blackboard_evidence = returned_line_range.map(|line_range| {
-            let receipt_id = self.services.read_receipts().issue(
+        let read_extent = if result.truncated {
+            EvidenceExtent::Truncated
+        } else {
+            EvidenceExtent::Complete
+        };
+        let receipt_placeholder = "x".repeat(READ_RECEIPT_ID_BYTES);
+        let lines = source_lines(&result.content, result.first_line, read_extent);
+        let evidence = pack_evidence(&lines, read_extent, |evidence| {
+            let receipt_id = evidence
+                .receipt_range()
+                .map(|_| receipt_placeholder.as_str());
+            fits_response(&render(evidence, receipt_id), byte_budget)
+        })
+        .ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "response budget leaves no room for evidence metadata".to_string(),
+            )
+        })?;
+        let receipt_id = evidence.receipt_range().map(|line_range| {
+            self.services.read_receipts().issue(
                 &self.project_id,
                 &self.thread_id,
                 &call.call_id,
                 BlackboardEvidenceLink {
-                    context_map_entry_id: result.hit.entry.id.clone(),
-                    source_fingerprint: result.hit.entry.value.source_fingerprint.clone(),
+                    context_map_entry_id: hit.entry.id.clone(),
+                    source_fingerprint: hit.entry.value.source_fingerprint.clone(),
                     line_range: Some(line_range),
                 },
-            );
-            json!({"readReceiptId": receipt_id})
+            )
         });
-        let mut content = result.content;
-        let original_bytes = content.len();
-        let mut output = json!({
-            "projectId": self.project_id,
-            "contextMapEntryId": context_map_entry_id,
-            "sourceFingerprint": result.hit.entry.value.source_fingerprint.to_string(),
-            "source": {
-                "projectRoot": result.hit.source.project_root,
-                "relativePath": result.hit.source.relative_path.to_string(),
-            },
-            "content": content,
-            "bytesReturned": result.bytes_returned,
-            "totalBytes": result.total_bytes,
-            "totalLines": result.total_lines,
-            "firstLine": result.first_line,
-            "lastLine": result.last_line,
-            "truncated": result.truncated,
-            "maxBytesApplied": max_bytes,
-            "maxBytesClamped": requested_max_bytes != max_bytes,
-            "sourceRefreshed": source_refreshed,
-            "blackboardEvidence": blackboard_evidence,
-            "revision": result.hit.entry.revision,
-        });
-        if !fits_response(&output, byte_budget) {
-            output["content"] = json!("");
-            output["bytesReturned"] = json!(0);
-            output["truncated"] = json!(true);
-            output["blackboardEvidence"] = serde_json::Value::Null;
-            if !fits_response(&output, byte_budget) {
-                return Err(FunctionCallError::RespondToModel(
-                    "response budget leaves no room for evidence metadata".to_string(),
-                ));
-            }
-            let mut lower = 0;
-            let mut upper = content.len();
-            while lower < upper {
-                let end = content.ceil_char_boundary(lower.midpoint(upper).saturating_add(1));
-                output["content"] = json!(&content[..end]);
-                output["bytesReturned"] = json!(end);
-                if fits_response(&output, byte_budget) {
-                    lower = end;
-                } else {
-                    upper = content.floor_char_boundary(end.saturating_sub(1));
-                }
-            }
-            content.truncate(lower);
-            output["content"] = json!(content);
-            output["bytesReturned"] = json!(content.len());
-        }
-        debug_assert!(content.len() <= original_bytes);
+        let output = render(&evidence, receipt_id.as_deref());
         bounded_json_output(&call, output)
     }
 
@@ -317,7 +308,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read fingerprint-verified exact source evidence. Prefer a current evidenceRoute returned by context_map_query and copy it unchanged; that guarded route fails closed if its source or range changed and is never refreshed into new coordinates. When root blackboard evidence already names a source and lines, relativePath plus a narrow lineRange remains available and refreshes a changed file once. sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
+            description: "Read fingerprint-verified exact source evidence. Prefer a current evidenceRoute returned by context_map_query and copy it unchanged; that guarded route fails closed if its source or range changed and is never refreshed into new coordinates. content is lineNumbered: each source line is prefixed with a display-only `L<n>: ` label giving its absolute 1-based file line number. Labels are not source text; they are excluded from bytesReturned and fingerprints and must not be quoted as source. firstLine and lastLine name the lines actually returned; lastLinePartial=true means the final returned line was cut. When root blackboard evidence already names a source and lines, relativePath plus a narrow lineRange remains available and refreshes a changed file once. sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -377,6 +368,148 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
 
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
+}
+
+/// One source line from a read, with its absolute 1-based number. A line is
+/// complete when it ends in a newline or is the last line of a complete read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SourceLine<'a> {
+    number: u64,
+    text: &'a str,
+    complete: bool,
+}
+
+fn source_lines(
+    content: &str,
+    first_line: Option<u64>,
+    read_extent: EvidenceExtent,
+) -> Vec<SourceLine<'_>> {
+    let Some(first_line) = first_line else {
+        return Vec::new();
+    };
+    (first_line..)
+        .zip(content.split_inclusive('\n'))
+        .map(|(number, text)| SourceLine {
+            number,
+            text,
+            complete: text.ends_with('\n') || read_extent == EvidenceExtent::Complete,
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EvidenceExtent {
+    /// Every selected source byte is present.
+    Complete,
+    /// The reader or the response budget cut the selected source.
+    Truncated,
+}
+
+/// Model-facing evidence text: source lines with display-only `L<n>: ` labels.
+/// `source_bytes`, `first_line`, and `last_line` describe the emitted source, never
+/// the labels.
+#[derive(Debug, PartialEq)]
+struct NumberedEvidence {
+    content: String,
+    source_bytes: usize,
+    first_line: Option<u64>,
+    last_line: Option<u64>,
+    last_line_partial: bool,
+    extent: EvidenceExtent,
+}
+
+impl NumberedEvidence {
+    fn new(lines: &[SourceLine<'_>], extent: EvidenceExtent) -> Self {
+        let mut content = String::new();
+        for line in lines {
+            let _ = write!(content, "L{}: {}", line.number, line.text);
+        }
+        Self {
+            content,
+            source_bytes: lines.iter().map(|line| line.text.len()).sum(),
+            first_line: lines.first().map(|line| line.number),
+            last_line: lines.last().map(|line| line.number),
+            last_line_partial: lines.last().is_some_and(|line| !line.complete),
+            extent,
+        }
+    }
+
+    /// The line range a read receipt may certify: only a complete, non-empty read.
+    fn receipt_range(&self) -> Option<EvidenceLineRange> {
+        match (self.extent, self.first_line, self.last_line) {
+            (EvidenceExtent::Complete, Some(start), Some(end)) => {
+                Some(EvidenceLineRange { start, end })
+            }
+            (EvidenceExtent::Complete | EvidenceExtent::Truncated, _, _) => None,
+        }
+    }
+}
+
+/// Packs the most source that `fits`: every line of a complete read, else the longest
+/// run of complete lines, else a labelled prefix of an oversized first line. Returns
+/// `None` when not even empty evidence fits.
+fn pack_evidence(
+    lines: &[SourceLine<'_>],
+    read_extent: EvidenceExtent,
+    fits: impl Fn(&NumberedEvidence) -> bool,
+) -> Option<NumberedEvidence> {
+    let truncated =
+        |lines: &[SourceLine<'_>]| NumberedEvidence::new(lines, EvidenceExtent::Truncated);
+    let max_complete_lines = match read_extent {
+        EvidenceExtent::Complete => {
+            let complete = NumberedEvidence::new(lines, EvidenceExtent::Complete);
+            if fits(&complete) {
+                return Some(complete);
+            }
+            lines.len().saturating_sub(1)
+        }
+        EvidenceExtent::Truncated => lines.iter().take_while(|line| line.complete).count(),
+    };
+    let empty = truncated(&[]);
+    if !fits(&empty) {
+        return None;
+    }
+    let line_count = largest_fitting(max_complete_lines, |count| {
+        fits(&truncated(&lines[..count]))
+    });
+    if line_count > 0 {
+        return Some(truncated(&lines[..line_count]));
+    }
+    let Some(first) = lines.first() else {
+        return Some(empty);
+    };
+    let available = if first.complete {
+        first.text.len().saturating_sub(1)
+    } else {
+        first.text.len()
+    };
+    let prefix = |end: usize| SourceLine {
+        number: first.number,
+        text: &first.text[..first.text.floor_char_boundary(end)],
+        complete: false,
+    };
+    let partial = prefix(largest_fitting(available, |end| {
+        fits(&truncated(&[prefix(end)]))
+    }));
+    if partial.text.is_empty() {
+        return Some(empty);
+    }
+    Some(truncated(&[partial]))
+}
+
+/// Largest `n` in `0..=upper` for which `fits(n)` holds, given that `fits(0)` holds
+/// and `fits` is monotone.
+fn largest_fitting(upper: usize, fits: impl Fn(usize) -> bool) -> usize {
+    let (mut lower, mut upper) = (0, upper);
+    while lower < upper {
+        let candidate = lower + (upper - lower).div_ceil(2);
+        if fits(candidate) {
+            lower = candidate;
+        } else {
+            upper = candidate - 1;
+        }
+    }
+    lower
 }
 
 #[cfg(test)]

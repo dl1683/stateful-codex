@@ -568,10 +568,8 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
     .await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
-    std::fs::write(
-        project_root.path().join("decision.md"),
-        "preamble\ndecisive clause\ncontrolling number: 42\nunrelated appendix\n",
-    )?;
+    let source = "preamble\ndecisive clause\ncontrolling number: 42\nunrelated appendix\n";
+    std::fs::write(project_root.path().join("decision.md"), source)?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -602,6 +600,7 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
         })
         .await?;
     assert_eq!(refreshed.files_indexed, 1);
+    let project_id = created.project.id.clone();
     let started = server
         .start_thread(ThreadStartParams {
             project_id: Some(created.project.id),
@@ -619,19 +618,35 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
             .function_call_output_text("evidence-call")
             .expect("evidence output should be text"),
     )?;
+    let receipt_id = output["blackboardEvidence"]["readReceiptId"]
+        .as_str()
+        .expect("a complete read carries a receipt");
+    assert!(receipt_id.starts_with("stateful-read-"));
     assert_eq!(
-        output["content"],
-        "decisive clause\ncontrolling number: 42\n"
-    );
-    assert_eq!(output["firstLine"], 2);
-    assert_eq!(output["lastLine"], 3);
-    assert_eq!(output["truncated"], false);
-    assert_eq!(output["maxBytesApplied"], 12_288);
-    assert_eq!(output["maxBytesClamped"], true);
-    assert!(
-        output["blackboardEvidence"]["readReceiptId"]
-            .as_str()
-            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+        output,
+        json!({
+            "projectId": project_id,
+            "contextMapEntryId": output["contextMapEntryId"],
+            "sourceFingerprint": format!("sha256:{:x}", Sha256::digest(source)),
+            "source": {
+                "projectRoot": output["source"]["projectRoot"],
+                "relativePath": "decision.md",
+            },
+            "contentFormat": "lineNumbered",
+            "content": "L2: decisive clause\nL3: controlling number: 42\n",
+            "bytesReturned": "decisive clause\ncontrolling number: 42\n".len(),
+            "totalBytes": source.len(),
+            "totalLines": 4,
+            "firstLine": 2,
+            "lastLine": 3,
+            "lastLinePartial": false,
+            "truncated": false,
+            "maxBytesApplied": 12_288,
+            "maxBytesClamped": true,
+            "sourceRefreshed": false,
+            "blackboardEvidence": {"readReceiptId": receipt_id},
+            "revision": output["revision"],
+        })
     );
     Ok(())
 }
