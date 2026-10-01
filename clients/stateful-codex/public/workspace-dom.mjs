@@ -28,6 +28,7 @@ export function createWorkspaceDom(
   const slotElements = new Map();
   const slotHtml = new Map();
   const cardHtml = new WeakMap();
+  const appliedModes = new WeakMap();
   const hierarchyMemo = { source: null, signature: null, html: null };
   const live = {
     turnId: null,
@@ -35,6 +36,8 @@ export function createWorkspaceDom(
     pending: new Map(),
     scheduled: false,
     items: new Map(),
+    // Appended chunks in arrival order, so trimming always drops the oldest text first.
+    chunks: [],
     length: 0,
   };
   let mounted = false;
@@ -68,7 +71,17 @@ export function createWorkspaceDom(
       cardHtml.set(cards[index], renderRequestCard(request)),
     );
     mounted = true;
+    syncMode(state);
     if (live.pending.size) scheduleFlush();
+  }
+
+  // Show the persisted mode unless the user has chosen another one that is not yet submitted.
+  function syncMode(state) {
+    const select = slotElements.get("mode-form").querySelector('[name="mode"]');
+    if (!select || !state.run) return;
+    const applied = appliedModes.get(select);
+    if (applied === undefined || select.value === applied) select.value = state.run.mode;
+    appliedModes.set(select, state.run.mode);
   }
 
   // Replace a slot's content while keeping the user's place: focus, scroll and open details.
@@ -120,6 +133,7 @@ export function createWorkspaceDom(
       slotHtml.set(name, html);
       replaceSlot(name, html);
     }
+    if (names.includes("mode-form")) syncMode(state);
   }
 
   // Keep a card's element while its request is pending so a half-typed answer survives.
@@ -144,7 +158,7 @@ export function createWorkspaceDom(
         cardHtml.set(card, html);
       }
       const current = list.children[index];
-      if (current !== card) list.insertBefore(card, current ?? null);
+      if (current !== card) moveKeepingFocus(list, card, current ?? null);
     });
     drawer.hidden = wanted.length === 0;
   }
@@ -168,6 +182,7 @@ export function createWorkspaceDom(
     live.pending.clear();
     for (const text of live.items.values()) text.parentNode?.remove();
     live.items.clear();
+    live.chunks = [];
     live.length = 0;
     if (mounted) {
       root.querySelector("[data-live-truncated]").hidden = true;
@@ -211,6 +226,7 @@ export function createWorkspaceDom(
       }
       const chunk = chunks.join("");
       text.appendData(chunk);
+      live.chunks.push({ itemId, length: chunk.length });
       live.length += chunk.length;
     }
     live.pending.clear();
@@ -222,17 +238,35 @@ export function createWorkspaceDom(
     let excess = live.length - liveLimit;
     if (excess <= 0) return;
     root.querySelector("[data-live-truncated]").hidden = false;
-    for (const [itemId, text] of live.items) {
-      if (excess <= 0) break;
-      const removed = Math.min(excess, text.data.length);
-      if (removed === text.data.length) {
+    // An item's oldest remaining characters are at the start of its text node.
+    while (excess > 0) {
+      const oldest = live.chunks[0];
+      const text = live.items.get(oldest.itemId);
+      const removed = Math.min(excess, oldest.length);
+      text.deleteData(0, removed);
+      oldest.length -= removed;
+      if (!oldest.length) live.chunks.shift();
+      if (!text.data.length) {
         text.parentNode.remove();
-        live.items.delete(itemId);
-      } else {
-        text.deleteData(0, removed);
+        live.items.delete(oldest.itemId);
       }
       excess -= removed;
       live.length -= removed;
+    }
+  }
+
+  // Moving a node blurs it; restore focus and the text selection of a moved, focused control.
+  function moveKeepingFocus(parent, node, before) {
+    const active = document.activeElement;
+    const focused = active && node.contains(active) ? active : null;
+    const selection =
+      focused && typeof focused.selectionStart === "number"
+        ? [focused.selectionStart, focused.selectionEnd]
+        : null;
+    parent.insertBefore(node, before);
+    if (focused && document.activeElement !== focused) {
+      focused.focus();
+      if (selection) focused.setSelectionRange(...selection);
     }
   }
 
@@ -249,15 +283,22 @@ export function createWorkspaceDom(
 // it while the request was pending, and a failed one leaves it untouched.
 export function createDraftTracker(root) {
   const versions = new WeakMap();
+  const submitting = new WeakSet();
   root.addEventListener("input", (event) => {
     versions.set(event.target, (versions.get(event.target) ?? 0) + 1);
   });
   return {
     async submit(control, operation) {
       const value = control.value.trim();
-      if (!value) return;
+      // One submission per field at a time; the field stays editable while it is pending.
+      if (!value || submitting.has(control)) return;
+      submitting.add(control);
       const version = versions.get(control) ?? 0;
-      await operation(value);
+      try {
+        await operation(value);
+      } finally {
+        submitting.delete(control);
+      }
       if ((versions.get(control) ?? 0) === version) control.value = "";
     },
   };

@@ -173,6 +173,21 @@ test("streamed text stays isolated by turn and item", () => {
   assert.deepEqual(liveItems(), [["d", "t3 text"]]);
 });
 
+test("the live tail drops the oldest text first, across interleaved items", () => {
+  const { view, runFrames, root, $ } = mountWorkspace({ liveLimit: 100 });
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "a".repeat(50) });
+  view.pushDelta({ turnId: "t1", itemId: "b", delta: "b".repeat(50) });
+  runFrames();
+  view.pushDelta({ turnId: "t1", itemId: "a", delta: "c".repeat(60) });
+  runFrames();
+
+  assert.deepEqual(
+    root.querySelectorAll("[data-live-item]").map((item) => item.textContent),
+    ["c".repeat(60), "b".repeat(40)],
+  );
+  assert.equal($("[data-live-truncated] a").getAttribute("href"), "#recorded-messages");
+});
+
 test("the live tail is bounded and says so", () => {
   const { view, runFrames, root, $ } = mountWorkspace({ liveLimit: 100 });
   view.pushDelta({ turnId: "t1", itemId: "a", delta: "a".repeat(80) });
@@ -210,6 +225,13 @@ test("a submitted draft is cleared only if it was not edited while the request w
   await pending;
   assert.equal(message.value, "");
   assert.deepEqual(sent, ["first", "first, and more"]);
+
+  type(message, "only once");
+  const first = drafts.submit(message, operation);
+  const second = drafts.submit(message, operation);
+  release();
+  await Promise.all([first, second]);
+  assert.deepEqual(sent, ["first", "first, and more", "only once"]);
 
   type(message, "will fail");
   await assert.rejects(
@@ -254,4 +276,45 @@ test("request cards are reconciled by typed request ID", () => {
   state.pendingRequests = [];
   view.update(state, ["requests"]);
   assert.equal($("[data-requests]").hidden, true);
+});
+
+test("reordering request cards keeps the focused answer focused", () => {
+  const { state, view, document, root } = mountWorkspace();
+  const approval = {
+    id: 7,
+    method: "item/fileChange/requestApproval",
+    params: { threadId: "thread", reason: "Write the summary" },
+  };
+  state.pendingRequests = [approval, state.pendingRequests[0]];
+  view.update(state, ["requests"]);
+  const answer = root.querySelector('[name="appendix"]');
+  answer.focus();
+
+  state.pendingRequests = [state.pendingRequests[1], approval];
+  view.update(state, ["requests"]);
+
+  assert.deepEqual(
+    root.querySelectorAll("[data-request-key]").map((card) => card.getAttribute("data-request-key")),
+    ['"request-1"', "7"],
+  );
+  assertSameNode(root.querySelector('[name="appendix"]'), answer);
+  assertSameNode(document.activeElement, answer);
+});
+
+test("an unsent mode choice survives a refresh; a clean selector follows the persisted mode", () => {
+  const { state, view, $ } = mountWorkspace();
+  const mode = $('[name="mode"]');
+  assert.equal(mode.value, "autonomous");
+
+  state.run = { ...state.run, mode: "collaborative", revision: 9 };
+  view.update(state);
+  assertSameNode($('[name="mode"]'), mode);
+  assert.equal(mode.value, "collaborative");
+
+  mode.value = "socratic";
+  mode.dispatch("change");
+  state.run = { ...state.run, mode: "autonomous", revision: 10 };
+  view.update(state);
+  assertSameNode($('[name="mode"]'), mode);
+  assert.equal(mode.value, "socratic");
 });

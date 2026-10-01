@@ -144,6 +144,22 @@ function metricTiles(html, panelTitle) {
   ].map((match) => match.slice(1));
 }
 
+test("completed agent messages stay readable outside the bounded live tail", () => {
+  const state = workspaceFixture();
+  state.activity.push({
+    turnId: "turn-4",
+    item: { type: "agentMessage", id: "message-1", text: "The full <final> answer." },
+  });
+
+  const actual = renderWorkspace(state);
+
+  assert.match(
+    actual,
+    /<details class="workspace-panel" id="recorded-messages"><summary>Recorded agent messages · 1 recent<\/summary><p class="recorded-message">The full &lt;final&gt; answer\.<\/p><\/details>/,
+  );
+  assert.match(actual, /Supporting activity · 1 recent items/);
+});
+
 function statefulFindingCount(state) {
   return state.blackboard.length;
 }

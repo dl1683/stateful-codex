@@ -472,18 +472,21 @@ textarea {
   font-size: 0.86rem;
   line-height: 1.48;
 }
-.strategy-current,
-.result-copy,
 .slot {
   display: contents;
 }
-.live-copy [data-live-item] {
+.live-copy [data-live-item],
+.recorded-message {
   display: block;
 }
-.live-copy [data-live-item] + [data-live-item] {
+.live-copy [data-live-item] + [data-live-item],
+.recorded-message + .recorded-message {
   margin-top: 0.8em;
 }
+.strategy-current,
+.result-copy,
 .live-copy,
+.recorded-message,
 .goal {
   margin: 0;
   line-height: 1.6;

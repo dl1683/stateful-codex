@@ -234,15 +234,21 @@ export const LIVE_TAIL_CHARACTERS = 64 * 1024;
 // The runtime streams into this panel's text nodes directly; the markup is rendered once.
 function renderLive(state) {
   const text = state.liveText ?? "";
-  return `<section class="workspace-panel" data-live${text ? "" : " hidden"}><div class="panel-heading"><h2>Live response</h2></div><p class="live-copy" data-live-copy>${text ? `<span data-live-item="">${escapeHtml(text)}</span>` : ""}</p><p class="microcopy" data-live-truncated hidden>Showing the latest ${LIVE_TAIL_CHARACTERS / 1024} KiB of streamed text. The complete message is kept in the thread's recorded history.</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p></section>`;
+  return `<section class="workspace-panel" data-live${text ? "" : " hidden"}><div class="panel-heading"><h2>Live response</h2></div><p class="live-copy" data-live-copy>${text ? `<span data-live-item="">${escapeHtml(text)}</span>` : ""}</p><p class="microcopy" data-live-truncated hidden>Showing the latest ${LIVE_TAIL_CHARACTERS / 1024}K characters of streamed text. Each complete message appears under <a href="#recorded-messages">Recorded agent messages</a> once it finishes.</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p></section>`;
 }
 
 function renderActivity(items) {
-  const recent = items
-    .map(normalizeThreadItem)
-    .filter(isSupportingActivity)
-    .slice(-12);
-  return `<details class="workspace-panel"><summary>Supporting activity · ${recent.length} recent items</summary><div class="activity-list">${recent.length ? recent.map((item) => `<div><span>${escapeHtml(activityLabel(item))}</span><small>${escapeHtml(activityDetail(item))}</small></div>`).join("") : empty("No supporting activity yet.")}</div></details>`;
+  const normalized = items.map(normalizeThreadItem);
+  const recent = normalized.filter(isSupportingActivity).slice(-12);
+  const messages = normalized
+    .filter((item) => item.type === "agentMessage" && item.text)
+    .slice(-3);
+  return `${renderRecordedMessages(messages)}<details class="workspace-panel"><summary>Supporting activity · ${recent.length} recent items</summary><div class="activity-list">${recent.length ? recent.map((item) => `<div><span>${escapeHtml(activityLabel(item))}</span><small>${escapeHtml(activityDetail(item))}</small></div>`).join("") : empty("No supporting activity yet.")}</div></details>`;
+}
+
+// Completed agent messages from the recorded thread history; the live panel shows only a tail.
+function renderRecordedMessages(messages) {
+  return `<details class="workspace-panel" id="recorded-messages"><summary>Recorded agent messages · ${messages.length} recent</summary>${messages.length ? messages.map((item) => `<p class="recorded-message">${escapeHtml(item.text)}</p>`).join("") : empty("No completed agent messages are recorded yet.")}</details>`;
 }
 
 function normalizeThreadItem(entry) {
@@ -267,7 +273,9 @@ function renderControlsState(state) {
 
 function renderModeForm(state) {
   if (!state.run || isTerminalRun(state.run)) return "";
-  return `<form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(state.run.mode)}</select></label><button class="secondary">Change</button></form>`;
+  // The persisted mode is applied to the select by the runtime, so a refresh never replaces
+  // the editor (or an unsent choice in it).
+  return `<form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(null)}</select></label><button class="secondary">Change</button></form>`;
 }
 
 function renderControlsDetail(state) {
