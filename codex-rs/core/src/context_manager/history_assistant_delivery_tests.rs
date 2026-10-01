@@ -95,7 +95,8 @@ fn resolution_keeps_identity_and_unresolved_or_rewritten_deliveries_stay_out_of_
         "tool-preamble",
         "preamble",
         "answer",
-        "rewritten",
+        "before-plan",
+        "plan-only",
         "interrupted",
     ];
     let mut history = recorded(&ids, thread_id);
@@ -115,10 +116,11 @@ fn resolution_keeps_identity_and_unresolved_or_rewritten_deliveries_stay_out_of_
         &[("preamble", "text preamble"), ("answer", "text answer")],
         ResponseCompletion::Answered,
     );
-    // A delivery the user saw with different text is never resolved, even when last.
+    // A last delivery whose visible text differs from its record, such as a plan-only message,
+    // is never resolved, and it still keeps the earlier delivery from being promoted.
     resolve(
         &mut history,
-        &[("rewritten", "visible text")],
+        &[("before-plan", "text before-plan"), ("plan-only", "")],
         ResponseCompletion::Answered,
     );
 
@@ -137,6 +139,10 @@ fn resolution_keeps_identity_and_unresolved_or_rewritten_deliveries_stay_out_of_
                 "text answer".to_string(),
                 ConversationRecordKind::AssistantFinal
             ),
+            (
+                "text before-plan".to_string(),
+                ConversationRecordKind::AssistantCommentary
+            ),
         ]
     );
     assert_eq!(
@@ -146,6 +152,7 @@ fn resolution_keeps_identity_and_unresolved_or_rewritten_deliveries_stay_out_of_
                 Some(Commentary),
                 Some(Commentary),
                 Some(Final),
+                Some(Commentary),
                 Some(Pending),
                 Some(Pending),
             ])

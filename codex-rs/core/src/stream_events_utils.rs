@@ -438,7 +438,8 @@ pub(crate) async fn handle_output_item_done(
     Ok(output)
 }
 
-/// The recorded pending delivery for a phase-less assistant message with visible finalized text.
+/// The recorded pending delivery for a phase-less assistant message. One with no visible text,
+/// such as a plan-only message, still holds its place so an earlier delivery is not promoted.
 pub(crate) async fn assistant_delivery_candidate(
     sess: &Session,
     item: &ResponseItem,
@@ -453,7 +454,9 @@ pub(crate) async fn assistant_delivery_candidate(
     else {
         return None;
     };
-    let text = facts?.last_agent_message.clone()?;
+    let text = facts
+        .and_then(|facts| facts.last_agent_message.clone())
+        .unwrap_or_default();
     if role != "assistant" {
         return None;
     }

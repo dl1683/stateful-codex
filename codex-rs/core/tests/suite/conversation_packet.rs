@@ -2,6 +2,7 @@
 
 use anyhow::Context;
 use anyhow::Result;
+use codex_history::ConversationInputCoverage;
 use codex_history::ConversationPacket;
 use codex_history::ConversationRecordKind;
 use codex_history::RolloutItem;
@@ -18,6 +19,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 const FIRST_REQUEST: &str = "How many config files are there, and where is the limit?";
 const FIRST_ANSWER: &str = "There are 42 config files; the limit is 8192 in src/config.rs:118.";
@@ -185,25 +187,30 @@ async fn phase_less_deliveries_are_resolved_before_the_next_checkpoint() -> Resu
             sse(vec![
                 responses::ev_assistant_message("msg-progress", "Found it."),
                 responses::ev_assistant_message("msg-second", SECOND_ANSWER),
-                responses::ev_completed("response-4"),
+                responses::ev_completed_with_tokens("response-4", /*total_tokens*/ 7_000),
             ]),
+            // The second checkpoint is the automatic post-turn compaction.
             compaction("SECOND_OPAQUE_SUMMARY"),
         ],
     )
     .await;
     let test = test_codex()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_model_info_override("gpt-5.5", |info| {
+            info.context_window = Some(12_000);
+            info.max_context_window = None;
+        })
+        .with_config(|config| config.model_post_turn_compact_threshold_percent = 50)
         .build(&server)
         .await?;
 
-    for request in [FIRST_REQUEST, SECOND_REQUEST] {
-        test.submit_turn(request).await?;
-        test.codex.submit(Op::Compact).await?;
-        wait_for_event(&test.codex, |event| {
-            matches!(event, EventMsg::TurnComplete(_))
-        })
-        .await;
-    }
+    test.submit_turn(FIRST_REQUEST).await?;
+    test.codex.submit(Op::Compact).await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    test.submit_turn(SECOND_REQUEST).await?;
     let rollout_path = test
         .session_configured
         .rollout_path
@@ -233,5 +240,74 @@ async fn phase_less_deliveries_are_resolved_before_the_next_checkpoint() -> Resu
             (ConversationRecordKind::AssistantFinal, SECOND_ANSWER),
         ]
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_deliveries_stay_pending_and_resolutions_survive_resume() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = wiremock::MockServer::start().await;
+    let response_mock = responses::mount_sse_sequence(
+        &server,
+        vec![
+            // The stream fails after this delivery, so it never resolves.
+            sse(vec![responses::ev_assistant_message(
+                "msg-lost",
+                "Partial answer.",
+            )]),
+            sse(vec![
+                responses::ev_assistant_message("msg-answer", FIRST_ANSWER),
+                responses::ev_completed("response-1"),
+            ]),
+            compaction("RESUMED_OPAQUE_SUMMARY"),
+        ],
+    )
+    .await;
+    let mut builder = test_codex()
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_config(|config| config.model_provider.stream_max_retries = Some(1));
+    let first = builder.build(&server).await?;
+    first.submit_turn(FIRST_REQUEST).await?;
+    let rollout_path = first
+        .session_configured
+        .rollout_path
+        .clone()
+        .context("rollout path")?;
+    first.codex.shutdown_and_wait().await?;
+
+    // The resumed thread replays the persisted resolution before its next compaction.
+    let resumed = builder
+        .resume(&server, Arc::clone(&first.home), rollout_path.clone())
+        .await?;
+    resumed.codex.submit(Op::Compact).await?;
+    wait_for_event(&resumed.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    resumed.codex.shutdown_and_wait().await?;
+
+    let packets = persisted_packets(&rollout_path)?;
+    let [packet] = packets.as_slice() else {
+        panic!("expected one checkpoint, got {}", packets.len());
+    };
+    assert_eq!(
+        summary(packet),
+        vec![
+            (ConversationRecordKind::User, FIRST_REQUEST),
+            (ConversationRecordKind::AssistantFinal, FIRST_ANSWER),
+        ]
+    );
+    assert_eq!(
+        packet.coverage().input_coverage(),
+        ConversationInputCoverage::BoundedWindow
+    );
+    for request in response_mock.requests() {
+        let body = request.body_json().to_string();
+        assert!(
+            !body.contains("assistant_delivery_classification"),
+            "host classification reached provider input: {body}"
+        );
+    }
     Ok(())
 }
