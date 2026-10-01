@@ -2,7 +2,12 @@ import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { submitSteering } from "./steering-submit.mjs";
-import { startFollowUp } from "./follow-up.mjs";
+import {
+  readPendingFollowUp,
+  resumePendingFollowUp,
+  sendFirstTurn,
+  startFollowUp,
+} from "./follow-up.mjs";
 import { createWorkspaceDom, watchFindingFilter } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
 import { describeSourceError, findUnavailableRoots } from "./source-availability.mjs";
@@ -45,6 +50,7 @@ const state = {
   findingFilter: { text: "", kind: "" },
   blackboardTruncated: false,
   turnMeasurements: [],
+  runGeneration: 0,
   activityTruncated: false,
   loading: true,
   busyAction: null,
@@ -77,6 +83,14 @@ async function ensureRun() {
   state.project = projectResponse.project;
   state.status = status;
   state.recovery = runResponse.recovery;
+  state.run = runResponse.run;
+  // A follow-up whose start or first turn was never confirmed is finished before anything else.
+  if (readPendingFollowUp(sessionStorage)) {
+    state.busyAction = "Finishing the follow-up";
+    render(["notices"]);
+    await resumePendingFollowUp({ state, rpc, storage: sessionStorage });
+    selectedMode = state.run.mode;
+  }
   state.unavailableRoots = await findUnavailableRoots(rpc, state.project.roots);
   // Indexing a missing folder cannot succeed; the header explains the condition instead.
   if (needsProjectRefresh(status) && !allRootsUnavailable()) {
@@ -86,8 +100,7 @@ async function ensureRun() {
     render(["notices"]);
     await rpc("contextMap/refresh", { projectId });
   }
-  if (runResponse.run) {
-    state.run = runResponse.run;
+  if (state.run) {
     if (
       state.run.mode !== selectedMode &&
       !["completed", "cancelled", "failed"].includes(state.run.status)
@@ -139,6 +152,9 @@ async function ensureRun() {
 }
 
 async function refreshWorkspace() {
+  // A run that changes while this refresh is in flight (a follow-up starting) makes its reads
+  // obsolete; they are discarded and the refresh gate runs again.
+  const generation = state.runGeneration;
   state.loading = !state.project;
   // An action's error stays visible until the user acts again; refreshes clear only their own.
   if (state.refreshFailed) {
@@ -195,6 +211,10 @@ async function refreshWorkspace() {
       throw error;
     }),
   ]);
+  if (generation !== state.runGeneration) {
+    refresh();
+    return;
+  }
   state.project = project.project;
   state.run = run.run;
   state.recovery = run.recovery;
@@ -501,14 +521,29 @@ async function sendTurn(text) {
 }
 
 async function continueThread(goal, mode) {
-  await startFollowUp({ state, rpc, storage: sessionStorage, goal, mode, sendTurn });
-  selectedMode = state.run.mode;
-  await refresh();
+  try {
+    await startFollowUp({
+      state,
+      rpc,
+      storage: sessionStorage,
+      goal,
+      mode,
+      onRunChanged: () => render(),
+    });
+  } finally {
+    if (state.run) selectedMode = state.run.mode;
+    await refresh();
+  }
 }
 
 async function sendInitialTurn() {
-  await sendTurn(initialGoal);
-  sessionStorage.setItem("stateful-initial-turn-sent", state.run.id);
+  await sendFirstTurn({
+    rpc,
+    storage: sessionStorage,
+    threadId,
+    run: state.run,
+    text: initialGoal,
+  });
 }
 
 async function controlRun(control) {
