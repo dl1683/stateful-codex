@@ -99,6 +99,10 @@ pub enum RepositoryUnknownReason {
     MissingRoot,
     InaccessibleRoot,
     GitUnavailable,
+    /// Git ran but exited unsuccessfully without a more specific established cause.
+    GitCommandFailed,
+    /// Git succeeded but its output was malformed or inconsistent.
+    InvalidGitOutput,
     Timeout,
     OutputLimit,
     UnsupportedPath,
@@ -113,6 +117,8 @@ impl RepositoryUnknownReason {
             Self::MissingRoot => "missingRoot",
             Self::InaccessibleRoot => "inaccessibleRoot",
             Self::GitUnavailable => "gitUnavailable",
+            Self::GitCommandFailed => "gitCommandFailed",
+            Self::InvalidGitOutput => "invalidGitOutput",
             Self::Timeout => "timeout",
             Self::OutputLimit => "outputLimit",
             Self::UnsupportedPath => "unsupportedPath",
@@ -127,6 +133,8 @@ impl RepositoryUnknownReason {
             Self::MissingRoot,
             Self::InaccessibleRoot,
             Self::GitUnavailable,
+            Self::GitCommandFailed,
+            Self::InvalidGitOutput,
             Self::Timeout,
             Self::OutputLimit,
             Self::UnsupportedPath,
@@ -205,33 +213,7 @@ impl RepositoryRootObservation {
         {
             return Err(RepositoryObservationError::InvalidDigest);
         }
-        self.unknown_reason().map(|_| ())
-    }
-
-    /// The single stored reason for this root. Every unknown component must agree.
-    pub(crate) fn unknown_reason(
-        &self,
-    ) -> Result<Option<RepositoryUnknownReason>, RepositoryObservationError> {
-        let head = match &self.head {
-            RepositoryHead::Unknown { reason } => Some(*reason),
-            RepositoryHead::Commit { .. } | RepositoryHead::Unborn { .. } => None,
-        };
-        let worktree = match &self.worktree {
-            RepositoryWorktree::Unknown { reason }
-            | RepositoryWorktree::Dirty {
-                coverage: RepositoryDirtyCoverage::Unknown { reason },
-            } => Some(*reason),
-            RepositoryWorktree::Clean
-            | RepositoryWorktree::Dirty {
-                coverage: RepositoryDirtyCoverage::Complete { .. },
-            } => None,
-        };
-        match (head, worktree) {
-            (Some(head), Some(worktree)) if head != worktree => Err(
-                RepositoryObservationError::ConflictingUnknownReasons(self.project_root.clone()),
-            ),
-            (head, worktree) => Ok(head.or(worktree)),
-        }
+        Ok(())
     }
 }
 
@@ -268,6 +250,4 @@ pub enum RepositoryObservationError {
     InvalidObjectId(String),
     #[error("HEAD ref must be non-empty, bounded, and contain no controls: {0}")]
     InvalidRef(String),
-    #[error("unknown HEAD and working-tree reasons must agree for root: {0}")]
-    ConflictingUnknownReasons(String),
 }

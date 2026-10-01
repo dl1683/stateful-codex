@@ -40,7 +40,9 @@ struct StoredRoot {
     worktree_state: String,
     dirty_digest: Option<String>,
     dirty_coverage: String,
-    unknown_reason: Option<String>,
+    head_unknown_reason: Option<String>,
+    worktree_unknown_reason: Option<String>,
+    dirty_unknown_reason: Option<String>,
 }
 
 /// Append-only store of immutable repository observations.
@@ -129,26 +131,29 @@ async fn insert_root(
     observation_id: &RepositoryObservationId,
     root: &RepositoryRootObservation,
 ) -> Result<(), RepositoryObservationStoreError> {
-    let (head_state, head_oid, head_ref) = match &root.head {
-        RepositoryHead::Commit { oid, head_ref } => ("commit", Some(oid), head_ref.as_ref()),
-        RepositoryHead::Unborn { head_ref } => ("unborn", None, head_ref.as_ref()),
-        RepositoryHead::Unknown { .. } => ("unknown", None, None),
+    let (head_state, head_oid, head_ref, head_reason) = match &root.head {
+        RepositoryHead::Commit { oid, head_ref } => ("commit", Some(oid), head_ref.as_ref(), None),
+        RepositoryHead::Unborn { head_ref } => ("unborn", None, head_ref.as_ref(), None),
+        RepositoryHead::Unknown { reason } => ("unknown", None, None, Some(*reason)),
     };
-    let (worktree_state, dirty_coverage, dirty_digest) = match &root.worktree {
-        RepositoryWorktree::Clean => ("clean", "complete", None),
+    let (worktree_state, dirty_coverage, dirty_digest, worktree_reason, dirty_reason) = match &root
+        .worktree
+    {
+        RepositoryWorktree::Clean => ("clean", "complete", None, None, None),
         RepositoryWorktree::Dirty {
             coverage: RepositoryDirtyCoverage::Complete { digest },
-        } => ("dirty", "complete", Some(digest)),
+        } => ("dirty", "complete", Some(digest), None, None),
         RepositoryWorktree::Dirty {
-            coverage: RepositoryDirtyCoverage::Unknown { .. },
-        } => ("dirty", "unknown", None),
-        RepositoryWorktree::Unknown { .. } => ("unknown", "unknown", None),
+            coverage: RepositoryDirtyCoverage::Unknown { reason },
+        } => ("dirty", "unknown", None, None, Some(*reason)),
+        RepositoryWorktree::Unknown { reason } => ("unknown", "unknown", None, Some(*reason), None),
     };
     sqlx::query(
         "INSERT INTO repository_root_observations (
             observation_id, project_root, git_worktree_root, head_state, head_oid, head_ref,
-            worktree_state, dirty_digest, dirty_coverage, unknown_reason
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            worktree_state, dirty_digest, dirty_coverage,
+            head_unknown_reason, worktree_unknown_reason, dirty_unknown_reason
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(observation_id.as_str())
     .bind(&root.project_root)
@@ -159,7 +164,9 @@ async fn insert_root(
     .bind(worktree_state)
     .bind(dirty_digest)
     .bind(dirty_coverage)
-    .bind(root.unknown_reason()?.map(RepositoryUnknownReason::as_str))
+    .bind(head_reason.map(RepositoryUnknownReason::as_str))
+    .bind(worktree_reason.map(RepositoryUnknownReason::as_str))
+    .bind(dirty_reason.map(RepositoryUnknownReason::as_str))
     .execute(connection)
     .await?;
     Ok(())
@@ -182,7 +189,8 @@ async fn load_observation(
     };
     let roots = sqlx::query_as::<_, StoredRoot>(
         "SELECT project_root, git_worktree_root, head_state, head_oid, head_ref,
-                worktree_state, dirty_digest, dirty_coverage, unknown_reason
+                worktree_state, dirty_digest, dirty_coverage,
+                head_unknown_reason, worktree_unknown_reason, dirty_unknown_reason
          FROM repository_root_observations WHERE observation_id = ?
          ORDER BY project_root",
     )
@@ -216,34 +224,39 @@ async fn load_observation(
 }
 
 fn decode_root(root: StoredRoot) -> Option<RepositoryRootObservation> {
-    let reason = match root.unknown_reason.as_deref() {
-        Some(reason) => Some(RepositoryUnknownReason::parse(reason)?),
-        None => None,
+    let reason = |reason: Option<String>| match reason {
+        Some(reason) => RepositoryUnknownReason::parse(&reason).map(Some),
+        None => Some(None),
     };
-    let head = match (root.head_state.as_str(), root.head_oid) {
-        ("commit", Some(oid)) => RepositoryHead::Commit {
+    let head_reason = reason(root.head_unknown_reason)?;
+    let worktree_reason = reason(root.worktree_unknown_reason)?;
+    let dirty_reason = reason(root.dirty_unknown_reason)?;
+    let head = match (root.head_state.as_str(), root.head_oid, head_reason) {
+        ("commit", Some(oid), None) => RepositoryHead::Commit {
             oid,
             head_ref: root.head_ref,
         },
-        ("unborn", None) => RepositoryHead::Unborn {
+        ("unborn", None, None) => RepositoryHead::Unborn {
             head_ref: root.head_ref,
         },
-        ("unknown", None) => RepositoryHead::Unknown { reason: reason? },
+        ("unknown", None, Some(reason)) => RepositoryHead::Unknown { reason },
         _ => return None,
     };
     let worktree = match (
         root.worktree_state.as_str(),
         root.dirty_coverage.as_str(),
         root.dirty_digest,
+        worktree_reason,
+        dirty_reason,
     ) {
-        ("clean", "complete", None) => RepositoryWorktree::Clean,
-        ("dirty", "complete", Some(digest)) => RepositoryWorktree::Dirty {
+        ("clean", "complete", None, None, None) => RepositoryWorktree::Clean,
+        ("dirty", "complete", Some(digest), None, None) => RepositoryWorktree::Dirty {
             coverage: RepositoryDirtyCoverage::Complete { digest },
         },
-        ("dirty", "unknown", None) => RepositoryWorktree::Dirty {
-            coverage: RepositoryDirtyCoverage::Unknown { reason: reason? },
+        ("dirty", "unknown", None, None, Some(reason)) => RepositoryWorktree::Dirty {
+            coverage: RepositoryDirtyCoverage::Unknown { reason },
         },
-        ("unknown", "unknown", None) => RepositoryWorktree::Unknown { reason: reason? },
+        ("unknown", "unknown", None, Some(reason), None) => RepositoryWorktree::Unknown { reason },
         _ => return None,
     };
     Some(RepositoryRootObservation {
