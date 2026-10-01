@@ -30,6 +30,7 @@ const state = {
   contextHits: [],
   evidence: null,
   pendingRequests: [],
+  requestItems: new Map(),
   selectedNodeId: null,
   loading: true,
   busyAction: null,

@@ -11,6 +11,8 @@ import {
 // Every slot. The hierarchy slot is memoized on its data, so listing it here is cheap, and
 // node selection is applied by attribute (selectNode) rather than by re-rendering the tree.
 export const ALL_SLOTS = Object.keys(WORKSPACE_SLOTS);
+// A full update also reconciles request cards, whose content can depend on refreshed activity.
+const FULL_UPDATE = [...ALL_SLOTS, "requests"];
 const SCROLLERS = [".tree", ".finding-list", ".activity-list", ".packet"];
 
 // Mounts the workspace once and then edits it in place: named slots are replaced only when
@@ -70,7 +72,7 @@ export function createWorkspaceDom(
     }
     const cards = root.querySelector("[data-request-list]").children;
     state.pendingRequests.forEach((request, index) =>
-      cardHtml.set(cards[index], renderRequestCard(request)),
+      cardHtml.set(cards[index], renderRequestCard(request, state)),
     );
     mounted = true;
     syncMode(state);
@@ -112,7 +114,7 @@ export function createWorkspaceDom(
     }
   }
 
-  function update(state, names = ALL_SLOTS) {
+  function update(state, names = FULL_UPDATE) {
     if (!mounted) {
       if (isLoadingScreen(state)) {
         const html = renderWorkspace(state);
@@ -144,7 +146,7 @@ export function createWorkspaceDom(
     );
     const wanted = state.pendingRequests.map((request) => [
       requestKey(request.id),
-      renderRequestCard(request),
+      renderRequestCard(request, state),
     ]);
     const keep = new Set(wanted.map(([key]) => key));
     for (const [key, card] of existing) if (!keep.has(key)) card.remove();

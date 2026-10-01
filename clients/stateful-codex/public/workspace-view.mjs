@@ -1,3 +1,8 @@
+import {
+  renderCommandApproval,
+  renderFileChangeApproval,
+} from "./approval-view.mjs";
+
 const packetSections = [
   ["examined", "Examined"],
   ["rationale", "Why it matters"],
@@ -69,7 +74,7 @@ export function renderWorkspaceShell(state, slotHtml) {
           ${slot("findings")}
         </section>
       </div>
-      ${renderRequests(state.pendingRequests)}
+      ${renderRequests(state)}
     </main>`;
   return html.replace(/[ \t]+\n/g, "\n");
 }
@@ -385,8 +390,21 @@ function newOutcomeLink() {
   return `<a class="text-button" href="/">Start another outcome</a>`;
 }
 
-function renderRequests(requests) {
-  return `<aside class="request-drawer" data-requests${requests.length ? "" : " hidden"}><h2>Agent needs input</h2><div data-request-list>${requests.map(renderRequestCard).join("")}</div></aside>`;
+function renderRequests(state) {
+  const requests = state.pendingRequests;
+  return `<aside class="request-drawer" data-requests${requests.length ? "" : " hidden"}><h2>Agent needs input</h2><div data-request-list>${requests.map((request) => renderRequestCard(request, state)).join("")}</div></aside>`;
+}
+
+// The thread item an approval refers to: live item events first, then recorded activity.
+export function requestItem(state, itemId) {
+  if (!itemId) return null;
+  return (
+    state.requestItems?.get(itemId) ??
+    state.activity
+      .map(normalizeThreadItem)
+      .find((item) => item?.id === itemId) ??
+    null
+  );
 }
 
 // Server request IDs may be numbers or strings; the key keeps 11 and "11" distinct.
@@ -394,7 +412,7 @@ export function requestKey(id) {
   return JSON.stringify(id);
 }
 
-export function renderRequestCard(request) {
+export function renderRequestCard(request, state) {
   const key = escapeHtml(requestKey(request.id));
   if (request.method === "item/tool/requestUserInput") {
     return `<form class="request-card stack" data-request-key="${key}">${request.params.questions.map(renderQuestion).join("")}<button class="primary">Reply</button></form>`;
@@ -405,11 +423,11 @@ export function renderRequestCard(request) {
       "item/fileChange/requestApproval",
     ].includes(request.method)
   ) {
-    const description =
-      request.params.command ??
-      request.params.reason ??
-      "The agent requests approval to continue.";
-    return `<article class="request-card" data-request-key="${key}"><p>${escapeHtml(description)}</p><div class="control-row"><button class="primary" data-action="approve">Approve</button><button class="secondary" data-action="decline">Decline</button></div></article>`;
+    const { ready, html } =
+      request.method === "item/fileChange/requestApproval"
+        ? renderFileChangeApproval(request, requestItem(state, request.params.itemId))
+        : { ready: true, html: renderCommandApproval(request) };
+    return `<article class="request-card" data-request-key="${key}">${html}<div class="control-row"><button class="primary" data-action="approve"${ready ? "" : " disabled"}>Approve</button><button class="secondary" data-action="decline">Decline</button></div></article>`;
   }
   return `<article class="request-card" data-request-key="${key}"><strong>${escapeHtml(request.method)}</strong><p>This request type is visible but must be handled by a compatible client.</p></article>`;
 }

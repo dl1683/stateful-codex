@@ -1,5 +1,9 @@
 import { belongsToWorkspace, eventScope } from "./event-scope.mjs";
 
+const REQUEST_ITEM_TYPES = new Set(["fileChange", "commandExecution"]);
+const REQUEST_ITEM_LIMIT = 50;
+const FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval";
+
 const REFRESH_METHODS =
   /^(statefulRun|statefulAttribution|obligation|steering|blackboard|project|thread|turn)\//;
 
@@ -30,7 +34,12 @@ export function applyWorkspaceEvent(state, message) {
       ...state.pendingRequests.filter((item) => item.id !== message.id),
       message,
     ];
-    return { sections: ["requests"], refresh: false };
+    // A file-change approval names only its item; if that item has not been seen live,
+    // refresh so the recorded activity can supply the changed files.
+    const unknownItem =
+      message.method === FILE_CHANGE_APPROVAL &&
+      !state.requestItems?.has(message.params?.itemId);
+    return { sections: ["requests"], refresh: unknownItem };
   }
   if (message.method === "gateway/pendingRequests") {
     // Authoritative on (re)connect: requests answered elsewhere while away disappear.
@@ -50,6 +59,9 @@ export function applyWorkspaceEvent(state, message) {
     return { sections: ["requests"], refresh: false };
   }
   const refresh = REFRESH_METHODS.test(message.method ?? "");
+  if (rememberRequestItem(state, message)) {
+    return { sections: ["requests"], refresh };
+  }
   if (message.method === "item/agentMessage/delta") {
     const { turnId = null, itemId = null, delta = "" } = message.params ?? {};
     return { sections: [], refresh, delta: { turnId, itemId, delta } };
@@ -59,4 +71,25 @@ export function applyWorkspaceEvent(state, message) {
     return { sections: [], refresh, turnStarted: turnId };
   }
   return { sections: [], refresh };
+}
+
+// Keep the latest file-change and command items so approval cards can show what they approve.
+// Returns true when a pending request refers to the updated item.
+function rememberRequestItem(state, message) {
+  const params = message.params ?? {};
+  let item = null;
+  if (["item/started", "item/completed"].includes(message.method)) {
+    if (REQUEST_ITEM_TYPES.has(params.item?.type)) item = params.item;
+  } else if (message.method === "item/fileChange/patchUpdated") {
+    const known = state.requestItems?.get(params.itemId);
+    item = { ...known, type: "fileChange", id: params.itemId, changes: params.changes };
+  }
+  if (!item?.id) return false;
+  state.requestItems ??= new Map();
+  state.requestItems.delete(item.id);
+  state.requestItems.set(item.id, item);
+  if (state.requestItems.size > REQUEST_ITEM_LIMIT) {
+    state.requestItems.delete(state.requestItems.keys().next().value);
+  }
+  return state.pendingRequests.some((request) => request.params?.itemId === item.id);
 }
