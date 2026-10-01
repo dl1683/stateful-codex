@@ -394,18 +394,18 @@ fn is_route_item_wrapper(arguments: &str) -> bool {
     let Ok(serde_json::Value::Object(arguments)) = serde_json::from_str(arguments) else {
         return false;
     };
-    let Some(route) = arguments.get("evidenceRoute") else {
-        return false;
+    let only_item_fields = |object: &serde_json::Map<String, serde_json::Value>| {
+        object
+            .keys()
+            .all(|key| key == "evidenceRoute" || ROUTE_ITEM_FIELDS.contains(&key.as_str()))
     };
-    let wrapper_fields = arguments
-        .keys()
-        .filter(|key| *key != "evidenceRoute")
-        .collect::<Vec<_>>();
-    let wrapped_item = !wrapper_fields.is_empty()
-        && wrapper_fields
-            .iter()
-            .all(|key| ROUTE_ITEM_FIELDS.contains(&key.as_str()));
-    wrapped_item || route.get("evidenceRoute").is_some()
+    match arguments.get("evidenceRoute") {
+        Some(serde_json::Value::Object(nested)) if nested.contains_key("evidenceRoute") => {
+            only_item_fields(&arguments) && only_item_fields(nested)
+        }
+        Some(_) => arguments.len() > 1 && only_item_fields(&arguments),
+        None => false,
+    }
 }
 
 /// Model-facing failure text: the reader's diagnosis plus this tool's next action.

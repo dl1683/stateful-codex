@@ -311,7 +311,7 @@ async fn guarded_route_failures_name_their_actual_cause() {
                     EvidenceRoute {
                         source_fingerprint: SourceFingerprint::parse(format!(
                             "sha256:{}",
-                            "0".repeat(64)
+                            "0".repeat(/*n*/ 64)
                         ))
                         .expect("valid fingerprint"),
                         ..a.clone()
@@ -384,5 +384,87 @@ async fn guarded_route_failures_name_their_actual_cause() {
                 "SourceNotCurrent(SourceUnavailable)".to_string()
             ),
         ]
+    );
+}
+
+#[tokio::test]
+async fn region_route_reports_stale_index_separately_from_a_removed_file() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    let source = (1..=70)
+        .map(|line| format!("region_fact line {line}\n"))
+        .collect::<String>();
+    std::fs::write(root.path().join("facts.txt"), source).expect("write fixture");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let index = ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    };
+    indexer.refresh(index.clone()).await.expect("index project");
+    let region = context_map
+        .query(crate::ContextMapQuery {
+            project_id: "project-1".to_string(),
+            text: "region_fact".to_string(),
+            max_results: 10,
+        })
+        .await
+        .expect("query route")
+        .data
+        .into_iter()
+        .find(|hit| hit.source.region_anchor.is_some())
+        .expect("indexed region");
+    let route = EvidenceRoute::from_hit(&region).expect("region route");
+    let reader = EvidenceReader::new(context_map);
+    let read = || {
+        reader.read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route.clone()),
+            max_bytes: 64,
+        })
+    };
+
+    // The parent file advances while the region entry keeps the issued fingerprint.
+    let region_node = hierarchy
+        .get_node("project-1", &region.entry.value.node_id)
+        .await
+        .expect("region node lookup")
+        .expect("region node");
+    let file_id = region_node.value.parent_id.expect("region parent");
+    let file = hierarchy
+        .get_node("project-1", &file_id)
+        .await
+        .expect("file node lookup")
+        .expect("file node");
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &file_id,
+            crate::HierarchySourceUpdate {
+                expected_revision: file.revision,
+                lifecycle: crate::NodeLifecycle::Active,
+                source_fingerprint: Some(
+                    SourceFingerprint::parse(format!("sha256:{}", "1".repeat(/*n*/ 64)))
+                        .expect("valid fingerprint"),
+                ),
+            },
+        )
+        .await
+        .expect("advance parent state");
+    let stale = format!("{:?}", read().await.err());
+
+    std::fs::remove_file(root.path().join("facts.txt")).expect("remove source");
+    indexer.refresh(index).await.expect("reindex project");
+    let removed = format!("{:?}", read().await.err());
+
+    assert_eq!(
+        (stale, removed),
+        (
+            "Some(SourceNotCurrent(Stale))".to_string(),
+            "Some(SourceNotCurrent(SourceUnavailable))".to_string(),
+        )
     );
 }

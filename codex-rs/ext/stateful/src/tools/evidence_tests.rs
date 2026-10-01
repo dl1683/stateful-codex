@@ -132,7 +132,7 @@ Threshold: 60
         .read_with_refresh(
             roots.clone(),
             EvidenceReadLocator::ContextMapRoute(route),
-            1024,
+            /*max_bytes*/ 1024,
         )
         .await
         .map(|(read, _)| read.content)
@@ -145,7 +145,7 @@ Threshold: 60
                 relative_path,
                 line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
             },
-            1024,
+            /*max_bytes*/ 1024,
         )
         .await
         .expect("path read refreshes the changed file");
@@ -486,6 +486,14 @@ fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
             "nested item",
             json!({"evidenceRoute": {"headline": "CLI", "evidenceRoute": route}}),
         ),
+        (
+            "nested item, outer extra",
+            json!({"evidenceRoute": {"headline": "CLI", "evidenceRoute": route}, "extra": 1}),
+        ),
+        (
+            "nested item, inner extra",
+            json!({"evidenceRoute": {"extra": 1, "evidenceRoute": route}}),
+        ),
         ("route only", json!({"evidenceRoute": route})),
         (
             "unrelated field",
@@ -510,6 +518,8 @@ fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
             ("named wrapper", true),
             ("whole item", true),
             ("nested item", true),
+            ("nested item, outer extra", false),
+            ("nested item, inner extra", false),
             ("route only", false),
             ("unrelated field", false),
             ("mixed fields", false),

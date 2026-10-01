@@ -17,13 +17,17 @@ use serde_json::json;
 use tempfile::TempDir;
 
 /// A code-mode script selects a refreshed route programmatically and reads it, reads
-/// a current range by path, and gets truthful diagnostics for a wrapped route item, a
-/// mistyped fingerprint, and an unrelated unknown field.
+/// current ranges by path (choosing a root where the path is ambiguous), and gets
+/// truthful diagnostics for a wrapped route item, a mistyped fingerprint, an unrelated
+/// unknown field, conflicting selectors, an ambiguous path, and a foreign root.
 #[tokio::test]
 async fn code_mode_reads_selected_routes_and_reports_route_mistakes_truthfully() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
+    let second_root = TempDir::new()?;
+    std::fs::write(project_root.path().join("shared.txt"), "first\n")?;
+    std::fs::write(second_root.path().join("shared.txt"), "second\n")?;
     std::fs::create_dir(project_root.path().join("textkit"))?;
     std::fs::write(
         project_root.path().join("textkit").join("cli.py"),
@@ -42,10 +46,13 @@ async fn code_mode_reads_selected_routes_and_reports_route_mistakes_truthfully()
             request_id,
             params: ProjectCreateParams {
                 name: "Evidence routes".to_string(),
-                roots: vec![ProjectRoot {
-                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
-                        .expect("temporary project root should be absolute"),
-                }],
+                roots: [&project_root, &second_root]
+                    .into_iter()
+                    .map(|root| ProjectRoot {
+                        path: AbsolutePathBuf::try_from(root.path().to_path_buf())
+                            .expect("temporary project root should be absolute"),
+                    })
+                    .collect(),
                 metadata: None,
                 idempotency_key: "evidence-routes-project".to_string(),
             },
@@ -68,6 +75,7 @@ async fn code_mode_reads_selected_routes_and_reports_route_mistakes_truthfully()
                     r#"
 const refreshed = await tools.context_map_refresh({});
 const item = refreshed.routes.find(r => r.source.relativePath === "textkit/cli.py");
+const second = refreshed.routes.find(r => r.source.relativePath === "shared.txt" && r.source.projectRoot !== item.source.projectRoot);
 const routed = await tools.evidence_read({ evidenceRoute: item.evidenceRoute });
 const ranged = await tools.evidence_read({ relativePath: "textkit/cli.py", lineRange: { start: 3, end: 4 } });
 const attempt = async (args) => {
@@ -78,8 +86,13 @@ const fingerprint = item.evidenceRoute.sourceFingerprint;
 const mistyped = fingerprint.slice(0, -1) + (fingerprint.endsWith("0") ? "1" : "0");
 text(JSON.stringify({
   routed: routed.content,
-  routedReceipt: routed.blackboardEvidence !== null,
+  routedIdentity: [routed.contextMapEntryId === item.evidenceRoute.contextMapEntryId, routed.sourceFingerprint === fingerprint],
+  routedReceipt: routed.blackboardEvidence.readReceiptId.startsWith("stateful-read-"),
   ranged: ranged.content,
+  explicitRoot: (await tools.evidence_read({ relativePath: "shared.txt", projectRoot: second.source.projectRoot })).content,
+  bothSelectors: await attempt({ evidenceRoute: item.evidenceRoute, relativePath: "textkit/cli.py" }),
+  ambiguous: await attempt({ relativePath: "shared.txt" }),
+  foreignRoot: await attempt({ relativePath: "shared.txt", projectRoot: item.source.projectRoot + "-outside" }),
   wrapper: await attempt({ name: "cli", evidenceRoute: item.evidenceRoute }),
   wholeItem: await attempt({ evidenceRoute: item }),
   mistyped: await attempt({ evidenceRoute: { ...item.evidenceRoute, sourceFingerprint: mistyped } }),
@@ -117,29 +130,47 @@ text(JSON.stringify({
         .filter_map(|item| item["text"].as_str())
         .find_map(|text| serde_json::from_str::<Value>(text).ok())
         .unwrap_or_else(|| panic!("the script should print its results: {output}"));
-    let message = |key: &str| printed[key].as_str().unwrap_or_default().to_string();
+    let diagnosed =
+        |key: &str, text: &str| printed[key].as_str().unwrap_or_default().contains(text);
     let wrapper_diagnostic = "rather than the whole route item or {name, evidenceRoute} wrapper";
+    let observed = json!({
+        "routed": printed["routed"],
+        "routedIdentity": printed["routedIdentity"],
+        "routedReceipt": printed["routedReceipt"],
+        "ranged": printed["ranged"],
+        "explicitRoot": printed["explicitRoot"],
+        "bothSelectors": diagnosed("bothSelectors", "provide either evidenceRoute"),
+        "ambiguous": diagnosed("ambiguous", "multiple project roots"),
+        "foreignRoot": diagnosed("foreignRoot", "outside the selected project"),
+        "wrapper": diagnosed("wrapper", wrapper_diagnostic),
+        "wholeItem": diagnosed("wholeItem", wrapper_diagnostic),
+        "mistypedMismatch": diagnosed("mistyped", "does not match this indexed route"),
+        "mistypedClaimsNotCurrent": diagnosed("mistyped", "not current"),
+        "unknown": diagnosed("unknown", "unknown field `extra`"),
+    });
     assert_eq!(
-        (
-            &printed["routed"],
-            &printed["routedReceipt"],
-            &printed["ranged"],
-            message("wrapper").contains(wrapper_diagnostic),
-            message("wholeItem").contains(wrapper_diagnostic),
-            message("mistyped").contains("does not match this indexed route"),
-            message("mistyped").contains("not current"),
-            message("unknown").contains("unknown field `extra`"),
-        ),
-        (
-            &json!("L1: import core\nL2: \nL3: def main():\nL4:     core.run()\n"),
-            &json!(true),
-            &json!("L3: def main():\nL4:     core.run()\n"),
-            true,
-            true,
-            true,
-            false,
-            true,
-        ),
+        observed,
+        json!({
+            "routed": "L1: import core
+L2: 
+L3: def main():
+L4:     core.run()
+",
+            "routedIdentity": [true, true],
+            "routedReceipt": true,
+            "ranged": "L3: def main():
+L4:     core.run()
+",
+            "explicitRoot": "L1: second\n",
+            "bothSelectors": true,
+            "ambiguous": true,
+            "foreignRoot": true,
+            "wrapper": true,
+            "wholeItem": true,
+            "mistypedMismatch": true,
+            "mistypedClaimsNotCurrent": false,
+            "unknown": true,
+        }),
         "{printed}"
     );
     Ok(())

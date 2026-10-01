@@ -180,9 +180,17 @@ impl ContextMapStore {
             .fetch_one(&mut *transaction)
             .await?;
             if current != 1 {
-                return Err(ContextMapStoreError::SourceNotCurrent(
-                    ContextMapFreshness::Stale,
-                ));
+                // A region whose own node is missing went with its file; any other
+                // inactive or re-fingerprinted region or parent is stale.
+                let freshness = match hit.freshness {
+                    ContextMapFreshness::SourceUnavailable => {
+                        ContextMapFreshness::SourceUnavailable
+                    }
+                    ContextMapFreshness::Current | ContextMapFreshness::Stale => {
+                        ContextMapFreshness::Stale
+                    }
+                };
+                return Err(ContextMapStoreError::SourceNotCurrent(freshness));
             }
         }
         transaction.commit().await?;

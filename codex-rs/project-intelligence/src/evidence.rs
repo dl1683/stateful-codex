@@ -138,7 +138,22 @@ impl EvidenceReader {
                         ContextMapStoreError::SourceNotCurrent(freshness) => {
                             EvidenceReadError::SourceNotCurrent(freshness)
                         }
-                        error => EvidenceReadError::ContextMap(error),
+                        error @ (ContextMapStoreError::InvalidEntry(_)
+                        | ContextMapStoreError::Hierarchy(_)
+                        | ContextMapStoreError::Storage(_)
+                        | ContextMapStoreError::Migration(_)
+                        | ContextMapStoreError::Io(_)
+                        | ContextMapStoreError::NodeNotFound(_)
+                        | ContextMapStoreError::EntryNotFound(_)
+                        | ContextMapStoreError::EntryIdentityConflict(_)
+                        | ContextMapStoreError::RoutingTermPositionOverflow
+                        | ContextMapStoreError::RevisionConflict { .. }
+                        | ContextMapStoreError::RevisionOverflow
+                        | ContextMapStoreError::ConcurrentMutation
+                        | ContextMapStoreError::CorruptEntry(_)
+                        | ContextMapStoreError::CorruptEnum(_)) => {
+                            EvidenceReadError::ContextMap(error)
+                        }
                     })?
                     .ok_or_else(|| {
                         EvidenceReadError::RouteNotFound(route.context_map_entry_id.to_string())
@@ -285,7 +300,7 @@ fn read_source(
     line_range: Option<EvidenceLineRange>,
     max_bytes: usize,
 ) -> Result<SourceRead, EvidenceReadError> {
-    let mut file = File::open(path)?;
+    let mut file = File::open(path).map_err(source_unavailable)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     let mut selected = Vec::with_capacity(max_bytes);
