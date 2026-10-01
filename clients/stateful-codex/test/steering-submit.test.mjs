@@ -110,6 +110,7 @@ test("a second submission while one is pending is refused visibly and keeps its 
   assert.equal(await first, true);
   assert.equal(control().value, "Second instruction");
   assert.equal(calls.length, 1);
+  assert.match(status().textContent, /newer text in the box was not sent/);
 });
 
 test("if the form is replaced while steering is pending, a failure still shows the text", async () => {
@@ -119,6 +120,7 @@ test("if the form is replaced while steering is pending, a failure still shows t
   });
   type(control(), "Keep the legacy module untouched");
   const pending = submit();
+  type(control(), "Keep the legacy module untouched, and its tests");
   state.run = { ...state.run, status: "completed" };
   view.update(state);
   assert.equal(control(), null);
@@ -127,6 +129,22 @@ test("if the form is replaced while steering is pending, a failure still shows t
   assert.equal(await pending, false);
   assert.equal(
     status().textContent,
-    "Steering was not saved: run is closed. Your text was: Keep the legacy module untouched",
+    "Steering was not saved: run is closed. Your text was: Keep the legacy module untouched, and its tests",
   );
+});
+
+test("text typed during a save that the closing run removed is shown, not dropped", async () => {
+  let release;
+  const { state, view, control, submit, status } = steeringWorkspace({
+    rpc: (_method, params) => new Promise((resolve) => (release = () => resolve(saved(params.input)))),
+  });
+  type(control(), "First");
+  const pending = submit();
+  type(control(), "Second");
+  state.run = { ...state.run, status: "completed" };
+  view.update(state);
+  release();
+
+  assert.equal(await pending, true);
+  assert.equal(status().textContent, "Your earlier steering was saved. Newer text was not sent: Second");
 });

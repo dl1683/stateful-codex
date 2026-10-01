@@ -335,7 +335,7 @@ function renderSteeringStatus(state) {
 function renderSteeringList(state) {
   const items = state.steering.slice(-5).reverse();
   return items.length
-    ? `<div class="steering-list">${items.map((item) => `<article><p>${escapeHtml(item.input)}</p><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}</article>`).join("")}</div>`
+    ? `<div class="steering-list">${items.map((item) => `<article><p>${escapeHtml(item.input)}</p><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}${item.statusStale ? `<small>Status as confirmed when submitted; later updates are not loaded.</small>` : ""}</article>`).join("")}</div>`
     : `<p class="microcopy">Your exact instruction and its application state remain visible.</p>`;
 }
 

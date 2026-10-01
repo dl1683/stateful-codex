@@ -181,12 +181,13 @@ async function refreshWorkspace() {
   state.hierarchy = hierarchy;
   state.blackboard = blackboard.data;
   state.obligations = obligations.data;
-  // The list is read oldest first and capped, so keep steering confirmed in this page view.
+  // The list is read oldest first and capped, so keep steering confirmed in this page view,
+  // marked stale when the capped read no longer includes it.
   state.steering = [
     ...steering.data,
-    ...state.confirmedSteering.filter(
-      (saved) => !steering.data.some((item) => item.id === saved.id),
-    ),
+    ...state.confirmedSteering
+      .filter((saved) => !steering.data.some((item) => item.id === saved.id))
+      .map((saved) => ({ ...saved, statusStale: true })),
   ];
   state.measurementSummary = measurementSummary.summary;
   state.activity = activity.data.reverse();
@@ -232,6 +233,12 @@ function handleEvent(message) {
     refreshTimer = setTimeout(
       () =>
         refresh().catch((error) => {
+          // Keep a displayed action error; report the background failure beside it.
+          if (state.error && !state.refreshFailed) {
+            state.notice = `Background refresh failed: ${error.message}`;
+            render(["notices"]);
+            return;
+          }
           fail(error);
           state.refreshFailed = true;
         }),

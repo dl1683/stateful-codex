@@ -37,12 +37,23 @@ export async function submitSteering({ state, control, drafts, rpc, action }) {
       saved = true;
     });
   } catch (error) {
-    // If the form was replaced meanwhile (for example the run closed), the text survives here.
+    // The control keeps its latest value even after the form is replaced (for example when the
+    // run closes), so the alert can carry whatever the user had typed last.
+    const current = control.value.trim() || text;
     state.steeringError = control.isConnected
       ? `Steering was not saved: ${error.message} Your text is kept.`
-      : `Steering was not saved: ${error.message} Your text was: ${text}`;
+      : `Steering was not saved: ${error.message} Your text was: ${current}`;
     return false;
   }
-  if (saved) state.steeringError = null;
-  return saved;
+  if (!saved) return false;
+  // Text typed while this submission was pending was not sent; say so instead of clearing.
+  const unsent = control.value.trim();
+  if (!unsent) state.steeringError = null;
+  else if (control.isConnected) {
+    state.steeringError =
+      "Your earlier steering was saved. The newer text in the box was not sent; submit it when ready.";
+  } else {
+    state.steeringError = `Your earlier steering was saved. Newer text was not sent: ${unsent}`;
+  }
+  return true;
 }
