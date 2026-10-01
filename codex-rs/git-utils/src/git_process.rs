@@ -12,14 +12,12 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "the repository observation collector is the first production caller"
-    )
-)]
 mod bounded;
+
+pub(crate) use bounded::GitCommandBudget;
+pub(crate) use bounded::GitCommandError;
+pub(crate) use bounded::GitCommandOutputCap;
+pub(crate) use bounded::run_git_command_with_budget;
 
 /// How strictly a spawned Git process tree must be contained for later cleanup.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
