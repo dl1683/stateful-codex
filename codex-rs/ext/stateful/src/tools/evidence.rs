@@ -90,7 +90,14 @@ impl EvidenceReadTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: EvidenceArguments = parse_arguments(&call)?;
+        let arguments: EvidenceArguments = parse_arguments(&call).map_err(|error| {
+            call.function_arguments()
+                .ok()
+                .filter(|arguments| is_route_item_wrapper(arguments))
+                .map_or(error, |_| {
+                    FunctionCallError::RespondToModel(ROUTE_WRAPPER_DIAGNOSTIC.to_string())
+                })
+        })?;
         let requested_max_bytes = arguments.max_bytes.unwrap_or(DEFAULT_BYTES);
         if requested_max_bytes == 0 {
             return Err(FunctionCallError::RespondToModel(format!(
@@ -235,7 +242,7 @@ impl EvidenceReadTool {
                 | EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Stale)),
             ) => {
                 let Some((project_root, relative_path)) = refresh_source else {
-                    return Err(respond(error));
+                    return Err(read_error(error));
                 };
                 let project_root = self
                     .refresh_root(&project_roots, project_root.as_ref(), &relative_path)
@@ -255,9 +262,9 @@ impl EvidenceReadTool {
                     .read(request)
                     .await
                     .map(|result| (result, true))
-                    .map_err(respond)
+                    .map_err(read_error)
             }
-            Err(error) => Err(respond(error)),
+            Err(error) => Err(read_error(error)),
         }
     }
 
@@ -308,7 +315,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read fingerprint-verified exact source evidence. Prefer a current evidenceRoute returned by context_map_query and copy it unchanged; that guarded route fails closed if its source or range changed and is never refreshed into new coordinates. content is lineNumbered: each source line is prefixed with a display-only `L<n>: ` label giving its absolute 1-based file line number. Labels are not source text; they are excluded from bytesReturned and fingerprints and must not be quoted as source. firstLine and lastLine name the lines actually returned; lastLinePartial=true means the final returned line was cut. When root blackboard evidence already names a source and lines, relativePath plus a narrow lineRange remains available and refreshes a changed file once. sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
+            description: "Read fingerprint-verified exact source evidence. For current source content, pass relativePath with an optional narrow lineRange, e.g. {relativePath: \"pkg/cli.py\", lineRange: {start: 1, end: 60}} (projectRoot only when the path exists under several roots); the host resolves the indexed file, verifies its full-file fingerprint while reading, and refreshes a changed file once. That reads the current range, not an earlier issued region. To read exactly an issued revision and region, select a context_map_query or context_map_refresh item in code and pass {evidenceRoute: item.evidenceRoute}; never retype its IDs or fingerprints. That guarded route fails closed if its source or range changed and is never refreshed into new coordinates. Never combine both selectors. content is lineNumbered: each source line is prefixed with a display-only `L<n>: ` label giving its absolute 1-based file line number. Labels are not source text; they are excluded from bytesReturned and fingerprints and must not be quoted as source. firstLine and lastLine name the lines actually returned; lastLinePartial=true means the final returned line was cut. sourceRefreshed=true means prior knowledge tied to the old fingerprint remains stale and must be revised or superseded before reuse. When blackboardEvidence is non-null, copy that host-issued read receipt unchanged into a blackboard record's evidence array. The receipt binds persistence to the exact source version and complete returned line range. A null value means the returned text was incomplete and must not be recorded as exact line evidence.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -316,7 +323,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
                 "properties": {
                     "evidenceRoute": {
                         "type": "object",
-                        "description": "Current guarded route returned by context_map_query. Copy every field unchanged and do not combine it with relativePath, projectRoot, or lineRange.",
+                        "description": "The evidenceRoute object of a current context_map_query or context_map_refresh item, passed unchanged; not the whole item. Do not combine it with relativePath, projectRoot, or lineRange.",
                         "properties": {
                             "contextMapEntryId": {"type": "string"},
                             "sourceFingerprint": {"type": "string"},
@@ -364,6 +371,80 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     {
         Box::pin(self.handle_call(call))
     }
+}
+
+/// Route-item fields from context_map_query/refresh output, plus the `name` label
+/// scripts attach, that identify a whole item passed where only its route belongs.
+const ROUTE_ITEM_FIELDS: &[&str] = &[
+    "name",
+    "headline",
+    "coverage",
+    "freshness",
+    "storedFreshness",
+    "source",
+    "refreshInput",
+    "knownKnowledge",
+];
+const ROUTE_WRAPPER_DIAGNOSTIC: &str = "Pass {evidenceRoute: item.evidenceRoute}, rather than the whole route item or {name, evidenceRoute} wrapper. Alternatively, use relativePath with optional lineRange. Do not combine both selectors.";
+
+/// True when the arguments wrap a route item instead of passing its evidenceRoute:
+/// `{name, evidenceRoute}`, a whole item, or a whole item nested as evidenceRoute.
+/// Any other unknown field keeps the ordinary rejection.
+fn is_route_item_wrapper(arguments: &str) -> bool {
+    let Ok(serde_json::Value::Object(arguments)) = serde_json::from_str(arguments) else {
+        return false;
+    };
+    let Some(route) = arguments.get("evidenceRoute") else {
+        return false;
+    };
+    let wrapper_fields = arguments
+        .keys()
+        .filter(|key| *key != "evidenceRoute")
+        .collect::<Vec<_>>();
+    let wrapped_item = !wrapper_fields.is_empty()
+        && wrapper_fields
+            .iter()
+            .all(|key| ROUTE_ITEM_FIELDS.contains(&key.as_str()));
+    wrapped_item || route.get("evidenceRoute").is_some()
+}
+
+/// Model-facing failure text: the reader's diagnosis plus this tool's next action.
+fn read_error(error: EvidenceReadError) -> FunctionCallError {
+    let next = match &error {
+        EvidenceReadError::RouteNotFound(_) => {
+            "Obtain a route from context_map_query or context_map_refresh and pass item.evidenceRoute unchanged, or read a known relativePath."
+        }
+        EvidenceReadError::RouteFingerprintMismatch => {
+            "Obtain the route again and pass item.evidenceRoute unchanged; do not repair fingerprints by hand."
+        }
+        EvidenceReadError::RouteChanged => {
+            "Query the region again; do not repair its coordinates manually."
+        }
+        EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Stale) => {
+            "Refresh the affected source, then query again for the current region before using a guarded route."
+        }
+        EvidenceReadError::SourceChanged => {
+            "Refresh the affected file; query again if you need the corresponding region."
+        }
+        EvidenceReadError::SourceNotCurrent(ContextMapFreshness::SourceUnavailable) => {
+            "Check its path or removal and refresh the index."
+        }
+        EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Current)
+        | EvidenceReadError::InvalidRequest
+        | EvidenceReadError::InvalidLineRange
+        | EvidenceReadError::RootOutsideProject
+        | EvidenceReadError::SourceNotIndexed(_)
+        | EvidenceReadError::InvalidRegionAnchor
+        | EvidenceReadError::UnsupportedRegionAnchor(_)
+        | EvidenceReadError::AmbiguousSource(_)
+        | EvidenceReadError::SourceOutsideRoot
+        | EvidenceReadError::NonUtf8Source
+        | EvidenceReadError::CountOverflow
+        | EvidenceReadError::ContextMap(_)
+        | EvidenceReadError::Io(_)
+        | EvidenceReadError::ReadTask(_) => return respond(error),
+    };
+    FunctionCallError::RespondToModel(format!("{error}. {next}"))
 }
 
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {

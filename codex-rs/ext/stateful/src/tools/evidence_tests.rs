@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use codex_project_intelligence::EvidenceLineRange;
 use codex_project_intelligence::EvidenceReadLocator;
+use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
@@ -15,6 +16,7 @@ use tempfile::TempDir;
 use super::EvidenceExtent;
 use super::EvidenceReadTool;
 use super::NumberedEvidence;
+use super::is_route_item_wrapper;
 use super::pack_evidence;
 use super::source_lines;
 use crate::services::ProjectIntelligenceServices;
@@ -75,6 +77,88 @@ async fn changed_source_is_incrementally_refreshed_and_reread_once() {
         .expect("reuse refreshed route");
     assert!(!source_refreshed);
     assert_eq!(unchanged.content, "Threshold: 60\n");
+}
+
+#[tokio::test]
+async fn failed_guarded_route_explains_recovery_without_refreshing() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    let source_path = project_root.path().join("policy.md");
+    std::fs::write(
+        &source_path,
+        "# Policy
+Threshold: 10
+",
+    )
+    .expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let context_map = services.context_map().await.expect("context map").clone();
+    ProjectIndexer::new(
+        services.hierarchy().await.expect("hierarchy").clone(),
+        context_map.clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![project_root.path().to_path_buf()],
+    })
+    .await
+    .expect("index source");
+    let relative_path = ProjectRelativePath::parse("policy.md").expect("relative path");
+    let hit = context_map
+        .file_hits_for_path("project-1", &relative_path)
+        .await
+        .expect("source lookup")
+        .into_iter()
+        .next()
+        .expect("indexed source");
+    let route = EvidenceRoute::from_hit(&hit).expect("file route");
+    std::fs::write(
+        &source_path,
+        "# Policy
+Threshold: 60
+",
+    )
+    .expect("change source");
+    let tool = EvidenceReadTool::new(
+        "project-1".to_string(),
+        "thread-1".to_string(),
+        services,
+        Arc::new(InMemoryThreadStore::default()),
+    );
+    let roots = vec![project_root.path().to_path_buf()];
+
+    let guarded = tool
+        .read_with_refresh(
+            roots.clone(),
+            EvidenceReadLocator::ContextMapRoute(route),
+            1024,
+        )
+        .await
+        .map(|(read, _)| read.content)
+        .map_err(|error| error.to_string());
+    let (path_read, source_refreshed) = tool
+        .read_with_refresh(
+            roots,
+            EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path,
+                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
+            },
+            1024,
+        )
+        .await
+        .expect("path read refreshes the changed file");
+
+    assert_eq!(
+        (guarded, path_read.content, source_refreshed),
+        (
+            Err("source bytes read do not match the indexed fingerprint; the source changed after indexing. Refresh the affected file; query again if you need the corresponding region.".to_string()),
+            "Threshold: 60
+".to_string(),
+            true,
+        )
+    );
 }
 
 /// A response shaped like the tool's own: labelled content, counters, and a
@@ -383,4 +467,53 @@ fn a_cut_complete_line_never_returns_its_last_character() {
     );
 
     assert_eq!(packed, Some(partial));
+}
+
+#[test]
+fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
+    let route =
+        json!({"contextMapEntryId": "map-1", "sourceFingerprint": "sha256:00", "lineRange": null});
+    let cases = [
+        (
+            "named wrapper",
+            json!({"name": "cli", "evidenceRoute": route}),
+        ),
+        (
+            "whole item",
+            json!({"headline": "CLI", "source": {"relativePath": "cli.py"}, "evidenceRoute": route}),
+        ),
+        (
+            "nested item",
+            json!({"evidenceRoute": {"headline": "CLI", "evidenceRoute": route}}),
+        ),
+        ("route only", json!({"evidenceRoute": route})),
+        (
+            "unrelated field",
+            json!({"evidenceRoute": route, "extra": 1}),
+        ),
+        (
+            "mixed fields",
+            json!({"name": "cli", "evidenceRoute": route, "extra": 1}),
+        ),
+        (
+            "path read",
+            json!({"relativePath": "cli.py", "name": "cli"}),
+        ),
+    ];
+    let observed = cases
+        .iter()
+        .map(|(case, arguments)| (*case, is_route_item_wrapper(&arguments.to_string())))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        observed,
+        vec![
+            ("named wrapper", true),
+            ("whole item", true),
+            ("nested item", true),
+            ("route only", false),
+            ("unrelated field", false),
+            ("mixed fields", false),
+            ("path read", false),
+        ]
+    );
 }

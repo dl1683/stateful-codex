@@ -130,7 +130,16 @@ impl EvidenceReader {
                         &route.context_map_entry_id,
                         &route.source_fingerprint,
                     )
-                    .await?
+                    .await
+                    .map_err(|error| match error {
+                        ContextMapStoreError::FingerprintMismatch(_) => {
+                            EvidenceReadError::RouteFingerprintMismatch
+                        }
+                        ContextMapStoreError::SourceNotCurrent(freshness) => {
+                            EvidenceReadError::SourceNotCurrent(freshness)
+                        }
+                        error => EvidenceReadError::ContextMap(error),
+                    })?
                     .ok_or_else(|| {
                         EvidenceReadError::RouteNotFound(route.context_map_entry_id.to_string())
                     })?;
@@ -169,8 +178,12 @@ impl EvidenceReader {
             return Err(EvidenceReadError::SourceNotCurrent(hit.freshness));
         }
 
-        let root = tokio::fs::canonicalize(&hit.source.project_root).await?;
-        let source = tokio::fs::canonicalize(root.join(hit.source.relative_path.as_str())).await?;
+        let root = tokio::fs::canonicalize(&hit.source.project_root)
+            .await
+            .map_err(source_unavailable)?;
+        let source = tokio::fs::canonicalize(root.join(hit.source.relative_path.as_str()))
+            .await
+            .map_err(source_unavailable)?;
         if !source.starts_with(&root) {
             return Err(EvidenceReadError::SourceOutsideRoot);
         }
@@ -193,6 +206,25 @@ impl EvidenceReader {
             last_line: read.last_line,
             truncated: read.truncated,
         })
+    }
+}
+
+fn source_unavailable(error: std::io::Error) -> EvidenceReadError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            EvidenceReadError::SourceNotCurrent(ContextMapFreshness::SourceUnavailable)
+        }
+        _ => EvidenceReadError::Io(error),
+    }
+}
+
+fn not_current_message(freshness: ContextMapFreshness) -> &'static str {
+    match freshness {
+        ContextMapFreshness::Stale => "indexed source revision or region is no longer current",
+        ContextMapFreshness::SourceUnavailable => {
+            "indexed source is unavailable; its path may have moved or been removed, which is not a fingerprint typo"
+        }
+        ContextMapFreshness::Current => "indexed source is current but could not be used",
     }
 }
 
@@ -333,9 +365,17 @@ pub enum EvidenceReadError {
     RootOutsideProject,
     #[error("source is not indexed in the selected project: {0}")]
     SourceNotIndexed(String),
-    #[error("context-map evidence route was not found: {0}")]
+    #[error(
+        "evidence route ID was not found in the selected project; it may be mistyped or obsolete: {0}"
+    )]
     RouteNotFound(String),
-    #[error("context-map evidence route changed; query the context map again")]
+    #[error(
+        "supplied source fingerprint does not match this indexed route; the route may be mistyped, paired with another source's fingerprint, or obsolete. This comparison does not establish that the source is stale"
+    )]
+    RouteFingerprintMismatch,
+    #[error(
+        "supplied line range does not match the indexed region; the route may have been edited or become obsolete"
+    )]
     RouteChanged,
     #[error("context-map region anchor is malformed")]
     InvalidRegionAnchor,
@@ -343,11 +383,13 @@ pub enum EvidenceReadError {
     UnsupportedRegionAnchor(String),
     #[error("source path exists in multiple project roots; provide projectRoot: {0}")]
     AmbiguousSource(String),
-    #[error("source route is not current: {0:?}")]
+    #[error("{}", not_current_message(*.0))]
     SourceNotCurrent(ContextMapFreshness),
     #[error("source resolves outside its configured project root")]
     SourceOutsideRoot,
-    #[error("source changed after indexing; refresh the context map before reading")]
+    #[error(
+        "source bytes read do not match the indexed fingerprint; the source changed after indexing"
+    )]
     SourceChanged,
     #[error("source region is not valid UTF-8 text")]
     NonUtf8Source,

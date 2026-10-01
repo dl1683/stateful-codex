@@ -134,6 +134,7 @@ mod stateful_checkpoint;
 mod stateful_code_mode;
 mod stateful_compaction;
 mod stateful_completion;
+mod stateful_evidence_routes;
 mod stateful_modes;
 mod stateful_project_context;
 mod stateful_run;

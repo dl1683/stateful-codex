@@ -157,10 +157,10 @@ impl ContextMapStore {
             transaction.commit().await?;
             return Ok(None);
         };
+        // Inequality proves only that the supplied fingerprint is not this entry's;
+        // it may be mistyped, mispaired, or obsolete, so it is not reported as staleness.
         if &hit.entry.value.source_fingerprint != expected_fingerprint {
-            return Err(ContextMapStoreError::SourceNotCurrent(
-                ContextMapFreshness::Stale,
-            ));
+            return Err(ContextMapStoreError::FingerprintMismatch(id.to_string()));
         }
         if hit.source.region_anchor.is_some() {
             let current: i64 = sqlx::query_scalar(
@@ -757,6 +757,8 @@ pub enum ContextMapStoreError {
     SourceNotCurrent(ContextMapFreshness),
     #[error("context-map entry not found: {0}")]
     EntryNotFound(String),
+    #[error("supplied source fingerprint does not match context-map entry {0}")]
+    FingerprintMismatch(String),
     #[error("context-map entry ID was already used for different content: {0}")]
     EntryIdentityConflict(String),
     #[error("context-map routing-term position overflow")]
