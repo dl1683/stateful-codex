@@ -96,7 +96,7 @@ test("intelligence counts are labelled by the population each one measures", () 
     lastRefresh: {
       ...state.status.lastRefresh,
       filesIndexed: 2864,
-      regionsIndexed: 18271,
+      regionsIndexed: 17950,
       completedAt: 1790000000,
     },
   };
@@ -109,8 +109,8 @@ test("intelligence counts are labelled by the population each one measures", () 
     ["2,864 files mapped", "2,864", "Files mapped"],
     ["3 missing sources", "3", "Missing sources"],
     [
-      "18,271 indexed source regions at last refresh (2026-09-21 14:13 UTC)",
-      "18,271",
+      "17,950 indexed source regions at last refresh (2026-09-21 14:13 UTC)",
+      "17,950",
       "Indexed source regions at last refresh · 2026-09-21 14:13 UTC",
     ],
   ]);
@@ -121,7 +121,7 @@ test("region counts carry the last refresh's completeness and are never inferred
   state.status.lastRefresh.regionCoverageComplete = false;
   assert.equal(
     metricTiles(renderWorkspace(state), "Project intelligence")[4][0],
-    "12 indexed source regions at last refresh (2026-09-21 14:13 UTC · region coverage partial)",
+    "9 indexed source regions at last refresh (2026-09-21 14:13 UTC · region coverage partial)",
   );
 
   state.status.lastRefresh = null;
