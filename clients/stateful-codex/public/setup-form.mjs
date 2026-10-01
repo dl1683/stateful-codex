@@ -1,4 +1,4 @@
-import { renderSetup, updateSetup } from "./setup-view.mjs";
+import { renderSetup, setupBlocker, updateSetup } from "./setup-view.mjs";
 
 const TEXT_FIELDS = new Set([
   "projectId",
@@ -78,6 +78,12 @@ export function createSetupForm({ root, state, rpc, openWorkspace }) {
     event.preventDefault();
     if (state.busy) return;
     for (const control of form.querySelectorAll("[name]")) capture(control);
+    const blocker = setupBlocker(state);
+    if (blocker) {
+      state.error = blocker;
+      update();
+      return;
+    }
     state.busy = true;
     state.error = null;
     update();

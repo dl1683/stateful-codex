@@ -114,7 +114,20 @@ function statusLine(state) {
 }
 
 function submitDisabled(state) {
-  return Boolean(state.busy || !state.account);
+  return Boolean(
+    state.busy ||
+      !state.account ||
+      (state.threadAction !== "create" && state.threadsLoading),
+  );
+}
+
+// Continue and fork need a chosen thread. A disabled select is skipped by native validation,
+// so the controller checks this before opening the workspace.
+export function setupBlocker(state) {
+  if (state.threadAction === "create") return null;
+  if (state.threadsLoading) return "Wait for the project's threads to load.";
+  if (!state.threadId) return "Select a thread to continue or fork.";
+  return null;
 }
 
 function submitLabel(state) {

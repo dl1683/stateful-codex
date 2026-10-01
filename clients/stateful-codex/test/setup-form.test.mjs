@@ -177,6 +177,35 @@ test("a failed obsolete thread list does not report an error for the current pro
   assert.equal(view.state.error, null);
 });
 
+test("continue and fork cannot open a workspace before a thread is chosen", async () => {
+  const { rpc, calls } = deferredRpc();
+  const view = mountSetup(rpc);
+  type(view.field("goal"), "Pick up where I left off");
+  view.card("thread", "continue").dispatch("click");
+  const loading = chooseProject(view, "project-a");
+  const submit = view.root.querySelector('button[type="submit"]');
+  const form = view.root.querySelector("#setup-form");
+  assert.equal(submit.disabled, true);
+
+  await Promise.all(form.dispatch("submit").results);
+  assert.equal(view.opened.length, 0);
+  assert.equal(view.state.error, "Wait for the project's threads to load.");
+
+  calls[0].resolve({ data: [{ id: "thread-a1", name: "Alpha thread" }] });
+  await loading;
+  assert.equal(submit.disabled, false);
+  await Promise.all(form.dispatch("submit").results);
+  assert.equal(view.opened.length, 0);
+  assert.equal(view.state.error, "Select a thread to continue or fork.");
+
+  const thread = view.field("threadId");
+  thread.value = "thread-a1";
+  thread.dispatch("change");
+  await Promise.all(form.dispatch("submit").results);
+  assert.equal(view.opened.length, 1);
+  assert.equal(view.opened[0].threadId, "thread-a1");
+});
+
 test("submitting opens the workspace once with the captured drafts", async () => {
   const view = mountSetup();
   type(view.field("projectName"), "New project");
