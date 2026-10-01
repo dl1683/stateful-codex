@@ -471,8 +471,14 @@ fn pack_evidence(
         return Some(truncated(&lines[..line_count]));
     }
     if let Some(first) = lines.first() {
+        // A prefix of a complete line must stop before its last character, so a cut
+        // never claims to be partial while returning every byte.
         let available = if first.complete {
-            first.text.len().saturating_sub(1)
+            first
+                .text
+                .char_indices()
+                .next_back()
+                .map_or(0, |(last_char, _)| last_char)
         } else {
             first.text.len()
         };

@@ -356,3 +356,31 @@ fn metadata_that_cannot_fit_returns_nothing() {
         None
     );
 }
+
+#[test]
+fn a_cut_complete_line_never_returns_its_last_character() {
+    let partial = evidence(
+        "L1: ab",
+        /*source_bytes*/ 2,
+        /*lines*/ Some((1, 1)),
+        /*last_line_partial*/ true,
+        EvidenceExtent::Truncated,
+    );
+    let complete = evidence(
+        "L1: abé",
+        /*source_bytes*/ 4,
+        /*lines*/ Some((1, 1)),
+        /*last_line_partial*/ false,
+        EvidenceExtent::Complete,
+    );
+    assert!(response_bytes(&complete) > response_bytes(&partial) + 2);
+
+    let packed = pack(
+        "abé",
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        response_bytes(&complete) - 1,
+    );
+
+    assert_eq!(packed, Some(partial));
+}
