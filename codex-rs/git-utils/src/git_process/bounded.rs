@@ -10,6 +10,8 @@ use std::pin::Pin;
 use std::process::Output;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+#[cfg(unix)]
+use std::time::Duration;
 
 use tokio::io::AsyncRead;
 use tokio::io::ReadBuf;
@@ -42,10 +44,6 @@ impl GitCommandBudget {
             deadline,
             remaining_output: AtomicUsize::new(output_allowance),
         }
-    }
-
-    pub(crate) fn remaining_output(&self) -> usize {
-        self.remaining_output.load(Ordering::SeqCst)
     }
 }
 
@@ -101,25 +99,70 @@ async fn collect_git_output(
     let missing_pipe = || GitCommandError::Io(io::Error::other("Git output pipe was not captured"));
     let stdout = child.stdout.take().ok_or_else(missing_pipe)?;
     let stderr = child.stderr.take().ok_or_else(missing_pipe)?;
+    // On Unix the leader stays unreaped until the group is killed, so its
+    // numeric process-group ID cannot be reused by an unrelated group first.
+    #[cfg(unix)]
+    let process_id = process_tree.process_id;
+    let exited = async {
+        #[cfg(unix)]
+        let exited = wait_for_exit_without_reaping(process_id).await;
+        #[cfg(windows)]
+        let exited = child.wait().await.map(drop);
+        exited.map_err(GitCommandError::Io)
+    };
     let collect = async {
-        let (stdout, stderr, status) = tokio::try_join!(
+        tokio::try_join!(
             drain_pipe(stdout, budget, &command_remaining),
             drain_pipe(stderr, budget, &command_remaining),
-            async { child.wait().await.map_err(GitCommandError::Io) },
-        )?;
-        Ok(Output {
-            status,
-            stdout,
-            stderr,
-        })
+            exited,
+        )
     };
-    let result = timeout_at(budget.deadline, collect)
+    let collected = timeout_at(budget.deadline, collect)
         .await
         .unwrap_or(Err(GitCommandError::Timeout));
     // Read-only commands never hand surviving descendants to the caller.
     drop(process_tree);
-    drop(child);
-    result
+    let (stdout, stderr, ()) = collected?;
+    // The leader has already exited, so this only collects its status.
+    let status = child.wait().await.map_err(GitCommandError::Io)?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+/// Polls for the leader's exit without reaping it.
+#[cfg(unix)]
+async fn wait_for_exit_without_reaping(process_id: u32) -> io::Result<()> {
+    const MAX_POLL_INTERVAL: Duration = Duration::from_millis(10);
+    let mut poll_interval = Duration::from_millis(1);
+    loop {
+        let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        // SAFETY: the storage is writable, and WNOWAIT leaves the child for
+        // Tokio to reap after process-group cleanup.
+        let observed = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                process_id,
+                info.as_mut_ptr(),
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if observed == -1 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        // SAFETY: waitid succeeded and initialized the zeroed signal information.
+        if unsafe { info.assume_init().si_pid() } != 0 {
+            return Ok(());
+        }
+        tokio::time::sleep(poll_interval).await;
+        poll_interval = (poll_interval * 2).min(MAX_POLL_INTERVAL);
+    }
 }
 
 async fn drain_pipe(
@@ -138,10 +181,11 @@ async fn drain_pipe(
         if bytes.is_empty() {
             return Ok(retained);
         }
-        // Reading past an exhausted allowance distinguishes EOF from one more byte.
-        if !try_charge(command_remaining, bytes.len())
-            || !try_charge(&budget.remaining_output, bytes.len())
-        {
+        // Reading past an exhausted allowance distinguishes EOF from one more
+        // byte. Rejected bytes still consume the shared allowance.
+        let within_command = try_charge(command_remaining, bytes.len());
+        let within_budget = try_charge(&budget.remaining_output, bytes.len());
+        if !(within_command && within_budget) {
             return Err(GitCommandError::OutputLimit);
         }
         retained.extend_from_slice(bytes);

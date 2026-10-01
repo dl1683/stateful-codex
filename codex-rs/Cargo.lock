@@ -3482,6 +3482,7 @@ dependencies = [
  "codex-utils-pty",
  "futures",
  "gix",
+ "libc",
  "once_cell",
  "pretty_assertions",
  "regex",

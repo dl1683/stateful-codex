@@ -27,6 +27,9 @@ enum Parent {
     Exits,
     /// Writes 64 KiB to stdout, then waits for the descendant.
     FloodsStdoutThenWaits,
+    /// Detaches the descendant from the output pipes and exits successfully
+    /// once it is ready.
+    SucceedsWithDetachedDescendant,
 }
 
 #[cfg(unix)]
@@ -37,6 +40,9 @@ fn parent_script(parent: Parent) -> String {
         Parent::FloodsStdoutThenWaits => {
             format!("( {DESCENDANT} ) & head -c 65536 /dev/zero; wait")
         }
+        Parent::SucceedsWithDetachedDescendant => format!(
+            r#"( {DESCENDANT} ) >/dev/null 2>&1 & while [ ! -f "$READY_FILE" ]; do sleep 0.01; done"#
+        ),
     }
 }
 
@@ -51,6 +57,9 @@ fn parent_script(parent: Parent) -> String {
         Parent::FloodsStdoutThenWaits => {
             format!("{start}; [Console]::Out.Write('x' * 65536); Wait-Process -Id $child.Id")
         }
+        Parent::SucceedsWithDetachedDescendant => format!(
+            "Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', '{DESCENDANT}') -WindowStyle Hidden; while (-not (Test-Path $env:READY_FILE)) {{ Start-Sleep -Milliseconds 25 }}"
+        ),
     }
 }
 
@@ -135,6 +144,10 @@ async fn spawn_ready(
     (child, process_tree)
 }
 
+fn remaining(budget: &GitCommandBudget) -> usize {
+    budget.remaining_output.load(Ordering::SeqCst)
+}
+
 fn budget(deadline_after: Duration, output_allowance: usize) -> GitCommandBudget {
     GitCommandBudget::new(Instant::now() + deadline_after, output_allowance)
 }
@@ -162,11 +175,23 @@ async fn deadline_after_readiness_times_out_and_terminates_descendants() {
 #[tokio::test]
 async fn descendant_holding_pipes_after_parent_exit_times_out() {
     let fixture = Fixture::new();
-    let (mut child, process_tree) = spawn_ready(&fixture, Parent::Exits).await;
-    tokio::time::timeout(GENEROUS, child.wait())
-        .await
+    let (child, process_tree) = spawn_ready(&fixture, Parent::Exits).await;
+    // Observe the exit without reaping, as the runner itself does on Unix.
+    #[cfg(unix)]
+    let parent_exit = tokio::time::timeout(
+        GENEROUS,
+        wait_for_exit_without_reaping(process_tree.process_id),
+    )
+    .await;
+    #[cfg(windows)]
+    let (parent_exit, child) = {
+        let mut child = child;
+        let exit = tokio::time::timeout(GENEROUS, child.wait()).await;
+        (exit.map(|exit| exit.map(drop)), child)
+    };
+    parent_exit
         .expect("parent exits")
-        .expect("wait for parent");
+        .expect("observe parent exit");
 
     let result = collect_git_output(
         child,
@@ -201,7 +226,7 @@ async fn output_limit_fails_and_terminates_descendants() {
         matches!(result, Err(GitCommandError::OutputLimit)),
         "{result:?}"
     );
-    assert_eq!(budget.remaining_output(), 0);
+    assert_eq!(remaining(&budget), 0);
     fixture.assert_descendant_terminated().await;
 }
 
@@ -245,7 +270,7 @@ async fn stderr_beyond_pipe_capacity_before_stdout_is_drained_concurrently() {
         (output.status.success(), output.stdout, output.stderr),
         (true, b"done".to_vec(), vec![b'x'; STDERR_BYTES])
     );
-    assert_eq!(budget.remaining_output(), 1024 * 1024 - STDERR_BYTES - 4);
+    assert_eq!(remaining(&budget), 1024 * 1024 - STDERR_BYTES - 4);
 }
 
 #[tokio::test]
@@ -282,7 +307,7 @@ async fn exhausted_allowance_still_accepts_exact_output_at_eof() {
             .expect("run fixture");
 
     assert_eq!(
-        (output.stdout, output.stderr, budget.remaining_output()),
+        (output.stdout, output.stderr, remaining(&budget)),
         (b"done".to_vec(), Vec::new(), 0)
     );
 }
@@ -314,5 +339,57 @@ async fn spawn_errors_are_preserved_and_expired_budgets_do_not_spawn() {
     assert!(
         matches!(expired, Err(GitCommandError::Timeout)),
         "{expired:?}"
+    );
+}
+
+#[tokio::test]
+async fn successful_completion_terminates_detached_descendants() {
+    let fixture = Fixture::new();
+    let budget = budget(GENEROUS, /*output_allowance*/ 1024);
+
+    let output = run_git_command_with_budget(
+        &mut fixture.command(Parent::SucceedsWithDetachedDescendant),
+        &budget,
+        GitCommandOutputCap::Metadata,
+    )
+    .await
+    .expect("run fixture");
+
+    assert!(output.status.success(), "{output:?}");
+    fixture.assert_descendant_terminated().await;
+}
+
+#[tokio::test]
+async fn rejected_metadata_output_still_consumes_the_shared_allowance() {
+    const ALLOWANCE: usize = 100 * 1024;
+    #[cfg(unix)]
+    let (flood, done) = ("head -c 65537 /dev/zero", "printf done");
+    #[cfg(windows)]
+    let (flood, done) = (
+        "[Console]::Out.Write('x' * 65537)",
+        "[Console]::Out.Write('done')",
+    );
+    let budget = budget(GENEROUS, ALLOWANCE);
+
+    let rejected =
+        run_git_command_with_budget(&mut shell(flood), &budget, GitCommandOutputCap::Metadata)
+            .await;
+    let after_rejection = remaining(&budget);
+    let output = run_git_command_with_budget(
+        &mut shell(done),
+        &budget,
+        GitCommandOutputCap::SharedAllowance,
+    )
+    .await
+    .expect("run fixture");
+
+    assert!(
+        matches!(rejected, Err(GitCommandError::OutputLimit)),
+        "{rejected:?}"
+    );
+    assert!(after_rejection <= ALLOWANCE - 65537, "{after_rejection}");
+    assert_eq!(
+        (output.stdout, remaining(&budget)),
+        (b"done".to_vec(), after_rejection - 4)
     );
 }
