@@ -2815,6 +2815,70 @@ async fn recorded_deliveries_stamp_their_origin_thread_and_keep_copied_provenanc
 }
 
 #[tokio::test]
+async fn compaction_persists_the_installed_packet_and_guardian_snapshots_carry_it() {
+    let (mut session, turn_context) = make_session_and_context().await;
+    let rollout_path = attach_thread_persistence(&mut session).await;
+    session
+        .record_conversation_items(
+            &turn_context,
+            turn_context.model_info(),
+            &[assistant_message("Done: 3 files")],
+        )
+        .await;
+    let capture = session
+        .clone_history()
+        .await
+        .capture_conversation_packet(session.thread_id());
+    let (window_number, window_ids) = session.advance_auto_compact_window().await;
+    session
+        .replace_compacted_history(
+            Vec::new(),
+            /*reference_context_item*/ None,
+            /*world_state_baseline*/ None,
+            CompactedHistoryMetadata {
+                input_goal_ids: Default::default(),
+                message: String::new(),
+                window_number,
+                window_ids,
+                compaction_response_id: None,
+                compaction_model_hash: None,
+                reviewer_compaction_hash: None,
+                conversation_packet: capture,
+            },
+        )
+        .await;
+    session.flush_rollout().await.expect("rollout flushed");
+
+    let live = session
+        .clone_history()
+        .await
+        .conversation_packet()
+        .cloned()
+        .expect("installed packet");
+    let texts = live
+        .records()
+        .iter()
+        .map(codex_history::ConversationPacketRecord::text);
+    assert_eq!(texts.collect::<Vec<_>>(), vec!["Done: 3 files"]);
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let persisted = resumed.history.iter().find_map(|item| match item {
+        RolloutItem::Compacted(compacted) => compacted.conversation_packet.clone(),
+        _ => None,
+    });
+    assert_eq!(persisted.as_ref(), Some(live.as_ref()));
+    let snapshot = session.guardian_fork_history().await;
+    let Some(RolloutItem::Compacted(checkpoint)) = snapshot.first() else {
+        panic!("guardian snapshot starts with a checkpoint");
+    };
+    assert_eq!(checkpoint.conversation_packet.as_ref(), Some(live.as_ref()));
+}
+
+#[tokio::test]
 async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
     let (mut session, turn_context) = make_session_and_context().await;
     let rollout_path = attach_thread_persistence(&mut session).await;
@@ -5959,6 +6023,7 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
+                conversation_packet: crate::context_manager::ConversationPacketUpdate::CarryForward,
             },
         ),
     ));
@@ -6093,6 +6158,7 @@ async fn mcp_attribution_checkpoints_cover_batch_prefixes_compaction_and_restore
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
+                conversation_packet: crate::context_manager::ConversationPacketUpdate::CarryForward,
             },
         )
         .await;
@@ -6243,6 +6309,8 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
                     compaction_response_id: None,
                     compaction_model_hash: None,
                     reviewer_compaction_hash: None,
+                    conversation_packet:
+                        crate::context_manager::ConversationPacketUpdate::CarryForward,
                 },
             )
             .await;

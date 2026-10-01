@@ -9,8 +9,12 @@
 //! Oversized instructions keep an incomplete excerpt for bounded root review, including
 //! sources recovered from legacy Guardian checkpoints before their raw history is dropped.
 
+#[path = "history_conversation_packet.rs"]
+mod conversation_packet;
 #[path = "history_user_authorization.rs"]
 mod user_authorization;
+
+pub(crate) use conversation_packet::ConversationPacketUpdate;
 
 use crate::context::ContextualUserFragment;
 use crate::context::ModelSwitchInstructions;
@@ -122,6 +126,8 @@ pub(crate) struct ContextManager {
     /// World-state comparison checkpoint. After compaction this may contain only
     /// extension metadata, with model-visible context still awaiting reinjection.
     world_state_baseline: Option<WorldStateSnapshot>,
+    /// Original deliveries installed by the latest capturing compaction checkpoint.
+    conversation_packet: Option<Arc<codex_history::ConversationPacket>>,
 }
 
 struct SharedConversationHistory {
@@ -246,6 +252,7 @@ impl ContextManager {
             ),
             reference_context_item: None,
             world_state_baseline: None,
+            conversation_packet: None,
         }
     }
 
@@ -668,6 +675,7 @@ impl ContextManager {
 
     pub(crate) fn replace_annotated(&mut self, items: Vec<ResponseItemEnvelope>) {
         self.retained_context = Arc::default();
+        self.update_conversation_packet(ConversationPacketUpdate::Clear);
         self.user_message_revision = self.user_message_revision.saturating_add(1);
         if let Some(review_history) = &mut self.review_history {
             review_history.reset(

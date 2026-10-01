@@ -294,6 +294,7 @@ async fn run_remote_compact_task_inner_impl(
     };
     let RemoteCompactV2Attempt {
         input_goal_ids,
+        conversation_packet,
         trace_input_history,
         prompt_input,
         prompt_input_metadata,
@@ -369,6 +370,7 @@ async fn run_remote_compact_task_inner_impl(
             compaction_response_id: Some(compaction_response_id),
             compaction_model_hash: compaction_turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash,
+            conversation_packet,
         },
     )
     .await;

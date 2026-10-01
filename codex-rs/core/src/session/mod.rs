@@ -4098,6 +4098,10 @@ impl Session {
                     .cloned(),
             );
             let replacement_history = items.clone();
+            // Checked before replacement, which may itself advance the reset generation.
+            let conversation_packet = state
+                .history
+                .update_conversation_packet(metadata.conversation_packet);
             state.replace_annotated_history(
                 items,
                 reference_context_item.clone(),
@@ -4130,7 +4134,7 @@ impl Session {
                     last_started_turn_id: state.last_started_turn_id.clone(),
                     previous_turn_settings: state.previous_turn_settings(),
                 }),
-                conversation_packet: None,
+                conversation_packet: conversation_packet.as_deref().cloned(),
             }
         };
 
@@ -4596,6 +4600,7 @@ impl Session {
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
+                conversation_packet: crate::context_manager::ConversationPacketUpdate::CarryForward,
             },
         )
         .await;

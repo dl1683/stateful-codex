@@ -25,7 +25,10 @@ impl Session {
             compaction_response_id: None,
             latest_token_usage_record: state.latest_token_usage_record.clone(),
             resume_metadata: None,
-            conversation_packet: None,
+            // The reviewer's own live packet, never the primary agent's.
+            conversation_packet: history
+                .conversation_packet()
+                .map(|packet| (**packet).clone()),
         })];
         if let Some(world_state) = history.world_state_checkpoint() {
             items.push(RolloutItem::WorldState(world_state));

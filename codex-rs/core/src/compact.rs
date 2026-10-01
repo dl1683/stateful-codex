@@ -9,6 +9,7 @@ use crate::client_common::ResponseEvent;
 use crate::context::CompactionSummary;
 use crate::context::ContextualUserFragment;
 use crate::context::world_state::WorldState;
+use crate::context_manager::ConversationPacketUpdate;
 use crate::hook_runtime::PostCompactHookOutcome;
 use crate::hook_runtime::PreCompactHookOutcome;
 use crate::hook_runtime::run_post_compact_hooks;
@@ -86,6 +87,8 @@ pub(crate) struct CompactedHistoryMetadata {
     pub(crate) compaction_response_id: Option<String>,
     pub(crate) compaction_model_hash: Option<String>,
     pub(crate) reviewer_compaction_hash: Option<String>,
+    /// Explicit, so a checkpoint that does not capture cannot silently erase the live packet.
+    pub(crate) conversation_packet: ConversationPacketUpdate,
 }
 
 pub(crate) async fn build_compaction_initial_context(
@@ -393,6 +396,7 @@ async fn run_compact_task_inner_impl(
             compaction_response_id: Some(compaction_response.response_id),
             compaction_model_hash: turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash: None,
+            conversation_packet: ConversationPacketUpdate::CarryForward,
         },
     )
     .await;
