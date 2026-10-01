@@ -29,6 +29,11 @@ pub use conversation_packet::MAX_PACKET_CANDIDATE_BYTES;
 pub use conversation_packet::MAX_PACKET_CANDIDATES;
 pub use conversation_packet::pack_conversation_packet;
 
+mod conversation_packet_source;
+pub use conversation_packet_source::ConversationPacketSource;
+pub use conversation_packet_source::HistoryContinuity;
+pub use conversation_packet_source::assemble_conversation_packet;
+
 use std::borrow::Borrow;
 use std::ops::Deref;
 use std::ops::DerefMut;
