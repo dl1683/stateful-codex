@@ -1,7 +1,8 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
-import { renderWorkspace } from "./workspace-view.mjs";
+import { createDraftTracker, createWorkspaceDom } from "./workspace-dom.mjs";
+import { requestKey } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
 const threadId = sessionStorage.getItem("stateful-thread");
@@ -29,7 +30,6 @@ const state = {
   contextHits: [],
   evidence: null,
   pendingRequests: [],
-  liveText: "",
   selectedNodeId: null,
   loading: true,
   busyAction: null,
@@ -39,8 +39,11 @@ const state = {
 
 let refreshTimer;
 const refresh = createRefreshGate(refreshWorkspace);
+const view = createWorkspaceDom(app);
+const drafts = createDraftTracker(app);
 
 async function boot() {
+  render();
   subscribe(handleEvent, { threadId, projectId });
   try {
     await ensureRun();
@@ -63,7 +66,7 @@ async function ensureRun() {
     state.busyAction = status.initialized
       ? "Retrying the incomplete project index"
       : "Indexing the selected project";
-    render();
+    render(["notices"]);
     await rpc("contextMap/refresh", { projectId });
   }
   if (runResponse.run) {
@@ -88,7 +91,7 @@ async function ensureRun() {
       sessionStorage.getItem("stateful-initial-turn-sent") !== state.run.id
     ) {
       state.busyAction = "Retrying the first turn";
-      render();
+      render(["notices"]);
       await sendInitialTurn();
     }
     return;
@@ -114,14 +117,14 @@ async function ensureRun() {
   state.run = started.run;
   sessionStorage.setItem("stateful-created-run-id", state.run.id);
   state.busyAction = "Starting the first turn";
-  render();
+  render(["notices"]);
   await sendInitialTurn();
 }
 
 async function refreshWorkspace() {
   state.loading = !state.project;
   state.error = null;
-  render();
+  render(["notices"]);
   const [
     project,
     run,
@@ -199,13 +202,17 @@ async function readHierarchy() {
   return nodes;
 }
 
-function render() {
-  app.innerHTML = renderWorkspace(state);
+// Updates the named slots (all by default); before the first mount it renders the loading
+// screen or mounts the workspace.
+function render(sections) {
+  view.update(state, sections);
 }
 
 function handleEvent(message) {
   const effect = applyWorkspaceEvent(state, message);
-  if (effect.render) render();
+  if (effect.turnStarted) view.startTurn(effect.turnStarted);
+  if (effect.delta) view.pushDelta(effect.delta);
+  if (effect.sections.length) render(effect.sections);
   if (effect.refresh) {
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => refresh().catch(fail), 180);
@@ -217,24 +224,24 @@ app.addEventListener("submit", async (event) => {
   const form = event.target;
   try {
     if (form.id === "steering-form") {
-      const input = new FormData(form).get("steering")?.toString().trim();
-      if (!input) return;
-      await action("Applying steering", () =>
-        rpc("steering/submit", {
-          runId: state.run.id,
-          input,
-          affectedObligationIds: state.obligations.at(-1)
-            ? [state.obligations.at(-1).id]
-            : [],
-          idempotencyKey: crypto.randomUUID(),
-        }),
+      await drafts.submit(form.querySelector('[name="steering"]'), (input) =>
+        action("Applying steering", () =>
+          rpc("steering/submit", {
+            runId: state.run.id,
+            input,
+            affectedObligationIds: state.obligations.at(-1)
+              ? [state.obligations.at(-1).id]
+              : [],
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        ),
       );
     } else if (form.id === "message-form") {
-      const input = new FormData(form).get("message")?.toString().trim();
-      if (!input) return;
-      await action("Sending instruction", () => sendTurn(input));
+      await drafts.submit(form.querySelector('[name="message"]'), (input) =>
+        action("Sending instruction", () => sendTurn(input)),
+      );
     } else if (form.id === "mode-form") {
-      const mode = new FormData(form).get("mode")?.toString();
+      const mode = form.querySelector('[name="mode"]').value;
       if (!mode || mode === state.run.mode) return;
       const response = await action("Changing workflow mode", () =>
         rpc("statefulRun/setMode", {
@@ -248,19 +255,19 @@ app.addEventListener("submit", async (event) => {
       sessionStorage.setItem("stateful-mode", selectedMode);
       state.notice = `Mode changed to ${mode}.`;
       await refresh();
-    } else if (form.dataset.requestId) {
+    } else if (form.dataset.requestKey) {
       await answerUserRequest(form);
     } else if (form.id === "context-search") {
-      const text = new FormData(form).get("query")?.toString().trim();
+      // The query stays in the field so it continues to describe the results below it.
+      const text = form.querySelector('[name="query"]').value.trim();
       if (!text) return;
       state.contextHits = (
         await action("Searching source map", () =>
           rpc("contextMap/query", { projectId, text, limit: 20 }),
         )
       ).data;
-      render();
+      render(["routing-results"]);
     }
-    form.reset();
   } catch (error) {
     fail(error);
   }
@@ -269,6 +276,7 @@ app.addEventListener("submit", async (event) => {
 app.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
+  const requestCard = button.closest("[data-request-key]");
   try {
     switch (button.dataset.action) {
       case "refresh":
@@ -307,7 +315,7 @@ app.addEventListener("click", async (event) => {
             maxBytes: 32768,
           }),
         );
-        render();
+        render(["routing-results"]);
         break;
       case "confirm-knowledge":
         await action("Confirming project understanding", () =>
@@ -324,11 +332,14 @@ app.addEventListener("click", async (event) => {
           state.selectedNodeId === button.dataset.nodeId
             ? null
             : button.dataset.nodeId;
-        render();
+        view.selectNode(state);
         break;
       case "approve":
       case "decline":
-        await answerApproval(button.dataset.requestId, button.dataset.action);
+        await answerApproval(
+          requestCard?.dataset.requestKey,
+          button.dataset.action,
+        );
         break;
     }
   } catch (error) {
@@ -339,12 +350,12 @@ app.addEventListener("click", async (event) => {
 async function action(label, operation) {
   state.busyAction = label;
   state.error = null;
-  render();
+  render(["notices"]);
   try {
     return await operation();
   } finally {
     state.busyAction = null;
-    render();
+    render(["notices"]);
   }
 }
 
@@ -374,9 +385,9 @@ async function controlRun(control) {
   );
 }
 
-async function answerApproval(requestId, actionName) {
+async function answerApproval(key, actionName) {
   const request = state.pendingRequests.find(
-    (item) => String(item.id) === requestId,
+    (item) => requestKey(item.id) === key,
   );
   if (!request) return;
   await reply(threadId, {
@@ -386,12 +397,12 @@ async function answerApproval(requestId, actionName) {
   state.pendingRequests = state.pendingRequests.filter(
     (item) => item.id !== request.id,
   );
-  render();
+  render(["requests"]);
 }
 
 async function answerUserRequest(form) {
   const request = state.pendingRequests.find(
-    (item) => String(item.id) === form.dataset.requestId,
+    (item) => requestKey(item.id) === form.dataset.requestKey,
   );
   if (!request) return;
   const data = new FormData(form);
@@ -405,14 +416,14 @@ async function answerUserRequest(form) {
   state.pendingRequests = state.pendingRequests.filter(
     (item) => item.id !== request.id,
   );
-  render();
+  render(["requests"]);
 }
 
 function fail(error) {
   state.loading = false;
   state.busyAction = null;
   state.error = error.message;
-  render();
+  render(["notices"]);
 }
 
 boot();

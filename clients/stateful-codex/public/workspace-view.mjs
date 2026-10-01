@@ -11,41 +11,75 @@ const packetSections = [
   ["requestedJudgment", "Your judgment could help"],
 ];
 
+// Runtime updates replace one slot at a time (see workspace-dom.mjs). Forms live in slots whose
+// markup changes only when the form itself must change, so drafts and focus survive refreshes.
+export const WORKSPACE_SLOTS = {
+  header: renderHeader,
+  notices: renderNotices,
+  intelligence: renderIntelligence,
+  hierarchy: renderHierarchy,
+  "routing-results": renderRoutingResults,
+  obligation: (state) => renderObligation(state.obligations.at(-1)),
+  strategy: renderStrategy,
+  result: renderResult,
+  activity: (state) => renderActivity(state.activity),
+  instruction: renderInstructionForm,
+  "controls-state": renderControlsState,
+  "mode-form": renderModeForm,
+  "controls-detail": renderControlsDetail,
+  measured: (state) => renderMeasuredWork(state.measurementSummary),
+  "steering-form": renderSteeringForm,
+  "steering-list": renderSteeringList,
+  findings: renderFindings,
+};
+
 export function renderWorkspace(state) {
-  if (state.loading && !state.project) return renderLoading(state);
-  const latestObligation = state.obligations.at(-1);
+  return renderWorkspaceShell(state, (name) => WORKSPACE_SLOTS[name](state));
+}
+
+// slotHtml(name) supplies each slot's content, letting the runtime reuse memoized slots.
+export function renderWorkspaceShell(state, slotHtml) {
+  if (isLoadingScreen(state)) return renderLoading(state);
+  const slot = (name) =>
+    `<div class="slot" data-slot="${name}">${slotHtml(name)}</div>`;
   const html = `
     <main class="workspace-shell">
-      ${renderHeader(state)}
-      ${state.error ? `<p class="banner error">${escapeHtml(state.error)}</p>` : ""}
-      ${state.notice ? `<p class="banner">${escapeHtml(state.notice)}</p>` : ""}
-      ${state.busyAction ? `<p class="working"><span></span>${escapeHtml(state.busyAction)}</p>` : ""}
+      ${slot("header")}
+      <div class="notices" data-slot="notices" role="status">${slotHtml("notices")}</div>
       <div class="workspace-grid">
         <aside class="stack-panel">
-          ${renderIntelligence(state)}
-          ${renderHierarchy(state)}
-          ${renderSourceRouting(state)}
+          ${slot("intelligence")}
+          ${slot("hierarchy")}
+          <section class="workspace-panel"><div class="panel-heading"><h2>Source routing</h2></div><form id="context-search" class="inline-form"><input name="query" aria-label="Search context map" placeholder="Find likely source material"/><button class="secondary">Search</button></form>${slot("routing-results")}</section>
         </aside>
         <section class="stack-panel main-work">
-          ${renderObligation(latestObligation)}
-          ${renderStrategy(state)}
-          ${renderResult(state)}
+          ${slot("obligation")}
+          ${slot("strategy")}
+          ${slot("result")}
           ${renderLive(state)}
-          ${renderActivity(state.activity)}
-          ${renderInstructionForm(state)}
+          ${slot("activity")}
+          ${slot("instruction")}
         </section>
         <aside class="stack-panel controls-panel">
-          ${renderControls(state)}
-          ${renderMeasuredWork(state.measurementSummary)}
-          ${renderSteering(state)}
+          <section class="workspace-panel"><div class="panel-heading"><h2>Run controls</h2></div>${slot("controls-state")}${slot("mode-form")}${slot("controls-detail")}</section>
+          ${slot("measured")}
+          <section class="workspace-panel"><div class="panel-heading"><h2>Steer the work</h2></div>${slot("steering-form")}${slot("steering-list")}</section>
         </aside>
         <section class="findings-work">
-          ${renderFindings(state)}
+          ${slot("findings")}
         </section>
       </div>
       ${renderRequests(state.pendingRequests)}
     </main>`;
   return html.replace(/[ \t]+\n/g, "\n");
+}
+
+export function isLoadingScreen(state) {
+  return Boolean(state.loading && !state.project);
+}
+
+function renderNotices(state) {
+  return `${state.error ? `<p class="banner error">${escapeHtml(state.error)}</p>` : ""}${state.notice ? `<p class="banner">${escapeHtml(state.notice)}</p>` : ""}${state.busyAction ? `<p class="working"><span></span>${escapeHtml(state.busyAction)}</p>` : ""}`;
 }
 
 function renderLoading(state) {
@@ -114,7 +148,9 @@ function renderHierarchy(state) {
   const children = new Map();
   for (const node of state.hierarchy) {
     const key = node.parentId ?? "root";
-    children.set(key, [...(children.get(key) ?? []), node]);
+    let bucket = children.get(key);
+    if (!bucket) children.set(key, (bucket = []));
+    bucket.push(node);
   }
   const roots = children.get("root") ?? [];
   const rows = roots.flatMap((node) => renderNode(node, children, 0, state));
@@ -139,13 +175,8 @@ function renderNode(node, children, depth, state) {
   ];
 }
 
-function renderSourceRouting(state) {
-  return panel(
-    "Source routing",
-    `<form id="context-search" class="inline-form"><input name="query" aria-label="Search context map" placeholder="Find likely source material"/><button class="secondary">Search</button></form>
-    ${state.contextHits.length ? state.contextHits.map(renderContextHit).join("") : `<p class="microcopy">Search descriptions and routing terms, then open exact source evidence.</p>`}
-    ${state.evidence ? renderEvidence(state.evidence) : ""}`,
-  );
+function renderRoutingResults(state) {
+  return `${state.contextHits.length ? state.contextHits.map(renderContextHit).join("") : `<p class="microcopy">Search descriptions and routing terms, then open exact source evidence.</p>`}${state.evidence ? renderEvidence(state.evidence) : ""}`;
 }
 
 function renderContextHit(hit) {
@@ -198,13 +229,12 @@ function renderResult(state) {
   );
 }
 
+export const LIVE_TAIL_CHARACTERS = 64 * 1024;
+
+// The runtime streams into this panel's text nodes directly; the markup is rendered once.
 function renderLive(state) {
-  return state.liveText
-    ? panel(
-        "Live response",
-        `<p class="live-copy">${escapeHtml(state.liveText)}</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p>`,
-      )
-    : "";
+  const text = state.liveText ?? "";
+  return `<section class="workspace-panel" data-live${text ? "" : " hidden"}><div class="panel-heading"><h2>Live response</h2></div><p class="live-copy" data-live-copy>${text ? `<span data-live-item="">${escapeHtml(text)}</span>` : ""}</p><p class="microcopy" data-live-truncated hidden>Showing the latest ${LIVE_TAIL_CHARACTERS / 1024} KiB of streamed text. The complete message is kept in the thread's recorded history.</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p></section>`;
 }
 
 function renderActivity(items) {
@@ -219,10 +249,9 @@ function normalizeThreadItem(entry) {
   return entry?.item ? { ...entry.item, turnId: entry.turnId } : entry;
 }
 
-function renderControls(state) {
+function renderControlsState(state) {
   const run = state.run;
-  if (!run) return panel("Run controls", empty("Preparing the run."));
-  const terminal = isTerminalRun(run);
+  if (!run) return empty("Preparing the run.");
   const buttons = [];
   if (run.status === "running") buttons.push(control("pause", "Pause"));
   if (run.status === "paused" || run.status === "pending") {
@@ -233,10 +262,18 @@ function renderControls(state) {
   if (["pending", "running", "paused", "blocked"].includes(run.status)) {
     buttons.push(control("cancel", "Cancel"));
   }
-  return panel(
-    "Run controls",
-    `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div>${terminal ? `<p class="microcopy">This outcome is closed. Its mode and record are preserved.</p>${newOutcomeLink()}` : `<form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(run.mode)}</select></label><button class="secondary">Change</button></form>`}<dl><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl>${renderRecovery(run, state.recovery)}${terminal ? "" : `<button class="secondary full" data-action="maintain">Maintain project intelligence</button>`}`,
-  );
+  return `<p class="goal">${escapeHtml(run.goal)}</p><div class="control-row">${buttons.join("")}</div>${isTerminalRun(run) ? `<p class="microcopy">This outcome is closed. Its mode and record are preserved.</p>${newOutcomeLink()}` : ""}`;
+}
+
+function renderModeForm(state) {
+  if (!state.run || isTerminalRun(state.run)) return "";
+  return `<form id="mode-form" class="mode-form"><label>Workflow mode<select name="mode">${modeOptions(state.run.mode)}</select></label><button class="secondary">Change</button></form>`;
+}
+
+function renderControlsDetail(state) {
+  const run = state.run;
+  if (!run) return "";
+  return `<dl><div><dt>Elapsed budget</dt><dd>${formatDuration(run.budget.maxElapsedSeconds)}</dd></div><div><dt>Run revision</dt><dd>${run.revision}</dd></div></dl>${renderRecovery(run, state.recovery)}${isTerminalRun(run) ? "" : `<button class="secondary full" data-action="maintain">Maintain project intelligence</button>`}`;
 }
 
 function renderMeasuredWork(summary) {
@@ -269,15 +306,17 @@ function renderMeasuredWork(summary) {
   );
 }
 
-function renderSteering(state) {
-  const items = state.steering.slice(-5).reverse();
-  const input = isTerminalRun(state.run)
+function renderSteeringForm(state) {
+  return isTerminalRun(state.run)
     ? `<p class="microcopy">Steering is closed with this outcome. Start another outcome to continue from the same project intelligence.</p>${newOutcomeLink()}`
     : `<form id="steering-form" class="stack"><textarea name="steering" placeholder="Follow this fact, connect these findings, or change direction…" required></textarea><button class="primary">Submit steering</button></form>`;
-  return panel(
-    "Steer the work",
-    `${input}${items.length ? `<div class="steering-list">${items.map((item) => `<article><p>${escapeHtml(item.input)}</p><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}</article>`).join("")}</div>` : `<p class="microcopy">Your exact instruction and its application state remain visible.</p>`}`,
-  );
+}
+
+function renderSteeringList(state) {
+  const items = state.steering.slice(-5).reverse();
+  return items.length
+    ? `<div class="steering-list">${items.map((item) => `<article><p>${escapeHtml(item.input)}</p><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${item.reason ? `<small>${escapeHtml(item.reason)}</small>` : ""}</article>`).join("")}</div>`
+    : `<p class="microcopy">Your exact instruction and its application state remain visible.</p>`;
 }
 
 function renderFindings(state) {
@@ -339,13 +378,18 @@ function newOutcomeLink() {
 }
 
 function renderRequests(requests) {
-  if (!requests.length) return "";
-  return `<aside class="request-drawer"><h2>Agent needs input</h2>${requests.map(renderRequest).join("")}</aside>`;
+  return `<aside class="request-drawer" data-requests${requests.length ? "" : " hidden"}><h2>Agent needs input</h2><div data-request-list>${requests.map(renderRequestCard).join("")}</div></aside>`;
 }
 
-function renderRequest(request) {
+// Server request IDs may be numbers or strings; the key keeps 11 and "11" distinct.
+export function requestKey(id) {
+  return JSON.stringify(id);
+}
+
+export function renderRequestCard(request) {
+  const key = escapeHtml(requestKey(request.id));
   if (request.method === "item/tool/requestUserInput") {
-    return `<form class="request-card stack" data-request-id="${escapeHtml(request.id)}">${request.params.questions.map(renderQuestion).join("")}<button class="primary">Reply</button></form>`;
+    return `<form class="request-card stack" data-request-key="${key}">${request.params.questions.map(renderQuestion).join("")}<button class="primary">Reply</button></form>`;
   }
   if (
     [
@@ -357,9 +401,9 @@ function renderRequest(request) {
       request.params.command ??
       request.params.reason ??
       "The agent requests approval to continue.";
-    return `<article class="request-card"><p>${escapeHtml(description)}</p><div class="control-row"><button class="primary" data-action="approve" data-request-id="${escapeHtml(request.id)}">Approve</button><button class="secondary" data-action="decline" data-request-id="${escapeHtml(request.id)}">Decline</button></div></article>`;
+    return `<article class="request-card" data-request-key="${key}"><p>${escapeHtml(description)}</p><div class="control-row"><button class="primary" data-action="approve">Approve</button><button class="secondary" data-action="decline">Decline</button></div></article>`;
   }
-  return `<article class="request-card"><strong>${escapeHtml(request.method)}</strong><p>This request type is visible but must be handled by a compatible client.</p></article>`;
+  return `<article class="request-card" data-request-key="${key}"><strong>${escapeHtml(request.method)}</strong><p>This request type is visible but must be handled by a compatible client.</p></article>`;
 }
 
 function renderQuestion(question) {

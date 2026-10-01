@@ -474,6 +474,15 @@ textarea {
 }
 .strategy-current,
 .result-copy,
+.slot {
+  display: contents;
+}
+.live-copy [data-live-item] {
+  display: block;
+}
+.live-copy [data-live-item] + [data-live-item] {
+  margin-top: 0.8em;
+}
 .live-copy,
 .goal {
   margin: 0;
