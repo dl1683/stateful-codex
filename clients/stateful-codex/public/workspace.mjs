@@ -101,7 +101,7 @@ async function ensureRun() {
   state.recovery = runResponse.recovery;
   state.run = runResponse.run;
   // A follow-up whose start or first turn was never confirmed is finished before anything else.
-  if (readPendingFollowUp(sessionStorage)) {
+  if (readPendingFollowUp(sessionStorage, { projectId, threadId })) {
     state.busyAction = "Finishing the follow-up";
     render(["notices"]);
     await resumePendingFollowUp({ state, rpc, storage: sessionStorage });
@@ -515,6 +515,14 @@ async function continueThread(goal, mode) {
       mode,
       onRunChanged: () => render(),
     });
+  } catch (error) {
+    // A refused follow-up's text moves to the running workspace's instruction box.
+    if (error.refusedText) {
+      await refresh();
+      const box = app.querySelector('#message-form [name="message"]');
+      if (box && !box.value.trim()) box.value = error.refusedText;
+    }
+    throw error;
   } finally {
     if (state.run) selectedMode = state.run.mode;
     await refresh();

@@ -1,4 +1,5 @@
 import { rpc, subscribe } from "./rpc.mjs";
+import { clearFollowUpRecords } from "./follow-up.mjs";
 import { createSetupForm } from "./setup-form.mjs";
 
 const state = {
@@ -92,6 +93,7 @@ async function openWorkspace() {
   sessionStorage.removeItem("stateful-created-run-id");
   sessionStorage.removeItem("stateful-initial-turn-sent");
   sessionStorage.removeItem("stateful-run-key");
+  clearFollowUpRecords(sessionStorage);
   sessionStorage.setItem(
     "stateful-max-continuations",
     String(state.maxContinuations),
