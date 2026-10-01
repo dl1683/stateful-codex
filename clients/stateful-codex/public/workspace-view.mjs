@@ -52,6 +52,7 @@ export function renderWorkspaceShell(state, slotHtml) {
     `<div class="slot" data-slot="${name}">${slotHtml(name)}</div>`;
   const html = `
     <main class="workspace-shell">
+      ${renderPendingBar(state)}
       ${slot("header")}
       <div class="notices" data-slot="notices" role="status">${slotHtml("notices")}</div>
       <div class="workspace-grid">
@@ -527,6 +528,20 @@ function isTerminalRun(run) {
 
 function newOutcomeLink() {
   return `<a class="text-button" href="/">Start another outcome</a>`;
+}
+
+// The full request cards stay in the work column; this slim bar stays in view wherever the
+// person has scrolled, announces waiting requests, and takes them to the cards.
+function renderPendingBar(state) {
+  const count = state.pendingRequests.length;
+  return `<div class="pending-bar" data-pending-bar role="status"${count ? "" : " hidden"}><span data-pending-count>${pendingSummary(count)}</span><button type="button" class="secondary" data-action="show-requests">Review</button></div>`;
+}
+
+export function pendingSummary(count) {
+  if (!count) return "";
+  return count === 1
+    ? "The agent is waiting for your input."
+    : `The agent is waiting for your input on ${count} requests.`;
 }
 
 // Pending requests sit at the top of the main work column, never over the page, so the

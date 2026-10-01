@@ -431,3 +431,29 @@ test("filtering findings re-renders only the list and keeps the filter field", (
   assert.equal(filter.value, "appendix");
   assert.equal($('[data-slot="findings"]').querySelectorAll("article").length, 1);
 });
+
+test("a slim pending bar announces waiting requests and takes the keyboard to them", () => {
+  const { state, view, document, $ } = mountWorkspace();
+  const bar = $("[data-pending-bar]");
+  assert.equal(bar.hidden, false);
+  assert.equal($("[data-pending-count]").textContent, "The agent is waiting for your input.");
+
+  state.pendingRequests = [
+    ...state.pendingRequests,
+    { id: 8, method: "item/commandExecution/requestApproval", params: { command: "pytest" } },
+  ];
+  view.update(state, ["requests"]);
+  assertSameNode($("[data-pending-bar]"), bar);
+  assert.equal(
+    $("[data-pending-count]").textContent,
+    "The agent is waiting for your input on 2 requests.",
+  );
+
+  view.showRequests();
+  assertSameNode(document.activeElement, $('[data-request-key] [name="appendix"]'));
+
+  state.pendingRequests = [];
+  view.update(state, ["requests"]);
+  assert.equal(bar.hidden, true);
+  assert.equal($("[data-pending-count]").textContent, "");
+});

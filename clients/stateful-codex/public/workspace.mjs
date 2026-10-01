@@ -397,6 +397,9 @@ app.addEventListener("click", async (event) => {
             : button.dataset.nodeId;
         view.selectNode(state);
         break;
+      case "show-requests":
+        view.showRequests();
+        break;
       case "approve":
       case "decline":
         await answerApproval(

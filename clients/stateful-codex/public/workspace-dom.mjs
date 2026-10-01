@@ -3,6 +3,7 @@ import {
   LIVE_TAIL_CHARACTERS,
   WORKSPACE_SLOTS,
   isLoadingScreen,
+  pendingSummary,
   renderRequestCard,
   renderWorkspace,
   renderWorkspaceShell,
@@ -158,6 +159,19 @@ export function createWorkspaceDom(
       if (current !== card) moveKeepingFocus(list, card, current ?? null);
     });
     drawer.hidden = wanted.length === 0;
+    const bar = root.querySelector("[data-pending-bar]");
+    const summary = pendingSummary(wanted.length);
+    const count = bar.querySelector("[data-pending-count]");
+    if (count.textContent !== summary) count.textContent = summary;
+    bar.hidden = wanted.length === 0;
+  }
+
+  // Bring the request cards into view and put the keyboard on the first one.
+  function showRequests() {
+    const drawer = root.querySelector("[data-requests]");
+    if (drawer.hidden) return;
+    drawer.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    drawer.querySelector("select, input, textarea, button:not([disabled])")?.focus({ preventScroll: true });
   }
 
   function selectNode(state) {
@@ -337,7 +351,7 @@ export function createWorkspaceDom(
     return container.children[0];
   }
 
-  return { update, selectNode, startTurn, pushDelta, completeMessage, drafts };
+  return { update, selectNode, startTurn, pushDelta, completeMessage, showRequests, drafts };
 }
 
 const TEXT_NODE = 3;

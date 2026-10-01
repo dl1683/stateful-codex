@@ -689,10 +689,29 @@ dd {
 }
 /* In the main work column, sticky only within that column: it can never cover the steering
    and control panels in the neighbouring column. */
+/* Shown only while requests wait; slim, so it never hides a panel for long. */
+.pending-bar {
+  position: sticky;
+  z-index: 6;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  border: 1px solid var(--accent);
+  border-radius: 0 0 12px 12px;
+  background: var(--panel-strong);
+  padding: 7px 12px;
+  font-size: 0.85rem;
+}
+.pending-bar[hidden] {
+  display: none;
+}
 .request-drawer {
   position: sticky;
   z-index: 5;
-  top: 12px;
+  top: 64px;
   min-width: 0;
   max-height: min(70vh, 640px);
   overflow: auto;
