@@ -31,6 +31,29 @@ use wiremock::MockBuilder;
 use wiremock::MockServer;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
+
+/// Host recall policy appended to the request copy of base instructions.
+pub const RECALL_POLICY_SEPARATOR: &str = "\n\n<conversation_recall_policy>";
+pub const RECALL_POLICY_END: &str = "</conversation_recall_policy>";
+const RECALL_POLICY_START: &str = "<conversation_recall_policy>";
+
+/// Instructions without the recall policy, asserting that it closes them exactly once.
+pub fn strip_recall_policy(instructions: &str) -> &str {
+    let (base, policy) = instructions
+        .rsplit_once(RECALL_POLICY_SEPARATOR)
+        .or_else(|| {
+            instructions
+                .starts_with(RECALL_POLICY_START)
+                .then_some(("", instructions))
+        })
+        .unwrap_or_else(|| panic!("request lacks the recall policy: {instructions}"));
+    assert!(
+        policy.ends_with(RECALL_POLICY_END)
+            && instructions.matches(RECALL_POLICY_START).count() == 1,
+        "the recall policy must close the instructions exactly once: {instructions}"
+    );
+    base
+}
 use wiremock::http::HeaderName;
 use wiremock::http::HeaderValue;
 use wiremock::matchers::method;
@@ -226,11 +249,9 @@ impl ResponsesRequest {
         namespace_child_tool(&self.body_json(), namespace, tool_name).cloned()
     }
 
+    /// Base instructions without the host recall policy, which every request carries once.
     pub fn instructions_text(&self) -> String {
-        self.body_json()["instructions"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        strip_recall_policy(self.body_json()["instructions"].as_str().unwrap()).to_string()
     }
 
     /// Returns all `input_text` spans from `message` inputs for the provided role.

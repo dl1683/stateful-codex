@@ -1489,6 +1489,15 @@ impl Session {
 
     /// Render the request copy without changing instructions persisted or inherited by forks.
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
+        let instructions = self.prompt_base_instructions_before_policy().await;
+        BaseInstructions {
+            text: crate::context::ConversationRecallPolicy::decorate(&instructions.text),
+            ..instructions
+        }
+    }
+
+    /// The request copy before host policy decoration, for comparing with model instructions.
+    pub(crate) async fn prompt_base_instructions_before_policy(&self) -> BaseInstructions {
         let config = self.get_config().await;
         let instructions = self.get_base_instructions().await;
         if !config.update_plan_enabled
@@ -1787,7 +1796,7 @@ impl Session {
             AutoCompactTokenLimitScope::BodyAfterPrefix
         ) {
             let history = self.clone_history().await;
-            let base_instructions = self.get_base_instructions().await;
+            let base_instructions = self.get_prompt_base_instructions().await;
             history.estimate_token_count_with_base_instructions(&base_instructions)
         } else {
             None
@@ -4810,7 +4819,7 @@ impl Session {
 
     pub(crate) async fn recompute_token_usage(&self, turn_context: &TurnContext) {
         let history = self.clone_history().await;
-        let base_instructions = self.get_base_instructions().await;
+        let base_instructions = self.get_prompt_base_instructions().await;
         let Some(estimated_total_tokens) =
             history.estimate_token_count_with_base_instructions(&base_instructions)
         else {

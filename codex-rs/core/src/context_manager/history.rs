@@ -637,13 +637,17 @@ impl ContextManager {
     // This is a coarse lower bound, not a tokenizer-accurate count.
     pub(crate) fn estimate_token_count(&self, turn_context: &TurnContext) -> Option<i64> {
         let model_info = &turn_context.model_info();
+        // Requests carry the recall policy with the instructions; count it exactly once here.
         let base_instructions = BaseInstructions {
-            text: render_model_instructions(model_info),
+            text: crate::context::ConversationRecallPolicy::decorate(&render_model_instructions(
+                model_info,
+            )),
             provenance: None,
         };
         self.estimate_token_count_with_base_instructions(&base_instructions)
     }
 
+    /// `base_instructions` must be the request copy, which already includes host policy.
     pub(crate) fn estimate_token_count_with_base_instructions(
         &self,
         base_instructions: &BaseInstructions,

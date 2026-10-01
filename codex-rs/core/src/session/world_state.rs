@@ -64,7 +64,8 @@ impl Session {
         } else {
             model_instructions
         };
-        let base_instructions = self.get_prompt_base_instructions().await.text;
+        // Host policy decoration is not a model change.
+        let base_instructions = self.prompt_base_instructions_before_policy().await.text;
         let previous_model = {
             let state = self.state.lock().await;
             state

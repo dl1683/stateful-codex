@@ -3583,10 +3583,12 @@ async fn recompute_token_usage_uses_session_base_instructions() {
         .await;
 
     let history = session.clone_history().await;
-    let session_base_instructions = BaseInstructions {
-        text: override_instructions,
-        provenance: None,
-    };
+    // Budgets count the request copy, which carries the recall policy exactly once.
+    let session_base_instructions = session.get_prompt_base_instructions().await;
+    assert_eq!(
+        session_base_instructions.text,
+        crate::context::ConversationRecallPolicy::decorate(&override_instructions)
+    );
     let expected_tokens = history
         .estimate_token_count_with_base_instructions(&session_base_instructions)
         .expect("estimate with session base instructions");

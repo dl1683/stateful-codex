@@ -37,6 +37,7 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::responses::start_websocket_server;
+use core_test_support::responses::strip_recall_policy;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -167,10 +168,12 @@ async fn message_budget_sheds_inventory_without_changing_tool_results_or_history
     }
     for (index, request) in requests.iter().enumerate() {
         assert_eq!(
-            request["instructions"]
-                .as_str()
-                .expect("request instructions")
-                .len(),
+            strip_recall_policy(
+                request["instructions"]
+                    .as_str()
+                    .expect("request instructions")
+            )
+            .len(),
             instruction_bytes
         );
         let request_bytes = serde_json::to_vec(request)?.len();
