@@ -415,9 +415,11 @@ async fn region_route_reports_stale_index_separately_from_a_removed_file() {
             .expect("query route")
             .data
             .into_iter()
-            .find(|hit| hit.source.region_anchor.is_some())
+            .filter_map(|hit| Some((EvidenceRoute::from_hit(&hit).ok()?, hit)))
+            .filter(|(route, _)| route.line_range.is_some())
+            .max_by_key(|(route, _)| route.line_range.map(|range| range.end))
             .expect("indexed region");
-        (EvidenceRoute::from_hit(&region).expect("region route"), region)
+        region
     };
     let (route, region) = region_route().await;
     let reader = EvidenceReader::new(context_map.clone());
@@ -459,14 +461,9 @@ async fn region_route_reports_stale_index_separately_from_a_removed_file() {
         .expect("advance parent state");
     let stale = format!("{:?}", read(route.clone()).await.err());
 
-    // Reindexing a shrunk file rebinds the entry, so the old route is obsolete.
-    let shrunk = (1..=10)
-        .map(|line| {
-            format!(
-                "region_fact line {line}
-"
-            )
-        })
+    // Shrinking the file retires its last region while the file stays present.
+    let shrunk = (1..=60)
+        .map(|line| format!("region_fact line {line}\n"))
         .collect::<String>();
     std::fs::write(root.path().join("facts.txt"), shrunk).expect("shrink source");
     indexer
@@ -485,7 +482,7 @@ async fn region_route_reports_stale_index_separately_from_a_removed_file() {
         (stale, retired, removed),
         (
             "Some(SourceNotCurrent(Stale))".to_string(),
-            "Some(RouteFingerprintMismatch)".to_string(),
+            "Some(SourceNotCurrent(Stale))".to_string(),
             "Some(SourceNotCurrent(SourceUnavailable))".to_string(),
         )
     );
