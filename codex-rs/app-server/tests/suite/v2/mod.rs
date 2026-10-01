@@ -14,6 +14,7 @@ mod auth_storage_originator;
 mod auto_env;
 mod bedrock_setup;
 mod blackboard;
+mod blackboard_authority;
 mod client_metadata;
 mod code_mode_host;
 mod collaboration_mode_list;

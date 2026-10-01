@@ -137,7 +137,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 "importance": "critical",
                 "rootPromotion": "promoted",
                 "evidence": [],
-                "provenance": {"kind": "user", "sourceId": "caller-claimed-user"}
+                "provenance": {"kind": "agent", "sourceId": "caller-claimed-user"}
             })),
         )
         .await?;
@@ -171,8 +171,8 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 evidence: Vec::new(),
                 premises: None,
                 provenance: BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::User,
-                    source_id: "turn-user-1".to_string(),
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "turn-agent-instruction".to_string(),
                 },
                 state: None,
                 superseded_by: None,
@@ -273,8 +273,8 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
                 evidence: instruction.entry.evidence.clone(),
                 premises: None,
                 provenance: BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::User,
-                    source_id: "turn-user-reconsidered".to_string(),
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: "turn-agent-reconsidered".to_string(),
                 },
                 state: Some(BlackboardEntryState::Active),
                 superseded_by: None,

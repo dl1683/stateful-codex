@@ -1159,7 +1159,7 @@ impl ThreadConfigLoader for BlockedResumeConfig {
     }
 }
 
-async fn start_resource_in_process_client(
+pub(super) async fn start_resource_in_process_client(
     codex_home: &Path,
     thread_config_loader: Arc<dyn ThreadConfigLoader>,
 ) -> Result<in_process::InProcessClientHandle> {
