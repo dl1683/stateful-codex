@@ -155,3 +155,83 @@ async fn remote_compact_v2_persists_original_deliveries_across_two_checkpoints()
     }
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn phase_less_deliveries_are_resolved_before_the_next_checkpoint() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = wiremock::MockServer::start().await;
+    let mut continued = responses::ev_completed("response-3");
+    continued["response"]["end_turn"] = json!(false);
+    responses::mount_sse_sequence(
+        &server,
+        vec![
+            // A preamble before a tool call is commentary; the answer after it is final.
+            sse(vec![
+                responses::ev_assistant_message("msg-preamble", "Checking the config."),
+                responses::ev_function_call("call-1", "missing_tool", "{}"),
+                responses::ev_completed("response-1"),
+            ]),
+            sse(vec![
+                responses::ev_assistant_message("msg-answer", FIRST_ANSWER),
+                responses::ev_completed("response-2"),
+            ]),
+            compaction("FIRST_OPAQUE_SUMMARY"),
+            // A response the provider continues cannot have delivered the answer.
+            sse(vec![
+                responses::ev_assistant_message("msg-continued", "Still looking."),
+                continued,
+            ]),
+            sse(vec![
+                responses::ev_assistant_message("msg-progress", "Found it."),
+                responses::ev_assistant_message("msg-second", SECOND_ANSWER),
+                responses::ev_completed("response-4"),
+            ]),
+            compaction("SECOND_OPAQUE_SUMMARY"),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .build(&server)
+        .await?;
+
+    for request in [FIRST_REQUEST, SECOND_REQUEST] {
+        test.submit_turn(request).await?;
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+    }
+    let rollout_path = test
+        .session_configured
+        .rollout_path
+        .clone()
+        .context("rollout path")?;
+    test.codex.shutdown_and_wait().await?;
+
+    let packets = persisted_packets(&rollout_path)?;
+    let [_, second] = packets.as_slice() else {
+        panic!("expected two checkpoints, got {}", packets.len());
+    };
+    assert_eq!(
+        summary(second),
+        vec![
+            (ConversationRecordKind::User, FIRST_REQUEST),
+            (
+                ConversationRecordKind::AssistantCommentary,
+                "Checking the config."
+            ),
+            (ConversationRecordKind::AssistantFinal, FIRST_ANSWER),
+            (ConversationRecordKind::User, SECOND_REQUEST),
+            (
+                ConversationRecordKind::AssistantCommentary,
+                "Still looking."
+            ),
+            (ConversationRecordKind::AssistantCommentary, "Found it."),
+            (ConversationRecordKind::AssistantFinal, SECOND_ANSWER),
+        ]
+    );
+    Ok(())
+}

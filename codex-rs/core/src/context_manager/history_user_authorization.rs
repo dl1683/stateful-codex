@@ -204,7 +204,8 @@ impl ContextManager {
                 message_id: item.id().map(|id| id.as_str().to_owned()),
                 text,
                 complete,
-                classification: None,
+                classification: metadata
+                    .and_then(|metadata| metadata.assistant_delivery_classification),
             };
             let retained = Arc::make_mut(&mut self.retained_context);
             captured = if is_assistant {

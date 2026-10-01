@@ -9,11 +9,16 @@
 //! Oversized instructions keep an incomplete excerpt for bounded root review, including
 //! sources recovered from legacy Guardian checkpoints before their raw history is dropped.
 
+#[path = "history_assistant_delivery.rs"]
+mod assistant_delivery;
 #[path = "history_conversation_packet.rs"]
 mod conversation_packet;
 #[path = "history_user_authorization.rs"]
 mod user_authorization;
 
+pub(crate) use assistant_delivery::AssistantDeliveryCandidate;
+pub(crate) use assistant_delivery::ResponseCompletion;
+pub(crate) use assistant_delivery::classify_completed_response;
 pub(crate) use conversation_packet::ConversationPacketUpdate;
 
 use crate::context::ContextualUserFragment;
@@ -299,7 +304,8 @@ impl ContextManager {
                 self.user_message_revision =
                     self.user_message_revision.saturating_add(/*rhs*/ 1);
             }
-            RetainedContextEvent::DeliveredAssistantMessage { .. } => {
+            RetainedContextEvent::DeliveredAssistantMessage { message, .. } => {
+                self.apply_assistant_delivery_classification(message);
                 self.guardian_review_context_revision = next_guardian_review_context_revision();
             }
         }

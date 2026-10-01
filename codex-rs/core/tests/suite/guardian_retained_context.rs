@@ -607,7 +607,9 @@ async fn retained_instructions_keep_identity_across_compaction_and_resume(
         "user_messages": user_messages, "user_messages_incomplete": false,
         "assistant_messages": [{"order": 1, "turn_id": answers[0].turn_id,
             "message_id": "ordinary-question", "revision": revisions["ordinary-question"],
-            "text": QUESTION, "complete": true, "origin_thread_id": origin_thread_id}],
+            "text": QUESTION, "complete": true, "origin_thread_id": origin_thread_id,
+            // A phase-less question before a tool call is resolved as commentary.
+            "classification": "commentary"}],
         "assistant_messages_incomplete": false,
         "verified_answers": ordered_answers, "incomplete": false, "next_order": next_order,
     });

@@ -13,6 +13,8 @@ use crate::compact_remote_v2::run_inline_remote_auto_compact_task as run_inline_
 use crate::connectors;
 use crate::context::ContextualUserFragment;
 use crate::context::UserVerificationNotice;
+use crate::context_manager::AssistantDeliveryCandidate;
+use crate::context_manager::ResponseCompletion;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::feedback_tags;
 use crate::hook_runtime::drain_async_hook_results;
@@ -43,6 +45,7 @@ use crate::skills::emit_explicit_skill_invocations;
 use crate::stream_events_utils::HandleOutputCtx;
 use crate::stream_events_utils::InFlightFuture;
 use crate::stream_events_utils::TurnItemContributorPolicy;
+use crate::stream_events_utils::assistant_delivery_candidate;
 use crate::stream_events_utils::finalize_non_tool_response_item;
 use crate::stream_events_utils::handle_non_tool_response_item;
 use crate::stream_events_utils::handle_output_item_done;
@@ -2415,6 +2418,7 @@ async fn emit_turn_item_in_plan_mode(
 }
 
 /// Handle a completed assistant response item in plan mode, returning true if handled.
+#[allow(clippy::too_many_arguments)]
 async fn handle_assistant_item_done_in_plan_mode(
     sess: &Session,
     step_context: &StepContext,
@@ -2423,6 +2427,7 @@ async fn handle_assistant_item_done_in_plan_mode(
     state: &mut PlanModeStreamState,
     previously_active_item: Option<&TurnItem>,
     last_agent_message: &mut Option<String>,
+    delivery_candidates: &mut Vec<AssistantDeliveryCandidate>,
 ) -> bool {
     let turn_context = &step_context.turn;
     if let ResponseItem::Message { role, .. } = item
@@ -2460,6 +2465,8 @@ async fn handle_assistant_item_done_in_plan_mode(
             finalized_facts.as_ref(),
         )
         .await;
+        delivery_candidates
+            .extend(assistant_delivery_candidate(sess, item, finalized_facts.as_ref()).await);
         if let Some(agent_message) = final_last_agent_message {
             *last_agent_message = Some(agent_message);
         }
@@ -2589,6 +2596,7 @@ async fn try_run_sampling_request(
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
+    let mut delivery_candidates: Vec<AssistantDeliveryCandidate> = Vec::new();
     let mut active_item: Option<TurnItem> = None;
     let mut active_tool_argument_diff_consumer: Option<(
         String,
@@ -2739,6 +2747,7 @@ async fn try_run_sampling_request(
                         state,
                         previously_streamed_item.as_ref(),
                         &mut last_agent_message,
+                        &mut delivery_candidates,
                     )
                     .await
                 {
@@ -2790,6 +2799,7 @@ async fn try_run_sampling_request(
                 if let Some(agent_message) = output_result.last_agent_message {
                     last_agent_message = Some(agent_message);
                 }
+                delivery_candidates.extend(output_result.delivery_candidate);
                 needs_follow_up |= output_result.needs_follow_up;
                 // Hosts can keep the current response intact and deliver mail before the next
                 // model request instead of cutting off its remaining tool calls.
@@ -2994,6 +3004,16 @@ async fn try_run_sampling_request(
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
                 }
+                let completion = if needs_follow_up {
+                    ResponseCompletion::Continues
+                } else {
+                    ResponseCompletion::Answered
+                };
+                sess.classify_assistant_deliveries(
+                    std::mem::take(&mut delivery_candidates),
+                    completion,
+                )
+                .await;
                 break Ok(SamplingRequestResult {
                     needs_follow_up,
                     last_agent_message,

@@ -2819,12 +2819,13 @@ async fn recorded_deliveries_stamp_their_origin_thread_and_keep_copied_provenanc
 async fn compaction_persists_the_installed_packet_and_guardian_snapshots_carry_it() {
     let (mut session, turn_context) = make_session_and_context().await;
     let rollout_path = attach_thread_persistence(&mut session).await;
+    // An explicit phase needs no completion to classify the delivery.
+    let mut answer = assistant_message("Done: 3 files");
+    if let ResponseItem::Message { phase, .. } = &mut answer {
+        *phase = Some(codex_protocol::models::MessagePhase::FinalAnswer);
+    }
     session
-        .record_conversation_items(
-            &turn_context,
-            turn_context.model_info(),
-            &[assistant_message("Done: 3 files")],
-        )
+        .record_conversation_items(&turn_context, turn_context.model_info(), &[answer])
         .await;
     let capture = session
         .clone_history()

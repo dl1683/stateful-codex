@@ -12,6 +12,9 @@ use std::task::Poll;
 
 use crate::context::ContextualUserFragment;
 use crate::context::UserGoalUpdate;
+use crate::context_manager::AssistantDeliveryCandidate;
+use crate::context_manager::ResponseCompletion;
+use crate::context_manager::classify_completed_response;
 use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
 use codex_history::RetainedContextEvent;
@@ -170,6 +173,31 @@ impl Session {
         {
             self.persist_rollout_items(&[RolloutItem::RetainedContext(event)])
                 .await;
+        }
+    }
+
+    /// The recorded pending delivery for a finalized phase-less assistant message.
+    pub(crate) async fn assistant_delivery_candidate(
+        &self,
+        message_id: &str,
+        text: String,
+    ) -> Option<AssistantDeliveryCandidate> {
+        self.state
+            .lock()
+            .await
+            .history
+            .assistant_delivery_candidate(message_id, text)
+    }
+
+    /// Persists the resolution of a successfully completed response's deliveries before any
+    /// later compaction can capture them.
+    pub(crate) async fn classify_assistant_deliveries(
+        &self,
+        candidates: Vec<AssistantDeliveryCandidate>,
+        completion: ResponseCompletion,
+    ) {
+        for event in classify_completed_response(candidates, completion) {
+            self.record_retained_context(event).await;
         }
     }
 

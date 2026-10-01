@@ -9,6 +9,7 @@ use codex_protocol::items::TurnItem;
 use codex_utils_stream_parser::strip_citations;
 use tokio_util::sync::CancellationToken;
 
+use crate::context_manager::AssistantDeliveryCandidate;
 use crate::function_tool::FunctionCallError;
 use crate::parse_turn_item;
 use crate::session::session::Session;
@@ -222,6 +223,8 @@ pub(crate) type InFlightFuture<'f> =
 #[derive(Default)]
 pub(crate) struct OutputItemResult {
     pub last_agent_message: Option<String>,
+    /// A phase-less delivery that this response's completion resolves.
+    pub delivery_candidate: Option<AssistantDeliveryCandidate>,
     pub needs_follow_up: bool,
     pub tool_future: Option<InFlightFuture<'static>>,
 }
@@ -394,6 +397,9 @@ pub(crate) async fn handle_output_item_done(
             )
             .await;
 
+            output.delivery_candidate =
+                assistant_delivery_candidate(ctx.sess.as_ref(), &item, finalized_facts.as_ref())
+                    .await;
             output.last_agent_message = finalized_facts.and_then(|facts| facts.last_agent_message);
         }
         // The tool request should be answered directly (or was denied); push that response into the transcript.
@@ -430,6 +436,28 @@ pub(crate) async fn handle_output_item_done(
     }
 
     Ok(output)
+}
+
+/// The recorded pending delivery for a phase-less assistant message with visible finalized text.
+pub(crate) async fn assistant_delivery_candidate(
+    sess: &Session,
+    item: &ResponseItem,
+    facts: Option<&FinalizedTurnItemFacts>,
+) -> Option<AssistantDeliveryCandidate> {
+    let ResponseItem::Message {
+        id: Some(id),
+        role,
+        phase: None,
+        ..
+    } = item
+    else {
+        return None;
+    };
+    let text = facts?.last_agent_message.clone()?;
+    if role != "assistant" {
+        return None;
+    }
+    sess.assistant_delivery_candidate(id.as_str(), text).await
 }
 
 pub(crate) async fn handle_non_tool_response_item(

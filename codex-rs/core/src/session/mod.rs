@@ -3567,6 +3567,13 @@ impl Session {
                     metadata.user_input_order.get_or_insert_with(|| {
                         message_order.unwrap_or_else(|| state.history.reserve_input_order())
                     });
+                    // Only its completed response can resolve a phase-less delivery.
+                    if matches!(&envelope.item, ResponseItem::Message { role, phase: None, .. } if role == "assistant")
+                    {
+                        metadata
+                            .assistant_delivery_classification
+                            .get_or_insert(codex_history::AssistantDeliveryClassification::Pending);
+                    }
                     // Copied parent context keeps its own provenance, or none.
                     if !metadata.inherited_user_message {
                         metadata
