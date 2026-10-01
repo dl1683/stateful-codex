@@ -256,3 +256,50 @@ function findingOrder(html) {
     (match) => match[1] ?? match[2],
   );
 }
+
+test("the latest answer says what it rested on, from its own turn's measurement", () => {
+  const state = workspaceFixture();
+  state.threadId = "thread-1";
+  state.activity.push({
+    turnId: "turn-4",
+    item: { type: "agentMessage", id: "message-1", text: "Nothing is outstanding." },
+  });
+  const measurement = (turnId, counters) => ({
+    threadId: "thread-1",
+    turnId,
+    status: "completed",
+    counters: {
+      rootEntriesLoaded: 9,
+      rootEvidenceRoutesStale: 2,
+      rootEvidenceRoutesUnavailable: 0,
+      evidenceReadCalls: 0,
+      ...counters,
+    },
+  });
+  state.turnMeasurements = [
+    { ...measurement("turn-9"), threadId: "another-thread" },
+    measurement("turn-4"),
+    measurement("turn-3", { evidenceReadCalls: 4 }),
+  ];
+
+  assert.match(
+    renderWorkspace(state),
+    /<p class="trust-line warn"><strong>Latest answer came from saved memory only:<\/strong> 9 saved understandings in context · 2 source links changed since saved · 0 exact source reads · 0 commands run · 0 file changes\. Some of what it relied on may be out of date; ask it to check the files\.<\/p>/,
+  );
+
+  // The answer's own turn ran a command: it is not presented as memory-only.
+  state.activity.push({
+    turnId: "turn-4",
+    item: { type: "commandExecution", id: "item-9", status: "completed", command: "git status" },
+  });
+  state.activityTruncated = true;
+  state.activity.unshift({ turnId: "turn-4", item: { type: "reasoning", id: "r", summary: [] } });
+  assert.match(
+    renderWorkspace(state),
+    /<p class="trust-line"><strong>Latest answer:<\/strong> 9 saved understandings in context · 2 source links changed since saved · 0 exact source reads · at least 1 command run · at least 0 file changes\.<\/p>/,
+  );
+
+  // No measurement for the latest answer's turn yet: say nothing rather than describe another turn.
+  state.turnMeasurements = [measurement("turn-3")];
+  assert.doesNotMatch(renderWorkspace(state), /trust-line/);
+});

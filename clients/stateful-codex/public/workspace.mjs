@@ -41,6 +41,8 @@ const state = {
   selectedNodeId: null,
   findingFilter: { text: "", kind: "" },
   blackboardTruncated: false,
+  turnMeasurements: [],
+  activityTruncated: false,
   loading: true,
   busyAction: null,
   error: null,
@@ -152,6 +154,7 @@ async function refreshWorkspace() {
     measurementSummary,
     activity,
     unavailableRoots,
+    turnMeasurements,
   ] = await Promise.all([
     rpc("project/read", { projectId }),
     rpc("statefulRun/read", runReadParams()),
@@ -183,6 +186,11 @@ async function refreshWorkspace() {
       throw error;
     }),
     findUnavailableRoots(rpc, state.project?.roots),
+    // Newest first; this thread's latest turn is normally within the newest few project turns.
+    rpc("statefulMeasurement/list", { projectId, cursor: null, limit: 20 }).catch((error) => {
+      if (error.code === -32601) return { data: [] };
+      throw error;
+    }),
   ]);
   state.project = project.project;
   state.run = run.run;
@@ -203,6 +211,8 @@ async function refreshWorkspace() {
   state.measurementSummary = measurementSummary.summary;
   state.unavailableRoots = unavailableRoots;
   state.activity = activity.data.reverse();
+  state.activityTruncated = Boolean(activity.nextCursor);
+  state.turnMeasurements = turnMeasurements.data;
   state.loading = false;
   state.busyAction = null;
   render();
