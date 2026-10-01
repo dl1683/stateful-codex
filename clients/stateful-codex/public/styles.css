@@ -123,6 +123,15 @@ textarea {
   display: grid;
   gap: 14px;
 }
+[hidden] {
+  display: none !important;
+}
+.field-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
 .choice-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

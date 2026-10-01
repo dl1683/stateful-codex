@@ -1,5 +1,5 @@
 import { rpc, subscribe } from "./rpc.mjs";
-import { renderSetup } from "./setup-view.mjs";
+import { createSetupForm } from "./setup-form.mjs";
 
 const state = {
   busy: false,
@@ -18,7 +18,12 @@ const state = {
   maxElapsedSeconds: 14400,
 };
 
-const app = document.querySelector("#app");
+const setup = createSetupForm({
+  root: document.querySelector("#app"),
+  state,
+  rpc,
+  openWorkspace,
+});
 
 async function boot() {
   subscribe(handleEvent);
@@ -33,78 +38,10 @@ async function boot() {
     ]);
     state.account = account.account;
     state.projects = projects.data;
-    render();
   } catch (error) {
     state.error = error.message;
-    render();
   }
-}
-
-function render() {
-  app.innerHTML = renderSetup(state);
-}
-
-function captureForm() {
-  const form = app.querySelector("#setup-form");
-  if (!form) return;
-  const data = new FormData(form);
-  for (const key of [
-    "projectId",
-    "projectName",
-    "rootPath",
-    "threadId",
-    "goal",
-  ]) {
-    if (data.has(key)) state[key] = String(data.get(key));
-  }
-  if (data.has("maxContinuations"))
-    state.maxContinuations = Number(data.get("maxContinuations"));
-  if (data.has("maxElapsedSeconds"))
-    state.maxElapsedSeconds = Number(data.get("maxElapsedSeconds"));
-}
-
-app.addEventListener("input", captureForm);
-app.addEventListener("change", async (event) => {
-  captureForm();
-  if (event.target.name === "projectId") await loadThreads();
-  render();
-});
-app.addEventListener("click", (event) => {
-  const choiceButton = event.target.closest("[data-choice-group]");
-  if (!choiceButton) return;
-  captureForm();
-  state[choiceButton.dataset.choiceGroup === "mode" ? "mode" : "threadAction"] =
-    choiceButton.dataset.choiceValue;
-  render();
-});
-app.addEventListener("submit", async (event) => {
-  if (event.target.id !== "setup-form") return;
-  event.preventDefault();
-  captureForm();
-  state.busy = true;
-  state.error = null;
-  render();
-  try {
-    await openWorkspace();
-  } catch (error) {
-    state.error = error.message;
-    state.busy = false;
-    render();
-  }
-});
-
-async function loadThreads() {
-  state.threads = [];
-  state.threadId = "";
-  if (state.projectId === "new") return;
-  const response = await rpc("thread/list", {
-    projectId: state.projectId,
-    limit: 100,
-    sortKey: "recency_at",
-    sortDirection: "desc",
-    archived: false,
-  });
-  state.threads = response.data;
+  setup.update();
 }
 
 async function openWorkspace() {
@@ -168,8 +105,7 @@ async function openWorkspace() {
 
 function handleEvent(message) {
   if (message.method === "gateway/error") {
-    state.error = message.params.message;
-    render();
+    setup.showError(message.params.message);
   }
 }
 
