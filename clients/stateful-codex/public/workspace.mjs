@@ -1,4 +1,5 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
+import { findTurnMeasurement, latestAnswerTurn } from "./answer-provenance.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { submitSteering } from "./steering-submit.mjs";
@@ -49,7 +50,8 @@ const state = {
   selectedNodeId: null,
   findingFilter: { text: "", kind: "" },
   blackboardTruncated: false,
-  turnMeasurements: [],
+  answerMeasurement: null,
+  liveTurnId: null,
   runGeneration: 0,
   activityTruncated: false,
   loading: true,
@@ -173,7 +175,6 @@ async function refreshWorkspace() {
     measurementSummary,
     activity,
     unavailableRoots,
-    turnMeasurements,
   ] = await Promise.all([
     rpc("project/read", { projectId }),
     rpc("statefulRun/read", runReadParams()),
@@ -205,11 +206,6 @@ async function refreshWorkspace() {
       throw error;
     }),
     findUnavailableRoots(rpc, state.project?.roots),
-    // Newest first; this thread's latest turn is normally within the newest few project turns.
-    rpc("statefulMeasurement/list", { projectId, cursor: null, limit: 20 }).catch((error) => {
-      if (error.code === -32601) return { data: [] };
-      throw error;
-    }),
   ]);
   if (generation !== state.runGeneration) {
     refresh();
@@ -237,7 +233,12 @@ async function refreshWorkspace() {
   if (state.evidenceError?.rootUnavailable && !unavailableRoots.size) state.evidenceError = null;
   state.activity = activity.data.reverse();
   state.activityTruncated = Boolean(activity.nextCursor);
-  state.turnMeasurements = turnMeasurements.data;
+  state.answerMeasurement = await findTurnMeasurement(rpc, {
+    projectId,
+    threadId,
+    turnId: latestAnswerTurn(state),
+    known: state.answerMeasurement,
+  });
   state.loading = false;
   state.busyAction = null;
   render();
@@ -278,6 +279,12 @@ function render(sections) {
 function handleEvent(message) {
   const effect = applyWorkspaceEvent(state, message);
   if (effect.turnStarted) view.startTurn(effect.turnStarted);
+  // A new turn's answer has no record yet; hide the previous answer's provenance meanwhile.
+  const liveTurn = effect.turnStarted ?? effect.delta?.turnId ?? null;
+  if (liveTurn && liveTurn !== state.liveTurnId) {
+    state.liveTurnId = liveTurn;
+    render(["activity"]);
+  }
   if (effect.delta) view.pushDelta(effect.delta);
   if (effect.completedMessage) view.completeMessage(effect.completedMessage);
   if (effect.sections.length) render(effect.sections);

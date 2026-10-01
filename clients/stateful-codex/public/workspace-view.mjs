@@ -2,6 +2,7 @@ import {
   renderCommandApproval,
   renderFileChangeApproval,
 } from "./approval-view.mjs";
+import { describeAnswer, normalizeThreadItem } from "./answer-provenance.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { effectiveFreshness, isRootUnavailable, rootKey } from "./source-availability.mjs";
 
@@ -331,47 +332,39 @@ function renderActivity(items) {
   return `${renderRecordedMessages(messages)}<details class="workspace-panel"><summary data-disclosure="activity">Supporting activity · ${recent.length} recent items</summary><div class="activity-list">${recent.length ? recent.map((item) => `<div><span>${escapeHtml(activityLabel(item))}</span><small>${escapeHtml(activityDetail(item))}</small></div>`).join("") : empty("No supporting activity yet.")}</div></details>`;
 }
 
-// What the latest answer on this thread actually rested on, from that turn's own measurement
-// (memory loaded into context, its source links' freshness, exact source reads) and from its
-// recorded items (commands and file changes). Shown only for the turn of the latest recorded
-// answer, and only once that turn has a measurement.
+// What the latest answer on this thread rested on, as far as the client can observe: saved
+// memory in context and its source freshness (from the turn's measurement), exact source
+// reads, and the commands, patches and other tools recorded for the turn. It claims nothing
+// about mechanisms it cannot see, and is hidden while a newer turn is under way.
 export function renderTrustLine(state) {
-  const items = state.activity.map(normalizeThreadItem);
-  const answerTurn = items.findLast((item) => item.type === "agentMessage")?.turnId;
-  const measurement = (state.turnMeasurements ?? []).find(
-    (candidate) => candidate.threadId === state.threadId && candidate.turnId === answerTurn,
-  );
-  if (!answerTurn || !measurement) return "";
-  const counters = measurement.counters ?? {};
-  const turnItems = items.filter((item) => item.turnId === measurement.turnId);
-  // The item page is bounded; if it starts inside this turn, earlier items may be missing.
-  const partial = state.activityTruncated && items[0]?.turnId === measurement.turnId;
-  const atLeast = partial ? "at least " : "";
-  const commands = turnItems.filter((item) => item.type === "commandExecution").length;
-  const edits = turnItems.filter((item) => item.type === "fileChange").length;
-  const reads = counters.evidenceReadCalls ?? 0;
-  const changed = counters.rootEvidenceRoutesStale ?? 0;
-  const missing = counters.rootEvidenceRoutesUnavailable ?? 0;
+  const answer = describeAnswer(state);
+  if (!answer) return "";
+  const atLeast = answer.partial ? "at least " : "";
+  const plural = (count, word, words = `${word}s`) =>
+    `${formatNumber(count)} ${count === 1 ? word : words}`;
   const facts = [
-    `${formatNumber(counters.rootEntriesLoaded ?? 0)} saved understanding${counters.rootEntriesLoaded === 1 ? "" : "s"} in context`,
-    changed ? `${formatNumber(changed)} source link${changed === 1 ? "" : "s"} changed since saved` : "",
-    missing ? `${formatNumber(missing)} source link${missing === 1 ? "" : "s"} missing` : "",
-    `${formatNumber(reads)} exact source read${reads === 1 ? "" : "s"}`,
-    `${atLeast}${formatNumber(commands)} command${commands === 1 ? "" : "s"} run`,
-    `${atLeast}${formatNumber(edits)} file change${edits === 1 ? "" : "s"}`,
+    answer.usedMemory ? "used saved project memory" : "no saved project memory in context",
+    answer.changedSources ? "some of its saved sources had changed since they were saved" : "",
+    answer.missingSources ? "some of its saved sources were missing" : "",
+    plural(answer.sourceReads, "exact source read"),
+    `${atLeast}${plural(answer.commands, "command")} run`,
+    answer.declined ? `${plural(answer.declined, "action")} declined` : "",
+    `${atLeast}${plural(answer.patches, "patch", "patches")} applied`,
+    answer.otherTools ? `${atLeast}${plural(answer.otherTools, "other tool call")}` : "",
   ].filter(Boolean);
-  const fromMemory = !reads && !commands && !edits && !partial;
-  const status = measurement.status === "completed" ? "" : ` (turn ${escapeHtml(measurement.status)})`;
-  return `<p class="trust-line${fromMemory && (changed || missing) ? " warn" : ""}"><strong>${fromMemory ? "Latest answer came from saved memory only" : "Latest answer"}${status}:</strong> ${facts.join(" · ")}.${fromMemory && (changed || missing) ? " Some of what it relied on may be out of date; ask it to check the files." : ""}</p>`;
+  const unchecked =
+    (answer.changedSources || answer.missingSources) &&
+    !answer.sourceReads &&
+    !answer.commands &&
+    !answer.otherTools &&
+    !answer.partial;
+  const status = answer.status === "completed" ? "" : ` (turn ${escapeHtml(answer.status)})`;
+  return `<p class="trust-line${unchecked ? " warn" : ""}"><strong>Latest answer${status}:</strong> ${facts.join(" · ")}.${unchecked ? " No source reads, commands or other tools were recorded for it, so parts of it may be out of date; ask it to check the files." : ""}</p>`;
 }
 
 // Completed agent messages from the recorded thread history; the live panel shows only a tail.
 function renderRecordedMessages(messages) {
   return `<details class="workspace-panel" id="recorded-messages"><summary data-disclosure="recorded-messages">Recorded agent messages · ${messages.length} recent</summary>${messages.length ? messages.map((item) => `<div class="recorded-message prose">${renderMarkdown(item.text)}</div>`).join("") : empty("No completed agent messages are recorded yet.")}</details>`;
-}
-
-function normalizeThreadItem(entry) {
-  return entry?.item ? { ...entry.item, turnId: entry.turnId } : entry;
 }
 
 function renderControlsState(state) {
