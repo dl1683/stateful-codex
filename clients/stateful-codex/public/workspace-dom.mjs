@@ -302,6 +302,9 @@ export function createDraftTracker(root) {
     isClean(control) {
       return (versions.get(control) ?? 0) === (settled.get(control) ?? 0);
     },
+    isSubmitting(control) {
+      return submitting.has(control);
+    },
     async submit(control, operation, { clear = true } = {}) {
       const value = control.value.trim();
       // One submission per field at a time; the field stays editable while it is pending.

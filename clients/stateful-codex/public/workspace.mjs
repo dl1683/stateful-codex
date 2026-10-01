@@ -27,6 +27,7 @@ const state = {
   obligations: [],
   steering: [],
   steeringError: null,
+  confirmedSteering: [],
   measurementSummary: null,
   activity: [],
   contextHits: [],
@@ -180,7 +181,13 @@ async function refreshWorkspace() {
   state.hierarchy = hierarchy;
   state.blackboard = blackboard.data;
   state.obligations = obligations.data;
-  state.steering = steering.data;
+  // The list is read oldest first and capped, so keep steering confirmed in this page view.
+  state.steering = [
+    ...steering.data,
+    ...state.confirmedSteering.filter(
+      (saved) => !steering.data.some((item) => item.id === saved.id),
+    ),
+  ];
   state.measurementSummary = measurementSummary.summary;
   state.activity = activity.data.reverse();
   state.loading = false;
@@ -225,8 +232,8 @@ function handleEvent(message) {
     refreshTimer = setTimeout(
       () =>
         refresh().catch((error) => {
-          state.refreshFailed = true;
           fail(error);
+          state.refreshFailed = true;
         }),
       180,
     );
@@ -367,6 +374,7 @@ app.addEventListener("click", async (event) => {
 async function action(label, operation) {
   state.busyAction = label;
   state.error = null;
+  state.refreshFailed = false;
   render(["notices"]);
   try {
     return await operation();
@@ -436,7 +444,9 @@ async function answerUserRequest(form) {
   render(["requests"]);
 }
 
+// Records an action's error; a background refresh marks its own errors after calling this.
 function fail(error) {
+  state.refreshFailed = false;
   state.loading = false;
   state.busyAction = null;
   state.error = error.message;

@@ -10,7 +10,14 @@ function steeringWorkspace({ run = workspaceFixture().run, rpc } = {}) {
   const document = createDocument();
   const root = document.createElement("div");
   document.body.append(root);
-  const state = { ...workspaceFixture(), liveText: "", run, steering: [], steeringError: null };
+  const state = {
+    ...workspaceFixture(),
+    liveText: "",
+    run,
+    steering: [],
+    steeringError: null,
+    confirmedSteering: [],
+  };
   const view = createWorkspaceDom(root, { schedule: () => {} });
   view.update(state);
   const calls = [];
@@ -86,4 +93,40 @@ test("a response without a saved steering record is treated as a failure", async
   assert.equal(await submit(), false);
   assert.equal(control().value, "Stop after the tests pass");
   assert.match(status().textContent, /did not confirm that it saved the steering/);
+});
+
+test("a second submission while one is pending is refused visibly and keeps its text", async () => {
+  let release;
+  const { control, submit, status, calls } = steeringWorkspace({
+    rpc: (_method, params) => new Promise((resolve) => (release = () => resolve(saved(params.input)))),
+  });
+  type(control(), "First instruction");
+  const first = submit();
+  type(control(), "Second instruction");
+
+  assert.equal(await submit(), false);
+  assert.match(status().textContent, /Earlier steering is still being sent/);
+  release();
+  assert.equal(await first, true);
+  assert.equal(control().value, "Second instruction");
+  assert.equal(calls.length, 1);
+});
+
+test("if the form is replaced while steering is pending, a failure still shows the text", async () => {
+  let reject;
+  const { state, view, control, submit, status } = steeringWorkspace({
+    rpc: () => new Promise((_resolve, rejectRequest) => (reject = rejectRequest)),
+  });
+  type(control(), "Keep the legacy module untouched");
+  const pending = submit();
+  state.run = { ...state.run, status: "completed" };
+  view.update(state);
+  assert.equal(control(), null);
+  reject(new Error("run is closed."));
+
+  assert.equal(await pending, false);
+  assert.equal(
+    status().textContent,
+    "Steering was not saved: run is closed. Your text was: Keep the legacy module untouched",
+  );
 });
