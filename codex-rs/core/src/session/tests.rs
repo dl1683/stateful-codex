@@ -3594,11 +3594,9 @@ async fn recompute_token_usage_uses_session_base_instructions() {
         .expect("estimate with session base instructions");
     // Independently: history items plus one byte-estimated copy of the decorated instructions.
     let items_only = history
-        .estimate_token_count_with_base_instructions(&BaseInstructions {
-            text: String::new(),
-            provenance: None,
-        })
-        .expect("estimate history items");
+        .raw_items()
+        .map(crate::context_manager::estimate_item_token_count)
+        .fold(0i64, i64::saturating_add);
     let instruction_tokens = i64::try_from(session_base_instructions.text.len().div_ceil(4))
         .expect("instruction tokens");
     assert_eq!(expected_tokens, items_only + instruction_tokens);
