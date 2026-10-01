@@ -301,7 +301,8 @@ function handleEvent(message) {
   const effect = applyWorkspaceEvent(state, message);
   if (effect.turnStarted) view.startTurn(effect.turnStarted);
   // A new turn's answer has no record yet; hide the previous answer's provenance meanwhile.
-  const liveTurn = effect.turnStarted ?? effect.delta?.turnId ?? null;
+  const liveTurn =
+    effect.turnStarted ?? effect.delta?.turnId ?? effect.completedMessage?.turnId ?? null;
   if (liveTurn && liveTurn !== state.liveTurnId) {
     state.liveTurnId = liveTurn;
     render(["activity"]);

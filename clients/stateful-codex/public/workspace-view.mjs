@@ -339,6 +339,9 @@ function renderActivity(items) {
 export function renderTrustLine(state) {
   const answer = describeAnswer(state);
   if (!answer) return "";
+  if (answer.beyondSearch) {
+    return `<p class="trust-line">The latest answer's record is older than the recent turns loaded here, so what it rested on is not shown.</p>`;
+  }
   const atLeast = answer.partial ? "at least " : "";
   const plural = (count, word, words = `${word}s`) =>
     `${formatNumber(count)} ${count === 1 ? word : words}`;
@@ -348,7 +351,7 @@ export function renderTrustLine(state) {
     answer.missingSources ? "some of its saved sources were missing" : "",
     plural(answer.sourceReads, "exact source read"),
     `${atLeast}${plural(answer.commands, "command")} run`,
-    answer.declined ? `${plural(answer.declined, "action")} declined` : "",
+    answer.notRun ? `${atLeast}${plural(answer.notRun, "action")} declined or not run` : "",
     `${atLeast}${plural(answer.patches, "patch", "patches")} applied`,
     answer.otherTools ? `${atLeast}${plural(answer.otherTools, "other tool call")}` : "",
   ].filter(Boolean);

@@ -43,18 +43,20 @@ test("only actions that happened are counted, and other tools are never hidden",
   const state = answeredState([
     { type: "commandExecution", id: "c1", status: "completed", command: "git status" },
     { type: "commandExecution", id: "c2", status: "declined", command: "rm -r build" },
+    { type: "commandExecution", id: "c3", status: "failed", command: "pytest", exitCode: 1 },
+    { type: "commandExecution", id: "c4", status: "failed", command: "curl x", exitCode: null },
     { type: "fileChange", id: "f1", status: "declined", changes: [] },
     { type: "mcpToolCall", id: "t1", tool: "fetch", status: "completed" },
   ]);
 
   assert.equal(
     renderTrustLine(state),
-    '<p class="trust-line"><strong>Latest answer:</strong> used saved project memory · some of its saved sources had changed since they were saved · 0 exact source reads · 1 command run · 2 actions declined · 0 patches applied · 1 other tool call.</p>',
+    '<p class="trust-line"><strong>Latest answer:</strong> used saved project memory · some of its saved sources had changed since they were saved · 0 exact source reads · 2 commands run · 3 actions declined or not run · 0 patches applied · 1 other tool call.</p>',
   );
 
   // A bounded item page that starts inside the turn makes the counts lower bounds.
   state.activityTruncated = true;
-  assert.match(renderTrustLine(state), /at least 1 command run · 2 actions declined · at least 0 patches applied · at least 1 other tool call\.<\/p>$/);
+  assert.match(renderTrustLine(state), /at least 2 commands run · at least 3 actions declined or not run · at least 0 patches applied · at least 1 other tool call\.<\/p>$/);
 });
 
 test("the previous answer's provenance is hidden while a newer turn is under way", () => {
@@ -66,6 +68,12 @@ test("the previous answer's provenance is hidden while a newer turn is under way
   state.liveTurnId = null;
   state.activity.push({ turnId: "turn-5", item: { type: "userMessage", id: "u2", content: [] } });
   assert.equal(renderTrustLine(state), "");
+
+  // A late live event from an older, recorded turn never hides the recorded answer.
+  const late = answeredState();
+  late.activity.unshift({ turnId: "turn-3", item: { type: "agentMessage", id: "old", text: "old" } });
+  late.liveTurnId = "turn-3";
+  assert.notEqual(renderTrustLine(late), "");
 
   // And a measurement for another turn never describes this answer.
   const other = answeredState();
@@ -103,4 +111,29 @@ test("the answer's measurement is found beyond newer measurements from other thr
   });
   assert.equal(again, found);
   assert.equal(cursors.length, 2);
+});
+
+test("viewing an image counts as a tool, so the answer is not called unchecked", () => {
+  const state = answeredState([{ type: "imageView", id: "i1", path: "C:/work/plot.png" }]);
+  assert.match(renderTrustLine(state), /· 1 other tool call\.<\/p>$/);
+  assert.doesNotMatch(renderTrustLine(state), /warn/);
+});
+
+test("an answer whose record is beyond the bounded search says so instead of vanishing", async () => {
+  const page = {
+    data: Array.from({ length: 50 }, (_, index) => ({ ...measurement(`x${index}`), threadId: "other" })),
+    nextCursor: "more",
+  };
+  const found = await findTurnMeasurement(async () => page, {
+    projectId: "p",
+    threadId: "thread-1",
+    turnId: "turn-4",
+    known: null,
+  });
+  const state = answeredState();
+  state.answerMeasurement = found;
+  assert.equal(
+    renderTrustLine(state),
+    `<p class="trust-line">The latest answer's record is older than the recent turns loaded here, so what it rested on is not shown.</p>`,
+  );
 });
