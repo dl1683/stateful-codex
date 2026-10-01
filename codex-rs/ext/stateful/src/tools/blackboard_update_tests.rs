@@ -295,6 +295,23 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
         .await
         .expect_err("stale revision fails");
     assert!(stale_error.to_string().contains("expected 2, found 3"));
+    let future_error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "revise",
+                "entryId": entry_id,
+                "expectedRevision": 4,
+                "content": "A conclusion judged against a revision that does not exist yet."
+            })),
+            "turn-future",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("a future revision is refused before policy checks");
+    assert_eq!(
+        future_error.to_string(),
+        "blackboard revision conflict: expected 4, found 3"
+    );
 
     let superseded = tool
         .apply_mutation(

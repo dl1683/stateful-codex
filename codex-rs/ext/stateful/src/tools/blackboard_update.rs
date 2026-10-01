@@ -17,6 +17,7 @@ use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
@@ -103,6 +104,23 @@ impl MutationArguments {
             | Self::Revise { entry_id, .. }
             | Self::Supersede { entry_id, .. }
             | Self::Retire { entry_id, .. } => entry_id,
+        }
+    }
+
+    fn expected_revision(&self) -> u64 {
+        match self {
+            Self::SetRootPromotion {
+                expected_revision, ..
+            }
+            | Self::Revise {
+                expected_revision, ..
+            }
+            | Self::Supersede {
+                expected_revision, ..
+            }
+            | Self::Retire {
+                expected_revision, ..
+            } => *expected_revision,
         }
     }
 
@@ -262,6 +280,13 @@ impl BlackboardUpdateTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel(format!("blackboard entry not found: {id}"))
             })?;
+        // Policy checks below must judge the revision this mutation replaces.
+        if current.revision != mutation.expected_revision() {
+            return Err(respond(BlackboardStoreError::RevisionConflict {
+                expected: mutation.expected_revision(),
+                actual: current.revision,
+            }));
+        }
         let mut update = BlackboardEntryUpdate {
             expected_revision: current.revision,
             kind: current.value.kind,
