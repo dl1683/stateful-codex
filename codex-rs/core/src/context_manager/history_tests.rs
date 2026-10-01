@@ -152,6 +152,7 @@ fn delivered_assistant_context_invalidates_reviews_without_changing_authorizatio
             complete: true,
             phase: None,
             origin_thread_id: None,
+            classification: None,
         },
         acceptance_order: history.reserve_input_order(),
     };

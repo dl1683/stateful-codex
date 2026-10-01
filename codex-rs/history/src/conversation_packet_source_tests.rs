@@ -247,6 +247,7 @@ fn duplicate_delivery_evidence_is_packed_once() {
             origin: UserInputOrigin::User,
             phase,
             origin_thread_id: Some(thread()),
+            classification: None,
         };
         let local = RetainedInputSource::Local(Some(order));
         retained
@@ -381,6 +382,7 @@ fn final_evicted_from_retained_buffer_is_still_captured_from_history() {
             origin: UserInputOrigin::User,
             phase: Some(phase),
             origin_thread_id: Some(thread()),
+            classification: None,
         };
         retained.record_assistant_message(message, RetainedInputSource::Local(Some(order)))
     };

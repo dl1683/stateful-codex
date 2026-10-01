@@ -61,6 +61,7 @@ fn changing_attestations_preserves_history_before_the_current_action() {
             message_id: None,
             text: instruction.to_owned(),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );

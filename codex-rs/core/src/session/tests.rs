@@ -2630,6 +2630,7 @@ async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
         complete: true,
         phase: None,
         origin_thread_id: None,
+        classification: None,
     };
     let (recording, _) = session.record_delivered_assistant_message(message.clone());
     let communication = InterAgentCommunication::new(

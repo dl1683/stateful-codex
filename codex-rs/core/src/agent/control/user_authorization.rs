@@ -135,6 +135,7 @@ impl LocalAgentControl {
                             message_id: item.id().map(|id| id.as_str().to_owned()),
                             text,
                             complete: false,
+                            classification: None,
                         },
                     ))
                 }),

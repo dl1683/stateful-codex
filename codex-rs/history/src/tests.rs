@@ -281,6 +281,7 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
                 complete,
                 phase: None,
                 origin_thread_id: Some(codex_protocol::ThreadId::from_u128(3)),
+                classification: None,
             },
             acceptance_order: 7,
         };
@@ -319,6 +320,7 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
                 complete: true,
                 phase: None,
                 origin_thread_id: None,
+                classification: None,
             },
             RetainedInputSource::Local(metadata.user_input_order),
         );
@@ -340,6 +342,110 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
         };
         assert_eq!(restored, original);
     }
+    Ok(())
+}
+
+#[test]
+fn delivered_assistant_rollout_preserves_classification_and_original_phase() -> Result<()> {
+    use codex_protocol::models::MessagePhase;
+
+    for (phase, classification) in [
+        (Some(MessagePhase::FinalAnswer), None),
+        (Some(MessagePhase::Commentary), None),
+        (None, Some(AssistantDeliveryClassification::Pending)),
+        (None, Some(AssistantDeliveryClassification::Commentary)),
+        (None, Some(AssistantDeliveryClassification::Final)),
+    ] {
+        let original = RetainedContextEvent::DeliveredAssistantMessage {
+            message: RetainedUserMessage {
+                origin: crate::UserInputOrigin::User,
+                turn_id: "turn".to_owned(),
+                message_id: Some("message".to_owned()),
+                text: "The answer is 42.".to_owned(),
+                complete: true,
+                phase: phase.clone(),
+                origin_thread_id: Some(codex_protocol::ThreadId::from_u128(3)),
+                classification,
+            },
+            acceptance_order: 4,
+        };
+        let wire = serde_json::to_value(RolloutItem::RetainedContext(original.clone()))?;
+        // Earlier readers still receive an unphased compatibility message.
+        assert_eq!(wire["payload"]["phase"], serde_json::Value::Null);
+        assert_eq!(
+            wire["metadata"]["original_phase"],
+            serde_json::to_value(&phase)?
+        );
+        assert_eq!(
+            wire["metadata"]["assistant_delivery_classification"],
+            serde_json::to_value(classification)?
+        );
+        let RolloutItem::RetainedContext(restored) = serde_json::from_value(wire)? else {
+            panic!("new readers need the model-invisible delivery event");
+        };
+        assert_eq!(restored, original);
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_delivered_assistant_rollout_decodes_without_classification() -> Result<()> {
+    let legacy = json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "id": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "The answer is 42."}],
+            "internal_chat_message_metadata_passthrough": {"turn_id": "turn"},
+        },
+        "metadata": {
+            "client_authored": false,
+            "delivered_assistant_message": "codex:code-mode-delivery:v1:complete",
+            "user_input_order": 4,
+        },
+    });
+    let RolloutItem::RetainedContext(restored) = serde_json::from_value(legacy)? else {
+        panic!("legacy deliveries remain model-invisible delivery events");
+    };
+    assert_eq!(
+        restored,
+        RetainedContextEvent::DeliveredAssistantMessage {
+            message: RetainedUserMessage {
+                origin: crate::UserInputOrigin::User,
+                turn_id: "turn".to_owned(),
+                message_id: Some("message".to_owned()),
+                text: "The answer is 42.".to_owned(),
+                complete: true,
+                phase: None,
+                origin_thread_id: None,
+                classification: None,
+            },
+            acceptance_order: 4,
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn response_item_metadata_round_trips_assistant_delivery_classification() -> Result<()> {
+    let envelope = ResponseItemEnvelope {
+        item: response_message("assistant"),
+        metadata: Some(CodexHarnessMetadata {
+            assistant_delivery_classification: Some(AssistantDeliveryClassification::Final),
+            user_input_order: Some(2),
+            ..Default::default()
+        }),
+    };
+    let wire = serde_json::to_value(RolloutItem::ResponseItem(envelope.clone()))?;
+    assert_eq!(
+        wire["metadata"]["assistant_delivery_classification"],
+        json!("final")
+    );
+    let RolloutItem::ResponseItem(restored) = serde_json::from_value(wire)? else {
+        panic!("expected response item");
+    };
+    assert_eq!(restored, envelope);
     Ok(())
 }
 

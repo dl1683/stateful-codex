@@ -63,6 +63,7 @@ impl ContextManager {
                     message_id: item.id().map(|id| id.as_str().to_owned()),
                     text,
                     complete: false,
+                    classification: None,
                 })
             })
     }
@@ -138,6 +139,7 @@ impl ContextManager {
                     message_id: call.item.id().map(|id| id.as_str().to_owned()),
                     text: text.clone(),
                     complete: true,
+                    classification: None,
                 },
                 source,
             );
@@ -202,6 +204,7 @@ impl ContextManager {
                 message_id: item.id().map(|id| id.as_str().to_owned()),
                 text,
                 complete,
+                classification: None,
             };
             let retained = Arc::make_mut(&mut self.retained_context);
             captured = if is_assistant {

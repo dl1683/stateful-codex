@@ -14,6 +14,7 @@ fn instruction(text: &str) -> RetainedUserMessage {
         message_id: None,
         text: text.to_owned(),
         complete: false,
+        classification: None,
     }
 }
 
@@ -169,6 +170,7 @@ fn heartbeat_versions_survive_retention_restore_and_reconciliation() {
             text: format!("<heartbeat>\n  <automation_id>monitor</automation_id>\n  <current_time_iso>2026-09-23T00:{index:02}:00Z</current_time_iso>\n  <instructions>\n{instructions}\n  </instructions>\n</heartbeat>\n"),
             complete: true,
             origin,
+            classification: None,
         }
     }).collect::<Vec<_>>();
     let mut retained = RetainedContext::default();

@@ -18,6 +18,7 @@ fn delivered_message() -> RetainedUserMessage {
         complete: true,
         phase: None,
         origin_thread_id: None,
+        classification: None,
     }
 }
 

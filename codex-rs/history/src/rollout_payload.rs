@@ -139,6 +139,8 @@ impl<'a> From<&'a RolloutItem> for RolloutItemWire<'a> {
                         delivered_assistant_message: Some(marker),
                         user_input_order: Some(*acceptance_order),
                         conversation_origin_thread_id: message.origin_thread_id,
+                        assistant_delivery_classification: message.classification,
+                        original_phase: message.phase.clone(),
                         ..Default::default()
                     })),
                 }
@@ -195,8 +197,9 @@ impl From<RolloutItemWire<'_>> for RolloutItem {
                                 message_id: id.as_ref().map(ToString::to_string),
                                 text: text.to_owned(),
                                 complete,
-                                phase: None,
+                                phase: metadata.original_phase.clone(),
                                 origin_thread_id: metadata.conversation_origin_thread_id,
+                                classification: metadata.assistant_delivery_classification,
                             },
                             acceptance_order,
                         },

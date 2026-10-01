@@ -1811,6 +1811,7 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
             message_id: None,
             text: "before compact".to_owned(),
             complete: false,
+            classification: None,
         },
         codex_history::RetainedInputSource::Local(None),
     );

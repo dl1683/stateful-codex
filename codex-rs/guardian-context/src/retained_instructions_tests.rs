@@ -31,6 +31,7 @@ fn instructions_preserve_source_order_and_whole_records() {
             message_id: Some("msg_revoke".to_owned()),
             text: "Do not publish after all.".to_owned(),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );
@@ -61,6 +62,7 @@ fn instructions_preserve_source_order_and_whole_records() {
             message_id: Some("msg_large".to_owned()),
             text: "Permission is conditional. ".repeat(200),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );
@@ -89,6 +91,7 @@ fn ordinary_exchanges_keep_roles_and_drop_assistant_context_before_restrictions(
                 "Details. ".repeat(150)
             ),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(Some(0)),
     );
@@ -101,6 +104,7 @@ fn ordinary_exchanges_keep_roles_and_drop_assistant_context_before_restrictions(
             message_id: Some("reply".to_owned()),
             text: "Yes, staging only.".to_owned(),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(Some(1)),
     );
@@ -170,6 +174,7 @@ fn ordinary_exchanges_keep_roles_and_drop_assistant_context_before_restrictions(
             message_id: Some("large".to_owned()),
             text: "x".repeat(4_000),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(Some(2)),
     );
@@ -214,6 +219,7 @@ fn delivery_uses_source_revision_and_complete_host_metadata() {
         text: "Draft only.".to_owned(),
         complete: true,
         origin: codex_history::UserInputOrigin::User,
+        classification: None,
     };
     let compose = |retained: &RetainedContext| {
         crate::CollectedContext {
@@ -351,6 +357,7 @@ fn transcript_original_requires_complete_source_proof_and_survives_budgeting() {
             origin: codex_history::UserInputOrigin::User,
             phase: None,
             origin_thread_id: None,
+            classification: None,
         },
         RetainedInputSource::Local(Some(6)),
     );

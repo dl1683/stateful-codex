@@ -28,6 +28,7 @@ fn delivered_message(id: &str, text: &str, acceptance_order: u64) -> RetainedCon
             complete: true,
             phase: None,
             origin_thread_id: None,
+            classification: None,
         },
         acceptance_order,
     }
@@ -48,6 +49,7 @@ fn retained_evidence_preserves_order_through_recovery_checkpoint_and_rollback() 
             message_id: Some("revocation".to_owned()),
             text: String::new(),
             complete: false,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );
@@ -158,6 +160,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
                 message_id: Some(format!("message-{index}")),
                 text: "Keep the repository private.".to_owned(),
                 complete: true,
+                classification: None,
             },
             RetainedInputSource::Local(None),
         );
@@ -180,6 +183,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
             message_id: Some("delayed-message".to_owned()),
             text: "An older queued instruction.".to_owned(),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(Some(0)),
     );
@@ -196,6 +200,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
             message_id: Some("oversized-message".to_owned()),
             text: "restriction ".repeat(MAX_RECORD_BYTES),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );
@@ -243,6 +248,7 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
             complete: false,
             phase: None,
             origin_thread_id: None,
+            classification: None,
         }
     );
     // Once the omission marker is set, another confirmed delivery still needs
@@ -265,6 +271,7 @@ fn recovered_excerpts_obey_record_and_family_limits() {
                 message_id: Some(format!("message-{index}")),
                 text: String::new(),
                 complete: false,
+                classification: None,
             },
             RetainedInputSource::Local(None),
         );
@@ -366,6 +373,7 @@ fn accepted_order_survives_delayed_recording_and_checkpoint_replay() {
         message_id: Some("steer".to_owned()),
         text: "Keep the repository private.".to_owned(),
         complete: true,
+        classification: None,
     };
     // Assistant delivery after accepted steering must not move the steering past it.
     let assistant_order = context.reserve_order();
@@ -458,6 +466,7 @@ fn adopted_instructions_preserve_local_order_and_rollback_scope() {
             message_id: Some(format!("parent-{index}")),
             text: format!("Parent instruction {index}"),
             complete: true,
+            classification: None,
         };
         context.record_user_message(message.clone(), RetainedInputSource::Inherited);
         context.record_user_message(message.clone(), RetainedInputSource::Inherited);

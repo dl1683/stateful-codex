@@ -13,6 +13,9 @@ pub use compaction_resume_metadata::resume_multi_agent_version;
 mod compaction_checkpoint;
 pub use compaction_checkpoint::CompactionCheckpoint;
 
+mod assistant_delivery;
+pub use assistant_delivery::AssistantDeliveryClassification;
+
 mod conversation_packet;
 pub use conversation_packet::CONVERSATION_PACKET_VERSION;
 pub use conversation_packet::ConversationInputCoverage;
@@ -150,6 +153,14 @@ pub struct CodexHarnessMetadata {
     /// Sender context captured by the host when this task message was accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_user_messages: Option<Box<SenderUserMessages>>,
+
+    /// Host resolution of an assistant delivery; absent on legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_delivery_classification: Option<AssistantDeliveryClassification>,
+
+    /// Original phase of a confirmed delivery whose compatibility item omits its phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_phase: Option<codex_protocol::models::MessagePhase>,
 }
 
 fn deserialize_mcp_attribution_checkpoint<'de, D>(
