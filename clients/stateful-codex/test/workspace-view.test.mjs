@@ -174,9 +174,26 @@ test("a missing project folder is explained once and no source is shown as curre
   assert.match(actual, /Project folder not found on disk: <code>C:\/work\/investigation<\/code>/);
   assert.match(actual, /These counts describe the last index/);
   assert.doesNotMatch(actual, /badge current/);
-  assert.match(actual, /<span class="badge sourceUnavailable">sourceUnavailable<\/span><\/div><p>Threshold amendment/);
+  assert.match(actual, /<span class="badge sourceUnavailable">source missing<\/span><\/div><p>Threshold amendment/);
   assert.match(
     actual,
-    /data-entry-id="map-1" disabled>Verify exact source<\/button><p class="inline-error" role="alert">The project folder can&#39;t be found on disk\.<\/p>/,
+    /data-entry-id="map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">Its project folder is missing \(see the notice at the top\)\.<\/p><p class="inline-error" role="alert">The project folder can&#39;t be found on disk\.<\/p>/,
   );
+  assert.doesNotMatch(actual, /data-action="refresh-map">Refresh map<\/button> to/);
+});
+
+test("a changed source says why it can't be verified and offers a re-index", () => {
+  const state = workspaceFixture();
+  state.contextHits[0].freshness = "stale";
+  state.blackboard[0].evidenceFreshness = "stale";
+
+  const actual = renderWorkspace(state);
+
+  assert.match(
+    actual,
+    /data-entry-id="map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index\. <button class="text-button" data-action="refresh-map">Refresh map<\/button> to re-index it\.<\/p>/,
+  );
+  assert.match(actual, /<span class="badge stale">source changed<\/span><\/div><p>Verify the amended threshold/);
+  // A finding without linked evidence has nothing to verify, so it offers nothing.
+  assert.equal(actual.match(/class="microcopy unverifiable"/g)?.length, 2);
 });

@@ -204,7 +204,29 @@ function renderRoutingResults(state) {
 
 function renderContextHit(hit, state) {
   const freshness = effectiveFreshness(hit.freshness, state.unavailableRoots, hit.source.projectRoot);
-  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong><span class="badge ${escapeHtml(freshness)}">${escapeHtml(freshness)}</span></div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" ${freshness !== "current" ? "disabled" : ""}>Verify exact source</button>${renderEvidenceError(state, [hit.entryId])}</article>`;
+  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong>${freshnessBadge(freshness)}</div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" ${freshness !== "current" ? "disabled" : ""}>Verify exact source</button>${renderUnverifiable(freshness, state)}${renderEvidenceError(state, [hit.entryId])}</article>`;
+}
+
+const FRESHNESS_LABELS = {
+  current: "source current",
+  stale: "source changed",
+  sourceUnavailable: "source missing",
+  notApplicable: "no source linked",
+};
+
+function freshnessBadge(freshness) {
+  return `<span class="badge ${escapeHtml(freshness)}">${escapeHtml(FRESHNESS_LABELS[freshness] ?? freshness)}</span>`;
+}
+
+// A disabled source action says why, and offers the one action that can fix it.
+function renderUnverifiable(freshness, state) {
+  if (freshness === "stale") {
+    return `<p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index. <button class="text-button" data-action="refresh-map">Refresh map</button> to re-index it.</p>`;
+  }
+  if (freshness === "sourceUnavailable") {
+    return `<p class="microcopy unverifiable">${unavailableRootPaths(state).length ? "Its project folder is missing (see the notice at the top)." : `This file is no longer where it was indexed. <button class="text-button" data-action="refresh-map">Refresh map</button> to update the index.`}</p>`;
+  }
+  return "";
 }
 
 // An exact-source failure is shown where the person asked for it, not only at the page top.
@@ -399,7 +421,7 @@ function renderFinding(hit, state) {
     hit.effectiveVerification === "userConfirmed"
       ? ""
       : `<button class="text-button" data-action="confirm-knowledge" data-entry-id="${escapeHtml(entry.id)}" data-revision="${entry.revision}">Confirm this understanding</button>`;
-  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span><span class="badge ${escapeHtml(freshness)}">${escapeHtml(freshness)}</span></div><p>${escapeHtml(entry.content)}</p>${evidence}${renderEvidenceError(state, entry.evidence.map((link) => link.contextMapEntryId))}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
+  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span>${freshnessBadge(freshness)}</div><p>${escapeHtml(entry.content)}</p>${evidence}${entry.evidence.length ? renderUnverifiable(freshness, state) : ""}${renderEvidenceError(state, entry.evidence.map((link) => link.contextMapEntryId))}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
 }
 
 // Evidence links do not name their root, so a finding is overridden only when every project

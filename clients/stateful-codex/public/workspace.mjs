@@ -306,12 +306,7 @@ app.addEventListener("submit", async (event) => {
       // The query stays in the field so it continues to describe the results below it.
       const text = form.querySelector('[name="query"]').value.trim();
       if (!text) return;
-      state.contextHits = (
-        await action("Searching source map", () =>
-          rpc("contextMap/query", { projectId, text, limit: 20 }),
-        )
-      ).data;
-      render(["routing-results"]);
+      await searchSources(text);
     }
   } catch (error) {
     fail(error);
@@ -338,6 +333,9 @@ app.addEventListener("click", async (event) => {
           await rpc("contextMap/refresh", { projectId });
           await refresh();
         });
+        // Results found before the refresh describe the old index; repeat the same search.
+        state.evidenceError = null;
+        if (state.lastSearch) await searchSources(state.lastSearch);
         break;
       case "pause":
       case "resume":
@@ -389,6 +387,16 @@ app.addEventListener("click", async (event) => {
     fail(error);
   }
 });
+
+async function searchSources(text) {
+  state.contextHits = (
+    await action("Searching source map", () =>
+      rpc("contextMap/query", { projectId, text, limit: 20 }),
+    )
+  ).data;
+  state.lastSearch = text;
+  render(["routing-results"]);
+}
 
 // Evidence failures are expected conditions (a changed or missing source): explain them beside
 // the button that was clicked, and learn from a missing root.
