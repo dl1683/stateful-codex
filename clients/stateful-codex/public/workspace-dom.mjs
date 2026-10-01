@@ -324,8 +324,9 @@ function capturePlace(container) {
         selector,
         index,
         node.scrollTop,
+        node.scrollLeft,
       ]),
-    ).filter(([, , top]) => top),
+    ).filter(([, , top, left]) => top || left),
     open: [...container.querySelectorAll("details")].map((details) => details.open),
   };
 }
@@ -334,9 +335,11 @@ function restorePlace(container, { focusKey, scrolls, open }) {
   [...container.querySelectorAll("details")].forEach((details, index) => {
     if (open[index]) details.open = true;
   });
-  for (const [selector, index, top] of scrolls) {
+  for (const [selector, index, top, left] of scrolls) {
     const node = container.querySelectorAll(selector)[index];
-    if (node) node.scrollTop = top;
+    if (!node) continue;
+    node.scrollTop = top;
+    node.scrollLeft = left;
   }
   if (focusKey) {
     [...container.querySelectorAll(focusKey.selector)].find(focusKey.matches)?.focus();

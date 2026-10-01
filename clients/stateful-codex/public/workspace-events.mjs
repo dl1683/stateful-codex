@@ -109,11 +109,19 @@ function rememberRequestItem(state, message) {
   return state.pendingRequests.some((request) => request.params?.itemId === item.id);
 }
 
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function copyString(text) {
+  return decoder.decode(encoder.encode(text));
+}
+
 function boundedItem(item) {
   let budget = REQUEST_ITEM_DIFF_CHARACTERS;
   const changes = (item.changes ?? []).map((change) => {
     const diff = String(change.diff ?? "");
-    const kept = diff.slice(0, Math.max(budget, 0));
+    // Copy through an encoder: a plain slice can keep the original huge string alive.
+    const kept = copyString(diff.slice(0, Math.max(budget, 0)));
     budget -= kept.length;
     return {
       path: change.path,

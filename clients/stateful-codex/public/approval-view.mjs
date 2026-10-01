@@ -51,6 +51,10 @@ export function renderCommandApproval(request) {
 
 const POWERSHELL = new Set(["pwsh", "powershell"]);
 const POSIX_SHELLS = new Set(["bash", "sh", "zsh"]);
+// Options that do not change what the script does. Any other option (for example -Version,
+// or bash -n) leaves the command shown exactly as sent.
+const NEUTRAL_POWERSHELL_OPTIONS = new Set(["-noprofile", "-nologo", "-noninteractive", "-nop", "-noni"]);
+const POSIX_SCRIPT_FLAGS = new Set(["-c", "-lc"]);
 
 // The server sends shell-joined argv. When it is a shell running one script
 // ("pwsh -NoProfile -Command <script>", "bash -lc <script>"), show the script itself;
@@ -66,12 +70,16 @@ export function displayCommand(command) {
   if (POWERSHELL.has(program)) {
     const flag = words.findIndex((word, index) => index > 0 && /^-(c|command)$/i.test(word));
     const options = words.slice(1, flag);
-    if (flag > 0 && flag === words.length - 2 && options.every((word) => word.startsWith("-"))) {
+    if (
+      flag > 0 &&
+      flag === words.length - 2 &&
+      options.every((word) => NEUTRAL_POWERSHELL_OPTIONS.has(word.toLowerCase()))
+    ) {
       return words[flag + 1];
     }
     return command;
   }
-  if (POSIX_SHELLS.has(program) && words.length === 3 && /^-[a-z]*c$/.test(words[1])) {
+  if (POSIX_SHELLS.has(program) && words.length === 3 && POSIX_SCRIPT_FLAGS.has(words[1])) {
     return words[2];
   }
   return command;

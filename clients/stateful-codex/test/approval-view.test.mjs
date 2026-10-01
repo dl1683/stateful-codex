@@ -205,6 +205,8 @@ test("shell wrappers are removed only for a shell running exactly one script", (
     "mypwsh -Command 'rm -rf /'",
     "bash -c 'echo one' extra-argument",
     "pwsh -Command 'Get-Item a' 'Remove-Item b'",
+    "pwsh -Version -Command 'Write-Output should-not-run'",
+    "bash -nc 'printf should-not-run'",
     "bash -lc 'unterminated",
   ]) {
     assert.equal(displayCommand(unchanged), unchanged);
@@ -232,10 +234,15 @@ test("replacing an approval card keeps an open diff and its focused summary", ()
   const details = card().querySelector(".approval-file details");
   details.open = true;
   details.querySelector("summary").focus();
+  const diff = card().querySelector(".approval-file .approval-diff");
+  diff.scrollTop = 45;
+  diff.scrollLeft = 180;
 
   apply({ ...fileApproval, params: { ...fileApproval.params, reason: "Also update the changelog" } });
 
   assert.equal(card().querySelector(".approval-file details").open, true);
+  const restored = card().querySelector(".approval-file .approval-diff");
+  assert.deepEqual([restored.scrollTop, restored.scrollLeft], [45, 180]);
   assert.equal(
     card().ownerDocument.activeElement.getAttribute("data-disclosure"),
     "diff-0",
