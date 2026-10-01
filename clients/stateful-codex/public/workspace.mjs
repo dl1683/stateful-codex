@@ -36,6 +36,9 @@ const state = {
   evidence: null,
   evidenceError: null,
   unavailableRoots: null,
+  lastSearch: null,
+  searchError: null,
+  searchGeneration: 0,
   pendingRequests: [],
   requestItems: new Map(),
   selectedNodeId: null,
@@ -210,6 +213,8 @@ async function refreshWorkspace() {
   ];
   state.measurementSummary = measurementSummary.summary;
   state.unavailableRoots = unavailableRoots;
+  // A missing-folder error beside a source clears once the folder is back.
+  if (state.evidenceError?.rootUnavailable && !unavailableRoots.size) state.evidenceError = null;
   state.activity = activity.data.reverse();
   state.activityTruncated = Boolean(activity.nextCursor);
   state.turnMeasurements = turnMeasurements.data;
@@ -355,19 +360,7 @@ app.addEventListener("click", async (event) => {
         await action("Refreshing workspace", refresh);
         break;
       case "refresh-map":
-        if (allRootsUnavailable()) {
-          state.error =
-            "The project folder is missing, so the source map can't be refreshed. Restore the folder at its recorded path first.";
-          render(["notices"]);
-          break;
-        }
-        await action("Refreshing source map", async () => {
-          await rpc("contextMap/refresh", { projectId });
-          await refresh();
-        });
-        // Results found before the refresh describe the old index; repeat the same search.
-        state.evidenceError = null;
-        if (state.lastSearch) await searchSources(state.lastSearch);
+        await refreshMap();
         break;
       case "pause":
       case "resume":
@@ -388,7 +381,7 @@ app.addEventListener("click", async (event) => {
               end: Number(button.dataset.lastLine),
             }
           : null;
-        await readEvidence(button.dataset.entryId, lineRange);
+        await readEvidence(button.dataset.entryId, lineRange, button.dataset.errorKey);
         break;
       case "confirm-knowledge":
         await action("Confirming project understanding", () =>
@@ -423,19 +416,53 @@ app.addEventListener("click", async (event) => {
   }
 });
 
-async function searchSources(text) {
-  state.contextHits = (
-    await action("Searching source map", () =>
+// Re-checks the folders first, so a restored folder can be indexed again; then re-indexes and
+// repeats the last search, whose results described the old index.
+async function refreshMap() {
+  state.unavailableRoots = await findUnavailableRoots(rpc, state.project?.roots);
+  render(["header", "intelligence", "routing-results", "findings"]);
+  if (allRootsUnavailable()) {
+    state.error =
+      "The project folder is missing, so the source map can't be refreshed. Restore the folder at its recorded path first.";
+    render(["notices"]);
+    return;
+  }
+  await action("Refreshing source map", async () => {
+    await rpc("contextMap/refresh", { projectId });
+    await refresh();
+  });
+  state.evidenceError = null;
+  if (state.lastSearch) await searchSources(state.lastSearch, { replay: true });
+  else render(["routing-results", "findings"]);
+}
+
+// Each search supersedes earlier ones: a response from an older search (including an automatic
+// replay) never replaces newer results. A failure is shown beside the results, which are
+// cleared rather than left describing an index they may no longer match.
+async function searchSources(text, { replay = false } = {}) {
+  const generation = ++state.searchGeneration;
+  try {
+    const response = await action("Searching source map", () =>
       rpc("contextMap/query", { projectId, text, limit: 20 }),
-    )
-  ).data;
-  state.lastSearch = text;
+    );
+    if (generation !== state.searchGeneration) return;
+    state.contextHits = response.data;
+    state.lastSearch = text;
+    state.searchError = null;
+  } catch (error) {
+    if (generation !== state.searchGeneration) return;
+    state.contextHits = [];
+    state.lastSearch = null;
+    state.searchError = replay
+      ? `The map was refreshed, but repeating the search for “${text}” failed (${error.message}). Search again.`
+      : `The search failed (${error.message}). Try again.`;
+  }
   render(["routing-results"]);
 }
 
 // Evidence failures are expected conditions (a changed or missing source): explain them beside
-// the button that was clicked, and learn from a missing root.
-async function readEvidence(entryId, lineRange) {
+// the control that was used, and learn from a missing root.
+async function readEvidence(entryId, lineRange, errorKey) {
   state.evidenceError = null;
   try {
     state.evidence = await action("Verifying exact evidence", () =>
@@ -449,11 +476,13 @@ async function readEvidence(entryId, lineRange) {
   } catch (error) {
     const described = describeSourceError(error.message);
     state.evidence = null;
-    state.evidenceError = { entryId, message: described.message };
+    state.evidenceError = {
+      key: errorKey,
+      message: described.message,
+      rootUnavailable: described.rootUnavailable,
+    };
     if (described.rootUnavailable) {
-      state.unavailableRoots = await findUnavailableRoots(rpc, state.project?.roots).catch(
-        () => state.unavailableRoots,
-      );
+      state.unavailableRoots = await findUnavailableRoots(rpc, state.project?.roots);
     }
   }
   render(["header", "intelligence", "routing-results", "findings"]);

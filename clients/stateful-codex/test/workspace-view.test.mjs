@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { rootKey } from "../public/source-availability.mjs";
 import { renderWorkspace } from "../public/workspace-view.mjs";
 import { workspaceFixture } from "./workspace-fixture.mjs";
 
@@ -169,23 +170,46 @@ function statefulFindingCount(state) {
 
 test("a missing project folder is explained once and no source is shown as current", () => {
   const state = workspaceFixture();
-  state.unavailableRoots = new Set(["C:/work/investigation"]);
-  state.evidenceError = { entryId: "map-1", message: "The project folder can't be found on disk." };
+  state.unavailableRoots = new Set([rootKey("C:\\WORK\\Investigation\\")]);
+  state.evidenceError = {
+    key: "hit:map-1",
+    message: "The project folder can't be found on disk.",
+    rootUnavailable: true,
+  };
 
   const actual = renderWorkspace(state);
 
-  assert.match(actual, /Project folder not found on disk: <code>C:\/work\/investigation<\/code>/);
+  assert.match(actual, /Project folder not found on disk: <code>C:\/work\/investigation<\/code>\. Saved understandings/);
   assert.match(actual, /These counts describe the last index/);
   assert.doesNotMatch(actual, /badge current/);
   assert.match(actual, /<span class="badge sourceUnavailable">source missing<\/span><\/div><p>Threshold amendment/);
   assert.match(
     actual,
-    /data-entry-id="map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">Its project folder is missing \(see the notice at the top\)\.<\/p><p class="inline-error" role="alert">The project folder can&#39;t be found on disk\.<\/p>/,
+    /data-error-key="hit:map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">Its project folder is missing \(see the notice at the top\)\.<\/p><p class="inline-error" role="alert">The project folder can&#39;t be found on disk\.<\/p>/,
   );
+  // The error belongs to the control that was used, not to every card citing the same source.
+  assert.equal(actual.match(/class="inline-error"/g)?.length, 1);
   assert.doesNotMatch(actual, /data-action="refresh-map">Refresh map<\/button> to/);
 });
 
-test("a changed source says why it can't be verified and offers a re-index", () => {
+test("with one of two folders missing, only its sources are affected", () => {
+  const state = workspaceFixture();
+  state.project.roots = [{ path: "C:/work/investigation" }, { path: "D:/archive" }];
+  state.unavailableRoots = new Set([rootKey("D:/archive")]);
+  state.contextHits[0].freshness = "sourceUnavailable";
+
+  const actual = renderWorkspace(state);
+
+  assert.match(
+    actual,
+    /One project folder not found on disk: <code>D:\/archive<\/code>\. Sources under it can't be checked until it is restored; the project's other folders work normally\./,
+  );
+  // The hit's own folder exists, so it is offered the re-index rather than blamed on a folder.
+  assert.match(actual, /This file is no longer where it was indexed\. <button class="text-button" data-action="refresh-map">Refresh map<\/button>/);
+  assert.match(actual, /<span class="badge current">source current<\/span><\/div><p>Verify the amended/);
+});
+
+test("a changed source says why it can't be verified and what can repair it", () => {
   const state = workspaceFixture();
   state.contextHits[0].freshness = "stale";
   state.blackboard[0].evidenceFreshness = "stale";
@@ -194,11 +218,26 @@ test("a changed source says why it can't be verified and offers a re-index", () 
 
   assert.match(
     actual,
-    /data-entry-id="map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index\. <button class="text-button" data-action="refresh-map">Refresh map<\/button> to re-index it\.<\/p>/,
+    /data-error-key="hit:map-1" disabled>Verify exact source<\/button><p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index\. <button class="text-button" data-action="refresh-map">Refresh map<\/button> to re-index it\.<\/p>/,
   );
-  assert.match(actual, /<span class="badge stale">source changed<\/span><\/div><p>Verify the amended threshold/);
-  // A finding without linked evidence has nothing to verify, so it offers nothing.
+  // A saved understanding keeps its saved fingerprint: re-indexing cannot repair it.
+  assert.match(
+    actual,
+    /<span class="badge stale">source changed<\/span><\/div><p>Verify the amended threshold[^]*?<p class="microcopy unverifiable">Its source changed after this understanding was saved\. Refreshing the map does not update a saved understanding; ask the agent to re-check it against the current file\.<\/p>/,
+  );
   assert.equal(actual.match(/class="microcopy unverifiable"/g)?.length, 2);
+});
+
+test("a failed search is explained beside the results, which are cleared", () => {
+  const state = workspaceFixture();
+  state.contextHits = [];
+  state.lastSearch = null;
+  state.searchError = "The search failed (offline). Try again.";
+
+  const actual = renderWorkspace(state);
+
+  assert.match(actual, /<p class="inline-error" role="alert">The search failed \(offline\)\. Try again\.<\/p>/);
+  assert.doesNotMatch(actual, /Search descriptions and routing terms/);
 });
 
 test("saved understandings read newest first, dated, with superseded ones set apart", () => {

@@ -3,7 +3,7 @@ import {
   renderFileChangeApproval,
 } from "./approval-view.mjs";
 import { renderMarkdown } from "./markdown.mjs";
-import { effectiveFreshness, rootKey } from "./source-availability.mjs";
+import { effectiveFreshness, isRootUnavailable, rootKey } from "./source-availability.mjs";
 
 const packetSections = [
   ["examined", "Examined"],
@@ -108,8 +108,13 @@ function renderHeader(state) {
 function renderMissingRoots(state) {
   const missing = unavailableRootPaths(state);
   if (!missing.length) return "";
-  const folders = missing.length === 1 ? "folder" : "folders";
-  return `<p class="banner error project-missing">Project ${folders} not found on disk: ${missing.map((path) => `<code>${escapeHtml(path)}</code>`).join(", ")}. Saved understandings and history are still readable, but sources can't be checked or re-indexed until the ${folders} ${missing.length === 1 ? "is" : "are"} restored at ${missing.length === 1 ? "that path" : "those paths"}.</p>`;
+  const all = missing.length === (state.project?.roots ?? []).length;
+  const one = missing.length === 1;
+  const paths = missing.map((path) => `<code>${escapeHtml(path)}</code>`).join(", ");
+  const consequence = all
+    ? `Saved understandings and history are still readable, but sources can't be checked or re-indexed until the ${one ? "folder is" : "folders are"} restored at ${one ? "that path" : "those paths"}.`
+    : `Sources under ${one ? "it" : "them"} can't be checked until ${one ? "it is" : "they are"} restored; the project's other folders work normally.`;
+  return `<p class="banner error project-missing">${all ? `Project ${one ? "folder" : "folders"}` : `${one ? "One project folder" : "Some project folders"}`} not found on disk: ${paths}. ${consequence}</p>`;
 }
 
 function unavailableRootPaths(state) {
@@ -201,12 +206,25 @@ function renderNode(node, children, depth, state) {
 }
 
 function renderRoutingResults(state) {
-  return `${state.contextHits.length ? state.contextHits.map((hit) => renderContextHit(hit, state)).join("") : `<p class="microcopy">Search descriptions and routing terms, then open exact source evidence.</p>`}${state.evidence ? renderEvidence(state.evidence) : ""}`;
+  const heading = state.lastSearch
+    ? `<p class="microcopy">Results for “${escapeHtml(state.lastSearch)}”</p>`
+    : "";
+  const searchError = state.searchError
+    ? `<p class="inline-error" role="alert">${escapeHtml(state.searchError)}</p>`
+    : "";
+  const hits = state.contextHits.length
+    ? `${heading}${state.contextHits.map((hit) => renderContextHit(hit, state)).join("")}`
+    : state.searchError
+      ? ""
+      : `<p class="microcopy">Search descriptions and routing terms, then open exact source evidence.</p>`;
+  return `${searchError}${hits}${state.evidence ? renderEvidence(state.evidence) : ""}`;
 }
 
 function renderContextHit(hit, state) {
   const freshness = effectiveFreshness(hit.freshness, state.unavailableRoots, hit.source.projectRoot);
-  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong>${freshnessBadge(freshness)}</div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" ${freshness !== "current" ? "disabled" : ""}>Verify exact source</button>${renderUnverifiable(freshness, state)}${renderEvidenceError(state, [hit.entryId])}</article>`;
+  const errorKey = `hit:${hit.entryId}`;
+  const missingRoot = isRootUnavailable(state.unavailableRoots, hit.source.projectRoot);
+  return `<article class="route"><div><strong>${escapeHtml(hit.source.relativePath || hit.source.projectRoot)}</strong>${freshnessBadge(freshness)}</div><p>${escapeHtml(hit.description)}</p><button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(hit.entryId)}" data-error-key="${escapeHtml(errorKey)}" ${freshness !== "current" ? "disabled" : ""}>Verify exact source</button>${renderUnverifiable(freshness, { missingRoot, saved: false })}${renderEvidenceError(state, errorKey)}</article>`;
 }
 
 const FRESHNESS_LABELS = {
@@ -220,21 +238,33 @@ function freshnessBadge(freshness) {
   return `<span class="badge ${escapeHtml(freshness)}">${escapeHtml(FRESHNESS_LABELS[freshness] ?? freshness)}</span>`;
 }
 
-// A disabled source action says why, and offers the one action that can fix it.
-function renderUnverifiable(freshness, state) {
+// A disabled source action says why, and offers an action only where it can help. A search
+// hit describes the index, so re-indexing repairs it. A saved understanding keeps the source
+// fingerprint it was saved with, so re-indexing cannot repair it; it needs re-checking.
+function renderUnverifiable(freshness, { missingRoot, saved }) {
+  const refreshMap = `<button class="text-button" data-action="refresh-map">Refresh map</button>`;
+  if (freshness === "sourceUnavailable" && missingRoot) {
+    return `<p class="microcopy unverifiable">Its project folder is missing (see the notice at the top).</p>`;
+  }
+  if (saved && freshness === "stale") {
+    return `<p class="microcopy unverifiable">Its source changed after this understanding was saved. Refreshing the map does not update a saved understanding; ask the agent to re-check it against the current file.</p>`;
+  }
+  if (saved && freshness === "sourceUnavailable") {
+    return `<p class="microcopy unverifiable">Its saved source can no longer be found. Ask the agent to re-check this understanding.</p>`;
+  }
   if (freshness === "stale") {
-    return `<p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index. <button class="text-button" data-action="refresh-map">Refresh map</button> to re-index it.</p>`;
+    return `<p class="microcopy unverifiable">This file changed after it was indexed, so it can't be checked against the index. ${refreshMap} to re-index it.</p>`;
   }
   if (freshness === "sourceUnavailable") {
-    return `<p class="microcopy unverifiable">${unavailableRootPaths(state).length ? "Its project folder is missing (see the notice at the top)." : `This file is no longer where it was indexed. <button class="text-button" data-action="refresh-map">Refresh map</button> to update the index.`}</p>`;
+    return `<p class="microcopy unverifiable">This file is no longer where it was indexed. ${refreshMap} to update the index.</p>`;
   }
   return "";
 }
 
-// An exact-source failure is shown where the person asked for it, not only at the page top.
-function renderEvidenceError(state, entryIds) {
+// An exact-source failure is shown beside the control that was used, not at the page top.
+function renderEvidenceError(state, errorKey) {
   const error = state.evidenceError;
-  if (!error || !entryIds.includes(error.entryId)) return "";
+  if (!error || error.key !== errorKey) return "";
   return `<p class="inline-error" role="alert">${escapeHtml(error.message)}</p>`;
 }
 
@@ -518,27 +548,30 @@ function renderFinding(hit, state) {
   const entry = hit.entry;
   const freshness = findingFreshness(hit, state);
   const evidence = entry.evidence
-    .map(
-      (link) =>
-        `<button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(link.contextMapEntryId)}"${link.lineRange ? ` data-first-line="${link.lineRange.start}" data-last-line="${link.lineRange.end}"` : ""} ${freshness !== "current" ? "disabled" : ""}>Open evidence${link.lineRange ? ` · lines ${link.lineRange.start}–${link.lineRange.end}` : ""}</button>`,
-    )
+    .map((link) => {
+      const range = link.lineRange ? `${link.lineRange.start}-${link.lineRange.end}` : "";
+      const errorKey = `finding:${entry.id}:${link.contextMapEntryId}:${range}`;
+      return `<button class="text-button" data-action="evidence" data-entry-id="${escapeHtml(link.contextMapEntryId)}" data-error-key="${escapeHtml(errorKey)}"${link.lineRange ? ` data-first-line="${link.lineRange.start}" data-last-line="${link.lineRange.end}"` : ""} ${freshness !== "current" ? "disabled" : ""}>Open evidence${link.lineRange ? ` · lines ${link.lineRange.start}–${link.lineRange.end}` : ""}</button>${renderEvidenceError(state, errorKey)}`;
+    })
     .join("");
   const confirm =
     hit.effectiveVerification === "userConfirmed"
       ? ""
       : `<button class="text-button" data-action="confirm-knowledge" data-entry-id="${escapeHtml(entry.id)}" data-revision="${entry.revision}">Confirm this understanding</button>`;
-  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span>${freshnessBadge(freshness)}</div>${renderFindingDate(entry)}<p>${escapeHtml(entry.content)}</p>${evidence}${entry.evidence.length ? renderUnverifiable(freshness, state) : ""}${renderEvidenceError(state, entry.evidence.map((link) => link.contextMapEntryId))}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
+  return `<article><div><span class="badge kind">${escapeHtml(entry.kind)}</span><span class="badge ${escapeHtml(hit.effectiveVerification)}">${escapeHtml(hit.effectiveVerification)}</span>${freshnessBadge(freshness)}</div>${renderFindingDate(entry)}<p>${escapeHtml(entry.content)}</p>${evidence}${entry.evidence.length ? renderUnverifiable(freshness, { missingRoot: allRootsMissing(state), saved: true }) : ""}${confirm}${hit.relations.length ? `<small>${hit.relations.length} linked relationship${hit.relations.length === 1 ? "" : "s"}</small>` : ""}</article>`;
 }
 
 // Evidence links do not name their root, so a finding is overridden only when every project
 // folder is missing.
 function findingFreshness(hit, state) {
-  const roots = state.project?.roots ?? [];
-  const allMissing =
-    roots.length > 0 && unavailableRootPaths(state).length === roots.length;
-  return allMissing && ["current", "stale"].includes(hit.evidenceFreshness)
+  return allRootsMissing(state) && ["current", "stale"].includes(hit.evidenceFreshness)
     ? "sourceUnavailable"
     : hit.evidenceFreshness;
+}
+
+function allRootsMissing(state) {
+  const roots = state.project?.roots ?? [];
+  return roots.length > 0 && unavailableRootPaths(state).length === roots.length;
 }
 
 function renderInstructionForm(state) {
