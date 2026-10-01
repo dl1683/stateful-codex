@@ -420,52 +420,110 @@ async fn model_must_downgrade_before_changing_user_confirmed_meaning() {
     );
 }
 
+fn update_call(mutation: serde_json::Value, response_bytes: usize) -> ToolCall<'static> {
+    ToolCall {
+        turn_id: "turn-1".to_string(),
+        call_id: "lifecycle-call".to_string(),
+        tool_name: ToolName::plain("blackboard_update_batch"),
+        model: "test-model".to_string(),
+        codex_turn_metadata: None,
+        truncation_policy: TruncationPolicy::Bytes(response_bytes),
+        source: ToolCallSource::Direct,
+        conversation_history: ConversationHistory::default(),
+        turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+        environments: Vec::new(),
+        payload: ToolPayload::Function {
+            arguments: json!({ "mutations": [mutation] }).to_string(),
+        },
+    }
+}
+
 #[tokio::test]
-async fn retire_result_discloses_partial_hiding_instead_of_forgetting() {
-    let (_temp_dir, tool, _entry_id, successor_id, _project_root, _receipt_id) = fixture().await;
-    let output = tool
-        .handle_call(ToolCall {
-            turn_id: "turn-1".to_string(),
-            call_id: "retire-call".to_string(),
-            tool_name: ToolName::plain("blackboard_update_batch"),
-            model: "test-model".to_string(),
-            codex_turn_metadata: None,
-            truncation_policy: TruncationPolicy::Bytes(20_000),
-            source: ToolCallSource::Direct,
-            conversation_history: ConversationHistory::default(),
-            turn_item_emitter: Arc::new(NoopTurnItemEmitter),
-            environments: Vec::new(),
-            payload: ToolPayload::Function {
-                arguments: json!({
-                    "mutations": [{
-                        "action": "retire",
-                        "entryId": successor_id,
-                        "expectedRevision": 1
-                    }]
-                })
-                .to_string(),
-            },
-        })
+async fn retire_and_supersede_results_disclose_partial_hiding_instead_of_forgetting() {
+    let (_temp_dir, tool, entry_id, successor_id, _project_root, _receipt_id) = fixture().await;
+    let superseded = tool
+        .handle_call(update_call(
+            json!({
+                "action": "supersede",
+                "entryId": entry_id,
+                "expectedRevision": 1,
+                "successorEntryId": successor_id
+            }),
+            /*response_bytes*/ 20_000,
+        ))
+        .await
+        .expect("supersede succeeds");
+    let retired = tool
+        .handle_call(update_call(
+            json!({
+                "action": "retire",
+                "entryId": successor_id,
+                "expectedRevision": 1
+            }),
+            /*response_bytes*/ 20_000,
+        ))
         .await
         .expect("retire succeeds");
-    let output: serde_json::Value =
-        serde_json::from_str(&output.log_output()).expect("JSON output");
-    assert_eq!(
-        output,
+    let outputs = [superseded, retired].map(|output| {
+        serde_json::from_str::<serde_json::Value>(&output.log_output()).expect("JSON output")
+    });
+    let receipt = |action: &str, id: &BlackboardEntryId, state: &str| {
         json!({
             "updated": 1,
             "failed": 0,
             "results": [{
                 "index": 0,
-                "action": "retire",
-                "entryId": successor_id.to_string(),
+                "action": action,
+                "entryId": id.to_string(),
                 "revision": 2,
-                "state": "tombstoned",
+                "state": state,
                 "rootPromotion": "candidate",
                 "updated": true,
-                "historicalFinding": {"entryId": successor_id.to_string(), "revision": 2},
+                "historicalFinding": {"entryId": id.to_string(), "revision": 2},
                 "retention": super::RETENTION_DISCLOSURE,
             }]
         })
+    };
+    assert_eq!(
+        outputs,
+        [
+            receipt("supersede", &entry_id, "superseded"),
+            receipt("retire", &successor_id, "tombstoned"),
+        ]
     );
+}
+
+#[tokio::test]
+async fn retire_is_refused_before_mutation_when_its_disclosure_cannot_be_returned() {
+    let (_temp_dir, tool, _entry_id, successor_id, _project_root, _receipt_id) = fixture().await;
+    let before = tool
+        .services
+        .blackboard()
+        .await
+        .expect("blackboard opens")
+        .get_entry(PROJECT_ID, &successor_id)
+        .await
+        .expect("entry lookup succeeds");
+    let error = tool
+        .handle_call(update_call(
+            json!({
+                "action": "retire",
+                "entryId": successor_id,
+                "expectedRevision": 1
+            }),
+            /*response_bytes*/ 512,
+        ))
+        .await
+        .err()
+        .expect("an undeliverable receipt refuses the batch");
+    assert!(error.to_string().starts_with("nothing was written"));
+    let after = tool
+        .services
+        .blackboard()
+        .await
+        .expect("blackboard opens")
+        .get_entry(PROJECT_ID, &successor_id)
+        .await
+        .expect("entry lookup succeeds");
+    assert_eq!(after, before);
 }

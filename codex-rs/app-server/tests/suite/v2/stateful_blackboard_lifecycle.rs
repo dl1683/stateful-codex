@@ -149,13 +149,22 @@ async fn model_receives_current_historical_selection_after_superseding_knowledge
             .expect("update output should be text"),
     )?;
     assert_eq!(
-        update_output["results"][0]["historicalFinding"],
+        update_output["results"][0],
         json!({
+            "index": 0,
+            "action": "supersede",
             "entryId": old_entry_id,
             "revision": 2,
+            "state": "superseded",
+            "rootPromotion": "promoted",
+            "updated": true,
+            "historicalFinding": {
+                "entryId": old_entry_id,
+                "revision": 2,
+            },
+            "retention": "Hidden from active blackboard search and the root only. This is not forgetting or deletion: prior revisions, historical search, run goals and results, obligation packets, and prior-run outcomes injected into later sessions may still contain this content. Do not tell the user it was forgotten, removed, or deleted; tell them what still remains.",
         })
     );
-    assert_eq!(update_output["results"][0]["state"], "superseded");
     Ok(())
 }
 
