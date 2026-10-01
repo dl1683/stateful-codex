@@ -3592,6 +3592,23 @@ async fn recompute_token_usage_uses_session_base_instructions() {
     let expected_tokens = history
         .estimate_token_count_with_base_instructions(&session_base_instructions)
         .expect("estimate with session base instructions");
+    // Independently: history items plus one byte-estimated copy of the decorated instructions.
+    let items_only = history
+        .estimate_token_count_with_base_instructions(&BaseInstructions {
+            text: String::new(),
+            provenance: None,
+        })
+        .expect("estimate history items");
+    let instruction_tokens = i64::try_from(session_base_instructions.text.len().div_ceil(4))
+        .expect("instruction tokens");
+    assert_eq!(expected_tokens, items_only + instruction_tokens);
+    assert_eq!(
+        session_base_instructions
+            .text
+            .matches("<conversation_recall_policy>")
+            .count(),
+        1
+    );
     let model_estimated_tokens = history
         .estimate_token_count(&turn_context)
         .expect("estimate with model instructions");
@@ -11486,6 +11503,36 @@ async fn build_initial_context_prepends_model_switch_message() {
         panic!("expected developer text");
     };
     assert!(text.contains("<model_switch>"));
+}
+
+#[tokio::test]
+async fn recall_policy_does_not_make_inherited_model_instructions_look_like_a_model_switch() {
+    let (session, turn_context) = make_session_and_context().await;
+    let turn_context = Arc::new(turn_context);
+    let model_instructions =
+        codex_prompts::render_model_instructions(turn_context.model_info().as_ref());
+    let has_model_switch = |context: &[ResponseItem]| {
+        context.iter().any(|item| {
+            matches!(item, ResponseItem::Message { content, .. }
+                if content.iter().any(|content| matches!(content,
+                    ContentItem::InputText { text } if text.contains("<model_switch>"))))
+        })
+    };
+    // Instructions inherited from another model's slug are a switch only if they differ.
+    for (base_instructions, expected_switch) in [
+        (model_instructions, false),
+        ("Instructions written for another model.".to_string(), true),
+    ] {
+        {
+            let mut state = session.state.lock().await;
+            state.session_configuration.base_instructions = base_instructions;
+            state.base_instructions_provenance = Some(BaseInstructionsProvenance::Model {
+                model: "another-model".to_string(),
+            });
+        }
+        let initial_context = build_initial_context(&session, &turn_context).await;
+        assert_eq!(has_model_switch(&initial_context), expected_switch);
+    }
 }
 
 #[tokio::test]

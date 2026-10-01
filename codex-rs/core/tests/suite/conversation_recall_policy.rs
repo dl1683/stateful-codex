@@ -60,7 +60,7 @@ async fn recall_policy_reaches_inference_and_both_compaction_paths() -> Result<(
                 config.model_provider.name = "Local compaction test provider".to_string();
             });
         }
-        let test = builder.build(&server).await?;
+        let test = builder.build_with_auto_env(&server).await?;
 
         // The first compaction has no earlier packet, so the policy cannot depend on one.
         test.submit_turn("What is the answer?").await?;
