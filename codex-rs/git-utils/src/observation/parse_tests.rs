@@ -53,6 +53,8 @@ fn every_change_kind_is_dirty() {
     let entries = [
         format!("1 .M N... 100644 100644 100644 {SHA1} {SHA1} a file.txt"),
         format!("1 A. S.M. 000000 160000 160000 {ZERO_SHA1} {SHA1} sub"),
+        format!("1 .M SC.U 160000 160000 160000 {SHA1} {SHA1} other sub"),
+        format!("1 .M S..U 160000 160000 160000 {SHA1} {SHA1} third sub"),
         format!("u UU N... 100644 100644 100644 100644 {SHA1} {SHA1} {SHA1} both.txt"),
         "? new file.txt".to_string(),
     ];
@@ -66,13 +68,24 @@ fn every_change_kind_is_dirty() {
         );
     }
 
-    let mut records = branch_headers();
-    records.push(format!(
-        "2 R. N... 100644 100644 100644 {SHA1} {SHA1} R100 new name"
-    ));
-    records.push("old name".to_string());
+    for (xy, score) in [("R.", "R100"), ("C.", "C75"), (".R", "R5")] {
+        let mut records = branch_headers();
+        records.push(format!(
+            "2 {xy} N... 100644 100644 100644 {SHA1} {SHA1} {score} new name"
+        ));
+        records.push("old name".to_string());
+        assert_eq!(
+            parse_sha1_status(&records),
+            Ok(committed(StatusWorktree::Dirty)),
+            "{xy} {score}"
+        );
+    }
+
+    // Paths are raw bytes and need not be UTF-8.
+    let mut output = status(&branch_headers());
+    output.extend_from_slice(b"? caf\xe9.txt\0");
     assert_eq!(
-        parse_sha1_status(&records),
+        parse_porcelain_v2_status(&output, GitObjectFormat::Sha1),
         Ok(committed(StatusWorktree::Dirty))
     );
 }
@@ -89,18 +102,53 @@ fn ignored_entries_do_not_make_the_worktree_dirty() {
 
 #[test]
 fn unborn_and_detached_headers_are_recognized() {
-    let records = [
+    let unborn = [
         "# branch.oid (initial)".to_string(),
+        "# branch.head trunk".to_string(),
+    ];
+    assert_eq!(
+        parse_sha1_status(&unborn),
+        Ok(PorcelainStatus {
+            oid: StatusBranchOid::Initial,
+            head: StatusBranchHead::Branch("trunk".to_string()),
+            worktree: StatusWorktree::Clean,
+        })
+    );
+    let detached = [
+        format!("# branch.oid {SHA1}"),
         "# branch.head (detached)".to_string(),
     ];
     assert_eq!(
-        parse_sha1_status(&records),
+        parse_sha1_status(&detached),
         Ok(PorcelainStatus {
-            oid: StatusBranchOid::Initial,
+            oid: StatusBranchOid::Commit(GitSha::new(SHA1)),
             head: StatusBranchHead::Detached,
             worktree: StatusWorktree::Clean,
         })
     );
+}
+
+#[test]
+fn unresolvable_or_invalid_branch_headers_are_rejected() {
+    for head in [
+        "(unknown)",
+        "main\n? hidden",
+        " ",
+        "",
+        "a..b",
+        "x.lock",
+        "@",
+    ] {
+        let records = [
+            format!("# branch.oid {SHA1}"),
+            format!("# branch.head {head}"),
+        ];
+        assert_eq!(
+            parse_sha1_status(&records),
+            Err(ParseFailure::InvalidOutput),
+            "{head:?}"
+        );
+    }
 }
 
 #[test]
@@ -158,6 +206,47 @@ fn malformed_or_incomplete_status_is_rejected() {
             )],
         ]
         .concat(),
+        [
+            branch_headers(),
+            vec![format!(
+                "u M. N... 100644 100644 100644 100644 {SHA1} {SHA1} {SHA1} f"
+            )],
+        ]
+        .concat(),
+        [
+            branch_headers(),
+            vec![format!("1 .. N... 100644 100644 100644 {SHA1} {SHA1} f")],
+        ]
+        .concat(),
+        [
+            branch_headers(),
+            vec![format!("1 .U N... 100644 100644 100644 {SHA1} {SHA1} f")],
+        ]
+        .concat(),
+        [
+            branch_headers(),
+            vec![format!(
+                "2 R. N... 100644 100644 100644 {SHA1} {SHA1} R999 new"
+            )],
+            vec!["old".to_string()],
+        ]
+        .concat(),
+        [
+            branch_headers(),
+            vec![format!(
+                "2 R. N... 100644 100644 100644 {SHA1} {SHA1} C90 new"
+            )],
+            vec!["old".to_string()],
+        ]
+        .concat(),
+        [
+            branch_headers(),
+            vec![format!(
+                "2 M. N... 100644 100644 100644 {SHA1} {SHA1} R90 new"
+            )],
+            vec!["old".to_string()],
+        ]
+        .concat(),
         [branch_headers(), vec!["? ".to_string()]].concat(),
         [branch_headers(), vec!["x unknown".to_string()]].concat(),
         [branch_headers(), vec![String::new()]].concat(),
@@ -203,13 +292,27 @@ fn worktree_root_keeps_whitespace_and_strips_only_the_line_ending() {
     );
 }
 
-#[cfg(windows)]
 #[test]
-fn non_utf8_worktree_root_is_unsupported_on_windows() {
+fn unrepresentable_worktree_roots_are_unsupported() {
+    #[cfg(unix)]
+    let nul: &[u8] = b"/tmp/bad\0path\n";
+    #[cfg(windows)]
+    let nul: &[u8] = b"C:/bad\0path\n";
+    assert_eq!(parse_worktree_root(nul), Err(ParseFailure::UnsupportedPath));
+
+    #[cfg(windows)]
     assert_eq!(
         parse_worktree_root(b"C:/bad\xff\n"),
         Err(ParseFailure::UnsupportedPath)
     );
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        assert_eq!(
+            parse_worktree_root(b"/tmp/caf\xe9\n"),
+            Ok(PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/caf\xe9")))
+        );
+    }
 }
 
 #[test]
@@ -270,6 +373,11 @@ fn symbolic_ref_requires_one_ref_line() {
         &b"refs/heads/main"[..],
         b"\n",
         b"HEAD\n",
+        b"refs/\n",
+        b"refs/heads/a b\n",
+        b"refs/heads/a..b\n",
+        b"refs/heads/x.lock\n",
+        b"refs/heads/a@{1}\n",
         b"refs/heads/a\nrefs/heads/b\n",
         b"refs/heads/\xff\n",
     ] {

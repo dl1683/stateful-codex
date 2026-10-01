@@ -23,15 +23,6 @@ pub(super) enum GitObjectFormat {
     Sha256,
 }
 
-impl GitObjectFormat {
-    fn hex_len(self) -> usize {
-        match self {
-            Self::Sha1 => 40,
-            Self::Sha256 => 64,
-        }
-    }
-}
-
 /// The `# branch.oid` status header.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum StatusBranchOid {
@@ -74,6 +65,9 @@ fn single_line(output: &[u8]) -> Result<&[u8], ParseFailure> {
 /// Parses `rev-parse --show-toplevel` output, preserving embedded whitespace.
 pub(super) fn parse_worktree_root(output: &[u8]) -> Result<PathBuf, ParseFailure> {
     let line = single_line(output)?;
+    if line.contains(&b'\0') {
+        return Err(ParseFailure::UnsupportedPath);
+    }
     #[cfg(unix)]
     let path = {
         use std::os::unix::ffi::OsStrExt;
@@ -107,7 +101,11 @@ pub(super) fn parse_oid_line(
 
 fn parse_oid(oid: &[u8], format: GitObjectFormat) -> Result<GitSha, ParseFailure> {
     let is_lower_hex = |byte: &u8| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte);
-    if oid.len() != format.hex_len() || !oid.iter().all(is_lower_hex) {
+    let hex_len = match format {
+        GitObjectFormat::Sha1 => 40,
+        GitObjectFormat::Sha256 => 64,
+    };
+    if oid.len() != hex_len || !oid.iter().all(is_lower_hex) {
         return Err(ParseFailure::InvalidOutput);
     }
     let oid = std::str::from_utf8(oid).map_err(|_| ParseFailure::InvalidOutput)?;
@@ -117,10 +115,28 @@ fn parse_oid(oid: &[u8], format: GitObjectFormat) -> Result<GitSha, ParseFailure
 /// Parses `symbolic-ref -q HEAD` output from a successful run.
 pub(super) fn parse_symbolic_ref(output: &[u8]) -> Result<String, ParseFailure> {
     let line = single_line(output)?;
-    if !line.starts_with(b"refs/") || line.iter().any(u8::is_ascii_control) {
+    if !line.starts_with(b"refs/") {
         return Err(ParseFailure::InvalidOutput);
     }
-    String::from_utf8(line.to_vec()).map_err(|_| ParseFailure::InvalidOutput)
+    parse_ref_name(line)
+}
+
+/// Accepts a reference name that `git check-ref-format --allow-onelevel`
+/// would accept, as UTF-8.
+fn parse_ref_name(name: &[u8]) -> Result<String, ParseFailure> {
+    let forbidden = |byte: &u8| byte.is_ascii_control() || b" ~^:?*[\\".contains(byte);
+    let valid_component = |component: &[u8]| {
+        !component.is_empty() && !component.starts_with(b".") && !component.ends_with(b".lock")
+    };
+    let valid = name != b"@"
+        && !name.ends_with(b".")
+        && !name.windows(2).any(|pair| pair == b".." || pair == b"@{")
+        && !name.iter().any(forbidden)
+        && name.split(|byte| *byte == b'/').all(valid_component);
+    if !valid {
+        return Err(ParseFailure::InvalidOutput);
+    }
+    String::from_utf8(name.to_vec()).map_err(|_| ParseFailure::InvalidOutput)
 }
 
 /// Parses `status --porcelain=v2 --branch -z` output.
@@ -186,11 +202,11 @@ fn parse_header(
         b"(initial)" => Ok(StatusBranchOid::Initial),
         _ => parse_oid(value, format).map(StatusBranchOid::Commit),
     };
+    // Git prints `(unknown)` when it could not resolve the branch.
     let parsed_head = || match value {
         b"(detached)" => Ok(StatusBranchHead::Detached),
-        _ => String::from_utf8(non_empty(value)?.to_vec())
-            .map(StatusBranchHead::Branch)
-            .map_err(|_| ParseFailure::InvalidOutput),
+        b"(unknown)" => Err(ParseFailure::InvalidOutput),
+        _ => parse_ref_name(value).map(StatusBranchHead::Branch),
     };
     match key {
         b"branch.oid" if oid.is_none() => *oid = Some(parsed_oid()?),
@@ -226,7 +242,7 @@ fn parse_change_fields(
     if fields.len() != field_count {
         return Err(ParseFailure::InvalidOutput);
     }
-    let valid = valid_xy(fields[0])
+    let valid = valid_xy(fields[0], entry)
         && valid_submodule(fields[1])
         && fields[2..2 + modes].iter().all(|mode| valid_mode(mode))
         && fields[2 + modes..2 + modes + oids]
@@ -234,7 +250,7 @@ fn parse_change_fields(
             .all(|oid| parse_oid(oid, format).is_ok())
         && fields[2 + modes + oids..field_count - 1]
             .iter()
-            .all(|score| valid_score(score));
+            .all(|score| valid_score(score, fields[0]));
     if !valid {
         return Err(ParseFailure::InvalidOutput);
     }
@@ -249,8 +265,22 @@ fn non_empty(field: &[u8]) -> Result<&[u8], ParseFailure> {
     }
 }
 
-fn valid_xy(xy: &[u8]) -> bool {
-    xy.len() == 2 && xy.iter().all(|state| b".MTADRCU".contains(state))
+fn valid_xy(xy: &[u8], entry: ChangeEntry) -> bool {
+    match (entry, xy) {
+        (ChangeEntry::Ordinary, [index, worktree]) => {
+            b".MTAD".contains(index) && b".MTAD".contains(worktree) && xy != b".."
+        }
+        (ChangeEntry::RenameOrCopy, [index, worktree]) => {
+            b".MTADRC".contains(index)
+                && b".MTADRC".contains(worktree)
+                && (b"RC".contains(index) || b"RC".contains(worktree))
+        }
+        // The seven unmerged combinations documented for porcelain status.
+        (ChangeEntry::Unmerged, _) => {
+            matches!(xy, b"DD" | b"AU" | b"UD" | b"UA" | b"DU" | b"AA" | b"UU")
+        }
+        (ChangeEntry::Ordinary | ChangeEntry::RenameOrCopy, _) => false,
+    }
 }
 
 fn valid_submodule(state: &[u8]) -> bool {
@@ -269,9 +299,18 @@ fn valid_mode(mode: &[u8]) -> bool {
     mode.len() == 6 && mode.iter().all(|digit| (b'0'..=b'7').contains(digit))
 }
 
-fn valid_score(score: &[u8]) -> bool {
+/// A rename or copy score: a letter from XY, then a percentage up to 100.
+fn valid_score(score: &[u8], xy: &[u8]) -> bool {
     match score {
-        [b'R' | b'C', digits @ ..] => !digits.is_empty() && digits.iter().all(u8::is_ascii_digit),
+        [letter @ (b'R' | b'C'), digits @ ..] => {
+            xy.contains(letter)
+                && (1..=3).contains(&digits.len())
+                && digits.iter().all(u8::is_ascii_digit)
+                && std::str::from_utf8(digits)
+                    .ok()
+                    .and_then(|digits| digits.parse::<u8>().ok())
+                    .is_some_and(|percent| percent <= 100)
+        }
         _ => false,
     }
 }
