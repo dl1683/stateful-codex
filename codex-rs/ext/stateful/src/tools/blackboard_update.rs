@@ -45,6 +45,11 @@ use super::worst_receipt_error;
 
 const UPDATE_TOOL_NAME: &str = "blackboard_update_batch";
 const MAX_MUTATIONS: usize = 24;
+/// Host-written disclosure attached to every successful retire or supersede result.
+///
+/// Retiring only hides an entry from active channels; it is not a forget or delete
+/// capability, and the model must not report it as one.
+const RETENTION_DISCLOSURE: &str = "Hidden from active blackboard search and the root only. This is not forgetting or deletion: prior revisions, historical search, run goals and results, obligation packets, and prior-run outcomes injected into later sessions may still contain this content. Do not tell the user it was forgotten, removed, or deleted; tell them what still remains.";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -174,6 +179,7 @@ impl BlackboardUpdateTool {
                             "rootPromotion": "x".repeat(16),
                             "updated": false,
                             "historicalFinding": {"entryId": entry_id, "revision": u64::MAX},
+                            "retention": RETENTION_DISCLOSURE,
                             "error": worst_receipt_error(),
                         })
                     })
@@ -430,7 +436,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, direct evidence, or exact premise revisions change. Premises are live-checked semantic provenance and never confer sourceVerified; pass an empty premises array only to deliberately clear them. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. userConfirmed is host-issued from an explicit user action and cannot be selected here; changing confirmed meaning or its support requires a new user action or an explicit downgrade. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. A successful supersede or retire result includes historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, direct evidence, or exact premise revisions change. Premises are live-checked semantic provenance and never confer sourceVerified; pass an empty premises array only to deliberately clear them. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. userConfirmed is host-issued from an explicit user action and cannot be selected here; changing confirmed meaning or its support requires a new user action or an explicit downgrade. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. Retire and supersede are not forget or delete: they hide an entry from active search and the root, while prior revisions, historical search, run results, obligation packets, and injected prior-run outcomes may still contain it. Forget and delete are unavailable: no tool can make the host stop using or remove knowledge. If the user asks to forget something, say that forgetting is not available; retiring offers only partial hiding, and you must tell the user exactly what remains rather than saying it was forgotten, removed, or deleted. A successful supersede or retire result includes retention and historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
             ),
             strict: false,
             defer_loading: None,
@@ -475,6 +481,7 @@ fn successful_update_result(
             "entryId": entry.id.to_string(),
             "revision": entry.revision,
         });
+        result["retention"] = json!(RETENTION_DISCLOSURE);
     }
     result
 }

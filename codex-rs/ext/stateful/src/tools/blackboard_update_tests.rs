@@ -1,6 +1,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use codex_extension_api::ConversationHistory;
+use codex_extension_api::NoopTurnItemEmitter;
+use codex_extension_api::ToolCall;
+use codex_extension_api::ToolCallSource;
+use codex_extension_api::ToolName;
+use codex_extension_api::ToolPayload;
+
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardEntryUpdate;
@@ -25,6 +32,7 @@ use codex_project_intelligence::SourceFingerprint;
 use codex_state::SqliteConfig;
 use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
+use codex_utils_output_truncation::TruncationPolicy;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use sha2::Digest;
@@ -409,5 +417,55 @@ async fn model_must_downgrade_before_changing_user_confirmed_meaning() {
     assert_eq!(
         self_award_error.to_string(),
         "userConfirmed is issued only from a host-observed user action and cannot be selected by the model"
+    );
+}
+
+#[tokio::test]
+async fn retire_result_discloses_partial_hiding_instead_of_forgetting() {
+    let (_temp_dir, tool, _entry_id, successor_id, _project_root, _receipt_id) = fixture().await;
+    let output = tool
+        .handle_call(ToolCall {
+            turn_id: "turn-1".to_string(),
+            call_id: "retire-call".to_string(),
+            tool_name: ToolName::plain("blackboard_update_batch"),
+            model: "test-model".to_string(),
+            codex_turn_metadata: None,
+            truncation_policy: TruncationPolicy::Bytes(20_000),
+            source: ToolCallSource::Direct,
+            conversation_history: ConversationHistory::default(),
+            turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+            environments: Vec::new(),
+            payload: ToolPayload::Function {
+                arguments: json!({
+                    "mutations": [{
+                        "action": "retire",
+                        "entryId": successor_id,
+                        "expectedRevision": 1
+                    }]
+                })
+                .to_string(),
+            },
+        })
+        .await
+        .expect("retire succeeds");
+    let output: serde_json::Value =
+        serde_json::from_str(&output.log_output()).expect("JSON output");
+    assert_eq!(
+        output,
+        json!({
+            "updated": 1,
+            "failed": 0,
+            "results": [{
+                "index": 0,
+                "action": "retire",
+                "entryId": successor_id.to_string(),
+                "revision": 2,
+                "state": "tombstoned",
+                "rootPromotion": "candidate",
+                "updated": true,
+                "historicalFinding": {"entryId": successor_id.to_string(), "revision": 2},
+                "retention": super::RETENTION_DISCLOSURE,
+            }]
+        })
     );
 }
