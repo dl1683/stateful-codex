@@ -5223,6 +5223,36 @@ class StatefulAttributionStatus(Enum):
     aborted = "aborted"
 
 
+class StatefulCaptureOutcome(Enum):
+    stored = "stored"
+    already_stored = "alreadyStored"
+
+
+class StatefulKnowledgeCategoryValue(Enum):
+    decision = "decision"
+    finding = "finding"
+
+
+class StatefulKnowledgeCategory(
+    RootModel[
+        StatefulKnowledgeCategoryValue
+        | Literal["rule"]
+        | Literal["pendingRule"]
+        | Literal["recipe"]
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        StatefulKnowledgeCategoryValue
+        | Literal["rule"]
+        | Literal["pendingRule"]
+        | Literal["recipe"],
+        Field(description="What a knowledge receipt says was saved."),
+    ]
+
+
 class StatefulObligationPacket(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10220,6 +10250,20 @@ class StatefulAttributionCompletedNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class StatefulKnowledgeCapturedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    category: StatefulKnowledgeCategory
+    entry_id: Annotated[str, Field(alias="entryId")]
+    outcome: StatefulCaptureOutcome
+    project_id: Annotated[str, Field(alias="projectId")]
+    revision: Annotated[int, Field(ge=0)]
+    text: Annotated[str, Field(description="The entry's content, at most 240 bytes.")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class StatefulMeasurementSummary(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11827,6 +11871,24 @@ class StatefulAttributionCompletedServerNotification(BaseModel):
         Field(title="StatefulAttribution/completedNotificationMethod"),
     ]
     params: StatefulAttributionCompletedNotification
+
+
+class StatefulKnowledgeCapturedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["statefulKnowledge/captured"],
+        Field(title="StatefulKnowledge/capturedNotificationMethod"),
+    ]
+    params: StatefulKnowledgeCapturedNotification
 
 
 class ThreadSettingsUpdatedServerNotification(BaseModel):
@@ -13599,6 +13661,7 @@ class ServerNotification(
         | SteeringUpdatedServerNotification
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
+        | StatefulKnowledgeCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
@@ -13695,6 +13758,7 @@ class ServerNotification(
         | SteeringUpdatedServerNotification
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
+        | StatefulKnowledgeCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification

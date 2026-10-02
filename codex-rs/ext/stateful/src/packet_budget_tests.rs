@@ -110,17 +110,19 @@ fn project_status() -> ProjectIntelligenceStatus {
             recency_at_ms: None,
         }),
         last_refresh: None,
-        root_blackboard: Box::new(RootBlackboardStatus::Available(ResolvedRootBlackboard {
-            projection: RootBlackboardProjection {
-                project_id: PROJECT_ID.to_string(),
-                revision: 12,
-                data: (1..=10).map(promoted_entry).collect(),
-                omitted_entries: 0,
-                candidate_entries: 0,
-            },
-            evidence_routes: Default::default(),
-            evidence_audit: None,
-        })),
+        root_blackboard: Box::new(RootBlackboardStatus::Available(
+            ResolvedRootBlackboard::new(
+                RootBlackboardProjection {
+                    project_id: PROJECT_ID.to_string(),
+                    revision: 12,
+                    data: (1..=10).map(promoted_entry).collect(),
+                    omitted_entries: 0,
+                    candidate_entries: 0,
+                },
+                Default::default(),
+                None,
+            ),
+        )),
     }
 }
 

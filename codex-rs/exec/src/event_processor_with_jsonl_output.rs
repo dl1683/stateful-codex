@@ -520,6 +520,12 @@ impl EventProcessorWithJsonOutput {
             ServerNotification::RawResponseCompleted(_)
             | ServerNotification::RawResponseItemCompleted(_)
             | ServerNotification::ContextCompacted(_) => CodexStatus::Running,
+            ServerNotification::StatefulKnowledgeCaptured(notification) => {
+                self.emit(ThreadEvent::StatefulKnowledge(
+                    crate::exec_events::StatefulKnowledgeEvent::from(&notification),
+                ));
+                CodexStatus::Running
+            }
             ServerNotification::StatefulAttributionCompleted(notification) => {
                 let turn_status = match notification.status {
                     codex_app_server_protocol::StatefulAttributionStatus::Completed => {

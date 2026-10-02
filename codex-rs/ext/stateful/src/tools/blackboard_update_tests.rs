@@ -544,3 +544,56 @@ async fn retire_is_refused_before_mutation_when_its_disclosure_cannot_be_returne
         .expect("entry lookup succeeds");
     assert_eq!(after, before);
 }
+
+/// A user rule keeps the user's words and a pending rule stays pending: the model can
+/// neither rewrite a rule nor promote one the user limited to a task.
+#[tokio::test]
+async fn user_rules_cannot_be_rewritten_or_promoted_from_pending() {
+    let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
+    let pending = crate::rule_capture::capture_marked_rules(
+        &tool.services,
+        /*event_sink*/ None,
+        PROJECT_ID,
+        "thread-1",
+        "turn-1",
+        "Never run migrations during this pass.",
+    )
+    .await
+    .remove(0)
+    .entry;
+    let promote_error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "setRootPromotion",
+                "entryId": pending.id.to_string(),
+                "expectedRevision": pending.revision,
+                "rootPromotion": "promoted"
+            })),
+            "turn-promote",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("a pending rule cannot be promoted");
+    let rewrite_error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "revise",
+                "entryId": pending.id.to_string(),
+                "expectedRevision": pending.revision,
+                "content": "Never run migrations."
+            })),
+            "turn-rewrite",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("a user rule cannot be rewritten");
+    assert_eq!(
+        (promote_error.to_string(), rewrite_error.to_string()),
+        (
+            "a pending user rule applies only after the user states it as standing; it cannot be promoted"
+                .to_string(),
+            "a user rule keeps the user's exact words; record the new wording with userQuote and supersede this entry"
+                .to_string(),
+        )
+    );
+}

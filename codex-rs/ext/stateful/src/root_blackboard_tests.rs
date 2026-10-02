@@ -60,8 +60,8 @@ fn hit(
 /// merged entry with a one-off "no code changes" restriction) is counted but never shown.
 #[test]
 fn user_rules_lead_and_agent_recorded_rules_are_not_applied() {
-    let status = RootBlackboardStatus::Available(ResolvedRootBlackboard {
-        projection: RootBlackboardProjection {
+    let status = RootBlackboardStatus::Available(ResolvedRootBlackboard::new(
+        RootBlackboardProjection {
             project_id: "project-1".to_string(),
             revision: 3,
             data: vec![
@@ -87,9 +87,9 @@ fn user_rules_lead_and_agent_recorded_rules_are_not_applied() {
             omitted_entries: 0,
             candidate_entries: 0,
         },
-        evidence_routes: Default::default(),
-        evidence_audit: None,
-    });
+        Default::default(),
+        None,
+    ));
     let mut output = String::new();
     render_root_blackboard(&mut output, &status);
     let headings = output
@@ -116,4 +116,88 @@ fn user_rules_lead_and_agent_recorded_rules_are_not_applied() {
             true,
         )
     );
+}
+
+/// Rules come out of the projection itself, so aliases stay contiguous for deltas and
+/// completion; and large knowledge cannot push the user's rules out of the packet.
+#[test]
+fn quarantine_keeps_aliases_contiguous_and_rules_are_never_evicted() {
+    let quarantined = ResolvedRootBlackboard::new(
+        RootBlackboardProjection {
+            project_id: "project-1".to_string(),
+            revision: 1,
+            data: vec![
+                hit(
+                    "rule",
+                    BlackboardKind::Instruction,
+                    BlackboardProvenanceKind::User,
+                    "Never commit.",
+                ),
+                hit(
+                    "hidden",
+                    BlackboardKind::Instruction,
+                    BlackboardProvenanceKind::Agent,
+                    "Invented.",
+                ),
+                hit(
+                    "fact",
+                    BlackboardKind::Fact,
+                    BlackboardProvenanceKind::Agent,
+                    "A fact.",
+                ),
+            ],
+            omitted_entries: 0,
+            candidate_entries: 0,
+        },
+        Default::default(),
+        None,
+    );
+    assert_eq!(
+        quarantined
+            .projection
+            .data
+            .iter()
+            .map(|hit| hit.entry.id.to_string())
+            .collect::<Vec<_>>(),
+        vec!["rule".to_string(), "fact".to_string()]
+    );
+
+    let mut data = (0..5)
+        .map(|index| {
+            hit(
+                &format!("rule-{index}"),
+                BlackboardKind::Instruction,
+                BlackboardProvenanceKind::User,
+                &format!("Rule {index}: {}", "never do this. ".repeat(55)),
+            )
+        })
+        .collect::<Vec<_>>();
+    data.extend((0..20).map(|index| {
+        hit(
+            &format!("fact-{index:02}"),
+            BlackboardKind::Fact,
+            BlackboardProvenanceKind::Agent,
+            &format!("Fact {index}: {}", "detail ".repeat(400)),
+        )
+    }));
+    let status = RootBlackboardStatus::Available(ResolvedRootBlackboard::new(
+        RootBlackboardProjection {
+            project_id: "project-1".to_string(),
+            revision: 2,
+            data,
+            omitted_entries: 0,
+            candidate_entries: 0,
+        },
+        Default::default(),
+        None,
+    ));
+    let mut output = String::new();
+    render_root_blackboard(&mut output, &status);
+    assert_eq!(
+        (0..5)
+            .map(|index| output.contains(&format!("Rule {index}:")))
+            .collect::<Vec<_>>(),
+        vec![true; 5]
+    );
+    assert!(output.contains("root entries omitted by the context bound"));
 }

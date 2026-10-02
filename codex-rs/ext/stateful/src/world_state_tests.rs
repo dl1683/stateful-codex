@@ -74,17 +74,19 @@ fn available_at_revision(
     ProjectIntelligenceStatus::Available {
         project: Box::new(project),
         last_refresh: None,
-        root_blackboard: Box::new(RootBlackboardStatus::Available(ResolvedRootBlackboard {
-            projection: RootBlackboardProjection {
-                project_id,
-                revision,
-                data: Vec::new(),
-                omitted_entries: 0,
-                candidate_entries,
-            },
-            evidence_routes: Default::default(),
-            evidence_audit: None,
-        })),
+        root_blackboard: Box::new(RootBlackboardStatus::Available(
+            ResolvedRootBlackboard::new(
+                RootBlackboardProjection {
+                    project_id,
+                    revision,
+                    data: Vec::new(),
+                    omitted_entries: 0,
+                    candidate_entries,
+                },
+                Default::default(),
+                None,
+            ),
+        )),
     }
 }
 

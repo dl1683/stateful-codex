@@ -37,6 +37,9 @@ pub enum ThreadEvent {
     /// Emits cumulative Stateful contribution after one Stateful turn stops.
     #[serde(rename = "stateful.attribution")]
     StatefulAttribution(StatefulAttributionEvent),
+    /// Receipt for one knowledge entry Stateful saved (or found saved) during the turn.
+    #[serde(rename = "stateful.knowledge")]
+    StatefulKnowledge(StatefulKnowledgeEvent),
     /// Represents an unrecoverable error emitted directly by the event stream.
     #[serde(rename = "error")]
     Error(ThreadErrorEvent),
@@ -157,6 +160,68 @@ pub enum StatefulTurnStatus {
     Completed,
     Failed,
     Aborted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum StatefulKnowledgeCategory {
+    Rule,
+    PendingRule,
+    Decision,
+    Recipe,
+    Finding,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum StatefulCaptureOutcome {
+    Stored,
+    AlreadyStored,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+pub struct StatefulKnowledgeEvent {
+    pub entry_id: String,
+    pub category: StatefulKnowledgeCategory,
+    pub outcome: StatefulCaptureOutcome,
+    /// The saved text (at most 240 bytes) with control characters replaced by spaces.
+    pub text: String,
+}
+
+impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
+    for StatefulKnowledgeEvent
+{
+    fn from(
+        notification: &codex_app_server_protocol::StatefulKnowledgeCapturedNotification,
+    ) -> Self {
+        use codex_app_server_protocol::StatefulCaptureOutcome as Outcome;
+        use codex_app_server_protocol::StatefulKnowledgeCategory as Category;
+        Self {
+            entry_id: notification.entry_id.clone(),
+            category: match notification.category {
+                Category::Rule => StatefulKnowledgeCategory::Rule,
+                Category::PendingRule => StatefulKnowledgeCategory::PendingRule,
+                Category::Decision => StatefulKnowledgeCategory::Decision,
+                Category::Recipe => StatefulKnowledgeCategory::Recipe,
+                Category::Finding => StatefulKnowledgeCategory::Finding,
+            },
+            outcome: match notification.outcome {
+                Outcome::Stored => StatefulCaptureOutcome::Stored,
+                Outcome::AlreadyStored => StatefulCaptureOutcome::AlreadyStored,
+            },
+            text: notification
+                .text
+                .chars()
+                .map(|character| {
+                    if character.is_control() {
+                        ' '
+                    } else {
+                        character
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

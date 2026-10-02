@@ -5023,6 +5023,26 @@
           "properties": {
             "method": {
               "enum": [
+                "statefulKnowledge/captured"
+              ],
+              "title": "StatefulKnowledge/capturedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/StatefulKnowledgeCapturedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "StatefulKnowledge/capturedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/project/updated"
               ],
               "title": "Thread/project/updatedNotificationMethod",
@@ -21558,6 +21578,91 @@
           "aborted"
         ],
         "type": "string"
+      },
+      "StatefulCaptureOutcome": {
+        "enum": [
+          "stored",
+          "alreadyStored"
+        ],
+        "type": "string"
+      },
+      "StatefulKnowledgeCapturedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Receipt for one knowledge entry stored (or already stored) during a Stateful turn.",
+        "properties": {
+          "category": {
+            "$ref": "#/definitions/v2/StatefulKnowledgeCategory"
+          },
+          "entryId": {
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/definitions/v2/StatefulCaptureOutcome"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "text": {
+            "description": "The entry's content, at most 240 bytes.",
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "entryId",
+          "outcome",
+          "projectId",
+          "revision",
+          "text",
+          "threadId",
+          "turnId"
+        ],
+        "title": "StatefulKnowledgeCapturedNotification",
+        "type": "object"
+      },
+      "StatefulKnowledgeCategory": {
+        "description": "What a knowledge receipt says was saved.",
+        "oneOf": [
+          {
+            "enum": [
+              "decision",
+              "finding"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "A standing rule in the user's own words.",
+            "enum": [
+              "rule"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Marked as standing but limited to a task; kept for inspection, never applied.",
+            "enum": [
+              "pendingRule"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "How to build, test or run the project here.",
+            "enum": [
+              "recipe"
+            ],
+            "type": "string"
+          }
+        ]
       },
       "StatefulMeasurementSummary": {
         "description": "Exact totals over a bounded newest-first window of project measurements.\n\nToken counts are exposed without estimating monetary cost because the persisted records do not contain authoritative provider pricing, units, or currency.",

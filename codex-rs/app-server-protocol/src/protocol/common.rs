@@ -2070,6 +2070,8 @@ server_notification_definitions! {
     BlackboardUpdated => "blackboard/updated" (v2::BlackboardUpdatedNotification),
     #[experimental("statefulAttribution/completed")]
     StatefulAttributionCompleted => "statefulAttribution/completed" (v2::StatefulAttributionCompletedNotification),
+    #[experimental("statefulKnowledge/captured")]
+    StatefulKnowledgeCaptured => "statefulKnowledge/captured" (v2::StatefulKnowledgeCapturedNotification),
     #[experimental("thread/project/updated")]
     ThreadProjectUpdated => "thread/project/updated" (v2::ThreadProjectUpdatedNotification),
     #[experimental("thread/environment/connected")]

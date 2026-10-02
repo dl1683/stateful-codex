@@ -292,6 +292,7 @@ impl BlackboardUpdateTool {
         let user_rule = current.value.kind == BlackboardKind::Instruction
             && current.value.provenance.kind == BlackboardProvenanceKind::User;
         let user_provenance = current.value.provenance.clone();
+        let current_promotion = current.value.root_promotion;
         let mut update = BlackboardEntryUpdate {
             expected_revision: current.revision,
             kind: current.value.kind,
@@ -444,6 +445,15 @@ impl BlackboardUpdateTool {
                 update.expected_revision = expected_revision;
                 update.state = BlackboardEntryState::Tombstoned;
             }
+        }
+        if user_rule
+            && current_promotion != RootPromotion::Promoted
+            && update.root_promotion == RootPromotion::Promoted
+            && update.state == BlackboardEntryState::Active
+        {
+            return Err(respond(
+                "a pending user rule applies only after the user states it as standing; it cannot be promoted",
+            ));
         }
         if user_rule && update.state == BlackboardEntryState::Active {
             update.provenance = user_provenance;

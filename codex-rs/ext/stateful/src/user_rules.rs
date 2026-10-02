@@ -74,6 +74,41 @@ const STANDING_PHRASES: &[&str] = &[
     "all of our work",
 ];
 
+/// Markers that make a rule's standing unambiguous even next to a task word.
+const STRONG_STANDING_PHRASES: &[&str] = &[
+    "from now on",
+    "going forward",
+    "in future",
+    "in the future",
+    "standing",
+    "the whole week",
+    "all week",
+    "later sessions",
+    "all our work",
+    "all of our work",
+];
+
+/// Reported speech: the sentence relays someone else's words or advice.
+const REPORTED_SPEECH_PHRASES: &[&str] = &[
+    "told me",
+    "told us",
+    "you told",
+    "said to",
+    "says to",
+    "you said",
+    "suggested",
+    "recommended",
+    "advised",
+    "assistant",
+    "according to",
+    "claimed",
+    "codex said",
+    "it said",
+    "they said",
+    "he said",
+    "she said",
+];
+
 const TASK_PHRASES: &[&str] = &[
     "yet",
     "for now",
@@ -96,41 +131,72 @@ const TASK_PHRASES: &[&str] = &[
 /// Clauses of `text` that the user explicitly marked as standing (or pending) rules.
 pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
     let mut rules = Vec::new();
-    let mut list_inherits = false;
+    // The standing of the list the current line belongs to, from its header.
+    let mut list_header: Option<RuleStanding> = None;
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            list_inherits = false;
+            list_header = None;
             continue;
         }
         let is_list_item = list_item_body(trimmed).is_some();
         if !is_list_item {
-            // A header such as "My working preferences for the whole week:" marks the
-            // list that follows; any other prose line ends a list.
-            list_inherits = trimmed.ends_with(':') && has_standing_marker(&normalize(trimmed));
+            // A header such as "My working preferences for the whole week:" marks the list
+            // that follows, carrying its own scope; any other prose line ends a list.
+            let normalized = normalize(trimmed);
+            list_header = (trimmed.ends_with(':')
+                && has_standing_marker(&normalized)
+                && !is_reported_speech(&normalized))
+            .then(|| standing_of(&normalized));
         }
-        let inherited = is_list_item && list_inherits;
+        let inherited = if is_list_item { list_header } else { None };
         for clause in clauses(trimmed) {
-            if clause.ends_with('?') || clause.len() > MAX_RULE_BYTES {
+            if clause.ends_with('?') || clause.ends_with(':') || clause.len() > MAX_RULE_BYTES {
                 continue;
             }
             let normalized = normalize(clause);
-            let standing = inherited || has_standing_marker(&normalized);
-            if !standing || clause.ends_with(':') {
+            if is_reported_speech(&normalized) {
                 continue;
             }
-            let pending = has_phrase(&normalized, TASK_PHRASES);
+            let standing = match inherited {
+                // A task-limited list header limits every item under it.
+                Some(RuleStanding::Pending) => RuleStanding::Pending,
+                Some(RuleStanding::Standing) => standing_of(&normalized),
+                None if has_standing_marker(&normalized) => standing_of(&normalized),
+                None => continue,
+            };
             rules.push(RuleClause {
                 text: clause.to_string(),
-                standing: if pending {
-                    RuleStanding::Pending
-                } else {
-                    RuleStanding::Standing
-                },
+                standing,
             });
         }
     }
     rules
+}
+
+/// Whether the user limited `clause` to the current task, phase or pass. A strong standing
+/// marker ("from now on", "in later sessions") outweighs a task word ("today").
+pub(crate) fn is_task_limited(clause: &str) -> bool {
+    let normalized = normalize(clause);
+    has_phrase(&normalized, TASK_PHRASES) && !has_phrase(&normalized, STRONG_STANDING_PHRASES)
+}
+
+/// Whether `clause` reports what someone else said or advised rather than stating the
+/// user's own rule; an assistant's advice must never become the user's rule.
+pub(crate) fn reports_speech(clause: &str) -> bool {
+    is_reported_speech(&normalize(clause))
+}
+
+fn standing_of(normalized: &str) -> RuleStanding {
+    if has_phrase(normalized, TASK_PHRASES) && !has_phrase(normalized, STRONG_STANDING_PHRASES) {
+        RuleStanding::Pending
+    } else {
+        RuleStanding::Standing
+    }
+}
+
+fn is_reported_speech(normalized: &str) -> bool {
+    has_phrase(normalized, REPORTED_SPEECH_PHRASES)
 }
 
 /// The whole clause of `text` that contains `quote` (whitespace-insensitive, case-sensitive),

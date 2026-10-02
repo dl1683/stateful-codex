@@ -20,6 +20,9 @@ use sha2::Sha256;
 use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
+use crate::events::CaptureOutcome;
+use crate::events::KnowledgeCategory;
+use crate::events::receipt_text;
 use crate::services::ProjectIntelligenceServices;
 use crate::user_rules::RuleStanding;
 use crate::user_rules::marked_rules;
@@ -67,8 +70,11 @@ pub(crate) async fn capture_marked_rules(
             services,
             event_sink,
             project_id,
-            thread_id,
-            turn_id,
+            RuleSource {
+                thread_id,
+                turn_id,
+                receipt_turn_id: turn_id,
+            },
             &rule.text,
             rule.standing,
         )
@@ -83,28 +89,60 @@ pub(crate) async fn capture_marked_rules(
     captured
 }
 
+/// Where a rule came from and which turn's receipt reports it.
+pub(crate) struct RuleSource<'a> {
+    pub(crate) thread_id: &'a str,
+    /// The turn whose user message holds the rule.
+    pub(crate) turn_id: &'a str,
+    /// The turn being run now, which the receipt belongs to.
+    pub(crate) receipt_turn_id: &'a str,
+}
+
 /// Stores one rule in the user's exact words (the whole clause they wrote), or returns the
 /// entry already holding that wording.
 pub(crate) async fn store_user_rule(
     services: &ProjectIntelligenceServices,
     event_sink: Option<&dyn StatefulEventSink>,
     project_id: &str,
-    thread_id: &str,
-    turn_id: &str,
+    source: RuleSource<'_>,
     clause: &str,
     standing: RuleStanding,
 ) -> Result<CapturedRule, String> {
+    let RuleSource {
+        thread_id,
+        turn_id,
+        receipt_turn_id,
+    } = source;
     let id = user_rule_entry_id(project_id, clause)
         .ok_or_else(|| "the rule cannot be identified".to_string())?;
     let store = services
         .blackboard()
         .await
         .map_err(|error| error.to_string())?;
+    let category = match standing {
+        RuleStanding::Standing => KnowledgeCategory::Rule,
+        RuleStanding::Pending => KnowledgeCategory::PendingRule,
+    };
+    let receipt = |entry: &BlackboardEntry, outcome: CaptureOutcome| {
+        if let Some(event_sink) = event_sink {
+            event_sink.emit(StatefulEvent::KnowledgeCaptured {
+                project_id: project_id.to_string(),
+                thread_id: thread_id.to_string(),
+                turn_id: receipt_turn_id.to_string(),
+                entry_id: entry.id.to_string(),
+                revision: entry.revision,
+                category,
+                outcome,
+                text: receipt_text(&entry.value.content),
+            });
+        }
+    };
     if let Some(existing) = store
         .get_entry(project_id, &id)
         .await
         .map_err(|error| error.to_string())?
     {
+        receipt(&existing, CaptureOutcome::AlreadyStored);
         return Ok(CapturedRule {
             entry: existing,
             standing,
@@ -148,6 +186,7 @@ pub(crate) async fn store_user_rule(
             revision: entry.revision,
         });
     }
+    receipt(&entry, CaptureOutcome::Stored);
     Ok(CapturedRule {
         entry,
         standing,

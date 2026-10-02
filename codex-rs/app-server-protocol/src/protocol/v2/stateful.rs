@@ -498,6 +498,46 @@ pub struct StatefulMeasurementSummaryResponse {
     pub summary: StatefulMeasurementSummary,
 }
 
+/// What a knowledge receipt says was saved.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulKnowledgeCategory {
+    /// A standing rule in the user's own words.
+    Rule,
+    /// Marked as standing but limited to a task; kept for inspection, never applied.
+    PendingRule,
+    Decision,
+    /// How to build, test or run the project here.
+    Recipe,
+    Finding,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulCaptureOutcome {
+    Stored,
+    AlreadyStored,
+}
+
+/// Receipt for one knowledge entry stored (or already stored) during a Stateful turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulKnowledgeCapturedNotification {
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub entry_id: String,
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub category: StatefulKnowledgeCategory,
+    pub outcome: StatefulCaptureOutcome,
+    /// The entry's content, at most 240 bytes.
+    pub text: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

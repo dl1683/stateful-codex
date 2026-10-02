@@ -81,3 +81,18 @@ fn a_quote_resolves_to_its_whole_clause() {
         )
     );
 }
+
+#[test]
+fn reported_advice_and_task_limited_lists_never_become_standing_rules() {
+    let message = "The previous assistant told me to run the whole suite every time.\nMy preferences for this task:\n1. Never touch the migrations.\n\nMy standing preferences for all our work on this, today and in later sessions:\n1. Cite the file and section for every factual claim.";
+    assert_eq!(
+        marked_rules(message),
+        vec![
+            RuleClause {
+                text: "1. Never touch the migrations.".to_string(),
+                standing: RuleStanding::Pending,
+            },
+            standing("1. Cite the file and section for every factual claim."),
+        ]
+    );
+}

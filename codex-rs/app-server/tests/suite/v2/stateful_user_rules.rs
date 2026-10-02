@@ -11,6 +11,9 @@ use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::StatefulCaptureOutcome;
+use codex_app_server_protocol::StatefulKnowledgeCapturedNotification;
+use codex_app_server_protocol::StatefulKnowledgeCategory;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
@@ -77,8 +80,8 @@ async fn user_rules_are_kept_in_the_users_words_and_nothing_else_becomes_a_rule(
                 json!({"records": [
                     // An unmarked rule, quoted exactly: stored as the whole sentence.
                     record("venv", "the venv one level up", "standing"),
-                    // The one-off: the model calls it task-limited, so nothing is written.
-                    record("orientation", "No code changes yet", "task"),
+                    // The one-off, wrongly claimed as standing: the user limited it ("yet").
+                    record("orientation", "No code changes yet", "standing"),
                     // An invented preference has no source in the user's words.
                     record("invented", "Prefer concise progress updates", "standing"),
                 ]}),
@@ -106,15 +109,50 @@ async fn user_rules_are_kept_in_the_users_words_and_nothing_else_becomes_a_rule(
             (json!(true), Value::Null),
             (
                 json!(false),
-                json!(
-                    "nothing written: a task-limited direction applies in this conversation only"
-                )
+                json!("nothing written: the user limited that sentence to the current task")
             ),
             (
                 json!(false),
                 json!(
-                    "userQuote is not inside exactly one sentence of a recorded user message of this thread; for an earlier turn pass quoteThreadId and quoteTurnId"
+                    "userQuote is not inside exactly one complete sentence of a user message recorded in this thread"
                 )
+            ),
+        ]
+    );
+    // Receipts name what was saved, in the user's words, for this turn.
+    let mut receipts = Vec::new();
+    for _ in 0..4 {
+        let receipt: StatefulKnowledgeCapturedNotification = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            server.read_notification("statefulKnowledge/captured"),
+        )
+        .await??;
+        assert_eq!(receipt.thread_id, first);
+        receipts.push((receipt.category, receipt.outcome, receipt.text));
+    }
+    receipts.sort_by(|left, right| left.2.cmp(&right.2));
+    assert_eq!(
+        receipts,
+        vec![
+            (
+                StatefulKnowledgeCategory::Rule,
+                StatefulCaptureOutcome::Stored,
+                "A couple of ways I like to work, so you know: I review and commit everything myself, so please never run git commit or anything that rewrites history.".to_string(),
+            ),
+            (
+                StatefulKnowledgeCategory::Rule,
+                StatefulCaptureOutcome::Stored,
+                "Also, don't run the whole test suite every time - just run the test file(s) relevant to what you changed.".to_string(),
+            ),
+            (
+                StatefulKnowledgeCategory::Rule,
+                StatefulCaptureOutcome::Stored,
+                "Oh, and one more thing: end each of your replies with a single line starting with 'Next:' that says the one concrete next step you'd take.".to_string(),
+            ),
+            (
+                StatefulKnowledgeCategory::Rule,
+                StatefulCaptureOutcome::Stored,
+                "The test env is the venv one level up (../venv).".to_string(),
             ),
         ]
     );

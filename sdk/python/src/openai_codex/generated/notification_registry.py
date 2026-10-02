@@ -55,6 +55,7 @@ from .v2_all import RemoteControlStatusChangedNotification
 from .v2_all import ServerRequestResolvedNotification
 from .v2_all import SkillsChangedNotification
 from .v2_all import StatefulAttributionCompletedNotification
+from .v2_all import StatefulKnowledgeCapturedNotification
 from .v2_all import StatefulRunUpdatedNotification
 from .v2_all import SteeringUpdatedNotification
 from .v2_all import StrictReviewRequiredNotification
@@ -145,6 +146,7 @@ KnownNotificationPayload: TypeAlias = (
     | ServerRequestResolvedNotification
     | SkillsChangedNotification
     | StatefulAttributionCompletedNotification
+    | StatefulKnowledgeCapturedNotification
     | StatefulRunUpdatedNotification
     | SteeringUpdatedNotification
     | StrictReviewRequiredNotification
@@ -237,6 +239,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "serverRequest/resolved": ServerRequestResolvedNotification,
     "skills/changed": SkillsChangedNotification,
     "statefulAttribution/completed": StatefulAttributionCompletedNotification,
+    "statefulKnowledge/captured": StatefulKnowledgeCapturedNotification,
     "statefulRun/updated": StatefulRunUpdatedNotification,
     "steering/updated": SteeringUpdatedNotification,
     "thread/archived": ThreadArchivedNotification,
@@ -303,6 +306,7 @@ DIRECT_TURN_ID_NOTIFICATION_TYPES: tuple[type[BaseModel], ...] = (
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
     StatefulAttributionCompletedNotification,
+    StatefulKnowledgeCapturedNotification,
     StrictReviewRequiredNotification,
     TerminalInteractionNotification,
     ThreadGoalUpdatedNotification,

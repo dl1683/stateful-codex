@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "StatefulCaptureOutcome": {
+      "enum": [
+        "stored",
+        "alreadyStored"
+      ],
+      "type": "string"
+    },
+    "StatefulKnowledgeCategory": {
+      "description": "What a knowledge receipt says was saved.",
+      "oneOf": [
+        {
+          "enum": [
+            "decision",
+            "finding"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A standing rule in the user's own words.",
+          "enum": [
+            "rule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Marked as standing but limited to a task; kept for inspection, never applied.",
+          "enum": [
+            "pendingRule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "How to build, test or run the project here.",
+          "enum": [
+            "recipe"
+          ],
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "description": "Receipt for one knowledge entry stored (or already stored) during a Stateful turn.",
+  "properties": {
+    "category": {
+      "$ref": "#/definitions/StatefulKnowledgeCategory"
+    },
+    "entryId": {
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/definitions/StatefulCaptureOutcome"
+    },
+    "projectId": {
+      "type": "string"
+    },
+    "revision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "text": {
+      "description": "The entry's content, at most 240 bytes.",
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "category",
+    "entryId",
+    "outcome",
+    "projectId",
+    "revision",
+    "text",
+    "threadId",
+    "turnId"
+  ],
+  "title": "StatefulKnowledgeCapturedNotification",
+  "type": "object"
+}

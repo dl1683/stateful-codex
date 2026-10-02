@@ -32,11 +32,56 @@ const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
 pub(super) const USER_RULES_HEADER: &str = "User rules (the user's exact words; they apply to all work in this project until the user changes them):";
 const KNOWLEDGE_HEADER: &str = "Other promoted knowledge:";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RootSection {
-    None,
-    UserRules,
-    Knowledge,
+/// Lays out root entries in a chosen order while keeping their projection aliases.
+struct EntryLayout<'a> {
+    entry_aliases: &'a HashMap<String, String>,
+    identity_aliases: HashMap<String, String>,
+    identity_evidence: HashMap<ContextMapEntryId, String>,
+    evidence_audit: Option<&'a EvidenceAudit>,
+    entries: Vec<LaidOutLine>,
+    shown: Vec<(usize, String)>,
+    omitted: u64,
+}
+
+impl EntryLayout<'_> {
+    fn place(
+        &mut self,
+        output: &mut String,
+        index: usize,
+        hit: &BlackboardHit,
+        evidence_aliases: &HashMap<ContextMapEntryId, String>,
+    ) {
+        let alias = format!("E{}", index + 1);
+        let line = bounded_entry_line(
+            render_hit(
+                &alias,
+                hit,
+                self.entry_aliases,
+                evidence_aliases,
+                self.evidence_audit,
+            ),
+            &alias,
+        );
+        if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
+            if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
+                self.shown.push((index, alias));
+            }
+            let canonical = render_hit(
+                hit.entry.id.as_str(),
+                hit,
+                &self.identity_aliases,
+                &self.identity_evidence,
+                self.evidence_audit,
+            );
+            self.entries.push(LaidOutLine {
+                key: short_digest(hit.entry.id.as_str()),
+                digest: short_digest(&canonical),
+                line,
+            });
+        } else {
+            self.omitted = self.omitted.saturating_add(1);
+        }
+    }
 }
 
 pub(super) enum RootBlackboardStatus {
@@ -67,6 +112,32 @@ pub(super) struct ResolvedRootBlackboard {
     pub(super) projection: RootBlackboardProjection,
     pub(super) evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
     pub(super) evidence_audit: Option<EvidenceAudit>,
+    /// Instruction entries removed because they are not in the user's own words.
+    quarantined_rules: u64,
+}
+
+impl ResolvedRootBlackboard {
+    /// Rules not in the user's own words are never applied: an agent's paraphrase or its
+    /// invention must not become a standing constraint. They leave the projection itself, so
+    /// aliases, change deltas and completion never see them.
+    pub(super) fn new(
+        mut projection: RootBlackboardProjection,
+        evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
+        evidence_audit: Option<EvidenceAudit>,
+    ) -> Self {
+        let before = projection.data.len();
+        projection.data.retain(|hit| {
+            hit.entry.value.kind != BlackboardKind::Instruction
+                || hit.entry.value.provenance.kind == BlackboardProvenanceKind::User
+        });
+        let quarantined_rules = u64::try_from(before - projection.data.len()).unwrap_or(u64::MAX);
+        Self {
+            projection,
+            evidence_routes,
+            evidence_audit,
+            quarantined_rules,
+        }
+    }
 }
 
 impl RootBlackboardStatus {
@@ -78,6 +149,7 @@ impl RootBlackboardStatus {
                 hasher.update(projection.revision.to_be_bytes());
                 hasher.update(projection.omitted_entries.to_be_bytes());
                 hasher.update(projection.candidate_entries.to_be_bytes());
+                hasher.update(root.quarantined_rules.to_be_bytes());
                 let mut rendered = String::new();
                 render_projection(&mut rendered, root);
                 hash_component(hasher, &rendered);
@@ -127,88 +199,61 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         .enumerate()
         .map(|(index, hit)| (hit.entry.id.to_string(), format!("E{}", index + 1)))
         .collect::<HashMap<_, _>>();
-    let (evidence_aliases, sources) = render_evidence_catalog(output, root);
-    let identity_aliases = projection
+    let mut layout = EntryLayout {
+        entry_aliases: &entry_aliases,
+        identity_aliases: projection
+            .data
+            .iter()
+            .map(|hit| (hit.entry.id.to_string(), hit.entry.id.to_string()))
+            .collect(),
+        identity_evidence: root
+            .evidence_routes
+            .keys()
+            .map(|route| (route.clone(), route.to_string()))
+            .collect(),
+        evidence_audit: root.evidence_audit.as_ref(),
+        entries: Vec::with_capacity(projection.data.len()),
+        shown: Vec::with_capacity(projection.data.len()),
+        omitted: projection.omitted_entries,
+    };
+    // The user's rules are laid out first, before the source catalog and any other entry,
+    // so no amount of other knowledge can push them out of the packet.
+    let (rules, knowledge): (Vec<_>, Vec<_>) = projection
         .data
         .iter()
-        .map(|hit| (hit.entry.id.to_string(), hit.entry.id.to_string()))
-        .collect::<HashMap<_, _>>();
-    let identity_evidence = root
-        .evidence_routes
-        .keys()
-        .map(|route| (route.clone(), route.to_string()))
-        .collect::<HashMap<_, _>>();
-    let mut entries = Vec::with_capacity(projection.data.len());
-    let mut shown = Vec::with_capacity(projection.data.len());
-    let mut omitted = projection.omitted_entries;
-    let mut quarantined = 0u64;
-    let mut section = RootSection::None;
-    for (index, hit) in projection.data.iter().enumerate() {
-        // Rules not in the user's own words are never applied: an agent's paraphrase or its
-        // invention must not become a standing constraint.
-        if hit.entry.value.kind == BlackboardKind::Instruction
-            && hit.entry.value.provenance.kind != BlackboardProvenanceKind::User
-        {
-            quarantined += 1;
-            continue;
-        }
-        let next_section = if hit.entry.value.kind == BlackboardKind::Instruction {
-            RootSection::UserRules
-        } else {
-            RootSection::Knowledge
-        };
-        if next_section != section {
-            append_line(
-                output,
-                match next_section {
-                    RootSection::UserRules => USER_RULES_HEADER,
-                    RootSection::Knowledge | RootSection::None => KNOWLEDGE_HEADER,
-                },
-            );
-            section = next_section;
-        }
-        let alias = format!("E{}", index + 1);
-        let line = bounded_entry_line(
-            render_hit(
-                &alias,
-                hit,
-                &entry_aliases,
-                &evidence_aliases,
-                root.evidence_audit.as_ref(),
-            ),
-            &alias,
-        );
-        if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
-            if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
-                shown.push((index, alias));
-            }
-            let canonical = render_hit(
-                hit.entry.id.as_str(),
-                hit,
-                &identity_aliases,
-                &identity_evidence,
-                root.evidence_audit.as_ref(),
-            );
-            entries.push(LaidOutLine {
-                key: short_digest(hit.entry.id.as_str()),
-                digest: short_digest(&canonical),
-                line,
-            });
-        } else {
-            omitted = omitted.saturating_add(1);
+        .enumerate()
+        .partition(|(_, hit)| hit.entry.value.kind == BlackboardKind::Instruction);
+    if !rules.is_empty() {
+        append_line(output, USER_RULES_HEADER);
+        for (index, hit) in &rules {
+            layout.place(output, *index, hit, &HashMap::new());
         }
     }
+    let (evidence_aliases, sources) = render_evidence_catalog(output, root);
+    if !rules.is_empty() && !knowledge.is_empty() {
+        append_line(output, KNOWLEDGE_HEADER);
+    }
+    for (index, hit) in &knowledge {
+        layout.place(output, *index, hit, &evidence_aliases);
+    }
+    let EntryLayout {
+        entries,
+        shown,
+        omitted,
+        ..
+    } = layout;
     if projection.data.is_empty() {
         append_line(
             output,
             "- No knowledge has been promoted to the root blackboard yet.",
         );
     }
-    if quarantined > 0 {
+    if root.quarantined_rules > 0 {
         append_line(
             output,
             &format!(
-                "- {quarantined} agent-recorded rules are not applied: they are not the user's own words. blackboard_query lists them; treat them as unconfirmed."
+                "- {} agent-recorded rules are not applied: they are not the user's own words. blackboard_query lists them; treat them as unconfirmed.",
+                root.quarantined_rules
             ),
         );
     }

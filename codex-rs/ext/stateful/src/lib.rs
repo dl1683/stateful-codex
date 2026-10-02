@@ -65,6 +65,9 @@ pub use autonomy::AutonomousContinuationSink;
 pub use autonomy::RunAdmissionFence;
 pub use autonomy::bound_run_turn;
 pub use events::BlackboardEntityKind;
+pub use events::CaptureOutcome;
+pub use events::KnowledgeCategory;
+pub use events::MAX_RECEIPT_TEXT_BYTES;
 pub use events::StatefulEvent;
 pub use events::StatefulEventSink;
 
@@ -320,17 +323,17 @@ impl StatefulExtension {
                             /*audit*/ None,
                             /*audit_recomputed*/ false,
                         );
-                        return RootBlackboardStatus::Available(ResolvedRootBlackboard {
+                        return RootBlackboardStatus::Available(ResolvedRootBlackboard::new(
                             projection,
-                            evidence_routes: Default::default(),
-                            evidence_audit: Some(EvidenceAudit {
+                            Default::default(),
+                            Some(EvidenceAudit {
                                 project_id: project_id.to_string(),
                                 statuses: Default::default(),
                                 cache_key: None,
                                 hashed_bytes: 0,
                                 observed_sources: 0,
                             }),
-                        });
+                        ));
                     }
                 };
                 let mut evidence_routes = std::collections::HashMap::new();
@@ -437,11 +440,11 @@ impl StatefulExtension {
                     Some(&evidence_audit),
                     audit_recomputed,
                 );
-                RootBlackboardStatus::Available(ResolvedRootBlackboard {
+                RootBlackboardStatus::Available(ResolvedRootBlackboard::new(
                     projection,
                     evidence_routes,
-                    evidence_audit: Some((*evidence_audit).clone()),
-                })
+                    Some((*evidence_audit).clone()),
+                ))
             }
             Err(error) => {
                 tracing::warn!(%project_id, %error, "failed to load Stateful root blackboard");

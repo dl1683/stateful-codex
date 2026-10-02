@@ -53,3 +53,17 @@ fn log_resolves_a_quote_to_its_clause_within_the_project() {
         )
     );
 }
+
+#[test]
+fn a_long_message_keeps_only_whole_lines() {
+    let registry = UserMessageRegistry::default();
+    let long = format!(
+        "{}\nDo not run the whole test suite for this task.",
+        "x".repeat(16_352)
+    );
+    registry.record("thread-1", "project-1", "turn-1", &text(&long));
+    assert_eq!(
+        registry.find("thread-1", "project-1", "whole test suite"),
+        None
+    );
+}

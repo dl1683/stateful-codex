@@ -60,10 +60,20 @@ impl UserMessageRegistry {
         if text.trim().is_empty() {
             return;
         }
-        let mut end = text.len().min(MAX_MESSAGE_BYTES);
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
+        // A long message keeps only whole lines, so no sentence can lose its qualifiers to
+        // the bound; a first line longer than the bound keeps nothing.
+        let end = if text.len() <= MAX_MESSAGE_BYTES {
+            text.len()
+        } else {
+            let mut limit = MAX_MESSAGE_BYTES;
+            while !text.is_char_boundary(limit) {
+                limit -= 1;
+            }
+            match text[..limit].rfind('\n') {
+                Some(newline) => newline,
+                None => return,
+            }
+        };
         let message = UserMessage {
             project_id: project_id.to_string(),
             turn_id: turn_id.to_string(),

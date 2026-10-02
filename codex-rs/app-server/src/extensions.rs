@@ -316,6 +316,50 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                 steering_id,
                 revision,
             }),
+            StatefulEvent::KnowledgeCaptured {
+                project_id,
+                thread_id,
+                turn_id,
+                entry_id,
+                revision,
+                category,
+                outcome,
+                text,
+            } => ServerNotification::StatefulKnowledgeCaptured(
+                codex_app_server_protocol::StatefulKnowledgeCapturedNotification {
+                    project_id,
+                    thread_id,
+                    turn_id,
+                    entry_id,
+                    revision,
+                    category: match category {
+                        codex_stateful_extension::KnowledgeCategory::Rule => {
+                            codex_app_server_protocol::StatefulKnowledgeCategory::Rule
+                        }
+                        codex_stateful_extension::KnowledgeCategory::PendingRule => {
+                            codex_app_server_protocol::StatefulKnowledgeCategory::PendingRule
+                        }
+                        codex_stateful_extension::KnowledgeCategory::Decision => {
+                            codex_app_server_protocol::StatefulKnowledgeCategory::Decision
+                        }
+                        codex_stateful_extension::KnowledgeCategory::Recipe => {
+                            codex_app_server_protocol::StatefulKnowledgeCategory::Recipe
+                        }
+                        codex_stateful_extension::KnowledgeCategory::Finding => {
+                            codex_app_server_protocol::StatefulKnowledgeCategory::Finding
+                        }
+                    },
+                    outcome: match outcome {
+                        codex_stateful_extension::CaptureOutcome::Stored => {
+                            codex_app_server_protocol::StatefulCaptureOutcome::Stored
+                        }
+                        codex_stateful_extension::CaptureOutcome::AlreadyStored => {
+                            codex_app_server_protocol::StatefulCaptureOutcome::AlreadyStored
+                        }
+                    },
+                    text,
+                },
+            ),
             StatefulEvent::AttributionCompleted { summary } => {
                 let notification = StatefulAttributionCompletedNotification {
                     project_id: summary.project_id,

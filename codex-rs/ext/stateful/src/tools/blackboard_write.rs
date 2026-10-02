@@ -32,14 +32,18 @@ use serde_json::json;
 use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
+use crate::events::CaptureOutcome;
+use crate::events::KnowledgeCategory;
+use crate::events::receipt_text;
 use crate::services::ProjectIntelligenceServices;
 
-use crate::conversation_summaries::project_turn_user_text;
+use crate::rule_capture::RuleSource;
 use crate::rule_capture::store_user_rule;
 use crate::user_messages::UserMessageRegistry;
 use crate::user_rules::MAX_RULE_BYTES;
 use crate::user_rules::RuleStanding;
-use crate::user_rules::clause_containing;
+use crate::user_rules::is_task_limited;
+use crate::user_rules::reports_speech;
 
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
@@ -80,9 +84,6 @@ struct RecordArguments {
     user_quote: Option<String>,
     /// For kind instruction: whether the rule outlives the current task.
     rule_scope: Option<RuleScope>,
-    /// For a quote from an earlier turn: its thread (default: this thread) and turn.
-    quote_thread_id: Option<String>,
-    quote_turn_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -140,16 +141,15 @@ impl BlackboardRecorder {
         }
     }
 
-    /// Stores a rule only as the user wrote it: the whole sentence of a user message that
-    /// contains `userQuote`, from this thread's recorded turn starts or, by locator, an
-    /// earlier turn of a top-level thread of this project. Task-limited directions are not
-    /// stored; they stay in the conversation they were given in.
+    /// Stores a rule only as the user wrote it: the whole sentence of a recorded human
+    /// message of this thread that contains `userQuote`. Earlier turns are not searched
+    /// (their stored summaries carry no input origin). Task-limited directions and relayed
+    /// advice are not stored, whatever scope the caller claims.
     async fn record_instruction(
         &self,
+        receipt_turn_id: &str,
         user_quote: Option<String>,
         rule_scope: Option<RuleScope>,
-        quote_thread_id: Option<String>,
-        quote_turn_id: Option<String>,
     ) -> Result<BlackboardEntry, FunctionCallError> {
         let (Some(quote), Some(scope)) = (user_quote, rule_scope) else {
             return Err(respond(
@@ -161,36 +161,25 @@ impl BlackboardRecorder {
                 "nothing written: a task-limited direction applies in this conversation only",
             ));
         }
-        let (thread_id, turn_id, clause) = match quote_turn_id {
-            Some(turn_id) => {
-                let thread_id = quote_thread_id.unwrap_or_else(|| self.thread_id.clone());
-                let text = project_turn_user_text(
-                    self.projects.as_ref(),
-                    &self.project_id,
-                    &thread_id,
-                    &turn_id,
+        let (message, clause) = self
+            .user_messages
+            .find(&self.thread_id, &self.project_id, &quote)
+            .ok_or_else(|| {
+                respond(
+                    "userQuote is not inside exactly one complete sentence of a user message recorded in this thread",
                 )
-                .await
-                .map_err(respond)?;
-                let clause = clause_containing(&text, &quote).ok_or_else(|| {
-                    respond(
-                        "userQuote is not inside exactly one sentence of that turn's user message",
-                    )
-                })?;
-                (thread_id, turn_id, clause)
-            }
-            None => {
-                let (message, clause) = self
-                    .user_messages
-                    .find(&self.thread_id, &self.project_id, &quote)
-                    .ok_or_else(|| {
-                        respond(
-                            "userQuote is not inside exactly one sentence of a recorded user message of this thread; for an earlier turn pass quoteThreadId and quoteTurnId",
-                        )
-                    })?;
-                (self.thread_id.clone(), message.turn_id, clause)
-            }
-        };
+            })?;
+        if is_task_limited(&clause) {
+            return Err(respond(
+                "nothing written: the user limited that sentence to the current task",
+            ));
+        }
+        if reports_speech(&clause) {
+            return Err(respond(
+                "nothing written: that sentence relays someone else's words, not the user's rule",
+            ));
+        }
+        let (thread_id, turn_id) = (self.thread_id.clone(), message.turn_id);
         if clause.len() > MAX_RULE_BYTES {
             return Err(respond(format!(
                 "the sentence holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
@@ -200,8 +189,11 @@ impl BlackboardRecorder {
             &self.services,
             self.event_sink.as_deref(),
             &self.project_id,
-            &thread_id,
-            &turn_id,
+            RuleSource {
+                thread_id: &thread_id,
+                turn_id: &turn_id,
+                receipt_turn_id,
+            },
             &clause,
             RuleStanding::Standing,
         )
@@ -213,6 +205,7 @@ impl BlackboardRecorder {
     async fn record(
         &self,
         arguments: RecordArguments,
+        turn_id: &str,
         source_id: &str,
         project_roots: &[std::path::PathBuf],
     ) -> Result<BlackboardEntry, FunctionCallError> {
@@ -230,8 +223,6 @@ impl BlackboardRecorder {
             premises,
             user_quote,
             rule_scope,
-            quote_thread_id,
-            quote_turn_id,
         } = arguments;
         if verification == BlackboardVerification::UserConfirmed {
             return Err(FunctionCallError::RespondToModel(
@@ -241,16 +232,12 @@ impl BlackboardRecorder {
         }
         if kind == BlackboardKind::Instruction {
             return self
-                .record_instruction(user_quote, rule_scope, quote_thread_id, quote_turn_id)
+                .record_instruction(turn_id, user_quote, rule_scope)
                 .await;
         }
-        if user_quote.is_some()
-            || rule_scope.is_some()
-            || quote_thread_id.is_some()
-            || quote_turn_id.is_some()
-        {
+        if user_quote.is_some() || rule_scope.is_some() {
             return Err(respond(
-                "userQuote, ruleScope, quoteThreadId and quoteTurnId apply to kind instruction only",
+                "userQuote and ruleScope apply to kind instruction only",
             ));
         }
         let (evidence, inferred_node_id) = resolve_evidence(
@@ -306,6 +293,32 @@ impl BlackboardRecorder {
                 entity_kind: BlackboardEntityKind::Entry,
                 entity_id: entry.id.to_string(),
                 revision: entry.revision,
+            });
+            event_sink.emit(StatefulEvent::KnowledgeCaptured {
+                project_id: entry.value.project_id.clone(),
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.to_string(),
+                entry_id: entry.id.to_string(),
+                revision: entry.revision,
+                category: match entry.value.kind {
+                    BlackboardKind::Decision => KnowledgeCategory::Decision,
+                    BlackboardKind::Fact if entry.value.content.starts_with("Recipe:") => {
+                        KnowledgeCategory::Recipe
+                    }
+                    BlackboardKind::Instruction => KnowledgeCategory::Rule,
+                    BlackboardKind::Fact
+                    | BlackboardKind::Claim
+                    | BlackboardKind::Number
+                    | BlackboardKind::Strategy
+                    | BlackboardKind::Question
+                    | BlackboardKind::Contradiction
+                    | BlackboardKind::Failure
+                    | BlackboardKind::RejectedApproach
+                    | BlackboardKind::Signal
+                    | BlackboardKind::Note => KnowledgeCategory::Finding,
+                },
+                outcome: CaptureOutcome::Stored,
+                text: receipt_text(&entry.value.content),
             });
         }
         Ok(entry)
@@ -432,7 +445,7 @@ impl BlackboardBatchRecordTool {
             let record_key = record.idempotency_key.clone();
             match self
                 .recorder
-                .record(record, &call.call_id, &project_roots)
+                .record(record, &call.turn_id, &call.call_id, &project_roots)
                 .await
             {
                 Ok(entry) => {
@@ -596,9 +609,7 @@ fn record_schema() -> serde_json::Value {
             "evidence": evidence_schema(),
             "premises": premise_schema(),
             "userQuote": {"type": "string"},
-            "ruleScope": {"type": "string", "enum": ["standing", "task"]},
-            "quoteThreadId": {"type": "string"},
-            "quoteTurnId": {"type": "string"}
+            "ruleScope": {"type": "string", "enum": ["standing", "task"]}
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false
