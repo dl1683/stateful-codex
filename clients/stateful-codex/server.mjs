@@ -8,6 +8,15 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import { EventRouter } from "./event-router.mjs";
+import {
+  admitApiRequest,
+  admitRequest,
+  admitRpcMethod,
+  checkRpcParams,
+  isApiPath,
+  isJsonObject,
+  sessionCookie,
+} from "./gateway-policy.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const publicRoot = resolve(here, "public");
@@ -167,7 +176,12 @@ const bridge = new AppServerBridge();
 await bridge.ready;
 const server = createServer(async (request, response) => {
   try {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+    const url = new URL(request.url ?? "/", `http://${host}:${port}`);
+    const api = isApiPath(url.pathname);
+    const refused = api
+      ? admitApiRequest(request, port, sessionToken)
+      : admitRequest(request, port);
+    if (refused) throw new HttpError(refused.status, refused.message);
     if (request.method === "GET" && url.pathname === "/events") {
       return openEventStream(url, request, response);
     }
@@ -176,21 +190,27 @@ const server = createServer(async (request, response) => {
       return json(response, 200, { ready: true, authMode: "chatgpt" });
     }
     if (request.method === "POST" && url.pathname === "/rpc") {
-      authorize(request);
-      const { method, params } = await readJson(request);
+      const body = await readJson(request);
+      if (!isJsonObject(body)) throw new HttpError(400, "request body must be a JSON object");
+      const { method, params } = body;
       if (typeof method !== "string" || !method)
         throw new HttpError(400, "method is required");
+      if (!admitRpcMethod(method))
+        throw new HttpError(403, `${method} is not available through the web gateway`);
+      const invalid = checkRpcParams(method, params ?? {});
+      if (invalid) throw new HttpError(400, invalid);
       return json(response, 200, {
         result: await bridge.request(method, params ?? {}),
       });
     }
     if (request.method === "POST" && url.pathname === "/reply") {
-      authorize(request);
       const envelope = await readJson(request);
+      if (!isJsonObject(envelope)) throw new HttpError(400, "request body must be a JSON object");
       if (!Object.hasOwn(envelope.response ?? {}, "id"))
         throw new HttpError(400, "reply id is required");
       const outcome = bridge.reply(envelope);
-      return json(response, outcome.accepted ? 202 : 409, outcome);
+      const status = outcome.accepted ? 202 : outcome.code === "invalid" ? 400 : 409;
+      return json(response, status, outcome);
     }
     if (request.method === "GET") {
       await serveStatic(url.pathname, response);
@@ -210,8 +230,6 @@ const server = createServer(async (request, response) => {
 });
 
 function openEventStream(url, request, response) {
-  if (url.searchParams.get("token") !== sessionToken)
-    throw new HttpError(403, "forbidden");
   response.writeHead(200, {
     "Cache-Control": "no-cache, no-transform",
     "Connection": "keep-alive",
@@ -226,12 +244,6 @@ function openEventStream(url, request, response) {
     projectId: url.searchParams.get("project"),
   });
   request.once("close", unsubscribe);
-}
-
-function authorize(request) {
-  if (request.headers["x-stateful-session"] !== sessionToken) {
-    throw new HttpError(403, "forbidden");
-  }
 }
 
 async function readJson(request) {
@@ -255,15 +267,13 @@ async function serveStatic(pathname, response) {
   if (relative(publicRoot, path).startsWith("..") || !(await isFile(path))) {
     throw new HttpError(404, "not found");
   }
-  let body = await readFile(path);
-  if (extname(path) === ".html") {
-    body = Buffer.from(
-      body
-        .toString("utf8")
-        .replaceAll("__STATEFUL_SESSION_TOKEN__", sessionToken),
-    );
-  }
+  const body = await readFile(path);
+  // Opening a page (only possible through an admitted Host) starts the browser's session; the
+  // credential lives in an HttpOnly cookie, never in the page or a URL.
+  const session =
+    extname(path) === ".html" ? { "Set-Cookie": sessionCookie(port, sessionToken) } : {};
   response.writeHead(200, {
+    ...session,
     "Cache-Control": "no-store",
     "Content-Type": mimeTypes.get(extname(path)) ?? "application/octet-stream",
     "Content-Security-Policy":

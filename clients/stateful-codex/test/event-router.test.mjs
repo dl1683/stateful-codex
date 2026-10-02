@@ -94,9 +94,68 @@ test("replies are forwarded only from the owning thread, once", () => {
 test("request ids keep their JSON type", () => {
   const { router, toServer } = setup();
   router.route(approval(1, "thread-a"));
-  assert.equal(router.reply({ threadId: "thread-a", response: { id: "1", result: {} } }).accepted, false);
-  assert.equal(router.reply({ threadId: "thread-a", response: { id: 1, result: {} } }).accepted, true);
-  assert.deepEqual(toServer, [{ id: 1, result: {} }]);
+  const accept = { decision: "accept" };
+  assert.equal(router.reply({ threadId: "thread-a", response: { id: "1", result: accept } }).accepted, false);
+  assert.equal(router.reply({ threadId: "thread-a", response: { id: 1, result: accept } }).accepted, true);
+  assert.deepEqual(toServer, [{ id: 1, result: accept }]);
+});
+
+test("a reply is forwarded only as an id and a result of the shape its request accepts", () => {
+  const { router, toServer } = setup();
+  router.route(approval(11, "thread-a"));
+  const invalid = (response) => router.reply({ threadId: "thread-a", response }).code;
+  assert.equal(invalid({ id: 11, method: "command/exec", params: { command: ["calc"] } }), "invalid");
+  assert.equal(invalid({ id: 11, result: { decision: "accept" }, method: "command/exec" }), "invalid");
+  assert.equal(invalid({ id: 11, result: { decision: "acceptForSession" } }), "invalid");
+  assert.equal(invalid({ id: 11, result: { decision: "accept", extra: true } }), "invalid");
+  assert.equal(invalid({ id: 11, error: { code: 1, message: "no" } }), "invalid");
+  assert.deepEqual(toServer, []);
+  assert.equal(router.reply({ threadId: "thread-a", response: { id: 11, result: { decision: "decline" } } }).accepted, true);
+  assert.deepEqual(toServer, [{ id: 11, result: { decision: "decline" } }]);
+
+  const question = {
+    id: 12,
+    method: "item/tool/requestUserInput",
+    params: { threadId: "thread-a", turnId: "t", itemId: "i", questions: [{ id: "q1" }, { id: "q2" }] },
+  };
+  router.route(question);
+  const answer = (answers) => router.reply({ threadId: "thread-a", response: { id: 12, result: { answers } } });
+  assert.equal(answer({ q1: { answers: ["yes"] } }).code, "invalid");
+  assert.equal(answer({ q1: { answers: ["yes"] }, q2: { answers: ["no"] }, q3: { answers: ["x"] } }).code, "invalid");
+  assert.equal(answer({ q1: { answers: ["yes", "no"] }, q2: { answers: ["no"] } }).code, "invalid");
+  assert.equal(answer([{ answers: ["yes"] }, { answers: ["no"] }]).code, "invalid");
+  // With question ids "0" and "1" an array would match the keys; it is still not an answer map.
+  router.route({
+    id: 14,
+    method: "item/tool/requestUserInput",
+    params: { threadId: "thread-a", turnId: "t", itemId: "i", questions: [{ id: "0" }, { id: "1" }] },
+  });
+  assert.equal(
+    router.reply({ threadId: "thread-a", response: { id: 14, result: { answers: [{ answers: ["a"] }, { answers: ["b"] }] } } })
+      .code,
+    "invalid",
+  );
+  assert.equal(router.pendingSnapshot("thread-a").params.requests.some((request) => request.id === 12), true);
+  assert.equal(answer({ q1: { answers: ["yes"] }, q2: { answers: ["no"] } }).accepted, true);
+  assert.equal(invalid({ id: null, result: { decision: "accept" } }), "invalid");
+  assert.equal(invalid({ id: [11], result: { decision: "accept" } }), "invalid");
+  assert.equal(invalid(null), "invalid");
+
+  // Repeated question ids are answered once each, as the page's form collapses them.
+  router.route({
+    id: 13,
+    method: "item/tool/requestUserInput",
+    params: { threadId: "thread-a", turnId: "t", itemId: "i", questions: [{ id: "q" }, { id: "q" }] },
+  });
+  assert.equal(
+    router.reply({ threadId: "thread-a", response: { id: 13, result: { answers: { q: { answers: ["a"] } } } } })
+      .accepted,
+    true,
+  );
+  assert.deepEqual(toServer.find((message) => message.id === 12), {
+    id: 12,
+    result: { answers: { q1: { answers: ["yes"] }, q2: { answers: ["no"] } } },
+  });
 });
 
 test("a workspace subscription starts with an authoritative snapshot of its open requests", () => {
@@ -119,7 +178,10 @@ test("a tab that was away while another tab answered reconnects to an empty draw
   router.subscribe(tabB, { threadId: "thread-a", projectId: "project-1" });
   router.route(approval(8, "thread-a"));
   unsubscribeA();
-  assert.equal(router.reply({ threadId: "thread-a", response: { id: 8, result: {} } }).accepted, true);
+  assert.equal(
+    router.reply({ threadId: "thread-a", response: { id: 8, result: { decision: "accept" } } }).accepted,
+    true,
+  );
   const tabAAgain = sink();
   router.subscribe(tabAAgain, { threadId: "thread-a", projectId: "project-1" });
   assert.deepEqual(tabAAgain.received, [snapshot("thread-a", [])]);

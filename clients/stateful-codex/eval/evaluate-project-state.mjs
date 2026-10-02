@@ -127,13 +127,13 @@ function parseArgs(args) {
   return options;
 }
 
+// The gateway sets an HttpOnly session cookie when its page is opened; replay it like a browser.
 async function sessionToken(gateway) {
   const response = await fetch(`${gateway}/`);
   if (!response.ok) throw new Error(`gateway setup returned ${response.status}`);
-  const html = await response.text();
-  const match = html.match(/<meta name="stateful-session" content="([^"]+)"/);
-  if (!match) throw new Error("gateway session token is missing");
-  return match[1];
+  const cookie = response.headers.get("set-cookie")?.split(";")[0];
+  if (!cookie) throw new Error("gateway session cookie is missing");
+  return cookie;
 }
 
 async function rpc(gateway, token, id, method, params) {
@@ -141,7 +141,9 @@ async function rpc(gateway, token, id, method, params) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-stateful-session": token,
+      cookie: token,
+      origin: new URL(gateway).origin,
+      "sec-fetch-site": "same-origin",
     },
     body: JSON.stringify({ id, method, params }),
   });
