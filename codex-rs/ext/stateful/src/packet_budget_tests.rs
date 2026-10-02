@@ -26,6 +26,7 @@ use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulObligation;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunOutcome;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulSteering;
 use codex_stateful_runtime::SteeringId;
@@ -34,6 +35,8 @@ use codex_stateful_runtime::WorkflowMode;
 use codex_thread_store::StoredProject;
 use codex_thread_store::StoredProjectRoot;
 
+use crate::outcome_world_state::ProjectOutcomesStatus;
+use crate::outcome_world_state::project_outcomes_world_state_section;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
@@ -42,7 +45,8 @@ use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
 /// Rendered bytes (markers included) of the fixture's Stateful content at a window start.
-/// Measured 2026-10-02: 11,659 bytes for Collaborative before the trim, 8,370 after.
+/// Measured 2026-10-02 for Collaborative: project plus run 11,659 bytes before the trim and
+/// 8,370 after; with five populated outcomes 14,234 (project 6,229, run 2,141, outcomes 5,864).
 const MAX_FIXTURE_PACKET_BYTES: usize = 22_000;
 
 const PROJECT_ID: &str = "project-1";
@@ -178,6 +182,36 @@ fn run_status(mode: WorkflowMode) -> RunWorldStateStatus {
     }
 }
 
+/// The five newest completed runs, each with a long goal, result and final obligation.
+fn outcomes_status() -> ProjectOutcomesStatus {
+    let outcomes = (1..=5)
+        .map(|index| {
+            let RunWorldStateStatus::Available {
+                mut run,
+                obligation,
+                ..
+            } = run_status(WorkflowMode::Collaborative)
+            else {
+                unreachable!("fixture run is available");
+            };
+            run.id = StatefulRunId::parse(format!("run-done-{index}")).expect("valid run id");
+            run.status = StatefulRunStatus::Completed;
+            run.value.goal = "Explore the scaler and report what to change next. ".repeat(10);
+            run.result =
+                Some("Rounding is fixed and tested; the crepes need approval. ".repeat(15));
+            StatefulRunOutcome {
+                run: *run,
+                final_obligation: obligation.map(|obligation| *obligation),
+            }
+        })
+        .collect();
+    ProjectOutcomesStatus::Available {
+        project_id: PROJECT_ID.to_string(),
+        outcomes,
+        has_more: true,
+    }
+}
+
 fn rendered_bytes(section: WorldStateSectionContribution) -> usize {
     section
         .render_diff(PreviousWorldStateSection::Absent)
@@ -200,6 +234,7 @@ fn fresh_window_stateful_content_stays_within_its_budget() {
                 /*visible_root*/ None,
             )),
             rendered_bytes(run_world_state_section(run_status(mode))),
+            rendered_bytes(project_outcomes_world_state_section(outcomes_status())),
         ];
         let total = sections.iter().sum::<usize>();
 

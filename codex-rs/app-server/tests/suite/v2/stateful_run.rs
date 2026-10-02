@@ -953,7 +953,7 @@ async fn model_cannot_persist_final_packet_as_intermediate_obligation() -> Resul
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 2);
-    assert!(requests[0].body_contains_text("meaningful content plus remaining work"));
+    assert!(requests[0].body_contains_text("include remaining work in next"));
     assert!(requests[0].body_contains_text("requestedJudgment"));
     assert!(
         requests[1]
