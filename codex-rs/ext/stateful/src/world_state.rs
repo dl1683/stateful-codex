@@ -135,11 +135,11 @@ impl ProjectIntelligenceStatus {
         );
         append_line(
             &mut body,
-            "Start from this project intelligence: it is what earlier work established, so continue from it instead of rediscovering it. Entries labelled verification=sourceVerified and evidence=current had their cited source bytes rechecked this turn (not their inference, scope or authority). Read source files directly when the task needs current content, and check only what the task depends on; do not query or reread merely to confirm what is shown. blackboard_query is for knowledge this packet omits. User-confirmed entries are user-supplied premises, not source verification.",
+            "Start from this project intelligence: it is what earlier work established, so continue from it instead of rediscovering it. Entries labelled verification=sourceVerified and evidence=current had their cited source bytes rechecked this turn (not their inference, scope or authority). Read source files directly when the task needs current content, and check only what the task depends on; do not query or reread merely to confirm what is shown. Before relying on an entry whose evidence is stale, unavailable or uncheckedThisTurn, that conflicts with another, or whose verification is too weak for the answer, check its decisive source. blackboard_query is for knowledge this packet omits. User-confirmed entries are user-supplied premises, not source verification.",
         );
         append_line(
             &mut body,
-            "Memory writes are optional and every call costs the user time. Record only what a later session would otherwise lose: user rules (kind instruction, in the user's words), decisions with their reasons, and hard-won facts with exact values and scope. Use one blackboard_record_batch near the end of the work. Do not read sources only to obtain evidence receipts; unverified entries are fine, and the host already keeps every request and final answer.",
+            "Routine memory writes are optional and every call costs the user time. Record only what a later session would otherwise lose: user rules (kind instruction, in the user's words), decisions with their reasons, and hard-won facts with exact values and scope. Use one blackboard_record_batch near the end of the work. Do not read sources only to obtain evidence receipts; unverified entries are fine, and the host already keeps every request and final answer. Exception: a durableLearning completion whose final obligation reports learning must select a recorded finding that preserves it.",
         );
         append_field(&mut body, "Project ID", self.project_id());
         match self {

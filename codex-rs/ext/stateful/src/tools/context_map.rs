@@ -166,7 +166,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate project files or regions when knowledge lacks a needed detail, evidence is stale or conflicting, exact wording is needed, or the user asks for fresh verification. Headlines are previews, not evidence. Read a returned region with evidence_read {evidenceRoute: item.evidenceRoute}, current content with relativePath, and a stale route by passing refreshInput unchanged. knownKnowledge means coverage only: use root or blackboard knowledge first.".to_string(),
+            description: "Locate project files or regions when knowledge lacks a needed detail, evidence is stale or conflicting, exact wording is needed, or the user asks for fresh verification. Headlines are previews, not evidence. Read a returned region with evidence_read {evidenceRoute: item.evidenceRoute}, current content with relativePath, and a stale route by passing refreshInput unchanged. knownKnowledge means recorded knowledge already covers the route.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

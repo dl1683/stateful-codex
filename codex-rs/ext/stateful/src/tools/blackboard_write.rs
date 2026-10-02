@@ -620,7 +620,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRelateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RELATE_TOOL_NAME.to_string(),
-            description: "Persist a relationship between two blackboard entries; contradicts means genuinely incompatible findings.".to_string(),
+            description: "Persist a relationship between two blackboard entries; contradicts means incompatible findings.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

@@ -315,7 +315,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read fingerprint-verified exact source text: {relativePath, lineRange?} for current content (projectRoot only if ambiguous), or {evidenceRoute} copied from a context_map item for an exact issued region (fails closed if changed); never both. `L<n>: ` labels are display-only. sourceRefreshed=true means knowledge on the old fingerprint is stale. Copy a non-null blackboardEvidence receipt unchanged into a record; null means incomplete text.".to_string(),
+            description: "Read fingerprint-verified exact source text: {relativePath, lineRange?} for current content (projectRoot only if ambiguous), or {evidenceRoute} copied from a context_map item for an exact issued region (fails closed if changed); never both. `L<n>: ` labels are display-only. sourceRefreshed=true means knowledge on the old fingerprint is stale. To record sourceVerified knowledge, copy a non-null blackboardEvidence receipt unchanged; null means incomplete text.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

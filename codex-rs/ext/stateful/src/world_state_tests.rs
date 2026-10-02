@@ -163,7 +163,9 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     for phrase in [
         "continue from it instead of rediscovering it",
         "do not query or reread merely to confirm what is shown",
-        "Memory writes are optional",
+        "Routine memory writes are optional",
+        "check its decisive source",
+        "must select a recorded finding that preserves it",
         "hard-won facts with exact values and scope",
         "Do not read sources only to obtain evidence receipts",
         "No knowledge has been promoted to the root blackboard yet",
