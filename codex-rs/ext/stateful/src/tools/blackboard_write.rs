@@ -24,6 +24,8 @@ use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
+use codex_project_intelligence::ProjectIndexRequest;
+use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::RootPromotion;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
@@ -155,22 +157,7 @@ impl BlackboardRecorder {
             Some(node_id) => HierarchyNodeId::parse(node_id).map_err(respond)?,
             None => match inferred_node_id {
                 Some(node_id) => node_id,
-                None => {
-                    self.services
-                        .hierarchy()
-                        .await
-                        .map_err(respond)?
-                        .project_node(&self.project_id)
-                        .await
-                        .map_err(respond)?
-                        .ok_or_else(|| {
-                            FunctionCallError::RespondToModel(
-                                "project hierarchy is empty; refresh the context map first"
-                                    .to_string(),
-                            )
-                        })?
-                        .id
-                }
+                None => self.project_node_id().await?,
             },
         };
         let id = BlackboardEntryId::parse(stable_id("entry", &self.project_id, &idempotency_key))
@@ -212,6 +199,39 @@ impl BlackboardRecorder {
             });
         }
         Ok(entry)
+    }
+
+    /// The project's hierarchy node, indexing the project first when it has never been
+    /// indexed, so a first write does not fail and cost the model a refresh round trip.
+    async fn project_node_id(&self) -> Result<HierarchyNodeId, FunctionCallError> {
+        let hierarchy = self.services.hierarchy().await.map_err(respond)?;
+        if let Some(node) = hierarchy
+            .project_node(&self.project_id)
+            .await
+            .map_err(respond)?
+        {
+            return Ok(node.id);
+        }
+        ProjectIndexer::new(
+            hierarchy.clone(),
+            self.services.context_map().await.map_err(respond)?.clone(),
+        )
+        .refresh(ProjectIndexRequest {
+            project_id: self.project_id.clone(),
+            roots: self.project_roots().await?,
+        })
+        .await
+        .map_err(respond)?;
+        hierarchy
+            .project_node(&self.project_id)
+            .await
+            .map_err(respond)?
+            .map(|node| node.id)
+            .ok_or_else(|| {
+                FunctionCallError::RespondToModel(
+                    "project hierarchy is still empty after indexing the project roots".to_string(),
+                )
+            })
     }
 
     async fn project_roots(&self) -> Result<Vec<std::path::PathBuf>, FunctionCallError> {

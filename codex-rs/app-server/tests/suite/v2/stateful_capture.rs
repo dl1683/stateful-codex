@@ -567,6 +567,77 @@ async fn conversation_read_pages_long_threads_within_the_result_budget() -> Resu
     Ok(())
 }
 
+/// The first write to a never-indexed project indexes it on the spot instead of failing
+/// and sending the model through a refresh round trip.
+#[tokio::test]
+async fn first_record_in_an_unindexed_project_succeeds() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(project_root.path().join("README.md"), "# Recipes\n")?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Unindexed".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: None,
+                idempotency_key: "unindexed-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            tool_call(
+                "first-record",
+                "blackboard_record_batch",
+                json!({"records": [{
+                    "idempotencyKey": "rule-metric-only",
+                    "kind": "instruction",
+                    "content": "Metric only, never cups or ounces.",
+                    "confidenceBasisPoints": 10000,
+                    "verification": "unverified",
+                    "importance": "high",
+                    "rootPromotion": "promoted"
+                }]}),
+            ),
+            assistant("Saved."),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &thread, "Remember: metric only.").await?;
+
+    let output: Value = serde_json::from_str(
+        &log.requests()[1]
+            .function_call_output_text("first-record")
+            .expect("record output"),
+    )?;
+    assert_eq!(
+        (output["recorded"].clone(), output["failed"].clone()),
+        (json!(1), json!(0))
+    );
+    Ok(())
+}
+
 fn tool_call(call_id: &str, tool: &str, arguments: Value) -> String {
     responses::sse(vec![
         responses::ev_function_call(call_id, tool, &arguments.to_string()),
