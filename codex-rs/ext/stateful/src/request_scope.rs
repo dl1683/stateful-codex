@@ -21,6 +21,11 @@ pub(crate) const END_MARKER: &str = "</stateful_request_scope>";
 pub(crate) const SELF_CONTAINED_NOTE: &str = "is self-contained. For that request only: work from the files and the project rules and knowledge shown, and make no memory reads or writes (no conversation_read, blackboard_query, context_map_query or refresh, evidence_read, blackboard_record_batch, update or relate calls, no run updates). Exceptions: the request states a new standing rule or decision, or the work turns out to depend on earlier work. Later requests are not covered by this note.";
 /// Shown when steering widens a self-contained request in the same turn.
 pub(crate) const WIDENED_NOTE: &str = "now refers to earlier work: the self-contained restriction for it no longer applies, and the project memory and conversation record do.";
+/// Retires notes written before notes named their request.
+pub(crate) const LEGACY_RETIREMENT: &str = "Earlier scope notes in this conversation that said they applied until a later scope note no longer apply.";
+/// Scope-note bytes one context window may hold (about two notes). Charges carried across
+/// an injected compaction can only shrink this reserve, never the record below its floor.
+pub(crate) const MAX_WINDOW_NOTE_BYTES: usize = 1_536;
 /// Bytes of the quoted request opening in a note.
 const MAX_HEAD_BYTES: usize = 80;
 
@@ -91,6 +96,8 @@ pub(crate) struct ScopeNotePlan {
     turn_id: String,
     /// Body rendered when the harness reports this turn's note missing or the scope widened.
     note: Option<String>,
+    /// Whether this turn's self-contained request carries a note (the reserve allowed it).
+    noted: bool,
     /// Bytes of scope notes this window holds, including the one planned here.
     pub(crate) window_bytes: usize,
 }
@@ -106,45 +113,63 @@ impl ScopeNotePlan {
         scope: RequestScope,
         head: Option<&RequestHead>,
     ) -> Self {
-        let previous_turn = previous
-            .and_then(|previous| previous.get("turnId"))
-            .and_then(Value::as_str);
-        let previous_scope = previous
-            .and_then(|previous| previous.get("scope"))
-            .and_then(Value::as_str);
-        let previous_bytes = previous
-            .and_then(|previous| previous.get("windowBytes"))
+        let field = |name: &str| previous.and_then(|previous| previous.get(name));
+        let previous_turn = field("turnId").and_then(Value::as_str);
+        let previous_scope = field("scope").and_then(Value::as_str);
+        let previous_noted = field("noted").and_then(Value::as_bool).unwrap_or(false);
+        let previous_bytes = field("windowBytes")
             .and_then(Value::as_u64)
             .and_then(|bytes| usize::try_from(bytes).ok())
             .unwrap_or(0);
+        // A note written before notes named their request said it applied "until a later
+        // scope note"; retire it explicitly once.
+        let legacy_restriction =
+            previous_turn.is_none() && previous_scope == Some(RequestScope::SelfContained.name());
         let quoted = crate::continuity::escape(
             &serde_json::to_string(head.map_or("", |head| head.0.as_str()))
                 .unwrap_or_else(|_| "\"\"".to_string()),
         );
         let same_turn = previous_turn == Some(turn_id);
-        let note = match scope {
-            RequestScope::SelfContained => Some(format!(
-                "Scope note for the request that begins {quoted}: it {SELF_CONTAINED_NOTE}"
-            )),
-            RequestScope::Continuity
-                if same_turn && previous_scope == Some(RequestScope::SelfContained.name()) =>
-            {
-                Some(format!(
-                    "Scope note for the request that begins {quoted}: it {WIDENED_NOTE}"
-                ))
+        let fragment_bytes = |note: &str| START_MARKER.len() + note.len() + END_MARKER.len();
+        let mut parts = Vec::new();
+        if legacy_restriction {
+            parts.push(LEGACY_RETIREMENT.to_string());
+        }
+        let mut noted = false;
+        match scope {
+            RequestScope::SelfContained if same_turn && previous_scope == Some(scope.name()) => {
+                // Already planned at an earlier step of this turn.
+                noted = previous_noted;
             }
-            RequestScope::Continuity => None,
-        };
-        // A self-contained turn's note was already counted at an earlier step of the turn.
-        let already_counted = same_turn && previous_scope == Some(scope.name());
-        let added = match &note {
-            Some(note) if !already_counted => START_MARKER.len() + note.len() + END_MARKER.len(),
-            Some(_) | None => 0,
-        };
+            RequestScope::SelfContained => {
+                let note = format!(
+                    "Scope note for the request that begins {quoted}: it {SELF_CONTAINED_NOTE}"
+                );
+                // Notes share a bounded reserve per window; past it, a narrow turn still
+                // defers the record but carries no note.
+                if previous_bytes.saturating_add(fragment_bytes(&note)) <= MAX_WINDOW_NOTE_BYTES {
+                    parts.push(note);
+                    noted = true;
+                }
+            }
+            RequestScope::Continuity
+                if same_turn
+                    && previous_noted
+                    && previous_scope == Some(RequestScope::SelfContained.name()) =>
+            {
+                parts.push(format!(
+                    "Scope note for the request that begins {quoted}: it {WIDENED_NOTE}"
+                ));
+            }
+            RequestScope::Continuity => {}
+        }
+        let note = (!parts.is_empty()).then(|| parts.join("\n"));
+        let added = note.as_deref().map_or(0, fragment_bytes);
         Self {
             scope,
             turn_id: turn_id.to_string(),
             note,
+            noted,
             window_bytes: previous_bytes.saturating_add(added),
         }
     }
@@ -156,10 +181,15 @@ impl ScopeNotePlan {
             scope,
             turn_id,
             note,
+            noted,
             window_bytes,
         } = self;
-        let snapshot =
-            json!({ "scope": scope.name(), "turnId": turn_id, "windowBytes": window_bytes });
+        let snapshot = json!({
+            "scope": scope.name(),
+            "turnId": turn_id,
+            "noted": noted,
+            "windowBytes": window_bytes,
+        });
         WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot, move |previous| {
             if let PreviousWorldStateSection::Known(previous) = previous
                 && previous.get("turnId").and_then(Value::as_str) == Some(turn_id.as_str())
@@ -376,6 +406,15 @@ const REFERENTS: &[&str] = &[
     "pointed out",
     "outlined",
     "listed",
+    "described",
+    "explained",
+    "drafted",
+    "sketched",
+    "showed",
+    "shown",
+    "provided",
+    "gave",
+    "given",
     // Approval and authorization.
     "permission",
     "authorize",

@@ -5,6 +5,8 @@ use codex_protocol::user_input::UserInput;
 use serde_json::json;
 
 use super::END_MARKER;
+use super::LEGACY_RETIREMENT;
+use super::MAX_WINDOW_NOTE_BYTES;
 use super::RequestHead;
 use super::RequestScope;
 use super::SELF_CONTAINED_NOTE;
@@ -97,6 +99,10 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
             "Apply the change you outlined to config loading in settings.py",
             RequestScope::Continuity,
         ),
+        (
+            "Implement the patch you described in parser.rs",
+            RequestScope::Continuity,
+        ),
     ];
     let actual = cases
         .iter()
@@ -148,9 +154,8 @@ fn scope_notes_name_their_request_and_count_against_the_window() {
         "Scope note for the request that begins \"Rename the \\u003chelper\\u003e in utils.py\": it {WIDENED_NOTE}"
     );
     let widened_bytes = START_MARKER.len() + widened.len() + END_MARKER.len();
-    let first_step =
-        json!({ "scope": "selfContained", "turnId": "turn-1", "windowBytes": note_bytes });
-    let next_turn = json!({ "scope": "continuity", "turnId": "turn-2", "windowBytes": note_bytes });
+    let first_step = json!({ "scope": "selfContained", "turnId": "turn-1", "noted": true, "windowBytes": note_bytes });
+    let next_turn = json!({ "scope": "continuity", "turnId": "turn-2", "noted": false, "windowBytes": note_bytes });
 
     assert_eq!(
         vec![
@@ -248,4 +253,41 @@ fn steering_widens_a_self_contained_turn_and_nothing_narrows_it() {
             RequestScope::Continuity,
         ]
     );
+}
+
+#[test]
+fn notes_share_a_bounded_reserve_and_legacy_restrictions_are_retired() {
+    let head = RequestHead("Rename the helper in utils.py".to_string());
+    // Several narrow turns in one window: notes stop once the reserve is used, while the
+    // turns stay self-contained (the record stays deferred).
+    let mut previous: Option<serde_json::Value> = None;
+    let mut noted = Vec::new();
+    for turn in 1..=4 {
+        let plan = ScopeNotePlan::new(
+            previous.as_ref(),
+            &format!("turn-{turn}"),
+            RequestScope::SelfContained,
+            Some(&head),
+        );
+        assert!(
+            plan.window_bytes <= MAX_WINDOW_NOTE_BYTES,
+            "{}",
+            plan.window_bytes
+        );
+        let section = plan.section();
+        noted.push(section.snapshot()["noted"].as_bool());
+        previous = Some(section.snapshot().clone());
+    }
+    assert_eq!(
+        noted,
+        vec![Some(true), Some(true), Some(false), Some(false)]
+    );
+
+    // A note from before notes named their request is retired once, by any later turn.
+    let legacy = json!({ "scope": "selfContained" });
+    let body = ScopeNotePlan::new(Some(&legacy), "turn-9", RequestScope::Continuity, None)
+        .section()
+        .render_diff(PreviousWorldStateSection::Known(&legacy))
+        .map(|fragment| fragment.body().to_string());
+    assert_eq!(body, Some(LEGACY_RETIREMENT.to_string()));
 }
