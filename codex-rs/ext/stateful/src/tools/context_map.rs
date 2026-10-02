@@ -85,6 +85,36 @@ impl ContextMapQueryTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel("selected project no longer exists".to_string())
             })?;
+        // A project that was never indexed (no routes at all) is indexed here rather than
+        // sending the model to discover and call the refresh tool first.
+        let indexed_on_demand = self
+            .services
+            .context_map()
+            .await
+            .map_err(respond)?
+            .list_project(ContextMapListQuery {
+                project_id: self.project_id.clone(),
+                max_results: 1,
+            })
+            .await
+            .map_err(respond)?
+            .is_empty();
+        if indexed_on_demand {
+            ProjectIndexer::new(
+                self.services.hierarchy().await.map_err(respond)?.clone(),
+                self.services.context_map().await.map_err(respond)?.clone(),
+            )
+            .refresh(ProjectIndexRequest {
+                project_id: self.project_id.clone(),
+                roots: project
+                    .roots
+                    .iter()
+                    .map(|root| PathBuf::from(&root.path))
+                    .collect(),
+            })
+            .await
+            .map_err(respond)?;
+        }
         let result = self
             .services
             .context_map()
@@ -141,6 +171,7 @@ impl ContextMapQueryTool {
             &call,
             json!({
                 "projectId": self.project_id,
+                "indexedOnDemand": indexed_on_demand,
                 "data": data,
                 "truncated": truncated,
                 "mayHaveMore": may_have_more,

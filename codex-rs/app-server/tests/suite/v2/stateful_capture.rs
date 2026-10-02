@@ -638,6 +638,75 @@ async fn first_record_in_an_unindexed_project_succeeds() -> Result<()> {
     Ok(())
 }
 
+/// A source query in a never-indexed project indexes it on demand and returns routes, so
+/// the model never has to discover and call the refresh tool first.
+#[tokio::test]
+async fn first_source_query_indexes_an_unindexed_project() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("README.md"),
+        "# Recipes\n\nScale recipes with recipes.py.\n",
+    )?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Unindexed query".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: None,
+                idempotency_key: "unindexed-query-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            tool_call(
+                "first-query",
+                "context_map_query",
+                json!({"text": "Scale recipes"}),
+            ),
+            assistant("Found it."),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &thread, "Where is scaling documented?").await?;
+
+    let output: Value = serde_json::from_str(
+        &log.requests()[1]
+            .function_call_output_text("first-query")
+            .expect("query output"),
+    )?;
+    assert_eq!(output["indexedOnDemand"], json!(true));
+    assert!(
+        output["data"]
+            .as_array()
+            .is_some_and(|routes| !routes.is_empty()),
+        "{output}"
+    );
+    Ok(())
+}
+
 fn tool_call(call_id: &str, tool: &str, arguments: Value) -> String {
     responses::sse(vec![
         responses::ev_function_call(call_id, tool, &arguments.to_string()),
