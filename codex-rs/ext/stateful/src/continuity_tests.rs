@@ -213,6 +213,12 @@ fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
                 Some(&format!("{long}?")),
             );
             captured.thread_id = "01a0fbad-0c72-7143-8052-63fab09364ca".to_string();
+            captured.thread_title = Some("\"<&>\"".repeat(30));
+            captured.run = RunLabel::Bound {
+                run_id: "run-1b2fa4cb7e11c0657076792b94499865df7cb364cff9bf857bcdfe510ed32143"
+                    .to_string(),
+                status: "completed",
+            };
             captured
         })
         .collect();

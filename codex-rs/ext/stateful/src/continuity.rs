@@ -100,7 +100,7 @@ impl ContinuityRecord {
         }
         if self.turns.is_empty() {
             if let Some(run) = &self.latest_run {
-                push_line(&mut body, &run_line(run));
+                push_line(&mut body, &run_line(run, RunDetail::Full));
             }
             if !self.history_unavailable {
                 push_line(&mut body, EMPTY);
@@ -126,10 +126,33 @@ impl ContinuityRecord {
         {
             push_line(&mut body, NEWEST_ASKED);
         }
+        let footer_bytes = |omitted_after: usize| {
+            self.footer(omitted_after)
+                .map_or(0, |footer| footer.len() + 1)
+        };
+        let fits = |length: usize, block: &str, omitted_after: usize| {
+            length + 1 + block.len() + footer_bytes(omitted_after) <= max_body
+        };
+        // The newest turn always appears: reserve its smallest form (no title, empty quotes
+        // with retrieval routes) before admitting the optional latest-run line.
+        let newest_omitted = self.turns.len() - 1;
+        let reserve = self.turns.first().map_or(0, |newest| {
+            1 + turn_block(newest, /*latest_run_id*/ None, TurnShape::MINIMAL).len()
+                + footer_bytes(newest_omitted)
+        });
+        let mut latest_run_id = None;
         if let Some(run) = &self.latest_run {
-            push_line(&mut body, &run_line(run));
+            let line = [
+                run_line(run, RunDetail::Full),
+                run_line(run, RunDetail::Brief),
+            ]
+            .into_iter()
+            .find(|line| body.len() + 1 + line.len() + reserve <= max_body);
+            if let Some(line) = line {
+                push_line(&mut body, &line);
+                latest_run_id = Some(run.id.as_str());
+            }
         }
-        let latest_run_id = self.latest_run.as_ref().map(|run| run.id.as_str());
         let mut newest_answer = true;
         let mut blocks = self
             .turns
@@ -138,7 +161,7 @@ impl ContinuityRecord {
                 let block = turn_block(
                     turn,
                     latest_run_id,
-                    full_limits(turn, newest_answer && turn.answer.is_some()),
+                    TurnShape::full(turn, newest_answer && turn.answer.is_some()),
                 );
                 newest_answer &= turn.answer.is_none();
                 block
@@ -146,29 +169,33 @@ impl ContinuityRecord {
             .collect::<Vec<_>>();
         // Admit whole turns newest first while the omission footer they imply still fits;
         // the newest turn is shortened to the space left rather than disappearing.
-        let footer_bytes = |omitted_after: usize| {
-            self.footer(omitted_after)
-                .map_or(0, |footer| footer.len() + 1)
-        };
-        let fits = |length: usize, block: &str, omitted_after: usize| {
-            length + 1 + block.len() + footer_bytes(omitted_after) <= max_body
-        };
         if let Some(newest) = self.turns.first()
-            && !fits(body.len(), &blocks[0], blocks.len() - 1)
+            && !fits(body.len(), &blocks[0], newest_omitted)
         {
-            let frame = turn_block(newest, latest_run_id, QuoteLimits { user: 0, answer: 0 }).len();
-            let room = max_body
-                .saturating_sub(body.len() + 1 + footer_bytes(blocks.len() - 1))
-                .saturating_sub(frame);
-            let user = if newest.user.is_some() { room / 4 } else { 0 };
-            blocks[0] = turn_block(
-                newest,
-                latest_run_id,
-                QuoteLimits {
-                    user,
-                    answer: room - user,
-                },
-            );
+            blocks[0] = [true, false]
+                .into_iter()
+                .map(|title| {
+                    let frame = TurnShape {
+                        user: 0,
+                        answer: 0,
+                        title,
+                    };
+                    let room = max_body
+                        .saturating_sub(body.len() + 1 + footer_bytes(newest_omitted))
+                        .saturating_sub(turn_block(newest, latest_run_id, frame).len());
+                    let user = if newest.user.is_some() { room / 4 } else { 0 };
+                    turn_block(
+                        newest,
+                        latest_run_id,
+                        TurnShape {
+                            user,
+                            answer: room - user,
+                            title,
+                        },
+                    )
+                })
+                .find(|block| fits(body.len(), block, newest_omitted))
+                .unwrap_or_else(|| turn_block(newest, latest_run_id, TurnShape::MINIMAL));
         }
         let mut shown = 0;
         let mut length = body.len();
@@ -213,29 +240,46 @@ impl ContinuityRecord {
     }
 }
 
-/// Rendered-byte limits for a turn's quoted user message and answer.
+/// How much of a turn to render: rendered-byte limits for its quoted user message and
+/// answer, and whether to name its thread's title.
 #[derive(Clone, Copy)]
-struct QuoteLimits {
+struct TurnShape {
     user: usize,
     answer: usize,
+    title: bool,
 }
 
-fn full_limits(turn: &CapturedTurn, newest_answer: bool) -> QuoteLimits {
-    QuoteLimits {
-        user: if turn.current_thread {
-            MAX_CURRENT_THREAD_USER_BYTES
-        } else {
-            MAX_USER_BYTES
-        },
-        answer: if newest_answer {
-            MAX_NEWEST_ANSWER_BYTES
-        } else {
-            MAX_ANSWER_BYTES
-        },
+impl TurnShape {
+    const MINIMAL: Self = Self {
+        user: 0,
+        answer: 0,
+        title: false,
+    };
+
+    fn full(turn: &CapturedTurn, newest_answer: bool) -> Self {
+        Self {
+            user: if turn.current_thread {
+                MAX_CURRENT_THREAD_USER_BYTES
+            } else {
+                MAX_USER_BYTES
+            },
+            answer: if newest_answer {
+                MAX_NEWEST_ANSWER_BYTES
+            } else {
+                MAX_ANSWER_BYTES
+            },
+            title: true,
+        }
     }
 }
 
-fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: QuoteLimits) -> String {
+#[derive(Clone, Copy)]
+enum RunDetail {
+    Full,
+    Brief,
+}
+
+fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: TurnShape) -> String {
     let when = turn
         .at_ms
         .map_or_else(|| "time unknown".to_string(), format_time);
@@ -243,7 +287,7 @@ fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: QuoteLim
     let thread = if turn.current_thread {
         format!("this thread {thread_id}")
     } else {
-        match &turn.thread_title {
+        match turn.thread_title.as_ref().filter(|_| limits.title) {
             Some(title) => format!(
                 "thread {thread_id} titled {}",
                 quote(title, MAX_THREAD_TITLE_BYTES, /*route*/ None)
@@ -287,13 +331,16 @@ fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: QuoteLim
     block
 }
 
-fn run_line(run: &LatestRun) -> String {
+fn run_line(run: &LatestRun, detail: RunDetail) -> String {
     let mut line = format!(
         "Latest Stateful run: {} ({}, {}).",
         quote(&run.id, usize::MAX, /*route*/ None),
         run.mode,
         run.status
     );
+    if let RunDetail::Brief = detail {
+        return line;
+    }
     for next in run.next.iter().take(MAX_NEXT_ITEMS) {
         line.push_str(&format!(
             " Next: {}",
