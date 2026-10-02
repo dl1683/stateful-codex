@@ -180,7 +180,7 @@ async fn material_root_checklist(
     requested_references: &[String],
     visible_root: Option<&VisibleRoot>,
 ) -> Result<MaterialChecklist, FunctionCallError> {
-    let projection = services
+    let mut projection = services
         .blackboard()
         .await
         .map_err(respond)?
@@ -190,6 +190,9 @@ async fn material_root_checklist(
         })
         .await
         .map_err(respond)?;
+    // Aliases are positions in the projection the packet showed, which never holds rules
+    // that are not in the user's own words.
+    crate::root_blackboard::retain_applicable_rules(&mut projection);
     if projection.revision != expected_root_revision {
         return Err(respond(format!(
             "root blackboard changed from revision {expected_root_revision} to {}; review the current root aliases before completing",

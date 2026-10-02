@@ -42,6 +42,7 @@ use crate::rule_capture::store_user_rule;
 use crate::user_messages::UserMessageRegistry;
 use crate::user_rules::MAX_RULE_BYTES;
 use crate::user_rules::RuleStanding;
+use crate::user_rules::inherited_scope;
 use crate::user_rules::is_task_limited;
 use crate::user_rules::reports_speech;
 
@@ -169,7 +170,9 @@ impl BlackboardRecorder {
                     "userQuote is not inside exactly one complete sentence of a user message recorded in this thread",
                 )
             })?;
-        if is_task_limited(&clause) {
+        if is_task_limited(&clause)
+            || inherited_scope(&message.text, &clause) == Some(RuleStanding::Pending)
+        {
             return Err(respond(
                 "nothing written: the user limited that sentence to the current task",
             ));

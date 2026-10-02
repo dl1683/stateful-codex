@@ -116,6 +116,18 @@ pub(super) struct ResolvedRootBlackboard {
     quarantined_rules: u64,
 }
 
+/// Removes rules that are not in the user's own words from a root projection, before any
+/// alias is assigned, and returns how many were removed. Every consumer of root aliases
+/// (the packet, its deltas, completion) must apply this to the same projection.
+pub(super) fn retain_applicable_rules(projection: &mut RootBlackboardProjection) -> u64 {
+    let before = projection.data.len();
+    projection.data.retain(|hit| {
+        hit.entry.value.kind != BlackboardKind::Instruction
+            || hit.entry.value.provenance.kind == BlackboardProvenanceKind::User
+    });
+    u64::try_from(before - projection.data.len()).unwrap_or(u64::MAX)
+}
+
 impl ResolvedRootBlackboard {
     /// Rules not in the user's own words are never applied: an agent's paraphrase or its
     /// invention must not become a standing constraint. They leave the projection itself, so
@@ -125,12 +137,7 @@ impl ResolvedRootBlackboard {
         evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
         evidence_audit: Option<EvidenceAudit>,
     ) -> Self {
-        let before = projection.data.len();
-        projection.data.retain(|hit| {
-            hit.entry.value.kind != BlackboardKind::Instruction
-                || hit.entry.value.provenance.kind == BlackboardProvenanceKind::User
-        });
-        let quarantined_rules = u64::try_from(before - projection.data.len()).unwrap_or(u64::MAX);
+        let quarantined_rules = retain_applicable_rules(&mut projection);
         Self {
             projection,
             evidence_routes,

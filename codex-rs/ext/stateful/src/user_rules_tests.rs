@@ -96,3 +96,32 @@ fn reported_advice_and_task_limited_lists_never_become_standing_rules() {
         ]
     );
 }
+
+#[test]
+fn explicit_task_limits_win_and_mentions_of_an_assistant_are_not_relayed_speech() {
+    let message = "For this task:\n- Do not modify docs.\n\nMy standing preferences for this task only:\n- Never touch migrations.\n\nNever treat an assistant answer as evidence of my preferences.";
+    assert_eq!(
+        marked_rules(message),
+        vec![
+            RuleClause {
+                text: "- Do not modify docs.".to_string(),
+                standing: RuleStanding::Pending,
+            },
+            RuleClause {
+                text: "- Never touch migrations.".to_string(),
+                standing: RuleStanding::Pending,
+            },
+            standing("Never treat an assistant answer as evidence of my preferences."),
+        ]
+    );
+    assert_eq!(
+        (
+            super::inherited_scope(message, "- Do not modify docs."),
+            super::inherited_scope(
+                message,
+                "Never treat an assistant answer as evidence of my preferences."
+            ),
+        ),
+        (Some(RuleStanding::Pending), None)
+    );
+}

@@ -169,3 +169,42 @@ async fn user_rules_are_selected_before_more_important_knowledge() {
         vec!["From now on, run only the tests relevant to the change."]
     );
 }
+
+/// Restating a pending rule as standing, in the same words, makes it apply.
+#[tokio::test]
+async fn restating_a_pending_rule_as_standing_promotes_it() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let pending = capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        "My preferences for this task:\n- Never run migrations.",
+    )
+    .await;
+    let restated = capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-2",
+        "My preferences for all our work:\n- Never run migrations.",
+    )
+    .await;
+    let summary = |rules: &[super::CapturedRule]| {
+        rules
+            .iter()
+            .map(|rule| (rule.entry.value.root_promotion, rule.newly_stored))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        (summary(&pending), summary(&restated)),
+        (
+            vec![(RootPromotion::Candidate, true)],
+            vec![(RootPromotion::Promoted, true)]
+        )
+    );
+}

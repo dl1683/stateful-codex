@@ -447,3 +447,86 @@ async fn completion_rejects_material_root_finding_changed_after_world_state_audi
         "material root finding E1 evidence is stale; read current evidence and revise or supersede"
     ));
 }
+
+/// Completion resolves E aliases against the projection the packet showed, which never holds
+/// rules that are not in the user's own words.
+#[tokio::test]
+async fn completion_aliases_skip_quarantined_rules() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let node_id = services
+        .project_node_id(PROJECT_ID)
+        .await
+        .expect("project node");
+    let blackboard = services.blackboard().await.expect("blackboard");
+    for (id, kind, content) in [
+        (
+            "a-hidden",
+            BlackboardKind::Instruction,
+            "An invented rule the user never stated.",
+        ),
+        (
+            "b-fact",
+            BlackboardKind::Fact,
+            "The scaler keeps metric units.",
+        ),
+    ] {
+        blackboard
+            .create_entry(
+                BlackboardEntryId::parse(id).expect("entry ID"),
+                NewBlackboardEntry {
+                    project_id: PROJECT_ID.to_string(),
+                    node_id: node_id.clone(),
+                    kind,
+                    content: content.to_string(),
+                    structured_value: None,
+                    confidence: ConfidenceScore::from_basis_points(9_000).expect("confidence"),
+                    verification: BlackboardVerification::Unverified,
+                    importance: BlackboardImportance::High,
+                    root_promotion: RootPromotion::Promoted,
+                    evidence: Vec::new(),
+                    premises: Vec::new(),
+                    provenance: BlackboardProvenance {
+                        kind: BlackboardProvenanceKind::Agent,
+                        source_id: "turn-1".to_string(),
+                    },
+                },
+            )
+            .await
+            .expect("create root knowledge");
+    }
+    let root_revision = blackboard
+        .root_projection(RootBlackboardQuery {
+            project_id: PROJECT_ID.to_string(),
+            max_entries: 256,
+        })
+        .await
+        .expect("root projection")
+        .revision;
+    let completion = prepare_completion(
+        &services,
+        CompletionRequest {
+            project_id: PROJECT_ID,
+            project_roots: &[],
+            result: "Done.",
+            packet: &ObligationPacket {
+                learning: vec!["Metric units stay.".to_string()],
+                ..Default::default()
+            },
+            root_revision,
+            material_root_findings: &["E1".to_string()],
+            material_historical_findings: &[],
+            visible_root: None,
+        },
+    )
+    .await
+    .expect("completion resolves E1");
+    assert_eq!(
+        (
+            completion.result.contains("The scaler keeps metric units."),
+            completion.result.contains("An invented rule"),
+        ),
+        (true, false)
+    );
+}

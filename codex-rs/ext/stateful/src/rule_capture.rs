@@ -6,6 +6,8 @@
 
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardEntryState;
+use codex_project_intelligence::BlackboardEntryUpdate;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
@@ -119,11 +121,12 @@ pub(crate) async fn store_user_rule(
         .blackboard()
         .await
         .map_err(|error| error.to_string())?;
-    let category = match standing {
-        RuleStanding::Standing => KnowledgeCategory::Rule,
-        RuleStanding::Pending => KnowledgeCategory::PendingRule,
-    };
     let receipt = |entry: &BlackboardEntry, outcome: CaptureOutcome| {
+        let category = if entry.value.root_promotion == RootPromotion::Promoted {
+            KnowledgeCategory::Rule
+        } else {
+            KnowledgeCategory::PendingRule
+        };
         if let Some(event_sink) = event_sink {
             event_sink.emit(StatefulEvent::KnowledgeCaptured {
                 project_id: project_id.to_string(),
@@ -142,6 +145,52 @@ pub(crate) async fn store_user_rule(
         .await
         .map_err(|error| error.to_string())?
     {
+        // The user restating a pending rule as standing, in their own words, makes it apply;
+        // a later task-limited mention never demotes a standing rule.
+        if standing == RuleStanding::Standing
+            && existing.value.root_promotion != RootPromotion::Promoted
+            && existing.state == BlackboardEntryState::Active
+        {
+            let promoted = store
+                .update_entry(
+                    project_id,
+                    &existing.id,
+                    BlackboardEntryUpdate {
+                        expected_revision: existing.revision,
+                        kind: existing.value.kind,
+                        content: existing.value.content.clone(),
+                        structured_value: existing.value.structured_value.clone(),
+                        confidence: existing.value.confidence,
+                        verification: existing.value.verification,
+                        importance: existing.value.importance,
+                        root_promotion: RootPromotion::Promoted,
+                        evidence: existing.value.evidence.clone(),
+                        premises: existing.value.premises.clone(),
+                        state: BlackboardEntryState::Active,
+                        superseded_by: None,
+                        provenance: BlackboardProvenance {
+                            kind: BlackboardProvenanceKind::User,
+                            source_id: user_message_source(thread_id, turn_id),
+                        },
+                    },
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            if let Some(event_sink) = event_sink {
+                event_sink.emit(StatefulEvent::BlackboardUpdated {
+                    project_id: project_id.to_string(),
+                    entity_kind: BlackboardEntityKind::Entry,
+                    entity_id: promoted.id.to_string(),
+                    revision: promoted.revision,
+                });
+            }
+            receipt(&promoted, CaptureOutcome::Stored);
+            return Ok(CapturedRule {
+                entry: promoted,
+                standing,
+                newly_stored: true,
+            });
+        }
         receipt(&existing, CaptureOutcome::AlreadyStored);
         return Ok(CapturedRule {
             entry: existing,
