@@ -135,20 +135,34 @@ impl ScopeNotePlan {
         if legacy_restriction {
             parts.push(LEGACY_RETIREMENT.to_string());
         }
+        let self_contained_note =
+            format!("Scope note for the request that begins {quoted}: it {SELF_CONTAINED_NOTE}");
+        let widened_note =
+            format!("Scope note for the request that begins {quoted}: it {WIDENED_NOTE}");
         let mut noted = false;
+        // Bytes this step adds to the window; a note re-planned at a later step of its own
+        // turn keeps its body (so a new window can show it again) but is not charged twice.
+        let mut charged = parts.iter().map(|part| fragment_bytes(part)).sum::<usize>();
         match scope {
             RequestScope::SelfContained if same_turn && previous_scope == Some(scope.name()) => {
-                // Already planned at an earlier step of this turn.
-                noted = previous_noted;
+                if previous_noted {
+                    parts.push(self_contained_note);
+                    noted = true;
+                }
             }
             RequestScope::SelfContained => {
-                let note = format!(
-                    "Scope note for the request that begins {quoted}: it {SELF_CONTAINED_NOTE}"
-                );
-                // Notes share a bounded reserve per window; past it, a narrow turn still
-                // defers the record but carries no note.
-                if previous_bytes.saturating_add(fragment_bytes(&note)) <= MAX_WINDOW_NOTE_BYTES {
-                    parts.push(note);
+                // Notes share a bounded reserve per window. A note is admitted only with
+                // room left for its own steering retraction; past the reserve a narrow turn
+                // still defers the record but carries no note.
+                let needed = fragment_bytes(&self_contained_note)
+                    .saturating_add(fragment_bytes(&widened_note));
+                if previous_bytes
+                    .saturating_add(charged)
+                    .saturating_add(needed)
+                    <= MAX_WINDOW_NOTE_BYTES
+                {
+                    charged += fragment_bytes(&self_contained_note);
+                    parts.push(self_contained_note);
                     noted = true;
                 }
             }
@@ -157,14 +171,15 @@ impl ScopeNotePlan {
                     && previous_noted
                     && previous_scope == Some(RequestScope::SelfContained.name()) =>
             {
-                parts.push(format!(
-                    "Scope note for the request that begins {quoted}: it {WIDENED_NOTE}"
-                ));
+                charged += fragment_bytes(&widened_note);
+                parts.push(widened_note);
             }
             RequestScope::Continuity => {}
         }
         let note = (!parts.is_empty()).then(|| parts.join("\n"));
-        let added = note.as_deref().map_or(0, fragment_bytes);
+        // A steering retraction was reserved when its note was admitted, so the window's
+        // charges never exceed the reserve; a re-planned note is not charged again.
+        let added = charged;
         Self {
             scope,
             turn_id: turn_id.to_string(),

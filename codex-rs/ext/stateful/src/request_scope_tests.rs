@@ -291,3 +291,50 @@ fn notes_share_a_bounded_reserve_and_legacy_restrictions_are_retired() {
         .map(|fragment| fragment.body().to_string());
     assert_eq!(body, Some(LEGACY_RETIREMENT.to_string()));
 }
+
+#[test]
+fn steered_narrow_turns_stay_within_the_reserve_and_notes_survive_a_new_window() {
+    let head = RequestHead(
+        "Rename the helper in utils.py to snake_case and update its callers".to_string(),
+    );
+    let mut previous: Option<serde_json::Value> = None;
+    let mut charges = Vec::new();
+    for turn in 1..=3 {
+        let turn_id = format!("turn-{turn}");
+        // Each narrow turn is steered to continuity at its next step.
+        for scope in [RequestScope::SelfContained, RequestScope::Continuity] {
+            let plan = ScopeNotePlan::new(previous.as_ref(), &turn_id, scope, Some(&head));
+            charges.push(plan.window_bytes);
+            previous = Some(plan.section().snapshot().clone());
+        }
+    }
+    assert!(
+        charges.iter().all(|bytes| *bytes <= MAX_WINDOW_NOTE_BYTES),
+        "{charges:?}"
+    );
+
+    // A later step of the same narrow turn re-plans its note: nothing new is charged, and
+    // when compaction removed the fragment the note is rendered again.
+    let first = ScopeNotePlan::new(None, "turn-1", RequestScope::SelfContained, Some(&head));
+    let first_bytes = first.window_bytes;
+    let first_snapshot = first.section().snapshot().clone();
+    let replanned = ScopeNotePlan::new(
+        Some(&first_snapshot),
+        "turn-1",
+        RequestScope::SelfContained,
+        Some(&head),
+    );
+    assert_eq!(replanned.window_bytes, first_bytes);
+    let section = replanned.section();
+    assert_eq!(
+        (
+            section
+                .render_diff(PreviousWorldStateSection::Known(&first_snapshot))
+                .is_some(),
+            section
+                .render_diff(PreviousWorldStateSection::Absent)
+                .is_some(),
+        ),
+        (false, true)
+    );
+}
