@@ -21424,6 +21424,11 @@
             "minimum": 0.0,
             "type": "integer"
           },
+          "conversationReadCalls": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
           "evidenceReadCalls": {
             "format": "uint64",
             "minimum": 0.0,
@@ -21523,6 +21528,7 @@
         "required": [
           "blackboardWriteCalls",
           "contextRefreshCalls",
+          "conversationReadCalls",
           "evidenceReadCalls",
           "failedStatefulToolCalls",
           "knowledgeQueryCalls",

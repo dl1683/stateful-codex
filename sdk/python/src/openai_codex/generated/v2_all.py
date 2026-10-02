@@ -5193,6 +5193,7 @@ class StatefulAttributionCounters(BaseModel):
     )
     blackboard_write_calls: Annotated[int, Field(alias="blackboardWriteCalls", ge=0)]
     context_refresh_calls: Annotated[int, Field(alias="contextRefreshCalls", ge=0)]
+    conversation_read_calls: Annotated[int, Field(alias="conversationReadCalls", ge=0)]
     evidence_read_calls: Annotated[int, Field(alias="evidenceReadCalls", ge=0)]
     failed_stateful_tool_calls: Annotated[int, Field(alias="failedStatefulToolCalls", ge=0)]
     knowledge_query_calls: Annotated[int, Field(alias="knowledgeQueryCalls", ge=0)]

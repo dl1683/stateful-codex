@@ -128,6 +128,7 @@ impl StatefulAttributionAccumulator {
         attribution.route_query_calls += counters.route_query_calls;
         attribution.evidence_read_calls += counters.evidence_read_calls;
         attribution.steering_query_calls += counters.steering_query_calls;
+        attribution.conversation_read_calls += counters.conversation_read_calls;
         attribution.blackboard_write_calls += counters.blackboard_write_calls;
         attribution.context_refresh_calls += counters.context_refresh_calls;
         attribution.obligation_write_calls += counters.obligation_write_calls;

@@ -120,6 +120,7 @@ pub struct StatefulAttribution {
     pub route_query_calls: u64,
     pub evidence_read_calls: u64,
     pub steering_query_calls: u64,
+    pub conversation_read_calls: u64,
     pub blackboard_write_calls: u64,
     pub context_refresh_calls: u64,
     pub obligation_write_calls: u64,

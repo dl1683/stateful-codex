@@ -368,7 +368,8 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     counters.knowledge_query_calls
                         + counters.route_query_calls
                         + counters.evidence_read_calls
-                        + counters.steering_query_calls,
+                        + counters.steering_query_calls
+                        + counters.conversation_read_calls,
                     writes,
                     counters.material_findings_reused,
                 );

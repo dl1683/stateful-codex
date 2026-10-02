@@ -154,6 +154,7 @@ fn api_attribution_counters(
         route_query_calls: counters.route_query_calls,
         evidence_read_calls: counters.evidence_read_calls,
         steering_query_calls: counters.steering_query_calls,
+        conversation_read_calls: counters.conversation_read_calls,
         blackboard_write_calls: counters.blackboard_write_calls,
         context_refresh_calls: counters.context_refresh_calls,
         obligation_write_calls: counters.obligation_write_calls,

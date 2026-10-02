@@ -377,6 +377,8 @@ pub struct StatefulAttributionCounters {
     #[ts(type = "number")]
     pub steering_query_calls: u64,
     #[ts(type = "number")]
+    pub conversation_read_calls: u64,
+    #[ts(type = "number")]
     pub blackboard_write_calls: u64,
     #[ts(type = "number")]
     pub context_refresh_calls: u64,
