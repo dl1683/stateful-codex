@@ -15,11 +15,15 @@ pub(super) const START_MARKER: &str = "<stateful_continuity>";
 pub(super) const END_MARKER: &str = "</stateful_continuity>";
 /// Hard bound for the whole fragment, markers included (about 2k tokens); a P0 item.
 pub(super) const MAX_FRAGMENT_BYTES: usize = 8 * 1024;
-const MAX_BODY_BYTES: usize = MAX_FRAGMENT_BYTES - START_MARKER.len() - END_MARKER.len();
-const MAX_USER_BYTES: usize = 1536;
+/// Smallest fragment the record is given when other Stateful sections are large.
+pub(super) const MIN_FRAGMENT_BYTES: usize = 3 * 1024;
+const MAX_USER_BYTES: usize = 1024;
 const MAX_CURRENT_THREAD_USER_BYTES: usize = 320;
-const MAX_NEWEST_ANSWER_BYTES: usize = 3 * 1024;
-const MAX_ANSWER_BYTES: usize = 1024;
+const MAX_NEWEST_ANSWER_BYTES: usize = 2 * 1024;
+const MAX_ANSWER_BYTES: usize = 640;
+/// Quote limits for the newest turn when its full form does not fit the budget.
+const COMPACT_USER_BYTES: usize = 256;
+const COMPACT_ANSWER_BYTES: usize = 768;
 const MAX_THREAD_TITLE_BYTES: usize = 60;
 const MAX_NEXT_ITEMS: usize = 2;
 const MAX_NEXT_ITEM_BYTES: usize = 240;
@@ -84,10 +88,14 @@ pub(super) struct ContinuityRecord {
 }
 
 impl ContinuityRecord {
-    /// Renders the escaped body, bounded so the whole fragment fits `MAX_FRAGMENT_BYTES`.
-    /// A project with nothing captured still gets one short line, so the fragment stays in
-    /// history and is not rendered again in the same window.
-    pub(super) fn render(&self) -> String {
+    /// Renders the escaped body, bounded so the whole fragment fits `max_fragment_bytes`
+    /// (clamped to `MIN_FRAGMENT_BYTES..=MAX_FRAGMENT_BYTES`). A project with nothing
+    /// captured still gets one short line, so the fragment stays in history and is not
+    /// rendered again in the same window.
+    pub(super) fn render(&self, max_fragment_bytes: usize) -> String {
+        let max_body = max_fragment_bytes.clamp(MIN_FRAGMENT_BYTES, MAX_FRAGMENT_BYTES)
+            - START_MARKER.len()
+            - END_MARKER.len();
         let mut body = format!("Project ID: {}", escape(&self.project_id));
         if self.history_unavailable {
             push_line(&mut body, UNAVAILABLE);
@@ -123,27 +131,42 @@ impl ContinuityRecord {
         if let Some(run) = &self.latest_run {
             push_line(&mut body, &run_line(run));
         }
+        let latest_run_id = self.latest_run.as_ref().map(|run| run.id.as_str());
         let mut newest_answer = true;
-        let blocks = self
+        let mut blocks = self
             .turns
             .iter()
             .map(|turn| {
                 let block = turn_block(
                     turn,
                     newest_answer && turn.answer.is_some(),
-                    self.latest_run.as_ref().map(|run| run.id.as_str()),
+                    latest_run_id,
+                    TurnDetail::Full,
                 );
                 newest_answer &= turn.answer.is_none();
                 block
             })
             .collect::<Vec<_>>();
-        // Admit whole turns newest first while the omission footer they imply still fits.
+        // Admit whole turns newest first while the omission footer they imply still fits;
+        // the newest turn falls back to a compact form rather than disappearing.
+        let fits = |length: usize, block: &str, omitted_after: usize| {
+            let footer = self.footer(omitted_after);
+            length + 1 + block.len() + footer.map_or(0, |footer| footer.len() + 1) <= max_body
+        };
+        if let Some(newest) = self.turns.first()
+            && !fits(body.len(), &blocks[0], blocks.len() - 1)
+        {
+            blocks[0] = turn_block(
+                newest,
+                newest.answer.is_some(),
+                latest_run_id,
+                TurnDetail::Compact,
+            );
+        }
         let mut shown = 0;
         let mut length = body.len();
         for block in &blocks {
-            let footer = self.footer(blocks.len() - shown - 1);
-            let footer_length = footer.map_or(0, |footer| footer.len() + 1);
-            if length + 1 + block.len() + footer_length > MAX_BODY_BYTES {
+            if !fits(length, block, blocks.len() - shown - 1) {
                 break;
             }
             length += 1 + block.len();
@@ -183,7 +206,18 @@ impl ContinuityRecord {
     }
 }
 
-fn turn_block(turn: &CapturedTurn, newest_answer: bool, latest_run_id: Option<&str>) -> String {
+#[derive(Clone, Copy)]
+enum TurnDetail {
+    Full,
+    Compact,
+}
+
+fn turn_block(
+    turn: &CapturedTurn,
+    newest_answer: bool,
+    latest_run_id: Option<&str>,
+    detail: TurnDetail,
+) -> String {
     let when = turn
         .at_ms
         .map_or_else(|| "time unknown".to_string(), format_time);
@@ -218,10 +252,10 @@ fn turn_block(turn: &CapturedTurn, newest_answer: bool, latest_run_id: Option<&s
     let route =
         |part: &str| format!("conversation_read threadId={thread_id} turnId={turn_id} part={part}");
     if let Some(user) = &turn.user {
-        let limit = if turn.current_thread {
-            MAX_CURRENT_THREAD_USER_BYTES
-        } else {
-            MAX_USER_BYTES
+        let limit = match (detail, turn.current_thread) {
+            (TurnDetail::Compact, _) => COMPACT_USER_BYTES,
+            (TurnDetail::Full, true) => MAX_CURRENT_THREAD_USER_BYTES,
+            (TurnDetail::Full, false) => MAX_USER_BYTES,
         };
         block.push_str(&format!(
             "\n  User: {}",
@@ -230,10 +264,10 @@ fn turn_block(turn: &CapturedTurn, newest_answer: bool, latest_run_id: Option<&s
     }
     match &turn.answer {
         Some(answer) => {
-            let limit = if newest_answer {
-                MAX_NEWEST_ANSWER_BYTES
-            } else {
-                MAX_ANSWER_BYTES
+            let limit = match (detail, newest_answer) {
+                (TurnDetail::Compact, _) => COMPACT_ANSWER_BYTES,
+                (TurnDetail::Full, true) => MAX_NEWEST_ANSWER_BYTES,
+                (TurnDetail::Full, false) => MAX_ANSWER_BYTES,
             };
             block.push_str(&format!(
                 "\n  Answer: {}",
@@ -332,9 +366,10 @@ fn push_line(body: &mut String, line: &str) {
 /// fragment (thread start, or the fragment left history at compaction).
 pub(super) fn continuity_world_state_section(
     record: &ContinuityRecord,
+    max_fragment_bytes: usize,
 ) -> WorldStateSectionContribution {
     let project_id = record.project_id.clone();
-    let body = record.render();
+    let body = record.render(max_fragment_bytes);
     WorldStateSectionContribution::new(
         WORLD_STATE_ID,
         json!({ "projectId": project_id }),

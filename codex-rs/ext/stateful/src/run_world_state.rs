@@ -107,7 +107,7 @@ impl RunWorldStateStatus {
         format!("{:x}", hasher.finalize())
     }
 
-    fn render(&self) -> String {
+    pub(super) fn render(&self) -> String {
         let mut output = String::with_capacity(MAX_BODY_BYTES);
         line(
             &mut output,

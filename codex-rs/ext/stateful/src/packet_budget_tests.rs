@@ -49,8 +49,9 @@ use crate::world_state::project_world_state_section;
 /// Rendered bytes (markers included) of the fixture's Stateful content at a window start.
 /// Measured 2026-10-02 for Collaborative: project plus run 11,659 bytes before the trim and
 /// 8,370 after; with five populated outcomes 14,234 (project 6,229, run 2,141, outcomes 5,864).
-/// The continuity record replaced the outcomes: 14,508 (continuity 6,138, ten long turns).
-const MAX_FIXTURE_PACKET_BYTES: usize = 22_000;
+/// The continuity record replaced the outcomes: 14,508 (continuity 6,138, ten long turns);
+/// under the 12 KiB aggregate window budget, 11,699 (project 6,510, run 2,397, record 2,792).
+const MAX_FIXTURE_PACKET_BYTES: usize = 12_500;
 
 const PROJECT_ID: &str = "project-1";
 
@@ -244,13 +245,18 @@ fn fresh_window_stateful_content_stays_within_its_budget() {
         WorkflowMode::Autonomous,
         WorkflowMode::Socratic,
     ] {
+        // The record gets what the project and run packets leave, as the extension does.
+        let packet_bytes = project_status().render().0.len() + run_status(mode).render().len();
         let sections = [
             rendered_bytes(project_world_state_section(
                 project_status(),
                 /*visible_root*/ None,
             )),
             rendered_bytes(run_world_state_section(run_status(mode))),
-            rendered_bytes(continuity_world_state_section(&continuity_record())),
+            rendered_bytes(continuity_world_state_section(
+                &continuity_record(),
+                crate::AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes),
+            )),
         ];
         let total = sections.iter().sum::<usize>();
 

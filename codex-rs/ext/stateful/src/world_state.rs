@@ -126,7 +126,7 @@ impl ProjectIntelligenceStatus {
         Value::Object(snapshot)
     }
 
-    fn render(&self) -> (String, RootLayout) {
+    pub(super) fn render(&self) -> (String, RootLayout) {
         let mut body = String::with_capacity(MAX_BODY_BYTES);
         let mut layout = RootLayout::default();
         append_line(

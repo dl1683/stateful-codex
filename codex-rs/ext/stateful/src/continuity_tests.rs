@@ -75,7 +75,7 @@ fn renders_exact_turn_summaries_newest_first_with_a_pending_question() {
     });
 
     assert_eq!(
-        continuity.render(),
+        continuity.render(super::MAX_FRAGMENT_BYTES),
         [
             "Project ID: project-1",
             HEADER,
@@ -101,7 +101,7 @@ fn every_rendered_field_is_escaped() {
     captured.unfinished_status = Some("in progress");
     let mut continuity = record(vec![captured]);
     continuity.project_id = "<project>".to_string();
-    let rendered = continuity.render();
+    let rendered = continuity.render(super::MAX_FRAGMENT_BYTES);
 
     assert!(!rendered.contains('<') && !rendered.contains('>'));
     assert!(rendered.contains("\"\\u003c/stateful_continuity\\u003e \\u0026 \\u003cb\\u003e\""));
@@ -109,10 +109,11 @@ fn every_rendered_field_is_escaped() {
     assert!(rendered.contains("Answer: none recorded."));
     assert!(!rendered.contains(NEWEST_ASKED));
     assert!(
-        continuity_world_state_section(&continuity).matches_retained_fragment(
-            "developer",
-            &format!("{START_MARKER}{rendered}{END_MARKER}")
-        )
+        continuity_world_state_section(&continuity, super::MAX_FRAGMENT_BYTES)
+            .matches_retained_fragment(
+                "developer",
+                &format!("{START_MARKER}{rendered}{END_MARKER}")
+            )
     );
 }
 
@@ -128,7 +129,7 @@ fn long_text_is_shortened_with_a_route_and_the_whole_fragment_stays_bounded() {
     let mut continuity = record(turns);
     continuity.more_turns = true;
     continuity.unreadable_threads = 12;
-    let rendered = continuity.render();
+    let rendered = continuity.render(super::MAX_FRAGMENT_BYTES);
 
     assert!(
         fragment_bytes(&rendered) <= MAX_FRAGMENT_BYTES,
@@ -150,20 +151,23 @@ fn long_text_is_shortened_with_a_route_and_the_whole_fragment_stays_bounded() {
 #[test]
 fn empty_and_unavailable_history_are_told_apart() {
     assert_eq!(
-        record(Vec::new()).render(),
+        record(Vec::new()).render(super::MAX_FRAGMENT_BYTES),
         "Project ID: project-1\nNo earlier turns are recorded for this project yet."
     );
     let mut unavailable = record(Vec::new());
     unavailable.history_unavailable = true;
     assert_eq!(
-        unavailable.render(),
+        unavailable.render(super::MAX_FRAGMENT_BYTES),
         "Project ID: project-1\nThe project's conversation history could not be read when this record was built; earlier turns may exist. conversation_read may retrieve them."
     );
 }
 
 #[test]
 fn section_renders_once_per_context_window() {
-    let section = continuity_world_state_section(&record(vec![turn("turn-1", "Hi", None)]));
+    let section = continuity_world_state_section(
+        &record(vec![turn("turn-1", "Hi", None)]),
+        super::MAX_FRAGMENT_BYTES,
+    );
     let previous = json!({ "projectId": "project-1" });
 
     let rendered = section
@@ -178,4 +182,22 @@ fn section_renders_once_per_context_window() {
         section.render_diff(PreviousWorldStateSection::Known(&previous)),
         None
     );
+}
+
+#[test]
+fn a_small_budget_keeps_the_newest_turn_in_compact_form() {
+    let long = "x".repeat(5_000);
+    let turns = (0..4)
+        .map(|index| turn(&format!("turn-{index}"), &long, Some(&long)))
+        .collect();
+    let rendered = record(turns).render(super::MIN_FRAGMENT_BYTES);
+
+    assert!(
+        fragment_bytes(&rendered) <= super::MIN_FRAGMENT_BYTES,
+        "{rendered}"
+    );
+    assert!(rendered.contains("turn \"turn-0\""));
+    assert!(rendered.contains("of 5000 bytes; conversation_read"));
+    assert!(!rendered.contains("turn \"turn-1\""));
+    assert!(rendered.ends_with("conversation_read lists and returns them."));
 }

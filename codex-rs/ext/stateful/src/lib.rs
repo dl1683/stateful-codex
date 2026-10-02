@@ -63,6 +63,10 @@ pub use events::BlackboardEntityKind;
 pub use events::StatefulEvent;
 pub use events::StatefulEventSink;
 
+/// Bytes of Stateful developer content a fresh context window carries across the project
+/// packet, the run packet and the conversation record (about 3k tokens).
+const AGGREGATE_WINDOW_BYTES: usize = 12 * 1024;
+
 /// Canonical project selected by the user for a thread view.
 ///
 /// The attachment stores only the durable project ID. Current project metadata
@@ -186,18 +190,26 @@ impl ContextContributor for StatefulExtension {
                     }
                 }
             };
+            let run_activity = self.run_activity.for_thread(&thread_id);
+            let run_status = self
+                .run_world_state(selected.project_id(), &thread_id, &run_activity)
+                .await;
+            // One aggregate budget for a fresh window: the conversation record gets what the
+            // project and run packets leave, within its own bounds.
+            let packet_bytes =
+                status.render().0.len() + run_status.as_ref().map_or(0, |run| run.render().len());
+            let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
             let mut sections = vec![project_world_state_section(
                 status,
                 Some((self.visible_root.clone(), thread_id.clone())),
             )];
             if let Some(continuity) = continuity {
-                sections.push(continuity_world_state_section(&continuity));
+                sections.push(continuity_world_state_section(
+                    &continuity,
+                    continuity_bytes,
+                ));
             }
-            let run_activity = self.run_activity.for_thread(&thread_id);
-            if let Some(run_status) = self
-                .run_world_state(selected.project_id(), &thread_id, &run_activity)
-                .await
-            {
+            if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }
             sections
