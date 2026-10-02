@@ -276,3 +276,56 @@ g
 "#
     );
 }
+
+fn lines(items: &[&str]) -> Vec<String> {
+    items.iter().map(|item| (*item).to_string()).collect()
+}
+
+#[test]
+fn nearest_region_hint_anchors_on_the_most_distinctive_line_after_the_search_start() {
+    let file = lines(&[
+        "fn a() {",
+        "}",
+        "fn naturaltime(value) {\r",
+        "    let delta = now - value;\r",
+        "}",
+        "fn naturaltime(value) {",
+        "}",
+    ]);
+    // "}" repeats and "" is blank; the anchor is the longest line, found after line index 4.
+    let pattern = lines(&["", "fn naturaltime(value) {", "    missing();", "}"]);
+    assert_eq!(
+        nearest_region_hint(&file, &pattern, /*search_start*/ 4),
+        format!(
+            "\n\nDiagnostic (the file was not changed). Nearest region of the file:\n    3| fn naturaltime(value) {{\n    4|     let delta = now - value;\n    5| }}\n    6| fn naturaltime(value) {{\n    7| }}\n{RETRY_ADVICE}"
+        )
+    );
+    // Before the search start, the closest earlier occurrence is used and CR is not shown.
+    assert_eq!(
+        nearest_region_hint(
+            &file,
+            &lines(&["    let delta = now - value;"]),
+            /*search_start*/ 6
+        ),
+        format!(
+            "\n\nDiagnostic (the file was not changed). Nearest region of the file:\n    2| }}\n    3| fn naturaltime(value) {{\n    4|     let delta = now - value;\n    5| }}\n    6| fn naturaltime(value) {{\n{RETRY_ADVICE}"
+        )
+    );
+}
+
+#[test]
+fn nearest_region_hint_is_bounded_and_keeps_char_boundaries() {
+    let long = "é".repeat(400);
+    let file = (0..40).map(|_| long.clone()).collect::<Vec<_>>();
+    let hint = nearest_region_hint(&file, &file[..20], /*search_start*/ 0);
+    assert!(
+        hint.len() <= MAX_HINT_BYTES + 1 + RETRY_ADVICE.len(),
+        "{}",
+        hint.len()
+    );
+    assert!(hint.contains("..."));
+    assert_eq!(
+        nearest_region_hint(&file, &lines(&["", "  "]), /*search_start*/ 0),
+        format!("\n\n{RETRY_ADVICE}")
+    );
+}

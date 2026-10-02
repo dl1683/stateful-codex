@@ -6,6 +6,7 @@ mod daemon_snapshot;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
+use super::stateful_thread_defaults::apply_stateful_thread_defaults;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
 use super::thread_input::can_accept_direct_input;
@@ -1496,6 +1497,10 @@ impl ThreadRequestProcessor {
         if let Some(project_id) = project_id.as_ref() {
             SelectedProject::insert_initial(&mut thread_extension_init, project_id.clone());
         }
+        let mut config = config;
+        if project_id.is_some() {
+            apply_stateful_thread_defaults(&mut config);
+        }
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
             None
@@ -2321,6 +2326,10 @@ impl ThreadRequestProcessor {
             .load_resume_initial_history_from_stored_thread(stored_thread)
             .await?;
         let selected_project_id = resume_source_thread.project_id.clone();
+        let mut config = config;
+        if selected_project_id.is_some() {
+            apply_stateful_thread_defaults(&mut config);
+        }
         let response_history = thread_history.clone();
         let NewThread {
             thread_id: resumed_thread_id,
@@ -4027,6 +4036,9 @@ impl ThreadRequestProcessor {
         if clear_reasoning_effort {
             config.model_reasoning_effort = None;
         }
+        if selected_project_id.is_some() {
+            apply_stateful_thread_defaults(&mut config);
+        }
 
         let response_history = thread_history.clone();
 
@@ -5239,6 +5251,10 @@ impl ThreadRequestProcessor {
         let mut thread_extension_init = ExtensionDataInit::new();
         if let Some(project_id) = inherited_project_id.as_ref() {
             SelectedProject::insert_initial(&mut thread_extension_init, project_id.clone());
+        }
+        let mut config = config;
+        if inherited_project_id.is_some() {
+            apply_stateful_thread_defaults(&mut config);
         }
         let fork_options = StartThreadOptions {
             thread_source,
