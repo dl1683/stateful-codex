@@ -136,7 +136,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Record an intermediate compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes and substantive work still remains. Explain significance; do not narrate routine tool activity. Every packet needs both meaningful semantic content and substantive remaining work in next, a blocker, or requested user judgment. Summarizing, synthesizing, or comparing already-reviewed evidence solely to prepare the current answer is final reasoning, not remaining work. A genuinely new cross-source conclusion, resolved contradiction, or changed strategy may be intermediate progress when additional investigation or execution still follows. When the work is ready to complete, put the final packet directly in stateful_run_update instead of spending a separate model turn here.".to_string(),
+            description: "Record an intermediate semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work materially change and substantive work remains. Explain significance, not activity; every packet needs meaningful content plus remaining work in next, a blocker, or a requested user judgment. When the work is ready to complete, put the final packet in stateful_run_update instead.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

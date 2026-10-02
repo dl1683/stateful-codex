@@ -158,63 +158,22 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("the host rechecked that the cited source bytes still match")
+            .contains("had their cited source bytes rechecked this turn")
     );
-    assert!(
-        rendered
-            .body()
-            .contains("It did not prove that those bytes entail the entry")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("Reuse these entries without routine rereading")
-    );
-    assert!(rendered.body().contains(
-        "compare only those candidates against the requested scope and evidence endpoint"
-    ));
-    assert!(
-        rendered
-            .body()
-            .contains("do not turn one criterion or decision dimension")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("search by every known filename, or reread the corpus")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("do not persist cheap-to-recompute inventories")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("Preserve decision-changing contrasts, exact values, qualifiers")
-    );
+    for phrase in [
+        "(not their inference, scope or authority); reuse them without rereading",
+        "keep investigation proportional to the requested outcome",
+        "Do not persist routine progress, cheap-to-recompute inventories",
+        "exact numbers with scope and qualifiers",
+        "Record once, in one batch, after the results the findings rest on are in",
+        "No knowledge has been promoted to the root blackboard yet",
+        "2 active candidate entries await an explicit project-relevance decision",
+        "at most 8 E aliases directly material to the outcome",
+        "rootRevision is not the run's expectedRevision",
+    ] {
+        assert!(rendered.body().contains(phrase), "missing {phrase:?}");
+    }
     assert!(!rendered.body().contains("established premises"));
-    assert!(rendered.body().contains("bounded batch tool"));
-    assert!(
-        rendered
-            .body()
-            .contains("No knowledge has been promoted to the root blackboard yet")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("2 active candidate entries await an explicit project-relevance decision")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("select at most 8 highest-priority E aliases")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("rootRevision is not expectedRevision")
-    );
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
     assert_fragment_bounded(&rendered);
 }

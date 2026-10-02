@@ -521,7 +521,7 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
     assert!(requests[0].body_contains_text("README.md (current)"));
     assert!(
-        requests[0].body_contains_text("compare only those candidates against the requested scope")
+        requests[0].body_contains_text("keep investigation proportional to the requested outcome")
     );
     let blackboard_output = requests[1]
         .function_call_output("blackboard-call")
@@ -1370,7 +1370,7 @@ async fn assert_latest_request_has_project(
     assert!(body.contains("Decisive Evidence Project"));
     assert!(body.contains("A decisive project fact survives every thread view."));
     assert!(body.contains("verification=unverified"));
-    assert!(body.contains("Reuse these entries without routine rereading"));
+    assert!(body.contains("reuse them without rereading"));
     Ok(())
 }
 

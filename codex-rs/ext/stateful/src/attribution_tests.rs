@@ -46,7 +46,7 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
     tracker.record_tool_outcome(
         "turn-1",
         "call-2",
-        "blackboard_record",
+        "blackboard_record_batch",
         ToolCallOutcome::Completed { success: true },
     );
     tracker.record_tool_outcome(

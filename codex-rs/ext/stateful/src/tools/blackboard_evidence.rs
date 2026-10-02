@@ -140,11 +140,11 @@ pub(super) async fn resolve_evidence(
 pub(super) fn evidence_schema() -> serde_json::Value {
     json!({
         "type": "array",
-        "description": "Host-issued receipts linked to sourceVerified knowledge. Copy each non-null blackboardEvidence object returned by evidence_read unchanged. The host resolves the exact route, source fingerprint, and complete returned line range and rejects receipts from another thread or a source that changed after reading. Semantic entailment remains the model's responsibility.",
+        "description": "blackboardEvidence objects from evidence_read, copied unchanged; the host rejects receipts from another thread or a changed source.",
         "items": {
             "type": "object",
             "properties": {
-                "readReceiptId": {"type": "string", "description": "Opaque receipt returned by evidence_read for the exact source bytes reviewed."}
+                "readReceiptId": {"type": "string"}
             },
             "required": ["readReceiptId"],
             "additionalProperties": false

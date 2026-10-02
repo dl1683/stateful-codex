@@ -196,7 +196,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
     append_line(
         output,
         &format!(
-            "For durableLearning completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, ensure at least one selected current root or exact historical finding preserves that reusable learning. Reusable source discoveries, such as project purpose, module responsibilities and relationships, or the test procedure, belong in recorded findings that are promoted when project-wide and selected here, even when no files changed. If the run learned nothing reusable (an answer from adequate existing knowledge, a narrow citation, or a trivial or cheap-to-recompute answer), do not record or promote an entry merely to obtain an E alias; complete with stateful_run_update passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
+            "For durableLearning completion, pass this project intelligence revision as rootRevision and at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases directly material to the outcome in materialRootFindings; do not record or promote an entry merely to obtain an alias. rootRevision is not the run's expectedRevision."
         ),
     );
     // Certify an entry as fully shown only after layout, against entries actually

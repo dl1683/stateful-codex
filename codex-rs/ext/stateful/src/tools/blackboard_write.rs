@@ -48,7 +48,6 @@ use super::stable_id;
 use super::worst_identifier;
 use super::worst_receipt_error;
 
-const RECORD_TOOL_NAME: &str = "blackboard_record";
 const BATCH_RECORD_TOOL_NAME: &str = "blackboard_record_batch";
 const RELATE_TOOL_NAME: &str = "blackboard_relate";
 const MAX_BATCH_RECORDS: usize = 24;
@@ -91,7 +90,8 @@ struct BatchRecordArguments {
     relations: Vec<BatchRelationArguments>,
 }
 
-pub(super) struct BlackboardRecordTool {
+/// Validates and persists one record for the batch tool.
+struct BlackboardRecorder {
     project_id: String,
     thread_id: String,
     services: ProjectIntelligenceServices,
@@ -99,8 +99,8 @@ pub(super) struct BlackboardRecordTool {
     event_sink: Option<Arc<dyn StatefulEventSink>>,
 }
 
-impl BlackboardRecordTool {
-    pub(super) fn new(
+impl BlackboardRecorder {
+    fn new(
         project_id: String,
         thread_id: String,
         services: ProjectIntelligenceServices,
@@ -114,29 +114,6 @@ impl BlackboardRecordTool {
             projects,
             event_sink,
         }
-    }
-
-    async fn handle_call(
-        &self,
-        call: ToolCall<'_>,
-    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: RecordArguments = parse_arguments(&call)?;
-        let project_roots = if arguments.evidence.is_empty() && arguments.premises.is_empty() {
-            Vec::new()
-        } else {
-            self.project_roots().await?
-        };
-        let entry = self
-            .record(arguments, &call.call_id, &project_roots)
-            .await?;
-        bounded_json_output(
-            &call,
-            json!({
-                "entryId": entry.id.to_string(),
-                "revision": entry.revision,
-                "recorded": true,
-            }),
-        )
     }
 
     async fn record(
@@ -255,43 +232,8 @@ impl BlackboardRecordTool {
     }
 }
 
-impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
-    fn tool_name(&self) -> ToolName {
-        ToolName::plain(RECORD_TOOL_NAME)
-    }
-
-    fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
-    }
-
-    fn spec(&self) -> ToolSpec {
-        ToolSpec::Function(ResponsesApiTool {
-            name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. A lookup or read-only citation answer is not record-worthy merely because it was requested; record it only if it is a distinct finding likely to improve future project work. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. When a new conclusion semantically depends on trusted blackboard knowledge, pin each exact entryId and revision in premises; premises are checked live, do not count as direct evidence, and do not confer sourceVerified. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
-            strict: false,
-            defer_loading: None,
-            parameters: parse_tool_input_schema(&record_schema())
-            .unwrap_or_else(|error| unreachable!("invalid static blackboard record schema: {error}")),
-            output_schema: None,
-        })
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        false
-    }
-
-    fn handle<'a>(&'a self, call: ToolCall<'call>) -> codex_extension_api::ToolExecutorFuture<'a>
-    where
-        'call: 'a,
-    {
-        Box::pin(self.handle_call(call))
-    }
-}
-
 pub(super) struct BlackboardBatchRecordTool {
-    recorder: BlackboardRecordTool,
+    recorder: BlackboardRecorder,
     relator: BlackboardRelateTool,
 }
 
@@ -304,7 +246,7 @@ impl BlackboardBatchRecordTool {
         event_sink: Option<Arc<dyn StatefulEventSink>>,
     ) -> Self {
         Self {
-            recorder: BlackboardRecordTool::new(
+            recorder: BlackboardRecorder::new(
                 project_id.clone(),
                 thread_id,
                 services.clone(),
@@ -490,7 +432,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings and up to {MAX_BATCH_RELATIONS} navigational relationships in one bounded call. A lookup or read-only citation answer is not record-worthy merely because it was requested; record it only if it is a distinct finding likely to improve future project work. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals instead of compressing the batch to the immediate answer. Pin an existing trusted entry's exact revision in premises when a finding semantically depends on it; do not substitute an unversioned dependsOn relation. Relations reference record idempotencyKey values from this same call through fromRecordKey and toRecordKey, avoiding opaque entry-ID copying. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this after one evidence-review pass."
+                "Persist 1-{MAX_BATCH_RECORDS} materially reusable findings, and up to {MAX_BATCH_RELATIONS} relations among them (fromRecordKey/toRecordKey name idempotencyKeys in this call), after the results they rest on are in. Worth recording: user rules (kind instruction), decisions and their reasons, exact numbers with their scope, failures and rejected approaches, open questions. Not worth recording: routine progress, cheap-to-recompute inventories, knowledge already shown. Keep decision-changing contrasts, exact values, qualifiers and supersession signals. sourceVerified needs evidence: copy each non-null blackboardEvidence object from evidence_read unchanged. Pin exact revisions of trusted entries a finding depends on in premises. Items are independently idempotent; do not retry successful items."
             ),
             strict: false,
             defer_loading: None,
@@ -542,7 +484,7 @@ fn record_schema() -> serde_json::Value {
             "content": {"type": "string"},
             "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false},
             "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
-            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links. It records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool."},
+            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "sourceVerified only with evidence receipts; userConfirmed is host-issued and unavailable here."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
             "evidence": evidence_schema(),

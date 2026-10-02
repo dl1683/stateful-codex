@@ -99,7 +99,7 @@ pub(super) fn premise_schema() -> serde_json::Value {
     json!({
         "type": "array",
         "maxItems": 16,
-        "description": "Exact revisions of current sourceVerified or userConfirmed blackboard entries whose meaning this entry depends on. Premises are semantic provenance, not direct source evidence, and never make this entry sourceVerified. Query the premise immediately before pinning it.",
+        "description": "Exact current revisions of sourceVerified or userConfirmed entries this entry depends on; provenance, not evidence.",
         "items": {
             "type": "object",
             "properties": {

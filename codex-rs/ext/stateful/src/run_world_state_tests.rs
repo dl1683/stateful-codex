@@ -152,7 +152,8 @@ fn run_world_state_discloses_omitted_detail() {
             .body()
             .contains("Call stateful_run_read with section=\"goal\" and follow nextCursor")
     );
-    assert!(rendered.body().contains("Semantic checkpoint: none due"));
+    // Collaborative runs carry no tool-call checkpoint nudges.
+    assert!(!rendered.body().contains("Semantic checkpoint"));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
     assert_fragment_bounded(&rendered);
 }
@@ -562,12 +563,14 @@ fn unanswered_checkpoint_escalates_through_a_delta() {
     let status = |checkpoint_due: Option<u64>| {
         let mut status = run_with_obligation("obligation-1", vec!["Found the permit.".to_string()]);
         let RunWorldStateStatus::Available {
+            run,
             checkpoint_due: due,
             ..
         } = &mut status
         else {
             unreachable!("fixture is available");
         };
+        run.value.mode = WorkflowMode::Autonomous;
         *due = checkpoint_due;
         status
     };

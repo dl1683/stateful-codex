@@ -47,13 +47,6 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
             visible_root.clone(),
         )),
-        Arc::new(blackboard_write::BlackboardRecordTool::new(
-            project_id.clone(),
-            thread_id.clone(),
-            services.clone(),
-            projects.clone(),
-            event_sink.clone(),
-        )),
         Arc::new(blackboard_write::BlackboardBatchRecordTool::new(
             project_id.clone(),
             thread_id.clone(),
@@ -233,3 +226,7 @@ async fn thread_run(
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
 }
+
+#[cfg(test)]
+#[path = "roster_budget_tests.rs"]
+mod roster_budget_tests;
