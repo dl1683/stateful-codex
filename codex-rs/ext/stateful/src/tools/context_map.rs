@@ -20,6 +20,7 @@ use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
+use codex_project_intelligence::ProjectIndexerError;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
@@ -85,24 +86,24 @@ impl ContextMapQueryTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel("selected project no longer exists".to_string())
             })?;
-        // A project that was never indexed (no routes at all) is indexed here rather than
+        let query = ContextMapQuery {
+            project_id: self.project_id.clone(),
+            text: query_text.clone(),
+            max_results: limit,
+        };
+        let context_map = self.services.context_map().await.map_err(respond)?;
+        let mut result = context_map.query(query.clone()).await.map_err(respond)?;
+        // A project that was never indexed has no entries at all; index it here rather than
         // sending the model to discover and call the refresh tool first.
-        let indexed_on_demand = self
-            .services
-            .context_map()
-            .await
-            .map_err(respond)?
-            .list_project(ContextMapListQuery {
-                project_id: self.project_id.clone(),
-                max_results: 1,
-            })
-            .await
-            .map_err(respond)?
-            .is_empty();
+        let indexed_on_demand = result.data.is_empty()
+            && !context_map
+                .has_entries(&self.project_id)
+                .await
+                .map_err(respond)?;
         if indexed_on_demand {
-            ProjectIndexer::new(
+            let refreshed = ProjectIndexer::new(
                 self.services.hierarchy().await.map_err(respond)?.clone(),
-                self.services.context_map().await.map_err(respond)?.clone(),
+                context_map.clone(),
             )
             .refresh(ProjectIndexRequest {
                 project_id: self.project_id.clone(),
@@ -112,21 +113,14 @@ impl ContextMapQueryTool {
                     .map(|root| PathBuf::from(&root.path))
                     .collect(),
             })
-            .await
-            .map_err(respond)?;
+            .await;
+            match refreshed {
+                // A concurrent refresh won and publishes the same project.
+                Ok(_) | Err(ProjectIndexerError::SupersededRefresh) => {}
+                Err(error) => return Err(respond(error)),
+            }
+            result = context_map.query(query).await.map_err(respond)?;
         }
-        let result = self
-            .services
-            .context_map()
-            .await
-            .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?
-            .query(ContextMapQuery {
-                project_id: self.project_id.clone(),
-                text: query_text.clone(),
-                max_results: limit,
-            })
-            .await
-            .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let may_have_more = result.truncated;
         let hits = result.data;
@@ -155,6 +149,7 @@ impl ContextMapQueryTool {
             if !fits_response(
                 &json!({
                     "projectId": self.project_id,
+                    "indexedOnDemand": indexed_on_demand,
                     "data": &data,
                     "truncated": truncated,
                     "mayHaveMore": may_have_more,

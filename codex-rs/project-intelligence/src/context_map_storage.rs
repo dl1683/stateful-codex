@@ -56,7 +56,7 @@ struct SearchCandidate {
 
 #[derive(Clone)]
 pub struct ContextMapStore {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl ContextMapStore {

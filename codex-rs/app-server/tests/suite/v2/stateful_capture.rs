@@ -681,8 +681,14 @@ async fn first_source_query_indexes_an_unindexed_project() -> Result<()> {
     let log = responses::mount_sse_sequence(
         &responses_server,
         vec![
+            tool_call("invalid-query", "context_map_query", json!({"text": "  "})),
             tool_call(
                 "first-query",
+                "context_map_query",
+                json!({"text": "Scale recipes"}),
+            ),
+            tool_call(
+                "second-query",
                 "context_map_query",
                 json!({"text": "Scale recipes"}),
             ),
@@ -692,18 +698,30 @@ async fn first_source_query_indexes_an_unindexed_project() -> Result<()> {
     .await;
     run_turn(&mut server, &thread, "Where is scaling documented?").await?;
 
-    let output: Value = serde_json::from_str(
-        &log.requests()[1]
-            .function_call_output_text("first-query")
-            .expect("query output"),
-    )?;
-    assert_eq!(output["indexedOnDemand"], json!(true));
+    let requests = log.requests();
+    // An invalid query is refused before any indexing, so the first valid query indexes.
     assert!(
-        output["data"]
+        !requests[1]
+            .function_call_output_text("invalid-query")
+            .expect("invalid query output")
+            .contains("indexedOnDemand")
+    );
+    let output = |index: usize, call_id: &str| -> Result<Value> {
+        Ok(serde_json::from_str(
+            &requests[index]
+                .function_call_output_text(call_id)
+                .expect("query output"),
+        )?)
+    };
+    let first = output(2, "first-query")?;
+    assert_eq!(first["indexedOnDemand"], json!(true));
+    assert!(
+        first["data"]
             .as_array()
             .is_some_and(|routes| !routes.is_empty()),
-        "{output}"
+        "{first}"
     );
+    assert_eq!(output(3, "second-query")?["indexedOnDemand"], json!(false));
     Ok(())
 }
 

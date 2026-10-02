@@ -3,6 +3,7 @@
 mod blackboard;
 mod blackboard_storage;
 mod context_map;
+mod context_map_presence;
 mod context_map_storage;
 mod evidence;
 mod hierarchy;
