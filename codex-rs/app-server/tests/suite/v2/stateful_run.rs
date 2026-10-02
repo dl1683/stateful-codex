@@ -792,9 +792,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     let requests = response_log.requests();
     assert_eq!(requests.len(), 5);
     assert!(requests[0].body_contains_text("<stateful_run>"));
-    assert!(
-        requests[0].body_contains_text("keep investigation proportional to the requested outcome")
-    );
+    assert!(requests[0].body_contains_text("check only what the task depends on"));
     assert!(requests[0].body_contains_text("completed only after all other durable writes"));
     assert!(requests[0].body_contains_text("final Stateful mutation"));
     assert!(requests[0].body_contains_text("rootRevision"));

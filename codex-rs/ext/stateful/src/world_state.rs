@@ -135,11 +135,11 @@ impl ProjectIntelligenceStatus {
         );
         append_line(
             &mut body,
-            "Start from this project intelligence. Entries labelled verification=sourceVerified and evidence=current had their cited source bytes rechecked this turn (not their inference, scope or authority); reuse them without rereading. Reopen only the smallest decisive source range when exact wording or code is needed, entries conflict or are stale, unavailable or uncheckedThisTurn, a controlling detail is missing, or the user asks for fresh verification. Query blackboard knowledge or context-map routes for missing detail before reading raw source, and keep investigation proportional to the requested outcome. User-confirmed entries are user-supplied premises, not source verification.",
+            "Start from this project intelligence: it is what earlier work established, so continue from it instead of rediscovering it. Entries labelled verification=sourceVerified and evidence=current had their cited source bytes rechecked this turn (not their inference, scope or authority). Read source files directly when the task needs current content, and check only what the task depends on; do not query or reread merely to confirm what is shown. blackboard_query is for knowledge this packet omits. User-confirmed entries are user-supplied premises, not source verification.",
         );
         append_line(
             &mut body,
-            "Persist only reusable understanding: user rules, decisions and their reasons, exact numbers with scope and qualifiers, failures, rejected approaches, contradictions and open questions. Do not persist routine progress, cheap-to-recompute inventories, knowledge already shown, or guesses as facts. Record once, in one batch, after the results the findings rest on are in, linking the smallest decisive evidence.",
+            "Memory writes are optional and every call costs the user time. Record only what a later session would otherwise lose: user rules (kind instruction, in the user's words), decisions with their reasons, and hard-won facts with exact values and scope. Use one blackboard_record_batch near the end of the work. Do not read sources only to obtain evidence receipts; unverified entries are fine, and the host already keeps every request and final answer.",
         );
         append_field(&mut body, "Project ID", self.project_id());
         match self {

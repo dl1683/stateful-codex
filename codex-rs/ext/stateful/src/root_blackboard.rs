@@ -165,22 +165,16 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         }
     }
     if projection.data.is_empty() {
-        // The capture reminder needs a truly empty root; omitted entries mean
-        // promoted knowledge exists beyond the context bound.
         append_line(
             output,
-            if projection.omitted_entries == 0 {
-                "- No knowledge has been promoted to the root blackboard yet. If this orientation establishes reusable project purpose, module responsibilities, or test instructions, capture those findings for later tasks. An empty root alone does not require a write."
-            } else {
-                "- No knowledge has been promoted to the root blackboard yet."
-            },
+            "- No knowledge has been promoted to the root blackboard yet.",
         );
     }
     if projection.candidate_entries > 0 {
         append_line(
             output,
             &format!(
-                "- {} active candidate entries await an explicit project-relevance decision. Query with rootPromotion=candidate, then use blackboard_update_batch to promote, keep deeper, revise, supersede, or retire them; do not infer that candidate means verified.",
+                "- {} active candidate entries await promotion and are not shown; blackboard_query with rootPromotion=candidate lists them if the task needs them.",
                 projection.candidate_entries
             ),
         );

@@ -161,13 +161,13 @@ fn renders_selected_project_as_bounded_typed_world_state() {
             .contains("had their cited source bytes rechecked this turn")
     );
     for phrase in [
-        "(not their inference, scope or authority); reuse them without rereading",
-        "keep investigation proportional to the requested outcome",
-        "Do not persist routine progress, cheap-to-recompute inventories",
-        "exact numbers with scope and qualifiers",
-        "Record once, in one batch, after the results the findings rest on are in",
+        "continue from it instead of rediscovering it",
+        "do not query or reread merely to confirm what is shown",
+        "Memory writes are optional",
+        "hard-won facts with exact values and scope",
+        "Do not read sources only to obtain evidence receipts",
         "No knowledge has been promoted to the root blackboard yet",
-        "2 active candidate entries await an explicit project-relevance decision",
+        "2 active candidate entries await promotion and are not shown",
         "at most 8 E aliases directly material to the outcome",
         "rootRevision is not the run's expectedRevision",
     ] {
@@ -341,7 +341,7 @@ fn rewritten_status_line_replaces_the_status_block() {
     assert!(
         rendered
             .body()
-            .contains("3 active candidate entries await an explicit project-relevance decision")
+            .contains("3 active candidate entries await promotion and are not shown")
     );
 }
 
@@ -717,107 +717,4 @@ fn entry_freshness_change_reaches_the_root_delta() {
     );
     assert!(rendered.body().contains("evidence=stale"));
     assert!(rendered.body().contains("verification=stale"));
-}
-
-const EMPTY_ROOT_REMINDER: &str = "An empty root alone does not require a write.";
-
-fn with_root(root_blackboard: RootBlackboardStatus) -> ProjectIntelligenceStatus {
-    let mut status = available(project("Research", Vec::new()));
-    let ProjectIntelligenceStatus::Available {
-        root_blackboard: current,
-        ..
-    } = &mut status
-    else {
-        unreachable!("test status should be available");
-    };
-    **current = root_blackboard;
-    status
-}
-
-fn full_body(status: ProjectIntelligenceStatus) -> String {
-    let rendered = section(status)
-        .render_diff(PreviousWorldStateSection::Absent)
-        .expect("project state should render");
-    assert_fragment_bounded(&rendered);
-    rendered.body().to_string()
-}
-
-#[test]
-fn empty_root_capture_reminder_follows_the_observed_root_state() {
-    let mut omitted_only = with_entries(/*revision*/ 3, Vec::new());
-    let ProjectIntelligenceStatus::Available {
-        root_blackboard, ..
-    } = &mut omitted_only
-    else {
-        unreachable!("test status should be available");
-    };
-    let RootBlackboardStatus::Available(root) = root_blackboard.as_mut() else {
-        unreachable!("test root should be available");
-    };
-    root.projection.omitted_entries = 2;
-
-    let cases = [
-        (
-            "empty",
-            full_body(with_entries(/*revision*/ 3, Vec::new())),
-            true,
-        ),
-        (
-            "populated",
-            full_body(with_entries(
-                /*revision*/ 3,
-                vec![hit("entry-a", "Tests run with `make test`.")],
-            )),
-            false,
-        ),
-        ("omitted only", full_body(omitted_only), false),
-        (
-            "unavailable",
-            full_body(with_root(RootBlackboardStatus::Unavailable)),
-            false,
-        ),
-        (
-            "not configured",
-            full_body(with_root(RootBlackboardStatus::NotConfigured)),
-            false,
-        ),
-    ];
-    let observed = cases
-        .iter()
-        .map(|(name, body, _)| (*name, body.contains(EMPTY_ROOT_REMINDER)))
-        .collect::<Vec<_>>();
-    let expected = cases
-        .iter()
-        .map(|(name, _, reminder)| (*name, *reminder))
-        .collect::<Vec<_>>();
-    assert_eq!(observed, expected);
-}
-
-#[test]
-fn promotion_replaces_the_empty_root_reminder() {
-    let empty = section(with_entries(/*revision*/ 3, Vec::new()));
-    let unchanged = section(with_entries(/*revision*/ 3, Vec::new()));
-    assert!(
-        unchanged
-            .render_diff(PreviousWorldStateSection::Known(empty.snapshot()))
-            .is_none()
-    );
-
-    let promoted = section(with_entries(
-        /*revision*/ 4,
-        vec![hit(
-            "entry-a",
-            "The parser module owns money parsing; tests run with `make test`.",
-        )],
-    ));
-    let rendered = promoted
-        .render_diff(PreviousWorldStateSection::Known(empty.snapshot()))
-        .expect("promotion must reach the model");
-    assert_fragment_bounded(&rendered);
-    assert!(
-        rendered
-            .body()
-            .contains("The parser module owns money parsing")
-    );
-    assert!(!rendered.body().contains(EMPTY_ROOT_REMINDER));
 }
