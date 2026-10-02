@@ -36,7 +36,7 @@ use crate::conversation_summaries::turn_time_ms;
 const TOOL_NAME: &str = "conversation_read";
 const THREADS_PER_PAGE: usize = 20;
 const TURNS_PER_PAGE: usize = 20;
-/// Turn pages scanned to find one turn by ID (up to 2,000 turns of one thread).
+/// Turn pages scanned to find one turn by ID from the given (or newest) position.
 const MAX_LOOKUP_PAGES: usize = 40;
 const LOOKUP_PAGE_SIZE: usize = 50;
 const PREVIEW_BYTES: usize = 160;
@@ -87,8 +87,15 @@ impl ConversationReadTool {
         match (arguments.turn_id, arguments.part) {
             (None, None) => self.list_turns(&call, &thread, arguments.cursor).await,
             (Some(turn_id), Some(part)) => {
-                self.read_text(&call, &thread, &turn_id, part, arguments.offset)
-                    .await
+                self.read_text(
+                    &call,
+                    &thread,
+                    &turn_id,
+                    part,
+                    arguments.offset,
+                    arguments.cursor,
+                )
+                .await
             }
             (Some(_), None) => Err(respond("part (user or answer) is required with turnId")),
             (None, Some(_)) => Err(respond("turnId is required with part")),
@@ -116,37 +123,48 @@ impl ConversationReadTool {
         Ok(thread)
     }
 
+    /// Lists the project's threads, re-reading with fewer per page until the serialized
+    /// page fits the result budget, so every entry stays reachable through the cursor.
     async fn list_threads(
         &self,
         call: &ToolCall<'_>,
         cursor: Option<String>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let page = self
-            .threads
-            .list_threads(project_threads_params(
-                &self.project_id,
-                THREADS_PER_PAGE,
-                cursor,
-            ))
-            .await
-            .map_err(respond)?;
-        let threads = page
-            .items
-            .iter()
-            .filter(|thread| is_top_level(thread))
-            .map(|thread| {
-                json!({
-                    "threadId": thread.thread_id.to_string(),
-                    "title": thread.name,
-                    "updatedAt": thread.updated_at.timestamp(),
-                    "firstRequest": thread.first_user_message.as_deref().map(preview),
+        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let mut page_size = THREADS_PER_PAGE;
+        loop {
+            let page = self
+                .threads
+                .list_threads(project_threads_params(
+                    &self.project_id,
+                    page_size,
+                    cursor.clone(),
+                ))
+                .await
+                .map_err(respond)?;
+            let threads = page
+                .items
+                .iter()
+                .filter(|thread| is_top_level(thread))
+                .map(|thread| {
+                    json!({
+                        "threadId": thread.thread_id.to_string(),
+                        "title": thread.name.as_deref().map(preview),
+                        "updatedAt": thread.updated_at.timestamp(),
+                        "firstRequest": thread.first_user_message.as_deref().map(preview),
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
-        bounded_json_output(
-            call,
-            json!({ "threads": threads, "nextCursor": page.next_cursor }),
-        )
+                .collect::<Vec<_>>();
+            let result = json!({
+                "cursor": cursor,
+                "threads": threads,
+                "nextCursor": page.next_cursor,
+            });
+            if result.to_string().len() <= budget || page_size == 1 {
+                return bounded_json_output(call, result);
+            }
+            page_size = page_size.div_ceil(2);
+        }
     }
 
     async fn list_turns(
@@ -155,42 +173,49 @@ impl ConversationReadTool {
         thread: &StoredThread,
         cursor: Option<String>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let page = self
-            .threads
-            .list_turns(ListTurnsParams {
-                thread_id: thread.thread_id,
-                include_archived: false,
-                cursor,
-                page_size: TURNS_PER_PAGE,
-                sort_direction: SortDirection::Desc,
-                items_view: StoredTurnItemsView::Summary,
-            })
-            .await
-            .map_err(respond)?;
-        let turns = page
-            .turns
-            .iter()
-            .map(|turn| {
-                let (user, answer) = turn_texts(&turn.items);
-                json!({
-                    "turnId": turn.turn_id,
-                    "atMs": turn_time_ms(turn),
-                    "status": turn_status(turn).unwrap_or("completed"),
-                    "user": user.as_deref().map(preview),
-                    "userBytes": user.as_ref().map_or(0, String::len),
-                    "answer": answer.as_deref().map(preview),
-                    "answerBytes": answer.as_ref().map_or(0, String::len),
+        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let mut page_size = TURNS_PER_PAGE;
+        loop {
+            let page = self
+                .threads
+                .list_turns(ListTurnsParams {
+                    thread_id: thread.thread_id,
+                    include_archived: false,
+                    cursor: cursor.clone(),
+                    page_size,
+                    sort_direction: SortDirection::Desc,
+                    items_view: StoredTurnItemsView::Summary,
                 })
-            })
-            .collect::<Vec<_>>();
-        bounded_json_output(
-            call,
-            json!({
+                .await
+                .map_err(respond)?;
+            let turns = page
+                .turns
+                .iter()
+                .map(|turn| {
+                    let (user, answer) = turn_texts(&turn.items);
+                    json!({
+                        "turnId": turn.turn_id,
+                        "atMs": turn_time_ms(turn),
+                        "status": turn_status(turn).unwrap_or("completed"),
+                        "user": user.as_deref().map(preview),
+                        "userBytes": user.as_ref().map_or(0, String::len),
+                        "answer": answer.as_deref().map(preview),
+                        "answerBytes": answer.as_ref().map_or(0, String::len),
+                    })
+                })
+                .collect::<Vec<_>>();
+            // `cursor` is echoed so an exact read can start from the page that lists a turn.
+            let result = json!({
                 "threadId": thread.thread_id.to_string(),
+                "cursor": cursor,
                 "turns": turns,
                 "nextCursor": page.next_cursor,
-            }),
-        )
+            });
+            if result.to_string().len() <= budget || page_size == 1 {
+                return bounded_json_output(call, result);
+            }
+            page_size = page_size.div_ceil(2);
+        }
     }
 
     async fn read_text(
@@ -200,8 +225,8 @@ impl ConversationReadTool {
         turn_id: &str,
         part: Part,
         offset: usize,
+        mut cursor: Option<String>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let mut cursor = None;
         for _ in 0..MAX_LOOKUP_PAGES {
             let page = self
                 .threads
@@ -230,7 +255,7 @@ impl ConversationReadTool {
             }
         }
         Err(respond(format!(
-            "turn {turn_id} was not found among the newest {} turns of thread {}",
+            "turn {turn_id} was not found within {} turns of thread {} from the given cursor; pass the cursor of the listing page that shows the turn",
             MAX_LOOKUP_PAGES * LOOKUP_PAGE_SIZE,
             thread.thread_id
         )))
@@ -301,7 +326,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ConversationReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "This project's earlier conversation: {} lists threads, {threadId} its turns, {threadId, turnId, part} the exact text. Page with cursor and offset.".to_string(),
+            description: "This project's earlier conversation: {} lists threads, {threadId} its turns, {threadId, turnId, part} exact text. Page with cursor (reuse a listing's) and offset.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

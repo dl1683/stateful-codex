@@ -15,6 +15,8 @@ use codex_app_server_protocol::StatefulRunStartResponse;
 use codex_app_server_protocol::StatefulRunStatus as ApiRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadStartParams;
+use codex_app_server_protocol::ThreadTurnsListParams;
+use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
@@ -408,6 +410,123 @@ async fn model_reads_a_shortened_earlier_turn_in_full() -> Result<()> {
     assert!(long_request.is_char_boundary(next_offset));
     assert_eq!(page, &long_request[..next_offset]);
     Ok(())
+}
+
+/// A long, quote-heavy thread lists in pages that fit the result budget and keep a cursor,
+/// and a turn beyond the first page is read exactly by starting from its listing cursor.
+#[tokio::test]
+async fn conversation_read_pages_long_threads_within_the_result_budget() -> Result<()> {
+    const TURNS: usize = 25;
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Paging".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "paging-project".to_string(),
+            },
+        })
+        .await?;
+    let project_id = project.project.id;
+    let first = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    let first_thread = first.thread.id;
+    let _first_log = responses::mount_sse_sequence(
+        &responses_server,
+        (0..TURNS).map(|_| assistant("\"Noted.\"")).collect(),
+    )
+    .await;
+    let request = |index: usize| format!("{index:02} {}", "\"quoted\" ".repeat(60));
+    for index in 0..TURNS {
+        run_turn(&mut server, &first_thread, &request(index)).await?;
+    }
+    // The second ten turns, newest first, through the public turn listing.
+    let first_page = turn_page(&mut server, &first_thread, /*cursor*/ None).await?;
+    let older_cursor = first_page.next_cursor.expect("older turns remain");
+    let second_page = turn_page(&mut server, &first_thread, Some(older_cursor.clone())).await?;
+    let older_turn = second_page.data[0].id.clone();
+
+    let second = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id),
+            ..Default::default()
+        })
+        .await?;
+    let paging_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            tool_call(
+                "list-turns",
+                "conversation_read",
+                json!({"threadId": first_thread}),
+            ),
+            tool_call(
+                "read-older",
+                "conversation_read",
+                json!({
+                    "threadId": first_thread,
+                    "turnId": older_turn,
+                    "part": "user",
+                    "cursor": older_cursor,
+                }),
+            ),
+            assistant("Read."),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &second.thread.id, "List my earlier turns.").await?;
+
+    let requests = paging_log.requests();
+    assert_eq!(requests.len(), 3);
+    let listing_text = requests[1]
+        .function_call_output_text("list-turns")
+        .expect("listing output");
+    assert!(listing_text.len() <= 9_000, "{} bytes", listing_text.len());
+    let listing: Value = serde_json::from_str(&listing_text)?;
+    let listed = listing["turns"].as_array().map_or(0, Vec::len);
+    assert!(listed > 0 && listed < TURNS, "{listed} turns listed");
+    assert!(listing["nextCursor"].is_string());
+    let read: Value = serde_json::from_str(
+        &requests[2]
+            .function_call_output_text("read-older")
+            .expect("read output"),
+    )?;
+    assert_eq!(read["turnId"], json!(older_turn));
+    assert_eq!(read["text"], json!(request(TURNS - 11)));
+    Ok(())
+}
+
+async fn turn_page(
+    server: &mut TestAppServer,
+    thread_id: &str,
+    cursor: Option<String>,
+) -> Result<ThreadTurnsListResponse> {
+    server
+        .request(|request_id| ClientRequest::ThreadTurnsList {
+            request_id,
+            params: ThreadTurnsListParams {
+                thread_id: thread_id.to_string(),
+                cursor,
+                limit: Some(10),
+                sort_direction: None,
+                items_view: None,
+            },
+        })
+        .await
 }
 
 fn tool_call(call_id: &str, tool: &str, arguments: Value) -> String {

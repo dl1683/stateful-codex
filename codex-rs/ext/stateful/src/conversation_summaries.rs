@@ -35,11 +35,14 @@ pub(super) fn project_threads_params(
     }
 }
 
-/// Whether a thread is the user's own conversation rather than a subagent, review, or
-/// memory worker thread.
+/// Whether a thread is the user's own conversation rather than a subagent, guardian review,
+/// or memory worker thread. Listings may omit `thread_source`, so the session source alone
+/// must already exclude internal and subagent threads.
 pub(super) fn is_top_level(thread: &StoredThread) -> bool {
-    !matches!(thread.source, SessionSource::SubAgent(_))
-        && matches!(thread.thread_source, None | Some(ThreadSource::User))
+    !matches!(
+        thread.source,
+        SessionSource::SubAgent(_) | SessionSource::Internal(_)
+    ) && matches!(thread.thread_source, None | Some(ThreadSource::User))
 }
 
 /// The first user message and the final answer among a turn's summary items.
