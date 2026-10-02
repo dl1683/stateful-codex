@@ -391,7 +391,7 @@ pub(super) fn escape(text: &str) -> String {
 }
 
 /// Formats Unix milliseconds as `YYYY-MM-DD HH:MM UTC` without a date-time dependency.
-fn format_time(ms: i64) -> String {
+pub(super) fn format_time(ms: i64) -> String {
     let seconds = ms.div_euclid(1000);
     let days = seconds.div_euclid(86_400);
     let minute_of_day = seconds.rem_euclid(86_400) / 60;

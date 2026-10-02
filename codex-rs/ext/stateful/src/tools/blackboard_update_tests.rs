@@ -597,3 +597,37 @@ async fn user_rules_cannot_be_rewritten_or_promoted_from_pending() {
         )
     );
 }
+
+/// A user rule cannot be retired by superseding it with an agent's finding.
+#[tokio::test]
+async fn a_user_rule_is_superseded_only_by_a_user_rule() {
+    let (_temp_dir, tool, _entry_id, successor_id, project_root, _receipt_id) = fixture().await;
+    let rule = crate::rule_capture::capture_marked_rules(
+        &tool.services,
+        /*event_sink*/ None,
+        PROJECT_ID,
+        "thread-1",
+        "turn-1",
+        "From now on, never run the whole test suite.",
+    )
+    .await
+    .remove(0)
+    .entry;
+    let error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "supersede",
+                "entryId": rule.id.to_string(),
+                "expectedRevision": rule.revision,
+                "successorEntryId": successor_id
+            })),
+            "turn-supersede-rule",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("an agent finding cannot replace a user rule");
+    assert_eq!(
+        error.to_string(),
+        "a user rule can be replaced only by the user's new rule in their own words"
+    );
+}

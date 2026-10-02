@@ -31,9 +31,13 @@ use crate::storage::unix_timestamp_millis;
 mod fence;
 mod query;
 mod relation;
+mod succession;
 mod update;
 
 pub use fence::CompletionFence;
+pub use succession::MAX_SUPERSEDED_ENTRIES;
+pub use succession::Succession;
+pub use succession::SupersededEntry;
 
 const INITIAL_REVISION: i64 = 1;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -73,37 +77,10 @@ impl BlackboardStore {
             transaction.commit().await?;
             return Ok(existing);
         }
-        load_node(&mut transaction, &value.project_id, &value.node_id)
-            .await?
-            .ok_or_else(|| BlackboardStoreError::NodeNotFound(value.node_id.to_string()))?;
-        validate_evidence(&mut transaction, &value).await?;
-        validate_premises(&mut transaction, &id, &value).await?;
         // Sampled only once the writer lock is held, so a creation queued behind another
         // writer (such as a completion fence) is never stamped earlier than that writer.
         let now = unix_timestamp_millis()?;
-        sqlx::query(
-            "INSERT INTO blackboard_entries (
-                id, project_id, node_id, revision, created_at_ms, updated_at_ms
-             ) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(id.as_str())
-        .bind(&value.project_id)
-        .bind(value.node_id.as_str())
-        .bind(INITIAL_REVISION)
-        .bind(now)
-        .bind(now)
-        .execute(&mut *transaction)
-        .await?;
-        write_revision(
-            &mut transaction,
-            &id,
-            INITIAL_REVISION,
-            &value,
-            BlackboardEntryState::Active,
-            None,
-            now,
-        )
-        .await?;
+        insert_new_entry(&mut transaction, &id, &value, now).await?;
         let entry = load_entry(&mut transaction, &value.project_id, &id)
             .await?
             .ok_or_else(|| BlackboardStoreError::EntryNotFound(id.to_string()))?;
@@ -295,6 +272,43 @@ async fn load_entry(
 
 fn parse_stored<T, E>(result: Result<T, E>, entry_id: &str) -> Result<T, BlackboardStoreError> {
     result.map_err(|_| BlackboardStoreError::CorruptEntry(entry_id.to_string()))
+}
+
+/// Validates and inserts a new active entry at its first revision.
+async fn insert_new_entry(
+    connection: &mut SqliteConnection,
+    id: &BlackboardEntryId,
+    value: &NewBlackboardEntry,
+    now: i64,
+) -> Result<(), BlackboardStoreError> {
+    load_node(&mut *connection, &value.project_id, &value.node_id)
+        .await?
+        .ok_or_else(|| BlackboardStoreError::NodeNotFound(value.node_id.to_string()))?;
+    validate_evidence(&mut *connection, value).await?;
+    validate_premises(&mut *connection, id, value).await?;
+    sqlx::query(
+        "INSERT INTO blackboard_entries (
+            id, project_id, node_id, revision, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id.as_str())
+    .bind(&value.project_id)
+    .bind(value.node_id.as_str())
+    .bind(INITIAL_REVISION)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *connection)
+    .await?;
+    write_revision(
+        connection,
+        id,
+        INITIAL_REVISION,
+        value,
+        BlackboardEntryState::Active,
+        None,
+        now,
+    )
+    .await
 }
 
 async fn load_entry_by_id(
@@ -547,6 +561,8 @@ pub enum BlackboardStoreError {
     SuccessorNotFound(String),
     #[error("blackboard successor entry is no longer active: {0}")]
     SuccessorNotActive(String),
+    #[error("a successor must replace 1-4 distinct entries other than itself")]
+    InvalidSuccession,
     #[error("blackboard evidence context-map entry not found: {0}")]
     EvidenceNotFound(String),
     #[error("blackboard evidence belongs to a different project")]

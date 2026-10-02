@@ -68,6 +68,14 @@ impl VisibleRoot {
         self.entries.insert(entry_id, (alias, revision));
     }
 
+    /// The entry and revision shown in full under `alias`, if this packet showed one.
+    pub(crate) fn entry_for_alias(&self, alias: &str) -> Option<(&str, u64)> {
+        self.entries
+            .iter()
+            .find(|(_, (shown_alias, _))| shown_alias == alias)
+            .map(|(entry_id, (_, revision))| (entry_id.as_str(), *revision))
+    }
+
     /// Returns the alias only when this exact entry revision was shown in full.
     pub(crate) fn alias_for(&self, entry_id: &str, revision: u64) -> Option<&str> {
         self.entries

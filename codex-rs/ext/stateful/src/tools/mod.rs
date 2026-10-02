@@ -1,6 +1,7 @@
 mod blackboard;
 mod blackboard_evidence;
 mod blackboard_premises;
+mod blackboard_supersede;
 mod blackboard_update;
 mod blackboard_write;
 mod context_map;
@@ -56,6 +57,7 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
             event_sink.clone(),
             user_messages,
+            visible_root.clone(),
         )),
         Arc::new(blackboard_update::BlackboardUpdateTool::new(
             project_id.clone(),

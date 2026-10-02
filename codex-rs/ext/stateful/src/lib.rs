@@ -440,11 +440,15 @@ impl StatefulExtension {
                     Some(&evidence_audit),
                     audit_recomputed,
                 );
-                RootBlackboardStatus::Available(ResolvedRootBlackboard::new(
-                    projection,
-                    evidence_routes,
-                    Some((*evidence_audit).clone()),
-                ))
+                let predecessors = root_predecessors(store, project_id, &projection).await;
+                RootBlackboardStatus::Available(
+                    ResolvedRootBlackboard::new(
+                        projection,
+                        evidence_routes,
+                        Some((*evidence_audit).clone()),
+                    )
+                    .with_predecessors(predecessors),
+                )
             }
             Err(error) => {
                 tracing::warn!(%project_id, %error, "failed to load Stateful root blackboard");
@@ -531,6 +535,30 @@ impl StatefulExtension {
             steering_complete,
             checkpoint_due,
         })
+    }
+}
+
+/// The newest entry each projected entry replaced; a failed lookup only loses the
+/// "replaces" decoration.
+async fn root_predecessors(
+    store: &codex_project_intelligence::BlackboardStore,
+    project_id: &str,
+    projection: &codex_project_intelligence::RootBlackboardProjection,
+) -> Vec<(String, codex_project_intelligence::BlackboardEntry)> {
+    let successor_ids = projection
+        .data
+        .iter()
+        .map(|hit| hit.entry.id.clone())
+        .collect::<Vec<_>>();
+    match store.newest_predecessors(project_id, &successor_ids).await {
+        Ok(predecessors) => predecessors
+            .into_iter()
+            .map(|(successor_id, predecessor)| (successor_id.to_string(), predecessor))
+            .collect(),
+        Err(error) => {
+            tracing::warn!(%project_id, %error, "failed to load replaced root entries");
+            Vec::new()
+        }
     }
 }
 

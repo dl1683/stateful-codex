@@ -47,12 +47,17 @@ use crate::user_rules::inherited_scope;
 use crate::user_rules::is_task_limited;
 use crate::user_rules::reports_speech;
 
+use crate::visible_root::VisibleRootRegistry;
+
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
 use super::blackboard_evidence::resolve_evidence;
 use super::blackboard_premises::PremiseArguments;
 use super::blackboard_premises::premise_schema;
 use super::blackboard_premises::resolve_premises;
+use super::blackboard_supersede::SupersedeReference;
+use super::blackboard_supersede::resolve_superseded;
+use super::blackboard_supersede::supersedes_schema;
 use super::bounded_json_output;
 use super::parse_arguments;
 use super::preflight_receipts;
@@ -86,6 +91,9 @@ struct RecordArguments {
     user_quote: Option<String>,
     /// For kind instruction: whether the rule outlives the current task.
     rule_scope: Option<RuleScope>,
+    /// Current entries this record replaces.
+    #[serde(default)]
+    supersedes: Vec<SupersedeReference>,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -122,6 +130,7 @@ struct BlackboardRecorder {
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     user_messages: UserMessageRegistry,
+    visible_root: VisibleRootRegistry,
 }
 
 impl BlackboardRecorder {
@@ -132,6 +141,7 @@ impl BlackboardRecorder {
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
         user_messages: UserMessageRegistry,
+        visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
             project_id,
@@ -140,6 +150,7 @@ impl BlackboardRecorder {
             projects,
             event_sink,
             user_messages,
+            visible_root,
         }
     }
 
@@ -226,6 +237,7 @@ impl BlackboardRecorder {
             premises,
             user_quote,
             rule_scope,
+            supersedes,
         } = arguments;
         if verification == BlackboardVerification::UserConfirmed {
             return Err(FunctionCallError::RespondToModel(
@@ -234,6 +246,11 @@ impl BlackboardRecorder {
             ));
         }
         if kind == BlackboardKind::Instruction {
+            if !supersedes.is_empty() {
+                return Err(respond(
+                    "a changed user rule replaces the old one with blackboard_update_batch supersede once the user has stated it",
+                ));
+            }
             return self
                 .record_instruction(turn_id, user_quote, rule_scope)
                 .await;
@@ -262,34 +279,54 @@ impl BlackboardRecorder {
         };
         let id = BlackboardEntryId::parse(stable_id("entry", &self.project_id, &idempotency_key))
             .map_err(respond)?;
-        let entry = self
-            .services
-            .blackboard()
-            .await
-            .map_err(respond)?
-            .create_entry(
-                id,
-                NewBlackboardEntry {
-                    project_id: self.project_id.clone(),
-                    node_id,
-                    kind,
-                    content,
-                    structured_value,
-                    confidence: ConfidenceScore::from_basis_points(confidence_basis_points)
-                        .map_err(respond)?,
-                    verification,
-                    importance,
-                    root_promotion,
-                    evidence,
-                    premises,
-                    provenance: BlackboardProvenance {
-                        kind: BlackboardProvenanceKind::Agent,
-                        source_id: source_id.to_string(),
-                    },
-                },
+        let value = NewBlackboardEntry {
+            project_id: self.project_id.clone(),
+            node_id,
+            kind,
+            content,
+            structured_value,
+            confidence: ConfidenceScore::from_basis_points(confidence_basis_points)
+                .map_err(respond)?,
+            verification,
+            importance,
+            root_promotion,
+            evidence,
+            premises,
+            provenance: BlackboardProvenance {
+                kind: BlackboardProvenanceKind::Agent,
+                source_id: source_id.to_string(),
+            },
+        };
+        let store = self.services.blackboard().await.map_err(respond)?;
+        let entry = if supersedes.is_empty() {
+            store.create_entry(id, value).await.map_err(respond)?
+        } else {
+            // The new entry and the end of the entries it replaces commit together.
+            let replaced = resolve_superseded(
+                store,
+                &self.visible_root,
+                &self.project_id,
+                &self.thread_id,
+                /*successor_is_user_rule*/ false,
+                supersedes,
             )
-            .await
-            .map_err(respond)?;
+            .await?;
+            let succession = store
+                .create_successor(id, value, replaced)
+                .await
+                .map_err(respond)?;
+            if let Some(event_sink) = &self.event_sink {
+                for superseded in &succession.superseded {
+                    event_sink.emit(StatefulEvent::BlackboardUpdated {
+                        project_id: superseded.value.project_id.clone(),
+                        entity_kind: BlackboardEntityKind::Entry,
+                        entity_id: superseded.id.to_string(),
+                        revision: superseded.revision,
+                    });
+                }
+            }
+            succession.successor
+        };
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::BlackboardUpdated {
                 project_id: entry.value.project_id.clone(),
@@ -365,6 +402,7 @@ impl BlackboardBatchRecordTool {
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
         user_messages: UserMessageRegistry,
+        visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
             recorder: BlackboardRecorder::new(
@@ -374,6 +412,7 @@ impl BlackboardBatchRecordTool {
                 projects,
                 event_sink.clone(),
                 user_messages,
+                visible_root,
             ),
             relator: BlackboardRelateTool::new(project_id, services, event_sink),
         }
@@ -612,7 +651,8 @@ fn record_schema() -> serde_json::Value {
             "evidence": evidence_schema(),
             "premises": premise_schema(),
             "userQuote": {"type": "string"},
-            "ruleScope": {"type": "string", "enum": ["standing", "task"]}
+            "ruleScope": {"type": "string", "enum": ["standing", "task"]},
+            "supersedes": supersedes_schema()
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false

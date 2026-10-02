@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardHit;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
@@ -32,12 +33,38 @@ const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
 pub(super) const USER_RULES_HEADER: &str = "User rules (the user's exact words; they apply to all work in this project until the user changes them):";
 const KNOWLEDGE_HEADER: &str = "Other promoted knowledge:";
 
+/// Longest excerpt of a replaced value shown on its successor's line.
+const MAX_REPLACED_EXCERPT_BYTES: usize = 160;
+
+/// ` replaces: "<old value>" (until YYYY-MM-DD; ...)` for the line of the entry that
+/// superseded `predecessor`.
+fn replaces_suffix(predecessor: &BlackboardEntry) -> String {
+    let content = single_line(&predecessor.value.content);
+    let excerpt = if content.len() > MAX_REPLACED_EXCERPT_BYTES {
+        let mut end = MAX_REPLACED_EXCERPT_BYTES;
+        while !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &content[..end])
+    } else {
+        content
+    };
+    let until = crate::continuity::format_time(predecessor.updated_at_ms);
+    let until = until.split(' ').next().unwrap_or(&until);
+    format!(
+        " replaces: {} (until {until}; earlier versions: blackboard_query entryScope historical)",
+        serde_json::Value::String(excerpt)
+    )
+}
+
 /// Lays out root entries in a chosen order while keeping their projection aliases.
 struct EntryLayout<'a> {
     entry_aliases: &'a HashMap<String, String>,
     identity_aliases: HashMap<String, String>,
     identity_evidence: HashMap<ContextMapEntryId, String>,
     evidence_audit: Option<&'a EvidenceAudit>,
+    /// The newest entry each shown entry replaced, by entry ID.
+    predecessors: &'a HashMap<String, BlackboardEntry>,
     entries: Vec<LaidOutLine>,
     shown: Vec<(usize, String)>,
     omitted: u64,
@@ -52,26 +79,45 @@ impl EntryLayout<'_> {
         evidence_aliases: &HashMap<ContextMapEntryId, String>,
     ) {
         let alias = format!("E{}", index + 1);
-        let line = bounded_entry_line(
-            render_hit(
-                &alias,
-                hit,
-                self.entry_aliases,
-                evidence_aliases,
-                self.evidence_audit,
-            ),
+        let plain = render_hit(
             &alias,
+            hit,
+            self.entry_aliases,
+            evidence_aliases,
+            self.evidence_audit,
         );
-        if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
+        // What the current value replaced is decoration: it is dropped before the entry
+        // itself is.
+        let predecessor = self.predecessors.get(hit.entry.id.as_str());
+        let decorated = predecessor.map(|predecessor| {
+            bounded_entry_line(format!("{plain}{}", replaces_suffix(predecessor)), &alias)
+        });
+        let plain = bounded_entry_line(plain, &alias);
+        let line = match decorated {
+            Some(decorated) if try_append_line(output, &decorated, ROOT_FOOTER_RESERVE_BYTES) => {
+                Some(decorated)
+            }
+            Some(_) | None => {
+                try_append_line(output, &plain, ROOT_FOOTER_RESERVE_BYTES).then_some(plain)
+            }
+        };
+        if let Some(line) = line {
             if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
                 self.shown.push((index, alias));
             }
-            let canonical = render_hit(
-                hit.entry.id.as_str(),
-                hit,
-                &self.identity_aliases,
-                &self.identity_evidence,
-                self.evidence_audit,
+            let canonical = format!(
+                "{}{}",
+                render_hit(
+                    hit.entry.id.as_str(),
+                    hit,
+                    &self.identity_aliases,
+                    &self.identity_evidence,
+                    self.evidence_audit,
+                ),
+                predecessor.map_or_else(String::new, |predecessor| format!(
+                    "|replaces:{}@{}",
+                    predecessor.id, predecessor.revision
+                )),
             );
             self.entries.push(LaidOutLine {
                 key: short_digest(hit.entry.id.as_str()),
@@ -114,6 +160,8 @@ pub(super) struct ResolvedRootBlackboard {
     pub(super) evidence_audit: Option<EvidenceAudit>,
     /// Instruction entries removed because they are not in the user's own words.
     quarantined_rules: u64,
+    /// The newest entry each projected entry replaced, by successor entry ID.
+    predecessors: HashMap<String, BlackboardEntry>,
 }
 
 /// Removes rules that are not in the user's own words from a root projection, before any
@@ -143,7 +191,18 @@ impl ResolvedRootBlackboard {
             evidence_routes,
             evidence_audit,
             quarantined_rules,
+            predecessors: HashMap::new(),
         }
+    }
+
+    /// Attaches what shown entries replaced, so the packet can say "replaces: ..." without
+    /// a memory call.
+    pub(super) fn with_predecessors(
+        mut self,
+        predecessors: impl IntoIterator<Item = (String, BlackboardEntry)>,
+    ) -> Self {
+        self.predecessors = predecessors.into_iter().collect();
+        self
     }
 }
 
@@ -219,6 +278,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             .map(|route| (route.clone(), route.to_string()))
             .collect(),
         evidence_audit: root.evidence_audit.as_ref(),
+        predecessors: &root.predecessors,
         entries: Vec::with_capacity(projection.data.len()),
         shown: Vec::with_capacity(projection.data.len()),
         omitted: projection.omitted_entries,

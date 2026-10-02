@@ -436,8 +436,22 @@ impl BlackboardUpdateTool {
             } => {
                 update.expected_revision = expected_revision;
                 update.state = BlackboardEntryState::Superseded;
-                update.superseded_by =
-                    Some(BlackboardEntryId::parse(successor_entry_id).map_err(respond)?);
+                let successor_id = BlackboardEntryId::parse(successor_entry_id).map_err(respond)?;
+                if user_rule {
+                    let successor = store
+                        .get_entry(&self.project_id, &successor_id)
+                        .await
+                        .map_err(respond)?;
+                    if !successor.is_some_and(|successor| {
+                        successor.value.kind == BlackboardKind::Instruction
+                            && successor.value.provenance.kind == BlackboardProvenanceKind::User
+                    }) {
+                        return Err(respond(
+                            "a user rule can be replaced only by the user's new rule in their own words",
+                        ));
+                    }
+                }
+                update.superseded_by = Some(successor_id);
             }
             MutationArguments::Retire {
                 expected_revision, ..
