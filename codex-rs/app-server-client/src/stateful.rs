@@ -120,24 +120,14 @@ pub async fn start_stateful_run(
     Ok(())
 }
 
-/// What a resumed thread's Stateful startup did.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ResumedStatefulRun {
-    /// The thread had no open run, so a new run now owns the resumed prompt.
-    Started,
-    /// The thread's open run in the same project and mode was running when read; the host
-    /// binds the resumed prompt's turn to whichever run is open when that turn starts.
-    Continued { run_id: String },
-}
-
-/// Starts a run for a resumed thread, or continues the thread's open run when that run is
-/// running in the same project and mode. Any other open run is refused with the control
-/// that can change it.
-pub async fn start_or_continue_stateful_run(
+/// Starts a run for a resumed thread, or refuses when the thread still has an open run,
+/// naming the run and the control that continues or changes it. A resumed turn is never
+/// announced as joining a run: the host binds turns to the open run when they start.
+pub async fn start_stateful_run_on_resumed_thread(
     request_handle: &AppServerRequestHandle,
     startup: &PreparedStatefulStartup,
     thread_id: &str,
-) -> Result<ResumedStatefulRun, StatefulStartupError> {
+) -> Result<(), StatefulStartupError> {
     let read: StatefulRunReadResponse = request_handle
         .request_typed(ClientRequest::StatefulRunRead {
             request_id: RequestId::String(format!(
@@ -155,21 +145,20 @@ pub async fn start_or_continue_stateful_run(
             source,
         })?;
     let Some(run) = read.run else {
-        start_stateful_run(request_handle, startup, thread_id).await?;
-        return Ok(ResumedStatefulRun::Started);
+        return start_stateful_run(request_handle, startup, thread_id).await;
     };
     let guidance = if run.project_id != startup.project_id {
         "it belongs to another project; resume the thread without --stateful".to_string()
     } else if run.mode != startup.mode {
         format!(
-            "it runs in {} mode; change its mode or cancel it in the web workspace, or pass --stateful {}",
-            mode_name(run.mode),
+            "it runs in {} mode; change its mode or cancel it in the web workspace, or resume without --stateful",
             mode_name(run.mode)
         )
     } else {
         match run.status {
             StatefulRunStatus::Running => {
-                return Ok(ResumedStatefulRun::Continued { run_id: run.id });
+                "resume the thread without --stateful; the host joins each new turn to the open run"
+                    .to_string()
             }
             StatefulRunStatus::Pending => {
                 "it is waiting to begin; begin it from the web workspace".to_string()
@@ -180,8 +169,7 @@ pub async fn start_or_continue_stateful_run(
             StatefulRunStatus::Completed
             | StatefulRunStatus::Cancelled
             | StatefulRunStatus::Failed => {
-                start_stateful_run(request_handle, startup, thread_id).await?;
-                return Ok(ResumedStatefulRun::Started);
+                return start_stateful_run(request_handle, startup, thread_id).await;
             }
         }
     };

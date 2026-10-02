@@ -24,12 +24,11 @@ use codex_app_server_client::ExecServerRuntimeOptions;
 use codex_app_server_client::InProcessAppServerClient;
 use codex_app_server_client::InProcessClientStartArgs;
 use codex_app_server_client::InProcessServerEvent;
-use codex_app_server_client::ResumedStatefulRun;
 use codex_app_server_client::StatefulStartup;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_client::prepare_stateful_startup;
-use codex_app_server_client::start_or_continue_stateful_run;
 use codex_app_server_client::start_stateful_run;
+use codex_app_server_client::start_stateful_run_on_resumed_thread;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -1780,18 +1779,9 @@ async fn start_stateful_run_for_existing_thread(
     let prepared = prepare_stateful_startup(&request_handle, &mut params, startup)
         .await
         .map_err(|error| error.to_string())?;
-    match start_or_continue_stateful_run(&request_handle, &prepared, thread_id)
+    start_stateful_run_on_resumed_thread(&request_handle, &prepared, thread_id)
         .await
-        .map_err(|error| error.to_string())?
-    {
-        ResumedStatefulRun::Started => {}
-        ResumedStatefulRun::Continued { run_id } => {
-            eprintln!(
-                "Continuing Stateful run {run_id}: the prompt becomes its next turn if the run is still running when the turn starts."
-            );
-        }
-    }
-    Ok(())
+        .map_err(|error| error.to_string())
 }
 
 fn stateful_workflow_mode(mode: StatefulModeCliArg) -> StatefulWorkflowMode {

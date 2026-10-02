@@ -290,7 +290,7 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn exec_stateful_resume_continues_an_open_collaborative_run() -> anyhow::Result<()> {
+async fn exec_resume_joins_an_open_collaborative_run_only_without_the_flag() -> anyhow::Result<()> {
     let test = test_codex_exec();
     let server = responses::start_mock_server().await;
     let first_response = responses::mount_sse_once(
@@ -313,7 +313,28 @@ async fn exec_stateful_resume_continues_an_open_collaborative_run() -> anyhow::R
         .success();
     first_response.single_request();
 
-    // The answered turn leaves the Collaborative run open; a resume continues it.
+    // The answered turn leaves the Collaborative run open, so a second run is refused with
+    // the control that continues the open one.
+    let refused = test
+        .cmd_with_server(&server)
+        .arg("--stateful")
+        .arg("collaborative")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("resume")
+        .arg("--last")
+        .arg("Start another collaborative goal")
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&refused.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("already has an open Stateful run")
+            && stderr.contains("resume the thread without --stateful"),
+        "stderr should name the open run and how to continue it: {stderr}"
+    );
+
+    // A plain resume joins the open run: its turn carries the run packet and policy.
     let second_response = responses::mount_sse_once(
         &server,
         responses::sse(vec![
@@ -323,10 +344,7 @@ async fn exec_stateful_resume_continues_an_open_collaborative_run() -> anyhow::R
         ]),
     )
     .await;
-    let continued = test
-        .cmd_with_server(&server)
-        .arg("--stateful")
-        .arg("collaborative")
+    test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(test.cwd_path())
@@ -335,17 +353,12 @@ async fn exec_stateful_resume_continues_an_open_collaborative_run() -> anyhow::R
         .arg("Continue the collaborative goal")
         .assert()
         .success();
-    let stderr = String::from_utf8_lossy(&continued.get_output().stderr).to_string();
-    assert!(
-        stderr.contains("Continuing Stateful run"),
-        "stderr should report the continued run: {stderr}"
-    );
     let request = second_response.single_request();
     assert!(request.body_contains_text("Continue the collaborative goal"));
     assert!(request.body_contains_text("Establish the collaborative goal"));
     assert!(request.body_contains_text("stays open across the user's turns"));
 
-    // A different mode is refused with the run it would have displaced.
+    // A different mode is refused with the open run's mode.
     let refused = test
         .cmd_with_server(&server)
         .arg("--stateful")
@@ -360,9 +373,8 @@ async fn exec_stateful_resume_continues_an_open_collaborative_run() -> anyhow::R
         .failure();
     let stderr = String::from_utf8_lossy(&refused.get_output().stderr).to_string();
     assert!(
-        stderr.contains("already has an open Stateful run")
-            && stderr.contains("it runs in collaborative mode"),
-        "stderr should name the open run and its mode: {stderr}"
+        stderr.contains("it runs in collaborative mode"),
+        "stderr should name the open run's mode: {stderr}"
     );
     Ok(())
 }

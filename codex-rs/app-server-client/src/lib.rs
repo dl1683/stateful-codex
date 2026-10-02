@@ -71,12 +71,11 @@ pub use crate::remote::RemoteAppServerEndpoint;
 pub use crate::stateful::DEFAULT_STATEFUL_MAX_CONTINUATIONS;
 pub use crate::stateful::DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS;
 pub use crate::stateful::PreparedStatefulStartup;
-pub use crate::stateful::ResumedStatefulRun;
 pub use crate::stateful::StatefulStartup;
 pub use crate::stateful::StatefulStartupError;
 pub use crate::stateful::prepare_stateful_startup;
-pub use crate::stateful::start_or_continue_stateful_run;
 pub use crate::stateful::start_stateful_run;
+pub use crate::stateful::start_stateful_run_on_resumed_thread;
 
 /// Transitional access to core-only embedded app-server types.
 ///
