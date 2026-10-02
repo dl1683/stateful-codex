@@ -94,32 +94,46 @@ impl ContextMapQueryTool {
         let context_map = self.services.context_map().await.map_err(respond)?;
         let mut result = context_map.query(query.clone()).await.map_err(respond)?;
         // A project that was never indexed has no entries at all; index it here rather than
-        // sending the model to discover and call the refresh tool first.
-        let indexed_on_demand = result.data.is_empty()
-            && !context_map
+        // sending the model to discover and call the refresh tool first. Indexing is
+        // serialized in this process and rechecked under the lock, and a refresh superseded
+        // by another process is retried once so this query sees a completed publication.
+        let mut indexed_on_demand = false;
+        if result.data.is_empty() {
+            let _guard = self.services.on_demand_index().lock().await;
+            if !context_map
                 .has_entries(&self.project_id)
                 .await
-                .map_err(respond)?;
-        if indexed_on_demand {
-            let refreshed = ProjectIndexer::new(
-                self.services.hierarchy().await.map_err(respond)?.clone(),
-                context_map.clone(),
-            )
-            .refresh(ProjectIndexRequest {
-                project_id: self.project_id.clone(),
-                roots: project
-                    .roots
-                    .iter()
-                    .map(|root| PathBuf::from(&root.path))
-                    .collect(),
-            })
-            .await;
-            match refreshed {
-                // A concurrent refresh won and publishes the same project.
-                Ok(_) | Err(ProjectIndexerError::SupersededRefresh) => {}
-                Err(error) => return Err(respond(error)),
+                .map_err(respond)?
+            {
+                let indexer = ProjectIndexer::new(
+                    self.services.hierarchy().await.map_err(respond)?.clone(),
+                    context_map.clone(),
+                );
+                let request = ProjectIndexRequest {
+                    project_id: self.project_id.clone(),
+                    roots: project
+                        .roots
+                        .iter()
+                        .map(|root| PathBuf::from(&root.path))
+                        .collect(),
+                };
+                match indexer.refresh(request.clone()).await {
+                    Ok(_) => {}
+                    Err(ProjectIndexerError::SupersededRefresh) => {
+                        indexer.refresh(request).await.map_err(respond)?;
+                    }
+                    Err(error) => return Err(respond(error)),
+                }
+                indexed_on_demand = true;
             }
-            result = context_map.query(query).await.map_err(respond)?;
+            if indexed_on_demand
+                || context_map
+                    .has_entries(&self.project_id)
+                    .await
+                    .map_err(respond)?
+            {
+                result = context_map.query(query).await.map_err(respond)?;
+            }
         }
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let may_have_more = result.truncated;

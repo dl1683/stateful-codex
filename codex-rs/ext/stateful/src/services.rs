@@ -21,6 +21,8 @@ pub(super) struct ProjectIntelligenceServices {
     hierarchy: Arc<OnceCell<HierarchyStore>>,
     read_receipts: EvidenceReadReceipts,
     runtime: Arc<OnceCell<StatefulRunStore>>,
+    /// Serializes on-demand indexing so concurrent first queries index a project once.
+    on_demand_index: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ProjectIntelligenceServices {
@@ -32,6 +34,7 @@ impl ProjectIntelligenceServices {
             hierarchy: Arc::new(OnceCell::new()),
             read_receipts: EvidenceReadReceipts::default(),
             runtime: Arc::new(OnceCell::new()),
+            on_demand_index: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -55,6 +58,10 @@ impl ProjectIntelligenceServices {
 
     pub(super) fn read_receipts(&self) -> &EvidenceReadReceipts {
         &self.read_receipts
+    }
+
+    pub(super) fn on_demand_index(&self) -> &tokio::sync::Mutex<()> {
+        &self.on_demand_index
     }
 
     pub(super) async fn runtime(&self) -> Result<&StatefulRunStore, StatefulRunStoreError> {
