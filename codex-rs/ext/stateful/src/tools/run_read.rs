@@ -349,7 +349,7 @@ impl StatefulRunReadTool {
 /// Serialized size grows with the page end for every page that carries a continuation
 /// cursor, so those ends are binary-searched over UTF-8 boundaries. The terminal page
 /// swaps the cursor for `null` and can be smaller, so it is checked on its own first.
-fn read_page(
+pub(super) fn read_page(
     text: &str,
     offset: usize,
     budget: usize,

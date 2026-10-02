@@ -291,6 +291,118 @@ async fn orientation_findings_reach_a_fresh_thread_after_outcome_eviction() -> R
     Ok(())
 }
 
+/// A fresh thread browses to an earlier request with conversation_read: the project's
+/// threads, that thread's turns, and the exact text, paged at a character boundary within
+/// the result budget.
+#[tokio::test]
+async fn model_reads_a_shortened_earlier_turn_in_full() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Recall".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "recall-project".to_string(),
+            },
+        })
+        .await?;
+    let project_id = project.project.id;
+    let first = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.clone()),
+            ..Default::default()
+        })
+        .await?;
+    // Multi-byte and quote-heavy text exercises character boundaries and escaping.
+    let long_request = format!("{}TAIL_OF_THE_LONG_REQUEST", "\u{20ac}\"<".repeat(2_000));
+    let _first_log =
+        responses::mount_sse_sequence(&responses_server, vec![assistant("Planned.")]).await;
+    let completed = server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: first.thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: long_request.clone(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let turn_id = completed.turn.id;
+    let first_thread = first.thread.id;
+
+    let second = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id),
+            ..Default::default()
+        })
+        .await?;
+    let recall_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            tool_call("list-threads", "conversation_read", json!({})),
+            tool_call(
+                "list-turns",
+                "conversation_read",
+                json!({"threadId": first_thread}),
+            ),
+            tool_call(
+                "read-turn",
+                "conversation_read",
+                json!({"threadId": first_thread, "turnId": turn_id, "part": "user"}),
+            ),
+            assistant("Recalled."),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &second.thread.id, "What did I ask before?").await?;
+
+    let requests = recall_log.requests();
+    assert_eq!(requests.len(), 4);
+    let output = |index: usize, call_id: &str| -> Result<Value> {
+        Ok(serde_json::from_str(
+            &requests[index]
+                .function_call_output_text(call_id)
+                .expect("tool output"),
+        )?)
+    };
+    let threads = output(1, "list-threads")?;
+    assert!(
+        threads["threads"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|thread| thread["threadId"] == json!(first_thread))
+    );
+    let turns = output(2, "list-turns")?;
+    assert_eq!(turns["turns"][0]["turnId"], json!(turn_id));
+    assert_eq!(turns["turns"][0]["answer"], json!("Planned."));
+    assert_eq!(turns["turns"][0]["userBytes"], json!(long_request.len()));
+    let read_text = requests[3]
+        .function_call_output_text("read-turn")
+        .expect("read output");
+    assert!(read_text.len() <= 9_000);
+    let read: Value = serde_json::from_str(&read_text)?;
+    let page = read["text"].as_str().expect("page text");
+    let next_offset = read["nextOffset"]
+        .as_u64()
+        .and_then(|offset| usize::try_from(offset).ok())
+        .expect("more text remains");
+    assert_eq!(next_offset, page.len());
+    assert!(long_request.is_char_boundary(next_offset));
+    assert_eq!(page, &long_request[..next_offset]);
+    Ok(())
+}
+
 fn tool_call(call_id: &str, tool: &str, arguments: Value) -> String {
     responses::sse(vec![
         responses::ev_function_call(call_id, tool, &arguments.to_string()),

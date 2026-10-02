@@ -4,6 +4,7 @@ mod blackboard_premises;
 mod blackboard_update;
 mod blackboard_write;
 mod context_map;
+mod conversation_read;
 mod evidence;
 mod obligation;
 mod run;
@@ -65,6 +66,10 @@ pub(super) fn project_intelligence_tools(
             project_id.clone(),
             services.clone(),
             event_sink.clone(),
+        )),
+        Arc::new(conversation_read::ConversationReadTool::new(
+            project_id.clone(),
+            projects.clone(),
         )),
         Arc::new(context_map::ContextMapQueryTool::new(
             project_id.clone(),

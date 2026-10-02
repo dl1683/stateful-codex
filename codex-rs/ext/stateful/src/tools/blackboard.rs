@@ -360,7 +360,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query project knowledge the root packet lacks, or pending root candidates (rootPromotion=candidate). Reuse an entry only when evidenceFreshness and premiseFreshness are current or notApplicable and effectiveVerification has the authority the answer needs. entryScope=historical returns superseded or retired conclusions. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to find knowledge resting on that source, then revise or supersede it. If truncated=true, repeat with expectedProjectRevision and afterEntryId from the result.".to_string(),
+            description: "Query project knowledge the root packet lacks, or pending root candidates (rootPromotion=candidate). Reuse an entry only when evidenceFreshness and premiseFreshness are current or notApplicable and effectiveVerification has the authority the answer needs. entryScope=historical includes superseded entries. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to find knowledge resting on that source, then revise or supersede it. If truncated=true, repeat with expectedProjectRevision and afterEntryId from the result.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

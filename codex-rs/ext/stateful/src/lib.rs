@@ -4,6 +4,7 @@ mod attribution;
 mod autonomy;
 mod checkpoint;
 mod completion;
+mod conversation_summaries;
 mod events;
 mod limits;
 mod outcome_world_state;

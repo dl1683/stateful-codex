@@ -4661,6 +4661,7 @@ version = "0.159.2"
 dependencies = [
  "codex-extension-api",
  "codex-project-intelligence",
+ "codex-protocol",
  "codex-state",
  "codex-stateful-runtime",
  "codex-thread-store",

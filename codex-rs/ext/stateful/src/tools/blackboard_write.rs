@@ -432,7 +432,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} reusable findings, and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey, after the results they rest on are in: user rules (kind instruction), decisions and reasons, exact numbers with scope, failures, rejected approaches, open questions. Not routine progress, inventories, or what is already shown. Keep contrasts, exact values and qualifiers. sourceVerified needs evidence copied unchanged from evidence_read. Items are independently idempotent."
+                "Persist 1-{MAX_BATCH_RECORDS} reusable findings, and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey, after the results they rest on are in: user rules (kind instruction), decisions and reasons, exact numbers with scope, failures, rejected approaches, open questions. Not routine progress or what is already shown; keep exact values and qualifiers. sourceVerified needs evidence copied unchanged from evidence_read. Items are independently idempotent."
             ),
             strict: false,
             defer_loading: None,
@@ -621,7 +621,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRelateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RELATE_TOOL_NAME.to_string(),
-            description: "Persist a meaningful relationship between two blackboard entries. Use contradictions for genuinely incompatible findings, not mere differences.".to_string(),
+            description: "Persist a relationship between two blackboard entries; contradicts means genuinely incompatible findings.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
