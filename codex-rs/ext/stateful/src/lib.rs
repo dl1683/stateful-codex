@@ -544,3 +544,7 @@ pub fn install<C: Sync>(
 #[cfg(test)]
 #[path = "freshness_tests.rs"]
 mod freshness_tests;
+
+#[cfg(test)]
+#[path = "packet_budget_tests.rs"]
+mod packet_budget_tests;

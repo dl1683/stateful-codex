@@ -587,3 +587,26 @@ fn unanswered_checkpoint_escalates_through_a_delta() {
     );
     assert!(rendered.body().contains("Call obligation_update now"));
 }
+
+#[test]
+fn collaborative_checkpoint_epochs_do_not_emit_updates() {
+    let status = |checkpoint_due: Option<u64>| {
+        let mut status = run_with_obligation("obligation-1", vec!["Found the permit.".to_string()]);
+        let RunWorldStateStatus::Available {
+            checkpoint_due: due,
+            ..
+        } = &mut status
+        else {
+            unreachable!("fixture is available");
+        };
+        *due = checkpoint_due;
+        status
+    };
+    let before = run_world_state_section(status(None));
+    let after = run_world_state_section(status(Some(2)));
+
+    assert_eq!(
+        after.render_diff(PreviousWorldStateSection::Known(before.snapshot())),
+        None
+    );
+}

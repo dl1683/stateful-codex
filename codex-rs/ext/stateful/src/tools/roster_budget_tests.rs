@@ -11,7 +11,7 @@ use crate::visible_root::VisibleRootRegistry;
 
 /// Every request carries the whole Stateful roster, so its serialized size is a fixed
 /// per-request cost (32,827 bytes before the 2026-10-02 trim).
-const MAX_ROSTER_BYTES: usize = 20_000;
+const MAX_ROSTER_BYTES: usize = 18_000;
 
 #[test]
 fn stateful_tool_roster_stays_within_its_request_budget() {

@@ -432,7 +432,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} materially reusable findings, and up to {MAX_BATCH_RELATIONS} relations among them (fromRecordKey/toRecordKey name idempotencyKeys in this call), after the results they rest on are in. Worth recording: user rules (kind instruction), decisions and their reasons, exact numbers with their scope, failures and rejected approaches, open questions. Not worth recording: routine progress, cheap-to-recompute inventories, knowledge already shown. Keep decision-changing contrasts, exact values, qualifiers and supersession signals. sourceVerified needs evidence: copy each non-null blackboardEvidence object from evidence_read unchanged. Pin exact revisions of trusted entries a finding depends on in premises. Items are independently idempotent; do not retry successful items."
+                "Persist 1-{MAX_BATCH_RECORDS} reusable findings, and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey, after the results they rest on are in: user rules (kind instruction), decisions and reasons, exact numbers with scope, failures, rejected approaches, open questions. Not routine progress, inventories, or what is already shown. Keep contrasts, exact values and qualifiers. sourceVerified needs evidence copied unchanged from evidence_read. Items are independently idempotent."
             ),
             strict: false,
             defer_loading: None,

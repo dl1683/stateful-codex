@@ -81,7 +81,13 @@ impl RunWorldStateStatus {
                 checkpoint_due,
             } => {
                 hash(&mut hasher, run.id.as_str());
-                hasher.update(checkpoint_due.unwrap_or_default().to_be_bytes());
+                // Collaborative runs render no checkpoint text, so an epoch change must not
+                // produce an otherwise empty update.
+                let rendered_checkpoint = match run.value.mode {
+                    WorkflowMode::Collaborative => None,
+                    WorkflowMode::Autonomous | WorkflowMode::Socratic => *checkpoint_due,
+                };
+                hasher.update(rendered_checkpoint.unwrap_or_default().to_be_bytes());
                 hasher.update(run.revision.to_be_bytes());
                 hasher.update(run.strategy_revision.to_be_bytes());
                 if let Some(obligation) = obligation {
