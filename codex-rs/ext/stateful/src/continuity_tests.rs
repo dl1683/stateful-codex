@@ -83,7 +83,7 @@ fn renders_exact_turn_summaries_newest_first_with_a_pending_question() {
             NEWEST_ASKED,
             "Latest Stateful run: \"run-ab12\" (collaborative, completed). Next: \"Add the \\u003ccrepes\\u003e after approval.\" Strategy: \"Ask first.\"",
             "- 2025-10-01 18:03 UTC, thread \"thread-b\" titled \"Crepes\", turn \"turn-2\", no Stateful run recorded:\n  User: \"Add my grandma's crepes: 1 cup flour.\"\n  Answer: \"May I modify recipes.json with:\\n- Flour: 125 g\\n- Milk: 300 ml?\"",
-            "- 2025-10-01 18:02 UTC, thread \"thread-a\", turn \"turn-1\", run \"run-ab12\" (now completed):\n  User: \"Fix the scaler. Remember: metric units only.\"\n  Answer: \"Fixed: flour 150 g, eggs 2.\"",
+            "- 2025-10-01 18:02 UTC, thread \"thread-a\", turn \"turn-1\", latest run:\n  User: \"Fix the scaler. Remember: metric units only.\"\n  Answer: \"Fixed: flour 150 g, eggs 2.\"",
         ]
         .join("\n")
     );
