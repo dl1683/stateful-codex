@@ -1395,8 +1395,6 @@ async fn model_can_reuse_file_learning_from_a_child_region_without_rereading() -
     let requests = response_log.requests();
     assert_eq!(requests.len(), 4);
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
-    assert!(requests[0].body_contains_text("blackboard_relate"));
-    assert!(requests[0].body_contains_text("context_map_refresh"));
     assert!(requests[0].body_contains_text("readReceiptId"));
     let batch_output: serde_json::Value = serde_json::from_str(
         &requests[1]

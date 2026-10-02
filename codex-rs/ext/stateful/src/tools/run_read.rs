@@ -401,7 +401,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunReadTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        ToolExposure::DirectModelOnly
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {

@@ -6,6 +6,7 @@ use codex_extension_api::FunctionCallError;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
@@ -308,6 +309,11 @@ impl ContextMapRefreshTool {
 impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(REFRESH_TOOL_NAME)
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::Deferred
     }
 
     fn spec(&self) -> ToolSpec {

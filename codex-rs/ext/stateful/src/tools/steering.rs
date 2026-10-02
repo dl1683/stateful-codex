@@ -117,6 +117,11 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringQueryTool {
         ToolName::plain(QUERY_TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::Deferred
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: QUERY_TOOL_NAME.to_string(),
@@ -328,9 +333,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringReconcileTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
