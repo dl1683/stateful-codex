@@ -268,15 +268,37 @@ fn fresh_window_stateful_content_stays_within_its_budget() {
             )),
         ];
         let total = sections.iter().sum::<usize>();
-        let self_contained = sections[0]
-            + sections[1]
-            + crate::request_scope::START_MARKER.len()
-            + crate::request_scope::SELF_CONTAINED_NOTE.len()
-            + crate::request_scope::END_MARKER.len();
+        // A narrow first request, then (same window) one that refers back: the record is
+        // admitted under what the packets and the retained and new scope notes leave.
+        let head = crate::request_scope::RequestHead("Rename the helper in utils.py".repeat(4));
+        let narrow = crate::request_scope::ScopeNotePlan::new(
+            None,
+            "turn-1",
+            crate::request_scope::RequestScope::SelfContained,
+            Some(&head),
+        );
+        let self_contained = sections[0] + sections[1] + narrow.window_bytes;
+        let narrow_snapshot = narrow.section().snapshot().clone();
+        let widened = crate::request_scope::ScopeNotePlan::new(
+            Some(&narrow_snapshot),
+            "turn-1",
+            crate::request_scope::RequestScope::Continuity,
+            Some(&head),
+        );
+        let alternation = packet_bytes
+            + widened.window_bytes
+            + rendered_bytes(continuity_world_state_section(
+                &continuity_record(),
+                crate::AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes + widened.window_bytes),
+            ));
         if mode == WorkflowMode::Collaborative {
             assert!(
                 self_contained <= MAX_SELF_CONTAINED_PACKET_BYTES && self_contained < total,
                 "self-contained Stateful content is {self_contained} bytes (continuity {total})"
+            );
+            assert!(
+                alternation <= MAX_FIXTURE_PACKET_BYTES,
+                "alternating scopes hold {alternation} bytes"
             );
         }
 

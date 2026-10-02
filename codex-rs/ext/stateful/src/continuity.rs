@@ -384,7 +384,7 @@ fn quote(text: &str, limit: usize, route: Option<&str>) -> String {
 }
 
 /// Escapes markup so quoted history cannot open or close a fragment.
-fn escape(text: &str) -> String {
+pub(super) fn escape(text: &str) -> String {
     text.replace('<', "\\u003c")
         .replace('>', "\\u003e")
         .replace('&', "\\u0026")

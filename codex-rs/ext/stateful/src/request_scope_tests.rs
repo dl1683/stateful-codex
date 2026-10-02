@@ -4,12 +4,15 @@ use codex_extension_api::PreviousWorldStateSection;
 use codex_protocol::user_input::UserInput;
 use serde_json::json;
 
-use super::CONTINUITY_NOTE;
+use super::END_MARKER;
+use super::RequestHead;
 use super::RequestScope;
 use super::SELF_CONTAINED_NOTE;
+use super::START_MARKER;
+use super::ScopeNotePlan;
+use super::WIDENED_NOTE;
 use super::classify;
 use super::classify_input;
-use super::request_scope_section;
 
 #[test]
 fn classifies_requests_by_their_reference_to_earlier_work() {
@@ -82,6 +85,18 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
             "You have permission to edit recipes.json for the crepes",
             RequestScope::Continuity,
         ),
+        (
+            "Implement your recommended fix in parser.py",
+            RequestScope::Continuity,
+        ),
+        (
+            "Fix the bug we identified in parser.rs",
+            RequestScope::Continuity,
+        ),
+        (
+            "Apply the change you outlined to config loading in settings.py",
+            RequestScope::Continuity,
+        ),
     ];
     let actual = cases
         .iter()
@@ -115,45 +130,78 @@ fn non_text_input_keeps_continuity() {
 }
 
 #[test]
-fn scope_note_renders_on_change_and_when_its_note_is_missing() {
-    let render = |scope: RequestScope, previous: PreviousWorldStateSection<'_>| {
-        request_scope_section(scope)
+fn scope_notes_name_their_request_and_count_against_the_window() {
+    let head = RequestHead("Rename the <helper> in utils.py".to_string());
+    let render = |plan: ScopeNotePlan, previous: PreviousWorldStateSection<'_>| {
+        let bytes = plan.window_bytes;
+        let body = plan
+            .section()
             .render_diff(previous)
-            .map(|fragment| fragment.body().to_string())
+            .map(|fragment| fragment.body().to_string());
+        (body, bytes)
     };
-    let self_contained = json!({ "scope": "selfContained" });
-    let continuity = json!({ "scope": "continuity" });
+    let note = format!(
+        "Scope note for the request that begins \"Rename the \\u003chelper\\u003e in utils.py\": it {SELF_CONTAINED_NOTE}"
+    );
+    let note_bytes = START_MARKER.len() + note.len() + END_MARKER.len();
+    let widened = format!(
+        "Scope note for the request that begins \"Rename the \\u003chelper\\u003e in utils.py\": it {WIDENED_NOTE}"
+    );
+    let widened_bytes = START_MARKER.len() + widened.len() + END_MARKER.len();
+    let first_step =
+        json!({ "scope": "selfContained", "turnId": "turn-1", "windowBytes": note_bytes });
+    let next_turn = json!({ "scope": "continuity", "turnId": "turn-2", "windowBytes": note_bytes });
+
     assert_eq!(
         vec![
+            // A self-contained turn's first step renders its note.
             render(
-                RequestScope::SelfContained,
+                ScopeNotePlan::new(None, "turn-1", RequestScope::SelfContained, Some(&head)),
                 PreviousWorldStateSection::Absent
             ),
-            render(RequestScope::Continuity, PreviousWorldStateSection::Absent),
+            // Later steps of the same turn add nothing.
             render(
-                RequestScope::SelfContained,
-                PreviousWorldStateSection::Known(&self_contained)
+                ScopeNotePlan::new(
+                    Some(&first_step),
+                    "turn-1",
+                    RequestScope::SelfContained,
+                    Some(&head)
+                ),
+                PreviousWorldStateSection::Known(&first_step)
             ),
+            // Steering widens the same request.
             render(
-                RequestScope::Continuity,
-                PreviousWorldStateSection::Known(&self_contained)
+                ScopeNotePlan::new(
+                    Some(&first_step),
+                    "turn-1",
+                    RequestScope::Continuity,
+                    Some(&head)
+                ),
+                PreviousWorldStateSection::Known(&first_step)
             ),
+            // A continuity turn adds nothing; the earlier note names its own request.
             render(
-                RequestScope::SelfContained,
-                PreviousWorldStateSection::Known(&continuity)
+                ScopeNotePlan::new(Some(&first_step), "turn-2", RequestScope::Continuity, None),
+                PreviousWorldStateSection::Known(&first_step)
             ),
+            // A later self-contained turn gets its own note, even when an interrupted write
+            // left an older continuity snapshot behind.
             render(
-                RequestScope::Continuity,
-                PreviousWorldStateSection::Known(&continuity)
+                ScopeNotePlan::new(
+                    Some(&next_turn),
+                    "turn-3",
+                    RequestScope::SelfContained,
+                    Some(&head)
+                ),
+                PreviousWorldStateSection::Known(&next_turn)
             ),
         ],
         vec![
-            Some(SELF_CONTAINED_NOTE.to_string()),
-            None,
-            None,
-            Some(CONTINUITY_NOTE.to_string()),
-            Some(SELF_CONTAINED_NOTE.to_string()),
-            None,
+            (Some(note.clone()), note_bytes),
+            (None, note_bytes),
+            (Some(widened), note_bytes + widened_bytes),
+            (None, note_bytes),
+            (Some(note), note_bytes * 2),
         ]
     );
 }

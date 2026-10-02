@@ -14,11 +14,20 @@ use codex_protocol::user_input::UserInput;
 use serde_json::Value;
 use serde_json::json;
 
-const WORLD_STATE_ID: &str = "stateful_request_scope";
+pub(crate) const WORLD_STATE_ID: &str = "stateful_request_scope";
 pub(crate) const START_MARKER: &str = "<stateful_request_scope>";
 pub(crate) const END_MARKER: &str = "</stateful_request_scope>";
-pub(crate) const SELF_CONTAINED_NOTE: &str = "Current request scope (applies until a later scope note): self-contained. Work from the files and the project rules and knowledge shown. Make no memory reads or writes in this turn: no conversation_read, blackboard_query, context_map_query or refresh, evidence_read, blackboard_record_batch, update or relate calls, and no run updates. Exceptions: the request itself states a new standing rule or decision, or the work turns out to depend on earlier work.";
-pub(crate) const CONTINUITY_NOTE: &str = "Current request scope (applies until a later scope note): this request may depend on earlier work; the project memory and the conversation record apply, and the earlier self-contained restriction no longer does.";
+/// Shown after the quoted opening of the request the note governs.
+pub(crate) const SELF_CONTAINED_NOTE: &str = "is self-contained. For that request only: work from the files and the project rules and knowledge shown, and make no memory reads or writes (no conversation_read, blackboard_query, context_map_query or refresh, evidence_read, blackboard_record_batch, update or relate calls, no run updates). Exceptions: the request states a new standing rule or decision, or the work turns out to depend on earlier work. Later requests are not covered by this note.";
+/// Shown when steering widens a self-contained request in the same turn.
+pub(crate) const WIDENED_NOTE: &str = "now refers to earlier work: the self-contained restriction for it no longer applies, and the project memory and conversation record do.";
+/// Bytes of the quoted request opening in a note.
+const MAX_HEAD_BYTES: usize = 80;
+
+/// Opening words of the request that started the turn, stored in the turn store so the
+/// scope note can name the request it governs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RequestHead(pub(crate) String);
 
 /// Whether the current request depends on earlier work. Stored in the turn store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +55,21 @@ impl RequestScope {
     /// Records the scope of a turn from the user input that started it.
     pub(crate) fn record_turn_start(turn_store: &ExtensionData, user_input: &[UserInput]) {
         turn_store.insert(classify_input(user_input));
+        let text = user_input
+            .iter()
+            .filter_map(|item| match item {
+                UserInput::Text { text, .. } => Some(text.as_str()),
+                // `UserInput` is non-exhaustive; only text has an opening to quote.
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut end = collapsed.len().min(MAX_HEAD_BYTES);
+        while !collapsed.is_char_boundary(end) {
+            end -= 1;
+        }
+        turn_store.insert(RequestHead(collapsed[..end].to_string()));
     }
 
     /// A user message that arrives during a self-contained turn (steering) can widen the
@@ -59,38 +83,100 @@ impl RequestScope {
     }
 }
 
-/// Per-turn scope note. It renders when the scope changes, and when a self-contained turn
-/// finds no note in the retained history (thread start, after compaction); a continuity
-/// turn with nothing to retract renders nothing.
-pub(crate) fn request_scope_section(scope: RequestScope) -> WorldStateSectionContribution {
-    WorldStateSectionContribution::new(
-        WORLD_STATE_ID,
-        json!({ "scope": scope.name() }),
-        move |previous| {
-            let previous_scope = match previous {
-                PreviousWorldStateSection::Known(previous) => {
-                    previous.get("scope").and_then(Value::as_str)
-                }
-                PreviousWorldStateSection::Absent | PreviousWorldStateSection::Unknown => None,
-            };
-            let note = match (previous_scope, scope) {
-                (Some(previous), current) if previous == current.name() => return None,
-                (None, RequestScope::Continuity) => return None,
-                (_, RequestScope::SelfContained) => SELF_CONTAINED_NOTE,
-                (Some(_), RequestScope::Continuity) => CONTINUITY_NOTE,
-            };
-            Some(RenderedWorldStateFragment::new(
-                "developer",
-                (START_MARKER, END_MARKER),
-                note,
-            ))
-        },
-    )
-    .with_retained_fragment_matcher(|role, text| {
-        role == "developer"
-            && text.trim_start().starts_with(START_MARKER)
-            && text.trim_end().ends_with(END_MARKER)
-    })
+/// The scope note planned for one sampling step and the scope-note bytes the current
+/// window holds once it is rendered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ScopeNotePlan {
+    pub(crate) scope: RequestScope,
+    turn_id: String,
+    /// Body rendered when the harness reports this turn's note missing or the scope widened.
+    note: Option<String>,
+    /// Bytes of scope notes this window holds, including the one planned here.
+    pub(crate) window_bytes: usize,
+}
+
+impl ScopeNotePlan {
+    /// Plans the note for `turn_id`. Each self-contained turn gets its own note naming the
+    /// request by its opening words, so a note left in history (for example after an
+    /// interrupted write) can never govern a later request; continuity turns add nothing
+    /// unless steering widened this turn's own self-contained request.
+    pub(crate) fn new(
+        previous: Option<&Value>,
+        turn_id: &str,
+        scope: RequestScope,
+        head: Option<&RequestHead>,
+    ) -> Self {
+        let previous_turn = previous
+            .and_then(|previous| previous.get("turnId"))
+            .and_then(Value::as_str);
+        let previous_scope = previous
+            .and_then(|previous| previous.get("scope"))
+            .and_then(Value::as_str);
+        let previous_bytes = previous
+            .and_then(|previous| previous.get("windowBytes"))
+            .and_then(Value::as_u64)
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .unwrap_or(0);
+        let quoted = crate::continuity::escape(
+            &serde_json::to_string(head.map_or("", |head| head.0.as_str()))
+                .unwrap_or_else(|_| "\"\"".to_string()),
+        );
+        let same_turn = previous_turn == Some(turn_id);
+        let note = match scope {
+            RequestScope::SelfContained => Some(format!(
+                "Scope note for the request that begins {quoted}: it {SELF_CONTAINED_NOTE}"
+            )),
+            RequestScope::Continuity
+                if same_turn && previous_scope == Some(RequestScope::SelfContained.name()) =>
+            {
+                Some(format!(
+                    "Scope note for the request that begins {quoted}: it {WIDENED_NOTE}"
+                ))
+            }
+            RequestScope::Continuity => None,
+        };
+        // A self-contained turn's note was already counted at an earlier step of the turn.
+        let already_counted = same_turn && previous_scope == Some(scope.name());
+        let added = match &note {
+            Some(note) if !already_counted => START_MARKER.len() + note.len() + END_MARKER.len(),
+            Some(_) | None => 0,
+        };
+        Self {
+            scope,
+            turn_id: turn_id.to_string(),
+            note,
+            window_bytes: previous_bytes.saturating_add(added),
+        }
+    }
+
+    /// The section rendering this plan. A note renders once per turn and scope, and again
+    /// when the harness reports it missing (a new window).
+    pub(crate) fn section(self) -> WorldStateSectionContribution {
+        let Self {
+            scope,
+            turn_id,
+            note,
+            window_bytes,
+        } = self;
+        let snapshot =
+            json!({ "scope": scope.name(), "turnId": turn_id, "windowBytes": window_bytes });
+        WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot, move |previous| {
+            if let PreviousWorldStateSection::Known(previous) = previous
+                && previous.get("turnId").and_then(Value::as_str) == Some(turn_id.as_str())
+                && previous.get("scope").and_then(Value::as_str) == Some(scope.name())
+            {
+                return None;
+            }
+            note.as_ref().map(|note| {
+                RenderedWorldStateFragment::new("developer", (START_MARKER, END_MARKER), note)
+            })
+        })
+        .with_retained_fragment_matcher(|role, text| {
+            role == "developer"
+                && text.trim_start().starts_with(START_MARKER)
+                && text.trim_end().ends_with(END_MARKER)
+        })
+    }
 }
 
 /// Classifies structured user input: any non-text item (image, mention, skill) is treated
@@ -271,6 +357,25 @@ const REFERENTS: &[&str] = &[
     "approach",
     "version",
     "variant",
+    // First-person-plural and second-person possessive references to shared work.
+    "we",
+    "our",
+    "ours",
+    "us",
+    "your",
+    "yours",
+    "recommended",
+    "recommendation",
+    "recommend",
+    "identified",
+    "found",
+    "noticed",
+    "flagged",
+    "spotted",
+    "mentioned",
+    "pointed out",
+    "outlined",
+    "listed",
     // Approval and authorization.
     "permission",
     "authorize",

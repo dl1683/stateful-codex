@@ -21,9 +21,7 @@ use tempfile::TempDir;
 
 const EARLIER_MARKER: &str = "EARLIER_THREAD_PROPOSAL_MARKER";
 const NARROW_REQUEST: &str = "Rename the helper in utils.py to snake_case and update its callers";
-const SELF_CONTAINED_NOTE: &str =
-    "Current request scope (applies until a later scope note): self-contained.";
-const CONTINUITY_NOTE: &str = "Current request scope (applies until a later scope note): this request may depend on earlier work";
+const SELF_CONTAINED_NOTE: &str = "Scope note for the request that begins";
 
 #[tokio::test]
 async fn self_contained_requests_defer_the_record_until_a_request_refers_to_earlier_work()
@@ -108,7 +106,6 @@ async fn self_contained_requests_defer_the_record_until_a_request_refers_to_earl
                 body.matches("<stateful_continuity>").count(),
                 body.contains(EARLIER_MARKER),
                 body.matches(SELF_CONTAINED_NOTE).count(),
-                body.matches(CONTINUITY_NOTE).count(),
             )
         })
         .collect::<Vec<_>>();
@@ -116,14 +113,15 @@ async fn self_contained_requests_defer_the_record_until_a_request_refers_to_earl
         observed,
         vec![
             // The narrow request keeps the project packet (rules and knowledge), defers the
-            // record, and carries the scope note once.
-            (true, 0, false, 1, 0),
-            // A second narrow turn adds nothing.
-            (true, 0, false, 1, 0),
-            // After compaction the note returns once with the new window.
-            (true, 0, false, 1, 0),
-            // A reply to the earlier proposal gets the record and lifts the restriction.
-            (true, 1, true, 1, 1),
+            // record, and carries a scope note naming that request.
+            (true, 0, false, 1),
+            // A second narrow request gets its own note.
+            (true, 0, false, 2),
+            // After compaction only the new request's note is in the window.
+            (true, 0, false, 1),
+            // A reply to the earlier proposal gets the record; the earlier note names only its
+            // own request, so nothing is retracted.
+            (true, 1, true, 1),
         ]
     );
     Ok(())

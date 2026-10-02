@@ -163,6 +163,19 @@ impl ContextContributor for StatefulExtension {
                 }
                 Some(_) => RequestScope::Continuity,
             };
+            // Scope notes this window already holds, plus this step's, count against the
+            // same window budget as the conversation record.
+            let scope_note = request_scope::ScopeNotePlan::new(
+                input
+                    .previous_world_state
+                    .and_then(|previous| previous.get(request_scope::WORLD_STATE_ID)),
+                input.turn_id,
+                scope,
+                input
+                    .turn_store
+                    .get::<request_scope::RequestHead>()
+                    .as_deref(),
+            );
             let mut continuity = None;
             let status = match self
                 .projects
@@ -219,14 +232,7 @@ impl ContextContributor for StatefulExtension {
                         + run.render().len()
                         + run_world_state::END_MARKER.len()
                 })
-                + match scope {
-                    RequestScope::SelfContained => {
-                        request_scope::START_MARKER.len()
-                            + request_scope::SELF_CONTAINED_NOTE.len()
-                            + request_scope::END_MARKER.len()
-                    }
-                    RequestScope::Continuity => 0,
-                };
+                + scope_note.window_bytes;
             let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
             let available_project_id = match &status {
                 ProjectIntelligenceStatus::Available { project, .. } => Some(project.id.clone()),
@@ -247,7 +253,7 @@ impl ContextContributor for StatefulExtension {
                 }
                 (None, None) => {}
             }
-            sections.push(request_scope::request_scope_section(scope));
+            sections.push(scope_note.section());
             if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }

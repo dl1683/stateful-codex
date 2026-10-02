@@ -68,6 +68,7 @@ export type StatefulAttribution = {
   route_query_calls: number;
   evidence_read_calls: number;
   steering_query_calls: number;
+  conversation_read_calls: number;
   blackboard_write_calls: number;
   context_refresh_calls: number;
   obligation_write_calls: number;
