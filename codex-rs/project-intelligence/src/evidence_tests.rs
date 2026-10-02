@@ -405,7 +405,7 @@ async fn region_route_reports_stale_index_separately_from_a_removed_file() {
     };
     indexer.refresh(index.clone()).await.expect("index project");
     let region_route = || async {
-        let region = context_map
+        context_map
             .query(crate::ContextMapQuery {
                 project_id: "project-1".to_string(),
                 text: "region_fact".to_string(),
@@ -418,8 +418,7 @@ async fn region_route_reports_stale_index_separately_from_a_removed_file() {
             .filter_map(|hit| Some((EvidenceRoute::from_hit(&hit).ok()?, hit)))
             .filter(|(route, _)| route.line_range.is_some())
             .max_by_key(|(route, _)| route.line_range.map(|range| range.end))
-            .expect("indexed region");
-        region
+            .expect("indexed region")
     };
     let (route, region) = region_route().await;
     let reader = EvidenceReader::new(context_map.clone());

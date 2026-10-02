@@ -508,3 +508,41 @@ async fn older_paused_refresh_cannot_publish_after_newer_refresh_completes() {
         1
     );
 }
+
+#[tokio::test]
+async fn ensured_project_node_is_the_node_a_later_refresh_uses() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    fs::write(root.path().join("README.md"), "# Recipes\n").expect("source fixture should write");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map);
+
+    let ensured = indexer
+        .ensure_project_node("project-1")
+        .await
+        .expect("project node is ensured without a scan");
+    assert_eq!(
+        indexer
+            .ensure_project_node("project-1")
+            .await
+            .expect("ensuring again is idempotent"),
+        ensured
+    );
+    indexer
+        .refresh(ProjectIndexRequest {
+            project_id: "project-1".to_string(),
+            roots: vec![root.path().to_path_buf()],
+        })
+        .await
+        .expect("a refresh after the ensured node succeeds");
+    assert_eq!(
+        hierarchy
+            .project_node("project-1")
+            .await
+            .expect("project node loads")
+            .map(|node| node.id),
+        Some(ensured.id)
+    );
+}

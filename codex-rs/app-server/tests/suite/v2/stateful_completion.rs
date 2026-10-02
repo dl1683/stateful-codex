@@ -432,7 +432,7 @@ async fn model_lookup_completion_with_durable_fields_is_rejected() -> Result<()>
 
 #[tokio::test]
 async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Result<()> {
-    let (output, status) = complete_lookup_after_recording(ProjectShape::Indexed).await?;
+    let (output, status) = complete_lookup_after_recording(RecordShape::Valid).await?;
     assert!(
         output.contains("agent-written project knowledge changed in this project during this run")
     );
@@ -442,22 +442,23 @@ async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Res
 
 #[tokio::test]
 async fn lookup_completion_is_allowed_when_every_record_failed() -> Result<()> {
-    let (output, status) = complete_lookup_after_recording(ProjectShape::Unindexed).await?;
+    let (output, status) = complete_lookup_after_recording(RecordShape::Rejected).await?;
     assert!(output.contains(r#"\"status\":\"completed\""#), "{output}");
     assert_eq!(status, StatefulRunStatus::Completed);
     Ok(())
 }
 
 /// Whether the project has an indexed hierarchy, which blackboard records require.
-enum ProjectShape {
-    Indexed,
-    Unindexed,
+enum RecordShape {
+    Valid,
+    /// Claims source verification without evidence, so the store rejects it.
+    Rejected,
 }
 
 /// Records one finding, then attempts a `noReusableLearning` completion. Returns the
 /// completion tool output and the run status afterwards.
 async fn complete_lookup_after_recording(
-    shape: ProjectShape,
+    shape: RecordShape,
 ) -> Result<(String, StatefulRunStatus)> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
@@ -469,12 +470,13 @@ async fn complete_lookup_after_recording(
         .with_codex_home(codex_home.path())
         .build_initialized()
         .await?;
-    let roots = match shape {
-        ProjectShape::Indexed => vec![ProjectRoot {
-            path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
-                .expect("temporary project root should be absolute"),
-        }],
-        ProjectShape::Unindexed => Vec::new(),
+    let roots = vec![ProjectRoot {
+        path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+            .expect("temporary project root should be absolute"),
+    }];
+    let verification = match shape {
+        RecordShape::Valid => "unverified",
+        RecordShape::Rejected => "sourceVerified",
     };
     let project: ProjectCreateResponse = server
         .request(|request_id| ClientRequest::ProjectCreate {
@@ -487,16 +489,14 @@ async fn complete_lookup_after_recording(
             },
         })
         .await?;
-    if let ProjectShape::Indexed = shape {
-        server
-            .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
-                request_id,
-                params: ContextMapRefreshParams {
-                    project_id: project.project.id.clone(),
-                },
-            })
-            .await?;
-    }
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: project.project.id.clone(),
+            },
+        })
+        .await?;
     let thread = server
         .start_thread(ThreadStartParams {
             project_id: Some(project.project.id.clone()),
@@ -532,7 +532,7 @@ async fn complete_lookup_after_recording(
                         "content": "The release gate is build C7-42.",
                         "importance": "high",
                         "confidenceBasisPoints": 9000,
-                        "verification": "unverified",
+                        "verification": verification,
                         "rootPromotion": "candidate"
                     }]})
                     .to_string(),
