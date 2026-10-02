@@ -452,6 +452,115 @@ async fn fresh_thread_receives_the_exact_earlier_conversation_once() -> Result<(
     Ok(())
 }
 
+/// The latest-run line follows the recalled threads: a run whose bound turn is in an
+/// archived thread no longer contributes its strategy to a fresh thread.
+#[tokio::test]
+async fn archiving_a_thread_removes_its_run_from_recall() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Archived recall".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "archived-recall-project".to_string(),
+            },
+        })
+        .await?;
+    let project_id = created.project.id;
+    let worked = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    let store =
+        StatefulRunStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs())).await?;
+    let run_id = StatefulRunId::parse("archived-recall-run")?;
+    let run = store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: project_id.clone(),
+                thread_ids: vec![worked.clone()],
+                goal: "Plan the migration.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+        )
+        .await?;
+    store
+        .update_run(
+            &run_id,
+            StatefulRunUpdate {
+                expected_revision: run.revision,
+                status: StatefulRunStatus::Running,
+                strategy: Some("ARCHIVED_STRATEGY_MARKER migrate the schema first.".to_string()),
+                result: None,
+            },
+        )
+        .await?;
+    run_turn(&mut server, &worked).await?;
+
+    let fresh_body = |server_requests: &[wiremock::Request]| -> Result<String> {
+        Ok(server_requests
+            .iter()
+            .rev()
+            .find(|request| request.url.path().ends_with("/responses"))
+            .expect("a model request should be recorded")
+            .body_json::<serde_json::Value>()?
+            .to_string())
+    };
+    let before = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut server, &before).await?;
+    let body = fresh_body(&responses.received_requests().await.unwrap_or_default())?;
+    assert!(body.contains("ARCHIVED_STRATEGY_MARKER"));
+    assert!(body.contains("archived-recall-run"));
+
+    let _: codex_app_server_protocol::ThreadArchiveResponse = server
+        .request(|request_id| ClientRequest::ThreadArchive {
+            request_id,
+            params: codex_app_server_protocol::ThreadArchiveParams {
+                thread_id: worked.clone(),
+            },
+        })
+        .await?;
+    let after = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut server, &after).await?;
+    let body = fresh_body(&responses.received_requests().await.unwrap_or_default())?;
+    assert!(!body.contains("ARCHIVED_STRATEGY_MARKER"));
+    assert!(!body.contains(&worked));
+    Ok(())
+}
+
 #[tokio::test]
 async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Result<()> {
     let responses_server = responses::start_mock_server().await;

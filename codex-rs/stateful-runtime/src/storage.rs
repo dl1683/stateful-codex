@@ -819,10 +819,10 @@ fn valid_transition(from: StatefulRunStatus, to: StatefulRunStatus) -> bool {
 
 macro_rules! enum_codec {
     ($name:ident, $parse:ident, $type:ty, {$($variant:path => $value:literal),+ $(,)?}) => {
-        fn $name(value: $type) -> &'static str {
+        pub(crate) fn $name(value: $type) -> &'static str {
             match value { $($variant => $value,)+ }
         }
-        fn $parse(value: &str) -> Result<$type, StatefulRunStoreError> {
+        pub(crate) fn $parse(value: &str) -> Result<$type, StatefulRunStoreError> {
             match value {
                 $($value => Ok($variant),)+
                 _ => Err(StatefulRunStoreError::CorruptEnum(value.to_string())),

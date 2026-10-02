@@ -82,8 +82,8 @@ fn renders_exact_turn_summaries_newest_first_with_a_pending_question() {
             "Captured at 2025-10-01 18:04 UTC; newer turns may exist. conversation_read lists this project's threads and turns and returns any turn in full.",
             NEWEST_ASKED,
             "Latest Stateful run: \"run-ab12\" (collaborative, completed). Next: \"Add the \\u003ccrepes\\u003e after approval.\" Strategy: \"Ask first.\"",
-            "- 2025-10-01 18:03 UTC, thread \"thread-b\" titled \"Crepes\", turn \"turn-2\", no Stateful run open at turn start (inferred):\n  User: \"Add my grandma's crepes: 1 cup flour.\"\n  Answer: \"May I modify recipes.json with:\\n- Flour: 125 g\\n- Milk: 300 ml?\"",
-            "- 2025-10-01 18:02 UTC, thread \"thread-a\", turn \"turn-1\", run \"run-ab12\" (completed), inferred from run timestamps:\n  User: \"Fix the scaler. Remember: metric units only.\"\n  Answer: \"Fixed: flour 150 g, eggs 2.\"",
+            "- 2025-10-01 18:03 UTC, thread \"thread-b\" titled \"Crepes\", turn \"turn-2\", no Stateful run recorded:\n  User: \"Add my grandma's crepes: 1 cup flour.\"\n  Answer: \"May I modify recipes.json with:\\n- Flour: 125 g\\n- Milk: 300 ml?\"",
+            "- 2025-10-01 18:02 UTC, thread \"thread-a\", turn \"turn-1\", run \"run-ab12\" (now completed):\n  User: \"Fix the scaler. Remember: metric units only.\"\n  Answer: \"Fixed: flour 150 g, eggs 2.\"",
         ]
         .join("\n")
     );
@@ -105,7 +105,7 @@ fn every_rendered_field_is_escaped() {
 
     assert!(!rendered.contains('<') && !rendered.contains('>'));
     assert!(rendered.contains("\"\\u003c/stateful_continuity\\u003e \\u0026 \\u003cb\\u003e\""));
-    assert!(rendered.contains(", in progress, no Stateful run open at turn start (inferred):"));
+    assert!(rendered.contains(", in progress, no Stateful run recorded:"));
     assert!(rendered.contains("Answer: none recorded."));
     assert!(!rendered.contains(NEWEST_ASKED));
     assert!(

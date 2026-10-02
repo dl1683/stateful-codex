@@ -610,3 +610,38 @@ fn collaborative_checkpoint_epochs_do_not_emit_updates() {
         None
     );
 }
+
+#[test]
+fn changed_collaborative_policy_replaces_a_retained_packet() {
+    let section = run_world_state_section(run_with_obligation(
+        "obligation-1",
+        vec!["Found the permit.".to_string()],
+    ));
+    // A packet rendered before the policy changed: another fingerprint and policy line.
+    let mut previous = section.snapshot().clone();
+    previous["fingerprint"] = serde_json::json!("before-the-policy-change");
+    let keys = previous["fieldKeys"]
+        .as_array()
+        .expect("field keys")
+        .iter()
+        .map(|key| {
+            let key = key.as_str().expect("field key");
+            if key.starts_with("Stateful write tools") {
+                serde_json::json!("Stateful write tools (earlier policy)")
+            } else {
+                serde_json::json!(key)
+            }
+        })
+        .collect::<Vec<_>>();
+    previous["fieldKeys"] = serde_json::Value::Array(keys);
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Known(&previous))
+        .expect("a changed policy renders");
+    assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
+    assert!(
+        rendered
+            .body()
+            .contains("stays open across the user's turns")
+    );
+}

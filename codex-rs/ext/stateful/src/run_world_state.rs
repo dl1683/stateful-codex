@@ -71,6 +71,8 @@ impl RunWorldStateStatus {
     fn fingerprint(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(b"codex-stateful-run-v1\0");
+        // A changed mode policy must reach runs whose earlier packet is retained in history.
+        hash(&mut hasher, COLLABORATIVE_COMPLETION);
         hash(&mut hasher, self.project_id());
         match self {
             Self::Available {

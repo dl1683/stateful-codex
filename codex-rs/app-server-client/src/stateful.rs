@@ -125,8 +125,8 @@ pub async fn start_stateful_run(
 pub enum ResumedStatefulRun {
     /// The thread had no open run, so a new run now owns the resumed prompt.
     Started,
-    /// The thread's open run in the same project and mode is still running and keeps
-    /// ownership; the resumed prompt becomes its next turn.
+    /// The thread's open run in the same project and mode was running when read; the host
+    /// binds the resumed prompt's turn to whichever run is open when that turn starts.
     Continued { run_id: String },
 }
 

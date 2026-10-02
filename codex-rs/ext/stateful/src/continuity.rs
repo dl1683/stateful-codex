@@ -29,7 +29,7 @@ pub(super) const NEWEST_ASKED: &str = "The newest answer ends with a question to
 const EMPTY: &str = "No earlier turns are recorded for this project yet.";
 const UNAVAILABLE: &str = "The project's conversation history could not be read when this record was built; earlier turns may exist. conversation_read may retrieve them.";
 
-/// Which run was open when a captured turn started, inferred from run timestamps.
+/// The run the host recorded for a captured turn when it ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum RunLabel {
     Bound {
@@ -37,7 +37,7 @@ pub(super) enum RunLabel {
         status: &'static str,
     },
     NoRun,
-    /// Run history could not be read or was too long to decide.
+    /// The binding was not recorded yet (unfinished turn) or could not be read.
     Unknown,
 }
 
@@ -201,10 +201,10 @@ fn turn_block(turn: &CapturedTurn, newest_answer: bool) -> String {
     let turn_id = quote(&turn.turn_id, usize::MAX, /*route*/ None);
     let run = match &turn.run {
         RunLabel::Bound { run_id, status } => format!(
-            "run {} ({status}), inferred from run timestamps",
+            "run {} (now {status})",
             quote(run_id, usize::MAX, /*route*/ None)
         ),
-        RunLabel::NoRun => "no Stateful run open at turn start (inferred)".to_string(),
+        RunLabel::NoRun => "no Stateful run recorded".to_string(),
         RunLabel::Unknown => "run binding unknown".to_string(),
     };
     let mut block = format!("- {when}, {thread}, turn {turn_id}{status}, {run}:");

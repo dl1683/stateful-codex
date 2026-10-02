@@ -1786,7 +1786,9 @@ async fn start_stateful_run_for_existing_thread(
     {
         ResumedStatefulRun::Started => {}
         ResumedStatefulRun::Continued { run_id } => {
-            eprintln!("Continuing Stateful run {run_id}; the prompt becomes its next turn.");
+            eprintln!(
+                "Continuing Stateful run {run_id}: the prompt becomes its next turn if the run is still running when the turn starts."
+            );
         }
     }
     Ok(())

@@ -28,6 +28,7 @@ pub use run::StatefulRunModeUpdate;
 pub use run::StatefulRunStatus;
 pub use run::StatefulRunUpdate;
 pub use run::WorkflowMode;
+pub use run_history_storage::TurnRun;
 pub use steering::NewSteeringInstruction;
 pub use steering::StatefulSteering;
 pub use steering::SteeringApplication;
