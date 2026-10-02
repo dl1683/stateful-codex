@@ -21,9 +21,7 @@ const MAX_USER_BYTES: usize = 1024;
 const MAX_CURRENT_THREAD_USER_BYTES: usize = 320;
 const MAX_NEWEST_ANSWER_BYTES: usize = 2 * 1024;
 const MAX_ANSWER_BYTES: usize = 640;
-/// Quote limits for the newest turn when its full form does not fit the budget.
-const COMPACT_USER_BYTES: usize = 256;
-const COMPACT_ANSWER_BYTES: usize = 768;
+
 const MAX_THREAD_TITLE_BYTES: usize = 60;
 const MAX_NEXT_ITEMS: usize = 2;
 const MAX_NEXT_ITEM_BYTES: usize = 240;
@@ -139,28 +137,37 @@ impl ContinuityRecord {
             .map(|turn| {
                 let block = turn_block(
                     turn,
-                    newest_answer && turn.answer.is_some(),
                     latest_run_id,
-                    TurnDetail::Full,
+                    full_limits(turn, newest_answer && turn.answer.is_some()),
                 );
                 newest_answer &= turn.answer.is_none();
                 block
             })
             .collect::<Vec<_>>();
         // Admit whole turns newest first while the omission footer they imply still fits;
-        // the newest turn falls back to a compact form rather than disappearing.
+        // the newest turn is shortened to the space left rather than disappearing.
+        let footer_bytes = |omitted_after: usize| {
+            self.footer(omitted_after)
+                .map_or(0, |footer| footer.len() + 1)
+        };
         let fits = |length: usize, block: &str, omitted_after: usize| {
-            let footer = self.footer(omitted_after);
-            length + 1 + block.len() + footer.map_or(0, |footer| footer.len() + 1) <= max_body
+            length + 1 + block.len() + footer_bytes(omitted_after) <= max_body
         };
         if let Some(newest) = self.turns.first()
             && !fits(body.len(), &blocks[0], blocks.len() - 1)
         {
+            let frame = turn_block(newest, latest_run_id, QuoteLimits { user: 0, answer: 0 }).len();
+            let room = max_body
+                .saturating_sub(body.len() + 1 + footer_bytes(blocks.len() - 1))
+                .saturating_sub(frame);
+            let user = if newest.user.is_some() { room / 4 } else { 0 };
             blocks[0] = turn_block(
                 newest,
-                newest.answer.is_some(),
                 latest_run_id,
-                TurnDetail::Compact,
+                QuoteLimits {
+                    user,
+                    answer: room - user,
+                },
             );
         }
         let mut shown = 0;
@@ -206,18 +213,29 @@ impl ContinuityRecord {
     }
 }
 
+/// Rendered-byte limits for a turn's quoted user message and answer.
 #[derive(Clone, Copy)]
-enum TurnDetail {
-    Full,
-    Compact,
+struct QuoteLimits {
+    user: usize,
+    answer: usize,
 }
 
-fn turn_block(
-    turn: &CapturedTurn,
-    newest_answer: bool,
-    latest_run_id: Option<&str>,
-    detail: TurnDetail,
-) -> String {
+fn full_limits(turn: &CapturedTurn, newest_answer: bool) -> QuoteLimits {
+    QuoteLimits {
+        user: if turn.current_thread {
+            MAX_CURRENT_THREAD_USER_BYTES
+        } else {
+            MAX_USER_BYTES
+        },
+        answer: if newest_answer {
+            MAX_NEWEST_ANSWER_BYTES
+        } else {
+            MAX_ANSWER_BYTES
+        },
+    }
+}
+
+fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: QuoteLimits) -> String {
     let when = turn
         .at_ms
         .map_or_else(|| "time unknown".to_string(), format_time);
@@ -252,26 +270,16 @@ fn turn_block(
     let route =
         |part: &str| format!("conversation_read threadId={thread_id} turnId={turn_id} part={part}");
     if let Some(user) = &turn.user {
-        let limit = match (detail, turn.current_thread) {
-            (TurnDetail::Compact, _) => COMPACT_USER_BYTES,
-            (TurnDetail::Full, true) => MAX_CURRENT_THREAD_USER_BYTES,
-            (TurnDetail::Full, false) => MAX_USER_BYTES,
-        };
         block.push_str(&format!(
             "\n  User: {}",
-            quote(user, limit, Some(&route("user")))
+            quote(user, limits.user, Some(&route("user")))
         ));
     }
     match &turn.answer {
         Some(answer) => {
-            let limit = match (detail, newest_answer) {
-                (TurnDetail::Compact, _) => COMPACT_ANSWER_BYTES,
-                (TurnDetail::Full, true) => MAX_NEWEST_ANSWER_BYTES,
-                (TurnDetail::Full, false) => MAX_ANSWER_BYTES,
-            };
             block.push_str(&format!(
                 "\n  Answer: {}",
-                quote(answer, limit, Some(&route("answer")))
+                quote(answer, limits.answer, Some(&route("answer")))
             ));
         }
         None => block.push_str("\n  Answer: none recorded."),

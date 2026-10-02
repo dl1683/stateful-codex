@@ -18,8 +18,8 @@ use sha2::Digest;
 use sha2::Sha256;
 
 const WORLD_STATE_ID: &str = "stateful_run";
-const START_MARKER: &str = "<stateful_run>";
-const END_MARKER: &str = "</stateful_run>";
+pub(super) const START_MARKER: &str = "<stateful_run>";
+pub(super) const END_MARKER: &str = "</stateful_run>";
 const UPDATE_START_MARKER: &str = "<stateful_run_update>";
 const UPDATE_END_MARKER: &str = "</stateful_run_update>";
 /// Markers plus body stay within the 9,000-byte model item bound (one byte per token

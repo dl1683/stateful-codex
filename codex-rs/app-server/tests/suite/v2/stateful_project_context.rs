@@ -449,6 +449,25 @@ async fn fresh_thread_receives_the_exact_earlier_conversation_once() -> Result<(
     // The record is rendered once per context window: the next request holds the same single
     // record in its history instead of a second insertion.
     assert_eq!(follow_up.matches("<stateful_continuity>").count(), 1);
+    // A fresh window's Stateful developer content stays within the 12 KiB window budget.
+    let fresh_request = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .nth_back(1)
+        .expect("fresh request")
+        .body_json::<serde_json::Value>()?;
+    let stateful_bytes = fresh_request["input"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["role"] == "developer")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|content| content["text"].as_str())
+        .filter(|text| text.trim_start().starts_with("<stateful"))
+        .map(str::len)
+        .sum::<usize>();
+    assert!(stateful_bytes <= 12 * 1024, "{stateful_bytes} bytes");
     Ok(())
 }
 

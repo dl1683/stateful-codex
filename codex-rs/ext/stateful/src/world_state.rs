@@ -21,8 +21,8 @@ use crate::visible_root::VisibleRoot;
 use crate::visible_root::VisibleRootRegistry;
 
 const WORLD_STATE_ID: &str = "stateful_project";
-const START_MARKER: &str = "<stateful_project>";
-const END_MARKER: &str = "</stateful_project>";
+pub(super) const START_MARKER: &str = "<stateful_project>";
+pub(super) const END_MARKER: &str = "</stateful_project>";
 const UPDATE_START_MARKER: &str = "<stateful_project_update>";
 const UPDATE_END_MARKER: &str = "</stateful_project_update>";
 pub(super) const MAX_BODY_BYTES: usize =

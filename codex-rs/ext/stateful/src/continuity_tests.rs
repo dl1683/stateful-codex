@@ -201,3 +201,39 @@ fn a_small_budget_keeps_the_newest_turn_in_compact_form() {
     assert!(!rendered.contains("turn \"turn-1\""));
     assert!(rendered.ends_with("conversation_read lists and returns them."));
 }
+
+#[test]
+fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
+    let long = "\"<quoted>\" ".repeat(400);
+    let turns = (0..4)
+        .map(|index| {
+            let mut captured = turn(
+                &format!("01a0fbad-1689-75e3-ac68-867cb758f5{index:02}"),
+                &long,
+                Some(&format!("{long}?")),
+            );
+            captured.thread_id = "01a0fbad-0c72-7143-8052-63fab09364ca".to_string();
+            captured
+        })
+        .collect();
+    let mut continuity = record(turns);
+    continuity.more_turns = true;
+    continuity.unreadable_threads = 3;
+    continuity.latest_run = Some(LatestRun {
+        id: "run-9b2fa4cb7e11c0657076792b94499865df7cb364cff9bf857bcdfe510ed32143".to_string(),
+        mode: "collaborative",
+        status: "running",
+        next: vec![long.clone(), long.clone()],
+        strategy: Some(long),
+    });
+    let rendered = continuity.render(super::MIN_FRAGMENT_BYTES);
+
+    assert!(
+        fragment_bytes(&rendered) <= super::MIN_FRAGMENT_BYTES,
+        "{} bytes",
+        fragment_bytes(&rendered)
+    );
+    assert!(rendered.contains(NEWEST_ASKED));
+    assert!(rendered.contains("turn \"01a0fbad-1689-75e3-ac68-867cb758f500\""));
+    assert!(rendered.contains("part=answer returns it in full]"));
+}

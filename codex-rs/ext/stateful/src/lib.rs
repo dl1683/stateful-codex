@@ -196,8 +196,14 @@ impl ContextContributor for StatefulExtension {
                 .await;
             // One aggregate budget for a fresh window: the conversation record gets what the
             // project and run packets leave, within its own bounds.
-            let packet_bytes =
-                status.render().0.len() + run_status.as_ref().map_or(0, |run| run.render().len());
+            let packet_bytes = world_state::START_MARKER.len()
+                + status.render().0.len()
+                + world_state::END_MARKER.len()
+                + run_status.as_ref().map_or(0, |run| {
+                    run_world_state::START_MARKER.len()
+                        + run.render().len()
+                        + run_world_state::END_MARKER.len()
+                });
             let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
             let mut sections = vec![project_world_state_section(
                 status,

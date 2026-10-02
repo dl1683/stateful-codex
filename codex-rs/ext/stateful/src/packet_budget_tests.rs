@@ -247,7 +247,10 @@ fn fresh_window_stateful_content_stays_within_its_budget() {
         WorkflowMode::Socratic,
     ] {
         // The record gets what the project and run packets leave, as the extension does.
-        let packet_bytes = project_status().render().0.len() + run_status(mode).render().len();
+        let packet_bytes = rendered_bytes(project_world_state_section(
+            project_status(),
+            /*visible_root*/ None,
+        )) + rendered_bytes(run_world_state_section(run_status(mode)));
         let sections = [
             rendered_bytes(project_world_state_section(
                 project_status(),
