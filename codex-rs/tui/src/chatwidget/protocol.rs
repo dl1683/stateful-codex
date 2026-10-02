@@ -399,6 +399,7 @@ impl ChatWidget {
             | ServerNotification::SteeringUpdated(_)
             | ServerNotification::BlackboardUpdated(_)
             | ServerNotification::StatefulAttributionCompleted(_)
+            | ServerNotification::StatefulKnowledgeCaptured(_)
             | ServerNotification::TurnTrajectoryUpdated(_) => {}
             ServerNotification::ContextCompacted(_) => {}
         }
