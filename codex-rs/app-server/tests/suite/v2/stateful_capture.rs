@@ -265,7 +265,13 @@ async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<
         .await?;
     let reuse_log =
         responses::mount_sse_sequence(&responses_server, vec![assistant("Reused.")]).await;
-    run_turn(&mut server, &second.thread.id, "How do I run the tests?").await?;
+    // The request refers to earlier work, so the conversation record is part of it.
+    run_turn(
+        &mut server,
+        &second.thread.id,
+        "Continue from the orientation: how do I run the tests?",
+    )
+    .await?;
     let body = reuse_log.single_request().body_json().to_string();
     let observed = [
         "NEWER_OUTCOME_MARKER 0",

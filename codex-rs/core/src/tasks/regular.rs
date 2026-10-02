@@ -64,6 +64,7 @@ impl SessionTask for RegularTask {
                 .emit_turn_start_lifecycle(
                     &ctx,
                     /*token_usage_at_turn_start*/ None,
+                    /*user_input*/ &[],
                     TurnStartPhase::RegularTaskStart,
                 )
                 .or_cancel(&cancellation_token)

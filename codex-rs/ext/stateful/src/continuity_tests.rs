@@ -243,3 +243,18 @@ fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
     assert!(rendered.contains("turn \"01a0fbad-1689-75e3-ac68-867cb758f500\""));
     assert!(rendered.contains("part=answer returns it in full]"));
 }
+
+#[test]
+fn deferred_section_renders_nothing_but_still_recognizes_a_record() {
+    let section = super::deferred_continuity_section("project-1");
+    let deferred = json!({ "projectId": "project-1", "deferred": true });
+    let record_text = format!("{START_MARKER}Project ID: project-1\nbody{END_MARKER}");
+    assert_eq!(
+        (
+            section.render_diff(PreviousWorldStateSection::Absent),
+            section.render_diff(PreviousWorldStateSection::Known(&deferred)),
+            section.matches_retained_fragment("developer", &record_text),
+        ),
+        (None, None, true)
+    );
+}

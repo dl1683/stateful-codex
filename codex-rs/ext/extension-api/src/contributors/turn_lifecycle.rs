@@ -5,6 +5,7 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TurnAbortReason;
+use codex_protocol::user_input::UserInput;
 
 use crate::ExtensionData;
 
@@ -25,6 +26,9 @@ pub struct TurnStartInput<'a> {
     /// Present before task registration; absent during regular-task preparation.
     /// Token-accounting contributors must remain in `BeforeTaskRegistration`.
     pub token_usage_at_turn_start: Option<&'a TokenUsage>,
+    /// User-origin input submitted to start this turn. Present before task registration;
+    /// empty during regular-task preparation and for turns started without user input.
+    pub user_input: &'a [UserInput],
     /// Store scoped to the host session runtime.
     pub session_store: &'a ExtensionData,
     /// Store scoped to this thread runtime.

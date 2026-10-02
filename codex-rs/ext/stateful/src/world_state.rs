@@ -30,6 +30,9 @@ pub(super) const MAX_BODY_BYTES: usize =
 pub(super) const MAX_ESTIMATED_TOKENS: usize = 8 * 1024;
 const MAX_PROJECT_ROOT_BYTES: usize = 4 * 1024;
 const MAX_DELTA_BYTES: usize = 8 * 1024;
+/// A Stateful product default, stated as such so it is never mistaken for, or recorded as,
+/// a user preference; explicit user or project instructions take precedence.
+pub(super) const PRODUCT_INSTALL_DEFAULT: &str = "Product default, not a user preference (user or project instructions override it): never install packages globally (pip outside a venv, npm -g, cargo install); use or create the project's local environment (.venv, uv run, node_modules).";
 const OMISSION_MARKER: &str =
     "... additional project World State lines omitted by the context bound.";
 
@@ -141,6 +144,7 @@ impl ProjectIntelligenceStatus {
             &mut body,
             "Routine memory writes are optional and every call costs the user time. Record only what a later session would otherwise lose: user rules (kind instruction, rootPromotion promoted, in the user's words), decisions with their reasons, and hard-won facts with exact values and scope. Use one blackboard_record_batch near the end of the work. Do not read sources only to obtain evidence receipts; unverified entries are fine, and the host already keeps every request and final answer. Exception: a durableLearning completion whose final obligation reports learning must select a recorded finding that preserves it.",
         );
+        append_line(&mut body, PRODUCT_INSTALL_DEFAULT);
         append_field(&mut body, "Project ID", self.project_id());
         match self {
             Self::Available {

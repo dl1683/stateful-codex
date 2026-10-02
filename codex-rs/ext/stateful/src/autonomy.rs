@@ -14,6 +14,7 @@ use codex_extension_api::TurnErrorInput;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
 use codex_extension_api::TurnStopInput;
+use codex_protocol::items::TurnItem;
 use codex_stateful_runtime::AutonomousClaimOutcome;
 use codex_stateful_runtime::AutonomousClaimRequest;
 use codex_stateful_runtime::StatefulRunId;
@@ -190,6 +191,12 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             begin_turn_attribution(self, input.turn_id, input.thread_store);
+            if input.thread_store.get::<SelectedProject>().is_some() {
+                crate::request_scope::RequestScope::record_turn_start(
+                    input.turn_store,
+                    input.user_input,
+                );
+            }
             let (Some(selected), Some(thread), Some(services)) = (
                 input.thread_store.get::<SelectedProject>(),
                 input.thread_store.get::<SelectedThread>(),
@@ -227,6 +234,20 @@ impl TurnLifecycleContributor for StatefulExtension {
                 }
             }
         })
+    }
+
+    fn on_item_completed<'a>(
+        &'a self,
+        thread_store: &'a ExtensionData,
+        turn_store: &'a ExtensionData,
+        item: &'a TurnItem,
+    ) -> ExtensionFuture<'a, ()> {
+        if let TurnItem::UserMessage(message) = item
+            && thread_store.get::<SelectedProject>().is_some()
+        {
+            crate::request_scope::RequestScope::observe_user_message(turn_store, &message.content);
+        }
+        Box::pin(std::future::ready(()))
     }
 
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {

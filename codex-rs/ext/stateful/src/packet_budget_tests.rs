@@ -52,7 +52,12 @@ use crate::world_state::project_world_state_section;
 /// 8,370 after; with five populated outcomes 14,234 (project 6,229, run 2,141, outcomes 5,864).
 /// The continuity record replaced the outcomes: 14,508 (continuity 6,138, ten long turns);
 /// under the 12 KiB aggregate window budget, 11,699 (project 6,510, run 2,397, record 2,792).
-const MAX_FIXTURE_PACKET_BYTES: usize = 13_000;
+/// The product install default (about 230 bytes) took Autonomous to 13,120 (project 6,747,
+/// run 3,561, record 2,812 at its floor).
+const MAX_FIXTURE_PACKET_BYTES: usize = 13_250;
+/// A self-contained request defers the record and adds the scope note instead (about 600
+/// bytes): Collaborative measured 9,648 bytes at a window start against 12,010.
+const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_500;
 
 const PROJECT_ID: &str = "project-1";
 
@@ -263,6 +268,17 @@ fn fresh_window_stateful_content_stays_within_its_budget() {
             )),
         ];
         let total = sections.iter().sum::<usize>();
+        let self_contained = sections[0]
+            + sections[1]
+            + crate::request_scope::START_MARKER.len()
+            + crate::request_scope::SELF_CONTAINED_NOTE.len()
+            + crate::request_scope::END_MARKER.len();
+        if mode == WorkflowMode::Collaborative {
+            assert!(
+                self_contained <= MAX_SELF_CONTAINED_PACKET_BYTES && self_contained < total,
+                "self-contained Stateful content is {self_contained} bytes (continuity {total})"
+            );
+        }
 
         assert!(
             total <= MAX_FIXTURE_PACKET_BYTES,

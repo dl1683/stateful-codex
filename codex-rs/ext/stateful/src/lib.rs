@@ -10,6 +10,7 @@ mod conversation_summaries;
 mod events;
 mod limits;
 mod read_receipts;
+mod request_scope;
 mod root_blackboard;
 mod run_world_state;
 mod services;
@@ -38,6 +39,7 @@ use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
 
 use crate::continuity::continuity_world_state_section;
+use crate::request_scope::RequestScope;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
@@ -146,6 +148,21 @@ impl ContextContributor for StatefulExtension {
                 return Vec::new();
             };
             let thread_id = input.thread_id.to_string();
+            let run_activity = self.run_activity.for_thread(&thread_id);
+            let run_status = self
+                .run_world_state(selected.project_id(), &thread_id, &run_activity)
+                .await;
+            // Autonomous and Socratic runs own a goal, and unreadable run state is not
+            // evidence of a self-contained request: both keep continuity.
+            let scope = match run_status.as_ref() {
+                None => RequestScope::of_turn(input.turn_store),
+                Some(RunWorldStateStatus::Available { run, .. })
+                    if run.value.mode == codex_stateful_runtime::WorkflowMode::Collaborative =>
+                {
+                    RequestScope::of_turn(input.turn_store)
+                }
+                Some(_) => RequestScope::Continuity,
+            };
             let mut continuity = None;
             let status = match self
                 .projects
@@ -157,15 +174,17 @@ impl ContextContributor for StatefulExtension {
                         Some(services) => services.runtime().await.ok(),
                         None => None,
                     };
-                    continuity = Some(
-                        continuity_source::gather_continuity(
-                            self.projects.as_ref(),
-                            runtime,
-                            &project.id,
-                            &thread_id,
-                        )
-                        .await,
-                    );
+                    if scope == RequestScope::Continuity {
+                        continuity = Some(
+                            continuity_source::gather_continuity(
+                                self.projects.as_ref(),
+                                runtime,
+                                &project.id,
+                                &thread_id,
+                            )
+                            .await,
+                        );
+                    }
                     let root_blackboard = self
                         .root_blackboard(&project, input.turn_id, input.turn_store)
                         .await;
@@ -190,10 +209,6 @@ impl ContextContributor for StatefulExtension {
                     }
                 }
             };
-            let run_activity = self.run_activity.for_thread(&thread_id);
-            let run_status = self
-                .run_world_state(selected.project_id(), &thread_id, &run_activity)
-                .await;
             // One aggregate budget for a fresh window: the conversation record gets what the
             // project and run packets leave, within its own bounds.
             let packet_bytes = world_state::START_MARKER.len()
@@ -203,18 +218,36 @@ impl ContextContributor for StatefulExtension {
                     run_world_state::START_MARKER.len()
                         + run.render().len()
                         + run_world_state::END_MARKER.len()
-                });
+                })
+                + match scope {
+                    RequestScope::SelfContained => {
+                        request_scope::START_MARKER.len()
+                            + request_scope::SELF_CONTAINED_NOTE.len()
+                            + request_scope::END_MARKER.len()
+                    }
+                    RequestScope::Continuity => 0,
+                };
             let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
+            let available_project_id = match &status {
+                ProjectIntelligenceStatus::Available { project, .. } => Some(project.id.clone()),
+                ProjectIntelligenceStatus::Missing { .. }
+                | ProjectIntelligenceStatus::Unavailable { .. } => None,
+            };
             let mut sections = vec![project_world_state_section(
                 status,
                 Some((self.visible_root.clone(), thread_id.clone())),
             )];
-            if let Some(continuity) = continuity {
-                sections.push(continuity_world_state_section(
+            match (continuity, available_project_id) {
+                (Some(continuity), _) => sections.push(continuity_world_state_section(
                     &continuity,
                     continuity_bytes,
-                ));
+                )),
+                (None, Some(project_id)) => {
+                    sections.push(continuity::deferred_continuity_section(&project_id));
+                }
+                (None, None) => {}
             }
+            sections.push(request_scope::request_scope_section(scope));
             if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }

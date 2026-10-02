@@ -446,6 +446,23 @@ pub(super) fn continuity_world_state_section(
     .with_retained_fragment_matcher(move |role, text| matches_fragment(role, text, &project_id))
 }
 
+/// The record's section while the current request is self-contained: it renders nothing, so
+/// the record is deferred to the first step whose request refers to earlier work (the
+/// harness reports the section absent while no record fragment is in history).
+pub(super) fn deferred_continuity_section(project_id: &str) -> WorldStateSectionContribution {
+    let project_id = project_id.to_string();
+    WorldStateSectionContribution::new(
+        WORLD_STATE_ID,
+        json!({ "projectId": project_id, "deferred": true }),
+        |_| None,
+    )
+    .with_legacy_matcher({
+        let project_id = project_id.clone();
+        move |role, text| matches_fragment(role, text, &project_id)
+    })
+    .with_retained_fragment_matcher(move |role, text| matches_fragment(role, text, &project_id))
+}
+
 fn matches_fragment(role: &str, text: &str, project_id: &str) -> bool {
     role == "developer"
         && text.trim_start().starts_with(START_MARKER)

@@ -17,6 +17,7 @@ impl Session {
         self: &Arc<Self>,
         turn_context: &TurnContext,
         token_usage_at_turn_start: Option<&TokenUsage>,
+        user_input: &[codex_protocol::user_input::UserInput],
         phase: TurnStartPhase,
     ) {
         let metadata: Arc<dyn TurnAnalyticsMetadata> = turn_context.turn_metadata_state.clone();
@@ -36,6 +37,7 @@ impl Session {
                     turn_id: turn_context.sub_id.as_str(),
                     collaboration_mode: &collaboration_mode,
                     token_usage_at_turn_start,
+                    user_input,
                     session_store: &self.services.session_extension_data,
                     thread_store: &self.services.thread_extension_data,
                     turn_store: turn_context.extension_data.as_ref(),

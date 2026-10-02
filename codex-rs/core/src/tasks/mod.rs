@@ -328,9 +328,26 @@ impl Session {
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
             .await;
+        let user_input = input
+            .iter()
+            .filter_map(|item| match item {
+                TurnInput::UserInput {
+                    content, metadata, ..
+                } if metadata.origin == codex_history::UserInputOrigin::User => {
+                    Some(content.as_slice())
+                }
+                TurnInput::UserInput { .. }
+                | TurnInput::FunctionCallOutput(_)
+                | TurnInput::ResponseItem(_)
+                | TurnInput::InterAgentCommunication(_) => None,
+            })
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
         self.emit_turn_start_lifecycle(
             turn_context.as_ref(),
             Some(&token_usage_at_turn_start),
+            &user_input,
             codex_extension_api::TurnStartPhase::BeforeTaskRegistration,
         )
         .await;
