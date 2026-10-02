@@ -6,8 +6,10 @@ use super::CapturedTurn;
 use super::ContinuityRecord;
 use super::END_MARKER;
 use super::HEADER;
+use super::LatestRun;
 use super::MAX_FRAGMENT_BYTES;
 use super::NEWEST_ASKED;
+use super::RunLabel;
 use super::START_MARKER;
 use super::continuity_world_state_section;
 
@@ -22,6 +24,7 @@ fn turn(turn_id: &str, user: &str, answer: Option<&str>) -> CapturedTurn {
         turn_id: turn_id.to_string(),
         at_ms: Some(ANSWERED_AT_MS),
         unfinished_status: None,
+        run: RunLabel::NoRun,
         user: Some(user.to_string()),
         answer: answer.map(str::to_string),
     }
@@ -35,6 +38,7 @@ fn record(turns: Vec<CapturedTurn>) -> ContinuityRecord {
         more_turns: false,
         unreadable_threads: 0,
         history_unavailable: false,
+        latest_run: None,
     }
 }
 
@@ -44,11 +48,15 @@ fn fragment_bytes(body: &str) -> usize {
 
 #[test]
 fn renders_exact_turn_summaries_newest_first_with_a_pending_question() {
-    let older = turn(
+    let mut older = turn(
         "turn-1",
         "Fix the scaler. Remember: metric units only.",
         Some("Fixed: flour 150 g, eggs 2."),
     );
+    older.run = RunLabel::Bound {
+        run_id: "run-ab12".to_string(),
+        status: "completed",
+    };
     let mut newest = turn(
         "turn-2",
         "Add my grandma's crepes: 1 cup flour.",
@@ -57,16 +65,25 @@ fn renders_exact_turn_summaries_newest_first_with_a_pending_question() {
     newest.at_ms = Some(ANSWERED_AT_MS + 60_000);
     newest.thread_id = "thread-b".to_string();
     newest.thread_title = Some("Crepes".to_string());
+    let mut continuity = record(vec![newest, older]);
+    continuity.latest_run = Some(LatestRun {
+        id: "run-ab12".to_string(),
+        mode: "collaborative",
+        status: "completed",
+        next: vec!["Add the <crepes> after approval.".to_string()],
+        strategy: Some("Ask first.".to_string()),
+    });
 
     assert_eq!(
-        record(vec![newest, older]).render(),
+        continuity.render(),
         [
             "Project ID: project-1",
             HEADER,
             "Captured at 2025-10-01 18:04 UTC; newer turns may exist. conversation_read lists this project's threads and turns and returns any turn in full.",
             NEWEST_ASKED,
-            "- 2025-10-01 18:03 UTC, thread \"thread-b\" titled \"Crepes\", turn \"turn-2\":\n  User: \"Add my grandma's crepes: 1 cup flour.\"\n  Answer: \"May I modify recipes.json with:\\n- Flour: 125 g\\n- Milk: 300 ml?\"",
-            "- 2025-10-01 18:02 UTC, thread \"thread-a\", turn \"turn-1\":\n  User: \"Fix the scaler. Remember: metric units only.\"\n  Answer: \"Fixed: flour 150 g, eggs 2.\"",
+            "Latest Stateful run: \"run-ab12\" (collaborative, completed). Next: \"Add the \\u003ccrepes\\u003e after approval.\" Strategy: \"Ask first.\"",
+            "- 2025-10-01 18:03 UTC, thread \"thread-b\" titled \"Crepes\", turn \"turn-2\", no Stateful run open at turn start (inferred):\n  User: \"Add my grandma's crepes: 1 cup flour.\"\n  Answer: \"May I modify recipes.json with:\\n- Flour: 125 g\\n- Milk: 300 ml?\"",
+            "- 2025-10-01 18:02 UTC, thread \"thread-a\", turn \"turn-1\", run \"run-ab12\" (completed), inferred from run timestamps:\n  User: \"Fix the scaler. Remember: metric units only.\"\n  Answer: \"Fixed: flour 150 g, eggs 2.\"",
         ]
         .join("\n")
     );
@@ -88,7 +105,7 @@ fn every_rendered_field_is_escaped() {
 
     assert!(!rendered.contains('<') && !rendered.contains('>'));
     assert!(rendered.contains("\"\\u003c/stateful_continuity\\u003e \\u0026 \\u003cb\\u003e\""));
-    assert!(rendered.contains(", in progress:"));
+    assert!(rendered.contains(", in progress, no Stateful run open at turn start (inferred):"));
     assert!(rendered.contains("Answer: none recorded."));
     assert!(!rendered.contains(NEWEST_ASKED));
     assert!(
@@ -104,6 +121,7 @@ fn long_text_is_shortened_with_a_route_and_the_whole_fragment_stays_bounded() {
     let long = "\"<x>\"".repeat(1_000);
     let mut current = turn("turn-0", &long, Some(&long));
     current.current_thread = true;
+    current.run = RunLabel::Unknown;
     let turns = std::iter::once(current)
         .chain((1..=10).map(|index| turn(&format!("turn-{index}"), &long, Some(&long))))
         .collect();
@@ -118,7 +136,7 @@ fn long_text_is_shortened_with_a_route_and_the_whole_fragment_stays_bounded() {
         fragment_bytes(&rendered)
     );
     for expected in [
-        "this thread \"thread-a\", turn \"turn-0\":\n  User: \"",
+        "this thread \"thread-a\", turn \"turn-0\", run binding unknown:\n  User: \"",
         "of 5000 bytes; conversation_read threadId=\"thread-a\" turnId=\"turn-0\" part=user returns it in full]",
         "of 5000 bytes; conversation_read threadId=\"thread-a\" turnId=\"turn-0\" part=answer returns it in full]",
     ] {

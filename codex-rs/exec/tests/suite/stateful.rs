@@ -288,3 +288,81 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
     assert!(requests[2].body_contains_text("The autonomous investigation is complete."));
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_stateful_resume_continues_an_open_collaborative_run() -> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    let first_response = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("response-1"),
+            responses::ev_assistant_message("message-1", "first turn answered"),
+            responses::ev_completed("response-1"),
+        ]),
+    )
+    .await;
+    test.cmd_with_server(&server)
+        .arg("--stateful")
+        .arg("collaborative")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("Establish the collaborative goal")
+        .assert()
+        .success();
+    first_response.single_request();
+
+    // The answered turn leaves the Collaborative run open; a resume continues it.
+    let second_response = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("response-2"),
+            responses::ev_assistant_message("message-2", "second turn answered"),
+            responses::ev_completed("response-2"),
+        ]),
+    )
+    .await;
+    let continued = test
+        .cmd_with_server(&server)
+        .arg("--stateful")
+        .arg("collaborative")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("resume")
+        .arg("--last")
+        .arg("Continue the collaborative goal")
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&continued.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("Continuing Stateful run"),
+        "stderr should report the continued run: {stderr}"
+    );
+    let request = second_response.single_request();
+    assert!(request.body_contains_text("Continue the collaborative goal"));
+    assert!(request.body_contains_text("Establish the collaborative goal"));
+    assert!(request.body_contains_text("stays open across the user's turns"));
+
+    // A different mode is refused with the run it would have displaced.
+    let refused = test
+        .cmd_with_server(&server)
+        .arg("--stateful")
+        .arg("autonomous")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("resume")
+        .arg("--last")
+        .arg("Take over autonomously")
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&refused.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("already has an open Stateful run")
+            && stderr.contains("it runs in collaborative mode"),
+        "stderr should name the open run and its mode: {stderr}"
+    );
+    Ok(())
+}

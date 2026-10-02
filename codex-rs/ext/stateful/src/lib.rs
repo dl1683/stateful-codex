@@ -149,9 +149,14 @@ impl ContextContributor for StatefulExtension {
                 .await
             {
                 Ok(Some(project)) => {
+                    let runtime = match self.services.as_ref() {
+                        Some(services) => services.runtime().await.ok(),
+                        None => None,
+                    };
                     continuity = Some(
                         continuity_source::gather_continuity(
                             self.projects.as_ref(),
+                            runtime,
                             &project.id,
                             &thread_id,
                         )

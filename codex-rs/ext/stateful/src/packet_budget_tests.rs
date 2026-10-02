@@ -36,6 +36,8 @@ use codex_thread_store::StoredProjectRoot;
 
 use crate::continuity::CapturedTurn;
 use crate::continuity::ContinuityRecord;
+use crate::continuity::LatestRun;
+use crate::continuity::RunLabel;
 use crate::continuity::continuity_world_state_section;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
@@ -196,6 +198,10 @@ fn continuity_record() -> ContinuityRecord {
                 turn_id: format!("01a0fbad-1689-75e3-ac68-867cb758f5{index:02}"),
                 at_ms: Some(1_759_341_720_000 - i64::from(index) * 60_000),
                 unfinished_status: None,
+                run: RunLabel::Bound {
+                    run_id: "run-1".to_string(),
+                    status: "running",
+                },
                 user: Some(
                     "Add my grandma's crepes, convert them to metric, and keep eggs whole. "
                         .repeat(30),
@@ -209,6 +215,16 @@ fn continuity_record() -> ContinuityRecord {
         more_turns: true,
         unreadable_threads: 0,
         history_unavailable: false,
+        latest_run: Some(LatestRun {
+            id: "run-1".to_string(),
+            mode: "collaborative",
+            status: "running",
+            next: vec!["Ask before writing recipes.json.".to_string()],
+            strategy: Some(
+                "Fix rounding first, then convert the recipe, then ask before writing recipes.json."
+                    .to_string(),
+            ),
+        }),
     }
 }
 
