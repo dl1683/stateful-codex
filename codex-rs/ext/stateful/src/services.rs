@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use codex_project_intelligence::BlackboardStore;
@@ -21,8 +22,9 @@ pub(super) struct ProjectIntelligenceServices {
     hierarchy: Arc<OnceCell<HierarchyStore>>,
     read_receipts: EvidenceReadReceipts,
     runtime: Arc<OnceCell<StatefulRunStore>>,
-    /// Serializes on-demand indexing so concurrent first queries index a project once.
-    on_demand_index: Arc<tokio::sync::Mutex<()>>,
+    /// One on-demand index per project, so concurrent first queries index it once and the
+    /// others wait for that publication.
+    on_demand_index: Arc<std::sync::Mutex<HashMap<String, Arc<OnceCell<()>>>>>,
 }
 
 impl ProjectIntelligenceServices {
@@ -34,7 +36,7 @@ impl ProjectIntelligenceServices {
             hierarchy: Arc::new(OnceCell::new()),
             read_receipts: EvidenceReadReceipts::default(),
             runtime: Arc::new(OnceCell::new()),
-            on_demand_index: Arc::new(tokio::sync::Mutex::new(())),
+            on_demand_index: Arc::default(),
         }
     }
 
@@ -60,8 +62,13 @@ impl ProjectIntelligenceServices {
         &self.read_receipts
     }
 
-    pub(super) fn on_demand_index(&self) -> &tokio::sync::Mutex<()> {
-        &self.on_demand_index
+    pub(super) fn on_demand_index(&self, project_id: &str) -> Arc<OnceCell<()>> {
+        self.on_demand_index
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(project_id.to_string())
+            .or_default()
+            .clone()
     }
 
     pub(super) async fn runtime(&self) -> Result<&StatefulRunStore, StatefulRunStoreError> {

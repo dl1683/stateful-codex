@@ -104,33 +104,39 @@ impl ContextMapQueryTool {
                 .await
                 .map_err(respond)?
         {
-            let _guard = self.services.on_demand_index().lock().await;
-            if !context_map
-                .has_entries(&self.project_id)
-                .await
-                .map_err(respond)?
-            {
-                let indexer = ProjectIndexer::new(
-                    self.services.hierarchy().await.map_err(respond)?.clone(),
-                    context_map.clone(),
-                );
-                let request = ProjectIndexRequest {
-                    project_id: self.project_id.clone(),
-                    roots: project
-                        .roots
-                        .iter()
-                        .map(|root| PathBuf::from(&root.path))
-                        .collect(),
-                };
-                match indexer.refresh(request.clone()).await {
-                    Ok(_) => {}
-                    Err(ProjectIndexerError::SupersededRefresh) => {
-                        indexer.refresh(request).await.map_err(respond)?;
+            let index = self.services.on_demand_index(&self.project_id);
+            index
+                .get_or_try_init(|| async {
+                    if context_map
+                        .has_entries(&self.project_id)
+                        .await
+                        .map_err(respond)?
+                    {
+                        return Ok(());
                     }
-                    Err(error) => return Err(respond(error)),
-                }
-                indexed_on_demand = true;
-            }
+                    let indexer = ProjectIndexer::new(
+                        self.services.hierarchy().await.map_err(respond)?.clone(),
+                        context_map.clone(),
+                    );
+                    let request = ProjectIndexRequest {
+                        project_id: self.project_id.clone(),
+                        roots: project
+                            .roots
+                            .iter()
+                            .map(|root| PathBuf::from(&root.path))
+                            .collect(),
+                    };
+                    match indexer.refresh(request.clone()).await {
+                        Ok(_) => {}
+                        Err(ProjectIndexerError::SupersededRefresh) => {
+                            indexer.refresh(request).await.map_err(respond)?;
+                        }
+                        Err(error) => return Err(respond(error)),
+                    }
+                    indexed_on_demand = true;
+                    Ok(())
+                })
+                .await?;
             // Either this query indexed the project or a concurrent one did while it waited.
             result = context_map.query(query).await.map_err(respond)?;
         }
