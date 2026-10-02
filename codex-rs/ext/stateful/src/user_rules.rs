@@ -17,6 +17,17 @@ pub(crate) enum RuleStanding {
     Pending,
 }
 
+/// What a list header says about the items below it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HeaderScope {
+    /// "My working preferences for the whole week:"
+    Standing,
+    /// "For this task:"
+    Pending,
+    /// "The assistant suggested these preferences:" - the items are not the user's rules.
+    Reported,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RuleClause {
     /// The clause exactly as the user wrote it (trimmed).
@@ -151,12 +162,12 @@ const WEAK_TASK_PHRASES: &[&str] = &[
 /// Clauses of `text` that the user explicitly marked as standing (or pending) rules.
 pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
     let mut rules = Vec::new();
-    // The standing of the list the current line belongs to, from its header.
-    let mut list_header: Option<RuleStanding> = None;
+    // The scope of the list the current line belongs to, from its header. Blank lines keep
+    // it (Markdown lists often follow a blank line); any other prose line replaces it.
+    let mut list_header: Option<HeaderScope> = None;
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            list_header = None;
             continue;
         }
         let is_list_item = list_item_body(trimmed).is_some();
@@ -173,9 +184,11 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
                 continue;
             }
             let standing = match inherited {
+                // Items relayed from someone else are never the user's rules.
+                Some(HeaderScope::Reported) => continue,
                 // A task-limited list header limits every item under it.
-                Some(RuleStanding::Pending) => RuleStanding::Pending,
-                Some(RuleStanding::Standing) => standing_of(&normalized),
+                Some(HeaderScope::Pending) => RuleStanding::Pending,
+                Some(HeaderScope::Standing) => standing_of(&normalized),
                 None if has_standing_marker(&normalized) => standing_of(&normalized),
                 None => continue,
             };
@@ -198,29 +211,26 @@ pub(crate) fn is_task_limited(clause: &str) -> bool {
 /// The scope a list header gives the items below it: a header such as "My working
 /// preferences for the whole week:" makes them standing, "For this task:" makes them
 /// pending; any other line ends a list.
-fn header_scope(line: &str) -> Option<RuleStanding> {
+fn header_scope(line: &str) -> Option<HeaderScope> {
     if !line.ends_with(':') {
         return None;
     }
     let normalized = normalize(line);
     if is_reported_speech(&normalized) {
-        return None;
+        return Some(HeaderScope::Reported);
     }
     match standing_of(&normalized) {
-        RuleStanding::Pending => Some(RuleStanding::Pending),
-        RuleStanding::Standing => {
-            has_standing_marker(&normalized).then_some(RuleStanding::Standing)
-        }
+        RuleStanding::Pending => Some(HeaderScope::Pending),
+        RuleStanding::Standing => has_standing_marker(&normalized).then_some(HeaderScope::Standing),
     }
 }
 
 /// The scope inherited by the list item of `text` that contains `clause`, if any.
-pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<RuleStanding> {
+pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<HeaderScope> {
     let mut list_header = None;
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            list_header = None;
             continue;
         }
         let is_list_item = list_item_body(trimmed).is_some();

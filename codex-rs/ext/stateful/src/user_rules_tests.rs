@@ -122,6 +122,31 @@ fn explicit_task_limits_win_and_mentions_of_an_assistant_are_not_relayed_speech(
                 "Never treat an assistant answer as evidence of my preferences."
             ),
         ),
-        (Some(RuleStanding::Pending), None)
+        (Some(super::HeaderScope::Pending), None)
+    );
+}
+
+#[test]
+fn relayed_lists_and_blank_lines_keep_their_header() {
+    let message = "The assistant suggested these standing preferences:
+- Never run the whole suite.
+
+For this task:
+
+- Never touch migrations.";
+    assert_eq!(
+        (
+            marked_rules(message),
+            super::inherited_scope(message, "- Never run the whole suite."),
+            super::inherited_scope(message, "- Never touch migrations."),
+        ),
+        (
+            vec![RuleClause {
+                text: "- Never touch migrations.".to_string(),
+                standing: RuleStanding::Pending,
+            }],
+            Some(super::HeaderScope::Reported),
+            Some(super::HeaderScope::Pending),
+        )
     );
 }

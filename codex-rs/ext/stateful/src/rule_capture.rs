@@ -12,6 +12,7 @@ use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::NewBlackboardEntry;
@@ -38,14 +39,29 @@ pub(crate) fn user_message_source(thread_id: &str, turn_id: &str) -> String {
 }
 
 /// Stable entry identity for a rule's exact wording within a project.
-pub(crate) fn user_rule_entry_id(project_id: &str, clause: &str) -> Option<BlackboardEntryId> {
+/// Stable identity for a rule's exact wording within a project. Retired or superseded
+/// entries are immutable history, so restating such a rule stores it again under the next
+/// generation of the same identity.
+pub(crate) fn user_rule_entry_id(
+    project_id: &str,
+    clause: &str,
+    generation: u32,
+) -> Option<BlackboardEntryId> {
     let normalized = clause.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut hasher = Sha256::new();
     hasher.update(project_id.as_bytes());
     hasher.update([0]);
     hasher.update(normalized.as_bytes());
-    BlackboardEntryId::parse(format!("stateful-user-rule-{:x}", hasher.finalize())).ok()
+    let digest = hasher.finalize();
+    let id = match generation {
+        0 => format!("stateful-user-rule-{digest:x}"),
+        generation => format!("stateful-user-rule-{digest:x}-{generation}"),
+    };
+    BlackboardEntryId::parse(id).ok()
 }
+
+/// Restatements of one wording after which a rule is no longer re-established.
+const MAX_RULE_GENERATIONS: u32 = 8;
 
 /// One user rule as the host recorded it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,8 +131,6 @@ pub(crate) async fn store_user_rule(
         turn_id,
         receipt_turn_id,
     } = source;
-    let id = user_rule_entry_id(project_id, clause)
-        .ok_or_else(|| "the rule cannot be identified".to_string())?;
     let store = services
         .blackboard()
         .await
@@ -140,64 +154,39 @@ pub(crate) async fn store_user_rule(
             });
         }
     };
-    if let Some(existing) = store
-        .get_entry(project_id, &id)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        // The user restating a pending rule as standing, in their own words, makes it apply;
-        // a later task-limited mention never demotes a standing rule.
-        if standing == RuleStanding::Standing
-            && existing.value.root_promotion != RootPromotion::Promoted
-            && existing.state == BlackboardEntryState::Active
+    // The current generation of this wording, or the first free one after inactive history.
+    let mut id = None;
+    for generation in 0..MAX_RULE_GENERATIONS {
+        let candidate = user_rule_entry_id(project_id, clause, generation)
+            .ok_or_else(|| "the rule cannot be identified".to_string())?;
+        match store
+            .get_entry(project_id, &candidate)
+            .await
+            .map_err(|error| error.to_string())?
         {
-            let promoted = store
-                .update_entry(
-                    project_id,
-                    &existing.id,
-                    BlackboardEntryUpdate {
-                        expected_revision: existing.revision,
-                        kind: existing.value.kind,
-                        content: existing.value.content.clone(),
-                        structured_value: existing.value.structured_value.clone(),
-                        confidence: existing.value.confidence,
-                        verification: existing.value.verification,
-                        importance: existing.value.importance,
-                        root_promotion: RootPromotion::Promoted,
-                        evidence: existing.value.evidence.clone(),
-                        premises: existing.value.premises.clone(),
-                        state: BlackboardEntryState::Active,
-                        superseded_by: None,
-                        provenance: BlackboardProvenance {
-                            kind: BlackboardProvenanceKind::User,
-                            source_id: user_message_source(thread_id, turn_id),
-                        },
-                    },
-                )
-                .await
-                .map_err(|error| error.to_string())?;
-            if let Some(event_sink) = event_sink {
-                event_sink.emit(StatefulEvent::BlackboardUpdated {
-                    project_id: project_id.to_string(),
-                    entity_kind: BlackboardEntityKind::Entry,
-                    entity_id: promoted.id.to_string(),
-                    revision: promoted.revision,
-                });
+            None => {
+                id = Some(candidate);
+                break;
             }
-            receipt(&promoted, CaptureOutcome::Stored);
-            return Ok(CapturedRule {
-                entry: promoted,
-                standing,
-                newly_stored: true,
-            });
+            Some(existing) if existing.state == BlackboardEntryState::Active => {
+                return reconcile_active_rule(
+                    store,
+                    event_sink,
+                    project_id,
+                    user_message_source(thread_id, turn_id),
+                    existing,
+                    standing,
+                    &receipt,
+                )
+                .await;
+            }
+            // Retired or superseded: the user restating it re-establishes it below.
+            Some(_) => {}
         }
-        receipt(&existing, CaptureOutcome::AlreadyStored);
-        return Ok(CapturedRule {
-            entry: existing,
-            standing,
-            newly_stored: false,
-        });
     }
+    let id = id.ok_or_else(|| {
+        "this rule was retired too many times to be stored again automatically".to_string()
+    })?;
     let node_id = services.project_node_id(project_id).await?;
     let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
         .map_err(|error| error.to_string())?;
@@ -238,6 +227,68 @@ pub(crate) async fn store_user_rule(
     receipt(&entry, CaptureOutcome::Stored);
     Ok(CapturedRule {
         entry,
+        standing,
+        newly_stored: true,
+    })
+}
+
+/// A pending rule restated as standing applies; a later task-limited mention never demotes a
+/// current standing rule. Receipts report the stored state.
+async fn reconcile_active_rule(
+    store: &BlackboardStore,
+    event_sink: Option<&dyn StatefulEventSink>,
+    project_id: &str,
+    source_id: String,
+    existing: BlackboardEntry,
+    standing: RuleStanding,
+    receipt: &impl Fn(&BlackboardEntry, CaptureOutcome),
+) -> Result<CapturedRule, String> {
+    if standing != RuleStanding::Standing
+        || existing.value.root_promotion == RootPromotion::Promoted
+    {
+        receipt(&existing, CaptureOutcome::AlreadyStored);
+        return Ok(CapturedRule {
+            entry: existing,
+            standing,
+            newly_stored: false,
+        });
+    }
+    let promoted = store
+        .update_entry(
+            project_id,
+            &existing.id,
+            BlackboardEntryUpdate {
+                expected_revision: existing.revision,
+                kind: existing.value.kind,
+                content: existing.value.content.clone(),
+                structured_value: existing.value.structured_value.clone(),
+                confidence: existing.value.confidence,
+                verification: existing.value.verification,
+                importance: existing.value.importance,
+                root_promotion: RootPromotion::Promoted,
+                evidence: existing.value.evidence.clone(),
+                premises: existing.value.premises.clone(),
+                state: BlackboardEntryState::Active,
+                superseded_by: None,
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id,
+                },
+            },
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    if let Some(event_sink) = event_sink {
+        event_sink.emit(StatefulEvent::BlackboardUpdated {
+            project_id: project_id.to_string(),
+            entity_kind: BlackboardEntityKind::Entry,
+            entity_id: promoted.id.to_string(),
+            revision: promoted.revision,
+        });
+    }
+    receipt(&promoted, CaptureOutcome::Stored);
+    Ok(CapturedRule {
+        entry: promoted,
         standing,
         newly_stored: true,
     })

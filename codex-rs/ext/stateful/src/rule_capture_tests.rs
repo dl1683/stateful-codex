@@ -208,3 +208,68 @@ async fn restating_a_pending_rule_as_standing_promotes_it() {
         )
     );
 }
+
+/// Restating a retired rule makes it current again.
+#[tokio::test]
+async fn restating_a_retired_rule_reactivates_it() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let message = "From now on, never run the whole test suite.";
+    let stored = capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        message,
+    )
+    .await
+    .remove(0)
+    .entry;
+    let store = services.blackboard().await.expect("blackboard");
+    store
+        .update_entry(
+            "project-1",
+            &stored.id,
+            codex_project_intelligence::BlackboardEntryUpdate {
+                expected_revision: stored.revision,
+                kind: stored.value.kind,
+                content: stored.value.content.clone(),
+                structured_value: None,
+                confidence: stored.value.confidence,
+                verification: stored.value.verification,
+                importance: stored.value.importance,
+                root_promotion: stored.value.root_promotion,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                state: codex_project_intelligence::BlackboardEntryState::Tombstoned,
+                superseded_by: None,
+                provenance: stored.value.provenance.clone(),
+            },
+        )
+        .await
+        .expect("retire");
+    let restated = capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-2",
+        message,
+    )
+    .await
+    .remove(0);
+    assert_eq!(
+        (
+            restated.entry.state,
+            restated.entry.value.root_promotion,
+            restated.newly_stored
+        ),
+        (
+            codex_project_intelligence::BlackboardEntryState::Active,
+            RootPromotion::Promoted,
+            true
+        )
+    );
+}
