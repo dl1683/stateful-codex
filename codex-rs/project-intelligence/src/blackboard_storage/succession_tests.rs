@@ -174,3 +174,60 @@ async fn invalid_successions_are_refused() {
         .expect_err("an entry cannot replace itself");
     assert!(matches!(error, BlackboardStoreError::InvalidSuccession));
 }
+
+/// A reused successor ID with different content, or a retry after the successor itself was
+/// replaced, is not a retry.
+#[tokio::test]
+async fn conflicting_retries_are_refused() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let store = store(&temp_dir).await;
+    let one_id = BlackboardEntryId::parse("decision-one").expect("ID");
+    let one = store
+        .create_entry(one_id.clone(), decision("ONE.", RootPromotion::Promoted))
+        .await
+        .expect("ONE");
+    let two_id = BlackboardEntryId::parse("decision-two").expect("ID");
+    let to_two = vec![SupersededEntry {
+        id: one_id,
+        expected_revision: one.revision,
+    }];
+    let two = store
+        .create_successor(
+            two_id.clone(),
+            decision("TWO.", RootPromotion::NotPromoted),
+            to_two.clone(),
+        )
+        .await
+        .expect("TWO")
+        .successor;
+    let different = store
+        .create_successor(
+            two_id.clone(),
+            decision("TWO, reworded.", RootPromotion::NotPromoted),
+            to_two.clone(),
+        )
+        .await
+        .expect_err("different content under the same ID");
+    store
+        .create_successor(
+            BlackboardEntryId::parse("decision-three").expect("ID"),
+            decision("THREE.", RootPromotion::NotPromoted),
+            vec![SupersededEntry {
+                id: two_id.clone(),
+                expected_revision: two.revision,
+            }],
+        )
+        .await
+        .expect("THREE");
+    let stale_retry = store
+        .create_successor(two_id, decision("TWO.", RootPromotion::NotPromoted), to_two)
+        .await
+        .expect_err("TWO is no longer current");
+    assert_eq!(
+        (
+            matches!(different, BlackboardStoreError::EntryIdentityConflict(_)),
+            matches!(stale_retry, BlackboardStoreError::EntryIdentityConflict(_)),
+        ),
+        (true, true)
+    );
+}

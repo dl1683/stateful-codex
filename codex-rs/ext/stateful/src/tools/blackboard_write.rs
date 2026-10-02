@@ -11,6 +11,7 @@ use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
@@ -298,7 +299,27 @@ impl BlackboardRecorder {
             },
         };
         let store = self.services.blackboard().await.map_err(respond)?;
-        let entry = if supersedes.is_empty() {
+        let retried = if supersedes.is_empty() {
+            None
+        } else {
+            // A repeated record whose succession already committed returns it; the entries it
+            // replaced are no longer current, so the first-write checks would refuse it.
+            store
+                .get_entry(&self.project_id, &id)
+                .await
+                .map_err(respond)?
+                .filter(|existing| {
+                    existing.state == BlackboardEntryState::Active
+                        && NewBlackboardEntry {
+                            root_promotion: existing.value.root_promotion,
+                            provenance: existing.value.provenance.clone(),
+                            ..value.clone()
+                        } == existing.value
+                })
+        };
+        let entry = if let Some(existing) = retried {
+            existing
+        } else if supersedes.is_empty() {
             store.create_entry(id, value).await.map_err(respond)?
         } else {
             // The new entry and the end of the entries it replaces commit together.

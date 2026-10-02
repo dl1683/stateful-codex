@@ -76,6 +76,12 @@ async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced(
                 "blackboard_record_batch",
                 decision("two", TWO, json!([{"alias": "E1"}])),
             ),
+            // A repeated record whose succession already committed returns it.
+            tool_call(
+                "record-two-again",
+                "blackboard_record_batch",
+                decision("two", TWO, json!([{"alias": "E1"}])),
+            ),
             assistant("Recorded TWO."),
             assistant("TWO decimal places; it replaced ONE."),
         ],
@@ -109,12 +115,15 @@ async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced(
         (
             output("stale-alias")?["results"][0]["error"].clone(),
             output("record-two")?["results"][0]["recorded"].clone(),
+            output("record-two-again")?["results"][0]["entryId"].clone()
+                == output("record-two")?["results"][0]["entryId"].clone(),
         ),
         (
             json!(
                 "E9 is not shown in full in this thread's current packet; pass entryId and revision from blackboard_query"
             ),
             json!(true),
+            true,
         )
     );
     let fresh = requests

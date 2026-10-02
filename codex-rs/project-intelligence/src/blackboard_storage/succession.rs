@@ -58,6 +58,9 @@ impl BlackboardStore {
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
+            // A retry is accepted only when it is the same request against a successor that
+            // is still current: same value (with the promotion it inherited), and every named
+            // entry superseded by it.
             let mut superseded = Vec::with_capacity(replaced.len());
             for entry in &replaced {
                 let current = load_entry(&mut transaction, &value.project_id, &entry.id)
@@ -69,6 +72,16 @@ impl BlackboardStore {
                     return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
                 }
                 superseded.push(current);
+            }
+            let mut expected = value.clone();
+            if superseded
+                .iter()
+                .any(|entry| entry.value.root_promotion == RootPromotion::Promoted)
+            {
+                expected.root_promotion = RootPromotion::Promoted;
+            }
+            if existing.state != BlackboardEntryState::Active || existing.value != expected {
+                return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
             }
             transaction.commit().await?;
             return Ok(Succession {
@@ -168,31 +181,40 @@ impl BlackboardStore {
         project_id: &str,
         successor_ids: &[BlackboardEntryId],
     ) -> Result<Vec<(BlackboardEntryId, BlackboardEntry)>, BlackboardStoreError> {
-        let mut transaction = self.pool.begin().await?;
-        let mut predecessors = Vec::new();
+        if successor_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT revision.superseded_by, entry.id
+             FROM blackboard_entries AS entry
+             JOIN blackboard_entry_revisions AS revision
+               ON revision.entry_id = entry.id AND revision.revision = entry.revision
+             WHERE revision.state = 'superseded' AND entry.project_id = ",
+        );
+        builder.push_bind(project_id);
+        builder.push(" AND revision.superseded_by IN (");
+        let mut separated = builder.separated(", ");
         for successor_id in successor_ids {
-            let predecessor_id = sqlx::query_scalar::<_, String>(
-                "SELECT entry.id
-                 FROM blackboard_entries AS entry
-                 JOIN blackboard_entry_revisions AS revision
-                   ON revision.entry_id = entry.id AND revision.revision = entry.revision
-                 WHERE entry.project_id = ? AND revision.state = 'superseded'
-                   AND revision.superseded_by = ?
-                 ORDER BY entry.updated_at_ms DESC, entry.id
-                 LIMIT 1",
-            )
-            .bind(project_id)
-            .bind(successor_id.as_str())
-            .fetch_optional(&mut *transaction)
+            separated.push_bind(successor_id.as_str());
+        }
+        builder.push(") ORDER BY revision.superseded_by, entry.updated_at_ms DESC, entry.id");
+        let mut transaction = self.pool.begin().await?;
+        // One pass over the project's superseded entries, newest first per successor.
+        let rows = builder
+            .build_query_as::<(String, String)>()
+            .fetch_all(&mut *transaction)
             .await?;
-            let Some(predecessor_id) = predecessor_id else {
+        let mut predecessors = Vec::new();
+        let mut seen = HashSet::new();
+        for (successor_id, predecessor_id) in rows {
+            if !seen.insert(successor_id.clone()) {
                 continue;
-            };
+            }
             let predecessor_id = BlackboardEntryId::parse(predecessor_id)?;
             if let Some(predecessor) =
                 load_entry(&mut transaction, project_id, &predecessor_id).await?
             {
-                predecessors.push((successor_id.clone(), predecessor));
+                predecessors.push((BlackboardEntryId::parse(successor_id)?, predecessor));
             }
         }
         transaction.commit().await?;

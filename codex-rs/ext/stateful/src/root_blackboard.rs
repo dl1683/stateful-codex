@@ -88,18 +88,20 @@ impl EntryLayout<'_> {
         );
         // What the current value replaced is decoration: it is dropped before the entry
         // itself is.
+        // Only a decoration that keeps the whole entry within its bound is tried.
         let predecessor = self.predecessors.get(hit.entry.id.as_str());
-        let decorated = predecessor.map(|predecessor| {
-            bounded_entry_line(format!("{plain}{}", replaces_suffix(predecessor)), &alias)
-        });
+        let decorated = predecessor
+            .map(|predecessor| format!("{plain}{}", replaces_suffix(predecessor)))
+            .filter(|decorated| decorated.len() <= MAX_ENTRY_BYTES);
         let plain = bounded_entry_line(plain, &alias);
-        let line = match decorated {
+        let (line, decorated_shown) = match decorated {
             Some(decorated) if try_append_line(output, &decorated, ROOT_FOOTER_RESERVE_BYTES) => {
-                Some(decorated)
+                (Some(decorated), true)
             }
-            Some(_) | None => {
-                try_append_line(output, &plain, ROOT_FOOTER_RESERVE_BYTES).then_some(plain)
-            }
+            Some(_) | None => (
+                try_append_line(output, &plain, ROOT_FOOTER_RESERVE_BYTES).then_some(plain),
+                false,
+            ),
         };
         if let Some(line) = line {
             if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
@@ -114,10 +116,10 @@ impl EntryLayout<'_> {
                     &self.identity_evidence,
                     self.evidence_audit,
                 ),
-                predecessor.map_or_else(String::new, |predecessor| format!(
-                    "|replaces:{}@{}",
-                    predecessor.id, predecessor.revision
-                )),
+                predecessor.filter(|_| decorated_shown).map_or_else(
+                    String::new,
+                    |predecessor| format!("|replaces:{}@{}", predecessor.id, predecessor.revision)
+                ),
             );
             self.entries.push(LaidOutLine {
                 key: short_digest(hit.entry.id.as_str()),
