@@ -64,5 +64,7 @@ fn allowed_while_pending(tool_name: &codex_extension_api::ToolName) -> bool {
                 | "stateful_run_read"
                 | "steering_query"
                 | "steering_reconcile"
+                // Discovery only: tools it loads are still checked here before they run.
+                | "tool_search"
         )
 }

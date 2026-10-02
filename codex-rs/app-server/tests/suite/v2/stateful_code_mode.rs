@@ -28,7 +28,7 @@ use tempfile::TempDir;
 /// sessions, so semantic text containing quotes never has to survive a
 /// model-written JavaScript string literal.
 #[tokio::test]
-async fn code_mode_keeps_prose_writes_out_of_nested_code_and_quote_safe() -> Result<()> {
+async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
@@ -118,28 +118,21 @@ async fn code_mode_keeps_prose_writes_out_of_nested_code_and_quote_safe() -> Res
         .unwrap_or_default();
     let tool_name = |tool: &Value| tool["name"].as_str().unwrap_or_default().to_string();
     let top_level = tools.iter().map(tool_name).collect::<Vec<_>>();
+    // This test model has no tool search, so the deferred Stateful tools fall back to
+    // direct exposure instead of becoming unreachable.
     for direct in [
+        "obligation_update",
         "stateful_run_update",
+        "stateful_run_read",
         "blackboard_record_batch",
+        "blackboard_relate",
+        "blackboard_update_batch",
+        "steering_reconcile",
         "conversation_read",
     ] {
         assert!(
             top_level.iter().any(|name| name == direct),
             "{direct} should be a direct model tool; saw {top_level:?}"
-        );
-    }
-    // Specialized writes and reads are deferred to tool search instead of riding in every
-    // request (this test model has no tool search, so they are simply absent).
-    for deferred in [
-        "obligation_update",
-        "stateful_run_read",
-        "blackboard_relate",
-        "blackboard_update_batch",
-        "steering_reconcile",
-    ] {
-        assert!(
-            !top_level.iter().any(|name| name == deferred),
-            "{deferred} should be deferred to tool search; saw {top_level:?}"
         );
     }
     let nested = tools

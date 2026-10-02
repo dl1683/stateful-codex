@@ -141,6 +141,7 @@ mod stateful_modes;
 mod stateful_network_authority;
 mod stateful_project_context;
 mod stateful_run;
+mod stateful_tool_search;
 mod thread_archive;
 mod thread_attachments;
 mod thread_delete;
