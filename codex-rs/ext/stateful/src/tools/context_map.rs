@@ -98,7 +98,12 @@ impl ContextMapQueryTool {
         // serialized in this process and rechecked under the lock, and a refresh superseded
         // by another process is retried once so this query sees a completed publication.
         let mut indexed_on_demand = false;
-        if result.data.is_empty() {
+        if result.data.is_empty()
+            && !context_map
+                .has_entries(&self.project_id)
+                .await
+                .map_err(respond)?
+        {
             let _guard = self.services.on_demand_index().lock().await;
             if !context_map
                 .has_entries(&self.project_id)
@@ -126,14 +131,8 @@ impl ContextMapQueryTool {
                 }
                 indexed_on_demand = true;
             }
-            if indexed_on_demand
-                || context_map
-                    .has_entries(&self.project_id)
-                    .await
-                    .map_err(respond)?
-            {
-                result = context_map.query(query).await.map_err(respond)?;
-            }
+            // Either this query indexed the project or a concurrent one did while it waited.
+            result = context_map.query(query).await.map_err(respond)?;
         }
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let may_have_more = result.truncated;
