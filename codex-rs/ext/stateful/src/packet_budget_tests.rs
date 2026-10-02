@@ -46,12 +46,13 @@ use crate::run_world_state::run_world_state_section;
 use crate::world_state::ProjectIntelligenceStatus;
 use crate::world_state::project_world_state_section;
 
-/// Rendered bytes (markers included) of the fixture's Stateful content at a window start.
+/// Rendered bytes (markers included) of the fixture's Stateful content at a window start; the
+/// record keeps at least 3 KiB, so Autonomous (larger run packet) slightly exceeds 12 KiB.
 /// Measured 2026-10-02 for Collaborative: project plus run 11,659 bytes before the trim and
 /// 8,370 after; with five populated outcomes 14,234 (project 6,229, run 2,141, outcomes 5,864).
 /// The continuity record replaced the outcomes: 14,508 (continuity 6,138, ten long turns);
 /// under the 12 KiB aggregate window budget, 11,699 (project 6,510, run 2,397, record 2,792).
-const MAX_FIXTURE_PACKET_BYTES: usize = 12_500;
+const MAX_FIXTURE_PACKET_BYTES: usize = 13_000;
 
 const PROJECT_ID: &str = "project-1";
 
