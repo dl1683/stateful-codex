@@ -9,8 +9,10 @@ use super::project_intelligence_tools;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
 
-/// Serialized size of every Stateful tool (32,827 bytes before the 2026-10-02 trim).
-const MAX_ROSTER_BYTES: usize = 18_000;
+/// Serialized size of every Stateful tool (32,827 bytes before the 2026-10-02 trim). Verified
+/// user-rule fields on the record tool took it to 18,223 while the direct roster fell to
+/// 11,032; deferred tools are loaded only through tool search.
+const MAX_ROSTER_BYTES: usize = 18_500;
 /// Every request carries the directly exposed tools, so their size is a fixed per-request
 /// cost; specialized tools are deferred to tool search.
 const MAX_DIRECT_ROSTER_BYTES: usize = 11_500;
@@ -27,6 +29,7 @@ fn stateful_tool_roster_stays_within_its_request_budget() {
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
+        crate::user_messages::UserMessageRegistry::default(),
     );
     let sizes = tools
         .iter()

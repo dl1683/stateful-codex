@@ -278,10 +278,7 @@ fn notes_share_a_bounded_reserve_and_legacy_restrictions_are_retired() {
         noted.push(section.snapshot()["noted"].as_bool());
         previous = Some(section.snapshot().clone());
     }
-    assert_eq!(
-        noted,
-        vec![Some(true), Some(true), Some(false), Some(false)]
-    );
+    assert_eq!(noted, vec![Some(true), Some(true), Some(true), Some(false)]);
 
     // A note from before notes named their request is retired once, by any later turn.
     let legacy = json!({ "scope": "selfContained" });

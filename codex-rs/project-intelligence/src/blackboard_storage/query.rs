@@ -366,7 +366,9 @@ impl BlackboardStore {
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
              WHERE entry.project_id = ? AND revision.state = 'active'
                AND revision.root_promotion = 'promoted'
-             ORDER BY CASE revision.importance
+             ORDER BY CASE WHEN revision.kind = 'instruction'
+                     AND revision.provenance_kind = 'user' THEN 0 ELSE 1 END,
+                 CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                  WHEN 'normal' THEN 2 ELSE 3 END, entry.id
              LIMIT ?",

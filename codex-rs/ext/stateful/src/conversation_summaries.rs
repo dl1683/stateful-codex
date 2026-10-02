@@ -1,15 +1,20 @@
 //! Reads of the thread store's per-turn summaries (each turn's first user message and
 //! final answer) for the selected project's top-level threads.
 
+use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_thread_store::ListThreadsParams;
+use codex_thread_store::ListTurnsParams;
+use codex_thread_store::ReadThreadParams;
 use codex_thread_store::SortDirection;
 use codex_thread_store::StoredThread;
 use codex_thread_store::StoredThreadItem;
 use codex_thread_store::StoredTurn;
+use codex_thread_store::StoredTurnItemsView;
 use codex_thread_store::StoredTurnStatus;
 use codex_thread_store::ThreadSortKey;
+use codex_thread_store::ThreadStore;
 use serde_json::Value;
 
 /// The project's unarchived threads, most recently updated first.
@@ -94,4 +99,67 @@ pub(super) fn turn_status(turn: &StoredTurn) -> Option<&'static str> {
         StoredTurnStatus::Failed => Some("failed"),
         StoredTurnStatus::InProgress => Some("in progress"),
     }
+}
+
+/// Turns scanned, in pages, when looking up one turn by its ID.
+const TURN_LOOKUP_PAGES: usize = 40;
+const TURN_LOOKUP_PAGE_SIZE: usize = 50;
+
+/// Reads a thread and checks that it is an unarchived top-level thread of `project_id`.
+pub(super) async fn project_thread(
+    threads: &dyn ThreadStore,
+    project_id: &str,
+    thread_id: &str,
+) -> Result<StoredThread, String> {
+    let parsed = ThreadId::from_string(thread_id).map_err(|error| error.to_string())?;
+    let thread = threads
+        .read_thread(ReadThreadParams {
+            thread_id: parsed,
+            include_archived: false,
+            include_history: false,
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    if thread.project_id.as_deref() != Some(project_id) || !is_top_level(&thread) {
+        return Err(format!(
+            "thread {thread_id} is not a conversation of this project"
+        ));
+    }
+    Ok(thread)
+}
+
+/// The first user message of one turn of a top-level thread of `project_id`.
+pub(super) async fn project_turn_user_text(
+    threads: &dyn ThreadStore,
+    project_id: &str,
+    thread_id: &str,
+    turn_id: &str,
+) -> Result<String, String> {
+    let thread = project_thread(threads, project_id, thread_id).await?;
+    let mut cursor = None;
+    for _ in 0..TURN_LOOKUP_PAGES {
+        let page = threads
+            .list_turns(ListTurnsParams {
+                thread_id: thread.thread_id,
+                include_archived: false,
+                cursor: cursor.take(),
+                page_size: TURN_LOOKUP_PAGE_SIZE,
+                sort_direction: SortDirection::Desc,
+                items_view: StoredTurnItemsView::Summary,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        if let Some(turn) = page.turns.iter().find(|turn| turn.turn_id == turn_id) {
+            return turn_texts(&turn.items)
+                .0
+                .ok_or_else(|| format!("turn {turn_id} has no user message"));
+        }
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    Err(format!(
+        "turn {turn_id} was not found in thread {thread_id}"
+    ))
 }

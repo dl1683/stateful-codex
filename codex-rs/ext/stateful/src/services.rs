@@ -5,8 +5,10 @@ use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::ContextMapStore;
 use codex_project_intelligence::ContextMapStoreError;
+use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::HierarchyStoreError;
+use codex_project_intelligence::ProjectIndexer;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
@@ -69,6 +71,31 @@ impl ProjectIntelligenceServices {
             .entry(project_id.to_string())
             .or_default()
             .clone()
+    }
+
+    /// The project's hierarchy node, created without a source scan when the project was
+    /// never indexed, so a first write neither fails nor waits for a full refresh.
+    pub(super) async fn project_node_id(
+        &self,
+        project_id: &str,
+    ) -> Result<HierarchyNodeId, String> {
+        let hierarchy = self.hierarchy().await.map_err(|error| error.to_string())?;
+        if let Some(node) = hierarchy
+            .project_node(project_id)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(node.id);
+        }
+        let context_map = self
+            .context_map()
+            .await
+            .map_err(|error| error.to_string())?;
+        ProjectIndexer::new(hierarchy.clone(), context_map.clone())
+            .ensure_project_node(project_id)
+            .await
+            .map(|node| node.id)
+            .map_err(|error| error.to_string())
     }
 
     pub(super) async fn runtime(&self) -> Result<&StatefulRunStore, StatefulRunStoreError> {

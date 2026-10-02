@@ -143,6 +143,7 @@ mod stateful_project_context;
 mod stateful_request_scope;
 mod stateful_run;
 mod stateful_tool_search;
+mod stateful_user_rules;
 mod thread_archive;
 mod thread_attachments;
 mod thread_delete;

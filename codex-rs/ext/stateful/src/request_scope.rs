@@ -18,14 +18,14 @@ pub(crate) const WORLD_STATE_ID: &str = "stateful_request_scope";
 pub(crate) const START_MARKER: &str = "<stateful_request_scope>";
 pub(crate) const END_MARKER: &str = "</stateful_request_scope>";
 /// Shown after the quoted opening of the request the note governs.
-pub(crate) const SELF_CONTAINED_NOTE: &str = "is self-contained. For that request only: work from the files and the project rules and knowledge shown, and make no memory reads or writes (no conversation_read, blackboard_query, context_map_query or refresh, evidence_read, blackboard_record_batch, update or relate calls, no run updates). Exceptions: the request states a new standing rule or decision, or the work turns out to depend on earlier work. Later requests are not covered by this note.";
+pub(crate) const SELF_CONTAINED_NOTE: &str = "is self-contained. For that request only: work from the files and the project rules and knowledge shown, and make no memory reads or writes (conversation_read, blackboard_query, context_map_query or refresh, evidence_read, record, update or relate calls, run updates) unless it states a new standing rule or decision, you verified a new project recipe, or the work turns out to depend on earlier work. Later requests are not covered by this note.";
 /// Shown when steering widens a self-contained request in the same turn.
 pub(crate) const WIDENED_NOTE: &str = "now refers to earlier work: the self-contained restriction for it no longer applies, and the project memory and conversation record do.";
 /// Retires notes written before notes named their request.
 pub(crate) const LEGACY_RETIREMENT: &str = "Earlier scope notes in this conversation that said they applied until a later scope note no longer apply.";
 /// Scope-note bytes one context window may hold (about two notes). Charges carried across
 /// an injected compaction can only shrink this reserve, never the record below its floor.
-pub(crate) const MAX_WINDOW_NOTE_BYTES: usize = 1_536;
+pub(crate) const MAX_WINDOW_NOTE_BYTES: usize = 2_048;
 /// Bytes of the quoted request opening in a note.
 const MAX_HEAD_BYTES: usize = 80;
 

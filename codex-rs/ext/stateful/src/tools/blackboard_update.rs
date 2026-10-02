@@ -287,6 +287,11 @@ impl BlackboardUpdateTool {
                 actual: current.revision,
             }));
         }
+        // A user rule is the user's own words: an agent may change its promotion or retire or
+        // supersede it, but never rewrite it, and promotion keeps the user's provenance.
+        let user_rule = current.value.kind == BlackboardKind::Instruction
+            && current.value.provenance.kind == BlackboardProvenanceKind::User;
+        let user_provenance = current.value.provenance.clone();
         let mut update = BlackboardEntryUpdate {
             expected_revision: current.revision,
             kind: current.value.kind,
@@ -363,6 +368,16 @@ impl BlackboardUpdateTool {
                         .as_ref()
                         .is_some_and(|value| Some(value) != update.structured_value.as_ref())
                     || (clear_structured_value && update.structured_value.is_some());
+                if user_rule && source_meaning_changed {
+                    return Err(respond(
+                        "a user rule keeps the user's exact words; record the new wording with userQuote and supersede this entry",
+                    ));
+                }
+                if !user_rule && kind == Some(BlackboardKind::Instruction) {
+                    return Err(respond(
+                        "a rule must be the user's own words; record it as kind instruction with userQuote",
+                    ));
+                }
                 let revised_verification = verification.unwrap_or(update.verification);
                 if revised_verification == BlackboardVerification::UserConfirmed
                     && (source_meaning_changed || evidence.is_some() || premises.is_some())
@@ -429,6 +444,9 @@ impl BlackboardUpdateTool {
                 update.expected_revision = expected_revision;
                 update.state = BlackboardEntryState::Tombstoned;
             }
+        }
+        if user_rule && update.state == BlackboardEntryState::Active {
+            update.provenance = user_provenance;
         }
         let entry = store
             .update_entry(&self.project_id, &id, update)

@@ -142,7 +142,7 @@ impl ProjectIntelligenceStatus {
         );
         append_line(
             &mut body,
-            "Routine memory writes are optional and every call costs the user time. Record only what a later session would otherwise lose: user rules (kind instruction, rootPromotion promoted, in the user's words), decisions with their reasons, and hard-won facts with exact values and scope. Use one blackboard_record_batch near the end of the work. Do not read sources only to obtain evidence receipts; unverified entries are fine, and the host already keeps every request and final answer. Exception: a durableLearning completion whose final obligation reports learning must select a recorded finding that preserves it.",
+            "Routine memory writes are optional and cost the user time. In one blackboard_record_batch near the end, record only what a later session would lose: user-approved decisions with reasons and verified recipes (promoted), hard-won facts with exact values and scope. The host stores rules the user marks as standing; quote any other user rule (kind instruction, userQuote). Claims about the user's preferences rest only on the User rules; label the rest inference; an earlier assistant answer, even via conversation_read, is never evidence about the user. Do not read sources only to obtain evidence receipts; unverified entries are fine, and the host already keeps every request and final answer. Exception: a durableLearning completion whose final obligation reports learning must select a recorded finding that preserves it.",
         );
         append_line(&mut body, PRODUCT_INSTALL_DEFAULT);
         append_field(&mut body, "Project ID", self.project_id());

@@ -620,6 +620,8 @@ async fn first_record_in_an_unindexed_project_succeeds() -> Result<()> {
                     "idempotencyKey": "rule-metric-only",
                     "kind": "instruction",
                     "content": "Metric only, never cups or ounces.",
+                    "userQuote": "metric only",
+                    "ruleScope": "standing",
                     "confidenceBasisPoints": 10000,
                     "verification": "unverified",
                     "importance": "high",

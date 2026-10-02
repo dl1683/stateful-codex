@@ -191,11 +191,45 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             begin_turn_attribution(self, input.turn_id, input.thread_store);
-            if input.thread_store.get::<SelectedProject>().is_some() {
+            if let Some(selected) = input.thread_store.get::<SelectedProject>() {
                 crate::request_scope::RequestScope::record_turn_start(
                     input.turn_store,
                     input.user_input,
                 );
+                if let Some(thread) = input.thread_store.get::<SelectedThread>() {
+                    self.user_messages.record(
+                        &thread.thread_id,
+                        selected.project_id(),
+                        input.turn_id,
+                        input.user_input,
+                    );
+                }
+                if let (Some(thread), Some(services)) = (
+                    input.thread_store.get::<SelectedThread>(),
+                    self.services.as_ref(),
+                ) {
+                    let text = input
+                        .user_input
+                        .iter()
+                        .filter_map(|item| match item {
+                            codex_protocol::user_input::UserInput::Text { text, .. } => {
+                                Some(text.as_str())
+                            }
+                            // `UserInput` is non-exhaustive; rules are read from text only.
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    crate::rule_capture::capture_marked_rules(
+                        services,
+                        self.event_sink.as_deref(),
+                        selected.project_id(),
+                        &thread.thread_id,
+                        input.turn_id,
+                        &text,
+                    )
+                    .await;
+                }
             }
             let (Some(selected), Some(thread), Some(services)) = (
                 input.thread_store.get::<SelectedProject>(),

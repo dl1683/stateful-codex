@@ -53,8 +53,9 @@ use crate::world_state::project_world_state_section;
 /// The continuity record replaced the outcomes: 14,508 (continuity 6,138, ten long turns);
 /// under the 12 KiB aggregate window budget, 11,699 (project 6,510, run 2,397, record 2,792).
 /// The product install default (about 230 bytes) took Autonomous to 13,120 (project 6,747,
-/// run 3,561, record 2,812 at its floor).
-const MAX_FIXTURE_PACKET_BYTES: usize = 13_250;
+/// run 3,561, record 2,812 at its floor). The provenance policy and root section headers
+/// took it to 13,360 (project 6,987).
+const MAX_FIXTURE_PACKET_BYTES: usize = 13_500;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010.
 const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_500;

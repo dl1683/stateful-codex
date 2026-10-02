@@ -24,7 +24,6 @@ use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
-use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::RootPromotion;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
@@ -34,6 +33,13 @@ use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::services::ProjectIntelligenceServices;
+
+use crate::conversation_summaries::project_turn_user_text;
+use crate::rule_capture::store_user_rule;
+use crate::user_messages::UserMessageRegistry;
+use crate::user_rules::MAX_RULE_BYTES;
+use crate::user_rules::RuleStanding;
+use crate::user_rules::clause_containing;
 
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
@@ -70,6 +76,20 @@ struct RecordArguments {
     evidence: Vec<EvidenceArguments>,
     #[serde(default)]
     premises: Vec<PremiseArguments>,
+    /// For kind instruction: the user's exact words for one rule.
+    user_quote: Option<String>,
+    /// For kind instruction: whether the rule outlives the current task.
+    rule_scope: Option<RuleScope>,
+    /// For a quote from an earlier turn: its thread (default: this thread) and turn.
+    quote_thread_id: Option<String>,
+    quote_turn_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum RuleScope {
+    Standing,
+    Task,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +118,7 @@ struct BlackboardRecorder {
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
+    user_messages: UserMessageRegistry,
 }
 
 impl BlackboardRecorder {
@@ -107,6 +128,7 @@ impl BlackboardRecorder {
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
+        user_messages: UserMessageRegistry,
     ) -> Self {
         Self {
             project_id,
@@ -114,7 +136,78 @@ impl BlackboardRecorder {
             services,
             projects,
             event_sink,
+            user_messages,
         }
+    }
+
+    /// Stores a rule only as the user wrote it: the whole sentence of a user message that
+    /// contains `userQuote`, from this thread's recorded turn starts or, by locator, an
+    /// earlier turn of a top-level thread of this project. Task-limited directions are not
+    /// stored; they stay in the conversation they were given in.
+    async fn record_instruction(
+        &self,
+        user_quote: Option<String>,
+        rule_scope: Option<RuleScope>,
+        quote_thread_id: Option<String>,
+        quote_turn_id: Option<String>,
+    ) -> Result<BlackboardEntry, FunctionCallError> {
+        let (Some(quote), Some(scope)) = (user_quote, rule_scope) else {
+            return Err(respond(
+                "kind instruction needs userQuote (the user's exact words for one rule) and ruleScope (standing or task)",
+            ));
+        };
+        if matches!(scope, RuleScope::Task) {
+            return Err(respond(
+                "nothing written: a task-limited direction applies in this conversation only",
+            ));
+        }
+        let (thread_id, turn_id, clause) = match quote_turn_id {
+            Some(turn_id) => {
+                let thread_id = quote_thread_id.unwrap_or_else(|| self.thread_id.clone());
+                let text = project_turn_user_text(
+                    self.projects.as_ref(),
+                    &self.project_id,
+                    &thread_id,
+                    &turn_id,
+                )
+                .await
+                .map_err(respond)?;
+                let clause = clause_containing(&text, &quote).ok_or_else(|| {
+                    respond(
+                        "userQuote is not inside exactly one sentence of that turn's user message",
+                    )
+                })?;
+                (thread_id, turn_id, clause)
+            }
+            None => {
+                let (message, clause) = self
+                    .user_messages
+                    .find(&self.thread_id, &self.project_id, &quote)
+                    .ok_or_else(|| {
+                        respond(
+                            "userQuote is not inside exactly one sentence of a recorded user message of this thread; for an earlier turn pass quoteThreadId and quoteTurnId",
+                        )
+                    })?;
+                (self.thread_id.clone(), message.turn_id, clause)
+            }
+        };
+        if clause.len() > MAX_RULE_BYTES {
+            return Err(respond(format!(
+                "the sentence holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
+            )));
+        }
+        store_user_rule(
+            &self.services,
+            self.event_sink.as_deref(),
+            &self.project_id,
+            &thread_id,
+            &turn_id,
+            &clause,
+            RuleStanding::Standing,
+        )
+        .await
+        .map(|captured| captured.entry)
+        .map_err(respond)
     }
 
     async fn record(
@@ -135,11 +228,29 @@ impl BlackboardRecorder {
             root_promotion,
             evidence,
             premises,
+            user_quote,
+            rule_scope,
+            quote_thread_id,
+            quote_turn_id,
         } = arguments;
         if verification == BlackboardVerification::UserConfirmed {
             return Err(FunctionCallError::RespondToModel(
                 "userConfirmed is issued only from a host-observed user action and cannot be selected by the model"
                     .to_string(),
+            ));
+        }
+        if kind == BlackboardKind::Instruction {
+            return self
+                .record_instruction(user_quote, rule_scope, quote_thread_id, quote_turn_id)
+                .await;
+        }
+        if user_quote.is_some()
+            || rule_scope.is_some()
+            || quote_thread_id.is_some()
+            || quote_turn_id.is_some()
+        {
+            return Err(respond(
+                "userQuote, ruleScope, quoteThreadId and quoteTurnId apply to kind instruction only",
             ));
         }
         let (evidence, inferred_node_id) = resolve_evidence(
@@ -200,25 +311,11 @@ impl BlackboardRecorder {
         Ok(entry)
     }
 
-    /// The project's hierarchy node, created without a source scan when the project was
-    /// never indexed, so a first write neither fails nor waits for a full refresh.
     async fn project_node_id(&self) -> Result<HierarchyNodeId, FunctionCallError> {
-        let hierarchy = self.services.hierarchy().await.map_err(respond)?;
-        if let Some(node) = hierarchy
-            .project_node(&self.project_id)
+        self.services
+            .project_node_id(&self.project_id)
             .await
-            .map_err(respond)?
-        {
-            return Ok(node.id);
-        }
-        ProjectIndexer::new(
-            hierarchy.clone(),
-            self.services.context_map().await.map_err(respond)?.clone(),
-        )
-        .ensure_project_node(&self.project_id)
-        .await
-        .map(|node| node.id)
-        .map_err(respond)
+            .map_err(FunctionCallError::RespondToModel)
     }
 
     async fn project_roots(&self) -> Result<Vec<std::path::PathBuf>, FunctionCallError> {
@@ -251,6 +348,7 @@ impl BlackboardBatchRecordTool {
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
+        user_messages: UserMessageRegistry,
     ) -> Self {
         Self {
             recorder: BlackboardRecorder::new(
@@ -259,6 +357,7 @@ impl BlackboardBatchRecordTool {
                 services.clone(),
                 projects,
                 event_sink.clone(),
+                user_messages,
             ),
             relator: BlackboardRelateTool::new(project_id, services, event_sink),
         }
@@ -439,7 +538,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} reusable findings, and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey, after the results they rest on are in: user rules (kind instruction), decisions and reasons, exact numbers with scope, failures, rejected approaches, open questions. Not routine progress or what is already shown; keep exact values and qualifiers. sourceVerified needs evidence copied unchanged from evidence_read. Items are independently idempotent."
+                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record. sourceVerified needs evidence copied from evidence_read. Items are idempotent."
             ),
             strict: false,
             defer_loading: None,
@@ -495,7 +594,11 @@ fn record_schema() -> serde_json::Value {
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
             "evidence": evidence_schema(),
-            "premises": premise_schema()
+            "premises": premise_schema(),
+            "userQuote": {"type": "string"},
+            "ruleScope": {"type": "string", "enum": ["standing", "task"]},
+            "quoteThreadId": {"type": "string"},
+            "quoteTurnId": {"type": "string"}
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false

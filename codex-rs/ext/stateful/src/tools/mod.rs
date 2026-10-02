@@ -39,6 +39,7 @@ pub(super) fn project_intelligence_tools(
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
+    user_messages: crate::user_messages::UserMessageRegistry,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
         Arc::new(blackboard::BlackboardQueryTool::new(
@@ -54,6 +55,7 @@ pub(super) fn project_intelligence_tools(
             services.clone(),
             projects.clone(),
             event_sink.clone(),
+            user_messages,
         )),
         Arc::new(blackboard_update::BlackboardUpdateTool::new(
             project_id.clone(),

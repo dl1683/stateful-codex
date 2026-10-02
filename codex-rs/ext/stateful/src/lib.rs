@@ -12,11 +12,14 @@ mod limits;
 mod read_receipts;
 mod request_scope;
 mod root_blackboard;
+mod rule_capture;
 mod run_world_state;
 mod services;
 mod socratic;
 mod source_freshness;
 mod tools;
+mod user_messages;
+mod user_rules;
 mod visible_root;
 mod world_state;
 
@@ -136,6 +139,7 @@ struct StatefulExtension {
     attribution: attribution::StatefulAttributionTracker,
     visible_root: visible_root::VisibleRootRegistry,
     run_activity: checkpoint::RunActivityRegistry,
+    user_messages: user_messages::UserMessageRegistry,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -547,6 +551,7 @@ impl ToolContributor for StatefulExtension {
             self.projects.clone(),
             self.event_sink.clone(),
             self.visible_root.clone(),
+            self.user_messages.clone(),
         )
     }
 }
@@ -567,6 +572,7 @@ pub fn install<C: Sync>(
         attribution: attribution::StatefulAttributionTracker::default(),
         visible_root: visible_root::VisibleRootRegistry::default(),
         run_activity: checkpoint::RunActivityRegistry::default(),
+        user_messages: user_messages::UserMessageRegistry::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());

@@ -12,9 +12,7 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
-use codex_protocol::ThreadId;
 use codex_thread_store::ListTurnsParams;
-use codex_thread_store::ReadThreadParams;
 use codex_thread_store::SortDirection;
 use codex_thread_store::StoredThread;
 use codex_thread_store::StoredTurnItemsView;
@@ -38,6 +36,9 @@ const THREADS_PER_PAGE: usize = 20;
 const TURNS_PER_PAGE: usize = 20;
 /// Turn pages scanned to find one turn by ID from the given (or newest) position.
 const MAX_LOOKUP_PAGES: usize = 40;
+/// Answers are the assistant's own earlier words; a later turn must not cite them as what
+/// the user said or prefers.
+const ANSWER_SOURCE: &str = "answers are the assistant's earlier words: reported history, never evidence of the user's preferences";
 const LOOKUP_PAGE_SIZE: usize = 50;
 const PREVIEW_BYTES: usize = 160;
 
@@ -104,23 +105,13 @@ impl ConversationReadTool {
 
     /// Reads a thread and checks that it is a top-level thread of the selected project.
     async fn project_thread(&self, thread_id: &str) -> Result<StoredThread, FunctionCallError> {
-        let parsed = ThreadId::from_string(thread_id).map_err(respond)?;
-        let thread = self
-            .threads
-            .read_thread(ReadThreadParams {
-                thread_id: parsed,
-                include_archived: false,
-                include_history: false,
-            })
-            .await
-            .map_err(respond)?;
-        if thread.project_id.as_deref() != Some(self.project_id.as_str()) || !is_top_level(&thread)
-        {
-            return Err(respond(format!(
-                "thread {thread_id} is not a conversation of this project"
-            )));
-        }
-        Ok(thread)
+        crate::conversation_summaries::project_thread(
+            self.threads.as_ref(),
+            &self.project_id,
+            thread_id,
+        )
+        .await
+        .map_err(respond)
     }
 
     /// Lists the project's threads, re-reading with fewer per page until the serialized
@@ -207,6 +198,7 @@ impl ConversationReadTool {
             // `cursor` is echoed so an exact read can start from the page that lists a turn.
             let result = json!({
                 "threadId": thread.thread_id.to_string(),
+                "answerSource": ANSWER_SOURCE,
                 "cursor": cursor,
                 "turns": turns,
                 "nextCursor": page.next_cursor,
@@ -290,6 +282,10 @@ fn text_page(
                 "part": match part {
                     Part::User => "user",
                     Part::Answer => "answer",
+                },
+                "source": match part {
+                    Part::User => "the user's own message",
+                    Part::Answer => ANSWER_SOURCE,
                 },
                 "totalBytes": text.len(),
                 "offset": offset,
