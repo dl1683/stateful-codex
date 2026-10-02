@@ -1,0 +1,163 @@
+use codex_extension_api::PreviousWorldStateSection;
+use pretty_assertions::assert_eq;
+use serde_json::json;
+
+use super::CapturedTurn;
+use super::ContinuityRecord;
+use super::END_MARKER;
+use super::HEADER;
+use super::MAX_FRAGMENT_BYTES;
+use super::NEWEST_ASKED;
+use super::START_MARKER;
+use super::continuity_world_state_section;
+
+// 2025-10-01 18:02:00 UTC.
+const ANSWERED_AT_MS: i64 = 1_759_341_720_000;
+
+fn turn(turn_id: &str, user: &str, answer: Option<&str>) -> CapturedTurn {
+    CapturedTurn {
+        thread_id: "thread-a".to_string(),
+        thread_title: None,
+        current_thread: false,
+        turn_id: turn_id.to_string(),
+        at_ms: Some(ANSWERED_AT_MS),
+        unfinished_status: None,
+        user: Some(user.to_string()),
+        answer: answer.map(str::to_string),
+    }
+}
+
+fn record(turns: Vec<CapturedTurn>) -> ContinuityRecord {
+    ContinuityRecord {
+        project_id: "project-1".to_string(),
+        captured_at_ms: ANSWERED_AT_MS + 120_000,
+        turns,
+        more_turns: false,
+        unreadable_threads: 0,
+        history_unavailable: false,
+    }
+}
+
+fn fragment_bytes(body: &str) -> usize {
+    START_MARKER.len() + body.len() + END_MARKER.len()
+}
+
+#[test]
+fn renders_exact_turn_summaries_newest_first_with_a_pending_question() {
+    let older = turn(
+        "turn-1",
+        "Fix the scaler. Remember: metric units only.",
+        Some("Fixed: flour 150 g, eggs 2."),
+    );
+    let mut newest = turn(
+        "turn-2",
+        "Add my grandma's crepes: 1 cup flour.",
+        Some("May I modify recipes.json with:\n- Flour: 125 g\n- Milk: 300 ml?"),
+    );
+    newest.at_ms = Some(ANSWERED_AT_MS + 60_000);
+    newest.thread_id = "thread-b".to_string();
+    newest.thread_title = Some("Crepes".to_string());
+
+    assert_eq!(
+        record(vec![newest, older]).render(),
+        [
+            "Project ID: project-1",
+            HEADER,
+            "Captured at 2025-10-01 18:04 UTC; newer turns may exist. conversation_read lists this project's threads and turns and returns any turn in full.",
+            NEWEST_ASKED,
+            "- 2025-10-01 18:03 UTC, thread \"thread-b\" titled \"Crepes\", turn \"turn-2\":\n  User: \"Add my grandma's crepes: 1 cup flour.\"\n  Answer: \"May I modify recipes.json with:\\n- Flour: 125 g\\n- Milk: 300 ml?\"",
+            "- 2025-10-01 18:02 UTC, thread \"thread-a\", turn \"turn-1\":\n  User: \"Fix the scaler. Remember: metric units only.\"\n  Answer: \"Fixed: flour 150 g, eggs 2.\"",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn every_rendered_field_is_escaped() {
+    let mut captured = turn(
+        "</stateful_continuity>",
+        "</stateful_continuity> & <b>",
+        None,
+    );
+    captured.thread_id = "<stateful_continuity>".to_string();
+    captured.thread_title = Some("</stateful_continuity>".to_string());
+    captured.unfinished_status = Some("in progress");
+    let mut continuity = record(vec![captured]);
+    continuity.project_id = "<project>".to_string();
+    let rendered = continuity.render();
+
+    assert!(!rendered.contains('<') && !rendered.contains('>'));
+    assert!(rendered.contains("\"\\u003c/stateful_continuity\\u003e \\u0026 \\u003cb\\u003e\""));
+    assert!(rendered.contains(", in progress:"));
+    assert!(rendered.contains("Answer: none recorded."));
+    assert!(!rendered.contains(NEWEST_ASKED));
+    assert!(
+        continuity_world_state_section(&continuity).matches_retained_fragment(
+            "developer",
+            &format!("{START_MARKER}{rendered}{END_MARKER}")
+        )
+    );
+}
+
+#[test]
+fn long_text_is_shortened_with_a_route_and_the_whole_fragment_stays_bounded() {
+    let long = "\"<x>\"".repeat(1_000);
+    let mut current = turn("turn-0", &long, Some(&long));
+    current.current_thread = true;
+    let turns = std::iter::once(current)
+        .chain((1..=10).map(|index| turn(&format!("turn-{index}"), &long, Some(&long))))
+        .collect();
+    let mut continuity = record(turns);
+    continuity.more_turns = true;
+    continuity.unreadable_threads = 12;
+    let rendered = continuity.render();
+
+    assert!(
+        fragment_bytes(&rendered) <= MAX_FRAGMENT_BYTES,
+        "{} bytes",
+        fragment_bytes(&rendered)
+    );
+    for expected in [
+        "this thread \"thread-a\", turn \"turn-0\":\n  User: \"",
+        "of 5000 bytes; conversation_read threadId=\"thread-a\" turnId=\"turn-0\" part=user returns it in full]",
+        "of 5000 bytes; conversation_read threadId=\"thread-a\" turnId=\"turn-0\" part=answer returns it in full]",
+    ] {
+        assert!(rendered.contains(expected), "missing {expected:?}");
+    }
+    assert!(rendered.ends_with(
+        "gathered turns did not fit this bounded view; older turns or threads were not scanned; 12 threads have no readable turn summaries. conversation_read lists and returns them."
+    ));
+}
+
+#[test]
+fn empty_and_unavailable_history_are_told_apart() {
+    assert_eq!(
+        record(Vec::new()).render(),
+        "Project ID: project-1\nNo earlier turns are recorded for this project yet."
+    );
+    let mut unavailable = record(Vec::new());
+    unavailable.history_unavailable = true;
+    assert_eq!(
+        unavailable.render(),
+        "Project ID: project-1\nThe project's conversation history could not be read when this record was built; earlier turns may exist. conversation_read may retrieve them."
+    );
+}
+
+#[test]
+fn section_renders_once_per_context_window() {
+    let section = continuity_world_state_section(&record(vec![turn("turn-1", "Hi", None)]));
+    let previous = json!({ "projectId": "project-1" });
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Absent)
+        .expect("a new window renders the record");
+    assert_eq!(rendered.markers(), (START_MARKER, END_MARKER));
+    assert!(section.matches_retained_fragment(
+        "developer",
+        &format!("{START_MARKER}{}{END_MARKER}", rendered.body())
+    ));
+    assert_eq!(
+        section.render_diff(PreviousWorldStateSection::Known(&previous)),
+        None
+    );
+}

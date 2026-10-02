@@ -122,12 +122,6 @@ pub struct StatefulRun {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StatefulRunOutcome {
-    pub run: StatefulRun,
-    pub final_obligation: Option<StatefulObligation>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatefulRunUpdate {
     pub expected_revision: u64,
     pub status: StatefulRunStatus,

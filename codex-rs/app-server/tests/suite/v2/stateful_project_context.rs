@@ -334,8 +334,7 @@ async fn unchecked_user_confirmed_evidence_replaces_the_current_packet() -> Resu
 }
 
 #[tokio::test]
-async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_history() -> Result<()>
-{
+async fn fresh_thread_receives_the_exact_earlier_conversation_once() -> Result<()> {
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses.uri())
@@ -381,7 +380,7 @@ async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_his
             run_id.clone(),
             NewStatefulRun {
                 project_id: created.project.id.clone(),
-                thread_ids: vec![first.thread.id],
+                thread_ids: vec![first.thread.id.clone()],
                 goal: "Determine the deployment gate.".to_string(),
                 mode: WorkflowMode::Collaborative,
                 budget: RunBudget {
@@ -427,18 +426,29 @@ async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_his
         })
         .await?;
     run_turn(&mut server, &second.thread.id).await?;
+    run_turn(&mut server, &second.thread.id).await?;
     let requests = responses.received_requests().await.unwrap_or_default();
-    let body = requests
+    let bodies = requests
         .iter()
-        .rev()
-        .find(|request| request.url.path().ends_with("/responses"))
-        .expect("fresh-thread model request should be recorded")
-        .body_json::<serde_json::Value>()?
-        .to_string();
-    assert!(body.contains("<stateful_project_outcomes>"));
-    assert!(body.contains("The deployment gate is green only after checksum verification."));
-    assert!(body.contains("Checksum verification is the decisive deployment condition."));
-    assert!(!body.contains("FIRST_THREAD_PRIVATE_TRANSCRIPT_MARKER"));
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .map(|request| {
+            request
+                .body_json::<serde_json::Value>()
+                .map(|body| body.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let [.., fresh, follow_up] = bodies.as_slice() else {
+        panic!("both fresh-thread model requests should be recorded");
+    };
+    // The earlier thread's exact request and final answer reach the fresh thread.
+    assert!(fresh.contains("<stateful_continuity>"));
+    assert!(fresh.contains("FIRST_THREAD_PRIVATE_TRANSCRIPT_MARKER"));
+    assert!(fresh.contains(&first.thread.id));
+    assert!(fresh.contains("Answer: \\\"Done\\\""));
+    assert!(!fresh.contains("<stateful_project_outcomes>"));
+    // The record is rendered once per context window: the next request holds the same single
+    // record in its history instead of a second insertion.
+    assert_eq!(follow_up.matches("<stateful_continuity>").count(), 1);
     Ok(())
 }
 

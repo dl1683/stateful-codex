@@ -4,10 +4,11 @@ mod attribution;
 mod autonomy;
 mod checkpoint;
 mod completion;
+mod continuity;
+mod continuity_source;
 mod conversation_summaries;
 mod events;
 mod limits;
-mod outcome_world_state;
 mod read_receipts;
 mod root_blackboard;
 mod run_world_state;
@@ -36,8 +37,7 @@ use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
 
-use crate::outcome_world_state::ProjectOutcomesStatus;
-use crate::outcome_world_state::project_outcomes_world_state_section;
+use crate::continuity::continuity_world_state_section;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
@@ -141,12 +141,22 @@ impl ContextContributor for StatefulExtension {
             let Some(selected) = input.thread_store.get::<SelectedProject>() else {
                 return Vec::new();
             };
+            let thread_id = input.thread_id.to_string();
+            let mut continuity = None;
             let status = match self
                 .projects
                 .read_project(selected.project_id().to_string())
                 .await
             {
                 Ok(Some(project)) => {
+                    continuity = Some(
+                        continuity_source::gather_continuity(
+                            self.projects.as_ref(),
+                            &project.id,
+                            &thread_id,
+                        )
+                        .await,
+                    );
                     let root_blackboard = self
                         .root_blackboard(&project, input.turn_id, input.turn_store)
                         .await;
@@ -171,13 +181,12 @@ impl ContextContributor for StatefulExtension {
                     }
                 }
             };
-            let thread_id = input.thread_id.to_string();
             let mut sections = vec![project_world_state_section(
                 status,
                 Some((self.visible_root.clone(), thread_id.clone())),
             )];
-            if let Some(outcomes) = self.project_outcomes(selected.project_id()).await {
-                sections.push(project_outcomes_world_state_section(outcomes));
+            if let Some(continuity) = continuity {
+                sections.push(continuity_world_state_section(&continuity));
             }
             let run_activity = self.run_activity.for_thread(&thread_id);
             if let Some(run_status) = self
@@ -208,43 +217,6 @@ impl StatefulExtension {
                 None
             }
         }
-    }
-
-    async fn project_outcomes(&self, project_id: &str) -> Option<ProjectOutcomesStatus> {
-        const MAX_OUTCOMES: usize = 5;
-
-        let services = self.services.as_ref()?;
-        let store = match services.runtime().await {
-            Ok(store) => store,
-            Err(error) => {
-                tracing::warn!(%project_id, %error, "failed to open Stateful outcome store");
-                return Some(ProjectOutcomesStatus::Unavailable {
-                    project_id: project_id.to_string(),
-                });
-            }
-        };
-        let mut outcomes = match store
-            .recent_completed_outcomes(project_id, (MAX_OUTCOMES + 1) as u32)
-            .await
-        {
-            Ok(outcomes) => outcomes,
-            Err(error) => {
-                tracing::warn!(%project_id, %error, "failed to load recent Stateful outcomes");
-                return Some(ProjectOutcomesStatus::Unavailable {
-                    project_id: project_id.to_string(),
-                });
-            }
-        };
-        if outcomes.is_empty() {
-            return None;
-        }
-        let has_more = outcomes.len() > MAX_OUTCOMES;
-        outcomes.truncate(MAX_OUTCOMES);
-        Some(ProjectOutcomesStatus::Available {
-            project_id: project_id.to_string(),
-            outcomes,
-            has_more,
-        })
     }
 
     async fn root_blackboard(

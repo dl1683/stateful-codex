@@ -41,11 +41,10 @@ const ORIENTATION_RESULT: &str = "ORIENTATION_RESULT_MARKER The orientation is c
 const CAPTURED_FINDING: &str = "Textkit normalizes text: textkit/cli.py parses arguments and delegates to textkit/core.py; the README documents `python -m pytest` as the test command (not executed).";
 
 /// An orientation that reads sources without changing them captures its reusable
-/// findings, completes with durableLearning, and a fresh thread still receives those
-/// findings after five newer outcomes have pushed the orientation result out of the
-/// recent-outcome window.
+/// findings and completes with durableLearning; a fresh thread receives those findings and
+/// the orientation request itself, while run results without conversation are not recalled.
 #[tokio::test]
-async fn orientation_findings_reach_a_fresh_thread_after_outcome_eviction() -> Result<()> {
+async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -280,20 +279,22 @@ async fn orientation_findings_reach_a_fresh_thread_after_outcome_eviction() -> R
     assert_eq!(
         observed,
         [
-            ("NEWER_OUTCOME_MARKER 0", true),
-            ("NEWER_OUTCOME_MARKER 4", true),
+            // Run results with no conversation behind them are not recalled.
+            ("NEWER_OUTCOME_MARKER 0", false),
+            ("NEWER_OUTCOME_MARKER 4", false),
             (CAPTURED_FINDING, true),
             ("ORIENTATION_RESULT_MARKER", false),
             ("ORIENTATION_LEARNING_MARKER", false),
-            ("ORIENTATION_TRANSCRIPT_MARKER", false),
+            // The orientation request is recalled from the earlier thread's turn summary.
+            ("ORIENTATION_TRANSCRIPT_MARKER", true),
         ]
     );
     Ok(())
 }
 
-/// A fresh thread browses to an earlier request with conversation_read: the project's
-/// threads, that thread's turns, and the exact text, paged at a character boundary within
-/// the result budget.
+/// A fresh thread sees an earlier request shortened in its continuity record and browses
+/// to it with conversation_read: the project's threads, that thread's turns, and the exact
+/// text, paged at a character boundary within the result budget.
 #[tokio::test]
 async fn model_reads_a_shortened_earlier_turn_in_full() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -368,6 +369,12 @@ async fn model_reads_a_shortened_earlier_turn_in_full() -> Result<()> {
 
     let requests = recall_log.requests();
     assert_eq!(requests.len(), 4);
+    let first_body = requests[0].body_json().to_string();
+    assert!(first_body.contains(&format!(
+        "of {} bytes; conversation_read threadId=",
+        long_request.len()
+    )));
+    assert!(!first_body.contains("TAIL_OF_THE_LONG_REQUEST"));
     let output = |index: usize, call_id: &str| -> Result<Value> {
         Ok(serde_json::from_str(
             &requests[index]

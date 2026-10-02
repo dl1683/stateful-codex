@@ -36,6 +36,7 @@ use super::stateful_project_context::promote_root_fact;
 use super::stateful_project_context::seed_root_blackboard;
 
 const ROOT: (&str, &str) = ("<stateful_project>", "</stateful_project>");
+const CONTINUITY: (&str, &str) = ("<stateful_continuity>", "</stateful_continuity>");
 const UPDATE: (&str, &str) = ("<stateful_project_update>", "</stateful_project_update>");
 const SEEDED_FACT: &str = "A decisive project fact survives every thread view.";
 const LATER_FACT: &str = "A later project decision changes the root.";
@@ -202,7 +203,141 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
 
     // The mid-turn checkpoint installs the root; the manual checkpoint leaves it to the next turn.
     assert_eq!(checkpoint_root_counts(&rollout)?, vec![1, 0]);
+
+    // The continuity record is installed once per context window: every request holds exactly
+    // one, and the record rebuilt at the mid-turn boundary already shows that turn in progress.
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| continuity_records(request).len())
+            .collect::<Vec<_>>(),
+        vec![1; 9]
+    );
+    assert!(
+        continuity_records(mid_turn_continuation)[0].contains("in progress"),
+        "{:?}",
+        continuity_records(mid_turn_continuation)
+    );
     Ok(())
+}
+
+/// Repeated mid-turn compactions and a compaction at a turn boundary each leave exactly one
+/// continuity record in the next request, and the boundary record already shows the turn
+/// that just finished.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn continuity_record_is_reinstalled_once_after_every_compaction() -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let over_limit_call = |id: &str| {
+        responses::sse(vec![
+            responses::ev_function_call(&format!("{id}-call"), "unsupported_tool", "{}"),
+            responses::ev_completed_with_tokens(id, /*total_tokens*/ 330_000),
+        ])
+    };
+    let reply = |id: &str, total_tokens| {
+        responses::sse(vec![
+            responses::ev_assistant_message(&format!("{id}-message"), "Done"),
+            responses::ev_completed_with_tokens(id, total_tokens),
+        ])
+    };
+    let mock = responses::mount_sse_sequence(
+        &server,
+        vec![
+            over_limit_call("first-over-limit"),
+            reply("first-summary", /*total_tokens*/ 200),
+            over_limit_call("second-over-limit"),
+            reply("second-summary", /*total_tokens*/ 200),
+            reply("over-limit-answer", /*total_tokens*/ 330_000),
+            reply("boundary-summary", /*total_tokens*/ 200),
+            reply("next-turn", /*total_tokens*/ 120),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .enable_feature(Feature::Sqlite)
+        .with_root_config(&format!(
+            "compact_prompt = \"{COMPACT_PROMPT}\"
+model_auto_compact_token_limit = 200000"
+        ))
+        .with_provider_config("supports_websockets = false")
+        .write(codex_home.path())?;
+    let mut app = start_app(codex_home.path()).await?;
+    let created: ProjectCreateResponse = app
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Repeated compaction".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "repeated-compaction-project".to_string(),
+            },
+        })
+        .await?;
+    let thread_id = app
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut app, &thread_id).await?;
+    run_turn(&mut app, &thread_id).await?;
+
+    let requests = mock.requests();
+    let phases = requests
+        .iter()
+        .map(|request| {
+            let metadata: Value = serde_json::from_str(
+                &request
+                    .header("x-codex-turn-metadata")
+                    .unwrap_or_else(|| "{}".to_string()),
+            )
+            .unwrap_or_default();
+            metadata["compaction"]["phase"].as_str().map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        phases,
+        vec![
+            None,
+            Some("mid_turn".to_string()),
+            None,
+            Some("mid_turn".to_string()),
+            None,
+            Some("pre_turn".to_string()),
+            None,
+        ]
+    );
+    let records = requests
+        .iter()
+        .zip(&phases)
+        .filter(|(_, phase)| phase.is_none())
+        .map(|(request, _)| continuity_records(request))
+        .collect::<Vec<_>>();
+    assert_eq!(records.iter().map(Vec::len).collect::<Vec<_>>(), vec![1; 4]);
+    assert!(records[3][0].contains("Continue the project work."));
+    Ok(())
+}
+
+/// Well-formed continuity records in one model request.
+fn continuity_records(request: &ResponsesRequest) -> Vec<String> {
+    request.body_json()["input"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["role"] == "developer")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|content| content["text"].as_str())
+        .map(str::trim)
+        .filter(|text| {
+            text.starts_with(CONTINUITY.0)
+                && text.ends_with(CONTINUITY.1)
+                && text.matches(CONTINUITY.0).count() == 1
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 /// What one model request shows of the project root, read only from recognized fragments.
