@@ -87,6 +87,18 @@ fn user_authority_requests() -> Vec<(&'static str, ClientRequest)> {
                 }),
             ),
         ),
+        (
+            "statefulMemory/add",
+            request(
+                "statefulMemory/add",
+                json!({
+                    "threadId": "thread-1",
+                    "kind": "rule",
+                    "content": "Run only the affected tests.",
+                    "clientActionId": "add-1"
+                }),
+            ),
+        ),
     ]
 }
 

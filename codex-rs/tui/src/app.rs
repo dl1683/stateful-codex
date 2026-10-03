@@ -657,7 +657,7 @@ pub(crate) struct App {
     rate_limit_refresh_state: rate_limit_refresh::RateLimitRefreshState,
     pending_mcp_login_start: Option<PendingMcpLoginStart>,
     /// The entries the last `/memory` listing numbered.
-    memory_listing: crate::stateful_memory::MemoryListing,
+    memory_listing: crate::stateful_memory_commands::MemoryListing,
     // Latest accepted attempt per server; stale retry completions must not update the UI.
     active_mcp_login_ids: HashMap<String, String>,
     // Serialize plugin enablement writes per plugin so stale completions cannot

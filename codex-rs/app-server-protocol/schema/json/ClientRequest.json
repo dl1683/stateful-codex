@@ -4308,6 +4308,39 @@
       ],
       "type": "string"
     },
+    "StatefulMemoryAddKind": {
+      "description": "What the user adds to project memory.",
+      "oneOf": [
+        {
+          "description": "A rule in the user's words, applied to new work within its scope.",
+          "enum": [
+            "rule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Something about the user or the whole work.",
+          "enum": [
+            "background"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A decision, with its reason when given.",
+          "enum": [
+            "decision"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Anything else worth keeping.",
+          "enum": [
+            "note"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "StatefulRunBudget": {
       "properties": {
         "maxContinuations": {

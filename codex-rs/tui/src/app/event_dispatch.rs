@@ -853,6 +853,14 @@ impl App {
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
             }
+            AppEvent::StatefulMemoryResult { thread_id, cell } => {
+                // A reply for a thread the user has left belongs to that thread, not this one.
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.insert_history_cell(tui, cell);
+                } else {
+                    tracing::debug!(%thread_id, "dropped a /memory result for an inactive thread");
+                }
+            }
             AppEvent::TurnTipReady { thread_id, turn_id } => {
                 self.turn_tips.ready(thread_id, &turn_id, self.transcript_cells.last());
                 tui.frame_requester().schedule_frame();
@@ -1555,7 +1563,7 @@ impl App {
                 self.fetch_mcp_inventory(app_server, detail, thread_id);
             }
             AppEvent::StatefulMemory { thread_id, args } => {
-                crate::stateful_memory::run(
+                crate::stateful_memory_commands::run(
                     app_server.request_handle(),
                     self.memory_listing.clone(),
                     thread_id,

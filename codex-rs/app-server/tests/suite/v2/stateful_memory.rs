@@ -11,6 +11,10 @@ use codex_app_server_protocol::BlackboardProvenanceKind;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::StatefulMemoryAddKind;
+use codex_app_server_protocol::StatefulMemoryAddOutcome;
+use codex_app_server_protocol::StatefulMemoryAddParams;
+use codex_app_server_protocol::StatefulMemoryAddResponse;
 use codex_app_server_protocol::StatefulMemoryCorrectParams;
 use codex_app_server_protocol::StatefulMemoryCorrectResponse;
 use codex_app_server_protocol::StatefulMemoryForgetParams;
@@ -329,6 +333,120 @@ async fn background_is_reviewed_corrected_and_forgotten_as_background() -> Resul
             ),
             StatefulMemorySection::Background,
             false,
+        )
+    );
+    Ok(())
+}
+
+/// The user adds a rule, something about themselves and a decision with its reason before
+/// any turn, with no model turn; a retried action changes nothing; a fresh thread applies
+/// the rule and shows the background.
+#[tokio::test]
+async fn the_user_adds_to_memory_without_a_model_turn() -> Result<()> {
+    const RULE: &str = "End every reply with a line starting with 'Next:'.";
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Add".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "add-project".to_string(),
+            },
+        })
+        .await?;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![responses::sse(vec![
+            responses::ev_assistant_message("assistant-message", "Done.\nNext: test it."),
+            responses::ev_completed("assistant-response"),
+        ])],
+    )
+    .await;
+    let thread = start_thread(&mut server, &project.project.id).await?;
+    let add = |kind: StatefulMemoryAddKind, content: &str, reason: Option<&str>, action: &str| {
+        let params = StatefulMemoryAddParams {
+            thread_id: thread.clone(),
+            kind,
+            content: content.to_string(),
+            scope: None,
+            reason: reason.map(str::to_string),
+            client_action_id: action.to_string(),
+            background_section: true,
+        };
+        move |request_id| ClientRequest::StatefulMemoryAdd { request_id, params }
+    };
+    let mut outcomes = Vec::new();
+    for (kind, content, reason, action) in [
+        (StatefulMemoryAddKind::Rule, RULE, None, "add-1"),
+        (StatefulMemoryAddKind::Rule, RULE, None, "add-1"),
+        (
+            StatefulMemoryAddKind::Background,
+            "I'm a backend developer, mostly Go.",
+            None,
+            "add-2",
+        ),
+        (
+            StatefulMemoryAddKind::Decision,
+            "Months use the symbol mth.",
+            Some("dashboard readers confused mo with minutes"),
+            "add-3",
+        ),
+    ] {
+        let response: StatefulMemoryAddResponse =
+            server.request(add(kind, content, reason, action)).await?;
+        outcomes.push((
+            response.item.section,
+            response.item.content,
+            response.outcome,
+        ));
+    }
+    let fresh = start_thread(&mut server, &project.project.id).await?;
+    run_turn(&mut server, &fresh, "Rename the helper in utils.py").await?;
+    let packet = log.single_request().body_json().to_string();
+    assert_eq!(
+        (
+            outcomes,
+            packet.contains(RULE),
+            packet.contains("mostly Go"),
+            packet.contains("confused mo with minutes"),
+        ),
+        (
+            vec![
+                (
+                    StatefulMemorySection::UserRule,
+                    RULE.to_string(),
+                    StatefulMemoryAddOutcome::Added
+                ),
+                (
+                    StatefulMemorySection::UserRule,
+                    RULE.to_string(),
+                    StatefulMemoryAddOutcome::AlreadyDone
+                ),
+                (
+                    StatefulMemorySection::Background,
+                    "I'm a backend developer, mostly Go.".to_string(),
+                    StatefulMemoryAddOutcome::Added
+                ),
+                (
+                    StatefulMemorySection::Decision,
+                    "Months use the symbol mth. Reason: dashboard readers confused mo with minutes"
+                        .to_string(),
+                    StatefulMemoryAddOutcome::Added
+                ),
+            ],
+            true,
+            true,
+            true,
         )
     );
     Ok(())

@@ -1,6 +1,6 @@
 ---
 source: tui/src/stateful_memory_tests.rs
-expression: "render(memory_lines(&items, false, Some(&run)))"
+expression: "render(memory_lines(&items.into_iter().enumerate().map(|(index, item)|\n(index + 1, item)).collect::<Vec<_>>(), Footer::More, Some(&run)))"
 ---
 Project memory
   Collaborative run open · it stays open between answers and after you quit
@@ -17,5 +17,6 @@ About you (your words)
 Decisions
   4. Months use the symbol mth.
      replaces: "Months use the symbol mo."
+  More entries follow: /memory more
 
-  /memory forget <number> · /memory correct <number> <new text> · no model turn is used
+  /memory add · /memory forget <number> · /memory correct <number> <new text> · /memory help · no model turn is used

@@ -502,6 +502,8 @@ export type { StatefulCaptureOutcome } from "./StatefulCaptureOutcome";
 export type { StatefulKnowledgeCapturedNotification } from "./StatefulKnowledgeCapturedNotification";
 export type { StatefulKnowledgeCategory } from "./StatefulKnowledgeCategory";
 export type { StatefulMeasurementSummary } from "./StatefulMeasurementSummary";
+export type { StatefulMemoryAddKind } from "./StatefulMemoryAddKind";
+export type { StatefulMemoryAddOutcome } from "./StatefulMemoryAddOutcome";
 export type { StatefulMemoryItem } from "./StatefulMemoryItem";
 export type { StatefulMemoryReplaced } from "./StatefulMemoryReplaced";
 export type { StatefulMemorySection } from "./StatefulMemorySection";

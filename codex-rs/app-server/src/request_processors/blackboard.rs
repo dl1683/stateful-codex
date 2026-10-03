@@ -66,6 +66,7 @@ pub(crate) struct BlackboardRequestProcessor {
     sqlite: Option<SqliteConfig>,
     store: Arc<OnceCell<BlackboardStore>>,
     hierarchy: Arc<OnceCell<HierarchyStore>>,
+    context_map: Arc<OnceCell<codex_project_intelligence::ContextMapStore>>,
     event_sink: Arc<dyn StatefulEventSink>,
 }
 
@@ -80,6 +81,7 @@ impl BlackboardRequestProcessor {
             sqlite,
             store: Arc::new(OnceCell::new()),
             hierarchy: Arc::new(OnceCell::new()),
+            context_map: Arc::new(OnceCell::new()),
             event_sink,
         }
     }
@@ -400,6 +402,18 @@ impl BlackboardRequestProcessor {
             .get_or_try_init(|| BlackboardStore::open(sqlite))
             .await
             .map_err(blackboard_error)
+    }
+
+    async fn context_map(
+        &self,
+    ) -> Result<&codex_project_intelligence::ContextMapStore, JSONRPCErrorError> {
+        let sqlite = self.sqlite.as_ref().ok_or_else(|| {
+            method_not_found("statefulMemory/add is unavailable without sqlite state")
+        })?;
+        self.context_map
+            .get_or_try_init(|| codex_project_intelligence::ContextMapStore::open(sqlite))
+            .await
+            .map_err(|error| internal_error(format!("failed to open the context map: {error}")))
     }
 
     async fn hierarchy(&self) -> Result<&HierarchyStore, JSONRPCErrorError> {

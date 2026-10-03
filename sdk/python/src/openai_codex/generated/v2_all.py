@@ -5255,6 +5255,19 @@ class StatefulKnowledgeCategory(
     ]
 
 
+class StatefulMemoryAddKind(Enum):
+    rule = "rule"
+    background = "background"
+    decision = "decision"
+    note = "note"
+
+
+class StatefulMemoryAddOutcome(Enum):
+    added = "added"
+    already_present = "alreadyPresent"
+    already_done = "alreadyDone"
+
+
 class StatefulMemoryReplaced(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,

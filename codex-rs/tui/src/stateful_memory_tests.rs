@@ -12,10 +12,9 @@ use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use pretty_assertions::assert_eq;
 
-use super::MemoryCommand;
+use super::Footer;
 use super::ReceiptTally;
 use super::memory_lines;
-use super::parse;
 use crate::history_cell::HistoryCell;
 
 fn render(lines: Vec<ratatui::text::Line<'static>>) -> String {
@@ -43,34 +42,6 @@ fn item(
         updated_at: 1_790_000_000,
         replaces: Vec::new(),
     }
-}
-
-#[test]
-fn memory_arguments_parse_into_commands() {
-    assert_eq!(
-        [
-            "",
-            "forget 2",
-            "correct 1 Run only the affected tests.",
-            "forget 0",
-            "forget two",
-            "correct 3",
-            "drop 1",
-        ]
-        .map(parse),
-        [
-            Ok(MemoryCommand::List),
-            Ok(MemoryCommand::Forget(2)),
-            Ok(MemoryCommand::Correct(
-                1,
-                "Run only the affected tests.".to_string()
-            )),
-            Err(super::USAGE.to_string()),
-            Err(super::USAGE.to_string()),
-            Err(super::USAGE.to_string()),
-            Err(super::USAGE.to_string()),
-        ]
-    );
 }
 
 #[test]
@@ -128,10 +99,18 @@ fn memory_listing_numbers_entries_by_section_and_names_the_open_run() {
     };
     insta::assert_snapshot!(
         "memory_listing",
-        render(memory_lines(&items, /*more*/ false, Some(&run)))
+        render(memory_lines(
+            &items
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| (index + 1, item))
+                .collect::<Vec<_>>(),
+            Footer::More,
+            Some(&run)
+        ))
     );
     assert_eq!(
-        render(memory_lines(&[], /*more*/ false, /*run*/ None)),
+        render(memory_lines(&[], Footer::Complete, /*run*/ None)),
         "Project memory\n  Nothing saved yet."
     );
 }

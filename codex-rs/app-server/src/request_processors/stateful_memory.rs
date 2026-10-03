@@ -3,6 +3,10 @@
 
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::StatefulMemoryAddKind;
+use codex_app_server_protocol::StatefulMemoryAddOutcome;
+use codex_app_server_protocol::StatefulMemoryAddParams;
+use codex_app_server_protocol::StatefulMemoryAddResponse;
 use codex_app_server_protocol::StatefulMemoryCorrectParams;
 use codex_app_server_protocol::StatefulMemoryCorrectResponse;
 use codex_app_server_protocol::StatefulMemoryForgetParams;
@@ -15,8 +19,12 @@ use codex_app_server_protocol::StatefulMemorySection as ApiSection;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardStore;
+use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::ProjectIndexer;
 use codex_protocol::ThreadId;
+use codex_stateful_extension::AddOutcome;
 use codex_stateful_extension::BlackboardEntityKind;
+use codex_stateful_extension::MemoryAddition;
 use codex_stateful_extension::MemoryControlError;
 use codex_stateful_extension::MemorySection;
 use codex_stateful_extension::StatefulEvent;
@@ -25,6 +33,7 @@ use codex_thread_store::ReadThreadParams;
 use super::BlackboardRequestProcessor;
 use super::blackboard_error;
 use super::project_error;
+use crate::error_code::internal_error;
 use crate::error_code::invalid_params;
 use crate::request_processors::blackboard_api::api_kind;
 use crate::request_processors::blackboard_api::api_provenance_kind;
@@ -149,6 +158,71 @@ impl BlackboardRequestProcessor {
             }
             .into(),
         ))
+    }
+
+    pub(crate) async fn memory_add(
+        &self,
+        params: StatefulMemoryAddParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let project_id = self.thread_project(&params.thread_id).await?;
+        if params.client_action_id.trim().is_empty() || params.client_action_id.len() > 128 {
+            return Err(invalid_params("clientActionId must be 1-128 bytes"));
+        }
+        let node_id = self.memory_node(&project_id).await?;
+        let store = self.store().await?;
+        let addition = match params.kind {
+            StatefulMemoryAddKind::Rule => MemoryAddition::Rule {
+                scope: params.scope,
+            },
+            StatefulMemoryAddKind::Background => MemoryAddition::Background,
+            StatefulMemoryAddKind::Decision => MemoryAddition::Decision {
+                reason: params.reason,
+            },
+            StatefulMemoryAddKind::Note => MemoryAddition::Note,
+        };
+        let (entry, outcome) = codex_stateful_extension::add_entry(
+            store,
+            &project_id,
+            node_id,
+            addition,
+            &params.content,
+            &params.client_action_id,
+        )
+        .await
+        .map_err(control_error)?;
+        let outcome = match outcome {
+            AddOutcome::Added => {
+                self.announce(&entry);
+                StatefulMemoryAddOutcome::Added
+            }
+            AddOutcome::AlreadyPresent => StatefulMemoryAddOutcome::AlreadyPresent,
+            AddOutcome::AlreadyDone => StatefulMemoryAddOutcome::AlreadyDone,
+        };
+        Ok(Some(
+            StatefulMemoryAddResponse {
+                item: memory_item(store, entry, Sections::of(params.background_section)).await?,
+                outcome,
+            }
+            .into(),
+        ))
+    }
+
+    /// The project's root node, created when the project has none yet.
+    async fn memory_node(&self, project_id: &str) -> Result<HierarchyNodeId, JSONRPCErrorError> {
+        let hierarchy = self.hierarchy().await?;
+        if let Some(node) = hierarchy
+            .project_node(project_id)
+            .await
+            .map_err(|error| internal_error(error.to_string()))?
+        {
+            return Ok(node.id);
+        }
+        let context_map = self.context_map().await?;
+        ProjectIndexer::new(hierarchy.clone(), context_map.clone())
+            .ensure_project_node(project_id)
+            .await
+            .map(|node| node.id)
+            .map_err(|error| internal_error(error.to_string()))
     }
 
     fn announce(&self, entry: &BlackboardEntry) {

@@ -919,6 +919,12 @@ client_request_definitions! {
         serialization: global("project-intelligence"),
         response: v2::StatefulMemoryCorrectResponse,
     },
+    #[experimental("statefulMemory/add")]
+    StatefulMemoryAdd => "statefulMemory/add" {
+        params: v2::StatefulMemoryAddParams,
+        serialization: global("project-intelligence"),
+        response: v2::StatefulMemoryAddResponse,
+    },
     #[experimental("statefulMeasurement/list")]
     StatefulMeasurementList => "statefulMeasurement/list" {
         params: v2::StatefulMeasurementListParams,

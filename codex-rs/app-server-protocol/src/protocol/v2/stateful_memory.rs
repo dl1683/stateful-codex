@@ -128,3 +128,61 @@ pub struct StatefulMemoryCorrectParams {
 pub struct StatefulMemoryCorrectResponse {
     pub item: StatefulMemoryItem,
 }
+
+/// What the user adds to project memory.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryAddKind {
+    /// A rule in the user's words, applied to new work within its scope.
+    Rule,
+    /// Something about the user or the whole work.
+    Background,
+    /// A decision, with its reason when given.
+    Decision,
+    /// Anything else worth keeping.
+    Note,
+}
+
+/// Adds an entry in the user's own words, with no model turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryAddParams {
+    pub thread_id: String,
+    pub kind: StatefulMemoryAddKind,
+    pub content: String,
+    /// For a rule: where it applies, in the user's words ("this whole investigation, until
+    /// we agree on the root cause"); absent means the whole project.
+    #[ts(optional = nullable)]
+    pub scope: Option<String>,
+    /// For a decision: why it was made.
+    #[ts(optional = nullable)]
+    pub reason: Option<String>,
+    /// Identifies this user action; repeating it returns what the first request did.
+    pub client_action_id: String,
+    /// Set by clients that know the `background` section.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background_section: bool,
+}
+
+/// What an addition did.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryAddOutcome {
+    /// A new entry was stored, or kept words now apply.
+    Added,
+    /// The same words were already current; nothing changed.
+    AlreadyPresent,
+    /// This action was already carried out; its entry is returned unchanged.
+    AlreadyDone,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryAddResponse {
+    pub item: StatefulMemoryItem,
+    pub outcome: StatefulMemoryAddOutcome,
+}
