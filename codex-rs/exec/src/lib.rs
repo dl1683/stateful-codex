@@ -10,6 +10,7 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
+mod memory_command;
 mod startup_warning_deduper;
 mod stateful_attribution;
 mod worktree;
@@ -165,6 +166,8 @@ pub use exec_events::TurnProgressEvent;
 pub use exec_events::TurnStartedEvent;
 pub use exec_events::Usage;
 pub use exec_events::WebSearchItem;
+pub use memory_command::MemoryAction;
+pub use memory_command::MemoryArgs;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
@@ -354,7 +357,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             Some(ExecCommand::Review(_)) => {
                 anyhow::bail!("--worktree is not supported with `codex exec review`");
             }
-            Some(ExecCommand::Fork(_)) | None => {}
+            Some(ExecCommand::Fork(_) | ExecCommand::Memory(_)) | None => {}
         }
     }
 
@@ -932,6 +935,18 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let default_effort = config.model_reasoning_effort.clone();
 
     let (initial_operation, prompt_summary) = match (command.as_ref(), prompt, images) {
+        (Some(ExecCommand::Memory(args)), _, _) => {
+            // Memory controls act for the user on a named thread; they start no turn and need
+            // no repository.
+            let client = InProcessAppServerClient::start(in_process_start_args)
+                .await
+                .map_err(|err| {
+                    anyhow::anyhow!("failed to initialize in-process app-server client: {err}")
+                })?;
+            let result = memory_command::run(&client, args.clone()).await;
+            let _ = client.shutdown().await;
+            return result;
+        }
         (Some(ExecCommand::Review(review_cli)), _, _) => {
             let review_request = build_review_request(review_cli)?;
             let summary = codex_core::review_prompts::user_facing_hint(&review_request.target);

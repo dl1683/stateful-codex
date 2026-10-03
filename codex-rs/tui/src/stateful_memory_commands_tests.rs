@@ -9,6 +9,8 @@ use super::Addition;
 use super::Listing;
 use super::MemoryCommand;
 use super::USAGE;
+
+const ADD_USAGE: &str = "Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about-me <text>, /memory add decision <choice> because <reason>, /memory add note <text>";
 use super::numbered;
 use super::parse;
 
@@ -23,6 +25,9 @@ fn item(entry_id: &str, section: StatefulMemorySection, content: &str) -> Statef
         source: BlackboardProvenanceKind::User,
         updated_at: 1_790_000_000,
         replaces: Vec::new(),
+        authority: None,
+        scope_title: None,
+        attributed_to: None,
     }
 }
 
@@ -46,6 +51,12 @@ fn memory_arguments_parse_into_commands() {
         [
             "",
             "more",
+            "next",
+            "refresh",
+            "investigations",
+            "join 2",
+            "end 1",
+            "leave",
             "help",
             "forget 2",
             "correct 1 Run only the affected tests.",
@@ -63,6 +74,12 @@ fn memory_arguments_parse_into_commands() {
         [
             Ok(MemoryCommand::List),
             Ok(MemoryCommand::More),
+            Ok(MemoryCommand::More),
+            Ok(MemoryCommand::List),
+            Ok(MemoryCommand::Investigations),
+            Ok(MemoryCommand::Join(2)),
+            Ok(MemoryCommand::End(1)),
+            Ok(MemoryCommand::Leave),
             Ok(MemoryCommand::Help),
             Ok(MemoryCommand::Forget(2)),
             Ok(MemoryCommand::Correct(
@@ -100,8 +117,8 @@ fn memory_arguments_parse_into_commands() {
                 None
             )),
             Err(USAGE.to_string()),
-            Err("Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about <text>, /memory add decision <choice> because <reason>, /memory add note <text>".to_string()),
-            Err("Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about <text>, /memory add decision <choice> because <reason>, /memory add note <text>".to_string()),
+            Err(ADD_USAGE.to_string()),
+            Err(ADD_USAGE.to_string()),
             Err(USAGE.to_string()),
         ]
     );

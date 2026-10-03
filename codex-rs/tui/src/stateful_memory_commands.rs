@@ -23,6 +23,9 @@ use codex_app_server_protocol::StatefulMemoryForgetResponse;
 use codex_app_server_protocol::StatefulMemoryItem;
 use codex_app_server_protocol::StatefulMemoryReadParams;
 use codex_app_server_protocol::StatefulMemoryReadResponse;
+use codex_app_server_protocol::StatefulMemoryScopeAction;
+use codex_app_server_protocol::StatefulMemoryScopeParams;
+use codex_app_server_protocol::StatefulMemoryScopeResponse;
 use codex_app_server_protocol::StatefulRun;
 use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
@@ -41,7 +44,7 @@ use crate::stateful_memory::section_rank;
 
 /// Entries one page shows.
 const PAGE_SIZE: u32 = 50;
-const USAGE: &str = "Usage: /memory, /memory more, /memory add <rule|about|decision|note> <text>, /memory forget <number>, /memory correct <number> <new text>, /memory help";
+const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <number>, /memory correct <number> <new text>, /memory investigations, /memory help";
 
 /// What the user asked `/memory` to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +52,14 @@ pub(crate) enum MemoryCommand {
     List,
     More,
     Help,
+    /// The project's investigations, numbered.
+    Investigations,
+    /// This thread continues investigation N of the last investigations list.
+    Join(usize),
+    /// End investigation N of the last investigations list.
+    End(usize),
+    /// This thread no longer continues an investigation.
+    Leave,
     Add(Addition),
     Forget(usize),
     Correct(usize, String),
@@ -74,8 +85,11 @@ pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
     let (verb, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
     let rest = rest.trim();
     match verb.to_ascii_lowercase().as_str() {
-        "more" if rest.is_empty() => return Ok(MemoryCommand::More),
+        "more" | "next" if rest.is_empty() => return Ok(MemoryCommand::More),
+        "refresh" | "list" if rest.is_empty() => return Ok(MemoryCommand::List),
         "help" if rest.is_empty() => return Ok(MemoryCommand::Help),
+        "investigations" if rest.is_empty() => return Ok(MemoryCommand::Investigations),
+        "leave" if rest.is_empty() => return Ok(MemoryCommand::Leave),
         "add" => return parse_addition(rest).map(MemoryCommand::Add),
         _ => {}
     }
@@ -87,6 +101,8 @@ pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
         .ok_or_else(|| USAGE.to_string());
     match verb.to_ascii_lowercase().as_str() {
         "forget" if text.trim().is_empty() => Ok(MemoryCommand::Forget(number?)),
+        "join" if text.trim().is_empty() => Ok(MemoryCommand::Join(number?)),
+        "end" if text.trim().is_empty() => Ok(MemoryCommand::End(number?)),
         "correct" if !text.trim().is_empty() => {
             Ok(MemoryCommand::Correct(number?, text.trim().to_string()))
         }
@@ -97,7 +113,7 @@ pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
 /// `rule [for <scope>:] <text>`, `about <text>`, `decision <choice> [because <reason>]`,
 /// `note <text>`.
 fn parse_addition(rest: &str) -> Result<Addition, String> {
-    const ADD_USAGE: &str = "Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about <text>, /memory add decision <choice> because <reason>, /memory add note <text>";
+    const ADD_USAGE: &str = "Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about-me <text>, /memory add decision <choice> because <reason>, /memory add note <text>";
     let (kind, text) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     let text = text.trim();
     if text.is_empty() {
@@ -124,7 +140,7 @@ fn parse_addition(rest: &str) -> Result<Addition, String> {
                 Some(_) | None => addition(StatefulMemoryAddKind::Rule, text, None, None),
             })
         }
-        "about" | "background" | "me" => Ok(addition(
+        "about" | "about-me" | "background" | "me" => Ok(addition(
             StatefulMemoryAddKind::Background,
             text,
             None,
@@ -144,13 +160,14 @@ fn parse_addition(rest: &str) -> Result<Addition, String> {
 /// The help shown by `/memory help`.
 pub(crate) const HELP: &[&str] = &[
     "/memory - list what this project remembers (no model turn)",
-    "/memory more - show the next entries of a long list",
+    "/memory next - show the next entries of a long list (/memory refresh lists again)",
     "/memory add rule <text> - add a rule in your words; rule for <scope>: <text> limits it",
-    "/memory add about <text> - add something about you",
+    "/memory add about-me <text> - add something about you",
     "/memory add decision <choice> because <reason> - add a decision with its reason",
     "/memory add note <text> - add anything else worth keeping",
     "/memory correct <number> <text> - replace an entry with your words",
     "/memory forget <number> - stop using an entry (it stays in history)",
+    "/memory investigations - list investigations; /memory join <n>, /memory end <n>, /memory leave",
     "Numbers stay the same until you list again. Outside the TUI: codex memory --help",
 ];
 
@@ -215,6 +232,8 @@ impl Listing {
 pub(crate) struct MemoryListing {
     shown: Arc<Mutex<Option<Listing>>>,
     next_generation: Arc<Mutex<u64>>,
+    /// The last investigations list shown, by thread: scope IDs by number.
+    investigations: Arc<Mutex<Option<(String, Vec<String>)>>>,
 }
 
 impl MemoryListing {
@@ -297,6 +316,30 @@ pub(crate) fn run(
                 HELP.iter().map(|line| (*line).into()).collect(),
             )),
             MemoryCommand::Add(addition) => add(&request, &listing, addition).await,
+            MemoryCommand::Investigations => {
+                investigations(&request, &listing, StatefulMemoryScopeAction::List, None).await
+            }
+            MemoryCommand::Leave => {
+                investigations(&request, &listing, StatefulMemoryScopeAction::Leave, None).await
+            }
+            MemoryCommand::Join(number) => {
+                investigations(
+                    &request,
+                    &listing,
+                    StatefulMemoryScopeAction::Join,
+                    Some(number),
+                )
+                .await
+            }
+            MemoryCommand::End(number) => {
+                investigations(
+                    &request,
+                    &listing,
+                    StatefulMemoryScopeAction::End,
+                    Some(number),
+                )
+                .await
+            }
             MemoryCommand::Forget(number) => forget(&request, &listing, number).await,
             MemoryCommand::Correct(number, text) => correct(&request, &listing, number, text).await,
         };
@@ -504,6 +547,95 @@ async fn correct(
         ),
         Some(format!("Replaces: {}", preview(&item.content))),
     ))
+}
+
+/// Lists, joins, leaves or ends an investigation; numbers refer to the last investigations
+/// list shown for this thread.
+async fn investigations(
+    request: &Requests<'_>,
+    listing: &MemoryListing,
+    action: StatefulMemoryScopeAction,
+    number: Option<usize>,
+) -> Result<PlainHistoryCell, String> {
+    let scope_id = match number {
+        Some(number) => {
+            let shown = listing
+                .investigations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let Some((thread_id, scopes)) = shown.filter(|(thread, _)| thread == request.thread_id)
+            else {
+                return Err(
+                    "Run /memory investigations first; numbers refer to its list.".to_string(),
+                );
+            };
+            let _ = thread_id;
+            Some(
+                scopes.get(number - 1).cloned().ok_or_else(|| {
+                    format!("There is no investigation {number} in the last list.")
+                })?,
+            )
+        }
+        None => None,
+    };
+    let response: StatefulMemoryScopeResponse = request
+        .handle
+        .request_typed(ClientRequest::StatefulMemoryScope {
+            request_id: request_id("scope"),
+            params: StatefulMemoryScopeParams {
+                thread_id: request.thread_id.to_string(),
+                action,
+                scope_id,
+            },
+        })
+        .await
+        .map_err(|error| format!("Nothing changed: {error}"))?;
+    *listing
+        .investigations
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((
+        request.thread_id.to_string(),
+        response
+            .scopes
+            .iter()
+            .map(|scope| scope.scope_id.clone())
+            .collect(),
+    ));
+    let done = match action {
+        StatefulMemoryScopeAction::List => None,
+        StatefulMemoryScopeAction::Join => {
+            Some("This thread now continues that investigation; its rules apply here.")
+        }
+        StatefulMemoryScopeAction::Leave => {
+            Some("This thread no longer continues an investigation.")
+        }
+        StatefulMemoryScopeAction::End => {
+            Some("Investigation ended: its rules no longer apply (they stay in history).")
+        }
+    };
+    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+    if let Some(done) = done {
+        lines.push(done.into());
+    }
+    if response.scopes.is_empty() {
+        lines.push(
+            "No investigations yet. Rules you give \"for this whole investigation\" start one."
+                .into(),
+        );
+    }
+    for (index, scope) in response.scopes.iter().enumerate() {
+        let state = match (scope.open, scope.this_thread) {
+            (true, true) => "open · this thread",
+            (true, false) => "open",
+            (false, _) => "ended",
+        };
+        lines.push(format!("  {}. {} ({state})", index + 1, preview(&scope.title)).into());
+        if let Some(condition) = &scope.end_condition {
+            lines.push(format!("     ends: {condition}").into());
+        }
+    }
+    Ok(PlainHistoryCell::new(lines))
 }
 
 /// The rows of `listing` numbered from `first` on, leaving out forgotten ones.

@@ -88,6 +88,13 @@ fn user_authority_requests() -> Vec<(&'static str, ClientRequest)> {
             ),
         ),
         (
+            "statefulMemory/scope",
+            request(
+                "statefulMemory/scope",
+                json!({"threadId": "thread-1", "action": "end", "scopeId": "scope-1"}),
+            ),
+        ),
+        (
             "statefulMemory/add",
             request(
                 "statefulMemory/add",
