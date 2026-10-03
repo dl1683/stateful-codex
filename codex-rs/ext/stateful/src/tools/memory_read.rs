@@ -50,8 +50,10 @@ const MAX_TERMS: usize = 12;
 const MAX_SEARCH_HITS: u32 = 30;
 const MAX_SUCCESSOR_HOPS: usize = 4;
 const MAX_ENTRY_CONTENT_BYTES: usize = 600;
-const MAX_HISTORY_EXCERPT_BYTES: usize = 200;
 const MAX_RELATION_EXCERPT_BYTES: usize = 160;
+const MAX_RELATIONS_PER_ENTRY: usize = 4;
+/// Entries changed in the requested period that are ranked by the question.
+const MAX_SINCE_CANDIDATES: u32 = 200;
 const MAX_THREADS: usize = 20;
 const MAX_TURNS_PER_THREAD: usize = 30;
 const MAX_TURNS_SCANNED: usize = 300;
@@ -123,7 +125,7 @@ impl MemoryReadTool {
         }
         let include_history = arguments.include_history.unwrap_or(true);
         let store = self.services.blackboard().await.map_err(respond)?;
-        let groups = self
+        let (groups, knowledge_truncated) = self
             .knowledge(store, &terms, since_ms, include_history)
             .await?;
         let (turns, coverage) = self.conversation(&terms, since_ms).await;
@@ -167,6 +169,7 @@ impl MemoryReadTool {
             }
         }
         result["coverage"]["entriesOmittedBySize"] = json!(omitted_entries);
+        result["coverage"]["moreMatchingKnowledge"] = json!(knowledge_truncated);
         result["coverage"]["turnsOmittedBySize"] = json!(omitted_turns);
         if !fits_response(&result, budget) {
             result["entries"] = json!([]);
@@ -176,16 +179,41 @@ impl MemoryReadTool {
         bounded_json_output(&call, result)
     }
 
-    /// Matching or recent entries, each current entry followed by its history.
+    /// Matching or recent entries, each current entry followed by its history, and whether
+    /// more candidates existed than were considered.
     async fn knowledge(
         &self,
         store: &BlackboardStore,
         terms: &[String],
         since_ms: Option<i64>,
         include_history: bool,
-    ) -> Result<Vec<Vec<Value>>, FunctionCallError> {
+    ) -> Result<(Vec<Vec<Value>>, bool), FunctionCallError> {
         let mut hits = Vec::new();
-        if !terms.is_empty() {
+        let truncated;
+        if let Some(since) = since_ms {
+            // The date filter comes first; matching then ranks within the period.
+            let (entries, more) = store
+                .changed_since(&self.project_id, since, MAX_SINCE_CANDIDATES)
+                .await
+                .map_err(respond)?;
+            truncated = more;
+            let mut ranked = entries
+                .into_iter()
+                .map(|entry| (match_count(&entry.value.content, terms), entry))
+                .filter(|(count, _)| terms.is_empty() || *count > 0)
+                .collect::<Vec<_>>();
+            // Stable: equal counts keep the newest-first order.
+            ranked.sort_by(|left, right| right.0.cmp(&left.0));
+            for (_, entry) in ranked.into_iter().take(MAX_SEARCH_HITS as usize) {
+                if let Some(hit) = store
+                    .get_hit(&self.project_id, &entry.id)
+                    .await
+                    .map_err(respond)?
+                {
+                    hits.push(hit);
+                }
+            }
+        } else {
             let result = store
                 .query(BlackboardQuery {
                     project_id: self.project_id.clone(),
@@ -197,31 +225,14 @@ impl MemoryReadTool {
                 })
                 .await
                 .map_err(respond)?;
-            hits.extend(
-                result
-                    .data
-                    .into_iter()
-                    .filter(|hit| since_ms.is_none_or(|since| hit.entry.updated_at_ms >= since)),
-            );
-        } else if let Some(since) = since_ms {
-            let (entries, _) = store
-                .changed_since(&self.project_id, since, MAX_SEARCH_HITS)
-                .await
-                .map_err(respond)?;
-            for entry in entries {
-                if let Some(hit) = store
-                    .get_hit(&self.project_id, &entry.id)
-                    .await
-                    .map_err(respond)?
-                {
-                    hits.push(hit);
-                }
-            }
+            truncated = result.truncated;
+            hits = result.data;
         }
 
-        // Resolve every match to its current entry, keeping the match order.
+        // Resolve every match to its current entry; matches that resolve to the same
+        // current entry share its group, so no matching history is dropped.
         let mut seen = HashSet::new();
-        let mut groups = Vec::new();
+        let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
         for hit in hits {
             let mut current = hit.clone();
             let mut chain = Vec::new();
@@ -239,40 +250,56 @@ impl MemoryReadTool {
                 chain.push(current);
                 current = successor;
             }
-            if !seen.insert(current.entry.id.to_string()) {
-                continue;
-            }
-            let mut group = vec![entry_item(&current, terms, &current_status(&current))];
-            if include_history {
-                let replaced = store
-                    .superseded_by(&self.project_id, &current.entry.id)
-                    .await
-                    .map_err(respond)?;
-                for predecessor in replaced {
-                    if seen.insert(predecessor.id.to_string()) {
-                        group.push(json!({
-                            "entryId": predecessor.id.to_string(),
-                            "status": format!("replaced by {} on {}", current.entry.id, day(predecessor.updated_at_ms)),
-                            "content": excerpt(&predecessor.value.content, terms, MAX_HISTORY_EXCERPT_BYTES),
-                            "recorded": day(predecessor.created_at_ms),
-                        }));
+            let current_id = current.entry.id.to_string();
+            let index = match groups.iter().position(|(id, _)| *id == current_id) {
+                Some(index) => index,
+                None => {
+                    seen.insert(current_id.clone());
+                    let row = entry_item(store, &self.project_id, &current, terms).await;
+                    groups.push((current_id.clone(), vec![row]));
+                    if include_history {
+                        let replaced = store
+                            .superseded_by(&self.project_id, &current.entry.id)
+                            .await
+                            .map_err(respond)?;
+                        for predecessor in replaced {
+                            if seen.insert(predecessor.id.to_string())
+                                && let Some(predecessor) = store
+                                    .get_hit(&self.project_id, &predecessor.id)
+                                    .await
+                                    .map_err(respond)?
+                            {
+                                let row =
+                                    entry_item(store, &self.project_id, &predecessor, terms).await;
+                                let last = groups.len() - 1;
+                                groups[last].1.push(row);
+                            }
+                        }
                     }
+                    groups.len() - 1
                 }
+            };
+            if include_history {
                 for older in chain {
                     if seen.insert(older.entry.id.to_string()) {
-                        group.push(entry_item(&older, terms, &current_status(&older)));
+                        let row = entry_item(store, &self.project_id, &older, terms).await;
+                        groups[index].1.push(row);
                     }
                 }
             }
-            groups.push(group);
         }
-        Ok(groups)
+        Ok((
+            groups.into_iter().map(|(_, rows)| rows).collect(),
+            truncated,
+        ))
     }
 
     /// Earlier turns of the project that match, newest first, and what the scan covered.
     async fn conversation(&self, terms: &[String], since_ms: Option<i64>) -> (Vec<Value>, Value) {
         let mut turns = Vec::new();
         let mut threads_scanned = 0usize;
+        let mut threads_not_scanned = 0usize;
+        let mut threads_with_more_turns = 0usize;
         let mut turns_scanned = 0usize;
         let mut unreadable_threads = 0usize;
         let page = match self
@@ -290,10 +317,11 @@ impl MemoryReadTool {
         };
         let more_threads = page.next_cursor.is_some();
         for thread in page.items.iter().filter(|thread| is_top_level(thread)) {
-            if turns_scanned >= MAX_TURNS_SCANNED || turns.len() >= MAX_TURNS_RETURNED {
-                break;
-            }
             if since_ms.is_some_and(|since| thread.updated_at.timestamp_millis() < since) {
+                continue;
+            }
+            if turns_scanned >= MAX_TURNS_SCANNED {
+                threads_not_scanned += 1;
                 continue;
             }
             threads_scanned += 1;
@@ -315,7 +343,12 @@ impl MemoryReadTool {
                     continue;
                 }
             };
+            let mut stopped_early = listed.next_cursor.is_some();
             for turn in &listed.turns {
+                if turns_scanned >= MAX_TURNS_SCANNED {
+                    stopped_early = true;
+                    break;
+                }
                 turns_scanned += 1;
                 let at = turn_time_ms(turn);
                 if since_ms.is_some_and(|since| at.is_none_or(|at| at < since)) {
@@ -341,9 +374,9 @@ impl MemoryReadTool {
                         "answer": answer.as_deref().map(|text| excerpt(text, terms, MAX_ANSWER_BYTES)),
                     }),
                 ));
-                if turns_scanned >= MAX_TURNS_SCANNED {
-                    break;
-                }
+            }
+            if stopped_early {
+                threads_with_more_turns += 1;
             }
         }
         turns.sort_by(|left, right| right.0.cmp(&left.0));
@@ -355,10 +388,13 @@ impl MemoryReadTool {
             .collect::<Vec<_>>();
         let coverage = json!({
             "threadsScanned": threads_scanned,
-            "moreThreadsNotScanned": more_threads,
+            "threadsNotScanned": threads_not_scanned,
+            "moreThreadsBeyondTheFirstPage": more_threads,
+            "threadsWithUnscannedOlderTurns": threads_with_more_turns,
             "unreadableThreads": unreadable_threads,
             "turnsScanned": turns_scanned,
             "turnsMatched": matched,
+            "turnsReturned": turns.len(),
             "turnsLabel": format!("each turn shows the user's first message and the {ANSWER_LABEL}; steering messages and intermediate answers are not included"),
             "noMatchMeans": "nothing matched within this coverage, not that nothing happened",
         });
@@ -382,7 +418,12 @@ fn current_status(hit: &BlackboardHit) -> String {
     }
 }
 
-fn entry_item(hit: &BlackboardHit, terms: &[String], status: &str) -> Value {
+async fn entry_item(
+    store: &BlackboardStore,
+    project_id: &str,
+    hit: &BlackboardHit,
+    terms: &[String],
+) -> Value {
     let value = &hit.entry.value;
     let source = match (value.provenance.kind, value.kind) {
         (BlackboardProvenanceKind::User, BlackboardKind::Instruction) => "the user's own words",
@@ -391,36 +432,41 @@ fn entry_item(hit: &BlackboardHit, terms: &[String], status: &str) -> Value {
         (BlackboardProvenanceKind::Maintenance, _) => "observed by the host",
         (BlackboardProvenanceKind::Import, _) => "import",
     };
-    let relations = hit
-        .relations
-        .iter()
-        .map(|relation| {
-            let other = if relation.value.from_entry_id == hit.entry.id {
-                &relation.value.to_entry_id
-            } else {
-                &relation.value.from_entry_id
-            };
-            json!({
-                "kind": relation.value.kind,
-                "otherEntryId": other.to_string(),
-                "note": relation.value.note.as_deref().map(|note| excerpt(note, terms, MAX_RELATION_EXCERPT_BYTES)),
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut relations = Vec::new();
+    for relation in hit.relations.iter().take(MAX_RELATIONS_PER_ENTRY) {
+        let other = if relation.value.from_entry_id == hit.entry.id {
+            &relation.value.to_entry_id
+        } else {
+            &relation.value.from_entry_id
+        };
+        let counterpart = store.get_entry(project_id, other).await.ok().flatten();
+        relations.push(json!({
+            "kind": relation.value.kind,
+            "otherEntryId": other.to_string(),
+            "otherStatus": counterpart.as_ref().map(|entry| entry.state),
+            "otherContent": counterpart
+                .as_ref()
+                .map(|entry| excerpt(&entry.value.content, terms, MAX_RELATION_EXCERPT_BYTES)),
+            "note": relation.value.note.as_deref().map(|note| excerpt(note, terms, MAX_RELATION_EXCERPT_BYTES)),
+        }));
+    }
     let evidence = value
         .evidence
         .iter()
         .map(|link| {
             json!({
-                "evidenceRead": link.context_map_entry_id.to_string(),
-                "lines": link.line_range,
+                "evidenceRoute": {
+                    "contextMapEntryId": link.context_map_entry_id.to_string(),
+                    "sourceFingerprint": link.source_fingerprint.to_string(),
+                    "lineRange": link.line_range,
+                },
             })
         })
         .collect::<Vec<_>>();
     json!({
         "entryId": hit.entry.id.to_string(),
         "kind": value.kind,
-        "status": status,
+        "status": current_status(hit),
         "source": source,
         "verification": value.verification,
         "storedEvidenceFreshness": hit.evidence_freshness,
@@ -428,8 +474,17 @@ fn entry_item(hit: &BlackboardHit, terms: &[String], status: &str) -> Value {
         "updated": day(hit.entry.updated_at_ms),
         "content": excerpt(&value.content, terms, MAX_ENTRY_CONTENT_BYTES),
         "relations": relations,
+        "relationsOmitted": hit.relations.len().saturating_sub(MAX_RELATIONS_PER_ENTRY),
         "evidence": evidence,
     })
+}
+
+/// How many distinct terms `text` mentions.
+fn match_count(text: &str, terms: &[String]) -> usize {
+    terms
+        .iter()
+        .filter(|term| mentions_any(text, std::slice::from_ref(term)))
+        .count()
 }
 
 /// Content words of a question: lowercase, at least three characters, no stopwords.
@@ -462,12 +517,21 @@ pub(super) fn excerpt(text: &str, terms: &[String], maximum: usize) -> String {
     if text.len() <= maximum {
         return text.to_string();
     }
-    let lower = text.to_lowercase();
+    // Lowercase while remembering where each lowered byte came from in the original.
+    let mut lower = String::with_capacity(text.len());
+    let mut origin = Vec::with_capacity(text.len());
+    for (offset, character) in text.char_indices() {
+        for lowered in character.to_lowercase() {
+            let before = lower.len();
+            lower.push(lowered);
+            origin.extend(std::iter::repeat_n(offset, lower.len() - before));
+        }
+    }
     let anchor = terms
         .iter()
         .filter_map(|term| lower.find(term.as_str()))
         .min()
-        .filter(|_| lower.len() == text.len())
+        .and_then(|position| origin.get(position).copied())
         .unwrap_or(0);
     let budget = maximum.saturating_sub(6);
     let mut start = anchor.saturating_sub(budget / 3);
@@ -496,8 +560,18 @@ pub(super) fn parse_utc_day(value: &str) -> Result<i64, String> {
     let [year, month, day] = parts[..] else {
         return Err(format!("since must be YYYY-MM-DD, got {value}"));
     };
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return Err(format!("since must be YYYY-MM-DD, got {value}"));
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    };
+    if !(1970..=9999).contains(&year) || !(1..=days_in_month).contains(&day) {
+        return Err(format!(
+            "since must be a real date YYYY-MM-DD from 1970, got {value}"
+        ));
     }
     // Days from civil (Howard Hinnant), proleptic Gregorian.
     let year = if month <= 2 { year - 1 } else { year };

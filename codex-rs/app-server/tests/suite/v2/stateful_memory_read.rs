@@ -150,6 +150,11 @@ async fn one_memory_read_returns_the_current_decision_its_history_and_the_users_
         "{turns:?}"
     );
     assert_eq!(entries[0]["source"], json!("agent record"));
+    // History rows carry the same authority fields as current ones.
+    assert_eq!(
+        (entries[1]["kind"].clone(), entries[1]["source"].clone()),
+        (json!("decision"), json!("agent record"))
+    );
 
     let since = output("recall-since")?;
     assert!(

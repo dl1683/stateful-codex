@@ -56,3 +56,135 @@ fn since_is_a_utc_day() {
         (Ok(86_400_000), Ok(1_790_899_200_000), true, true)
     );
 }
+
+#[test]
+fn since_rejects_impossible_dates_and_years() {
+    assert_eq!(
+        (
+            parse_utc_day("2026-02-31").is_err(),
+            parse_utc_day("2024-02-29").is_ok(),
+            parse_utc_day("2023-02-29").is_err(),
+            parse_utc_day("99999999999-01-01").is_err(),
+            parse_utc_day("1969-12-31").is_err(),
+        ),
+        (true, true, true, true, true)
+    );
+}
+
+#[test]
+fn excerpts_stay_centred_when_lowercasing_changes_byte_lengths() {
+    let text = format!(
+        "\u{130}{}The decision: hints are opt-in.{}",
+        " background".repeat(60),
+        " tail".repeat(60)
+    );
+    let cut = excerpt(&text, &["decision".to_string()], 120);
+    assert!(cut.contains("The decision: hints are opt-in."), "{cut}");
+}
+
+fn decision(
+    node_id: &codex_project_intelligence::HierarchyNodeId,
+    content: &str,
+) -> codex_project_intelligence::NewBlackboardEntry {
+    codex_project_intelligence::NewBlackboardEntry {
+        project_id: "project-1".to_string(),
+        node_id: node_id.clone(),
+        kind: codex_project_intelligence::BlackboardKind::Decision,
+        content: content.to_string(),
+        structured_value: None,
+        confidence: codex_project_intelligence::ConfidenceScore::from_basis_points(9_000)
+            .expect("confidence"),
+        verification: codex_project_intelligence::BlackboardVerification::Unverified,
+        importance: codex_project_intelligence::BlackboardImportance::High,
+        root_promotion: codex_project_intelligence::RootPromotion::Promoted,
+        evidence: Vec::new(),
+        premises: Vec::new(),
+        provenance: codex_project_intelligence::BlackboardProvenance {
+            kind: codex_project_intelligence::BlackboardProvenanceKind::Agent,
+            source_id: "turn-1".to_string(),
+        },
+    }
+}
+
+/// A -> B -> C where the question matches A and C: one group, C first, with B and A as
+/// history; and a since filter applies before matches are ranked.
+#[tokio::test]
+async fn matches_of_one_chain_share_a_group_and_since_filters_first() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let id = |value: &str| codex_project_intelligence::BlackboardEntryId::parse(value).expect("id");
+    store
+        .create_entry(
+            id("a"),
+            decision(&node_id, "Rounding uses ONE decimal place."),
+        )
+        .await
+        .expect("A");
+    store
+        .create_successor(
+            id("b"),
+            decision(&node_id, "Formatting now uses two places."),
+            vec![codex_project_intelligence::SupersededEntry {
+                id: id("a"),
+                expected_revision: 1,
+            }],
+        )
+        .await
+        .expect("B");
+    store
+        .create_successor(
+            id("c"),
+            decision(&node_id, "Rounding uses TWO decimal places, final."),
+            vec![codex_project_intelligence::SupersededEntry {
+                id: id("b"),
+                expected_revision: 1,
+            }],
+        )
+        .await
+        .expect("C");
+    let tool = super::MemoryReadTool::new(
+        "project-1".to_string(),
+        services.clone(),
+        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+    );
+    let terms = question_terms("rounding decimal places");
+    let (groups, _) = tool
+        .knowledge(
+            store, &terms, /*since_ms*/ None, /*include_history*/ true,
+        )
+        .await
+        .expect("knowledge");
+    let ids = groups
+        .iter()
+        .map(|group| {
+            group
+                .iter()
+                .map(|row| row["entryId"].as_str().unwrap_or_default().to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let (future_only, _) = tool
+        .knowledge(
+            store,
+            &terms,
+            Some(i64::MAX / 2),
+            /*include_history*/ true,
+        )
+        .await
+        .expect("knowledge");
+    assert_eq!(
+        (
+            ids.len(),
+            ids[0].first().cloned(),
+            ids[0].len(),
+            future_only.len()
+        ),
+        (1, Some("c".to_string()), 3, 0)
+    );
+}
