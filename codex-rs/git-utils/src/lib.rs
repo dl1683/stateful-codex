@@ -50,6 +50,7 @@ pub use info::get_head_commit_hash;
 pub use info::git_diff_to_remote;
 pub use info::local_git_branches;
 pub use info::recent_commits;
+pub use observation::GitChangedPath;
 pub use observation::GitCommitRange;
 pub use observation::GitCommitSummary;
 pub use observation::GitHeadObservation;

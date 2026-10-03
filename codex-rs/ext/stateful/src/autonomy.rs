@@ -201,7 +201,18 @@ impl StatefulExtension {
     }
 
     /// Records the checkout as a turn left it, so the next turn reports only later changes.
-    async fn observe_checkout_at_turn_end(&self, thread_store: &ExtensionData) {
+    async fn observe_checkout_at_turn_end(
+        &self,
+        thread_store: &ExtensionData,
+        turn_store: &ExtensionData,
+    ) {
+        // A start that could not process the changes keeps the old baseline for a retry.
+        if turn_store
+            .get::<crate::checkout::CheckoutBaselineHeld>()
+            .is_some()
+        {
+            return;
+        }
         let (Some(selected), Some(services)) = (
             thread_store.get::<SelectedProject>(),
             self.services.as_ref(),
@@ -256,15 +267,20 @@ impl TurnLifecycleContributor for StatefulExtension {
                     )
                     .await;
                     let roots = self.project_roots(selected.project_id()).await;
-                    if let Some(report) = crate::checkout::observe_turn_start(
+                    let observed = crate::checkout::observe_turn_start(
                         services,
                         selected.project_id(),
                         &roots,
                         input.turn_id,
                     )
-                    .await
-                    {
+                    .await;
+                    if let Some(report) = observed.report {
                         input.turn_store.insert(report);
+                    }
+                    if !observed.complete {
+                        input
+                            .turn_store
+                            .insert(crate::checkout::CheckoutBaselineHeld);
                     }
                 }
             }
@@ -324,14 +340,16 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Completed);
-            self.observe_checkout_at_turn_end(input.thread_store).await;
+            self.observe_checkout_at_turn_end(input.thread_store, input.turn_store)
+                .await;
         })
     }
 
     fn on_turn_abort<'a>(&'a self, input: TurnAbortInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
-            self.observe_checkout_at_turn_end(input.thread_store).await;
+            self.observe_checkout_at_turn_end(input.thread_store, input.turn_store)
+                .await;
         })
     }
 

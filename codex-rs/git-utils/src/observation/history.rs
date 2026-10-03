@@ -23,8 +23,6 @@ use crate::git_process::run_git_command_with_budget;
 const MAX_BODY_BYTES: usize = 400;
 /// Longest subject kept per commit.
 const MAX_SUBJECT_BYTES: usize = 240;
-const FIELD_SEPARATOR: char = '\u{1f}';
-const RECORD_SEPARATOR: char = '\u{1e}';
 
 /// One commit that advanced HEAD.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -52,10 +50,18 @@ pub enum GitCommitRange {
     Unknown(GitObservationFailure),
 }
 
-/// Paths with uncommitted changes (tracked or untracked), at most the requested limit.
+/// One path with uncommitted changes and its two-letter porcelain status (index, worktree).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitChangedPath {
+    pub status: String,
+    /// Relative to the Git worktree root.
+    pub path: String,
+}
+
+/// Paths with uncommitted changes (tracked, staged or untracked), at most the requested limit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitWorktreePaths {
-    pub paths: Vec<String>,
+    pub paths: Vec<GitChangedPath>,
     pub omitted: bool,
 }
 
@@ -94,17 +100,22 @@ pub async fn commits_between(
         _ => return GitCommitRange::Unknown(command_failed(&ancestry)),
     }
     let count = format!("--max-count={}", limit.saturating_add(1));
-    let format = format!(
-        "--format=%H{FIELD_SEPARATOR}%ct{FIELD_SEPARATOR}%s{FIELD_SEPARATOR}%b{RECORD_SEPARATOR}"
-    );
     let range = format!("{}..{}", earlier.0, later.0);
+    // Records end with NUL, which no commit message can contain; within a record the first
+    // two lines are the OID and committer time and the rest is the raw message.
     let log = match run(
         cwd,
         &[
+            "-c",
+            "i18n.logOutputEncoding=UTF-8",
+            "-c",
+            "log.showSignature=false",
             "log",
+            "-z",
             "--no-color",
+            "--encoding=UTF-8",
             &count,
-            &format,
+            "--format=%H%n%ct%n%B",
             "--end-of-options",
             &range,
         ],
@@ -119,24 +130,29 @@ pub async fn commits_between(
     };
     let text = String::from_utf8_lossy(&log.stdout);
     let mut commits = Vec::new();
-    for record in text.split(RECORD_SEPARATOR) {
+    for record in text.split('\0') {
         let record = record.trim_start_matches(['\n', '\r']);
         if record.is_empty() {
             continue;
         }
-        let mut fields = record.splitn(4, FIELD_SEPARATOR);
-        let (Some(oid), Some(time), Some(subject)) = (fields.next(), fields.next(), fields.next())
-        else {
+        let mut lines = record.splitn(3, '\n');
+        let (Some(oid), Some(time)) = (lines.next(), lines.next()) else {
             return GitCommitRange::Unknown(GitObservationFailure::InvalidOutput);
         };
+        let oid = oid.trim();
         let Ok(committed_at) = time.trim().parse::<i64>() else {
             return GitCommitRange::Unknown(GitObservationFailure::InvalidOutput);
         };
+        if !matches!(oid.len(), 40 | 64) || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return GitCommitRange::Unknown(GitObservationFailure::InvalidOutput);
+        }
+        let message = lines.next().unwrap_or_default();
+        let (subject, body) = message.split_once('\n').unwrap_or((message, ""));
         commits.push(GitCommitSummary {
-            oid: oid.trim().to_string(),
+            oid: oid.to_string(),
             committed_at,
             subject: bounded(subject.trim(), MAX_SUBJECT_BYTES),
-            body: bounded(fields.next().unwrap_or_default().trim(), MAX_BODY_BYTES),
+            body: bounded(body.trim(), MAX_BODY_BYTES),
         });
     }
     let omitted = commits.len() > limit;
@@ -157,6 +173,7 @@ pub async fn changed_paths(
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
+            "--ignore-submodules=none",
             "--no-renames",
         ],
         budget,
@@ -169,8 +186,11 @@ pub async fn changed_paths(
     let text = String::from_utf8_lossy(&output.stdout);
     let mut paths = text
         .split('\0')
-        .filter(|entry| entry.len() > 3)
-        .map(|entry| entry[3..].to_string())
+        .filter(|entry| entry.len() > 3 && entry.is_char_boundary(2) && entry.is_char_boundary(3))
+        .map(|entry| GitChangedPath {
+            status: entry[..2].to_string(),
+            path: entry[3..].to_string(),
+        })
         .collect::<Vec<_>>();
     let omitted = paths.len() > limit;
     paths.truncate(limit);

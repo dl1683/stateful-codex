@@ -7,6 +7,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 use tokio::time::Instant;
 
+use super::GitChangedPath;
 use super::GitCommitRange;
 use super::GitWorktreePaths;
 use super::changed_paths;
@@ -123,8 +124,10 @@ async fn changed_paths_lists_tracked_and_untracked_changes_within_a_limit() {
     std::fs::write(path.join("notes.md"), "Priya asked for per=w").expect("untracked");
     let root = AbsolutePathBuf::from_absolute_path(path).expect("absolute");
 
+    std::fs::write(path.join("staged.txt"), "staged").expect("staged");
+    git(path, &["add", "staged.txt"]);
     let mut all = changed_paths(&root, 10, &budget()).await.expect("paths");
-    all.paths.sort();
+    all.paths.sort_by(|left, right| left.path.cmp(&right.path));
     assert_eq!(
         (
             all,
@@ -135,9 +138,59 @@ async fn changed_paths_lists_tracked_and_untracked_changes_within_a_limit() {
         ),
         (
             GitWorktreePaths {
-                paths: vec!["notes.md".to_string(), "tracked.txt".to_string()],
+                paths: vec![
+                    GitChangedPath {
+                        status: "??".to_string(),
+                        path: "notes.md".to_string(),
+                    },
+                    GitChangedPath {
+                        status: "A ".to_string(),
+                        path: "staged.txt".to_string(),
+                    },
+                    GitChangedPath {
+                        status: " M".to_string(),
+                        path: "tracked.txt".to_string(),
+                    },
+                ],
                 omitted: false,
             },
+            true
+        )
+    );
+}
+
+/// Message text cannot break the record framing: separator-like characters and extra
+/// lines stay inside their own commit.
+#[tokio::test]
+async fn messages_with_separator_characters_keep_their_framing() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let path = temp_dir.path();
+    git(path, &["init", "-q", "-b", "main"]);
+    let base = commit(path, "a.txt", "initial");
+    let head = commit(
+        path,
+        "b.txt",
+        "Odd \u{1e} subject \u{1f} here\n\nFirst body line.\n\u{1e}\u{1f}Second body line.",
+    );
+    let root = AbsolutePathBuf::from_absolute_path(path).expect("absolute");
+    let GitCommitRange::Advanced { commits, omitted } =
+        commits_between(&root, &base, &head, 10, &budget()).await
+    else {
+        panic!("expected advanced history");
+    };
+    assert_eq!(
+        (
+            commits.len(),
+            omitted,
+            commits[0].oid.clone(),
+            commits[0].subject.clone(),
+            commits[0].body.contains("Second body line."),
+        ),
+        (
+            1,
+            false,
+            head.0,
+            "Odd \u{1e} subject \u{1f} here".to_string(),
             true
         )
     );

@@ -55,63 +55,119 @@ const COMMIT_FACT_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CheckoutReport(pub(crate) String);
 
+/// The longest a turn's start or end may spend on checkout observation, storage included.
+const LIFECYCLE_BUDGET: Duration = Duration::from_secs(4);
+
+/// Marks a turn whose start could not fully process the checkout changes; its end then
+/// does not advance the baseline, so the next turn retries the same comparison.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CheckoutBaselineHeld;
+
+/// What a turn's start learned about the checkout.
+pub(crate) struct TurnStartObservation {
+    pub(crate) report: Option<CheckoutReport>,
+    /// False when reading history or storing facts failed, or the work ran out of time.
+    pub(crate) complete: bool,
+}
+
 /// Samples the project's roots, compares them with the newest stored observation, stores
-/// observed commits as facts and the new sample as the latest observation. Returns a report
-/// when anything changed. Failures only lose the report.
+/// observed commits as facts and the new sample as the latest observation. The new sample
+/// becomes the baseline only when the comparison completed; otherwise the next turn retries
+/// it. Bounded in time; failures only lose the report.
 pub(crate) async fn observe_turn_start(
     services: &ProjectIntelligenceServices,
     project_id: &str,
     roots: &[String],
     turn_id: &str,
-) -> Option<CheckoutReport> {
+) -> TurnStartObservation {
+    match tokio::time::timeout(
+        LIFECYCLE_BUDGET,
+        observe_turn_start_unbounded(services, project_id, roots, turn_id),
+    )
+    .await
+    {
+        Ok(observation) => observation,
+        Err(_) => {
+            tracing::warn!(%project_id, "checkout observation at turn start timed out");
+            TurnStartObservation {
+                report: None,
+                complete: false,
+            }
+        }
+    }
+}
+
+async fn observe_turn_start_unbounded(
+    services: &ProjectIntelligenceServices,
+    project_id: &str,
+    roots: &[String],
+    turn_id: &str,
+) -> TurnStartObservation {
+    let incomplete = TurnStartObservation {
+        report: None,
+        complete: false,
+    };
     let budget = GitObservationBudget::until(tokio::time::Instant::now() + OBSERVATION_BUDGET);
-    let (current, samples) = sample(project_id, roots, &budget).await?;
+    let Some((current, samples)) = sample(project_id, roots, &budget).await else {
+        return TurnStartObservation {
+            report: None,
+            complete: true,
+        };
+    };
     let store = match services.repository_observations().await {
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to open repository observations");
-            return None;
+            return incomplete;
         }
     };
     let previous = match store.latest(project_id).await {
         Ok(previous) => previous,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to read the latest repository observation");
-            None
+            return incomplete;
         }
     };
-    let report = match previous {
+    let (report, complete) = match previous {
         Some(previous) => {
             compare(services, project_id, turn_id, &previous, &samples, &budget).await
         }
-        None => None,
+        None => (None, true),
     };
-    if let Err(error) = store.record(current).await {
+    if complete && let Err(error) = store.record(current).await {
         tracing::warn!(%project_id, %error, "failed to record a repository observation");
     }
-    report
+    TurnStartObservation { report, complete }
 }
 
 /// Samples the project's roots at the end of a turn, so the next turn compares against the
-/// checkout as this turn left it.
+/// checkout as this turn left it. Bounded in time.
 pub(crate) async fn observe_turn_end(
     services: &ProjectIntelligenceServices,
     project_id: &str,
     roots: &[String],
 ) {
-    let budget = GitObservationBudget::until(tokio::time::Instant::now() + OBSERVATION_BUDGET);
-    let Some((current, _)) = sample(project_id, roots, &budget).await else {
-        return;
-    };
-    match services.repository_observations().await {
-        Ok(store) => {
-            if let Err(error) = store.record(current).await {
-                tracing::warn!(%project_id, %error, "failed to record a repository observation");
+    let observe = async {
+        let budget = GitObservationBudget::until(tokio::time::Instant::now() + OBSERVATION_BUDGET);
+        let Some((current, _)) = sample(project_id, roots, &budget).await else {
+            return;
+        };
+        match services.repository_observations().await {
+            Ok(store) => {
+                if let Err(error) = store.record(current).await {
+                    tracing::warn!(%project_id, %error, "failed to record a repository observation");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to open repository observations");
             }
         }
-        Err(error) => {
-            tracing::warn!(%project_id, %error, "failed to open repository observations");
-        }
+    };
+    if tokio::time::timeout(LIFECYCLE_BUDGET, observe)
+        .await
+        .is_err()
+    {
+        tracing::warn!(%project_id, "checkout observation at turn end timed out");
     }
 }
 
@@ -126,9 +182,16 @@ struct RootSample {
 }
 
 /// Paths listed when fingerprinting uncommitted changes.
-const MAX_FINGERPRINT_PATHS: usize = 500;
+const MAX_FINGERPRINT_PATHS: usize = 200;
 
-async fn dirty_digest(path: &AbsolutePathBuf, budget: &GitObservationBudget) -> Option<String> {
+/// Fingerprint of the uncommitted changes: each changed path's index and worktree status,
+/// size and modification time. Paths are relative to the Git worktree root.
+async fn dirty_digest(
+    path: &AbsolutePathBuf,
+    worktree_root: Option<&AbsolutePathBuf>,
+    budget: &GitObservationBudget,
+) -> Option<String> {
+    let worktree_root = worktree_root?;
     let listed = changed_paths(path, MAX_FINGERPRINT_PATHS, budget)
         .await
         .ok()?;
@@ -136,17 +199,19 @@ async fn dirty_digest(path: &AbsolutePathBuf, budget: &GitObservationBudget) -> 
         return None;
     }
     let mut paths = listed.paths;
-    paths.sort();
+    paths.sort_by(|left, right| left.path.cmp(&right.path));
     let mut parts = Vec::with_capacity(paths.len());
-    for relative in &paths {
-        let metadata = std::fs::metadata(path.as_path().join(relative)).ok();
+    for changed in &paths {
+        let relative = &changed.path;
+        let status = &changed.status;
+        let metadata = std::fs::metadata(worktree_root.as_path().join(relative)).ok();
         let modified = metadata
             .as_ref()
             .and_then(|metadata| metadata.modified().ok())
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |elapsed| elapsed.as_nanos());
         let size = metadata.map_or(0, |metadata| metadata.len());
-        parts.push(format!("{relative}|{size}|{modified}"));
+        parts.push(format!("{status}|{relative}|{size}|{modified}"));
     }
     Some(digest(
         &parts.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -169,7 +234,9 @@ async fn sample(
         };
         let observation = observe_repository(&path, budget).await;
         let dirty_digest = match observation.worktree {
-            GitWorktreeObservation::Dirty => dirty_digest(&path, budget).await,
+            GitWorktreeObservation::Dirty => {
+                dirty_digest(&path, observation.worktree_root.as_ref(), budget).await
+            }
             GitWorktreeObservation::Clean | GitWorktreeObservation::Unknown(_) => None,
         };
         samples.push(RootSample {
@@ -248,6 +315,8 @@ async fn sample(
     Some((observation, samples))
 }
 
+/// Compares the fresh samples with the previous observation. Returns the report and whether
+/// the comparison completed (every history read and fact write succeeded).
 async fn compare(
     services: &ProjectIntelligenceServices,
     project_id: &str,
@@ -255,7 +324,8 @@ async fn compare(
     previous: &RepositoryObservation,
     samples: &[RootSample],
     budget: &GitObservationBudget,
-) -> Option<CheckoutReport> {
+) -> (Option<CheckoutReport>, bool) {
+    let mut complete = true;
     let mut lines = Vec::new();
     for sample in samples {
         let Some(before) = previous
@@ -282,8 +352,7 @@ async fn compare(
                         ));
                         for commit in &commits {
                             let short = &commit.oid[..commit.oid.len().min(8)];
-                            let date = crate::continuity::format_time(commit.committed_at.saturating_mul(1000));
-                            let date = date.split(' ').next().unwrap_or(&date).to_string();
+                            let date = date_only(commit.committed_at.saturating_mul(1000));
                             let body = if commit.body.is_empty() {
                                 String::new()
                             } else {
@@ -293,16 +362,19 @@ async fn compare(
                                 "- {short} ({date}) {}{body}",
                                 single_line(&commit.subject)
                             ));
-                            store_commit_fact(
+                            complete &= store_commit_fact(
                                 services,
                                 project_id,
                                 turn_id,
-                                &previous.id,
+                                previous,
                                 &sample.project_root,
                                 &commit.oid,
                                 &format!(
-                                    "Commit {short} ({date}) in {}, observed between Stateful turns (origin unknown): {}{body}",
+                                    "Commit {} (committed {date}) in {}, observed after {} between Stateful turns (origin unknown; full message: git show {}): {}{body}",
+                                    commit.oid,
                                     sample.project_root,
+                                    crate::continuity::format_time(previous.completed_at_ms),
+                                    commit.oid,
                                     single_line(&commit.subject)
                                 ),
                             )
@@ -322,39 +394,71 @@ async fn compare(
                         &new.0[..new.0.len().min(8)]
                     )),
                     GitCommitRange::Unknown(_) => {
-                        root_lines.push("HEAD changed; the commits could not be read.".to_string())
+                        complete = false;
+                        root_lines.push("HEAD changed; the commits could not be read.".to_string());
                     }
                 }
             }
-            (_, GitHeadObservation::Unknown(_)) | (RepositoryHead::Unknown { .. }, _) => {
-                root_lines.push("HEAD change unknown.".to_string());
+            (RepositoryHead::Unborn { .. }, GitHeadObservation::Commit { oid, .. }) => {
+                root_lines.push(format!(
+                    "The first commit(s) were made (HEAD now {}); run git log.",
+                    &oid.0[..oid.0.len().min(8)]
+                ));
             }
-            _ => {}
+            (RepositoryHead::Commit { .. }, GitHeadObservation::Unborn { .. }) => {
+                root_lines.push("HEAD now names a branch with no commits.".to_string());
+            }
+            (RepositoryHead::Unborn { .. }, GitHeadObservation::Unborn { .. }) => {}
+            (RepositoryHead::Unknown { .. }, GitHeadObservation::Unknown(_)) => {}
+            (_, GitHeadObservation::Unknown(_)) | (RepositoryHead::Unknown { .. }, _) => {
+                root_lines.push("Whether HEAD changed is unknown.".to_string());
+            }
         }
-        // Uncommitted changes are reported when they differ from the last observation: the
-        // same fingerprint means nothing changed since then.
-        let unchanged_dirt = matches!(
-            (&before.worktree, &sample.dirty_digest),
-            (
-                RepositoryWorktree::Dirty {
-                    coverage: RepositoryDirtyCoverage::Complete { digest: old },
-                },
-                Some(new),
-            ) if old == new
-        );
-        if sample.observation.worktree == GitWorktreeObservation::Dirty && !unchanged_dirt {
-            match changed_paths(&sample.path, MAX_LISTED, budget).await {
-                Ok(paths) => root_lines.push(format!(
-                    "Uncommitted changes now: {}{}",
-                    paths
-                        .paths
-                        .iter()
-                        .map(|path| single_line(path))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    if paths.omitted { ", ..." } else { "" }
-                )),
-                Err(_) => root_lines.push("Uncommitted changes now (paths unknown).".to_string()),
+        match (&before.worktree, &sample.observation.worktree) {
+            (_, GitWorktreeObservation::Dirty) => {
+                // The same fingerprint means the uncommitted changes did not change.
+                let unchanged = matches!(
+                    (&before.worktree, &sample.dirty_digest),
+                    (
+                        RepositoryWorktree::Dirty {
+                            coverage: RepositoryDirtyCoverage::Complete { digest: old },
+                        },
+                        Some(new),
+                    ) if old == new
+                );
+                if !unchanged {
+                    match changed_paths(&sample.path, MAX_LISTED, budget).await {
+                        Ok(paths) => root_lines.push(format!(
+                            "Uncommitted changes now: {}{}",
+                            paths
+                                .paths
+                                .iter()
+                                .map(|changed| format!(
+                                    "{} ({})",
+                                    single_line(&changed.path),
+                                    changed.status.trim()
+                                ))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            if paths.omitted { ", ..." } else { "" }
+                        )),
+                        Err(_) => {
+                            root_lines.push("Uncommitted changes now (paths unknown).".to_string())
+                        }
+                    }
+                }
+            }
+            (RepositoryWorktree::Dirty { .. }, GitWorktreeObservation::Clean) => {
+                root_lines.push(
+                    "The uncommitted changes seen before are gone (committed, reverted or removed); the checkout is clean."
+                        .to_string(),
+                );
+            }
+            (RepositoryWorktree::Unknown { .. }, GitWorktreeObservation::Clean)
+            | (RepositoryWorktree::Clean, GitWorktreeObservation::Clean)
+            | (RepositoryWorktree::Unknown { .. }, GitWorktreeObservation::Unknown(_)) => {}
+            (_, GitWorktreeObservation::Unknown(_)) => {
+                root_lines.push("Whether there are uncommitted changes is unknown.".to_string());
             }
         }
         if !root_lines.is_empty() {
@@ -363,37 +467,72 @@ async fn compare(
         }
     }
     if lines.is_empty() {
-        return None;
+        return (None, complete);
     }
-    let observed_at = crate::continuity::format_time(previous.completed_at_ms);
-    let mut report = format!(
+    (
+        Some(CheckoutReport(render_report(
+            previous.completed_at_ms,
+            lines,
+        ))),
+        complete,
+    )
+}
+
+/// The report text, bounded after escaping (notice included) so the fragment never exceeds
+/// `MAX_REPORT_BYTES`.
+fn render_report(observed_at_ms: i64, lines: Vec<String>) -> String {
+    // Bounded after escaping, notice included, so the fragment never exceeds the cap.
+    let observed_at = crate::continuity::format_time(observed_at_ms);
+    let mut report = crate::continuity::escape(&format!(
         "Checkout changes since the last observation ({observed_at}, at a Stateful turn in this project). Their origin is unknown: the user, another tool, or a concurrent thread. Keep existing work; credit the user only where commit messages or explicit markings support it, and keep lines the user marked as theirs when editing nearby."
-    );
+    ));
+    let notice = "\n... more changes: run git log and git status.";
     for line in lines {
-        let next = format!("\n{line}");
-        if report.len() + next.len() > MAX_REPORT_BYTES {
-            report.push_str("\n... more changes: run git log and git status.");
+        let next = crate::continuity::escape(&format!("\n{line}"));
+        if report.len() + next.len() + notice.len() > MAX_REPORT_BYTES {
+            let room = MAX_REPORT_BYTES.saturating_sub(report.len() + notice.len());
+            if room > 40 {
+                let mut end = room;
+                while !next.is_char_boundary(end) {
+                    end -= 1;
+                }
+                // Never cut inside an escape sequence such as \u003c.
+                let cut = &next[..end];
+                let cut = match cut.rfind('\\') {
+                    Some(position) if cut.len() - position < 6 => &cut[..position],
+                    Some(_) | None => cut,
+                };
+                report.push_str(cut);
+            }
+            report.push_str(notice);
             break;
         }
         report.push_str(&next);
     }
-    Some(CheckoutReport(crate::continuity::escape(&report)))
+    report
 }
 
+fn date_only(ms: i64) -> String {
+    let time = crate::continuity::format_time(ms);
+    time.split(' ').next().unwrap_or(&time).to_string()
+}
+
+/// Stores one observed commit as a dated maintenance fact; returns whether it is stored.
 async fn store_commit_fact(
     services: &ProjectIntelligenceServices,
     project_id: &str,
     turn_id: &str,
-    observation_id: &RepositoryObservationId,
+    previous: &RepositoryObservation,
     project_root: &str,
     oid: &str,
     content: &str,
-) {
+) -> bool {
+    let observation_id = &previous.id;
     let Ok(id) = BlackboardEntryId::parse(format!(
         "stateful-commit-{}",
         digest(&[project_id, project_root, oid])
     )) else {
-        return;
+        return false;
     };
     let result = async {
         let store = services
@@ -447,8 +586,12 @@ async fn store_commit_fact(
             .map_err(|error| error.to_string())
     }
     .await;
-    if let Err(error) = result {
-        tracing::warn!(%project_id, %error, "failed to store an observed commit");
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(%project_id, %error, "failed to store an observed commit");
+            false
+        }
     }
 }
 
@@ -513,6 +656,8 @@ const OVER_BUDGET_REPORT: &str = "Further checkout changes were observed since t
 pub(crate) struct CheckoutReportPlan {
     turn_id: String,
     body: Option<String>,
+    /// Which form this turn's report took: "full", "fallback" or "none".
+    shown: String,
     pub(crate) window_bytes: usize,
 }
 
@@ -531,16 +676,36 @@ impl CheckoutReportPlan {
             .and_then(|bytes| usize::try_from(bytes).ok())
             .unwrap_or(0);
         let fragment_bytes = |body: &str| START_MARKER.len() + body.len() + END_MARKER.len();
-        let body = report.map(|report| {
-            if same_turn
-                || previous_bytes.saturating_add(fragment_bytes(&report.0))
-                    <= MAX_WINDOW_REPORT_BYTES
-            {
-                report.0.clone()
-            } else {
-                OVER_BUDGET_REPORT.to_string()
+        let fallback_bytes = fragment_bytes(OVER_BUDGET_REPORT);
+        // A later step of the same turn shows the form admitted at its first step, uncharged.
+        let shown = if same_turn {
+            field("shown")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("none")
+                .to_string()
+        } else {
+            match report {
+                Some(report)
+                    if previous_bytes
+                        .saturating_add(fragment_bytes(&report.0))
+                        .saturating_add(fallback_bytes)
+                        <= MAX_WINDOW_REPORT_BYTES =>
+                {
+                    "full".to_string()
+                }
+                Some(_)
+                    if previous_bytes.saturating_add(fallback_bytes) <= MAX_WINDOW_REPORT_BYTES =>
+                {
+                    "fallback".to_string()
+                }
+                Some(_) | None => "none".to_string(),
             }
-        });
+        };
+        let body = match (shown.as_str(), report) {
+            ("full", Some(report)) => Some(report.0.clone()),
+            ("fallback", Some(_)) => Some(OVER_BUDGET_REPORT.to_string()),
+            _ => None,
+        };
         let added = match (&body, same_turn) {
             (Some(body), false) => fragment_bytes(body),
             (Some(_), true) | (None, _) => 0,
@@ -548,6 +713,7 @@ impl CheckoutReportPlan {
         Self {
             turn_id: turn_id.to_string(),
             body,
+            shown,
             window_bytes: previous_bytes.saturating_add(added),
         }
     }
@@ -556,11 +722,12 @@ impl CheckoutReportPlan {
         let Self {
             turn_id,
             body,
+            shown,
             window_bytes,
         } = self;
         codex_extension_api::WorldStateSectionContribution::new(
             WORLD_STATE_ID,
-            serde_json::json!({ "turnId": turn_id, "windowBytes": window_bytes }),
+            serde_json::json!({ "turnId": turn_id, "shown": shown, "windowBytes": window_bytes }),
             move |previous| {
                 if let codex_extension_api::PreviousWorldStateSection::Known(previous) = previous
                     && previous.get("turnId").and_then(serde_json::Value::as_str)

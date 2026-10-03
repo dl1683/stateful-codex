@@ -27,6 +27,7 @@ mod history;
 mod parse;
 mod probe;
 
+pub use history::GitChangedPath;
 pub use history::GitCommitRange;
 pub use history::GitCommitSummary;
 pub use history::GitWorktreePaths;

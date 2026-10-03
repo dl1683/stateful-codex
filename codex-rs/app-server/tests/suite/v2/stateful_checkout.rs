@@ -98,6 +98,9 @@ async fn checkout_changes_between_turns_reach_the_next_turn_once() -> Result<()>
     std::fs::write(repo.path().join("NOTES-rate.md"), "Priya asked for per=w\n")?;
     run_turn(&mut server, &thread).await?;
     run_turn(&mut server, &thread).await?;
+    // The note is reverted (deleted) between turns: the report says the checkout is clean.
+    std::fs::remove_file(repo.path().join("NOTES-rate.md"))?;
+    run_turn(&mut server, &thread).await?;
 
     let bodies = responses
         .received_requests()
@@ -111,8 +114,8 @@ async fn checkout_changes_between_turns_reach_the_next_turn_once() -> Result<()>
                 .map(|body| body.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let [first, second, third] = bodies.as_slice() else {
-        panic!("three requests expected, got {}", bodies.len());
+    let [first, second, third, fourth] = bodies.as_slice() else {
+        panic!("four requests expected, got {}", bodies.len());
     };
     let count = |body: &str| body.matches("<stateful_checkout_changes>").count();
     assert_eq!(
@@ -124,8 +127,10 @@ async fn checkout_changes_between_turns_reach_the_next_turn_once() -> Result<()>
             second.contains("Matches the key our downstream app uses."),
             second.contains("NOTES-rate.md"),
             second.contains("Their origin is unknown"),
+            count(fourth),
+            fourth.contains("the checkout is clean"),
         ),
-        (0, 1, 1, true, true, true, true)
+        (0, 1, 1, true, true, true, true, 2, true)
     );
     Ok(())
 }
