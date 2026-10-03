@@ -131,12 +131,9 @@ fn parse_addition(rest: &str) -> Result<Addition, String> {
                 .strip_prefix("for ")
                 .and_then(|scoped| scoped.split_once(": "));
             Ok(match scoped {
-                Some((scope, rule)) if !rule.trim().is_empty() => addition(
-                    StatefulMemoryAddKind::Rule,
-                    rule,
-                    Some(&format!("For {scope}")),
-                    None,
-                ),
+                Some((scope, rule)) if !rule.trim().is_empty() => {
+                    addition(StatefulMemoryAddKind::Rule, rule, Some(scope), None)
+                }
                 Some(_) | None => addition(StatefulMemoryAddKind::Rule, text, None, None),
             })
         }
@@ -234,6 +231,8 @@ pub(crate) struct MemoryListing {
     next_generation: Arc<Mutex<u64>>,
     /// The last investigations list shown: its generation, thread, and scope IDs by number.
     investigations: Arc<Mutex<Option<(u64, String, Vec<String>)>>>,
+    /// The listing generation last put on screen, by thread.
+    displayed: Arc<Mutex<Option<(String, u64)>>>,
 }
 
 impl MemoryListing {
@@ -259,6 +258,32 @@ impl MemoryListing {
             .filter(|listing| listing.thread_id == thread_id)
             .cloned()
             .ok_or_else(|| "Run /memory first; numbers refer to the list it shows.".to_string())
+    }
+
+    /// Records that the listing `generation` of `thread_id` is now on screen.
+    pub(crate) fn displayed(&self, thread_id: &str, generation: u64) {
+        *self
+            .displayed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((thread_id.to_string(), generation));
+    }
+
+    /// The listing whose numbers are on screen for `thread_id`: a number never names an entry
+    /// of a list the user has not seen yet.
+    fn on_screen(&self, thread_id: &str) -> Result<Listing, String> {
+        let shown = self.for_thread(thread_id)?;
+        let displayed = self
+            .displayed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if displayed != Some((thread_id.to_string(), shown.generation)) {
+            return Err(
+                "The list on screen is out of date; run /memory to list it again.".to_string(),
+            );
+        }
+        Ok(shown)
     }
 
     /// Applies `change` to the listing if it is still generation `generation` of the thread.
@@ -291,17 +316,18 @@ pub(crate) fn run(
             ))));
             return;
         };
-        let insert = |cell: PlainHistoryCell| {
+        let insert = |cell: PlainHistoryCell, listing_generation: Option<u64>| {
             app_event_tx.send(AppEvent::StatefulMemoryResult {
                 thread_id: thread,
                 cell: Box::new(cell),
+                listing_generation,
             });
         };
         let thread_id = thread.to_string();
         let command = match parse(&args) {
             Ok(command) => command,
             Err(usage) => {
-                insert(new_error_event(usage));
+                insert(new_error_event(usage), /*listing_generation*/ None);
                 return;
             }
         };
@@ -309,42 +335,60 @@ pub(crate) fn run(
             handle: &request_handle,
             thread_id: &thread_id,
         };
-        let result = match command {
-            MemoryCommand::List => list(&request, &listing).await,
-            MemoryCommand::More => more(&request, &listing).await,
-            MemoryCommand::Help => Ok(PlainHistoryCell::new(
-                HELP.iter().map(|line| (*line).into()).collect(),
-            )),
-            MemoryCommand::Add(addition) => add(&request, &listing, addition).await,
-            MemoryCommand::Investigations => {
-                investigations(&request, &listing, StatefulMemoryScopeAction::List, None).await
-            }
-            MemoryCommand::Leave => {
-                investigations(&request, &listing, StatefulMemoryScopeAction::Leave, None).await
-            }
-            MemoryCommand::Join(number) => {
-                investigations(
-                    &request,
-                    &listing,
-                    StatefulMemoryScopeAction::Join,
-                    Some(number),
-                )
-                .await
-            }
-            MemoryCommand::End(number) => {
-                investigations(
-                    &request,
-                    &listing,
-                    StatefulMemoryScopeAction::End,
-                    Some(number),
-                )
-                .await
-            }
-            MemoryCommand::Forget(number) => forget(&request, &listing, number).await,
-            MemoryCommand::Correct(number, text) => correct(&request, &listing, number, text).await,
+        let shows = |result: Result<(PlainHistoryCell, u64), String>| match result {
+            Ok((cell, generation)) => (Ok(cell), Some(generation)),
+            Err(error) => (Err(error), None),
         };
-        insert(result.unwrap_or_else(new_error_event));
+        let (result, listing_generation) = match command {
+            MemoryCommand::List => shows(list(&request, &listing).await),
+            MemoryCommand::More => shows(more(&request, &listing).await),
+            command => (other(&request, &listing, command).await, None),
+        };
+        insert(result.unwrap_or_else(new_error_event), listing_generation);
     });
+}
+
+/// Runs a command that shows no numbered listing.
+async fn other(
+    request: &Requests<'_>,
+    listing: &MemoryListing,
+    command: MemoryCommand,
+) -> Result<PlainHistoryCell, String> {
+    match command {
+        MemoryCommand::List | MemoryCommand::More => {
+            Err("Listing commands show their own list.".to_string())
+        }
+        MemoryCommand::Help => Ok(PlainHistoryCell::new(
+            HELP.iter().map(|line| (*line).into()).collect(),
+        )),
+        MemoryCommand::Add(addition) => add(request, listing, addition).await,
+        MemoryCommand::Investigations => {
+            investigations(request, listing, StatefulMemoryScopeAction::List, None).await
+        }
+        MemoryCommand::Leave => {
+            investigations(request, listing, StatefulMemoryScopeAction::Leave, None).await
+        }
+        MemoryCommand::Join(number) => {
+            investigations(
+                &request,
+                &listing,
+                StatefulMemoryScopeAction::Join,
+                Some(number),
+            )
+            .await
+        }
+        MemoryCommand::End(number) => {
+            investigations(
+                &request,
+                &listing,
+                StatefulMemoryScopeAction::End,
+                Some(number),
+            )
+            .await
+        }
+        MemoryCommand::Forget(number) => forget(request, listing, number).await,
+        MemoryCommand::Correct(number, text) => correct(request, listing, number, text).await,
+    }
 }
 
 /// The app-server handle and the thread a command acts for.
@@ -384,7 +428,10 @@ impl Requests<'_> {
     }
 }
 
-async fn list(request: &Requests<'_>, listing: &MemoryListing) -> Result<PlainHistoryCell, String> {
+async fn list(
+    request: &Requests<'_>,
+    listing: &MemoryListing,
+) -> Result<(PlainHistoryCell, u64), String> {
     let generation = listing.begin();
     let page = request.page(/*cursor*/ None).await?;
     let run = request.run().await;
@@ -404,23 +451,20 @@ async fn list(request: &Requests<'_>, listing: &MemoryListing) -> Result<PlainHi
             .as_ref()
             .is_some_and(|current| current.generation > generation);
         if newer {
-            return Ok(new_info_event(
-                "A newer /memory list replaced this one; use its numbers.".to_string(),
-                /*hint*/ None,
-            ));
+            return Err("A newer /memory list replaced this one; use its numbers.".to_string());
         }
         *current = Some(shown);
     }
-    Ok(PlainHistoryCell::new(lines))
+    Ok((PlainHistoryCell::new(lines), generation))
 }
 
-async fn more(request: &Requests<'_>, listing: &MemoryListing) -> Result<PlainHistoryCell, String> {
-    let shown = listing.for_thread(request.thread_id)?;
+async fn more(
+    request: &Requests<'_>,
+    listing: &MemoryListing,
+) -> Result<(PlainHistoryCell, u64), String> {
+    let shown = listing.on_screen(request.thread_id)?;
     let Some(cursor) = shown.cursor.clone() else {
-        return Ok(new_info_event(
-            "That was the whole list.".to_string(),
-            /*hint*/ None,
-        ));
+        return Err("That was the whole list.".to_string());
     };
     let page = request.page(Some(cursor)).await.map_err(|error| {
         format!("{error}. Memory changed since the list was shown; run /memory to list it again.")
@@ -441,7 +485,7 @@ async fn more(request: &Requests<'_>, listing: &MemoryListing) -> Result<PlainHi
                 /*run*/ None,
             )
         })
-        .map(PlainHistoryCell::new)
+        .map(|lines| (PlainHistoryCell::new(lines), shown.generation))
         .ok_or_else(|| "A newer /memory list replaced this one; use its numbers.".to_string())
 }
 
@@ -499,7 +543,7 @@ async fn forget(
     listing: &MemoryListing,
     number: usize,
 ) -> Result<PlainHistoryCell, String> {
-    let shown = listing.for_thread(request.thread_id)?;
+    let shown = listing.on_screen(request.thread_id)?;
     let item = shown.current(number)?.clone();
     let _: StatefulMemoryForgetResponse = request
         .handle
@@ -528,7 +572,7 @@ async fn correct(
     number: usize,
     text: String,
 ) -> Result<PlainHistoryCell, String> {
-    let shown = listing.for_thread(request.thread_id)?;
+    let shown = listing.on_screen(request.thread_id)?;
     let item = shown.current(number)?.clone();
     let response: StatefulMemoryCorrectResponse = request
         .handle

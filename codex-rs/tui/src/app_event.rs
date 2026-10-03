@@ -1091,6 +1091,8 @@ pub(crate) enum AppEvent {
     StatefulMemoryResult {
         thread_id: ThreadId,
         cell: Box<dyn HistoryCell>,
+        /// The numbered listing generation the cell shows, if it shows one.
+        listing_generation: Option<u64>,
     },
 
     McpLoginStarted {

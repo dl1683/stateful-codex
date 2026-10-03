@@ -109,7 +109,7 @@ pub async fn add_entry(
     };
     // The complete request, so a retry is recognized by what was asked, not by stored text
     // that two different requests can share.
-    let fingerprint = request_fingerprint(&addition, content);
+    let fingerprint = request_fingerprint(&addition, content, actor.thread_id.as_deref());
     // A retried action returns what it did; the same identity for anything else (other
     // words, another kind, a different reason or scope) is refused.
     if let Some(done) = store.change_for_action(project_id, action_id).await? {
@@ -126,18 +126,16 @@ pub async fn add_entry(
             Some(id) => store.get_entry(project_id, &id).await?,
             None => None,
         };
-        return match entry {
-            Some(entry)
-                if entry.value.content == text
-                    && entry.value.kind == kind
-                    && done.record.category == category =>
-            {
-                Ok((entry, AddOutcome::AlreadyDone))
-            }
-            Some(_) | None => Err(MemoryControlError::Refused(
-                "this action already added something else; nothing was added".to_string(),
-            )),
-        };
+        // The request matches the recorded one, so its recorded result is returned as it is
+        // stored now (the words of an "already present" entry may differ in spacing).
+        return entry
+            .map(|entry| (entry, AddOutcome::AlreadyDone))
+            .ok_or_else(|| {
+                MemoryControlError::Refused(
+                    "the entry this action made is no longer readable; nothing was added"
+                        .to_string(),
+                )
+            });
     }
     // A scoped rule belongs to the open investigation this thread continues, named by its ID
     // or its title, or as "this investigation"; it ends with that investigation.
@@ -316,7 +314,11 @@ const CURRENT_INVESTIGATION: &[&str] = &[
 
 /// The journal's record of a direct addition's complete request (kind, words, reason,
 /// scope), kept in the change's group field, which direct additions do not otherwise use.
-fn request_fingerprint(addition: &MemoryAddition, content: &str) -> String {
+fn request_fingerprint(
+    addition: &MemoryAddition,
+    content: &str,
+    thread_id: Option<&str>,
+) -> String {
     let (kind, extra) = match addition {
         MemoryAddition::Rule { scope } => ("rule", scope.as_deref()),
         MemoryAddition::Background => ("background", None),
@@ -329,6 +331,10 @@ fn request_fingerprint(addition: &MemoryAddition, content: &str) -> String {
         hasher.update([0]);
     }
     hasher.update([u8::from(extra.is_some())]);
+    // A scope such as "this investigation" means the one the requesting thread continues.
+    if matches!(addition, MemoryAddition::Rule { scope: Some(_) }) {
+        hasher.update(thread_id.unwrap_or_default().as_bytes());
+    }
     format!("add-request-{:x}", hasher.finalize())
 }
 

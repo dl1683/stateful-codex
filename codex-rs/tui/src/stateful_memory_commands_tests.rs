@@ -95,7 +95,7 @@ fn memory_arguments_parse_into_commands() {
             Ok(addition(
                 StatefulMemoryAddKind::Rule,
                 "Do not change code.",
-                Some("For this investigation, until we agree"),
+                Some("this investigation, until we agree"),
                 None
             )),
             Ok(addition(
@@ -177,5 +177,39 @@ fn numbers_stay_put_through_changes_pages_and_additions() {
             Err("Item 3 was forgotten.".to_string()),
             Ok("Never commit or push.".to_string()),
         )
+    );
+}
+
+/// Item 3 review 3: numbers resolve only against the listing on screen; a listing published
+/// but not yet displayed (or one for another thread) is refused, never used.
+#[test]
+fn numbers_resolve_only_against_the_listing_on_screen() {
+    let listing = super::MemoryListing::default();
+    let generation = listing.begin();
+    let mut shown = Listing {
+        thread_id: "thread-1".to_string(),
+        generation,
+        slots: Vec::new(),
+        cursor: None,
+    };
+    shown.append(vec![item(
+        "e1",
+        StatefulMemorySection::UserRule,
+        "Never push.",
+    )]);
+    *listing.lock() = Some(shown);
+    let before_display = listing.on_screen("thread-1").is_ok();
+    listing.displayed("thread-1", generation);
+    let on_screen = listing.on_screen("thread-1").map(|shown| shown.generation);
+    let other_thread = listing.on_screen("thread-2").is_ok();
+    // A newer listing published after the display is not yet on screen.
+    let newer = listing.begin();
+    if let Some(current) = listing.lock().as_mut() {
+        current.generation = newer;
+    }
+    let replaced = listing.on_screen("thread-1").is_ok();
+    assert_eq!(
+        (before_display, on_screen, other_thread, replaced),
+        (false, Ok(generation), false, false)
     );
 }

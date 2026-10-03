@@ -182,6 +182,18 @@ impl BlackboardRequestProcessor {
         if params.client_action_id.trim().is_empty() || params.client_action_id.len() > 128 {
             return Err(invalid_params("clientActionId must be 1-128 bytes"));
         }
+        // A field the kind does not use is refused rather than dropped.
+        let given = |value: &Option<String>| {
+            value
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        };
+        if given(&params.reason) && params.kind != StatefulMemoryAddKind::Decision {
+            return Err(invalid_params("reason is only for a decision"));
+        }
+        if given(&params.scope) && params.kind != StatefulMemoryAddKind::Rule {
+            return Err(invalid_params("scope is only for a rule"));
+        }
         let node_id = self.memory_node(&project_id).await?;
         let store = self.store().await?;
         let addition = match params.kind {

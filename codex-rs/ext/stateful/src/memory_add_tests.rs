@@ -385,10 +385,45 @@ async fn an_action_is_bound_to_its_whole_request_and_scope() {
             .await
         }
     };
+    // A retry of an addition that found the words already saved (spaced differently)
+    // replays that outcome.
+    let spaced = |action: &'static str| {
+        let node_id = node_id.clone();
+        let actor = actor(action);
+        async move {
+            add_entry(
+                store,
+                &actor,
+                "project-1",
+                node_id,
+                MemoryAddition::Note,
+                "The CI  runs on Windows.",
+            )
+            .await
+            .map(|(_, outcome)| outcome)
+            .ok()
+        }
+    };
+    add_entry(
+        store,
+        &actor("n1"),
+        "project-1",
+        node_id.clone(),
+        MemoryAddition::Note,
+        "The CI runs on Windows.",
+    )
+    .await
+    .expect("note");
+    let first_spaced = spaced("n2").await;
+    let retried_spaced = spaced("n2").await;
     let other_investigation = scoped("a2", "the cache investigation").await;
     let with_ending = scoped("a3", "this investigation, until we agree").await;
     let by_title = scoped("a4", "Ground rules for the parser bug").await;
     let by_id = scoped("a5", "scope-a").await;
+    assert_eq!(
+        (first_spaced, retried_spaced),
+        (Some(AddOutcome::Added), Some(AddOutcome::AlreadyDone))
+    );
     assert_eq!(
         (
             refused(same_text_other_request),
