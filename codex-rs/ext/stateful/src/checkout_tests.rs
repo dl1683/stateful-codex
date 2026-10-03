@@ -72,3 +72,35 @@ fn the_report_is_bounded_after_escaping() {
     assert!(report.ends_with("run git log and git status."));
     assert!(!report.contains('<') && !report.contains('&'));
 }
+
+/// An unknown HEAD is never a baseline: the project's baseline is held for every thread,
+/// so no turn end records over the last known observation.
+#[tokio::test]
+async fn an_unknown_head_holds_the_baseline_for_every_thread() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let missing = state_home.path().join("missing-root").display().to_string();
+    let report = super::observe_turn_start(
+        &services,
+        "project-1",
+        std::slice::from_ref(&missing),
+        "turn-1",
+    )
+    .await;
+    super::observe_turn_end(&services, "project-1", std::slice::from_ref(&missing)).await;
+    let latest = services
+        .repository_observations()
+        .await
+        .expect("observations")
+        .latest("project-1")
+        .await
+        .expect("latest");
+    assert_eq!(
+        (report, services.checkout_held("project-1"), latest),
+        (None, true, None)
+    );
+}

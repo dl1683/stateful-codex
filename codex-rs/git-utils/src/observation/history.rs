@@ -197,6 +197,33 @@ pub async fn changed_paths(
     Ok(GitWorktreePaths { paths, omitted })
 }
 
+/// The staged changes as Git's raw diff of the index against HEAD (modes and blob IDs per
+/// path), for fingerprinting what is staged even when the status letters do not change.
+pub async fn staged_changes(
+    root: &AbsolutePathBuf,
+    budget: &GitObservationBudget,
+) -> Result<String, GitObservationFailure> {
+    let output = run(
+        root.as_path(),
+        &[
+            "diff",
+            "--cached",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--no-color",
+            "--ignore-submodules=none",
+        ],
+        budget,
+        GitCommandOutputCap::SharedAllowance,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(command_failed(&output));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 async fn run(
     cwd: &Path,
     args: &[&str],

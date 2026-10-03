@@ -12,6 +12,7 @@ use super::GitCommitRange;
 use super::GitWorktreePaths;
 use super::changed_paths;
 use super::commits_between;
+use super::staged_changes;
 use crate::observation::GitObservationBudget;
 use crate::observation::probe::REPOSITORY_SELECTOR_VARIABLES;
 
@@ -193,5 +194,29 @@ async fn messages_with_separator_characters_keep_their_framing() {
             "Odd \u{1e} subject \u{1f} here".to_string(),
             true
         )
+    );
+}
+
+#[tokio::test]
+async fn staged_changes_name_the_staged_blob() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let path = temp_dir.path();
+    git(path, &["init", "-q", "-b", "main"]);
+    commit(path, "tracked.txt", "initial");
+    let root = AbsolutePathBuf::from_absolute_path(path).expect("absolute");
+    let clean = staged_changes(&root, &budget()).await.expect("staged");
+    std::fs::write(path.join("tracked.txt"), "first staging").expect("edit");
+    git(path, &["add", "tracked.txt"]);
+    let first = staged_changes(&root, &budget()).await.expect("staged");
+    std::fs::write(path.join("tracked.txt"), "second staging").expect("edit");
+    git(path, &["add", "tracked.txt"]);
+    let second = staged_changes(&root, &budget()).await.expect("staged");
+    assert_eq!(
+        (
+            clean.is_empty(),
+            first.contains("tracked.txt"),
+            first == second
+        ),
+        (true, true, false)
     );
 }

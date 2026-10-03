@@ -33,6 +33,7 @@ pub use history::GitCommitSummary;
 pub use history::GitWorktreePaths;
 pub use history::changed_paths;
 pub use history::commits_between;
+pub use history::staged_changes;
 
 use parse::ParseFailure;
 use parse::PorcelainStatus;

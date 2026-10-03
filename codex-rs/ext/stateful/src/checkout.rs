@@ -18,6 +18,7 @@ use codex_git_utils::GitWorktreeObservation;
 use codex_git_utils::changed_paths;
 use codex_git_utils::commits_between;
 use codex_git_utils::observe_repository;
+use codex_git_utils::staged_changes;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
@@ -58,18 +59,6 @@ pub(crate) struct CheckoutReport(pub(crate) String);
 /// The longest a turn's start or end may spend on checkout observation, storage included.
 const LIFECYCLE_BUDGET: Duration = Duration::from_secs(4);
 
-/// Marks a turn whose start could not fully process the checkout changes; its end then
-/// does not advance the baseline, so the next turn retries the same comparison.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CheckoutBaselineHeld;
-
-/// What a turn's start learned about the checkout.
-pub(crate) struct TurnStartObservation {
-    pub(crate) report: Option<CheckoutReport>,
-    /// False when reading history or storing facts failed, or the work ran out of time.
-    pub(crate) complete: bool,
-}
-
 /// Samples the project's roots, compares them with the newest stored observation, stores
 /// observed commits as facts and the new sample as the latest observation. The new sample
 /// becomes the baseline only when the comparison completed; otherwise the next turn retries
@@ -79,20 +68,18 @@ pub(crate) async fn observe_turn_start(
     project_id: &str,
     roots: &[String],
     turn_id: &str,
-) -> TurnStartObservation {
+) -> Option<CheckoutReport> {
     match tokio::time::timeout(
         LIFECYCLE_BUDGET,
         observe_turn_start_unbounded(services, project_id, roots, turn_id),
     )
     .await
     {
-        Ok(observation) => observation,
+        Ok(report) => report,
         Err(_) => {
             tracing::warn!(%project_id, "checkout observation at turn start timed out");
-            TurnStartObservation {
-                report: None,
-                complete: false,
-            }
+            services.set_checkout_hold(project_id, /*held*/ true);
+            None
         }
     }
 }
@@ -102,42 +89,42 @@ async fn observe_turn_start_unbounded(
     project_id: &str,
     roots: &[String],
     turn_id: &str,
-) -> TurnStartObservation {
-    let incomplete = TurnStartObservation {
-        report: None,
-        complete: false,
+) -> Option<CheckoutReport> {
+    let hold = || {
+        services.set_checkout_hold(project_id, /*held*/ true);
+        None
     };
     let budget = GitObservationBudget::until(tokio::time::Instant::now() + OBSERVATION_BUDGET);
     let Some((current, samples)) = sample(project_id, roots, &budget).await else {
-        return TurnStartObservation {
-            report: None,
-            complete: true,
-        };
+        return None;
     };
     let store = match services.repository_observations().await {
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to open repository observations");
-            return incomplete;
+            return hold();
         }
     };
     let previous = match store.latest(project_id).await {
         Ok(previous) => previous,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to read the latest repository observation");
-            return incomplete;
+            return hold();
         }
     };
-    let (report, complete) = match previous {
+    let (report, compared) = match previous {
         Some(previous) => {
             compare(services, project_id, turn_id, &previous, &samples, &budget).await
         }
         None => (None, true),
     };
+    // An unknown HEAD is not a baseline: the last known one stays until a sample succeeds.
+    let complete = compared && samples.iter().all(known_head);
     if complete && let Err(error) = store.record(current).await {
         tracing::warn!(%project_id, %error, "failed to record a repository observation");
     }
-    TurnStartObservation { report, complete }
+    services.set_checkout_hold(project_id, !complete);
+    report
 }
 
 /// Samples the project's roots at the end of a turn, so the next turn compares against the
@@ -148,10 +135,17 @@ pub(crate) async fn observe_turn_end(
     roots: &[String],
 ) {
     let observe = async {
+        // A turn of any thread that could not process the changes holds the baseline.
+        if services.checkout_held(project_id) {
+            return;
+        }
         let budget = GitObservationBudget::until(tokio::time::Instant::now() + OBSERVATION_BUDGET);
-        let Some((current, _)) = sample(project_id, roots, &budget).await else {
+        let Some((current, samples)) = sample(project_id, roots, &budget).await else {
             return;
         };
+        if !samples.iter().all(known_head) {
+            return;
+        }
         match services.repository_observations().await {
             Ok(store) => {
                 if let Err(error) = store.record(current).await {
@@ -169,6 +163,10 @@ pub(crate) async fn observe_turn_end(
     {
         tracing::warn!(%project_id, "checkout observation at turn end timed out");
     }
+}
+
+fn known_head(sample: &RootSample) -> bool {
+    !matches!(sample.observation.head, GitHeadObservation::Unknown(_))
 }
 
 /// One root's sample: its configured spelling, path and Git observation.
@@ -191,31 +189,37 @@ async fn dirty_digest(
     worktree_root: Option<&AbsolutePathBuf>,
     budget: &GitObservationBudget,
 ) -> Option<String> {
-    let worktree_root = worktree_root?;
+    let worktree_root = worktree_root?.as_path().to_path_buf();
     let listed = changed_paths(path, MAX_FINGERPRINT_PATHS, budget)
         .await
         .ok()?;
     if listed.omitted {
         return None;
     }
+    // Staged blob IDs and modes catch staging changes the status letters do not show.
+    let staged = staged_changes(path, budget).await.ok()?;
     let mut paths = listed.paths;
     paths.sort_by(|left, right| left.path.cmp(&right.path));
-    let mut parts = Vec::with_capacity(paths.len());
-    for changed in &paths {
-        let relative = &changed.path;
-        let status = &changed.status;
-        let metadata = std::fs::metadata(worktree_root.as_path().join(relative)).ok();
-        let modified = metadata
-            .as_ref()
-            .and_then(|metadata| metadata.modified().ok())
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |elapsed| elapsed.as_nanos());
-        let size = metadata.map_or(0, |metadata| metadata.len());
-        parts.push(format!("{status}|{relative}|{size}|{modified}"));
-    }
-    Some(digest(
-        &parts.iter().map(String::as_str).collect::<Vec<_>>(),
-    ))
+    // File metadata is read off the async task, so a stalled filesystem cannot hold the
+    // turn past its lifecycle bound.
+    tokio::task::spawn_blocking(move || {
+        let mut parts = vec![format!("staged|{staged}")];
+        for changed in &paths {
+            let relative = &changed.path;
+            let status = &changed.status;
+            let metadata = std::fs::metadata(worktree_root.join(relative)).ok();
+            let modified = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |elapsed| elapsed.as_nanos());
+            let size = metadata.map_or(0, |metadata| metadata.len());
+            parts.push(format!("{status}|{relative}|{size}|{modified}"));
+        }
+        digest(&parts.iter().map(String::as_str).collect::<Vec<_>>())
+    })
+    .await
+    .ok()
 }
 
 async fn sample(

@@ -27,6 +27,9 @@ pub(super) struct ProjectIntelligenceServices {
     read_receipts: EvidenceReadReceipts,
     runtime: Arc<OnceCell<StatefulRunStore>>,
     repository_observations: Arc<OnceCell<RepositoryObservationStore>>,
+    /// Projects whose checkout changes could not be fully processed: no turn of any thread
+    /// advances their observation baseline until a turn's start completes the comparison.
+    checkout_holds: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// One on-demand index per project, so concurrent first queries index it once and the
     /// others wait for that publication.
     on_demand_index: Arc<std::sync::Mutex<HashMap<String, Arc<OnceCell<()>>>>>,
@@ -42,6 +45,7 @@ impl ProjectIntelligenceServices {
             read_receipts: EvidenceReadReceipts::default(),
             runtime: Arc::new(OnceCell::new()),
             repository_observations: Arc::new(OnceCell::new()),
+            checkout_holds: Arc::default(),
             on_demand_index: Arc::default(),
         }
     }
@@ -108,6 +112,26 @@ impl ProjectIntelligenceServices {
         self.repository_observations
             .get_or_try_init(|| RepositoryObservationStore::open(&self.sqlite))
             .await
+    }
+
+    /// Holds or releases the project's checkout baseline for every thread of this process.
+    pub(super) fn set_checkout_hold(&self, project_id: &str, held: bool) {
+        let mut holds = self
+            .checkout_holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if held {
+            holds.insert(project_id.to_string());
+        } else {
+            holds.remove(project_id);
+        }
+    }
+
+    pub(super) fn checkout_held(&self, project_id: &str) -> bool {
+        self.checkout_holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(project_id)
     }
 
     pub(super) async fn runtime(&self) -> Result<&StatefulRunStore, StatefulRunStoreError> {

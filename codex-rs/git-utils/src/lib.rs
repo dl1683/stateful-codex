@@ -63,6 +63,7 @@ pub use observation::GitWorktreePaths;
 pub use observation::changed_paths;
 pub use observation::commits_between;
 pub use observation::observe_repository;
+pub use observation::staged_changes;
 pub use operations::git_config_override_env;
 pub use platform::create_symlink;
 pub use status::get_has_changes_in_repo;
