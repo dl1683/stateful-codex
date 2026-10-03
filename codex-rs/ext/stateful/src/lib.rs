@@ -1,5 +1,6 @@
 //! Project-scoped Stateful Codex integration.
 
+mod answer_units;
 mod attribution;
 mod autonomy;
 mod background;
@@ -8,6 +9,7 @@ mod checkpoint;
 mod completion;
 mod continuity;
 mod continuity_source;
+mod conversation_capture;
 mod conversation_summaries;
 mod events;
 mod limits;

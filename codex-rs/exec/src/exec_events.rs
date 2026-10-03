@@ -171,6 +171,8 @@ pub enum StatefulKnowledgeCategory {
     Recipe,
     Finding,
     Background,
+    RuledOut,
+    OpenCheck,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -199,6 +201,8 @@ impl StatefulKnowledgeCategory {
             Self::Recipe => "recipe",
             Self::Finding => "finding",
             Self::Background => "background about you",
+            Self::RuledOut => "ruled out",
+            Self::OpenCheck => "open check",
         }
     }
 }
@@ -231,6 +235,8 @@ impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
                 Category::Recipe => StatefulKnowledgeCategory::Recipe,
                 Category::Finding => StatefulKnowledgeCategory::Finding,
                 Category::Background => StatefulKnowledgeCategory::Background,
+                Category::RuledOut => StatefulKnowledgeCategory::RuledOut,
+                Category::OpenCheck => StatefulKnowledgeCategory::OpenCheck,
             },
             outcome: match notification.outcome {
                 Outcome::Stored => StatefulCaptureOutcome::Stored,
@@ -273,19 +279,27 @@ pub(crate) fn group_receipts(
             )
         })
         .collect();
+    use codex_app_server_protocol::StatefulKnowledgeCategory as Category;
+    // Rules come from the user's message; the other groups from the assistant's answer.
+    let (one, many, from) = match notification.category {
+        Category::Rule | Category::PendingRule => ("rule", "rules", "your message"),
+        Category::RuledOut => ("ruled-out item", "ruled-out items", "the answer"),
+        Category::OpenCheck => ("open check", "open checks", "the answer"),
+        Category::Decision => ("decision", "decisions", "the answer"),
+        Category::Recipe | Category::Finding | Category::Background => {
+            ("item", "items", "this turn")
+        }
+    };
     let rules = |count: u32| {
         if count == 1 {
-            "1 rule".to_string()
+            format!("1 {one}")
         } else {
-            format!("{count} rules")
+            format!("{count} {many}")
         }
     };
     let mut parts = Vec::new();
     if notification.saved > 0 {
-        parts.push(format!(
-            "saved {} from your message",
-            rules(notification.saved)
-        ));
+        parts.push(format!("saved {} from {from}", rules(notification.saved)));
     }
     if notification.pending > 0 {
         parts.push(format!(
@@ -300,7 +314,18 @@ pub(crate) fn group_receipts(
         ));
     }
     for omitted in &notification.omitted_items {
-        parts.push(format!("not saved (too long to keep whole): \"{omitted}\""));
+        match notification.category {
+            Category::Rule | Category::PendingRule => {
+                parts.push(format!("not saved (too long to keep whole): \"{omitted}\""));
+            }
+            // These openings say why they were not saved.
+            Category::RuledOut
+            | Category::OpenCheck
+            | Category::Decision
+            | Category::Recipe
+            | Category::Finding
+            | Category::Background => parts.push(format!("not saved: {omitted}")),
+        }
     }
     if notification.failed > 0 {
         parts.push(format!("{} could not be saved", rules(notification.failed)));

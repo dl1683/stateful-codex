@@ -1,0 +1,10 @@
+---
+source: tui/src/stateful_memory_tests.rs
+expression: "super::group_receipt_cell(&notification).map(|cell|\nrender(cell.display_lines(200))).unwrap_or_default()"
+---
+• Saved 2 ruled-out items from the answer · /memory to review
+    1. "Environment variable `SHIPIT_CONFIG`: absent during reproduction."
+    2. "TOML parsing, built-in defaults, and deploy planning: the failure occurs before those stages."
+    For the investigation: "Some ground rules for this whole investigation"
+    1 ruled-out item was already saved
+    Not saved: "forgotten earlier, not restored: Incorrect home-path expansion"

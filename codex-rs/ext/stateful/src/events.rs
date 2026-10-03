@@ -100,6 +100,10 @@ pub enum KnowledgeCategory {
     Finding,
     /// What the user said about themselves or the whole work, in their words.
     Background,
+    /// A hypothesis or approach an answer reported as ruled out.
+    RuledOut,
+    /// A check an answer reported as still open.
+    OpenCheck,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

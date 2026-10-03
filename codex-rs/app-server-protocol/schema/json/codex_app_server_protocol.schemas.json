@@ -21688,6 +21688,20 @@
               "background"
             ],
             "type": "string"
+          },
+          {
+            "description": "A hypothesis or approach an answer reported as ruled out.",
+            "enum": [
+              "ruledOut"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "A check an answer reported as still open.",
+            "enum": [
+              "openCheck"
+            ],
+            "type": "string"
           }
         ]
       },

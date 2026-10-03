@@ -222,6 +222,11 @@ impl TurnLifecycleContributor for StatefulExtension {
                     input.turn_store,
                     input.user_input,
                 );
+                input
+                    .turn_store
+                    .insert(crate::conversation_capture::CaptureTurn {
+                        turn_id: input.turn_id.to_string(),
+                    });
                 if let Some(thread) = input.thread_store.get::<SelectedThread>() {
                     self.user_messages.record(
                         &thread.thread_id,
@@ -333,10 +338,15 @@ impl TurnLifecycleContributor for StatefulExtension {
         turn_store: &'a ExtensionData,
         item: &'a TurnItem,
     ) -> ExtensionFuture<'a, ()> {
-        if let TurnItem::UserMessage(message) = item
-            && thread_store.get::<SelectedProject>().is_some()
-        {
-            crate::request_scope::RequestScope::observe_user_message(turn_store, &message.content);
+        if thread_store.get::<SelectedProject>().is_some() {
+            if let TurnItem::UserMessage(message) = item {
+                crate::request_scope::RequestScope::observe_user_message(
+                    turn_store,
+                    &message.content,
+                );
+            } else if let TurnItem::AgentMessage(message) = item {
+                crate::conversation_capture::observe_agent_message(turn_store, message);
+            }
         }
         Box::pin(std::future::ready(()))
     }
@@ -344,6 +354,20 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Completed);
+            if let (Some(selected), Some(thread), Some(services)) = (
+                input.thread_store.get::<SelectedProject>(),
+                input.thread_store.get::<SelectedThread>(),
+                self.services.as_ref(),
+            ) {
+                crate::conversation_capture::capture_completed_answer(
+                    services,
+                    self.event_sink.as_deref(),
+                    selected.project_id(),
+                    &thread.thread_id,
+                    input.turn_store,
+                )
+                .await;
+            }
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
     }

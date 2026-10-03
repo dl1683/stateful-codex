@@ -251,3 +251,56 @@ fn group_receipts_count_what_was_committed() {
             .unwrap_or_default()
     );
 }
+
+/// debug2: the ruled-out items of a completed answer, counted, with one the user had
+/// forgotten (not restored) and the investigation they belong to.
+#[test]
+fn ruled_out_group_receipts_name_the_answer() {
+    use codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification;
+    use codex_app_server_protocol::StatefulKnowledgeGroupItem;
+    let item = |text: &str, outcome| StatefulKnowledgeGroupItem {
+        entry_id: "entry".to_string(),
+        revision: 1,
+        category: StatefulKnowledgeCategory::RuledOut,
+        outcome,
+        text: text.to_string(),
+    };
+    let notification = StatefulKnowledgeGroupCapturedNotification {
+        project_id: "project-1".to_string(),
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        group_id: "group-1".to_string(),
+        category: StatefulKnowledgeCategory::RuledOut,
+        declared_count: None,
+        recognized: 4,
+        saved: 2,
+        already_present: 1,
+        pending: 0,
+        omitted: 1,
+        failed: 0,
+        items: vec![
+            item(
+                "Environment variable `SHIPIT_CONFIG`: absent during reproduction.",
+                StatefulCaptureOutcome::Stored,
+            ),
+            item(
+                "TOML parsing, built-in defaults, and deploy planning: the failure occurs before those stages.",
+                StatefulCaptureOutcome::Stored,
+            ),
+            item(
+                "`--env` and `--dry-run`: both variants fail identically.",
+                StatefulCaptureOutcome::AlreadyStored,
+            ),
+        ],
+        omitted_items: vec![
+            "forgotten earlier, not restored: Incorrect home-path expansion".to_string(),
+        ],
+        scope_title: Some("Some ground rules for this whole investigation".to_string()),
+    };
+    insta::assert_snapshot!(
+        "memory_group_receipt_ruled_out",
+        super::group_receipt_cell(&notification)
+            .map(|cell| render(cell.display_lines(/*width*/ 200)))
+            .unwrap_or_default()
+    );
+}

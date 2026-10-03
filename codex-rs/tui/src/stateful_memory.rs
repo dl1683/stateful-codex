@@ -221,7 +221,9 @@ impl ReceiptTally {
             StatefulKnowledgeCategory::Decision
             | StatefulKnowledgeCategory::Recipe
             | StatefulKnowledgeCategory::Finding
-            | StatefulKnowledgeCategory::Background => None,
+            | StatefulKnowledgeCategory::Background
+            | StatefulKnowledgeCategory::RuledOut
+            | StatefulKnowledgeCategory::OpenCheck => None,
         };
         Some(receipt_cell(notification, rule_number))
     }
@@ -246,6 +248,8 @@ fn receipt_cell(
         (StatefulKnowledgeCategory::Background, _) => {
             "Saved what you said about yourself".to_string()
         }
+        (StatefulKnowledgeCategory::RuledOut, _) => "Saved a ruled-out item".to_string(),
+        (StatefulKnowledgeCategory::OpenCheck, _) => "Saved an open check".to_string(),
     };
     let text = match notification.category {
         StatefulKnowledgeCategory::Rule | StatefulKnowledgeCategory::PendingRule => {
@@ -254,7 +258,9 @@ fn receipt_cell(
         StatefulKnowledgeCategory::Decision
         | StatefulKnowledgeCategory::Recipe
         | StatefulKnowledgeCategory::Finding
-        | StatefulKnowledgeCategory::Background => &notification.text,
+        | StatefulKnowledgeCategory::Background
+        | StatefulKnowledgeCategory::RuledOut
+        | StatefulKnowledgeCategory::OpenCheck => &notification.text,
     };
     PlainHistoryCell::new(vec![
         vec![
@@ -284,9 +290,23 @@ pub(crate) fn group_receipt_cell(
             format!("{count} {many}")
         }
     };
+    // Rules come from the user's message; the other groups from the assistant's answer.
+    let (one, many, from) = match notification.category {
+        StatefulKnowledgeCategory::Rule | StatefulKnowledgeCategory::PendingRule => {
+            ("rule", "rules", "")
+        }
+        StatefulKnowledgeCategory::RuledOut => {
+            ("ruled-out item", "ruled-out items", " from the answer")
+        }
+        StatefulKnowledgeCategory::OpenCheck => ("open check", "open checks", " from the answer"),
+        StatefulKnowledgeCategory::Decision => ("decision", "decisions", " from the answer"),
+        StatefulKnowledgeCategory::Recipe
+        | StatefulKnowledgeCategory::Finding
+        | StatefulKnowledgeCategory::Background => ("item", "items", ""),
+    };
     let headline = match (notification.saved, notification.pending) {
         (0, 0) => "Nothing new was saved".to_string(),
-        (saved, 0) => format!("Saved {}", plural(saved, "rule", "rules")),
+        (saved, 0) => format!("Saved {}{from}", plural(saved, one, many)),
         (0, pending) => format!(
             "Saved {} for this task only (not applied later)",
             plural(pending, "rule", "rules")
@@ -305,6 +325,14 @@ pub(crate) fn group_receipt_cell(
         ]
         .into(),
     ];
+    // Only a rule's receipt drops its message framing.
+    let item_text = |text: &'_ str| -> String {
+        if from.is_empty() {
+            rule_body(text).to_string()
+        } else {
+            text.to_string()
+        }
+    };
     let mut number = 0;
     for item in &notification.items {
         if item.outcome == StatefulCaptureOutcome::AlreadyStored {
@@ -317,10 +345,12 @@ pub(crate) fn group_receipt_cell(
             | StatefulKnowledgeCategory::Decision
             | StatefulKnowledgeCategory::Recipe
             | StatefulKnowledgeCategory::Finding
-            | StatefulKnowledgeCategory::Background => "",
+            | StatefulKnowledgeCategory::Background
+            | StatefulKnowledgeCategory::RuledOut
+            | StatefulKnowledgeCategory::OpenCheck => "",
         };
         lines.push(
-            format!("    {number}. {}{note}", preview(rule_body(&item.text)))
+            format!("    {number}. {}{note}", preview(&item_text(&item.text)))
                 .dim()
                 .into(),
         );
@@ -336,27 +366,30 @@ pub(crate) fn group_receipt_cell(
         lines.push(
             format!(
                 "    {} already saved",
-                plural(notification.already_present, "rule was", "rules were")
+                plural(
+                    notification.already_present,
+                    &format!("{one} was"),
+                    &format!("{many} were")
+                )
             )
             .dim()
             .into(),
         );
     }
     for omitted in &notification.omitted_items {
-        lines.push(
-            format!(
-                "    Not saved, too long to keep whole: {}",
-                preview(omitted)
-            )
-            .dim()
-            .into(),
-        );
+        // A rule's opening is shown bare; an answer's unit already says why it was not saved.
+        let why = if from.is_empty() {
+            "Not saved, too long to keep whole: "
+        } else {
+            "Not saved: "
+        };
+        lines.push(format!("    {why}{}", preview(omitted)).dim().into());
     }
     if notification.failed > 0 {
         lines.push(
             format!(
                 "    {} could not be saved",
-                plural(notification.failed, "rule", "rules")
+                plural(notification.failed, one, many)
             )
             .dim()
             .into(),

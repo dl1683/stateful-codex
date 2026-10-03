@@ -705,6 +705,8 @@ fn api_category(
         KnowledgeCategory::Recipe => Api::Recipe,
         KnowledgeCategory::Finding => Api::Finding,
         KnowledgeCategory::Background => Api::Background,
+        KnowledgeCategory::RuledOut => Api::RuledOut,
+        KnowledgeCategory::OpenCheck => Api::OpenCheck,
     }
 }
 
