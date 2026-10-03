@@ -219,6 +219,37 @@ async fn deferred_stateful_tools_load_through_tool_search() -> Result<()> {
             "{direct} missing from {initial:?}"
         );
     }
+    // The Stateful share of the finalized outbound roster, as serialized on the wire. No
+    // tokenizer is available here; bytes bound the token count from above.
+    let stateful_schema_bytes = requests[0].body_json()["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|tool| {
+            [
+                "blackboard_query",
+                "blackboard_record_batch",
+                "blackboard_update_batch",
+                "blackboard_relate",
+                "conversation_read",
+                "memory_read",
+                "context_map_query",
+                "context_map_refresh",
+                "evidence_read",
+                "obligation_update",
+                "stateful_run_update",
+                "stateful_run_read",
+                "steering_query",
+                "steering_reconcile",
+            ]
+            .contains(&tool["name"].as_str().unwrap_or_default())
+        })
+        .map(|tool| tool.to_string().len())
+        .sum::<usize>();
+    assert!(
+        (1..=1_200).contains(&stateful_schema_bytes),
+        "always-exposed Stateful schema is {stateful_schema_bytes} bytes"
+    );
     assert!(
         searched_names(&requests[1], "find-obligation").contains(&"obligation_update".to_string())
     );
