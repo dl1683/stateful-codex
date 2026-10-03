@@ -59,14 +59,17 @@ use crate::world_state::project_world_state_section;
 /// S17 made 19 conversation reads) took it to 13,741 (project 7,368); truncated-rule,
 /// strategy-supersession and root-relative path guidance to 13,866 (project 7,493); a
 /// background entry and the guidance on relayed words (tui8) to 14,129 (project 7,756).
-const MAX_FIXTURE_PACKET_BYTES: usize = 14_250;
+/// The headed-outcome and regression-test guidance (debug2) adds about 380 bytes.
+const MAX_FIXTURE_PACKET_BYTES: usize = 14_600;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010. The recall,
 /// truncated-rule, strategy and root-relative path guidance (field evidence from horizon2,
 /// prop2 and learn2) took it to 10,560 against 12,702. A background entry in the fixture
 /// and the guidance on relayed words and claims about the user (tui8) took it to 10,823
-/// against 12,965.
-const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_950;
+/// against 12,965. The guidance to state ruled-out items, open checks and decisions under
+/// headings the host captures, and to show a regression test failing first (debug2), took
+/// it to 11,201 against 13,343.
+const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 11_350;
 
 const PROJECT_ID: &str = "project-1";
 
