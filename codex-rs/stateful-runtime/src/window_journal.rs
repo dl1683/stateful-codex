@@ -188,6 +188,29 @@ impl StatefulRunStore {
         rows.into_iter().map(parse_event).collect()
     }
 
+    /// Whether `(after_seq, through_seq]` holds work worth publishing (an edit, a command or a
+    /// plan), checked over the whole range rather than one page.
+    pub async fn has_window_work(
+        &self,
+        thread_id: &str,
+        after_seq: u64,
+        through_seq: u64,
+    ) -> Result<bool, StatefulRunStoreError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS (
+                SELECT 1 FROM stateful_window_events
+                WHERE thread_id = ? AND seq > ? AND seq <= ?
+                  AND kind IN ('edit', 'command', 'plan')
+             )",
+        )
+        .bind(thread_id)
+        .bind(to_i64(after_seq)?)
+        .bind(to_i64(through_seq)?)
+        .fetch_one(&self.pool)
+        .await?
+            != 0)
+    }
+
     /// Threads of `project_id` whose journal has observations no publication covers yet.
     pub async fn threads_with_unpublished_events(
         &self,

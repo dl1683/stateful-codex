@@ -174,3 +174,73 @@ async fn completed_items_are_journaled_redacted_and_published_once_per_window() 
         Vec::new()
     );
 }
+
+#[tokio::test]
+async fn work_older_than_the_newest_page_still_publishes_and_message_only_windows_do_not() {
+    let home = TempDir::new().expect("home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.path().abs()));
+    let store = services.runtime().await.expect("runtime");
+    journal_item(
+        store,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        &command_item("exec-1", "cargo test", 1, "1 failed"),
+    )
+    .await;
+    for index in 0..120 {
+        journal_item(
+            store,
+            "project-1",
+            "thread-1",
+            "turn-1",
+            &message_item(
+                &format!("msg-{index}"),
+                MessagePhase::Commentary,
+                "Still reading the code.",
+            ),
+        )
+        .await;
+    }
+    publish_window(&services, "project-1", "thread-1").await;
+    // A second thread that only exchanged messages closes without a note.
+    journal_item(
+        store,
+        "project-1",
+        "thread-2",
+        "turn-1",
+        &message_item("msg-only", MessagePhase::Commentary, "Hello."),
+    )
+    .await;
+    publish_window(&services, "project-1", "thread-2").await;
+
+    let notes = services
+        .blackboard()
+        .await
+        .expect("blackboard")
+        .query(codex_project_intelligence::BlackboardQuery {
+            project_id: "project-1".to_string(),
+            text: Some("Host-observed work receipts".to_string()),
+            within_node: None,
+            root_promotion: None,
+            entry_scope: codex_project_intelligence::BlackboardEntryScope::Active,
+            max_results: 10,
+        })
+        .await
+        .expect("query")
+        .data;
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].entry.value.content.contains("thread-1"),
+        "{}",
+        notes[0].entry.value.content
+    );
+    assert_eq!(
+        store
+            .threads_with_unpublished_events("project-1", 10)
+            .await
+            .expect("threads"),
+        Vec::<String>::new()
+    );
+}

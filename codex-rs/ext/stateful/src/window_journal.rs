@@ -360,7 +360,19 @@ async fn stage(
     let events = store
         .window_events_newest_first(thread_id, from_seq, through_seq, PUBLICATION_PAGE)
         .await?;
-    let content = publication_content(thread_id, from_seq, through_seq, &events);
+    let content = if store
+        .has_window_work(thread_id, from_seq, through_seq)
+        .await?
+    {
+        Some(publication_content(
+            thread_id,
+            from_seq,
+            through_seq,
+            &events,
+        ))
+    } else {
+        None
+    };
     let entry_id = stable_entry_id(project_id, thread_id, from_seq, through_seq);
     let staged = store
         .stage_window_publication(&WindowPublication {
@@ -463,16 +475,7 @@ fn publication_content(
     from_seq: u64,
     through_seq: u64,
     newest_first: &[WindowEvent],
-) -> Option<String> {
-    let substantive = newest_first.iter().any(|event| {
-        matches!(
-            event.event.kind,
-            WindowEventKind::Edit | WindowEventKind::Command | WindowEventKind::Plan
-        )
-    });
-    if !substantive {
-        return None;
-    }
+) -> String {
     let mut lines = vec![format!(
         "Host-observed work receipts (activity, not verified conclusions) from thread {thread_id}, events {}-{through_seq}.",
         from_seq + 1
@@ -591,7 +594,7 @@ fn publication_content(
     if content.len() > MAX_PUBLICATION_BYTES {
         content = head(&content, MAX_PUBLICATION_BYTES);
     }
-    Some(content.trim().to_string())
+    content.trim().to_string()
 }
 
 pub(crate) fn command_text(event: &WindowEvent) -> &str {
