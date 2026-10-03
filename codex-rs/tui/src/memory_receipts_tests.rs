@@ -13,6 +13,9 @@ use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use pretty_assertions::assert_eq;
 
+use super::ExitCoverage;
+use super::MemoryView;
+use super::ServerLifetime;
 use super::exit_lines;
 use super::footer_text;
 use super::recap_cell;
@@ -102,15 +105,47 @@ fn status_and_exit_receipts() {
         ),
         /*width*/ 120,
     );
-    let exit = exit_lines(Some(&session()), Some(&run(StatefulRunStatus::Running))).join("\n");
-    let exit_quiet = exit_lines(
-        Some(&StatefulMemoryChangeTotals::default()),
-        Some(&run(StatefulRunStatus::Completed)),
+    let exit = exit_lines(
+        Some(&session()),
+        ExitCoverage::Complete,
+        Some(&run(StatefulRunStatus::Running)),
+        ServerLifetime::Embedded,
     )
     .join("\n");
+    let exit_persistent = exit_lines(
+        Some(&session()),
+        ExitCoverage::Partial,
+        Some(&run(StatefulRunStatus::Paused)),
+        ServerLifetime::Persistent,
+    )
+    .join("\n");
+    let exit_quiet = exit_lines(
+        Some(&StatefulMemoryChangeTotals::default()),
+        ExitCoverage::Complete,
+        Some(&run(StatefulRunStatus::Completed)),
+        ServerLifetime::Embedded,
+    )
+    .join("\n");
+    let exit_unknown = exit_lines(
+        /*session*/ None,
+        ExitCoverage::Partial,
+        /*run*/ None,
+        ServerLifetime::Embedded,
+    )
+    .join("\n");
+    let unavailable = render(&MemoryView::Unavailable.status_cell(), /*width*/ 120);
     insta::assert_snapshot!(
         "memory_status_and_exit",
-        [status, quiet, exit, exit_quiet].join("\n---\n")
+        [
+            status,
+            quiet,
+            unavailable,
+            exit,
+            exit_persistent,
+            exit_quiet,
+            exit_unknown,
+        ]
+        .join("\n---\n")
     );
 }
 

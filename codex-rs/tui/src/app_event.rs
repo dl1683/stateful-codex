@@ -1110,6 +1110,11 @@ pub(crate) enum AppEvent {
         session: Option<codex_app_server_protocol::StatefulMemoryChangeTotals>,
     },
 
+    /// A thread's project memory could not be read when it became active.
+    StatefulMemoryUnavailable {
+        thread_id: ThreadId,
+    },
+
     /// The dated return recap, shown once per session.
     StatefulMemoryRecap {
         thread_id: ThreadId,

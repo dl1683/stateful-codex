@@ -20,9 +20,9 @@ fn the_receipt_names_only_what_changed() {
             ),
         ),
         (
-            vec!["nothing was saved or changed this run".to_string()],
+            vec!["nothing was saved or changed in this thread during the run".to_string()],
             vec![
-                "this run: 2 saved, 1 corrected, 1 commit remembered from workspace history, 2 captures could not finish"
+                "changes in this thread during the run: 2 saved, 1 corrected, 1 commit remembered from workspace history, 2 captures could not finish"
                     .to_string()
             ],
         )

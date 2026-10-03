@@ -861,6 +861,9 @@ impl App {
                 self.chat_widget
                     .set_stateful_memory(thread_id, counts, session);
             }
+            AppEvent::StatefulMemoryUnavailable { thread_id } => {
+                self.chat_widget.set_stateful_memory_unavailable(thread_id);
+            }
             AppEvent::StatefulMemoryRecap { thread_id, recap } => {
                 let format_time = |seconds: i64| {
                     chrono::DateTime::from_timestamp(seconds, 0).map_or_else(

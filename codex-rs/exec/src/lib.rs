@@ -1228,8 +1228,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 
     info!("Codex initialized with event: {session_configured:?}");
     // Read before the first turn, so this run's memory changes can be counted at its end.
+    // `None` outside a Stateful thread; `Some(None)` when the baseline could not be read.
     let memory_watermark = if thread_has_project || stateful_mode.is_some() {
-        memory_receipt::watermark(&client, request_ids.next(), &primary_thread_id_for_span).await
+        Some(
+            memory_receipt::watermark(&client, request_ids.next(), &primary_thread_id_for_span)
+                .await,
+        )
     } else {
         None
     };
@@ -1664,14 +1668,19 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         .await
         .ok()
         .flatten();
-        let receipt = memory_receipt::receipt(
-            &client,
-            request_ids.next(),
-            &primary_thread_id_for_span,
-            watermark,
-            run.as_ref(),
-        )
-        .await;
+        let receipt = match watermark {
+            Some(watermark) => {
+                memory_receipt::receipt(
+                    &client,
+                    request_ids.next(),
+                    &primary_thread_id_for_span,
+                    watermark,
+                    run.as_ref(),
+                )
+                .await
+            }
+            None => memory_receipt::lines(/*totals*/ None, run.as_ref()),
+        };
         event_processor.set_memory_receipt(receipt);
     }
     if let Err(err) = client.shutdown().await {

@@ -51,6 +51,40 @@ fn count_parts(counts: &StatefulMemoryCounts) -> Vec<(u32, String)> {
     .collect()
 }
 
+/// Project memory as last read for a thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MemoryView {
+    Known {
+        counts: StatefulMemoryCounts,
+        /// Changes in this session's threads since the session first read the project.
+        session: Option<StatefulMemoryChangeTotals>,
+    },
+    /// The project's memory could not be read.
+    Unavailable,
+}
+
+impl MemoryView {
+    pub(crate) fn footer_text(&self) -> String {
+        match self {
+            Self::Known { counts, .. } => footer_text(counts),
+            Self::Unavailable => "Memory: could not be read".to_string(),
+        }
+    }
+
+    pub(crate) fn status_cell(&self) -> PlainHistoryCell {
+        match self {
+            Self::Known { counts, session } => status_cell(counts, session.as_ref()),
+            Self::Unavailable => PlainHistoryCell::new(vec![
+                vec![
+                    " Project memory: ".bold(),
+                    "could not be read right now".dim(),
+                ]
+                .into(),
+            ]),
+        }
+    }
+}
+
 /// The compact footer text: `Memory: 2 rules · 1 decision · 1 open check · 4 more`.
 pub(crate) fn footer_text(counts: &StatefulMemoryCounts) -> String {
     let parts = count_parts(counts);
@@ -125,7 +159,7 @@ pub(crate) fn status_cell(
         } else {
             changes.join(" · ")
         };
-        lines.push(vec![" This session: ".dim(), changed.dim()].into());
+        lines.push(vec![" In this session's threads: ".dim(), changed.dim()].into());
     }
     lines.push(
         " /memory to review · counted from saved changes"
@@ -135,20 +169,52 @@ pub(crate) fn status_cell(
     PlainHistoryCell::new(lines)
 }
 
-/// The memory part of the exit receipt: what this session changed, and what an open run
-/// does after the user quits.
+/// Whether the exit count covers every thread of the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExitCoverage {
+    Complete,
+    /// Some thread's memory could not be read, so changes may be missing from the count.
+    Partial,
+}
+
+/// What happens to the app server when the TUI exits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ServerLifetime {
+    /// The server runs inside this process and stops with it.
+    Embedded,
+    /// The server keeps running after this client disconnects.
+    Persistent,
+}
+
+/// The memory part of the exit receipt: the changes counted in this session's threads, and
+/// what an open run does after the user quits.
 pub(crate) fn exit_lines(
     session: Option<&StatefulMemoryChangeTotals>,
+    coverage: ExitCoverage,
     run: Option<&StatefulRun>,
+    lifetime: ServerLifetime,
 ) -> Vec<String> {
     let mut lines = Vec::new();
-    if let Some(session) = session {
-        let changes = change_parts(session);
-        lines.push(if changes.is_empty() {
-            "Project memory: nothing was saved or changed this session.".to_string()
-        } else {
-            format!("Project memory this session: {}.", changes.join(", "))
-        });
+    let partial = match coverage {
+        ExitCoverage::Complete => "",
+        ExitCoverage::Partial => " (incomplete: some project memory could not be read)",
+    };
+    match session {
+        Some(session) => {
+            let changes = change_parts(session);
+            lines.push(if changes.is_empty() {
+                format!("Project memory: nothing was saved or changed in this session's threads{partial}.")
+            } else {
+                format!(
+                    "Project memory, changes in this session's threads: {}{partial}.",
+                    changes.join(", ")
+                )
+            });
+        }
+        None => lines.push(
+            "Project memory: this session's changes could not be counted; /memory shows what is saved."
+                .to_string(),
+        ),
     }
     if let Some(run) = run
         && matches!(
@@ -161,9 +227,14 @@ pub(crate) fn exit_lines(
             StatefulWorkflowMode::Collaborative => "Collaborative",
             StatefulWorkflowMode::Socratic => "Socratic",
         };
-        lines.push(format!(
-            "Your {mode} run stays open for next time; nothing works on it while you are away."
-        ));
+        lines.push(match lifetime {
+            ServerLifetime::Embedded => format!(
+                "Your {mode} run stays open; nothing works on it until you resume this session."
+            ),
+            ServerLifetime::Persistent => format!(
+                "Your {mode} run stays open on the server; work already under way there may continue."
+            ),
+        });
     }
     lines
 }
@@ -239,7 +310,7 @@ pub(crate) fn recap_cell(
     if recap.capture_incomplete > 0 {
         lines.push(
             format!(
-                "  {} since then; something you said may be missing · /memory add",
+                "  {} since the last finished work; something you said may be missing · /memory add",
                 plural(
                     recap.capture_incomplete,
                     "capture could not finish",
@@ -250,11 +321,7 @@ pub(crate) fn recap_cell(
             .into(),
         );
     }
-    lines.push(
-        "  No next step was recorded; say where you want to pick up."
-            .dim()
-            .into(),
-    );
+    lines.push("  Say where you want to pick up.".dim().into());
     Some(PlainHistoryCell::new(lines))
 }
 

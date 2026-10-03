@@ -102,9 +102,12 @@ pub(crate) fn lines(
             }))
             .collect::<Vec<_>>();
             lines.push(if parts.is_empty() {
-                "nothing was saved or changed this run".to_string()
+                "nothing was saved or changed in this thread during the run".to_string()
             } else {
-                format!("this run: {}", parts.join(", "))
+                format!(
+                    "changes in this thread during the run: {}",
+                    parts.join(", ")
+                )
             });
         }
         None => lines.push(

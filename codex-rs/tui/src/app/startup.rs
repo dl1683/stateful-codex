@@ -1352,9 +1352,19 @@ See the Codex keymap documentation for supported actions and examples."
         };
         // Counted before the embedded server stops, so the receipt reflects every committed
         // change of this session.
+        let lifetime = match app.app_server_target {
+            AppServerTarget::Embedded => crate::memory_receipts::ServerLifetime::Embedded,
+            AppServerTarget::LocalDaemon { .. } | AppServerTarget::Remote { .. } => {
+                crate::memory_receipts::ServerLifetime::Persistent
+            }
+        };
         let memory_receipt = app
             .memory_status
-            .exit_lines(&app_server.request_handle())
+            .exit_lines(
+                &app_server.request_handle(),
+                app.chat_widget.thread_id(),
+                lifetime,
+            )
             .await;
         if let Err(err) = app_server.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");

@@ -8,6 +8,7 @@ use codex_protocol::ThreadId;
 
 use super::ChatWidget;
 use crate::app_event::AppEvent;
+use crate::memory_receipts::MemoryView;
 
 impl ChatWidget {
     /// Stores the newest memory summary for `thread_id`; one for another thread is ignored.
@@ -17,10 +18,19 @@ impl ChatWidget {
         counts: StatefulMemoryCounts,
         session: Option<StatefulMemoryChangeTotals>,
     ) {
+        self.set_memory_view(thread_id, MemoryView::Known { counts, session });
+    }
+
+    /// Records that `thread_id`'s project memory could not be read.
+    pub(crate) fn set_stateful_memory_unavailable(&mut self, thread_id: ThreadId) {
+        self.set_memory_view(thread_id, MemoryView::Unavailable);
+    }
+
+    fn set_memory_view(&mut self, thread_id: ThreadId, view: MemoryView) {
         if self.thread_id != Some(thread_id) {
             return;
         }
-        self.stateful_memory = Some((counts, session));
+        self.stateful_memory = Some(view);
         self.refresh_status_line();
     }
 
@@ -34,11 +44,8 @@ impl ChatWidget {
 
     /// The `/status` memory lines, when this is a Stateful session.
     pub(super) fn add_memory_status_output(&mut self) {
-        if let Some((counts, session)) = self.stateful_memory {
-            self.add_to_history(crate::memory_receipts::status_cell(
-                &counts,
-                session.as_ref(),
-            ));
+        if let Some(view) = self.stateful_memory {
+            self.add_to_history(view.status_cell());
         }
     }
 }

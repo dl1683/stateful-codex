@@ -523,11 +523,8 @@ pub(crate) struct ChatWidget {
     pub(crate) cyber_policy_notice: crate::daybreak::NoticeCache,
     /// What this session saved to project memory, for numbering receipts.
     memory_receipts: crate::stateful_memory::ReceiptTally,
-    /// Project memory counts and this session's changes, from the last summary read.
-    stateful_memory: Option<(
-        codex_app_server_protocol::StatefulMemoryCounts,
-        Option<codex_app_server_protocol::StatefulMemoryChangeTotals>,
-    )>,
+    /// Project memory as last read for this thread.
+    stateful_memory: Option<crate::memory_receipts::MemoryView>,
     app_event_tx: AppEventSender,
     codex_op_target: CodexOpTarget,
     bottom_pane: BottomPane,

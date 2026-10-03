@@ -829,7 +829,7 @@ impl ChatWidget {
             StatusLineItem::Memory => self
                 .stateful_memory
                 .as_ref()
-                .map(|(counts, _)| crate::memory_receipts::footer_text(counts)),
+                .map(crate::memory_receipts::MemoryView::footer_text),
         }
     }
 
