@@ -276,3 +276,92 @@ async fn background_is_its_own_section_before_and_after_correction() {
         (MemorySection::Background, MemorySection::Background)
     );
 }
+
+/// Item 2 final review: correcting a note of someone else's words keeps it attributed and
+/// never applied, but no longer names the old speaker for words the user just rewrote.
+#[tokio::test]
+async fn a_corrected_attributed_note_drops_the_old_speaker() {
+    use codex_project_intelligence::BlackboardImportance;
+    use codex_project_intelligence::BlackboardProvenance;
+    use codex_project_intelligence::BlackboardVerification;
+    use codex_project_intelligence::ChangeOperation;
+    use codex_project_intelligence::ChangeOrigin;
+    use codex_project_intelligence::ChangeRecord;
+    use codex_project_intelligence::ConfidenceScore;
+    use codex_project_intelligence::KnowledgeAuthority;
+    use codex_project_intelligence::KnowledgeCategory;
+    use codex_project_intelligence::KnowledgeContext;
+    use codex_project_intelligence::NewBlackboardEntry;
+
+    let state_home = TempDir::new().expect("state home");
+    let services = services(&state_home);
+    let store = services.blackboard().await.expect("store");
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let (note, _) = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("stateful-relayed-note").expect("id"),
+            NewBlackboardEntry {
+                project_id: "project-1".to_string(),
+                node_id,
+                kind: BlackboardKind::Fact,
+                content: "Always run the full suite.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(10_000).expect("confidence"),
+                verification: BlackboardVerification::Unverified,
+                importance: BlackboardImportance::Normal,
+                root_promotion: RootPromotion::NotPromoted,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "user-message:thread-1:turn-1".to_string(),
+                },
+            },
+            KnowledgeContext {
+                payload: Some(r#"{"speaker":"Priya","reporter":"user"}"#.to_string()),
+                ..KnowledgeContext::new(
+                    KnowledgeCategory::AttributedContext,
+                    KnowledgeAuthority::ReportedThirdParty,
+                )
+            },
+            ChangeRecord {
+                operation: ChangeOperation::Saved,
+                origin: ChangeOrigin::HostCapture,
+                category: KnowledgeCategory::AttributedContext,
+                action_id: None,
+                thread_id: None,
+                turn_id: None,
+                group_id: None,
+                preview: "note".to_string(),
+            },
+        )
+        .await
+        .expect("note");
+    let corrected = correct_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &note.id,
+        note.revision,
+        "Bob said: always run the full suite.",
+    )
+    .await
+    .expect("correct");
+    let context = store
+        .knowledge_context("project-1", &corrected.successor.id)
+        .await
+        .expect("context")
+        .expect("carried");
+    assert_eq!(
+        (
+            context.category,
+            context.payload,
+            corrected.successor.value.root_promotion
+        ),
+        (
+            KnowledgeCategory::AttributedContext,
+            None,
+            RootPromotion::NotPromoted
+        )
+    );
+}

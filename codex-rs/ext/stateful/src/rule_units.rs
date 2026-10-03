@@ -34,15 +34,6 @@ const LIMITED_SCOPE_PHRASES: &[&str] = &[
     "this debugging",
 ];
 
-/// Whether a rule's words name a piece of work it is limited to (an investigation, this bug,
-/// ...), the way a header or sentence that scopes rules does.
-pub(crate) fn names_limited_scope(normalized: &str) -> bool {
-    has_phrase(normalized, crate::user_rules::INVESTIGATION_PHRASES)
-        || LIMITED_SCOPE_PHRASES
-            .iter()
-            .any(|phrase| normalized.contains(phrase))
-}
-
 /// A rule found in a message, with the investigation it is limited to, if any.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MarkedRule {

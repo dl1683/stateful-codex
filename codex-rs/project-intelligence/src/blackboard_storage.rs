@@ -33,6 +33,7 @@ mod knowledge;
 mod query;
 mod relation;
 mod review;
+mod root_projection;
 mod scopes;
 mod source_order;
 mod succession;
@@ -554,6 +555,8 @@ pub enum BlackboardStoreError {
     NodeNotFound(String),
     #[error("blackboard entry not found: {0}")]
     EntryNotFound(String),
+    #[error("this user action was already recorded: {0}")]
+    ActionAlreadyRecorded(String),
     #[error("stored knowledge context is invalid: {0}")]
     InvalidStoredKnowledge(String),
     #[error("blackboard entry ID was already used for different content: {0}")]

@@ -1,25 +1,8 @@
 use pretty_assertions::assert_eq;
 
-use super::releases;
-
-#[test]
-fn only_the_users_own_words_release_an_investigation() {
-    assert_eq!(
-        [
-            "Great, we've agreed on the root cause. Go ahead and fix it.",
-            "End this investigation, please.",
-            "My colleague wrote: \"we have agreed on the root cause\".",
-            "Have we agreed on the fix yet?",
-            "Do NOT change any code until we have agreed on the root cause.",
-            "Keep investigating.",
-        ]
-        .map(|text| releases(text, Some("until we have agreed on the root cause"))),
-        [true, true, false, false, false, false]
-    );
-}
-
-/// debug2: the ground rules apply in the thread that stated them and in a thread that
-/// continues the investigation, not in another thread, and stop when the user ends it.
+/// debug2: the ground rules apply in the thread that stated them and in a thread the user
+/// joins to the investigation, not in another thread, and stop when the user ends it; words
+/// alone ("we agreed on the root cause") neither join nor end it.
 #[tokio::test]
 async fn investigation_rules_follow_their_threads() {
     use codex_state::SqliteConfig;
@@ -50,70 +33,38 @@ async fn investigation_rules_follow_their_threads() {
     };
     let opened = applies_in("thread-1").await;
     let other = applies_in("thread-2").await;
-    super::observe_turn_start(
-        store,
-        "project-1",
-        "thread-3",
-        "turn-1",
-        "Remind me what we ruled out.",
-        crate::request_scope::RequestScope::Continuity,
-    )
-    .await;
+    let scope = store
+        .thread_scope("project-1", "thread-1")
+        .await
+        .expect("binding")
+        .expect("bound");
+    store
+        .bind_thread_scope("project-1", "thread-3", &scope.scope_id)
+        .await
+        .expect("join");
     let continued = applies_in("thread-3").await;
-    super::observe_turn_start(
-        store,
-        "project-1",
-        "thread-3",
-        "turn-2",
-        "OK, we've agreed on the root cause.",
-        crate::request_scope::RequestScope::Continuity,
-    )
-    .await;
+    store
+        .end_scope(
+            "project-1",
+            &scope.scope_id,
+            "direct-control:thread-3",
+            &codex_project_intelligence::ChangeRecord {
+                operation: codex_project_intelligence::ChangeOperation::ScopeEnded,
+                origin: codex_project_intelligence::ChangeOrigin::DirectControl,
+                category: codex_project_intelligence::KnowledgeCategory::Rule,
+                action_id: None,
+                thread_id: Some("thread-3".to_string()),
+                turn_id: None,
+                group_id: None,
+                preview: scope.title.clone(),
+            },
+        )
+        .await
+        .expect("end");
     let ended = applies_in("thread-3").await;
     assert_eq!(
         (captured.len(), opened, other, continued, ended),
         (2, 2, 0, 2, 0)
-    );
-}
-
-/// Item 1 review: conditional, negated, questioning, blockquoted and fenced mentions never
-/// end an investigation; an agreement ends one only when that was its condition; a request
-/// joins an investigation only when it refers to one.
-#[test]
-fn releases_are_affirmative_and_bindings_are_explicit() {
-    let condition = Some("until we have agreed on the root cause");
-    assert_eq!(
-        (
-            [
-                "Do not end this investigation.",
-                "If tomorrow we agree on the root cause, start the fix.",
-                "Should we end this investigation?",
-                "> End this investigation.",
-                "```\nend this investigation\n```",
-                "OK, we've agreed on the root cause.",
-                "We agree on lunch.",
-                "End this investigation if the test passes.",
-                "We have agreed on the root cause when the test passes.",
-                "The investigation is over.",
-                "We haven't agreed on the root cause.",
-                "Don\u{2019}t end this investigation.",
-            ]
-            .map(|text| releases(text, condition)),
-            releases("We have agreed on the root cause.", Some("until I say so")),
-            [
-                "Format utils.py",
-                "Remind me what we ruled out.",
-                "Where are we on the investigation?",
-            ]
-            .map(super::refers_to_investigation),
-        ),
-        (
-            [
-                false, false, false, false, false, true, false, false, false, true, false, false
-            ],
-            false,
-            [false, true, true],
-        )
     );
 }
 
@@ -161,7 +112,7 @@ async fn one_message_opens_one_investigation() {
     assert_eq!(
         (
             projection.data.len(),
-            view.inapplicable.len(),
+            view.unscoped_legacy,
             open.len(),
             full.data.len()
         ),

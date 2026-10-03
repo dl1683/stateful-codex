@@ -95,6 +95,10 @@ pub(crate) struct CapturedRule {
     pub(crate) newly_stored: bool,
 }
 
+/// Whether turn start stores background it infers from the user's message. Off: inference
+/// cannot yet tell a temporary or relayed statement from the user's lasting context.
+pub(crate) const HOST_BACKGROUND_CAPTURE: bool = false;
+
 /// Stores what the user says about themselves or the whole work ("I know Python well but
 /// only a little Rust") verbatim, as promoted user-authored background. A statement already
 /// stored is not stored twice, and one the user forgot stays forgotten.

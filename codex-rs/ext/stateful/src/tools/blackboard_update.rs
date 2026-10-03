@@ -297,6 +297,18 @@ impl BlackboardUpdateTool {
             current.value.provenance.clone(),
         );
         let current_promotion = current.value.root_promotion;
+        // Someone else's words the user passed on (by recorded meaning, which a correction
+        // carries to its successor, or by the note's identity) are kept for explanation only:
+        // no mutation ever makes them applied memory.
+        let attributed = current.id.as_str().starts_with("stateful-relayed-")
+            || store
+                .knowledge_context(&self.project_id, &current.id)
+                .await
+                .map_err(respond)?
+                .is_some_and(|context| {
+                    context.category
+                        == codex_project_intelligence::KnowledgeCategory::AttributedContext
+                });
         let mut update = BlackboardEntryUpdate {
             expected_revision: current.revision,
             kind: current.value.kind,
@@ -323,13 +335,6 @@ impl BlackboardUpdateTool {
             } => {
                 // Someone else's words the user passed on are kept for explanation only; they
                 // never join the applied root.
-                if current.id.as_str().starts_with("stateful-relayed-")
-                    && root_promotion != RootPromotion::NotPromoted
-                {
-                    return Err(respond(
-                        "that note keeps someone else's words the user passed on; it is never promoted",
-                    ));
-                }
                 update.expected_revision = expected_revision;
                 update.root_promotion = root_promotion;
             }
@@ -472,6 +477,15 @@ impl BlackboardUpdateTool {
                 update.expected_revision = expected_revision;
                 update.state = BlackboardEntryState::Tombstoned;
             }
+        }
+        if attributed
+            && update.state == BlackboardEntryState::Active
+            && (update.root_promotion != RootPromotion::NotPromoted
+                || update.kind == BlackboardKind::Instruction)
+        {
+            return Err(respond(
+                "that note keeps someone else's words the user passed on; it is never promoted",
+            ));
         }
         if user_rule
             && current_promotion != RootPromotion::Promoted

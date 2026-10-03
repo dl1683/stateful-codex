@@ -354,3 +354,18 @@ fn a_curly_quoted_relay_does_not_swallow_the_users_next_rule() {
         }]
     );
 }
+
+/// Item 2 final review: a statement about the user or the work that names its duration is
+/// not a rule ("I maintain this fork for this project."); a directive in the same words is.
+#[test]
+fn a_statement_naming_the_project_is_not_a_rule() {
+    assert_eq!(
+        (
+            crate::user_rules::marked_rules("I maintain this fork for this project.").len(),
+            crate::user_rules::marked_rules("We use uv for this project.").len(),
+            crate::user_rules::marked_rules("I want you to use uv for this project.").len(),
+            crate::user_rules::marked_rules("Use uv for this project.").len(),
+        ),
+        (0, 0, 1, 1)
+    );
+}

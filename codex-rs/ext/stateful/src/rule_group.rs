@@ -270,7 +270,15 @@ pub(crate) async fn capture_marked_rules(
                 thread_id: Some(thread_id.to_string()),
                 turn_id: Some(turn_id.to_string()),
                 group_id: Some(group_id.clone()),
-                preview: format!("{} of {} rules saved", captured.len(), group.recognized),
+                preview: format!(
+                    "group not recorded: {} saved, {} already saved, {} kept but not applied, {} too long, {} failed, of {} recognized",
+                    group.saved,
+                    group.already_present,
+                    group.pending,
+                    group.omitted,
+                    group.failed,
+                    group.recognized
+                ),
             };
             if let Err(error) = store.record_change(project_id, None, &incomplete).await {
                 tracing::warn!(%project_id, %error, "failed to journal an incomplete capture");

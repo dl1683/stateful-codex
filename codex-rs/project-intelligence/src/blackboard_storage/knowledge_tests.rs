@@ -310,3 +310,49 @@ async fn scopes_open_bind_and_end_once() {
         )
     );
 }
+
+/// Foundation: one user action binds one journaled change; a second writer of the same action
+/// commits nothing (its entry is rolled back with it).
+#[tokio::test]
+async fn an_action_binds_one_change() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let store = store(&temp_dir).await;
+    let with_action = |preview: &str| ChangeRecord {
+        action_id: Some("action-1".to_string()),
+        ..change(ChangeOperation::Saved, preview)
+    };
+    let first = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("entry-1").expect("id"),
+            rule("Never push."),
+            KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect),
+            with_action("Never push."),
+        )
+        .await
+        .map(|(_, outcome)| outcome);
+    let second = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("entry-2").expect("id"),
+            rule("Never commit."),
+            KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect),
+            with_action("Never commit."),
+        )
+        .await
+        .map(|(_, outcome)| outcome)
+        .map_err(|error| error.to_string());
+    let second_entry = store
+        .get_entry(
+            PROJECT_ID,
+            &BlackboardEntryId::parse("entry-2").expect("id"),
+        )
+        .await
+        .expect("read");
+    assert_eq!(
+        (first.ok(), second, second_entry.is_none()),
+        (
+            Some(CreateOutcome::Created),
+            Err("this user action was already recorded: action-1".to_string()),
+            true
+        )
+    );
+}

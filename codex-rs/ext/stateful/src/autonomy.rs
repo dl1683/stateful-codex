@@ -263,15 +263,20 @@ impl TurnLifecycleContributor for StatefulExtension {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    crate::rule_capture::capture_background(
-                        services,
-                        self.event_sink.as_deref(),
-                        selected.project_id(),
-                        &thread.thread_id,
-                        input.turn_id,
-                        &text,
-                    )
-                    .await;
+                    // Disabled in the foundation: inferred background can keep temporary or
+                    // someone else's statements as the user's permanent context. The user adds
+                    // background explicitly (/memory add about-me, statefulMemory/add).
+                    if crate::rule_capture::HOST_BACKGROUND_CAPTURE {
+                        crate::rule_capture::capture_background(
+                            services,
+                            self.event_sink.as_deref(),
+                            selected.project_id(),
+                            &thread.thread_id,
+                            input.turn_id,
+                            &text,
+                        )
+                        .await;
+                    }
                     crate::rule_group::capture_marked_rules(
                         services,
                         self.event_sink.as_deref(),
@@ -295,17 +300,6 @@ impl TurnLifecycleContributor for StatefulExtension {
                     .await;
                     if let Some(note) = crate::relayed::RelayedNote::for_quotes(&relayed) {
                         input.turn_store.insert(note);
-                    }
-                    if let Ok(store) = services.blackboard().await {
-                        crate::rule_scope::observe_turn_start(
-                            store,
-                            selected.project_id(),
-                            &thread.thread_id,
-                            input.turn_id,
-                            &text,
-                            crate::request_scope::RequestScope::of_turn(input.turn_store),
-                        )
-                        .await;
                     }
                     let roots = self.project_roots(selected.project_id()).await;
                     if let Some(report) = crate::checkout::observe_turn_start(

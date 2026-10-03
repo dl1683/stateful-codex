@@ -31,6 +31,19 @@ pub(super) const OUTSIDE_THREAD_SCOPE: &str = "
                          WHERE binding.project_id = entry.project_id AND binding.thread_id = ?
                            AND bound.state = 'open'))";
 
+/// An instruction recorded before meanings were kept (no context row) whose words limit it to
+/// a piece of work ("for this investigation", "this bug", as capture recognizes them): which
+/// piece is unknown, so it applies nowhere until the user restates it.
+pub(super) const LEGACY_LIMITED_RULE: &str = "revision.kind = 'instruction'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM knowledge_context AS any_context
+                       WHERE any_context.entry_id = entry.id)
+                   AND (LOWER(revision.content) LIKE '%investigation%'
+                        OR LOWER(revision.content) LIKE '%this bug%'
+                        OR LOWER(revision.content) LIKE '%this issue%'
+                        OR LOWER(revision.content) LIKE '%this incident%'
+                        OR LOWER(revision.content) LIKE '%this debugging%')";
+
 /// Keeps an entry whose current meaning limits it to an open investigation other than the one
 /// the thread (the bound parameter) continues.
 pub(super) const IN_OTHER_OPEN_SCOPE: &str = "

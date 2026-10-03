@@ -301,4 +301,6 @@ pub struct ThreadScopes {
     /// Promoted entries left out because they belong to an open investigation the thread does
     /// not continue (entries of ended investigations are left out without a count).
     pub scoped_elsewhere: u64,
+    /// Older rules naming a piece of work without a recorded scope, left out everywhere.
+    pub legacy_held_back: u64,
 }

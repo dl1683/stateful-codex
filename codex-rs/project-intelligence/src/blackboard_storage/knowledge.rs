@@ -397,6 +397,12 @@ pub(super) async fn carry_context(
     revision: i64,
 ) -> Result<(), BlackboardStoreError> {
     if let Some(context) = context_of(&mut *connection, project_id, from.as_str()).await? {
+        // The successor's words are new: what the payload said about the old words (who
+        // spoke them) no longer holds, so it is not carried.
+        let context = KnowledgeContext {
+            payload: None,
+            ..context
+        };
         write_context(connection, project_id, to, revision, &context).await?;
     }
     Ok(())
@@ -410,6 +416,22 @@ pub(super) async fn append_change(
     change: &ChangeRecord,
     now: i64,
 ) -> Result<u64, BlackboardStoreError> {
+    // An action identity binds one journaled change: a second writer of the same user action
+    // (a concurrent retry) fails inside its own transaction, so it commits nothing.
+    if let Some(action_id) = &change.action_id {
+        let recorded = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM memory_changes WHERE project_id = ? AND action_id = ?)",
+        )
+        .bind(project_id)
+        .bind(action_id)
+        .fetch_one(&mut *connection)
+        .await?;
+        if recorded != 0 {
+            return Err(BlackboardStoreError::ActionAlreadyRecorded(
+                action_id.clone(),
+            ));
+        }
+    }
     let preview = bounded_preview(&change.preview);
     let sequence = sqlx::query_scalar::<_, i64>(
         "INSERT INTO memory_changes (

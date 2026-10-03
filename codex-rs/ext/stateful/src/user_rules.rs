@@ -513,13 +513,28 @@ pub(crate) fn has_standing_marker(normalized: &str) -> bool {
         || (has_phrase(normalized, DURATION_PHRASES) && !describes_the_user(body))
 }
 
-/// Whether a sentence describes the user rather than directing the work.
+/// Whether a sentence describes the user or the work rather than directing it: it opens with
+/// the speaker ("I maintain this fork for this project") and asks nothing of the assistant.
 fn describes_the_user(body: &str) -> bool {
-    [
-        "i'm ", "i am ", "i know ", "i've ", "i have ", "i work ", "my ",
+    let first_person = [
+        "i ", "i'm ", "i've ", "i'd ", "my ", "we ", "we're ", "we've ", "our ",
     ]
     .iter()
-    .any(|opening| body.starts_with(opening))
+    .any(|opening| body.starts_with(opening));
+    let directs = [
+        " never ",
+        " always ",
+        " don't ",
+        " do not ",
+        " must ",
+        " should ",
+        " want you ",
+        " need you ",
+        " please ",
+    ]
+    .iter()
+    .any(|word| format!(" {body} ").contains(word));
+    first_person && !directs
 }
 
 pub(crate) fn strip_list_marker(normalized: &str) -> &str {
