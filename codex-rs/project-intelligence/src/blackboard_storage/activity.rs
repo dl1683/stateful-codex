@@ -8,6 +8,7 @@ use sqlx::Sqlite;
 
 use crate::BlackboardKind;
 use crate::BlackboardProvenanceKind;
+use crate::BlackboardVerification;
 use crate::ChangeOperation;
 use crate::KnowledgeCategory;
 use crate::KnowledgeValidity;
@@ -21,6 +22,7 @@ use super::knowledge::StoredChange;
 use super::parse_kind;
 use super::parse_promotion;
 use super::parse_provenance;
+use super::parse_verification;
 
 /// What classifies one active entry, without its content.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,6 +35,9 @@ pub struct CensusEntry {
     pub category: Option<KnowledgeCategory>,
     /// Whether it still describes the present; `None` for legacy entries.
     pub validity: Option<KnowledgeValidity>,
+    pub verification: BlackboardVerification,
+    /// The investigation or task it is limited to, if any.
+    pub scope_id: Option<String>,
     pub updated_at_ms: i64,
 }
 
@@ -67,6 +72,10 @@ impl BlackboardStore {
                     (SELECT context.validity FROM knowledge_context AS context
                      WHERE context.entry_id = entry.id AND context.revision <= entry.revision
                      ORDER BY context.revision DESC LIMIT 1) AS validity,
+                    (SELECT context.scope_id FROM knowledge_context AS context
+                     WHERE context.entry_id = entry.id AND context.revision <= entry.revision
+                     ORDER BY context.revision DESC LIMIT 1) AS scope_id,
+                    revision.verification AS verification,
                     entry.updated_at_ms AS updated_at_ms
              FROM blackboard_entries AS entry
              JOIN blackboard_entry_revisions AS revision
@@ -99,6 +108,8 @@ impl BlackboardStore {
                                 .map_err(BlackboardStoreError::InvalidStoredKnowledge)
                         })
                         .transpose()?,
+                    verification: parse_verification(&row.verification)?,
+                    scope_id: row.scope_id,
                     updated_at_ms: row.updated_at_ms,
                 })
             })
@@ -152,7 +163,8 @@ impl BlackboardStore {
         limit: u32,
     ) -> Result<Vec<MemoryChange>, BlackboardStoreError> {
         let after = i64::try_from(after).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
-        let limit = i64::from(limit.clamp(1, MAX_CHANGES_PAGE));
+        // One row past a full page lets a caller tell that more follow.
+        let limit = i64::from(limit.clamp(1, MAX_CHANGES_PAGE + 1));
         let mut query =
             QueryBuilder::<Sqlite>::new("SELECT * FROM memory_changes WHERE project_id = ");
         query
@@ -255,6 +267,8 @@ struct StoredCensus {
     root_promotion: String,
     category: Option<String>,
     validity: Option<String>,
+    scope_id: Option<String>,
+    verification: String,
     updated_at_ms: i64,
 }
 

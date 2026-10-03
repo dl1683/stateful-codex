@@ -179,6 +179,8 @@ async fn census_totals_and_pages_follow_the_journal() {
                 root_promotion: RootPromotion::Promoted,
                 category: None,
                 validity: None,
+                verification: BlackboardVerification::Unverified,
+                scope_id: None,
                 updated_at_ms: 0,
             },
             CensusEntry {
@@ -188,6 +190,8 @@ async fn census_totals_and_pages_follow_the_journal() {
                 root_promotion: RootPromotion::Promoted,
                 category: Some(KnowledgeCategory::Rule),
                 validity: Some(KnowledgeValidity::Current),
+                verification: BlackboardVerification::Unverified,
+                scope_id: None,
                 updated_at_ms: 0,
             },
             CensusEntry {
@@ -197,6 +201,8 @@ async fn census_totals_and_pages_follow_the_journal() {
                 root_promotion: RootPromotion::Promoted,
                 category: Some(KnowledgeCategory::CommitObservation),
                 validity: Some(KnowledgeValidity::Current),
+                verification: BlackboardVerification::Unverified,
+                scope_id: None,
                 updated_at_ms: 0,
             },
         ]
@@ -254,7 +260,7 @@ async fn census_totals_and_pages_follow_the_journal() {
         previews,
         vec![
             rule_text.to_string(),
-            "a".repeat(MAX_CHANGE_PREVIEW_BYTES - 1)
+            format!("{}\u{2026}", "a".repeat(MAX_CHANGE_PREVIEW_BYTES - 3))
         ]
     );
     let page = store
@@ -289,5 +295,36 @@ async fn census_totals_and_pages_follow_the_journal() {
             store.sequence_at(PROJECT_ID, i64::MAX).await.expect("at"),
         ),
         (0, watermark + 1)
+    );
+}
+
+/// A full page can still tell that more rows follow: one row past the page is returned.
+#[tokio::test]
+async fn a_full_page_reports_that_more_follow() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let store = store(&temp_dir).await;
+    for index in 0..=super::MAX_CHANGES_PAGE {
+        store
+            .record_change(
+                PROJECT_ID,
+                /*entry*/ None,
+                &change(
+                    ChangeOrigin::HostCapture,
+                    KnowledgeCategory::Rule,
+                    "thread-1",
+                    &format!("row {index}"),
+                ),
+            )
+            .await
+            .expect("row");
+    }
+    let session = vec!["thread-1".to_string()];
+    let page = store
+        .memory_changes_for_threads(PROJECT_ID, 0, Some(&session), super::MAX_CHANGES_PAGE + 1)
+        .await
+        .expect("page");
+    assert_eq!(
+        page.len(),
+        usize::try_from(super::MAX_CHANGES_PAGE).expect("fits") + 1
     );
 }

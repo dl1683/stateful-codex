@@ -452,6 +452,7 @@ pub(super) async fn append_change(
     now: i64,
 ) -> Result<u64, BlackboardStoreError> {
     let preview = bounded_preview(&change.preview);
+    let preview = preview.as_ref();
     let sequence = sqlx::query_scalar::<_, i64>(
         "INSERT INTO memory_changes (
             project_id, sequence, entry_id, revision, operation, origin, category, action_id,
@@ -479,15 +480,17 @@ pub(super) async fn append_change(
     u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
 }
 
-fn bounded_preview(text: &str) -> &str {
+/// `text` within `MAX_CHANGE_PREVIEW_BYTES`; a cut ends on a character boundary and is
+/// marked with an ellipsis, so a cut sentence never reads as a whole one.
+fn bounded_preview(text: &str) -> std::borrow::Cow<'_, str> {
     if text.len() <= MAX_CHANGE_PREVIEW_BYTES {
-        return text;
+        return std::borrow::Cow::Borrowed(text);
     }
-    let mut end = MAX_CHANGE_PREVIEW_BYTES;
+    let mut end = MAX_CHANGE_PREVIEW_BYTES - '\u{2026}'.len_utf8();
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    &text[..end]
+    std::borrow::Cow::Owned(format!("{}\u{2026}", &text[..end]))
 }
 
 async fn context_of(

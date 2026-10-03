@@ -121,6 +121,8 @@ pub struct StatefulMemoryActivityResponse {
 pub struct StatefulMemorySummaryParams {
     pub thread_id: String,
     /// Also count the changes after this journal sequence (a session's start watermark).
+    /// Counted by thread, not by client: another client acting in the same threads after
+    /// the watermark is counted too.
     #[ts(optional = nullable, type = "number | null")]
     pub since_sequence: Option<u64>,
     /// Restrict those counted changes to these threads (a session's threads).
@@ -231,7 +233,7 @@ pub struct StatefulMemoryRecapResponse {
     pub more_decisions: u32,
     pub open_checks: Vec<String>,
     pub more_open_checks: u32,
-    /// Commits remembered from the workspace history since the last finished work.
+    /// Commits from the workspace history still remembered, most recently remembered first.
     pub commits: Vec<String>,
     pub more_commits: u32,
     /// Captures that could not finish since the last finished work.

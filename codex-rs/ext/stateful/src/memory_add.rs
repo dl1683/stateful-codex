@@ -14,6 +14,7 @@ use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::KnowledgeAuthority;
 use codex_project_intelligence::KnowledgeCategory as PiCategory;
@@ -155,7 +156,7 @@ pub async fn add_entry(
     };
     for id in candidates {
         let Some(existing) = store.get_entry(project_id, &id).await? else {
-            let (entry, _) = store
+            let (entry, created) = store
                 .create_entry_with_context(
                     id,
                     value,
@@ -163,7 +164,12 @@ pub async fn add_entry(
                     origin.change(ChangeOperation::Saved, category, &text),
                 )
                 .await?;
-            return Ok((entry, AddOutcome::Added));
+            // A concurrent request of the same action may have stored it first.
+            let outcome = match created {
+                CreateOutcome::Created => AddOutcome::Added,
+                CreateOutcome::AlreadyPresent => AddOutcome::AlreadyDone,
+            };
+            return Ok((entry, outcome));
         };
         // A retried action finds what it made, whatever happened to it since; it never
         // restores words forgotten after it.

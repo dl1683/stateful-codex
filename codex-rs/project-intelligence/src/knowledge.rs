@@ -147,7 +147,8 @@ pub struct ChangeRecord {
     pub thread_id: Option<String>,
     pub turn_id: Option<String>,
     pub group_id: Option<String>,
-    /// At most `MAX_CHANGE_PREVIEW_BYTES`, cut on a character boundary.
+    /// Stored at most `MAX_CHANGE_PREVIEW_BYTES`, cut on a character boundary and marked
+    /// with an ellipsis when cut.
     pub preview: String,
 }
 

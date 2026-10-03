@@ -27,7 +27,6 @@ use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::KnowledgeAuthority;
-use codex_project_intelligence::KnowledgeCategory as PiCategory;
 use codex_project_intelligence::KnowledgeContext;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
@@ -336,7 +335,7 @@ impl BlackboardRecorder {
             },
         };
         let store = self.services.blackboard().await.map_err(respond)?;
-        let category = journal_category(&value);
+        let category = super::journal_policy::written_category(&value);
         let change = ChangeRecord {
             operation: ChangeOperation::Saved,
             origin: ChangeOrigin::ModelTool,
@@ -902,22 +901,3 @@ fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
 }
 use std::sync::Arc;
-
-/// The journal category of a model-written entry.
-fn journal_category(value: &NewBlackboardEntry) -> PiCategory {
-    match value.kind {
-        BlackboardKind::Decision => PiCategory::Decision,
-        BlackboardKind::Instruction => PiCategory::Rule,
-        BlackboardKind::Fact if value.content.starts_with("Recipe:") => PiCategory::Recipe,
-        BlackboardKind::Question => PiCategory::OpenCheck,
-        BlackboardKind::RejectedApproach => PiCategory::RuledOut,
-        BlackboardKind::Fact
-        | BlackboardKind::Claim
-        | BlackboardKind::Number
-        | BlackboardKind::Strategy
-        | BlackboardKind::Contradiction
-        | BlackboardKind::Failure
-        | BlackboardKind::Signal
-        | BlackboardKind::Note => PiCategory::Note,
-    }
-}

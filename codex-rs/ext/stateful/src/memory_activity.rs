@@ -5,17 +5,18 @@
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardStoreError;
+use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::CensusEntry;
 use codex_project_intelligence::ChangeCount;
 use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::KnowledgeCategory as PiCategory;
 use codex_project_intelligence::KnowledgeValidity;
 use codex_project_intelligence::RootBlackboardQuery;
+use codex_project_intelligence::ScopeState;
 use codex_thread_store::ThreadStore;
 
 use crate::memory_controls::MemorySection;
 use crate::memory_controls::section_of;
-use crate::rule_scope::ScopeView;
 
 /// Identity prefix of commits remembered from the workspace history.
 pub(crate) const COMMIT_ID_PREFIX: &str = "stateful-commit-";
@@ -24,8 +25,10 @@ const MAX_RECAP_RULES: usize = 5;
 const MAX_RECAP_ITEMS: usize = 3;
 /// Longest text of one recap line, in bytes.
 const MAX_RECAP_TEXT_BYTES: usize = 240;
-/// Rules read for a recap (the packet's own projection bound).
+/// Rules read for a recap's order (the packet's own projection bound).
 const RECAP_PROJECTION_ENTRIES: u32 = 256;
+/// Newest commit journal rows read to find the commits still remembered.
+const RECENT_COMMIT_ROWS: u32 = 50;
 
 /// Current project memory, by what new work does with it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -80,7 +83,7 @@ pub struct ReturnRecap {
     pub more_decisions: u32,
     pub open_checks: Vec<String>,
     pub more_open_checks: u32,
-    /// Commits most recently remembered from the workspace history, newest first.
+    /// Commits still remembered, most recently remembered first.
     pub commits: Vec<String>,
     pub more_commits: u32,
     /// Captures that could not finish since the last finished work.
@@ -164,8 +167,9 @@ pub fn change_totals(counts: &[ChangeCount]) -> ChangeTotals {
 }
 
 /// Assembles the return recap for `thread_id`: the last finished work, the rules that apply
-/// in this thread, current decisions with their recorded reasons, open checks, recently
-/// remembered commits and capture gaps. No next action is invented.
+/// in this thread, current decisions with their recorded reasons, open checks, the commits
+/// most recently remembered and capture gaps since the last finished work. No next action is
+/// invented.
 pub async fn return_recap(
     store: &BlackboardStore,
     threads: &dyn ThreadStore,
@@ -186,67 +190,87 @@ pub async fn return_recap(
             request: turn.user.as_deref().map(bounded),
         });
 
-    let mut projection = store
+    // What applies here: current (not obsolete, historical, stale or disputed), and either
+    // project-wide or limited to the open investigation this thread is bound to. Filtered
+    // before anything is cut, so entries that do not apply never take a shown place.
+    let bound_scope = store
+        .thread_scope(project_id, thread_id)
+        .await?
+        .filter(|scope| scope.state == ScopeState::Open)
+        .map(|scope| scope.scope_id);
+    let applies = |entry: &CensusEntry| {
+        !matches!(
+            entry.verification,
+            BlackboardVerification::Stale | BlackboardVerification::Disputed
+        ) && entry
+            .scope_id
+            .as_ref()
+            .is_none_or(|scope| bound_scope.as_ref() == Some(scope))
+    };
+    let mut census = store.memory_census(project_id).await?;
+    census.sort_by_key(|entry| std::cmp::Reverse(entry.updated_at_ms));
+    let eligible = |wanted: Tally| {
+        census
+            .iter()
+            .filter(|entry| tally(entry) == Some(wanted) && applies(entry))
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>()
+    };
+    let rule_ids = eligible(Tally::Section(MemorySection::UserRule));
+    let decision_ids = eligible(Tally::Section(MemorySection::Decision));
+    let open_check_ids = eligible(Tally::OpenCheck);
+    let commit_ids = eligible(Tally::Commit);
+
+    // Rules keep the order the user stated them, as new work receives them.
+    let projection = store
         .root_projection(RootBlackboardQuery {
             project_id: project_id.to_string(),
             max_entries: RECAP_PROJECTION_ENTRIES,
         })
         .await?;
-    ScopeView::load(store, &projection, thread_id)
-        .await
-        .retain_applicable(&mut projection);
     let rules = projection
         .data
         .iter()
         .map(|hit| &hit.entry)
-        .filter(|entry| {
-            section_of(
-                entry.value.kind,
-                entry.value.provenance.kind,
-                entry.value.root_promotion,
-                entry.id.as_str(),
-            ) == MemorySection::UserRule
-        })
+        .filter(|entry| rule_ids.contains(&entry.id.to_string()))
+        .take(MAX_RECAP_RULES)
         .map(|entry| bounded(&entry.value.content))
         .collect::<Vec<_>>();
-
-    let mut census = store.memory_census(project_id).await?;
-    census.sort_by_key(|entry| std::cmp::Reverse(entry.updated_at_ms));
-    let decision_ids = census
-        .iter()
-        .filter(|entry| tally(entry) == Some(Tally::Section(MemorySection::Decision)))
-        .map(|entry| entry.id.clone())
-        .collect::<Vec<_>>();
-    let open_check_ids = census
-        .iter()
-        .filter(|entry| tally(entry) == Some(Tally::OpenCheck))
-        .map(|entry| entry.id.clone())
-        .collect::<Vec<_>>();
     let mut decisions = Vec::new();
-    for id in decision_ids.iter().take(MAX_RECAP_ITEMS) {
-        if let Some(entry) = load(store, project_id, id).await? {
+    for id in &decision_ids {
+        if decisions.len() == MAX_RECAP_ITEMS {
+            break;
+        }
+        if let Some(entry) = load_active(store, project_id, id).await? {
             decisions.push(decision(&entry.value.content));
         }
     }
     let mut open_checks = Vec::new();
-    for id in open_check_ids.iter().take(MAX_RECAP_ITEMS) {
-        if let Some(entry) = load(store, project_id, id).await? {
+    for id in &open_check_ids {
+        if open_checks.len() == MAX_RECAP_ITEMS {
+            break;
+        }
+        if let Some(entry) = load_active(store, project_id, id).await? {
             open_checks.push(bounded(&entry.value.content));
         }
     }
-    let commit_total = census
-        .iter()
-        .filter(|entry| tally(entry) == Some(Tally::Commit))
-        .count();
+    // Commits still remembered, newest first, named as they were when remembered.
     let commits = store
         .recent_changes(
             project_id,
             ChangeOperation::Saved,
             PiCategory::CommitObservation,
-            u32::try_from(MAX_RECAP_ITEMS).unwrap_or(u32::MAX),
+            RECENT_COMMIT_ROWS,
         )
         .await?
         .into_iter()
+        .filter(|change| {
+            change
+                .entry_id
+                .as_ref()
+                .is_some_and(|id| commit_ids.contains(id))
+        })
+        .take(MAX_RECAP_ITEMS)
         .map(|change| {
             bounded(
                 change
@@ -268,21 +292,32 @@ pub async fn return_recap(
     )
     .capture_incomplete;
 
-    let more = |total: usize, shown: usize| u32::try_from(total - shown).unwrap_or(u32::MAX);
-    let rule_count = rules.len();
+    let more =
+        |total: usize, shown: usize| u32::try_from(total.saturating_sub(shown)).unwrap_or(u32::MAX);
     Ok(ReturnRecap {
         as_of_ms: continuity.captured_at_ms,
         last_work,
-        more_rules: more(rule_count, rule_count.min(MAX_RECAP_RULES)),
-        rules: rules.into_iter().take(MAX_RECAP_RULES).collect(),
+        more_rules: more(rule_ids.len(), rules.len()),
+        rules,
         more_decisions: more(decision_ids.len(), decisions.len()),
         decisions,
         more_open_checks: more(open_check_ids.len(), open_checks.len()),
         open_checks,
-        more_commits: more(commit_total.max(commits.len()), commits.len()),
+        more_commits: more(commit_ids.len(), commits.len()),
         commits,
         capture_incomplete,
     })
+}
+
+/// The entry when it is still active (it may have been forgotten since the census).
+async fn load_active(
+    store: &BlackboardStore,
+    project_id: &str,
+    id: &str,
+) -> Result<Option<codex_project_intelligence::BlackboardEntry>, BlackboardStoreError> {
+    Ok(load(store, project_id, id)
+        .await?
+        .filter(|entry| entry.state == codex_project_intelligence::BlackboardEntryState::Active))
 }
 
 async fn load(

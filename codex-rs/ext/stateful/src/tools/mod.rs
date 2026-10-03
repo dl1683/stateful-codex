@@ -7,6 +7,7 @@ mod blackboard_write;
 mod context_map;
 mod conversation_read;
 mod evidence;
+mod journal_policy;
 mod memory_read;
 mod obligation;
 mod run;
