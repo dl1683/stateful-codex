@@ -357,35 +357,13 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 ) {
                     *self
                         .memory_saved
-                        .entry(match receipt.category {
-                            crate::exec_events::StatefulKnowledgeCategory::Rule => "standing rule",
-                            crate::exec_events::StatefulKnowledgeCategory::PendingRule => {
-                                "pending rule (not applied)"
-                            }
-                            crate::exec_events::StatefulKnowledgeCategory::Decision => "decision",
-                            crate::exec_events::StatefulKnowledgeCategory::Recipe => "recipe",
-                            crate::exec_events::StatefulKnowledgeCategory::Finding => "finding",
-                        })
+                        .entry(receipt.category.label())
                         .or_default() += 1;
                 }
                 eprintln!(
-                    "{} {} {}: \"{}\"",
+                    "{} {}",
                     "stateful:".style(self.cyan).style(self.bold),
-                    match receipt.outcome {
-                        crate::exec_events::StatefulCaptureOutcome::Stored => "saved",
-                        crate::exec_events::StatefulCaptureOutcome::AlreadyStored =>
-                            "already saved",
-                    },
-                    match receipt.category {
-                        crate::exec_events::StatefulKnowledgeCategory::Rule => "standing rule",
-                        crate::exec_events::StatefulKnowledgeCategory::PendingRule => {
-                            "pending rule (not applied)"
-                        }
-                        crate::exec_events::StatefulKnowledgeCategory::Decision => "decision",
-                        crate::exec_events::StatefulKnowledgeCategory::Recipe => "recipe",
-                        crate::exec_events::StatefulKnowledgeCategory::Finding => "finding",
-                    },
-                    receipt.text,
+                    receipt.summary(),
                 );
                 CodexStatus::Running
             }

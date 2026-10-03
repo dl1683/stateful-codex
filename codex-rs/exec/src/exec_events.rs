@@ -188,6 +188,30 @@ pub struct StatefulKnowledgeEvent {
     pub text: String,
 }
 
+impl StatefulKnowledgeCategory {
+    /// How a person reads this kind of saved knowledge.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Rule => "standing rule",
+            Self::PendingRule => "pending rule (not applied)",
+            Self::Decision => "decision",
+            Self::Recipe => "recipe",
+            Self::Finding => "finding",
+        }
+    }
+}
+
+impl StatefulKnowledgeEvent {
+    /// The receipt as a person reads it, for example `saved standing rule: "..."`.
+    pub(crate) fn summary(&self) -> String {
+        let outcome = match self.outcome {
+            StatefulCaptureOutcome::Stored => "saved",
+            StatefulCaptureOutcome::AlreadyStored => "already saved",
+        };
+        format!("{outcome} {}: \"{}\"", self.category.label(), self.text)
+    }
+}
+
 impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
     for StatefulKnowledgeEvent
 {

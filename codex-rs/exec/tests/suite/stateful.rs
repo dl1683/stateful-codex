@@ -429,6 +429,11 @@ async fn exec_shows_a_receipt_for_a_captured_rule() -> anyhow::Result<()> {
         ) && stderr.contains("project memory: saved 1 standing rule this run"),
         "{stderr}"
     );
+    assert!(
+        String::from_utf8_lossy(&json.get_output().stderr)
+            .contains("stateful: already saved standing rule: \"From now on, never run the whole test suite.\""),
+        "a JSON run also tells the person on stderr"
+    );
     let knowledge = String::from_utf8_lossy(&json.get_output().stdout)
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
