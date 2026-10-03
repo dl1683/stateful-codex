@@ -61,12 +61,15 @@ export function renderRecap(state) {
     recap.moreDecisions ||
     recap.moreOpenChecks ||
     recap.moreCommits ||
-    recap.captureIncomplete;
+    recap.captureIncomplete ||
+    recap.historyComplete === false;
   if (!hasContent) return "";
   const rows = [];
   if (recap.lastWork) {
     const request = recap.lastWork.request ? ` — “${escapeHtml(clipText(recap.lastWork.request, 160))}”` : "";
     rows.push(`<p>Last finished ${escapeHtml(formatDate(recap.lastWork.finishedAt))}${request}</p>`);
+  } else {
+    rows.push(`<p class="microcopy">The last finished work could not be determined.</p>`);
   }
   rows.push(list("Rules that apply", recap.rules, recap.moreRules, (rule) => escapeHtml(clipText(rule, 200))));
   rows.push(
@@ -85,6 +88,7 @@ export function renderRecap(state) {
       `<p class="microcopy">${recap.captureIncomplete === 1 ? "One capture" : `${recap.captureIncomplete} captures`} could not finish since the last finished work; something you said may be missing from memory.</p>`,
     );
   }
+  rows.push(`<p class="microcopy">Capture gaps from before the last finished work are not tracked here.</p>`);
   if (recap.historyComplete === false) {
     rows.push(`<p class="microcopy">Some earlier work could not be read, so this may not be the latest.</p>`);
   }
