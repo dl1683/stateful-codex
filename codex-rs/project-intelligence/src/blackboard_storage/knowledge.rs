@@ -586,7 +586,7 @@ impl StoredScope {
 }
 
 #[derive(FromRow)]
-struct StoredChange {
+pub(super) struct StoredChange {
     project_id: String,
     sequence: i64,
     entry_id: Option<String>,
@@ -603,7 +603,7 @@ struct StoredChange {
 }
 
 impl StoredChange {
-    fn into_change(self) -> Result<MemoryChange, BlackboardStoreError> {
+    pub(super) fn into_change(self) -> Result<MemoryChange, BlackboardStoreError> {
         Ok(MemoryChange {
             project_id: self.project_id,
             sequence: unsigned(self.sequence)?,
