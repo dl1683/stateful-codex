@@ -1,6 +1,7 @@
 //! A continuation window (opened by compaction in the same thread) through the public API:
-//! knowledge it does not show stays selectable for completion, and selecting another project
-//! in the thread starts that project's full packet instead of a continuation.
+//! it carries one task capsule built from what the host observed, knowledge it does not show
+//! stays selectable for completion, and selecting another project in the thread starts that
+//! project's full packet instead of a continuation.
 
 use std::collections::BTreeMap;
 
@@ -141,6 +142,113 @@ async fn continuation_keeps_hidden_findings_selectable_and_a_new_project_starts_
     assert!(switched_carriers[0].contains(OTHER_PROJECT_FACT));
     assert!(!switched_carriers[0].contains("continues the same thread after context compaction"));
     Ok(())
+}
+
+/// A command that fails, then mid-turn compaction: the next request carries exactly one task
+/// capsule naming the failure from the host's own receipt, and an unchanged step adds none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mid_turn_compaction_installs_one_capsule_from_host_receipts() -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let reply = |id: &str| {
+        responses::sse(vec![
+            responses::ev_assistant_message(&format!("{id}-message"), "Done"),
+            responses::ev_completed_with_tokens(id, /*total_tokens*/ 120),
+        ])
+    };
+    let mock = responses::mount_sse_sequence(
+        &server,
+        vec![
+            responses::sse(vec![
+                json!({
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "message",
+                        "role": "assistant",
+                        "id": "intent",
+                        "phase": "commentary",
+                        "content": [{"type": "output_text", "text": "Next I will fix the failing build step."}]
+                    }
+                }),
+                responses::ev_function_call(
+                    "failing-command",
+                    "exec_command",
+                    &json!({"cmd": "exit 3", "yield_time_ms": 10_000}).to_string(),
+                ),
+                responses::ev_completed_with_tokens("over-limit", /*total_tokens*/ 330_000),
+            ]),
+            reply("summary"),
+            reply("continued"),
+            reply("unchanged"),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .enable_feature(Feature::Sqlite)
+        .enable_feature(Feature::UnifiedExec)
+        .with_sandbox_mode("danger-full-access")
+        .with_root_config(
+            "compact_prompt = \"Summarize.\"\nmodel_auto_compact_token_limit = 200000",
+        )
+        .with_provider_config("supports_websockets = false")
+        .write(codex_home.path())?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project = create_project(&mut app, "Capsule project", "capsule-project").await?;
+    seed_root_blackboard(codex_home.path(), &project).await?;
+    let thread_id = app
+        .start_thread(ThreadStartParams {
+            project_id: Some(project),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut app, &thread_id).await?;
+    run_turn(&mut app, &thread_id).await?;
+
+    let requests = mock.requests();
+    let [first, _, continued, unchanged] = requests.as_slice() else {
+        panic!("expected four model requests, got {}", requests.len());
+    };
+    assert_eq!(capsules(first).len(), 0);
+    let installed = capsules(continued);
+    assert_eq!(installed.len(), 1, "{installed:?}");
+    let capsule = &installed[0];
+    assert!(
+        capsule.contains("Latest command without exit code 0:"),
+        "{capsule}"
+    );
+    assert!(capsule.contains("exit 3"), "{capsule}");
+    assert!(
+        capsule.contains("Last announced intention (the agent's own words"),
+        "{capsule}"
+    );
+    assert!(
+        capsule.contains("Next I will fix the failing build step."),
+        "{capsule}"
+    );
+    // The capsule stays in history; an unchanged step does not repeat it.
+    assert_eq!(capsules(unchanged), installed);
+    Ok(())
+}
+
+/// `<stateful_task_capsule>` fragments in one request.
+fn capsules(request: &ResponsesRequest) -> Vec<String> {
+    request.body_json()["input"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["role"] == "developer")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|content| content["text"].as_str())
+        .map(str::trim)
+        .filter(|text| text.starts_with("<stateful_task_capsule>"))
+        .map(str::to_string)
+        .collect()
 }
 
 async fn create_project(app: &mut TestAppServer, name: &str, key: &str) -> Result<String> {

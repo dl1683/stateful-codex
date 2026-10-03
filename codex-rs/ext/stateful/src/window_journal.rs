@@ -538,6 +538,22 @@ fn publication_content(
                 exit_text(test)
             ));
         }
+        if let Some(working) = commands.iter().find(|event| {
+            event.event.payload["status"] == "completed"
+                && exit_code(event) == Some(0)
+                && is_validation_command(command_text(event))
+        }) {
+            lines.push(format!(
+                "Last working test or check command, verbatim: `{}` in {}.",
+                head(command_text(working), 600),
+                head(
+                    working.event.payload["cwd"]
+                        .as_str()
+                        .unwrap_or("an unrecorded directory"),
+                    240
+                )
+            ));
+        }
         if let Some(failure) = commands.iter().find(|event| exit_code(event) != Some(0)) {
             lines.push(format!(
                 "Last command without exit code 0: `{}` {}.",
@@ -597,6 +613,11 @@ pub(crate) fn exit_text(event: &WindowEvent) -> String {
 /// Whether a command looks like a test or check runner. Recognition is by name only: it says
 /// nothing about what passed, and a compound command's exit code is its last command's.
 pub(crate) fn is_validation_command(command: &str) -> bool {
+    validation_runner(command).is_some()
+}
+
+/// The test or check runner a command invokes, by name (see [`is_validation_command`]).
+pub(crate) fn validation_runner(command: &str) -> Option<&'static str> {
     const RUNNERS: &[&str] = &[
         "cargo test",
         "cargo nextest",
@@ -623,7 +644,10 @@ pub(crate) fn is_validation_command(command: &str) -> bool {
         "tsc",
     ];
     let command = command.to_ascii_lowercase();
-    RUNNERS.iter().any(|runner| command.contains(runner))
+    RUNNERS
+        .iter()
+        .find(|runner| command.contains(*runner))
+        .copied()
 }
 
 /// The first `max` bytes of `text`, cut at a character boundary.

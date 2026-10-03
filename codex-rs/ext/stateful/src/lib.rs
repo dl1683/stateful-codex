@@ -26,6 +26,7 @@ mod run_world_state;
 mod services;
 mod socratic;
 mod source_freshness;
+mod task_capsule;
 mod tools;
 mod user_messages;
 mod user_rules;
@@ -378,6 +379,27 @@ impl ContextContributor for StatefulExtension {
                 } else {
                     run_world_state_section(run_status)
                 });
+            }
+            if continuation_window
+                && let Some(store) = runtime_store
+                && let Some(capsule) = task_capsule::window_capsule(
+                    store,
+                    &thread_id,
+                    &window.window_id,
+                    task_capsule::capsule_bytes(input.model_info.auto_compact_token_limit()),
+                )
+                .await
+                && task_capsule::has_content(&capsule)
+            {
+                let stale = store
+                    .edited_after(&thread_id, capsule.through_seq)
+                    .await
+                    .unwrap_or_default();
+                sections.push(task_capsule::capsule_section(
+                    &window.window_id,
+                    &capsule,
+                    stale,
+                ));
             }
             sections
         })
