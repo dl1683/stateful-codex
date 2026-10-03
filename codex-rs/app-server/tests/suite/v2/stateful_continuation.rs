@@ -20,6 +20,7 @@ use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
 use pretty_assertions::assert_eq;
@@ -187,6 +188,15 @@ async fn mid_turn_compaction_installs_one_capsule_from_host_receipts() -> Result
                     }
                 }),
                 responses::ev_function_call(
+                    "plan",
+                    "update_plan",
+                    &json!({"plan": [
+                        {"step": "Reproduce the build failure", "status": "completed"},
+                        {"step": "Fix the failing build step", "status": "in_progress"},
+                    ]})
+                    .to_string(),
+                ),
+                responses::ev_function_call(
                     "failing-command",
                     "exec_command",
                     &json!({"cmd": "exit 3", "yield_time_ms": 10_000}).to_string(),
@@ -205,7 +215,7 @@ async fn mid_turn_compaction_installs_one_capsule_from_host_receipts() -> Result
         .enable_feature(Feature::UnifiedExec)
         .with_sandbox_mode("danger-full-access")
         .with_root_config(
-            "compact_prompt = \"Summarize.\"\nmodel_auto_compact_token_limit = 200000",
+            "compact_prompt = \"Summarize.\"\nmodel_auto_compact_token_limit = 200000\ntools.update_plan.enabled = true",
         )
         .with_provider_config("supports_websockets = false")
         .write(codex_home.path())?;
@@ -213,11 +223,11 @@ async fn mid_turn_compaction_installs_one_capsule_from_host_receipts() -> Result
         .with_codex_home(codex_home.path())
         .build_initialized()
         .await?;
-    let project = create_project(&mut app, "Capsule project", "capsule-project").await?;
-    seed_root_blackboard(codex_home.path(), &project).await?;
+    let project_id = create_project(&mut app, "Capsule project", "capsule-project").await?;
+    seed_root_blackboard(codex_home.path(), &project_id).await?;
     let thread_id = app
         .start_thread(ThreadStartParams {
-            project_id: Some(project),
+            project_id: Some(project_id.clone()),
             ..Default::default()
         })
         .await?
@@ -239,16 +249,40 @@ async fn mid_turn_compaction_installs_one_capsule_from_host_receipts() -> Result
         "{capsule}"
     );
     assert!(capsule.contains("exit 3"), "{capsule}");
+    // The agent's own update_plan step, not the host's guess.
     assert!(
-        capsule.contains("Last announced intention (the agent's own words"),
+        capsule.contains("Next step (the agent's last update_plan,"),
         "{capsule}"
     );
     assert!(
-        capsule.contains("Next I will fix the failing build step."),
+        capsule.contains("\"Fix the failing build step\""),
         "{capsule}"
     );
     // The capsule stays in history; an unchanged step does not repeat it.
     assert_eq!(capsules(unchanged), installed);
+
+    // Closing the window published its receipts once, and the later turn in the same window
+    // published nothing more.
+    let notes = codex_project_intelligence::BlackboardStore::open(
+        &codex_state::SqliteConfig::new_for_testing(codex_home.path().abs()),
+    )
+    .await?
+    .query(codex_project_intelligence::BlackboardQuery {
+        project_id: project_id.clone(),
+        text: Some("Host-observed work receipts".to_string()),
+        within_node: None,
+        root_promotion: None,
+        entry_scope: codex_project_intelligence::BlackboardEntryScope::Active,
+        max_results: 10,
+    })
+    .await?
+    .data;
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].entry.value.content.contains("exit 3"),
+        "{}",
+        notes[0].entry.value.content
+    );
     Ok(())
 }
 

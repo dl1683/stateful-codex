@@ -88,9 +88,15 @@ async fn the_capsule_reports_observations_and_the_agents_own_next_step() {
     .await;
     append(&store, "e2", WindowEventKind::Edit, edit(&worklog)).await;
 
-    let capsule = window_capsule(&store, "thread-1", "window-2", capsule_bytes(None))
-        .await
-        .expect("capsule");
+    let capsule = window_capsule(
+        &store,
+        "thread-1",
+        "project-1",
+        "window-2",
+        capsule_bytes(None),
+    )
+    .await
+    .expect("capsule");
     let body = &capsule.body;
     assert_eq!(capsule.through_seq, 4);
     assert!(
@@ -102,7 +108,10 @@ async fn the_capsule_reports_observations_and_the_agents_own_next_step() {
         "{body}"
     );
     assert!(body.contains("1 failed, 4 passed"), "{body}");
-    assert!(body.contains("scale.py: last patch applied;"), "{body}");
+    assert!(
+        body.contains("scale.py: in a patch that applied;"),
+        "{body}"
+    );
     assert!(body.contains("sha256"), "{body}");
     assert!(body.contains("the end of its lines 21-60 of 60"), "{body}");
     assert!(body.contains("entry 60"), "{body}");
@@ -118,7 +127,14 @@ async fn the_capsule_reports_observations_and_the_agents_own_next_step() {
     )
     .await;
     assert_eq!(
-        window_capsule(&store, "thread-1", "window-2", capsule_bytes(None)).await,
+        window_capsule(
+            &store,
+            "thread-1",
+            "project-1",
+            "window-2",
+            capsule_bytes(None)
+        )
+        .await,
         Some(capsule.clone())
     );
 }
@@ -134,9 +150,15 @@ async fn without_a_plan_the_capsule_quotes_or_says_unknown_and_never_claims_a_pa
         command("cargo test -p scaler && cargo fmt", 0, "test result: ok"),
     )
     .await;
-    let unknown = window_capsule(&store, "thread-1", "window-1", capsule_bytes(None))
-        .await
-        .expect("capsule");
+    let unknown = window_capsule(
+        &store,
+        "thread-1",
+        "project-1",
+        "window-1",
+        capsule_bytes(None),
+    )
+    .await
+    .expect("capsule");
     assert!(
         unknown.body.contains("Next step: unknown."),
         "{}",
@@ -165,9 +187,15 @@ async fn without_a_plan_the_capsule_quotes_or_says_unknown_and_never_claims_a_pa
         json!({"text": "Actually stop and ask first."}),
     )
     .await;
-    let quoted = window_capsule(&store, "thread-1", "window-2", capsule_bytes(Some(60_000)))
-        .await
-        .expect("capsule");
+    let quoted = window_capsule(
+        &store,
+        "thread-1",
+        "project-1",
+        "window-2",
+        capsule_bytes(Some(60_000)),
+    )
+    .await
+    .expect("capsule");
     assert!(
         quoted.body.contains("Last announced intention (the agent's own words, 1 observations before compaction): \"I will add the crepes recipe next.\". A later user message may have changed it"),
         "{}",
@@ -187,9 +215,15 @@ async fn the_capsule_renders_once_and_later_edits_add_one_notice() {
         command("go test ./...", 1, "FAIL"),
     )
     .await;
-    let capsule = window_capsule(&store, "thread-1", "window-1", capsule_bytes(None))
-        .await
-        .expect("capsule");
+    let capsule = window_capsule(
+        &store,
+        "thread-1",
+        "project-1",
+        "window-1",
+        capsule_bytes(None),
+    )
+    .await
+    .expect("capsule");
     let fresh = capsule_section("window-1", &capsule, /*stale*/ false);
     let stale = capsule_section("window-1", &capsule, /*stale*/ true);
     let rendered = |section: &codex_extension_api::WorldStateSectionContribution,
@@ -243,9 +277,15 @@ async fn the_capsule_keeps_the_last_working_validation_and_the_workaround_it_nee
         command("powershell -Command git push", 128, "fatal: no upstream"),
     )
     .await;
-    let capsule = window_capsule(&store, "thread-1", "window-2", capsule_bytes(Some(60_000)))
-        .await
-        .expect("capsule");
+    let capsule = window_capsule(
+        &store,
+        "thread-1",
+        "project-1",
+        "window-2",
+        capsule_bytes(Some(60_000)),
+    )
+    .await
+    .expect("capsule");
     let body = &capsule.body;
     assert!(
         body.contains(&format!(

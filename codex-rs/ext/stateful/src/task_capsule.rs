@@ -22,13 +22,13 @@ use serde_json::json;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::window_journal::command_text;
-use crate::window_journal::exit_code;
-use crate::window_journal::exit_text;
-use crate::window_journal::head;
-use crate::window_journal::is_validation_command;
-use crate::window_journal::tail;
-use crate::window_journal::validation_runner;
+use crate::window_capture::command_text;
+use crate::window_capture::exit_code;
+use crate::window_capture::exit_text;
+use crate::window_capture::head;
+use crate::window_capture::is_validation_command;
+use crate::window_capture::tail;
+use crate::window_capture::validation_runner;
 
 const WORLD_STATE_ID: &str = "stateful_task_capsule";
 /// Stored for a window whose closed predecessor observed no work, so it is not rebuilt.
@@ -54,7 +54,7 @@ const MAX_WORKING_COMMAND_BYTES: usize = 600;
 /// Files larger than this are named but not hashed or read at the boundary.
 const MAX_OBSERVED_FILE_BYTES: u64 = 4 * 1024 * 1024;
 /// Observations the capsule is built from (newest first).
-const CAPSULE_PAGE: u32 = 100;
+const CAPSULE_PAGE: u32 = 64;
 const PROGRESS_NAMES: &[&str] = &[
     "WORKLOG", "PROGRESS", "STATUS", "TODO", "NOTES", "PLAN", "RESULT", "JOURNAL", "HANDOFF",
 ];
@@ -72,6 +72,7 @@ pub(crate) fn capsule_bytes(auto_compact_token_limit: Option<i64>) -> usize {
 pub(crate) async fn window_capsule(
     store: &StatefulRunStore,
     thread_id: &str,
+    project_id: &str,
     window_id: &str,
     max_bytes: usize,
 ) -> Option<TaskCapsule> {
@@ -83,12 +84,15 @@ pub(crate) async fn window_capsule(
             return None;
         }
     }
-    let through_seq = store.window_event_watermark(thread_id).await.ok()?;
+    let through_seq = store
+        .window_event_watermark(thread_id, project_id)
+        .await
+        .ok()?;
     if through_seq == 0 {
         return None;
     }
     let events = match store
-        .window_events_newest_first(thread_id, 0, through_seq, CAPSULE_PAGE)
+        .window_events_newest_first(thread_id, project_id, 0, through_seq, CAPSULE_PAGE)
         .await
     {
         Ok(events) => events,
@@ -193,7 +197,7 @@ impl Sections {
         if !self.files.is_empty() {
             let omitted = self.more_files + self.files.len().saturating_sub(files);
             lines.push(format!(
-                "Files changed through apply_patch, newest first (scripts may have changed others; hashes are of the bytes found at the boundary):{}",
+                "Paths in recent patches, newest first, each with its patch's overall outcome (which files a failed patch changed was not observed; scripts may have changed others; hashes are of the bytes found at the boundary):{}",
                 if omitted > 0 {
                     format!(" {omitted} more not listed.")
                 } else {
@@ -438,7 +442,7 @@ async fn edited_files(newest_first: &[WindowEvent]) -> (Vec<(String, String)>, u
         let observed = observe_file(Path::new(&path)).await;
         files.push((
             path.clone(),
-            format!("- {path}: last patch {status}; {observed}"),
+            format!("- {path}: in a patch that {status}; {observed}"),
         ));
     }
     (files, more)

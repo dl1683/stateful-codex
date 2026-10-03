@@ -120,6 +120,13 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
             input
                 .thread_store
                 .insert(SelectedThread::new(input.thread_id.to_string()));
+            // Retry publications a crash or a failed write left staged but undelivered.
+            if let (Some(selected), Some(services)) = (
+                input.thread_store.get::<SelectedProject>(),
+                self.services.as_ref(),
+            ) {
+                crate::window_journal::recover_pending(services, selected.project_id()).await;
+            }
         })
     }
 
@@ -217,7 +224,7 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             begin_turn_attribution(self, input.turn_id, input.thread_store);
-            input.turn_store.insert(crate::window_journal::JournalTurn(
+            input.turn_store.insert(crate::window_capture::JournalTurn(
                 input.turn_id.to_string(),
             ));
             if let Some(selected) = input.thread_store.get::<SelectedProject>() {
@@ -345,13 +352,13 @@ impl TurnLifecycleContributor for StatefulExtension {
             let (Some(selected), Some(thread), Some(turn), Some(services)) = (
                 thread_store.get::<SelectedProject>(),
                 thread_store.get::<SelectedThread>(),
-                turn_store.get::<crate::window_journal::JournalTurn>(),
+                turn_store.get::<crate::window_capture::JournalTurn>(),
                 self.services.as_ref(),
             ) else {
                 return;
             };
             if let Ok(store) = services.runtime().await {
-                crate::window_journal::journal_item(
+                crate::window_capture::journal_item(
                     store,
                     selected.project_id(),
                     &thread.thread_id,

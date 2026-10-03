@@ -275,7 +275,7 @@ fn stateful_tool_name(name: &codex_extension_api::ToolName) -> Option<&str> {
 impl ToolLifecycleContributor for StatefulExtension {
     fn on_tool_start<'a>(&'a self, input: ToolStartInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
-            crate::window_journal::remember_plan_call(
+            crate::window_capture::remember_plan_call(
                 input.turn_store,
                 input.tool_name,
                 input.call_id,
@@ -299,7 +299,7 @@ impl ToolLifecycleContributor for StatefulExtension {
                 self.services.as_ref(),
             ) && let Ok(store) = services.runtime().await
             {
-                crate::window_journal::journal_plan_call(
+                crate::window_capture::journal_plan_call(
                     store,
                     input.turn_store,
                     (selected.project_id(), &thread.thread_id, input.turn_id),

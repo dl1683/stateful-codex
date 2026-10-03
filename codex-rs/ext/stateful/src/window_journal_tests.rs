@@ -22,10 +22,10 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
 
-use super::is_validation_command;
-use super::journal_item;
 use super::publish_window;
 use crate::services::ProjectIntelligenceServices;
+use crate::window_capture::is_validation_command;
+use crate::window_capture::journal_item;
 
 pub(crate) fn command_item(id: &str, command: &str, exit_code: i32, output: &str) -> TurnItem {
     let cwd = TempDir::new().expect("cwd");
@@ -125,7 +125,7 @@ async fn completed_items_are_journaled_redacted_and_published_once_per_window() 
     // A replayed completion is the same observation.
     journal_item(store, "project-1", "thread-1", "turn-1", &items[1]).await;
     let events = store
-        .window_events_newest_first("thread-1", 0, 10, 10)
+        .window_events_newest_first("thread-1", "project-1", 0, 10, 10)
         .await
         .expect("events");
     assert_eq!(events.len(), 3);
@@ -164,8 +164,17 @@ async fn completed_items_are_journaled_redacted_and_published_once_per_window() 
         note.value.provenance.kind,
         BlackboardProvenanceKind::Maintenance
     );
-    assert!(note.value.content.contains("scale.py (applied)"));
-    assert!(note.value.content.contains("`bash -lc pytest -q` exit 1"));
+    assert!(
+        note.value
+            .content
+            .contains("Paths in patches that applied, newest first:")
+    );
+    assert!(note.value.content.contains("scale.py;"));
+    assert!(
+        note.value
+            .content
+            .contains("Last failing test or check command: `bash -lc pytest -q` exit 1.")
+    );
     assert_eq!(
         store
             .pending_window_publications("project-1", 10)
@@ -238,9 +247,56 @@ async fn work_older_than_the_newest_page_still_publishes_and_message_only_window
     );
     assert_eq!(
         store
-            .threads_with_unpublished_events("project-1", 10)
+            .threads_with_unpublished_events("project-1", i64::MAX, 10)
             .await
             .expect("threads"),
         Vec::<String>::new()
     );
+}
+
+#[tokio::test]
+async fn long_paths_never_crowd_out_the_test_and_failure_receipts() {
+    let home = TempDir::new().expect("home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.path().abs()));
+    let store = services.runtime().await.expect("runtime");
+    for index in 0..8 {
+        journal_item(
+            store,
+            "project-1",
+            "thread-1",
+            "turn-1",
+            &edit_item(
+                &format!("patch-{index}"),
+                PathBuf::from(format!("/work/{index}/{}", "d".repeat(480))),
+                PatchApplyStatus::Failed,
+            ),
+        )
+        .await;
+    }
+    journal_item(
+        store,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        &command_item("exec-1", "pytest -q", 1, "1 failed"),
+    )
+    .await;
+    let events = store
+        .window_events_newest_first("thread-1", "project-1", 0, 9, 64)
+        .await
+        .expect("events");
+    let content = super::publication_content("thread-1", 0, 9, &events);
+    assert!(content.len() <= 3_800);
+    assert!(
+        content.contains("Last failing test or check command: `bash -lc pytest -q` exit 1."),
+        "{content}"
+    );
+    assert!(
+        content.contains(
+            "Paths in patches that failed (attempted; which files changed was not observed)"
+        ),
+        "{content}"
+    );
+    assert!(content.contains("more not listed."), "{content}");
 }
