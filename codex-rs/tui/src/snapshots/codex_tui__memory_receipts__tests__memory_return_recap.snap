@@ -1,0 +1,16 @@
+---
+source: tui/src/memory_receipts_tests.rs
+expression: "render(&cell, 160)"
+---
+Where things stand · as of T1790000000
+  Last finished T1789990000: "Draft sections 4–7 and cite § 2.3 — not the summary"
+  Your rules (2):
+    1. "British spelling throughout."
+    2. "Never call the product “revolutionary”."
+  Decision: "Cut the history section." because "the editor said it reads as filler"
+  Decision: "Use SQLite." (no reason recorded)
+  Open check: "Does Ananya want US spelling?"
+  Recently remembered from workspace history: abc12345: Draft conclusion
+  1 more decision or check · /memory
+  1 capture could not finish since then; something you said may be missing · /memory add
+  No next step was recorded; say where you want to pick up.

@@ -387,6 +387,7 @@ pub(super) async fn handle_model_migration_prompt_if_needed(
                     disconnect_info: None,
                     update_action: None,
                     exit_reason: ExitReason::UserRequested,
+                    memory_receipt: Vec::new(),
                 }));
             }
         }

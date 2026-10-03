@@ -853,6 +853,31 @@ impl App {
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
             }
+            AppEvent::StatefulMemoryStatus {
+                thread_id,
+                counts,
+                session,
+            } => {
+                self.chat_widget
+                    .set_stateful_memory(thread_id, counts, session);
+            }
+            AppEvent::StatefulMemoryRecap { thread_id, recap } => {
+                let format_time = |seconds: i64| {
+                    chrono::DateTime::from_timestamp(seconds, 0).map_or_else(
+                        || "an unknown time".to_string(),
+                        |time| {
+                            time.with_timezone(&chrono::Local)
+                                .format("%Y-%m-%d %H:%M")
+                                .to_string()
+                        },
+                    )
+                };
+                if self.chat_widget.thread_id() == Some(thread_id)
+                    && let Some(cell) = crate::memory_receipts::recap_cell(&recap, &format_time)
+                {
+                    self.insert_history_cell(tui, Box::new(cell));
+                }
+            }
             AppEvent::StatefulMemoryResult { thread_id, cell } => {
                 // A reply for a thread the user has left belongs to that thread, not this one.
                 if self.chat_widget.thread_id() == Some(thread_id) {
@@ -1561,6 +1586,23 @@ impl App {
             }
             AppEvent::FetchMcpInventory { detail, thread_id } => {
                 self.fetch_mcp_inventory(app_server, detail, thread_id);
+            }
+            AppEvent::StatefulMemoryAttach { thread_id } => {
+                self.memory_status
+                    .attach(
+                        app_server.request_handle(),
+                        thread_id,
+                        self.app_event_tx.clone(),
+                    )
+                    .await;
+            }
+            AppEvent::StatefulMemoryRefresh { thread_id } => {
+                let thread_id = self.chat_widget.thread_id().unwrap_or(thread_id);
+                self.memory_status.refresh(
+                    app_server.request_handle(),
+                    thread_id,
+                    self.app_event_tx.clone(),
+                );
             }
             AppEvent::StatefulMemory { thread_id, args } => {
                 crate::stateful_memory_commands::run(

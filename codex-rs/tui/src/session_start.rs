@@ -136,6 +136,7 @@ pub(crate) async fn cancel_session_start(app_server: AppServerSession) -> AppExi
         disconnect_info: None,
         update_action: None,
         exit_reason: ExitReason::UserRequested,
+        memory_receipt: Vec::new(),
     }
 }
 

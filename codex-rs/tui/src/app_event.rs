@@ -1093,6 +1093,29 @@ pub(crate) enum AppEvent {
         cell: Box<dyn HistoryCell>,
     },
 
+    /// A thread became active: start counting its memory changes and read the status.
+    StatefulMemoryAttach {
+        thread_id: ThreadId,
+    },
+
+    /// A memory change was announced; read the memory summary again.
+    StatefulMemoryRefresh {
+        thread_id: ThreadId,
+    },
+
+    /// The newest memory summary read for a thread.
+    StatefulMemoryStatus {
+        thread_id: ThreadId,
+        counts: codex_app_server_protocol::StatefulMemoryCounts,
+        session: Option<codex_app_server_protocol::StatefulMemoryChangeTotals>,
+    },
+
+    /// The dated return recap, shown once per session.
+    StatefulMemoryRecap {
+        thread_id: ThreadId,
+        recap: Box<codex_app_server_protocol::StatefulMemoryRecapResponse>,
+    },
+
     McpLoginStarted {
         request_id: String,
         result: Result<McpServerOauthLoginResponse, String>,

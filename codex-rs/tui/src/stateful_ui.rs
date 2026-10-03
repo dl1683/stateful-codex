@@ -131,9 +131,14 @@ pub(crate) async fn handle_app_scoped_notification(
             }
             true
         }
-        ServerNotification::SteeringUpdated(_)
-        | ServerNotification::BlackboardUpdated(_)
-        | ServerNotification::ProjectChanged(_) => true,
+        ServerNotification::BlackboardUpdated(_) => {
+            // A forget, correction or model write changes what memory holds.
+            if let Some(thread_id) = primary_thread_id {
+                app_event_tx.send(AppEvent::StatefulMemoryRefresh { thread_id });
+            }
+            true
+        }
+        ServerNotification::SteeringUpdated(_) | ServerNotification::ProjectChanged(_) => true,
         _ => false,
     }
 }

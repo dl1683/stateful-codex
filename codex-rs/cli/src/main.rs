@@ -3716,6 +3716,7 @@ mod tests {
             disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::UserRequested,
+            memory_receipt: Vec::new(),
         }
     }
 
@@ -3728,6 +3729,7 @@ mod tests {
             disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::UserRequested,
+            memory_receipt: Vec::new(),
         };
         let lines = exit_info.format_exit_messages(/*color_enabled*/ false);
         assert!(lines.is_empty());
@@ -3802,6 +3804,7 @@ mod tests {
             disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::Fatal("boom".to_string()),
+            memory_receipt: Vec::new(),
         };
         let lines = exit_info.format_exit_messages(/*color_enabled*/ false);
         assert_eq!(

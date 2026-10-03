@@ -296,6 +296,7 @@ use self::mcp_startup::McpStartupStatus;
 mod misalignment_policy;
 pub(crate) use misalignment_policy::MisalignmentReview;
 pub(crate) use misalignment_policy::MisalignmentTurnSource;
+mod memory_status;
 mod pets;
 mod session_flow;
 mod session_header;
@@ -459,7 +460,12 @@ const ASK_FOR_APPROVAL_LABEL: &str = "Ask for approval";
 const APPROVE_FOR_ME_LABEL: &str = "Approve for me";
 const AUTO_REVIEW_DESCRIPTION: &str = "Only ask for actions detected as potentially unsafe";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-const DEFAULT_STATUS_LINE_ITEMS: [&str; 3] = ["model-with-reasoning", "current-dir", "thread-name"];
+const DEFAULT_STATUS_LINE_ITEMS: [&str; 4] = [
+    "model-with-reasoning",
+    "current-dir",
+    "thread-name",
+    "memory",
+];
 
 /// Common initialization parameters shared by all `ChatWidget` constructors.
 pub(crate) struct ChatWidgetInit {
@@ -517,6 +523,11 @@ pub(crate) struct ChatWidget {
     pub(crate) cyber_policy_notice: crate::daybreak::NoticeCache,
     /// What this session saved to project memory, for numbering receipts.
     memory_receipts: crate::stateful_memory::ReceiptTally,
+    /// Project memory counts and this session's changes, from the last summary read.
+    stateful_memory: Option<(
+        codex_app_server_protocol::StatefulMemoryCounts,
+        Option<codex_app_server_protocol::StatefulMemoryChangeTotals>,
+    )>,
     app_event_tx: AppEventSender,
     codex_op_target: CodexOpTarget,
     bottom_pane: BottomPane,

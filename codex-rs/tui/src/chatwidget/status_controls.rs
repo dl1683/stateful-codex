@@ -273,6 +273,7 @@ impl ChatWidget {
         } else {
             self.add_to_history(cell);
         }
+        self.add_memory_status_output();
         // Capture the displayed status inputs before later configuration or thread changes.
         let mut copy_targets = vec![
             ("Model".to_string(), Arc::<str>::from(model)),

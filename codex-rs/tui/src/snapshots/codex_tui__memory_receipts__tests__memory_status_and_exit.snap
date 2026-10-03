@@ -1,0 +1,16 @@
+---
+source: tui/src/memory_receipts_tests.rs
+expression: "[status, quiet, exit, exit_quiet].join(\"\\n---\\n\")"
+---
+ Project memory: 2 rules · 1 decision · 1 open check · 1 note about you · 5 remembered commits
+ This session: 2 saved · 1 corrected · 1 forgotten · 3 commits remembered from workspace history
+ /memory to review · counted from saved changes
+---
+ Project memory: nothing saved yet
+ This session: nothing saved or changed yet
+ /memory to review · counted from saved changes
+---
+Project memory this session: 2 saved, 1 corrected, 1 forgotten, 3 commits remembered from workspace history.
+Your Collaborative run stays open for next time; nothing works on it while you are away.
+---
+Project memory: nothing was saved or changed this session.

@@ -116,6 +116,7 @@ pub(crate) async fn make_test_app() -> App {
         rate_limit_refresh_state: Default::default(),
         pending_mcp_login_start: None,
         memory_listing: Default::default(),
+        memory_status: Default::default(),
         active_mcp_login_ids: HashMap::new(),
         pending_plugin_enabled_writes: HashMap::new(),
         pending_hook_enabled_writes: HashMap::new(),

@@ -61,6 +61,7 @@ impl StatusLineAccent {
             | StatusLineItem::ThreadTitle
             | StatusLineItem::WorkspaceHeadline => Self::Thread,
             StatusLineItem::TaskProgress => Self::Progress,
+            StatusLineItem::Memory => Self::State,
         }
     }
 

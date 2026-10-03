@@ -155,6 +155,9 @@ pub(crate) enum StatusLineItem {
 
     /// Latest checklist task progress from `update_plan` (if available).
     TaskProgress,
+
+    /// What Stateful project memory holds (omitted outside a Stateful project).
+    Memory,
 }
 
 impl StatusLineItem {
@@ -215,6 +218,9 @@ impl StatusLineItem {
             StatusLineItem::TaskProgress => {
                 "Latest task progress from update_plan (omitted until available)"
             }
+            StatusLineItem::Memory => {
+                "What project memory holds (Stateful projects only; omitted otherwise)"
+            }
         }
     }
 
@@ -250,6 +256,7 @@ impl StatusLineItem {
             StatusLineItem::ThreadTitle => StatusSurfacePreviewItem::ThreadTitle,
             StatusLineItem::WorkspaceHeadline => StatusSurfacePreviewItem::WorkspaceHeadline,
             StatusLineItem::TaskProgress => StatusSurfacePreviewItem::TaskProgress,
+            StatusLineItem::Memory => StatusSurfacePreviewItem::Memory,
         }
     }
 }

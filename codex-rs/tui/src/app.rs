@@ -455,6 +455,8 @@ pub struct AppExitInfo {
     pub disconnect_info: Option<DisconnectInfo>,
     pub update_action: Option<UpdateAction>,
     pub exit_reason: ExitReason,
+    /// What this session changed in project memory, and what an open run does after exit.
+    pub memory_receipt: Vec<String>,
 }
 
 impl AppExitInfo {
@@ -466,6 +468,7 @@ impl AppExitInfo {
             disconnect_info: None,
             update_action: None,
             exit_reason: ExitReason::Fatal(message.into()),
+            memory_receipt: Vec::new(),
         }
     }
 }
@@ -658,6 +661,8 @@ pub(crate) struct App {
     pending_mcp_login_start: Option<PendingMcpLoginStart>,
     /// The entries the last `/memory` listing numbered.
     memory_listing: crate::stateful_memory_commands::MemoryListing,
+    /// Project memory status of this session: footer counts, exit receipt and recap.
+    memory_status: crate::memory_status::MemoryStatus,
     // Latest accepted attempt per server; stale retry completions must not update the UI.
     active_mcp_login_ids: HashMap<String, String>,
     // Serialize plugin enablement writes per plugin so stale completions cannot

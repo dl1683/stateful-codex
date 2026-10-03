@@ -171,6 +171,8 @@ mod markdown;
 mod markdown_render;
 mod markdown_stream;
 mod markdown_text_merge;
+mod memory_receipts;
+mod memory_status;
 mod mention_codec;
 mod model_catalog;
 mod model_migration;
@@ -1111,6 +1113,7 @@ pub async fn run_main(
                 disconnect_info: None,
                 update_action: None,
                 exit_reason: ExitReason::UserRequested,
+                memory_receipt: Vec::new(),
             }),
             Err(err) => {
                 restore_terminal_before_fatal_exit();
@@ -1185,6 +1188,7 @@ async fn run_ratatui_app(
                         disconnect_info: None,
                         update_action: Some(action),
                         exit_reason: ExitReason::UserRequested,
+                        memory_receipt: Vec::new(),
                     });
                 }
             }
@@ -1347,6 +1351,7 @@ async fn run_ratatui_app(
                 disconnect_info: None,
                 update_action: None,
                 exit_reason: ExitReason::UserRequested,
+                memory_receipt: Vec::new(),
             });
         }
         #[cfg(target_os = "windows")]
@@ -1427,6 +1432,7 @@ async fn run_ratatui_app(
                 exit_reason: ExitReason::Fatal(format!(
                     "No saved session found with ID {id_str}. Run `codex {action}` without an ID to choose from existing sessions."
                 )),
+                memory_receipt: Vec::new(),
             })
         };
 
@@ -1540,6 +1546,7 @@ async fn run_ratatui_app(
                         disconnect_info: None,
                         update_action: None,
                         exit_reason: ExitReason::UserRequested,
+                        memory_receipt: Vec::new(),
                     });
                 }
                 other => other,
@@ -1639,6 +1646,7 @@ async fn run_ratatui_app(
                     disconnect_info: None,
                     update_action: None,
                     exit_reason: ExitReason::UserRequested,
+                    memory_receipt: Vec::new(),
                 });
             }
             other => other,
@@ -1689,6 +1697,7 @@ async fn run_ratatui_app(
                 disconnect_info: None,
                 update_action: None,
                 exit_reason: ExitReason::UserRequested,
+                memory_receipt: Vec::new(),
             });
         }
         Err(err) => {
@@ -1890,6 +1899,7 @@ async fn run_ratatui_app(
                     disconnect_info: None,
                     update_action: None,
                     exit_reason: ExitReason::UserRequested,
+                    memory_receipt: Vec::new(),
                 });
             }
             if !uses_remote_workspace {

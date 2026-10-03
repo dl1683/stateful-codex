@@ -826,6 +826,10 @@ impl ChatWidget {
                 .or_else(|| self.thread_id.map(|id| id.to_string())),
             StatusLineItem::WorkspaceHeadline => self.status_line_workspace_headline.clone(),
             StatusLineItem::TaskProgress => self.terminal_title_task_progress(),
+            StatusLineItem::Memory => self
+                .stateful_memory
+                .as_ref()
+                .map(|(counts, _)| crate::memory_receipts::footer_text(counts)),
         }
     }
 
@@ -846,6 +850,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::ProjectRoot => StatusLineItem::ProjectRoot,
             StatusSurfacePreviewItem::Status => return Some(self.run_state_status_text()),
             StatusSurfacePreviewItem::TaskProgress => return self.terminal_title_task_progress(),
+            StatusSurfacePreviewItem::Memory => StatusLineItem::Memory,
             StatusSurfacePreviewItem::CurrentDir => StatusLineItem::CurrentDir,
             StatusSurfacePreviewItem::Hostname => StatusLineItem::Hostname,
             StatusSurfacePreviewItem::ThreadName => StatusLineItem::ThreadName,

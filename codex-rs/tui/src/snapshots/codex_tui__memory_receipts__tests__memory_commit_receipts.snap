@@ -1,0 +1,10 @@
+---
+source: tui/src/memory_receipts_tests.rs
+expression: "[render_group(&one), render_group(&many)].join(\"\\n---\\n\")"
+---
+• Remembered commit abc12345: Revise after editor feedback — § 3 · from workspace history
+---
+• Remembered 3 commits · from workspace history
+    abc12345: Draft section 3
+    def67890: Draft conclusion
+    and 1 more · /memory

@@ -903,6 +903,7 @@ See the Codex keymap documentation for supported actions and examples."
             rate_limit_refresh_state: Default::default(),
             pending_mcp_login_start: None,
             memory_listing: Default::default(),
+            memory_status: Default::default(),
             active_mcp_login_ids: HashMap::new(),
             pending_plugin_enabled_writes: HashMap::new(),
             pending_hook_enabled_writes: HashMap::new(),
@@ -1349,6 +1350,12 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
+        // Counted before the embedded server stops, so the receipt reflects every committed
+        // change of this session.
+        let memory_receipt = app
+            .memory_status
+            .exit_lines(&app_server.request_handle())
+            .await;
         if let Err(err) = app_server.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }
@@ -1371,6 +1378,8 @@ See the Codex keymap documentation for supported actions and examples."
                 return Err(err);
             }
         };
-        Ok(app.exit_info(exit_reason))
+        let mut exit_info = app.exit_info(exit_reason);
+        exit_info.memory_receipt = memory_receipt;
+        Ok(exit_info)
     }
 }

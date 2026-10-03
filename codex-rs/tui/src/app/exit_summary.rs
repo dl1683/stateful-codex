@@ -73,6 +73,7 @@ impl App {
             disconnect_info,
             update_action: self.pending_update_action,
             exit_reason,
+            memory_receipt: Vec::new(),
         }
     }
 }
@@ -87,7 +88,8 @@ impl AppExitInfo {
                 command
             }
         };
-        let mut lines = Vec::new();
+        // What this session changed in project memory comes first, counted by the server.
+        let mut lines = self.memory_receipt.clone();
         if let Some(disconnect) = self.disconnect_info
             && let Some(thread_id) = self.thread_id
         {
