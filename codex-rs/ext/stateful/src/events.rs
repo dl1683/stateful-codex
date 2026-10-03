@@ -77,7 +77,13 @@ pub(crate) fn receipt_text(content: &str) -> String {
     while !content.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}...", &content[..end])
+    // End at a word boundary when one is near, so the receipt never stops mid-word.
+    let cut = &content[..end];
+    let cut = match cut.rfind(char::is_whitespace) {
+        Some(space) if end - space <= 40 => cut[..space].trim_end(),
+        _ => cut,
+    };
+    format!("{cut}...")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,3 +99,7 @@ pub enum BlackboardEntityKind {
 pub trait StatefulEventSink: Send + Sync {
     fn emit(&self, event: StatefulEvent);
 }
+
+#[cfg(test)]
+#[path = "events_tests.rs"]
+mod tests;
