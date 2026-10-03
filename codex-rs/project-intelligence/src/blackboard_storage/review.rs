@@ -8,16 +8,39 @@ use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::load_entry;
 
+/// One page of active entries, read in one snapshot with the memory revision it reflects.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewPage {
+    pub entries: Vec<BlackboardEntry>,
+    pub more: bool,
+    pub revision: u64,
+}
+
 impl BlackboardStore {
     /// Active entries of the project starting at `offset` in review order, at most `limit`,
-    /// and whether more follow. Within a group, the most recently changed come first.
+    /// whether more follow, and the revision they reflect, all from one snapshot. Within a
+    /// group, the most recently changed come first. With `expected_revision`, a page of a
+    /// later revision is not read and `None` is returned.
     pub async fn active_review_page(
         &self,
         project_id: &str,
         offset: u32,
         limit: u32,
-    ) -> Result<(Vec<BlackboardEntry>, bool), BlackboardStoreError> {
+        expected_revision: Option<u64>,
+    ) -> Result<Option<ReviewPage>, BlackboardStoreError> {
         let mut transaction = self.pool.begin().await?;
+        let revision = sqlx::query_scalar::<_, i64>(
+            "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
+        )
+        .bind(project_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .unwrap_or_default();
+        let revision =
+            u64::try_from(revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
+        if expected_revision.is_some_and(|expected| expected != revision) {
+            return Ok(None);
+        }
         let ids = sqlx::query_scalar::<_, String>(
             "SELECT entry.id
              FROM blackboard_entries AS entry
@@ -46,6 +69,10 @@ impl BlackboardStore {
             }
         }
         transaction.commit().await?;
-        Ok((entries, more))
+        Ok(Some(ReviewPage {
+            entries,
+            more,
+            revision,
+        }))
     }
 }

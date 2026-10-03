@@ -42,39 +42,48 @@ impl BlackboardRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let project_id = self.thread_project(&params.thread_id).await?;
         let store = self.store().await?;
-        // A cursor names the memory revision its page came from; after any change the
-        // order may have shifted, so the reader starts again instead of skipping entries.
-        let revision = store
-            .project_revision(&project_id)
-            .await
-            .map_err(blackboard_error)?;
-        let offset = match params.cursor.as_deref() {
-            None => 0,
+        // A cursor names the project and the memory revision its page came from; after any
+        // change the order may have shifted, so the reader starts again instead of skipping
+        // entries. The check and the page share one snapshot.
+        let (expected_revision, offset) = match params.cursor.as_deref() {
+            None => (None, 0),
             Some(cursor) => {
-                let (cursor_revision, offset) = cursor
-                    .split_once(':')
-                    .and_then(|(revision, offset)| {
-                        Some((revision.parse::<u64>().ok()?, offset.parse::<u32>().ok()?))
-                    })
-                    .ok_or_else(|| invalid_params("cursor is not one this method returned"))?;
-                if cursor_revision != revision {
+                let mut parts = cursor.rsplitn(3, ':');
+                let (Some(offset), Some(revision), Some(cursor_project)) =
+                    (parts.next(), parts.next(), parts.next())
+                else {
+                    return Err(invalid_params("cursor is not one this method returned"));
+                };
+                let (Ok(offset), Ok(revision)) = (offset.parse::<u32>(), revision.parse::<u64>())
+                else {
+                    return Err(invalid_params("cursor is not one this method returned"));
+                };
+                if cursor_project != project_id {
                     return Err(invalid_params(
-                        "project memory changed since this page was read; read it again from the start",
+                        "this cursor belongs to another project's memory; read again from the start",
                     ));
                 }
-                offset
+                (Some(revision), offset)
             }
         };
         let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-        let (entries, more) = store
-            .active_review_page(&project_id, offset, limit)
+        let page = store
+            .active_review_page(&project_id, offset, limit, expected_revision)
             .await
-            .map_err(blackboard_error)?;
-        let mut data = Vec::with_capacity(entries.len());
-        for entry in entries {
+            .map_err(blackboard_error)?
+            .ok_or_else(|| {
+                invalid_params(
+                    "project memory changed since this page was read; read it again from the start",
+                )
+            })?;
+        let mut data = Vec::with_capacity(page.entries.len());
+        for entry in page.entries {
             data.push(memory_item(store, entry).await?);
         }
-        let next_cursor = more.then(|| format!("{revision}:{}", offset + limit));
+        let revision = page.revision;
+        let next_cursor = page
+            .more
+            .then(|| format!("{project_id}:{revision}:{}", offset + limit));
         Ok(Some(
             StatefulMemoryReadResponse {
                 project_id,

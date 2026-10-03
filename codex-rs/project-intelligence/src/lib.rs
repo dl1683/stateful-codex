@@ -50,6 +50,7 @@ pub use blackboard_storage::BlackboardStore;
 pub use blackboard_storage::BlackboardStoreError;
 pub use blackboard_storage::CompletionFence;
 pub use blackboard_storage::MAX_SUPERSEDED_ENTRIES;
+pub use blackboard_storage::ReviewPage;
 pub use blackboard_storage::Succession;
 pub use blackboard_storage::SupersededEntry;
 pub use context_map::ContextMapCoverage;

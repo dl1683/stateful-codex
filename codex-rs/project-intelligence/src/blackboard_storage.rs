@@ -36,6 +36,7 @@ mod succession;
 mod update;
 
 pub use fence::CompletionFence;
+pub use review::ReviewPage;
 pub use succession::MAX_SUPERSEDED_ENTRIES;
 pub use succession::Succession;
 pub use succession::SupersededEntry;
