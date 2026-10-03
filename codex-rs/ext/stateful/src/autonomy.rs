@@ -228,7 +228,11 @@ impl TurnLifecycleContributor for StatefulExtension {
                     let after_change = match self.services.as_ref() {
                         Some(services) => match services.blackboard().await {
                             Ok(store) => store
-                                .latest_change_sequence(selected.project_id())
+                                .message_watermark(
+                                    selected.project_id(),
+                                    &thread.thread_id,
+                                    input.turn_id,
+                                )
                                 .await
                                 .ok(),
                             Err(_) => None,

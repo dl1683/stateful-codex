@@ -393,7 +393,11 @@ pub(crate) fn releases(text: &str, end_condition: Option<&str>) -> bool {
                 // conditional ("... if the test passes"), and an agreement is about what the
                 // condition names, not anything else ("we agree on lunch").
                 let after_words = after.split(' ').collect::<Vec<_>>();
+                let negated = [&lower[sentence_start..start], &lower[end..sentence_end]]
+                    .iter()
+                    .any(|part| part.contains("n't") || part.contains("n\u{2019}t"));
                 !questioning
+                    && !negated
                     && !before
                         .split(' ')
                         .chain(after_words.iter().copied())

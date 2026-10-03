@@ -148,7 +148,7 @@ fn locate_rules(text: &str) -> LocatedRules {
             let normalized = normalize(clause);
             if let Some((rule, at)) = extendable.as_mut()
                 && qualifies_previous(&normalized)
-                && !has_standing_marker(&normalized)
+                && (!has_standing_marker(&normalized) || is_exception(&normalized))
             {
                 // The qualification is part of the rule: its standing, scope and ending are
                 // judged on the whole.
@@ -195,6 +195,8 @@ fn locate_rules(text: &str) -> LocatedRules {
 pub(crate) fn rule_for_clause(text: &str, clause: &str, quote: &str) -> Option<MarkedRule> {
     let start = text.find(clause)?;
     let end = start + clause.len();
+    // Sentence punctuation at the quote's end is not part of the rule's own words.
+    let quote = quote.trim().trim_end_matches(['.', '!', ';', ',']);
     let at = find_collapsed(&text[start..end], quote)
         .map(|found| start + found.start..start + found.end)
         .unwrap_or(start..end);
@@ -202,6 +204,11 @@ pub(crate) fn rule_for_clause(text: &str, clause: &str, quote: &str) -> Option<M
     let within = |range: &Range<usize>| range.start <= at.start && at.end <= range.end;
     if let Some((rule, _)) = located.rules.iter().find(|(_, range)| within(range)) {
         return Some(rule.clone());
+    }
+    // A quote that runs across two recognized rules names neither.
+    let crosses = |range: &Range<usize>| range.start < at.end && at.start < range.end;
+    if located.rules.iter().any(|(_, range)| crosses(range)) {
+        return None;
     }
     if let Some((full, _)) = located.omitted.iter().find(|(_, range)| within(range)) {
         return Some(MarkedRule {
@@ -258,6 +265,14 @@ const QUALIFIER_OPENINGS: &[&str] = &[
     "when",
     "only if",
 ];
+
+/// Whether a qualifying sentence states an exception to the rule before it ("Unless I ask
+/// otherwise, you may ..."), which belongs to that rule even when it reads as a directive.
+fn is_exception(normalized: &str) -> bool {
+    ["unless", "except", "but if", "otherwise"]
+        .iter()
+        .any(|opening| normalized == *opening || normalized.starts_with(&format!("{opening} ")))
+}
 
 fn qualifies_previous(normalized: &str) -> bool {
     QUALIFIER_OPENINGS

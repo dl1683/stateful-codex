@@ -8,9 +8,9 @@ use super::BlackboardStore;
 use super::BlackboardStoreError;
 
 impl BlackboardStore {
-    /// The journal position of a user message: the sequence before the first change host
-    /// capture journaled for it, or, when it has none yet, the latest sequence now. A retried
-    /// capture of the same message keeps the position its first capture had.
+    /// The journal position of a user message: the sequence before the first change journaled
+    /// for its turn, or, when it has none yet, the latest sequence now. A retried capture or a
+    /// cold resume of the same message keeps the position its first capture had.
     pub async fn message_watermark(
         &self,
         project_id: &str,
@@ -20,8 +20,7 @@ impl BlackboardStore {
         let sequence = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(
                  (SELECT MIN(sequence) - 1 FROM memory_changes
-                  WHERE project_id = ? AND thread_id = ? AND turn_id = ?
-                    AND origin = 'host_capture'),
+                  WHERE project_id = ? AND thread_id = ? AND turn_id = ?),
                  (SELECT COALESCE(MAX(sequence), 0) FROM memory_changes WHERE project_id = ?))",
         )
         .bind(project_id)

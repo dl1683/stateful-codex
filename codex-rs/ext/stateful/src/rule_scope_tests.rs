@@ -95,6 +95,8 @@ fn releases_are_affirmative_and_bindings_are_explicit() {
                 "End this investigation if the test passes.",
                 "We have agreed on the root cause when the test passes.",
                 "The investigation is over.",
+                "We haven't agreed on the root cause.",
+                "Don\u{2019}t end this investigation.",
             ]
             .map(|text| releases(text, condition)),
             releases("We have agreed on the root cause.", Some("until I say so")),
@@ -107,7 +109,7 @@ fn releases_are_affirmative_and_bindings_are_explicit() {
         ),
         (
             [
-                false, false, false, false, false, true, false, false, false, true
+                false, false, false, false, false, true, false, false, false, true, false, false
             ],
             false,
             [false, true, true],
@@ -219,5 +221,41 @@ async fn a_follow_up_rule_joins_the_open_investigation() {
             applies_in("thread-2").await
         ),
         (1, 3, 0)
+    );
+}
+
+/// Item 1 final review: the investigation's ending is recorded whichever of its rules states
+/// it, so agreement releases it even when the first rule names no ending.
+#[tokio::test]
+async fn an_ending_stated_by_a_later_rule_is_recorded() {
+    use codex_state::SqliteConfig;
+    use codex_utils_absolute_path::test_support::PathExt;
+
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        SqliteConfig::new_for_testing(state_home.path().abs()),
+    );
+    crate::rule_group::capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        "Some ground rules for this whole investigation:\n- Never push.\n- Do not change code until we agree on the root cause.",
+    )
+    .await;
+    let store = services.blackboard().await.expect("store");
+    let open = store
+        .scopes(
+            "project-1",
+            Some(codex_project_intelligence::ScopeState::Open),
+        )
+        .await
+        .expect("scopes");
+    assert_eq!(
+        open.iter()
+            .map(|scope| scope.end_condition.clone())
+            .collect::<Vec<_>>(),
+        vec![Some("until we agree on the root cause".to_string())]
     );
 }

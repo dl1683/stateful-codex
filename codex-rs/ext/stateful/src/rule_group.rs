@@ -134,9 +134,20 @@ pub(crate) async fn capture_marked_rules(
         }
     };
     // One investigation per message: the rules it limits to an investigation share it.
-    let hint = marked.rules.iter().find_map(|rule| rule.scope.clone());
+    // Its ending is the one the user stated, whichever of its rules states it.
+    let hint = marked
+        .rules
+        .iter()
+        .filter_map(|rule| rule.scope.clone())
+        .reduce(|first, next| match first.end_condition {
+            Some(_) => first,
+            None => ScopeHint {
+                end_condition: next.end_condition,
+                ..first
+            },
+        });
     let scope = match &hint {
-        Some(hint) => open_investigation(store, project_id, thread_id, turn_id, hint)
+        Some(hint) => open_investigation(store, project_id, thread_id, turn_id, hint, text)
             .await
             .map_err(|error| {
                 tracing::warn!(%project_id, %error, "failed to open an investigation scope");
@@ -288,13 +299,16 @@ async fn open_investigation(
     thread_id: &str,
     turn_id: &str,
     hint: &ScopeHint,
+    text: &str,
 ) -> Result<Option<String>, String> {
     let scope_id = scope_id_for(project_id, thread_id, turn_id, &hint.title);
+    // Anywhere in the message: "Start a new investigation into parser.rs. Some ground rules
+    // for this whole investigation: ..." opens a new one.
     let starts_another = {
-        let title = hint.title.to_lowercase();
+        let message = text.to_lowercase();
         ANOTHER_INVESTIGATION
             .iter()
-            .any(|phrase| title.contains(phrase))
+            .any(|phrase| message.contains(phrase))
     };
     if !starts_another
         && let Some(bound) = store

@@ -344,3 +344,28 @@ fn quotes_resolve_by_position_and_qualifications_decide_standing() {
         )
     );
 }
+
+/// Item 1 final review: a quote with its sentence's full stop still names its framed item; a
+/// quote across two rules names neither; an exception stays with the prohibition it limits.
+#[test]
+fn punctuated_quotes_and_exceptions_keep_their_rule() {
+    let framed = "Some ground rules for this essay: second person; British spelling.";
+    let exception = "Never edit the docs. Unless I ask otherwise, you may edit them.";
+    assert_eq!(
+        (
+            rule_for_clause(framed, framed, "British spelling.").map(|rule| rule.clause),
+            rule_for_clause(framed, framed, "second person; British spelling")
+                .map(|rule| rule.clause),
+            marked_rules(exception),
+        ),
+        (
+            Some(standing(
+                "Some ground rules for this essay: British spelling."
+            )),
+            None,
+            vec![standing(
+                "Never edit the docs. Unless I ask otherwise, you may edit them."
+            )],
+        )
+    );
+}
