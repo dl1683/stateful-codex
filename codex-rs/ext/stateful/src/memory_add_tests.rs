@@ -125,9 +125,7 @@ async fn the_user_adds_each_kind_directly() {
                 "project-1",
                 node_id,
                 MemoryAddition::Rule {
-                    scope: Some(
-                        "For this whole investigation, until we agree on the cause".to_string(),
-                    ),
+                    scope: Some("this whole investigation".to_string()),
                 },
                 "Do not change any code.",
             )
@@ -178,8 +176,17 @@ async fn the_user_adds_each_kind_directly() {
     let user = BlackboardProvenanceKind::User;
     let promoted = RootPromotion::Promoted;
     assert_eq!(
-        [&rule, &repeated, &background, &decision, &retried, &note, &restored, &scoped]
-            .map(summary),
+        [
+            &rule,
+            &repeated,
+            &background,
+            &decision,
+            &retried,
+            &note,
+            &restored,
+            &scoped
+        ]
+        .map(summary),
         [
             (
                 MemorySection::UserRule,
@@ -240,8 +247,7 @@ async fn the_user_adds_each_kind_directly() {
             (
                 MemorySection::UserRule,
                 BlackboardKind::Instruction,
-                "For this whole investigation, until we agree on the cause: Do not change any code."
-                    .to_string(),
+                "Do not change any code.".to_string(),
                 user,
                 promoted,
                 AddOutcome::Added
@@ -299,5 +305,104 @@ async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
     assert_eq!(
         (added.id == pending.id, memory_section(&added), outcome),
         (true, MemorySection::UserRule, AddOutcome::Added)
+    );
+}
+
+/// Item 3 review 2: an action is bound to its complete request (a decision with a reason is
+/// not the same request as one whose words contain "Reason:"), and a scoped rule must name
+/// the investigation the thread continues and carry no ending of its own.
+#[tokio::test]
+async fn an_action_is_bound_to_its_whole_request_and_scope() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let actor = |action: &str| crate::memory_controls::MemoryActor {
+        thread_id: Some("thread-1".to_string()),
+        action_id: Some(action.to_string()),
+    };
+    let refused = |result: Result<_, crate::memory_controls::MemoryControlError>| {
+        matches!(
+            result,
+            Err(crate::memory_controls::MemoryControlError::Refused(_))
+        )
+    };
+    add_entry(
+        store,
+        &actor("a1"),
+        "project-1",
+        node_id.clone(),
+        MemoryAddition::Decision {
+            reason: Some("Y".to_string()),
+        },
+        "X",
+    )
+    .await
+    .expect("decision");
+    let same_text_other_request = add_entry(
+        store,
+        &actor("a1"),
+        "project-1",
+        node_id.clone(),
+        MemoryAddition::Decision { reason: None },
+        "X Reason: Y",
+    )
+    .await;
+    store
+        .open_scope(&codex_project_intelligence::KnowledgeScope {
+            project_id: "project-1".to_string(),
+            scope_id: "scope-a".to_string(),
+            kind: codex_project_intelligence::ScopeKind::Investigation,
+            title: "Ground rules for the parser bug".to_string(),
+            state: codex_project_intelligence::ScopeState::Open,
+            end_condition: None,
+            opened_source: "test".to_string(),
+            ended_source: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        })
+        .await
+        .expect("scope");
+    store
+        .bind_thread_scope("project-1", "thread-1", "scope-a")
+        .await
+        .expect("bind");
+    let scoped = |action: &'static str, scope: &'static str| {
+        let node_id = node_id.clone();
+        let actor = actor(action);
+        async move {
+            add_entry(
+                store,
+                &actor,
+                "project-1",
+                node_id,
+                MemoryAddition::Rule {
+                    scope: Some(scope.to_string()),
+                },
+                "Never push.",
+            )
+            .await
+        }
+    };
+    let other_investigation = scoped("a2", "the cache investigation").await;
+    let with_ending = scoped("a3", "this investigation, until we agree").await;
+    let by_title = scoped("a4", "Ground rules for the parser bug").await;
+    let by_id = scoped("a5", "scope-a").await;
+    assert_eq!(
+        (
+            refused(same_text_other_request),
+            refused(other_investigation),
+            refused(with_ending),
+            by_title.map(|(_, outcome)| outcome).ok(),
+            by_id.map(|(_, outcome)| outcome).ok(),
+        ),
+        (
+            true,
+            true,
+            true,
+            Some(AddOutcome::Added),
+            Some(AddOutcome::AlreadyPresent)
+        )
     );
 }

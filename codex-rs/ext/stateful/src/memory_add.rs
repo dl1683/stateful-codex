@@ -15,6 +15,7 @@ use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ChangeOperation;
+use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::HierarchyNodeId;
@@ -38,10 +39,9 @@ const MAX_GENERATIONS: u32 = 64;
 /// What the user is adding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MemoryAddition {
-    /// A rule in the user's words. With a scope ("this whole investigation into the config
-    /// bug, until we agree on the root cause") the rule is limited to the open investigation
-    /// the thread continues, and the scope is kept in the user's words ahead of the rule; with
-    /// no such investigation the addition is refused rather than applied to all work.
+    /// A rule in the user's words. With a scope naming the open investigation the thread
+    /// continues (its ID, its title, or "this investigation") the rule is limited to it and
+    /// ends with it; any other scope is refused rather than applied to all work.
     Rule { scope: Option<String> },
     /// Something about the user or the whole work.
     Background,
@@ -87,10 +87,9 @@ pub async fn add_entry(
             .map(str::to_string)
     };
     let text = match &addition {
-        MemoryAddition::Rule { scope } => match non_empty(scope) {
-            Some(scope) => format!("{}: {content}", scope.trim_end_matches(':')),
-            None => content.to_string(),
-        },
+        // A scoped rule keeps the user's words; its investigation is recorded with it (and
+        // shown by its title), not written into them.
+        MemoryAddition::Rule { .. } => content.to_string(),
         MemoryAddition::Decision { reason } => match non_empty(reason) {
             Some(reason) => format!("{content} Reason: {reason}"),
             None => content.to_string(),
@@ -108,10 +107,17 @@ pub async fn add_entry(
         MemoryAddition::Background => (BlackboardKind::Fact, KnowledgeCategory::Background),
         MemoryAddition::Note => (BlackboardKind::Fact, KnowledgeCategory::Note),
     };
+    // The complete request, so a retry is recognized by what was asked, not by stored text
+    // that two different requests can share.
+    let fingerprint = request_fingerprint(&addition, content);
     // A retried action returns what it did; the same identity for anything else (other
-    // words, another kind) is refused. The entry the action wrote keeps its words whatever
-    // happened to it since, so the comparison is on the complete stored text.
+    // words, another kind, a different reason or scope) is refused.
     if let Some(done) = store.change_for_action(project_id, action_id).await? {
+        if done.record.group_id.as_deref() != Some(fingerprint.as_str()) {
+            return Err(MemoryControlError::Refused(
+                "this action already added something else; nothing was added".to_string(),
+            ));
+        }
         let entry_id = done
             .entry_id
             .as_deref()
@@ -133,9 +139,10 @@ pub async fn add_entry(
             )),
         };
     }
-    // A scoped rule belongs to the open investigation this thread continues.
+    // A scoped rule belongs to the open investigation this thread continues, named by its ID
+    // or its title, or as "this investigation"; it ends with that investigation.
     let scope_id = match &addition {
-        MemoryAddition::Rule { scope } if non_empty(scope).is_some() => {
+        MemoryAddition::Rule { scope } if let Some(named) = non_empty(scope) => {
             let thread_id = actor.thread_id.as_deref().ok_or_else(|| {
                 MemoryControlError::Refused(
                     "a rule limited to an investigation needs the thread that continues it"
@@ -151,6 +158,22 @@ pub async fn add_entry(
                         "this thread continues no open investigation; join one (/memory investigations) or add the rule without a scope".to_string(),
                     )
                 })?;
+            let normalized = crate::user_rules::normalize(&named);
+            let names_it = named == bound.scope_id
+                || normalized == crate::user_rules::normalize(&bound.title)
+                || CURRENT_INVESTIGATION.contains(&normalized.as_str());
+            if !names_it {
+                return Err(MemoryControlError::Refused(format!(
+                    "that scope does not name the investigation this thread continues ({}); use its ID from /memory investigations or say \"this investigation\"",
+                    bound.title
+                )));
+            }
+            if normalized.split(' ').any(|word| word == "until") {
+                return Err(MemoryControlError::Refused(
+                    "a rule added directly ends with its investigation; leave out the ending"
+                        .to_string(),
+                ));
+            }
             Some(bound.scope_id)
         }
         _ => None,
@@ -199,7 +222,10 @@ pub async fn add_entry(
             vec![digest_id("stateful-memory-add-", project_id, action_id)?]
         }
     };
-    let change = actor.change(ChangeOperation::Saved, category, &text);
+    let change = ChangeRecord {
+        group_id: Some(fingerprint.clone()),
+        ..actor.change(ChangeOperation::Saved, category, &text)
+    };
     for id in candidates {
         let Some(existing) = store.get_entry(project_id, &id).await? else {
             let (entry, created) = store
@@ -252,7 +278,10 @@ pub async fn add_entry(
                             source_id,
                         },
                     },
-                    Some(&actor.change(ChangeOperation::Promoted, category, &text)),
+                    Some(&ChangeRecord {
+                        group_id: Some(fingerprint),
+                        ..actor.change(ChangeOperation::Promoted, category, &text)
+                    }),
                 )
                 .await?;
             return Ok((promoted, AddOutcome::Added));
@@ -263,7 +292,10 @@ pub async fn add_entry(
             .record_change(
                 project_id,
                 Some(&existing),
-                &actor.change(ChangeOperation::Saved, category, &text),
+                &ChangeRecord {
+                    group_id: Some(fingerprint),
+                    ..actor.change(ChangeOperation::Saved, category, &text)
+                },
             )
             .await?;
         return Ok((existing, AddOutcome::AlreadyPresent));
@@ -271,6 +303,33 @@ pub async fn add_entry(
     Err(MemoryControlError::Refused(
         "these words were retired too many times to be added again".to_string(),
     ))
+}
+
+/// Ways to name the investigation the thread continues without its title or ID.
+const CURRENT_INVESTIGATION: &[&str] = &[
+    "this investigation",
+    "this whole investigation",
+    "the current investigation",
+    "for this investigation",
+    "for this whole investigation",
+];
+
+/// The journal's record of a direct addition's complete request (kind, words, reason,
+/// scope), kept in the change's group field, which direct additions do not otherwise use.
+fn request_fingerprint(addition: &MemoryAddition, content: &str) -> String {
+    let (kind, extra) = match addition {
+        MemoryAddition::Rule { scope } => ("rule", scope.as_deref()),
+        MemoryAddition::Background => ("background", None),
+        MemoryAddition::Decision { reason } => ("decision", reason.as_deref()),
+        MemoryAddition::Note => ("note", None),
+    };
+    let mut hasher = Sha256::new();
+    for part in [kind, content.trim(), extra.map_or("", str::trim)] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    hasher.update([u8::from(extra.is_some())]);
+    format!("add-request-{:x}", hasher.finalize())
 }
 
 fn digest_id(

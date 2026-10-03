@@ -425,8 +425,13 @@ async fn more(request: &Requests<'_>, listing: &MemoryListing) -> Result<PlainHi
     let page = request.page(Some(cursor)).await.map_err(|error| {
         format!("{error}. Memory changed since the list was shown; run /memory to list it again.")
     })?;
+    let used = shown.cursor.clone();
     listing
         .with_current(request.thread_id, shown.generation, |current| {
+            // Another /memory next already showed this page: nothing is numbered twice.
+            if current.cursor != used {
+                return vec!["That page is already shown above.".into()];
+            }
             let first = current.slots.len() + 1;
             current.cursor = page.next_cursor;
             current.append(page.data);
@@ -596,7 +601,8 @@ async fn investigations(
         })
         .await
         .map_err(|error| format!("Nothing changed: {error}"))?;
-    // Only the newest investigations list owns the numbers.
+    // Only the newest investigations list owns the numbers; an older one is not shown, so no
+    // visible number can name a different investigation.
     {
         let mut shown = listing
             .investigations
@@ -604,7 +610,19 @@ async fn investigations(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if shown
             .as_ref()
-            .is_none_or(|(shown_generation, _, _)| *shown_generation < generation)
+            .is_some_and(|(shown_generation, _, _)| *shown_generation > generation)
+        {
+            let done = match action {
+                StatefulMemoryScopeAction::List => "",
+                StatefulMemoryScopeAction::Join => "Joined. ",
+                StatefulMemoryScopeAction::Leave => "Left. ",
+                StatefulMemoryScopeAction::End => "Ended. ",
+            };
+            return Ok(new_info_event(
+                format!("{done}A newer investigations list replaced this one; use its numbers."),
+                /*hint*/ None,
+            ));
+        }
         {
             *shown = Some((
                 generation,
