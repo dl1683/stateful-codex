@@ -706,6 +706,14 @@ impl EventProcessor for EventProcessorWithJsonOutput {
         collected.status
     }
 
+    fn set_memory_receipt(&mut self, lines: Vec<String>) {
+        // The person watching a JSON run reads stderr, not the event stream.
+        #[allow(clippy::print_stderr)]
+        for line in lines {
+            eprintln!("project memory: {line}");
+        }
+    }
+
     fn print_final_output(&mut self) {
         if self.emit_final_message_on_shutdown
             && let Some(path) = self.last_message_path.as_deref()

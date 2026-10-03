@@ -26,6 +26,9 @@ pub(crate) trait EventProcessor {
     fn process_warning(&mut self, message: String) -> CodexStatus;
 
     fn print_final_output(&mut self) {}
+
+    /// The run's memory receipt, counted by the app server, shown with the final output.
+    fn set_memory_receipt(&mut self, _lines: Vec<String>) {}
 }
 
 pub(crate) fn handle_last_message(last_agent_message: Option<&str>, output_file: &Path) {

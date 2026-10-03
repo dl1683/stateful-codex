@@ -426,7 +426,7 @@ async fn exec_shows_a_receipt_for_a_captured_rule() -> anyhow::Result<()> {
     assert!(
         stderr.contains(
             "stateful: saved standing rule: \"From now on, never run the whole test suite.\""
-        ) && stderr.contains("project memory: saved 1 standing rule this run"),
+        ) && stderr.contains("project memory: this run: 1 saved"),
         "{stderr}"
     );
     assert!(

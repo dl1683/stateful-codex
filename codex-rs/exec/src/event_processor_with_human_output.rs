@@ -38,8 +38,8 @@ pub(crate) struct EventProcessorWithHumanOutput {
     final_message_rendered: bool,
     emit_final_message_on_shutdown: bool,
     stateful_attribution: StatefulAttributionAccumulator,
-    /// What project memory newly saved during this run, by kind, for the closing summary.
-    memory_saved: std::collections::BTreeMap<&'static str, usize>,
+    /// What this run changed in project memory, counted by the app server at the end.
+    memory_receipt: Vec<String>,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -65,7 +65,7 @@ impl EventProcessorWithHumanOutput {
             final_message_rendered: false,
             emit_final_message_on_shutdown: false,
             stateful_attribution: StatefulAttributionAccumulator::default(),
-            memory_saved: std::collections::BTreeMap::new(),
+            memory_receipt: Vec::new(),
         }
     }
 
@@ -352,15 +352,6 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             ServerNotification::StatefulKnowledgeGroupCaptured(notification) => {
                 let (receipts, summary) = crate::exec_events::group_receipts(&notification);
                 for receipt in receipts {
-                    if matches!(
-                        receipt.outcome,
-                        crate::exec_events::StatefulCaptureOutcome::Stored
-                    ) {
-                        *self
-                            .memory_saved
-                            .entry(receipt.category.label())
-                            .or_default() += 1;
-                    }
                     eprintln!(
                         "{} {}",
                         "stateful:".style(self.cyan).style(self.bold),
@@ -377,15 +368,6 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             }
             ServerNotification::StatefulKnowledgeCaptured(notification) => {
                 let receipt = crate::exec_events::StatefulKnowledgeEvent::from(&notification);
-                if matches!(
-                    receipt.outcome,
-                    crate::exec_events::StatefulCaptureOutcome::Stored
-                ) {
-                    *self
-                        .memory_saved
-                        .entry(receipt.category.label())
-                        .or_default() += 1;
-                }
                 eprintln!(
                     "{} {}",
                     "stateful:".style(self.cyan).style(self.bold),
@@ -504,6 +486,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         CodexStatus::Running
     }
 
+    fn set_memory_receipt(&mut self, lines: Vec<String>) {
+        self.memory_receipt = lines;
+    }
+
     fn print_final_output(&mut self) {
         if self.emit_final_message_on_shutdown
             && let Some(path) = self.last_message_path.as_deref()
@@ -512,15 +498,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         }
 
         // The run's memory changes, repeated after the work so they are not lost in it.
-        if !self.memory_saved.is_empty() {
-            let saved = self
-                .memory_saved
-                .iter()
-                .map(|(kind, count)| format!("{count} {kind}"))
-                .collect::<Vec<_>>()
-                .join(", ");
+        for line in &self.memory_receipt {
             eprintln!(
-                "{} saved {saved} this run",
+                "{} {line}",
                 "project memory:".style(self.cyan).style(self.bold),
             );
         }

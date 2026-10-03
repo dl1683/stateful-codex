@@ -10,6 +10,7 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
+mod memory_receipt;
 mod startup_warning_deduper;
 mod stateful_attribution;
 mod worktree;
@@ -1055,135 +1056,151 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         })?;
 
     // Resolve resume and fork through existing app-server thread lifecycle APIs.
-    let (primary_thread_id, fallback_session_configured) = if let Some(ExecCommand::Resume(args)) =
-        command.as_ref()
-    {
-        if let Some(thread_id) =
-            resolve_resume_thread_id(&client, &config, state_db.as_ref(), args).await?
-        {
-            let response: ThreadResumeResponse = send_request_with_response(
-                &client,
-                ClientRequest::ThreadResume {
-                    request_id: request_ids.next(),
-                    params: thread_resume_params_from_config(
-                        &config,
-                        thread_id,
-                        resume_approvals_reviewer_override,
-                    ),
-                },
-                "thread/resume",
-            )
-            .await
-            .map_err(anyhow::Error::msg)?;
-            let session_configured =
-                session_configured_from_thread_resume_response(&response, &config)
-                    .map_err(anyhow::Error::msg)?;
-            if let Some(startup) = stateful_startup.clone() {
-                start_stateful_run_for_existing_thread(
+    let (primary_thread_id, fallback_session_configured, thread_has_project) =
+        if let Some(ExecCommand::Resume(args)) = command.as_ref() {
+            if let Some(thread_id) =
+                resolve_resume_thread_id(&client, &config, state_db.as_ref(), args).await?
+            {
+                let response: ThreadResumeResponse = send_request_with_response(
                     &client,
-                    &config,
-                    &thread_source,
-                    startup,
-                    &session_configured.thread_id.to_string(),
+                    ClientRequest::ThreadResume {
+                        request_id: request_ids.next(),
+                        params: thread_resume_params_from_config(
+                            &config,
+                            thread_id,
+                            resume_approvals_reviewer_override,
+                        ),
+                    },
+                    "thread/resume",
                 )
                 .await
                 .map_err(anyhow::Error::msg)?;
+                let session_configured =
+                    session_configured_from_thread_resume_response(&response, &config)
+                        .map_err(anyhow::Error::msg)?;
+                if let Some(startup) = stateful_startup.clone() {
+                    start_stateful_run_for_existing_thread(
+                        &client,
+                        &config,
+                        &thread_source,
+                        startup,
+                        &session_configured.thread_id.to_string(),
+                    )
+                    .await
+                    .map_err(anyhow::Error::msg)?;
+                }
+                (
+                    session_configured.thread_id,
+                    session_configured,
+                    response.thread.project_id.is_some(),
+                )
+            } else {
+                let response = start_thread(
+                    &client,
+                    &mut request_ids,
+                    &config,
+                    &thread_source,
+                    /*stateful_startup*/ None,
+                )
+                .await
+                .map_err(anyhow::Error::msg)?;
+                let session_configured =
+                    session_configured_from_thread_start_response(&response, &config)
+                        .map_err(anyhow::Error::msg)?;
+                (
+                    session_configured.thread_id,
+                    session_configured,
+                    response.thread.project_id.is_some(),
+                )
             }
-            (session_configured.thread_id, session_configured)
+        } else if let Some(ExecCommand::Fork(args)) = command.as_ref() {
+            let source_args = crate::cli::ResumeArgs {
+                session_id: Some(args.session_id.clone()),
+                last: false,
+                all: true,
+                images: Vec::new(),
+                prompt: None,
+            };
+            let source_thread_id =
+                resolve_resume_thread_id(&client, &config, state_db.as_ref(), &source_args)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("Session not found: {}", args.session_id))?;
+            let permissions = permissions_selection_from_config(&config);
+            let sandbox = permissions.is_none().then(|| {
+                sandbox_mode_from_permission_profile(
+                    &config.permissions.effective_permission_profile(),
+                    config.cwd.as_path(),
+                )
+            });
+            let response: ThreadForkResponse = send_request_with_response(
+                &client,
+                ClientRequest::ThreadFork {
+                    request_id: request_ids.next(),
+                    params: ThreadForkParams {
+                        thread_id: source_thread_id,
+                        model: config.model.clone(),
+                        model_provider: Some(config.model_provider_id.clone()),
+                        cwd: Some(config.cwd.to_string_lossy().to_string()),
+                        runtime_workspace_roots: Some(config.workspace_roots.clone()),
+                        approval_policy: Some(config.permissions.approval_policy.value().into()),
+                        approvals_reviewer: resume_approvals_reviewer_override,
+                        sandbox: sandbox.flatten(),
+                        permissions,
+                        config: thread_config_overrides_from_config(&config),
+                        ephemeral: config.ephemeral,
+                        thread_source: Some(thread_source.clone()),
+                        exclude_turns: true,
+                        defer_goal_continuation: !config.ephemeral,
+                        ..ThreadForkParams::default()
+                    },
+                },
+                "thread/fork",
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
+            let session_configured = session_configured_from_thread_response(
+                &response.thread.session_id,
+                &response.thread.id,
+                response.thread.forked_from_id.as_deref(),
+                response.thread.parent_thread_id.as_deref(),
+                response.thread.thread_source.clone().map(Into::into),
+                response.thread.name.clone(),
+                response.thread.path.clone(),
+                response.model,
+                response.model_provider,
+                response.service_tier,
+                response.approval_policy.to_core(),
+                response.approvals_reviewer.to_core(),
+                config.permissions.effective_permission_profile(),
+                response.active_permission_profile.map(Into::into),
+                response.cwd,
+                response.reasoning_effort,
+            )
+            .map_err(anyhow::Error::msg)?;
+            (
+                session_configured.thread_id,
+                session_configured,
+                response.thread.project_id.is_some(),
+            )
         } else {
             let response = start_thread(
                 &client,
                 &mut request_ids,
                 &config,
                 &thread_source,
-                /*stateful_startup*/ None,
+                stateful_startup,
             )
             .await
             .map_err(anyhow::Error::msg)?;
             let session_configured =
                 session_configured_from_thread_start_response(&response, &config)
                     .map_err(anyhow::Error::msg)?;
-            (session_configured.thread_id, session_configured)
-        }
-    } else if let Some(ExecCommand::Fork(args)) = command.as_ref() {
-        let source_args = crate::cli::ResumeArgs {
-            session_id: Some(args.session_id.clone()),
-            last: false,
-            all: true,
-            images: Vec::new(),
-            prompt: None,
-        };
-        let source_thread_id =
-            resolve_resume_thread_id(&client, &config, state_db.as_ref(), &source_args)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("Session not found: {}", args.session_id))?;
-        let permissions = permissions_selection_from_config(&config);
-        let sandbox = permissions.is_none().then(|| {
-            sandbox_mode_from_permission_profile(
-                &config.permissions.effective_permission_profile(),
-                config.cwd.as_path(),
+            (
+                session_configured.thread_id,
+                session_configured,
+                response.thread.project_id.is_some(),
             )
-        });
-        let response: ThreadForkResponse = send_request_with_response(
-            &client,
-            ClientRequest::ThreadFork {
-                request_id: request_ids.next(),
-                params: ThreadForkParams {
-                    thread_id: source_thread_id,
-                    model: config.model.clone(),
-                    model_provider: Some(config.model_provider_id.clone()),
-                    cwd: Some(config.cwd.to_string_lossy().to_string()),
-                    runtime_workspace_roots: Some(config.workspace_roots.clone()),
-                    approval_policy: Some(config.permissions.approval_policy.value().into()),
-                    approvals_reviewer: resume_approvals_reviewer_override,
-                    sandbox: sandbox.flatten(),
-                    permissions,
-                    config: thread_config_overrides_from_config(&config),
-                    ephemeral: config.ephemeral,
-                    thread_source: Some(thread_source.clone()),
-                    exclude_turns: true,
-                    defer_goal_continuation: !config.ephemeral,
-                    ..ThreadForkParams::default()
-                },
-            },
-            "thread/fork",
-        )
-        .await
-        .map_err(anyhow::Error::msg)?;
-        let session_configured = session_configured_from_thread_response(
-            &response.thread.session_id,
-            &response.thread.id,
-            response.thread.forked_from_id.as_deref(),
-            response.thread.parent_thread_id.as_deref(),
-            response.thread.thread_source.clone().map(Into::into),
-            response.thread.name.clone(),
-            response.thread.path.clone(),
-            response.model,
-            response.model_provider,
-            response.service_tier,
-            response.approval_policy.to_core(),
-            response.approvals_reviewer.to_core(),
-            config.permissions.effective_permission_profile(),
-            response.active_permission_profile.map(Into::into),
-            response.cwd,
-            response.reasoning_effort,
-        )
-        .map_err(anyhow::Error::msg)?;
-        (session_configured.thread_id, session_configured)
-    } else {
-        let response = start_thread(
-            &client,
-            &mut request_ids,
-            &config,
-            &thread_source,
-            stateful_startup,
-        )
-        .await
-        .map_err(anyhow::Error::msg)?;
-        let session_configured = session_configured_from_thread_start_response(&response, &config)
-            .map_err(anyhow::Error::msg)?;
-        (session_configured.thread_id, session_configured)
-    };
+        };
 
     if let Some(worktree) = managed_worktree.as_ref() {
         worktree
@@ -1210,6 +1227,12 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     }
 
     info!("Codex initialized with event: {session_configured:?}");
+    // Read before the first turn, so this run's memory changes can be counted at its end.
+    let memory_watermark = if thread_has_project || stateful_mode.is_some() {
+        memory_receipt::watermark(&client, request_ids.next(), &primary_thread_id_for_span).await
+    } else {
+        None
+    };
 
     let (interrupt_tx, mut interrupt_rx) = mpsc::unbounded_channel::<()>();
     tokio::spawn(async move {
@@ -1632,6 +1655,25 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         }
     }
 
+    if let Some(watermark) = memory_watermark {
+        let run = read_stateful_run(
+            &client,
+            &mut request_ids,
+            StatefulRunLookup::Thread(&primary_thread_id_for_span),
+        )
+        .await
+        .ok()
+        .flatten();
+        let receipt = memory_receipt::receipt(
+            &client,
+            request_ids.next(),
+            &primary_thread_id_for_span,
+            watermark,
+            run.as_ref(),
+        )
+        .await;
+        event_processor.set_memory_receipt(receipt);
+    }
     if let Err(err) = client.shutdown().await {
         warn!("in-process app-server shutdown failed: {err}");
     }
