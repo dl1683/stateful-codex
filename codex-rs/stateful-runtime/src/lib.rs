@@ -8,6 +8,7 @@ mod run_history_storage;
 mod steering;
 mod steering_storage;
 mod storage;
+mod window_journal;
 
 pub use context_window::ContextWindowDecision;
 pub use context_window::ContextWindowMode;
@@ -44,3 +45,9 @@ pub use storage::AutonomousClaimRequest;
 pub use storage::AutonomousRecoveryState;
 pub use storage::StatefulRunStore;
 pub use storage::StatefulRunStoreError;
+pub use window_journal::MAX_WINDOW_EVENT_PAYLOAD_BYTES;
+pub use window_journal::NewWindowEvent;
+pub use window_journal::WindowEvent;
+pub use window_journal::WindowEventKind;
+pub use window_journal::WindowPublication;
+pub use window_journal::WindowPublicationState;

@@ -902,6 +902,8 @@ pub enum StatefulRunStoreError {
     ConcurrentMutation,
     #[error("obligation ID must be non-empty, bounded, and contain no controls")]
     InvalidRecordId,
+    #[error("journal event key was already used for a different observation: {0}")]
+    WindowEventConflict(String),
     #[error("obligation ID was already used for different content: {0}")]
     ObligationIdentityConflict(String),
     #[error("obligation not found: {0}")]
