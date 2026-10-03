@@ -2,9 +2,10 @@
 //! their exit codes, patch outcomes, the agent's plan updates and messages, and the user's
 //! messages. Each is one committed journal row, so no model request is needed to remember it.
 //!
-//! Secrets are redacted from the source text before it is bounded, so a cut never splits a
-//! credential away from the context that identifies it. Each observation also fits one
-//! aggregate serialized budget: what does not fit is counted as omitted, never dropped silently.
+//! Secrets are redacted from the whole source text before it is bounded, so a cut cannot
+//! separate a credential the redactor recognizes from the context that identifies it. Each
+//! observation fits one aggregate serialized budget: text is shortened, and paths or plan steps
+//! that do not fit are counted as omitted, so a completed observation is never dropped.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -36,9 +37,6 @@ const MAX_USER_BYTES: usize = 512;
 const MAX_PATH_BYTES: usize = 512;
 const MAX_PLAN_STEPS: usize = 16;
 const MAX_PLAN_STEP_BYTES: usize = 256;
-/// Extra source text kept around a cut while redacting, so a secret's identifying prefix is
-/// still present when the redactor runs.
-const REDACTION_MARGIN_BYTES: usize = 1_024;
 /// Serialized budget of one observation, well under the runtime's 16 KiB row bound even after
 /// JSON escaping.
 const MAX_OBSERVATION_BYTES: usize = 8 * 1_024;
@@ -163,31 +161,25 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
                 },
                 String::len,
             );
-            let output_tail = match command.aggregated_output.as_deref() {
-                Some(output) => clean_tail(output, MAX_OUTPUT_TAIL_BYTES),
-                None => clean_tail(
-                    &format!(
-                        "{}{}",
-                        tail(
-                            command.stdout.as_deref().unwrap_or_default(),
-                            MAX_OUTPUT_TAIL_BYTES + REDACTION_MARGIN_BYTES
-                        ),
-                        tail(
-                            command.stderr.as_deref().unwrap_or_default(),
-                            MAX_OUTPUT_TAIL_BYTES + REDACTION_MARGIN_BYTES
-                        )
-                    ),
-                    MAX_OUTPUT_TAIL_BYTES,
-                ),
-            };
-            let command_line = clean_head(&command.command.join(" "), MAX_COMMAND_BYTES);
-            Some((
-                format!("{}:command", command.id),
-                WindowEventKind::Command,
-                json!({
+            let output = command.aggregated_output.clone().unwrap_or_else(|| {
+                format!(
+                    "{}{}",
+                    command.stdout.as_deref().unwrap_or_default(),
+                    command.stderr.as_deref().unwrap_or_default()
+                )
+            });
+            let full_command = command.command.join(" ");
+            // Escaping can make text serialize larger than its bytes: halve the kept text
+            // until the whole receipt fits, keeping status and exit code intact.
+            let (mut command_bytes, mut tail_bytes) = (MAX_COMMAND_BYTES, MAX_OUTPUT_TAIL_BYTES);
+            loop {
+                let command_line = clean_head(&full_command, command_bytes);
+                let output_tail = clean_tail(&output, tail_bytes);
+                let payload = json!({
                     // Lets a capsule find test runs older than its page.
                     "validation": is_validation_command(&command_line),
                     "command": command_line,
+                    "commandComplete": command_line.len() == full_command.len(),
                     "cwd": clean_head(&command.cwd.to_string(), MAX_CWD_BYTES),
                     "status": status,
                     "exitCode": command.exit_code,
@@ -196,8 +188,22 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
                     "outputTail": output_tail,
                     // Whether the retained tail is all the output this item supplied.
                     "outputComplete": output_tail.len() == output_bytes,
-                }),
-            ))
+                });
+                if serialized_len(&payload) <= MAX_OBSERVATION_BYTES
+                    || (command_bytes == 0 && tail_bytes == 0)
+                {
+                    return Some((
+                        format!("{}:command", command.id),
+                        WindowEventKind::Command,
+                        payload,
+                    ));
+                }
+                if tail_bytes > 0 {
+                    tail_bytes /= 2;
+                } else {
+                    command_bytes /= 2;
+                }
+            }
         }
         TurnItem::FileChange(change) => {
             // One status covers the whole patch; per-file results are not observed.
@@ -332,20 +338,14 @@ fn serialized_len(value: &Value) -> usize {
     serde_json::to_string(value).map_or(usize::MAX, |text| text.len())
 }
 
-/// The first `max` bytes of `text` after redacting a margin beyond the cut.
+/// The first `max` bytes of `text` after redacting all of it.
 fn clean_head(text: &str, max: usize) -> String {
-    head(
-        &codex_secrets::redact_secrets(head(text, max + REDACTION_MARGIN_BYTES)),
-        max,
-    )
+    head(&codex_secrets::redact_secrets(text.to_string()), max)
 }
 
-/// The last `max` bytes of `text` after redacting a margin before the cut.
+/// The last `max` bytes of `text` after redacting all of it.
 fn clean_tail(text: &str, max: usize) -> String {
-    tail(
-        &codex_secrets::redact_secrets(tail(text, max + REDACTION_MARGIN_BYTES)),
-        max,
-    )
+    tail(&codex_secrets::redact_secrets(text.to_string()), max)
 }
 
 pub(crate) fn command_text(event: &WindowEvent) -> &str {

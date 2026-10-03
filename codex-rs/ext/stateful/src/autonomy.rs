@@ -125,7 +125,12 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
                 input.thread_store.get::<SelectedProject>(),
                 self.services.as_ref(),
             ) {
-                crate::window_journal::recover_pending(services, selected.project_id()).await;
+                crate::window_journal::recover_pending(
+                    services,
+                    selected.project_id(),
+                    &input.thread_id.to_string(),
+                )
+                .await;
             }
         })
     }

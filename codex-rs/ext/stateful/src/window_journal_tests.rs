@@ -173,7 +173,7 @@ async fn completed_items_are_journaled_redacted_and_published_once_per_window() 
     assert!(
         note.value
             .content
-            .contains("Last failing test or check command: `bash -lc pytest -q` exit 1.")
+            .contains("Last failing test or check command (exit 1): `bash -lc pytest -q`.")
     );
     assert_eq!(
         store
@@ -289,7 +289,7 @@ async fn long_paths_never_crowd_out_the_test_and_failure_receipts() {
     let content = super::publication_content("thread-1", 0, 9, &events);
     assert!(content.len() <= 3_800);
     assert!(
-        content.contains("Last failing test or check command: `bash -lc pytest -q` exit 1."),
+        content.contains("Last failing test or check command (exit 1): `bash -lc pytest -q`."),
         "{content}"
     );
     assert!(
@@ -299,4 +299,99 @@ async fn long_paths_never_crowd_out_the_test_and_failure_receipts() {
         "{content}"
     );
     assert!(content.contains("more not listed."), "{content}");
+}
+
+#[test]
+fn a_long_failing_command_keeps_its_exit_code_in_the_publication() {
+    let long = format!("pytest {}", "k".repeat(950));
+    let event = codex_stateful_runtime::WindowEvent {
+        seq: 1,
+        event: codex_stateful_runtime::NewWindowEvent {
+            thread_id: "thread-1".to_string(),
+            event_key: "exec-1:command".to_string(),
+            project_id: "project-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            kind: codex_stateful_runtime::WindowEventKind::Command,
+            payload: json!({"command": long, "status": "failed", "exitCode": 17}),
+        },
+        created_at_ms: 0,
+    };
+    let content = super::publication_content("thread-1", 0, 1, &[event]);
+    assert!(
+        content.contains("Last failing test or check command (exit 17): `pytest"),
+        "{content}"
+    );
+    assert!(
+        content.contains("Last command without exit code 0 (exit 17):"),
+        "{content}"
+    );
+}
+
+#[tokio::test]
+async fn recovery_closes_message_only_sentinels_and_retries_closed_windows() {
+    let home = TempDir::new().expect("home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.path().abs()));
+    let store = services.runtime().await.expect("runtime");
+    // A message-only suffix staged but interrupted before its acknowledgement.
+    journal_item(
+        store,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        &message_item("m1", MessagePhase::Commentary, "Reading."),
+    )
+    .await;
+    store
+        .stage_window_publication(&codex_stateful_runtime::WindowPublication {
+            thread_id: "thread-1".to_string(),
+            from_seq: 0,
+            through_seq: 1,
+            project_id: "project-1".to_string(),
+            entry_id: "stateful-window-receipts-sentinel".to_string(),
+            content: "no receipts".to_string(),
+            state: codex_stateful_runtime::WindowPublicationState::Pending,
+        })
+        .await
+        .expect("stage sentinel");
+    // A closed window whose staging never happened.
+    journal_item(
+        store,
+        "project-1",
+        "thread-2",
+        "turn-1",
+        &command_item("exec-1", "cargo test", 1, "1 failed"),
+    )
+    .await;
+    store
+        .record_window_closure("thread-2", "project-1", 1)
+        .await
+        .expect("closure");
+
+    super::recover_pending(&services, "project-1", "thread-2").await;
+
+    let notes = services
+        .blackboard()
+        .await
+        .expect("blackboard")
+        .query(codex_project_intelligence::BlackboardQuery {
+            project_id: "project-1".to_string(),
+            text: None,
+            within_node: None,
+            root_promotion: None,
+            entry_scope: codex_project_intelligence::BlackboardEntryScope::Active,
+            max_results: 10,
+        })
+        .await
+        .expect("query")
+        .data;
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].entry.value.content.contains("thread-2"));
+    assert_eq!(
+        store
+            .pending_window_publications("project-1", 10)
+            .await
+            .expect("pending"),
+        Vec::new()
+    );
 }

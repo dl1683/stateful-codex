@@ -22,6 +22,7 @@ use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RootPromotion;
+use codex_stateful_runtime::IdleStaging;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
 use codex_stateful_runtime::WindowEvent;
@@ -54,7 +55,8 @@ const IDLE_BEFORE_RECOVERY_MS: i64 = 30 * 60 * 1_000;
 /// The frozen content of a suffix that has nothing worth publishing.
 const NOTHING_TO_PUBLISH: &str = "no receipts";
 
-/// Publishes the thread's unpublished suffix for this project (the window that just closed),
+/// Closes the thread's current window for this project: records the closure durably (so a
+/// failed staging is retried when a thread of the project becomes ready), stages its suffix,
 /// then delivers every staged publication of the project that is still pending.
 pub(crate) async fn publish_window(
     services: &ProjectIntelligenceServices,
@@ -64,8 +66,16 @@ pub(crate) async fn publish_window(
     let Ok(store) = services.runtime().await else {
         return;
     };
-    if let Err(error) = stage(store, project_id, thread_id).await {
-        tracing::warn!(%thread_id, %error, "failed to stage a window publication");
+    let closed = async {
+        let through_seq = store.window_event_watermark(thread_id, project_id).await?;
+        store
+            .record_window_closure(thread_id, project_id, through_seq)
+            .await?;
+        stage(store, project_id, thread_id, through_seq).await
+    }
+    .await;
+    if let Err(error) = closed {
+        tracing::warn!(%thread_id, %error, "failed to stage a closed window's publication");
     }
     deliver_pending(services, store, project_id).await;
 }
@@ -80,9 +90,10 @@ pub(crate) async fn publish_open_windows(services: &ProjectIntelligenceServices,
         .ok()
         .and_then(|now| i64::try_from(now.as_millis()).ok())
         .map_or(0, |now| now.saturating_sub(IDLE_BEFORE_RECOVERY_MS));
+    let mut attempted = Vec::<String>::new();
     for _ in 0..MAX_RECOVERY_PAGES {
         let threads = match store
-            .threads_with_unpublished_events(project_id, idle_since, RECOVERY_PAGE)
+            .threads_with_unpublished_events(project_id, idle_since, 100)
             .await
         {
             Ok(threads) => threads,
@@ -91,43 +102,60 @@ pub(crate) async fn publish_open_windows(services: &ProjectIntelligenceServices,
                 break;
             }
         };
-        if threads.is_empty() {
+        // Threads already attempted (staged, failed, or found active) are not retried here, so
+        // a failing thread cannot hold back the others.
+        let fresh = threads
+            .into_iter()
+            .filter(|thread| !attempted.contains(thread))
+            .take(RECOVERY_PAGE as usize)
+            .collect::<Vec<_>>();
+        if fresh.is_empty() {
             break;
         }
-        let mut staged_any = false;
-        for thread_id in threads {
-            match stage(store, project_id, &thread_id).await {
-                Ok(()) => staged_any = true,
-                Err(error) => {
-                    tracing::warn!(%thread_id, %error, "failed to stage a window publication");
-                }
+        for thread_id in fresh {
+            if let Err(error) = stage_idle(store, project_id, &thread_id, idle_since).await {
+                tracing::warn!(%thread_id, %error, "failed to stage an idle window's publication");
             }
-        }
-        if !staged_any {
-            break;
+            attempted.push(thread_id);
         }
     }
     deliver_pending(services, store, project_id).await;
 }
 
-/// Delivers staged publications a crash or a failed write left pending.
-pub(crate) async fn recover_pending(services: &ProjectIntelligenceServices, project_id: &str) {
-    if let Ok(store) = services.runtime().await {
-        deliver_pending(services, store, project_id).await;
+/// When a thread of the project becomes ready: stages this thread's closed windows that were
+/// never staged, then delivers publications a crash or a failed write left pending.
+pub(crate) async fn recover_pending(
+    services: &ProjectIntelligenceServices,
+    project_id: &str,
+    thread_id: &str,
+) {
+    let Ok(store) = services.runtime().await else {
+        return;
+    };
+    let closed = async {
+        let through_seq = store.latest_window_closure(thread_id, project_id).await?;
+        stage(store, project_id, thread_id, through_seq).await
     }
+    .await;
+    if let Err(error) = closed {
+        tracing::warn!(%thread_id, %error, "failed to stage a closed window's publication");
+    }
+    deliver_pending(services, store, project_id).await;
 }
 
-async fn stage(
+/// The frozen publication of the thread's unpublished suffix through `through_seq`, or `None`
+/// when that suffix is empty.
+async fn prepare(
     store: &StatefulRunStore,
     project_id: &str,
     thread_id: &str,
-) -> Result<(), StatefulRunStoreError> {
+    through_seq: u64,
+) -> Result<Option<WindowPublication>, StatefulRunStoreError> {
     let from_seq = store
         .window_publication_watermark(thread_id, project_id)
         .await?;
-    let through_seq = store.window_event_watermark(thread_id, project_id).await?;
     if through_seq <= from_seq {
-        return Ok(());
+        return Ok(None);
     }
     let content = if store
         .has_window_work(thread_id, project_id, from_seq, through_seq)
@@ -148,22 +176,62 @@ async fn stage(
     } else {
         NOTHING_TO_PUBLISH.to_string()
     };
-    let staged = store
-        .stage_window_publication(&WindowPublication {
-            thread_id: thread_id.to_string(),
-            from_seq,
-            through_seq,
-            project_id: project_id.to_string(),
-            entry_id: stable_entry_id(project_id, thread_id, from_seq, through_seq),
-            content,
-            state: WindowPublicationState::Pending,
-        })
-        .await?;
-    // A window that only exchanged messages (already in the thread's history) has no receipt
-    // worth a memory entry: its suffix is closed without writing one.
-    if staged.content == NOTHING_TO_PUBLISH {
+    Ok(Some(WindowPublication {
+        thread_id: thread_id.to_string(),
+        from_seq,
+        through_seq,
+        project_id: project_id.to_string(),
+        entry_id: stable_entry_id(project_id, thread_id, from_seq, through_seq),
+        content,
+        state: WindowPublicationState::Pending,
+    }))
+}
+
+async fn stage(
+    store: &StatefulRunStore,
+    project_id: &str,
+    thread_id: &str,
+    through_seq: u64,
+) -> Result<(), StatefulRunStoreError> {
+    let Some(publication) = prepare(store, project_id, thread_id, through_seq).await? else {
+        return Ok(());
+    };
+    let staged = store.stage_window_publication(&publication).await?;
+    settle_if_empty(store, &staged).await
+}
+
+async fn stage_idle(
+    store: &StatefulRunStore,
+    project_id: &str,
+    thread_id: &str,
+    idle_since: i64,
+) -> Result<(), StatefulRunStoreError> {
+    let through_seq = store.window_event_watermark(thread_id, project_id).await?;
+    let Some(publication) = prepare(store, project_id, thread_id, through_seq).await? else {
+        return Ok(());
+    };
+    match store
+        .stage_idle_window_publication(&publication, idle_since)
+        .await?
+    {
+        IdleStaging::Staged => settle_if_empty(store, &publication).await,
+        IdleStaging::BecameActive => Ok(()),
+    }
+}
+
+/// A window that only exchanged messages (already in the thread's history) has no receipt
+/// worth a memory entry: its suffix is closed without writing one.
+async fn settle_if_empty(
+    store: &StatefulRunStore,
+    publication: &WindowPublication,
+) -> Result<(), StatefulRunStoreError> {
+    if publication.content == NOTHING_TO_PUBLISH {
         store
-            .mark_window_publication_published(thread_id, project_id, from_seq)
+            .mark_window_publication_published(
+                &publication.thread_id,
+                &publication.project_id,
+                publication.from_seq,
+            )
             .await?;
     }
     Ok(())
@@ -174,9 +242,10 @@ async fn deliver_pending(
     store: &StatefulRunStore,
     project_id: &str,
 ) {
+    let mut after_row = 0;
     for _ in 0..MAX_RECOVERY_PAGES {
         let pending = match store
-            .pending_window_publications(project_id, RECOVERY_PAGE)
+            .pending_window_publications_after(project_id, after_row, RECOVERY_PAGE)
             .await
         {
             Ok(pending) => pending,
@@ -185,17 +254,25 @@ async fn deliver_pending(
                 return;
             }
         };
-        if pending.is_empty() {
+        let Some((last_row, _)) = pending.last() else {
             return;
-        }
+        };
+        // Rows that fail stay pending for a later call; the cursor moves past them.
+        after_row = *last_row;
         let (Ok(blackboard), Ok(node_id)) = (
             services.blackboard().await,
             services.project_node_id(project_id).await,
         ) else {
             return;
         };
-        let mut delivered_any = false;
-        for publication in pending {
+        for (_, publication) in pending {
+            // A message-only suffix interrupted before its acknowledgement writes no entry.
+            if publication.content == NOTHING_TO_PUBLISH {
+                if let Err(error) = settle_if_empty(store, &publication).await {
+                    tracing::warn!(%error, "failed to close a message-only window");
+                }
+                continue;
+            }
             let Ok(id) = BlackboardEntryId::parse(publication.entry_id.clone()) else {
                 continue;
             };
@@ -221,24 +298,20 @@ async fn deliver_pending(
                 },
             };
             match blackboard.create_entry(id, value).await {
-                Ok(_) => match store
-                    .mark_window_publication_published(
-                        &publication.thread_id,
-                        project_id,
-                        publication.from_seq,
-                    )
-                    .await
-                {
-                    Ok(()) => delivered_any = true,
-                    Err(error) => {
+                Ok(_) => {
+                    if let Err(error) = store
+                        .mark_window_publication_published(
+                            &publication.thread_id,
+                            project_id,
+                            publication.from_seq,
+                        )
+                        .await
+                    {
                         tracing::warn!(%error, "failed to acknowledge a window publication");
                     }
-                },
+                }
                 Err(error) => tracing::warn!(%error, "failed to publish window receipts"),
             }
-        }
-        if !delivered_any {
-            return;
         }
     }
 }
@@ -295,11 +368,11 @@ fn publication_content(
                 && is_validation_command(command_text(event))
         }) {
             lines.push(receipt_line(format!(
-                "Last working test or check command, verbatim (exit 0, not a test count): `{}` in {}.",
-                command_text(working),
+                "Last working test or check command (exit 0, not a test count), in {}, verbatim: `{}`.",
                 working.event.payload["cwd"]
                     .as_str()
-                    .unwrap_or("an unrecorded directory")
+                    .unwrap_or("an unrecorded directory"),
+                command_text(working)
             )));
         }
         if let Some(test) = commands
@@ -307,16 +380,16 @@ fn publication_content(
             .find(|event| is_validation_command(command_text(event)) && exit_code(event) != Some(0))
         {
             lines.push(receipt_line(format!(
-                "Last failing test or check command: `{}` {}.",
-                command_text(test),
-                exit_text(test)
+                "Last failing test or check command ({}): `{}`.",
+                exit_text(test),
+                command_text(test)
             )));
         }
         if let Some(failure) = commands.iter().find(|event| exit_code(event) != Some(0)) {
             lines.push(receipt_line(format!(
-                "Last command without exit code 0: `{}` {}.",
-                command_text(failure),
-                exit_text(failure)
+                "Last command without exit code 0 ({}): `{}`.",
+                exit_text(failure),
+                command_text(failure)
             )));
         }
     }
