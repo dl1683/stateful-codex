@@ -21,6 +21,7 @@ use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::KnowledgeCategory;
 use codex_project_intelligence::RootPromotion;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
@@ -286,6 +287,37 @@ impl BlackboardUpdateTool {
                 expected: mutation.expected_revision(),
                 actual: current.revision,
             }));
+        }
+        // An open check stays open until evidence settles it: the model cannot retire or
+        // reword it, and can replace it only with an entry that carries evidence. A passing
+        // run or a finished task does not close it; the user can, with /memory.
+        let open_check = store
+            .knowledge_context(&self.project_id, &id)
+            .await
+            .map_err(respond)?
+            .is_some_and(|context| context.category == KnowledgeCategory::OpenCheck);
+        if open_check {
+            let settled = match &mutation {
+                MutationArguments::SetRootPromotion { .. } => true,
+                MutationArguments::Revise { kind, content, .. } => {
+                    kind.is_none() && content.is_none()
+                }
+                MutationArguments::Retire { .. } => false,
+                MutationArguments::Supersede {
+                    successor_entry_id, ..
+                } => {
+                    let successor =
+                        BlackboardEntryId::parse(successor_entry_id.as_str()).map_err(respond)?;
+                    store
+                        .get_entry(&self.project_id, &successor)
+                        .await
+                        .map_err(respond)?
+                        .is_some_and(|successor| !successor.value.evidence.is_empty())
+                }
+            };
+            if !settled {
+                return Err(respond(super::blackboard_supersede::OPEN_CHECK_STAYS_OPEN));
+            }
         }
         // A user rule is the user's own words: an agent may change its promotion or retire or
         // supersede it, but never rewrite it, and promotion keeps the user's provenance.

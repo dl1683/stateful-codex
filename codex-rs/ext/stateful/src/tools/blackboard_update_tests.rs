@@ -692,3 +692,63 @@ async fn lifecycle_changes_keep_the_texts_authorship() {
         (old.value.provenance, other.value.provenance)
     );
 }
+
+/// An open check cannot be retired or replaced by the model without evidence; replacing it
+/// with an entry that carries evidence settles it.
+#[tokio::test]
+async fn an_open_check_closes_only_with_evidence() {
+    let (temp_dir, tool, entry_id, successor_id, project_root, receipt_id) = fixture().await;
+    let store =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(temp_dir.path().abs()));
+    let store = store.blackboard().await.expect("blackboard opens");
+    let check = store
+        .get_entry(PROJECT_ID, &entry_id)
+        .await
+        .expect("read")
+        .expect("check");
+    store
+        .record_context(
+            &check,
+            &codex_project_intelligence::KnowledgeContext::new(
+                codex_project_intelligence::KnowledgeCategory::OpenCheck,
+                codex_project_intelligence::KnowledgeAuthority::AssistantReported,
+            ),
+            /*change*/ None,
+        )
+        .await
+        .expect("context");
+    let roots = std::slice::from_ref(&project_root);
+    let attempt = |value: serde_json::Value| tool.apply_mutation(mutation(value), "turn-x", roots);
+    let retired = attempt(json!({
+        "action": "retire", "entryId": entry_id, "expectedRevision": 1
+    }))
+    .await
+    .map(|entry| entry.revision);
+    let replaced_without_evidence = attempt(json!({
+        "action": "supersede", "entryId": entry_id, "expectedRevision": 1,
+        "successorEntryId": successor_id
+    }))
+    .await
+    .map(|entry| entry.revision);
+    attempt(json!({
+        "action": "revise", "entryId": successor_id, "expectedRevision": 1,
+        "verification": "sourceVerified", "evidence": [{"readReceiptId": receipt_id}]
+    }))
+    .await
+    .expect("successor gets evidence");
+    let settled = attempt(json!({
+        "action": "supersede", "entryId": entry_id, "expectedRevision": 1,
+        "successorEntryId": successor_id
+    }))
+    .await
+    .map(|entry| entry.state);
+    let refused = || {
+        Err(codex_extension_api::FunctionCallError::RespondToModel(
+            super::super::blackboard_supersede::OPEN_CHECK_STAYS_OPEN.to_string(),
+        ))
+    };
+    assert_eq!(
+        (retired, replaced_without_evidence, settled),
+        (refused(), refused(), Ok(BlackboardEntryState::Superseded))
+    );
+}

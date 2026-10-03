@@ -360,6 +360,21 @@ impl BlackboardRecorder {
                 supersedes,
             )
             .await?;
+            if value.evidence.is_empty() {
+                let replaced_ids = replaced
+                    .iter()
+                    .map(|entry| entry.id.clone())
+                    .collect::<Vec<_>>();
+                let contexts = store
+                    .knowledge_contexts(&self.project_id, &replaced_ids)
+                    .await
+                    .map_err(respond)?;
+                if contexts.values().any(|context| {
+                    context.category == codex_project_intelligence::KnowledgeCategory::OpenCheck
+                }) {
+                    return Err(respond(super::blackboard_supersede::OPEN_CHECK_STAYS_OPEN));
+                }
+            }
             let succession = store
                 .create_successor(id, value, replaced)
                 .await
