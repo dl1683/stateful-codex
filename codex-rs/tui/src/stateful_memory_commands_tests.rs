@@ -213,3 +213,42 @@ fn numbers_resolve_only_against_the_listing_on_screen() {
         (false, Ok(generation), false, false)
     );
 }
+
+/// Item 3 final review: investigation numbers resolve only against the investigations list on
+/// screen, so a list published in the background never shifts what a number ends.
+#[test]
+fn investigation_numbers_resolve_only_against_the_list_on_screen() {
+    let listing = super::MemoryListing::default();
+    let first = listing.begin();
+    *listing
+        .investigations
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((
+        first,
+        "thread-1".to_string(),
+        vec!["scope-a".to_string(), "scope-b".to_string()],
+    ));
+    listing.displayed("thread-1", first);
+    let shown = listing.scope_on_screen("thread-1", 2);
+    // A newer list ([C, A, B]) is published but not yet displayed.
+    let newer = listing.begin();
+    *listing
+        .investigations
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((
+        newer,
+        "thread-1".to_string(),
+        vec![
+            "scope-c".to_string(),
+            "scope-a".to_string(),
+            "scope-b".to_string(),
+        ],
+    ));
+    let before_display = listing.scope_on_screen("thread-1", 2).is_ok();
+    listing.displayed("thread-1", newer);
+    let after_display = listing.scope_on_screen("thread-1", 2);
+    assert_eq!(
+        (shown, before_display, after_display),
+        (Ok("scope-b".to_string()), false, Ok("scope-a".to_string()))
+    );
+}

@@ -387,42 +387,40 @@ async fn an_action_is_bound_to_its_whole_request_and_scope() {
     };
     // A retry of an addition that found the words already saved (spaced differently)
     // replays that outcome.
-    let spaced = |action: &'static str| {
+    let spaced = |action: &'static str, content: &'static str| {
         let node_id = node_id.clone();
-        let actor = actor(action);
+        let actor = crate::memory_controls::MemoryActor {
+            thread_id: None,
+            action_id: Some(action.to_string()),
+        };
         async move {
             add_entry(
                 store,
                 &actor,
                 "project-1",
                 node_id,
-                MemoryAddition::Note,
-                "The CI  runs on Windows.",
+                MemoryAddition::Rule { scope: None },
+                content,
             )
             .await
             .map(|(_, outcome)| outcome)
             .ok()
         }
     };
-    add_entry(
-        store,
-        &actor("n1"),
-        "project-1",
-        node_id.clone(),
-        MemoryAddition::Note,
-        "The CI runs on Windows.",
-    )
-    .await
-    .expect("note");
-    let first_spaced = spaced("n2").await;
-    let retried_spaced = spaced("n2").await;
+    let first_saved = spaced("n1", "Always run the linter.").await;
+    let first_spaced = spaced("n2", "Always run  the linter.").await;
+    let retried_spaced = spaced("n2", "Always run  the linter.").await;
     let other_investigation = scoped("a2", "the cache investigation").await;
     let with_ending = scoped("a3", "this investigation, until we agree").await;
     let by_title = scoped("a4", "Ground rules for the parser bug").await;
     let by_id = scoped("a5", "scope-a").await;
     assert_eq!(
-        (first_spaced, retried_spaced),
-        (Some(AddOutcome::Added), Some(AddOutcome::AlreadyDone))
+        (first_saved, first_spaced, retried_spaced),
+        (
+            Some(AddOutcome::Added),
+            Some(AddOutcome::AlreadyPresent),
+            Some(AddOutcome::AlreadyDone)
+        )
     );
     assert_eq!(
         (
