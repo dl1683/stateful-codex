@@ -30,6 +30,9 @@ pub(super) struct ProjectIntelligenceServices {
     /// Projects whose checkout changes could not be fully processed: no turn of any thread
     /// advances their observation baseline until a turn's start completes the comparison.
     checkout_holds: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// One checkout reconciliation per project at a time: comparison, hold updates and
+    /// baseline publication happen under this single permit.
+    checkout_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
     /// One on-demand index per project, so concurrent first queries index it once and the
     /// others wait for that publication.
     on_demand_index: Arc<std::sync::Mutex<HashMap<String, Arc<OnceCell<()>>>>>,
@@ -46,6 +49,7 @@ impl ProjectIntelligenceServices {
             runtime: Arc::new(OnceCell::new()),
             repository_observations: Arc::new(OnceCell::new()),
             checkout_holds: Arc::default(),
+            checkout_locks: Arc::default(),
             on_demand_index: Arc::default(),
         }
     }
@@ -125,6 +129,16 @@ impl ProjectIntelligenceServices {
         } else {
             holds.remove(project_id);
         }
+    }
+
+    /// The project's checkout reconciliation permit.
+    pub(super) fn checkout_lock(&self, project_id: &str) -> Arc<tokio::sync::Semaphore> {
+        self.checkout_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(project_id.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
     }
 
     pub(super) fn checkout_held(&self, project_id: &str) -> bool {

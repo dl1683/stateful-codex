@@ -208,6 +208,8 @@ pub async fn staged_changes(
         &[
             "diff",
             "--cached",
+            // Repository-wide even when diff.relative is configured, like porcelain status.
+            "--no-relative",
             "--raw",
             "-z",
             "--no-renames",

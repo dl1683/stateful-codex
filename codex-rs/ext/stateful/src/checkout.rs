@@ -90,6 +90,11 @@ async fn observe_turn_start_unbounded(
     roots: &[String],
     turn_id: &str,
 ) -> Option<CheckoutReport> {
+    // Serialized with every other start and end of the project, so a hold set by one
+    // thread is seen before another publishes a baseline.
+    let Ok(_permit) = services.checkout_lock(project_id).acquire_owned().await else {
+        return None;
+    };
     let hold = || {
         services.set_checkout_hold(project_id, /*held*/ true);
         None
@@ -135,6 +140,9 @@ pub(crate) async fn observe_turn_end(
     roots: &[String],
 ) {
     let observe = async {
+        let Ok(_permit) = services.checkout_lock(project_id).acquire_owned().await else {
+            return;
+        };
         // A turn of any thread that could not process the changes holds the baseline.
         if services.checkout_held(project_id) {
             return;

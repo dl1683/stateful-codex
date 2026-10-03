@@ -104,3 +104,32 @@ async fn an_unknown_head_holds_the_baseline_for_every_thread() {
         (None, true, None)
     );
 }
+
+/// Starts and ends of one project are serialized: an end waits while another thread holds
+/// the project's reconciliation permit.
+#[tokio::test]
+async fn checkout_reconciliation_is_serialized_per_project() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let permit = services
+        .checkout_lock("project-1")
+        .acquire_owned()
+        .await
+        .expect("permit");
+    let root = state_home.path().display().to_string();
+    let ending = {
+        let services = services.clone();
+        tokio::spawn(async move {
+            super::observe_turn_end(&services, "project-1", std::slice::from_ref(&root)).await;
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let waited = !ending.is_finished();
+    drop(permit);
+    ending.await.expect("end completes");
+    assert_eq!(waited, true);
+}
