@@ -31,6 +31,20 @@ impl BlackboardStore {
         update: BlackboardEntryUpdate,
         change: Option<&crate::ChangeRecord>,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.update_entry_with_context(project_id, id, update, change, /*context*/ None)
+            .await
+    }
+
+    /// Like `update_entry_recorded`, also recording `context` for the new revision in the
+    /// same transaction (without it, the revision keeps its predecessor's context).
+    pub(super) async fn update_entry_with_context(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        update: BlackboardEntryUpdate,
+        change: Option<&crate::ChangeRecord>,
+        context: Option<&crate::KnowledgeContext>,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
         update.validate(id)?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| BlackboardStoreError::RevisionOverflow)?;
@@ -128,6 +142,37 @@ impl BlackboardStore {
             now,
         )
         .await?;
+        // A changed statement is current and drops the typed details (anchors, reasons,
+        // invalidation) that described the old one.
+        let restated = value.content != current.value.content
+            || value.structured_value != current.value.structured_value;
+        let cleared = match context {
+            Some(_) => None,
+            None if restated => {
+                super::knowledge::context_of(&mut transaction, project_id, id.as_str())
+                    .await?
+                    .filter(|context| {
+                        context.validity != crate::KnowledgeValidity::Current
+                            || context.payload.is_some()
+                    })
+                    .map(|context| crate::KnowledgeContext {
+                        validity: crate::KnowledgeValidity::Current,
+                        payload: None,
+                        ..context
+                    })
+            }
+            None => None,
+        };
+        if let Some(context) = context.or(cleared.as_ref()) {
+            super::knowledge::write_context(
+                &mut transaction,
+                project_id,
+                id,
+                next_revision,
+                context,
+            )
+            .await?;
+        }
         if let Some(change) = change {
             super::knowledge::append_change(
                 &mut transaction,

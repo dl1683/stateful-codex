@@ -51,6 +51,8 @@ pub use blackboard_storage::BlackboardStore;
 pub use blackboard_storage::BlackboardStoreError;
 pub use blackboard_storage::CompletionFence;
 pub use blackboard_storage::CreateOutcome;
+pub use blackboard_storage::InvalidationCandidates;
+pub use blackboard_storage::InvalidationOutcome;
 pub use blackboard_storage::MAX_CHANGES_PAGE;
 pub use blackboard_storage::MAX_SUPERSEDED_ENTRIES;
 pub use blackboard_storage::ReviewPage;

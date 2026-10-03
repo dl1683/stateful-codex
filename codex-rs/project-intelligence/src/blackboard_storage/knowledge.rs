@@ -86,6 +86,30 @@ impl BlackboardStore {
         context_of(&mut connection, project_id, id.as_str()).await
     }
 
+    /// The context in effect at `revision` of the entry, so a reader can pair it with the
+    /// content of that same revision.
+    pub async fn knowledge_context_at(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        revision: u64,
+    ) -> Result<Option<KnowledgeContext>, BlackboardStoreError> {
+        let revision =
+            i64::try_from(revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
+        sqlx::query_as::<_, StoredContext>(
+            "SELECT * FROM knowledge_context
+             WHERE project_id = ? AND entry_id = ? AND revision <= ?
+             ORDER BY revision DESC LIMIT 1",
+        )
+        .bind(project_id)
+        .bind(id.as_str())
+        .bind(revision)
+        .fetch_optional(&self.pool)
+        .await?
+        .map(StoredContext::into_context)
+        .transpose()
+    }
+
     /// Contexts of several entries, by entry ID; entries without one are legacy.
     pub async fn knowledge_contexts(
         &self,
@@ -438,6 +462,13 @@ pub(super) async fn carry_context(
     revision: i64,
 ) -> Result<(), BlackboardStoreError> {
     if let Some(context) = context_of(&mut *connection, project_id, from.as_str()).await? {
+        // A successor is a new statement: current, and without its predecessor's typed
+        // details (anchors, reasons, invalidation), which described the old wording.
+        let context = KnowledgeContext {
+            validity: crate::KnowledgeValidity::Current,
+            payload: None,
+            ..context
+        };
         write_context(connection, project_id, to, revision, &context).await?;
     }
     Ok(())
@@ -490,7 +521,7 @@ fn bounded_preview(text: &str) -> &str {
     &text[..end]
 }
 
-async fn context_of(
+pub(super) async fn context_of(
     connection: &mut SqliteConnection,
     project_id: &str,
     entry_id: &str,

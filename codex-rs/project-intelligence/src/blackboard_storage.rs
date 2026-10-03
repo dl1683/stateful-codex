@@ -29,6 +29,7 @@ use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
 mod fence;
+mod invalidation;
 mod knowledge;
 mod query;
 mod relation;
@@ -37,6 +38,8 @@ mod succession;
 mod update;
 
 pub use fence::CompletionFence;
+pub use invalidation::InvalidationCandidates;
+pub use invalidation::InvalidationOutcome;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;
 pub use review::ReviewPage;
