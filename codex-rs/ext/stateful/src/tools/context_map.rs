@@ -25,6 +25,8 @@ use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::index_gate::IndexOperation;
+use crate::index_gate::PROJECT_INDEX_DEADLINE;
 use crate::services::ProjectIntelligenceServices;
 use crate::source_freshness::audited_context_freshness;
 use crate::source_freshness::observe_evidence;
@@ -94,9 +96,10 @@ impl ContextMapQueryTool {
         let context_map = self.services.context_map().await.map_err(respond)?;
         let mut result = context_map.query(query.clone()).await.map_err(respond)?;
         // A project that was never indexed has no entries at all; index it here rather than
-        // sending the model to discover and call the refresh tool first. Indexing is
-        // serialized in this process and rechecked under the lock, and a refresh superseded
-        // by another process is retried once so this query sees a completed publication.
+        // sending the model to discover and call the refresh tool first. Indexing holds the
+        // project's index permit and rechecks under it, so concurrent first queries index
+        // once; a refresh superseded by another process is retried once. Past the
+        // foreground deadline the build is reported pending, never abandoned or repeated.
         let mut indexed_on_demand = false;
         if result.data.is_empty()
             && !context_map
@@ -104,39 +107,58 @@ impl ContextMapQueryTool {
                 .await
                 .map_err(respond)?
         {
-            let index = self.services.on_demand_index(&self.project_id);
-            index
-                .get_or_try_init(|| async {
-                    if context_map
-                        .has_entries(&self.project_id)
-                        .await
-                        .map_err(respond)?
-                    {
-                        return Ok(());
-                    }
-                    let indexer = ProjectIndexer::new(
-                        self.services.hierarchy().await.map_err(respond)?.clone(),
-                        context_map.clone(),
-                    );
-                    let request = ProjectIndexRequest {
-                        project_id: self.project_id.clone(),
-                        roots: project
-                            .roots
-                            .iter()
-                            .map(|root| PathBuf::from(&root.path))
-                            .collect(),
-                    };
-                    match indexer.refresh(request.clone()).await {
-                        Ok(_) => {}
-                        Err(ProjectIndexerError::SupersededRefresh) => {
-                            indexer.refresh(request).await.map_err(respond)?;
+            let indexer = ProjectIndexer::new(
+                self.services.hierarchy().await.map_err(respond)?.clone(),
+                context_map.clone(),
+            );
+            let store = context_map.clone();
+            let request = ProjectIndexRequest {
+                project_id: self.project_id.clone(),
+                roots: project
+                    .roots
+                    .iter()
+                    .map(|root| PathBuf::from(&root.path))
+                    .collect(),
+            };
+            let outcome = self
+                .services
+                .index_gates()
+                .run(
+                    &self.project_id,
+                    PROJECT_INDEX_DEADLINE,
+                    move |cancellation| async move {
+                        if store.has_entries(&request.project_id).await? {
+                            return Ok(false);
                         }
-                        Err(error) => return Err(respond(error)),
-                    }
-                    indexed_on_demand = true;
-                    Ok(())
-                })
-                .await?;
+                        match indexer
+                            .refresh_cancellable(request.clone(), cancellation.clone())
+                            .await
+                        {
+                            Err(ProjectIndexerError::SupersededRefresh) => {
+                                indexer.refresh_cancellable(request, cancellation).await?;
+                            }
+                            other => {
+                                other?;
+                            }
+                        }
+                        Ok::<_, ProjectIndexerError>(true)
+                    },
+                )
+                .await;
+            match outcome {
+                IndexOperation::Finished(Ok(indexed)) => indexed_on_demand = indexed,
+                IndexOperation::Finished(Err(error)) => return Err(respond(error)),
+                IndexOperation::Pending => {
+                    return Err(respond(
+                        "timedOutWorkPending: the project index is still being built and was not abandoned; retry shortly, or read a known file with evidence_read relativePath",
+                    ));
+                }
+                IndexOperation::Failed(error) => {
+                    return Err(respond(format!(
+                        "indexUnavailable: indexing the project stopped unexpectedly ({error})"
+                    )));
+                }
+            }
             // Either this query indexed the project or a concurrent one did while it waited.
             result = context_map.query(query).await.map_err(respond)?;
         }
@@ -272,20 +294,42 @@ impl ContextMapRefreshTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel("selected project no longer exists".to_string())
             })?;
-        let report = ProjectIndexer::new(
+        let indexer = ProjectIndexer::new(
             self.services.hierarchy().await.map_err(respond)?.clone(),
             self.services.context_map().await.map_err(respond)?.clone(),
-        )
-        .refresh(ProjectIndexRequest {
+        );
+        let request = ProjectIndexRequest {
             project_id: self.project_id.clone(),
             roots: project
                 .roots
                 .iter()
                 .map(|root| PathBuf::from(&root.path))
                 .collect(),
-        })
-        .await
-        .map_err(respond)?;
+        };
+        let report = match self
+            .services
+            .index_gates()
+            .run(
+                &self.project_id,
+                PROJECT_INDEX_DEADLINE,
+                move |cancellation| async move {
+                    indexer.refresh_cancellable(request, cancellation).await
+                },
+            )
+            .await
+        {
+            IndexOperation::Finished(report) => report.map_err(respond)?,
+            IndexOperation::Pending => {
+                return Err(respond(
+                    "timedOutWorkPending: a project index operation is still running and was not abandoned; its coverage is not yet published. Retry shortly",
+                ));
+            }
+            IndexOperation::Failed(error) => {
+                return Err(respond(format!(
+                    "indexUnavailable: indexing the project stopped unexpectedly ({error})"
+                )));
+            }
+        };
         let routes = self
             .services
             .context_map()

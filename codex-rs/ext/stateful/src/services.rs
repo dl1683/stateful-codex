@@ -16,6 +16,7 @@ use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
 use tokio::sync::OnceCell;
 
+use crate::index_gate::IndexGates;
 use crate::read_receipts::EvidenceReadReceipts;
 
 #[derive(Clone)]
@@ -30,14 +31,11 @@ pub(super) struct ProjectIntelligenceServices {
     /// Projects whose checkout changes could not be fully processed: no turn of any thread
     /// advances their observation baseline until a turn's start completes the comparison.
     checkout_holds: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    /// Projects whose never-built index a read already tried to build in this process.
-    index_attempts: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// One checkout reconciliation per project at a time: comparison, hold updates and
     /// baseline publication happen under this single permit.
     checkout_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
-    /// One on-demand index per project, so concurrent first queries index it once and the
-    /// others wait for that publication.
-    on_demand_index: Arc<std::sync::Mutex<HashMap<String, Arc<OnceCell<()>>>>>,
+    /// One index operation per project at a time, bounded for its caller.
+    index_gates: IndexGates,
 }
 
 impl ProjectIntelligenceServices {
@@ -51,9 +49,8 @@ impl ProjectIntelligenceServices {
             runtime: Arc::new(OnceCell::new()),
             repository_observations: Arc::new(OnceCell::new()),
             checkout_holds: Arc::default(),
-            index_attempts: Arc::default(),
             checkout_locks: Arc::default(),
-            on_demand_index: Arc::default(),
+            index_gates: IndexGates::default(),
         }
     }
 
@@ -79,13 +76,8 @@ impl ProjectIntelligenceServices {
         &self.read_receipts
     }
 
-    pub(super) fn on_demand_index(&self, project_id: &str) -> Arc<OnceCell<()>> {
-        self.on_demand_index
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(project_id.to_string())
-            .or_default()
-            .clone()
+    pub(super) fn index_gates(&self) -> &IndexGates {
+        &self.index_gates
     }
 
     /// The project's hierarchy node, created without a source scan when the project was
@@ -142,14 +134,6 @@ impl ProjectIntelligenceServices {
             .entry(project_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
             .clone()
-    }
-
-    /// Claims the one on-demand index attempt for a project; false once claimed.
-    pub(super) fn claim_index_attempt(&self, project_id: &str) -> bool {
-        self.index_attempts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(project_id.to_string())
     }
 
     pub(super) fn checkout_held(&self, project_id: &str) -> bool {

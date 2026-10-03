@@ -10,6 +10,7 @@ mod continuity;
 mod continuity_source;
 mod conversation_summaries;
 mod events;
+mod index_gate;
 mod limits;
 mod memory_add;
 mod memory_controls;

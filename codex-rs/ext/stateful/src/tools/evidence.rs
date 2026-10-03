@@ -19,9 +19,6 @@ use codex_project_intelligence::EvidenceReadRequest;
 use codex_project_intelligence::EvidenceReadResult;
 use codex_project_intelligence::EvidenceReader;
 use codex_project_intelligence::EvidenceRoute;
-use codex_project_intelligence::ProjectIndexFileRequest;
-use codex_project_intelligence::ProjectIndexRequest;
-use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::SourceFingerprint;
 use codex_thread_store::ThreadStore;
@@ -33,15 +30,13 @@ use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
+use super::evidence_refresh;
 use super::fits_response;
 use super::parse_arguments;
 
 const TOOL_NAME: &str = "evidence_read";
 const DEFAULT_BYTES: u32 = 8 * 1024;
 const MAX_BYTES: u32 = 12 * 1024;
-
-/// Longest a read may spend building a never-built project index before it gives up.
-const ON_DEMAND_INDEX_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -243,67 +238,29 @@ impl EvidenceReadTool {
             Ok(result) => Ok((result, false)),
             Err(
                 error @ (EvidenceReadError::SourceChanged
-                | EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Stale)
+                | EvidenceReadError::SourceNotCurrent(
+                    ContextMapFreshness::Stale | ContextMapFreshness::SourceUnavailable,
+                )
                 | EvidenceReadError::SourceNotIndexed(_)),
             ) => {
-                let Some((project_root, relative_path)) = refresh_source else {
+                // Only an explicit path is refreshed: a guarded route fails closed so an old
+                // evidence claim never silently receives new bytes.
+                let Some((requested_root, relative_path)) = refresh_source else {
                     return Err(read_error(error));
                 };
-                let indexer = ProjectIndexer::new(
-                    self.services.hierarchy().await.map_err(respond)?.clone(),
-                    self.services.context_map().await.map_err(respond)?.clone(),
-                );
-                if matches!(error, EvidenceReadError::SourceNotIndexed(_)) {
-                    // Only a project whose source map was never built (for example a
-                    // documents-only project) is indexed here, within a time bound; a file
-                    // missing from a built index is reported, not a reason to reindex.
-                    let never_indexed = self
-                        .services
-                        .hierarchy()
-                        .await
-                        .map_err(respond)?
-                        .project_intelligence_status(&self.project_id)
-                        .await
-                        .is_ok_and(|status| status.last_refresh.is_none());
-                    // One attempt per project and process: a scan cut off by the time bound
-                    // keeps running in the background and must not be started again.
-                    if !never_indexed || !self.services.claim_index_attempt(&self.project_id) {
-                        return Err(read_error(error));
-                    }
-                    match tokio::time::timeout(
-                        ON_DEMAND_INDEX_BUDGET,
-                        indexer.refresh(ProjectIndexRequest {
-                            project_id: self.project_id.clone(),
-                            roots: project_roots.clone(),
-                        }),
-                    )
-                    .await
-                    {
-                        Ok(Ok(_)) => {}
-                        Ok(Err(refresh)) => {
-                            return Err(respond(format!(
-                                "{error}; indexing the project failed ({refresh}). Read the file directly instead; an evidence receipt is optional"
-                            )));
-                        }
-                        Err(_) => {
-                            return Err(respond(format!(
-                                "{error}; the project is too large to index during this call. Read the file directly instead; an evidence receipt is optional"
-                            )));
-                        }
-                    }
-                } else {
-                    let project_root = self
-                        .refresh_root(&project_roots, project_root.as_ref(), &relative_path)
-                        .await?;
-                    indexer
-                        .refresh_file(ProjectIndexFileRequest {
-                            project_id: self.project_id.clone(),
-                            project_root,
-                            relative_path,
-                        })
-                        .await
-                        .map_err(respond)?;
-                }
+                let project_root = evidence_refresh::source_root(
+                    &project_roots,
+                    requested_root.as_ref(),
+                    &relative_path,
+                )
+                .await?;
+                evidence_refresh::refresh_explicit_file(
+                    &self.services,
+                    &self.project_id,
+                    project_root,
+                    relative_path,
+                )
+                .await?;
                 reader
                     .read(request)
                     .await
@@ -311,44 +268,6 @@ impl EvidenceReadTool {
                     .map_err(read_error)
             }
             Err(error) => Err(read_error(error)),
-        }
-    }
-
-    async fn refresh_root(
-        &self,
-        project_roots: &[PathBuf],
-        requested_root: Option<&PathBuf>,
-        relative_path: &ProjectRelativePath,
-    ) -> Result<PathBuf, FunctionCallError> {
-        if let Some(root) = requested_root {
-            return Ok(root.clone());
-        }
-        if let [root] = project_roots {
-            return Ok(root.clone());
-        }
-        let hits = self
-            .services
-            .context_map()
-            .await
-            .map_err(respond)?
-            .file_hits_for_path(&self.project_id, relative_path)
-            .await
-            .map_err(respond)?;
-        let mut matching_roots = hits
-            .into_iter()
-            .filter_map(|hit| {
-                project_roots
-                    .iter()
-                    .find(|root| *root == &PathBuf::from(&hit.source.project_root))
-                    .cloned()
-            })
-            .collect::<Vec<_>>();
-        matching_roots.dedup();
-        match matching_roots.as_slice() {
-            [root] => Ok(root.clone()),
-            _ => Err(FunctionCallError::RespondToModel(format!(
-                "source path exists in multiple project roots; provide projectRoot: {relative_path}"
-            ))),
         }
     }
 }
@@ -480,10 +399,13 @@ fn read_error(error: EvidenceReadError) -> FunctionCallError {
             "Refresh the affected file; query again if you need the corresponding region."
         }
         EvidenceReadError::SourceNotIndexed(_) => {
-            "The project index does not contain this file (even after indexing on demand). Read it directly instead; an evidence receipt is optional."
+            "The index has no current entry for it. Read it directly instead; an evidence receipt is optional."
         }
         EvidenceReadError::SourceNotCurrent(ContextMapFreshness::SourceUnavailable) => {
-            "Check its path or removal and refresh the index."
+            return evidence_refresh::status(
+                "notFound",
+                format!("{error}. Check the path; the file is no longer present."),
+            );
         }
         EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Current)
         | EvidenceReadError::InvalidRequest
@@ -493,11 +415,16 @@ fn read_error(error: EvidenceReadError) -> FunctionCallError {
         | EvidenceReadError::UnsupportedRegionAnchor(_)
         | EvidenceReadError::AmbiguousSource(_)
         | EvidenceReadError::SourceOutsideRoot
-        | EvidenceReadError::NonUtf8Source
         | EvidenceReadError::CountOverflow
         | EvidenceReadError::ContextMap(_)
         | EvidenceReadError::Io(_)
         | EvidenceReadError::ReadTask(_) => return respond(error),
+        EvidenceReadError::NonUtf8Source => {
+            return evidence_refresh::status(
+                "nonText",
+                format!("{error}. Inspect it with a binary-aware command if needed."),
+            );
+        }
     };
     FunctionCallError::RespondToModel(format!("{error}. {next}"))
 }

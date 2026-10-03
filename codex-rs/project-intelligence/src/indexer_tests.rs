@@ -336,7 +336,12 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
         .expect("failed refresh should claim a generation");
 
     let report = indexer
-        .publish_refresh(request.clone(), failed_scan, failed_generation)
+        .publish_refresh(
+            request.clone(),
+            failed_scan,
+            failed_generation,
+            &super::IndexCancellation::default(),
+        )
         .await
         .expect("incomplete inventory should publish without deletion reconciliation");
     assert_eq!(
@@ -454,7 +459,8 @@ async fn older_paused_refresh_cannot_publish_after_newer_refresh_completes() {
     let older_generation = super::generation::claim(&older_indexer, "project-1")
         .await
         .expect("older refresh should claim a generation");
-    let older_scan = super::scan::scan_roots(&request.roots).expect("older scan should complete");
+    let older_scan = super::scan::scan_roots(&request.roots, &super::IndexCancellation::default())
+        .expect("older scan should complete");
 
     fs::write(&source, "newer_refresh_fact\n").expect("newer source fixture should write");
     newer_indexer
@@ -469,7 +475,12 @@ async fn older_paused_refresh_cannot_publish_after_newer_refresh_completes() {
         .expect("newer refresh status should persist");
 
     let stale = older_indexer
-        .publish_refresh(request, older_scan, older_generation)
+        .publish_refresh(
+            request,
+            older_scan,
+            older_generation,
+            &super::IndexCancellation::default(),
+        )
         .await
         .expect_err("older publisher should be rejected");
     assert!(matches!(stale, ProjectIndexerError::SupersededRefresh));
@@ -545,4 +556,45 @@ async fn ensured_project_node_is_the_node_a_later_refresh_uses() {
             .map(|node| node.id),
         Some(ensured.id)
     );
+}
+
+/// A cancelled refresh stops before publishing and records no completed refresh, so a
+/// later refresh starts from the untouched previous state.
+#[tokio::test]
+async fn cancelled_refresh_publishes_nothing_and_a_later_refresh_succeeds() {
+    let state_home = TempDir::new().expect("state home");
+    let root = TempDir::new().expect("project root");
+    fs::write(root.path().join("notes.md"), "# Notes\nkept\n").expect("write source");
+    let sqlite = SqliteConfig::new_for_testing(state_home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let request = ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    };
+    let cancellation = IndexCancellation::default();
+    cancellation.cancel();
+
+    let cancelled = indexer
+        .refresh_cancellable(request.clone(), cancellation)
+        .await;
+
+    assert!(matches!(cancelled, Err(ProjectIndexerError::Cancelled)));
+    assert!(
+        !context_map
+            .has_entries("project-1")
+            .await
+            .expect("entries load")
+    );
+    assert_eq!(
+        hierarchy
+            .project_intelligence_status("project-1")
+            .await
+            .expect("status loads")
+            .last_refresh,
+        None
+    );
+    let report = indexer.refresh(request).await.expect("later refresh");
+    assert_eq!(report.files_indexed, 1);
 }

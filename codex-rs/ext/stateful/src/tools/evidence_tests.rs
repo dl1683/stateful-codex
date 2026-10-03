@@ -538,38 +538,272 @@ fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
     );
 }
 
-/// A project whose source map was never built is indexed on demand by the first read.
-#[tokio::test]
-async fn a_never_indexed_project_is_indexed_on_demand() {
-    let state_home = TempDir::new().expect("temporary state home");
-    let project_root = TempDir::new().expect("temporary project root");
-    std::fs::write(
-        project_root.path().join("proposal.md"),
-        "# Proposal\nCost — low\n",
-    )
-    .expect("write source");
-    let services =
-        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
-    let tool = EvidenceReadTool::new(
+fn source_tool(state_home: &TempDir) -> EvidenceReadTool {
+    EvidenceReadTool::new(
         "project-1".to_string(),
         "thread-1".to_string(),
-        services,
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs())),
         Arc::new(InMemoryThreadStore::default()),
+    )
+}
+
+fn whole_file(path: &str) -> EvidenceReadLocator {
+    EvidenceReadLocator::Source {
+        project_root: None,
+        relative_path: ProjectRelativePath::parse(path).expect("relative path"),
+        line_range: None,
+    }
+}
+
+fn model_error(error: codex_extension_api::FunctionCallError) -> String {
+    match error {
+        codex_extension_api::FunctionCallError::RespondToModel(message) => message,
+        other => panic!("expected a model-facing error, got {other:?}"),
+    }
+}
+
+/// debug2: parallel first reads of a never-indexed project all failed with "not indexed
+/// even after indexing on demand". Each explicit read now indexes just its own file.
+#[tokio::test]
+async fn concurrent_first_reads_of_a_never_indexed_project_all_succeed() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    std::fs::create_dir_all(project_root.path().join("shipit")).expect("package dir");
+    for (path, text) in [
+        (
+            "shipit/cli.py",
+            "import click
+",
+        ),
+        (
+            "shipit/types.py",
+            "class ConfigPath: ...
+",
+        ),
+        (
+            "README.md",
+            "# shipit
+",
+        ),
+    ] {
+        std::fs::write(project_root.path().join(path), text).expect("write source");
+    }
+    let tool = source_tool(&state_home);
+    let roots = vec![project_root.path().to_path_buf()];
+
+    let (cli, types, readme) = tokio::join!(
+        tool.read_with_refresh(roots.clone(), whole_file("shipit/cli.py"), 1024),
+        tool.read_with_refresh(roots.clone(), whole_file("shipit/types.py"), 1024),
+        tool.read_with_refresh(roots.clone(), whole_file("README.md"), 1024),
     );
-    let (read, source_refreshed) = tool
+
+    assert_eq!(
+        [cli, types, readme].map(|read| read
+            .map(|(read, refreshed)| (read.content, refreshed))
+            .map_err(model_error)),
+        [
+            Ok((
+                "import click
+"
+                .to_string(),
+                true
+            )),
+            Ok((
+                "class ConfigPath: ...
+"
+                .to_string(),
+                true
+            )),
+            Ok((
+                "# shipit
+"
+                .to_string(),
+                true
+            )),
+        ]
+    );
+}
+
+/// A file added after the project was indexed, and a git-ignored vendored file that the
+/// corpus scan excludes, are both readable by explicit path.
+#[tokio::test]
+async fn new_and_ignored_files_in_a_built_project_are_read_by_path() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    std::fs::create_dir_all(project_root.path().join(".git")).expect("git marker");
+    std::fs::write(
+        project_root.path().join(".gitignore"),
+        "vendor/
+",
+    )
+    .expect("ignore");
+    std::fs::create_dir_all(project_root.path().join("vendor/click")).expect("vendor dir");
+    std::fs::write(
+        project_root.path().join("vendor/click/core.py"),
+        "def main(): ...
+",
+    )
+    .expect("vendored source");
+    std::fs::write(
+        project_root.path().join("app.py"),
+        "print('app')
+",
+    )
+    .expect("source");
+    let tool = source_tool(&state_home);
+    ProjectIndexer::new(
+        tool.services.hierarchy().await.expect("hierarchy").clone(),
+        tool.services
+            .context_map()
+            .await
+            .expect("context map")
+            .clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![project_root.path().to_path_buf()],
+    })
+    .await
+    .expect("index project");
+    std::fs::write(
+        project_root.path().join("added.py"),
+        "ADDED = 1
+",
+    )
+    .expect("new file");
+    let roots = vec![project_root.path().to_path_buf()];
+
+    let added = tool
+        .read_with_refresh(roots.clone(), whole_file("added.py"), 1024)
+        .await
+        .map(|(read, refreshed)| (read.content, refreshed))
+        .map_err(model_error);
+    let vendored = tool
+        .read_with_refresh(roots, whole_file("vendor/click/core.py"), 1024)
+        .await
+        .map(|(read, refreshed)| (read.content, refreshed))
+        .map_err(model_error);
+
+    assert_eq!(
+        (added, vendored),
+        (
+            Ok((
+                "ADDED = 1
+"
+                .to_string(),
+                true
+            )),
+            Ok((
+                "def main(): ...
+"
+                .to_string(),
+                true
+            )),
+        )
+    );
+}
+
+/// Missing paths and paths present under several roots get precise statuses.
+#[tokio::test]
+async fn missing_and_ambiguous_paths_report_precise_statuses() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let first = TempDir::new().expect("first root");
+    let second = TempDir::new().expect("second root");
+    std::fs::write(
+        first.path().join("shared.md"),
+        "first
+",
+    )
+    .expect("first copy");
+    std::fs::write(
+        second.path().join("shared.md"),
+        "second
+",
+    )
+    .expect("second copy");
+    let tool = source_tool(&state_home);
+    let roots = vec![first.path().to_path_buf(), second.path().to_path_buf()];
+
+    let missing = tool
+        .read_with_refresh(roots.clone(), whole_file("absent.md"), 1024)
+        .await
+        .map(|_| ())
+        .map_err(model_error)
+        .expect_err("absent file");
+    let single_root_missing = tool
         .read_with_refresh(
-            vec![project_root.path().to_path_buf()],
+            vec![first.path().to_path_buf()],
+            whole_file("absent.md"),
+            1024,
+        )
+        .await
+        .map(|_| ())
+        .map_err(model_error)
+        .expect_err("absent file in one root");
+    let ambiguous = tool
+        .read_with_refresh(roots.clone(), whole_file("shared.md"), 1024)
+        .await
+        .map(|_| ())
+        .map_err(model_error)
+        .expect_err("ambiguous path");
+    let chosen = tool
+        .read_with_refresh(
+            roots,
             EvidenceReadLocator::Source {
-                project_root: None,
-                relative_path: ProjectRelativePath::parse("proposal.md").expect("path"),
-                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
+                project_root: Some(second.path().to_path_buf()),
+                relative_path: ProjectRelativePath::parse("shared.md").expect("path"),
+                line_range: None,
             },
             1024,
         )
         .await
-        .expect("indexed on demand and read");
+        .map(|(read, _)| read.content)
+        .map_err(model_error);
+
     assert_eq!(
-        (read.content.as_str(), source_refreshed),
-        ("Cost — low\n", true)
+        (
+            missing.split(':').next(),
+            single_root_missing.split(':').next(),
+            ambiguous.split(':').next(),
+            chosen,
+        ),
+        (
+            Some("notFound"),
+            Some("notFound"),
+            Some("ambiguousRoot"),
+            Ok("second
+"
+            .to_string()),
+        )
     );
+}
+
+/// A deleted source with an index row is reported missing, not read from stale bytes.
+#[tokio::test]
+async fn a_deleted_indexed_file_is_reported_not_found() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    let source = project_root.path().join("gone.md");
+    std::fs::write(
+        &source,
+        "soon gone
+",
+    )
+    .expect("write source");
+    let tool = source_tool(&state_home);
+    let roots = vec![project_root.path().to_path_buf()];
+    tool.read_with_refresh(roots.clone(), whole_file("gone.md"), 1024)
+        .await
+        .map_err(model_error)
+        .expect("first read indexes the file");
+    std::fs::remove_file(&source).expect("delete source");
+
+    let error = tool
+        .read_with_refresh(roots, whole_file("gone.md"), 1024)
+        .await
+        .map(|_| ())
+        .map_err(model_error)
+        .expect_err("deleted file");
+
+    assert_eq!(error.split(':').next(), Some("notFound"));
 }

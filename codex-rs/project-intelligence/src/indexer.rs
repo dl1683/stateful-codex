@@ -9,11 +9,13 @@ use sha2::Digest;
 use sha2::Sha256;
 use thiserror::Error;
 
+mod cancellation;
 mod generation;
 mod publish;
 mod regions;
 mod scan;
 
+pub use cancellation::IndexCancellation;
 use generation::RefreshGeneration;
 use publish::mark_file_missing;
 use publish::publish_file;
@@ -108,12 +110,24 @@ impl ProjectIndexer {
         &self,
         request: ProjectIndexRequest,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
+        self.refresh_cancellable(request, IndexCancellation::default())
+            .await
+    }
+
+    /// A full refresh that stops between files, and before each publication
+    /// transaction, once `cancellation` is signalled.
+    pub async fn refresh_cancellable(
+        &self,
+        request: ProjectIndexRequest,
+        cancellation: IndexCancellation,
+    ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         validate_request(&request)?;
         let project_id = request.project_id.clone();
         let generation = generation::claim(self, &project_id).await?;
         let roots = request.roots.clone();
         let scan_started = Instant::now();
-        let scan = tokio::task::spawn_blocking(move || scan_roots(&roots))
+        let scan_cancellation = cancellation.clone();
+        let scan = tokio::task::spawn_blocking(move || scan_roots(&roots, &scan_cancellation))
             .await
             .map_err(ProjectIndexerError::ScanTask)??;
         let scan_duration_ms = elapsed_millis(scan_started);
@@ -126,10 +140,13 @@ impl ProjectIndexer {
                 .ok_or(ProjectIndexerError::CountOverflow)
         })?;
         let publication_started = Instant::now();
-        let mut report = self.publish_refresh(request, scan, generation).await?;
+        let mut report = self
+            .publish_refresh(request, scan, generation, &cancellation)
+            .await?;
         report.regions_indexed = regions_indexed;
         report.scan_duration_ms = scan_duration_ms;
         report.publication_duration_ms = elapsed_millis(publication_started);
+        cancellation.check()?;
         self.record_refresh_status(&project_id, &report, generation)
             .await?;
         Ok(report)
@@ -140,8 +157,10 @@ impl ProjectIndexer {
         request: ProjectIndexRequest,
         scan: scan::ScanResult,
         generation: RefreshGeneration,
+        cancellation: &IndexCancellation,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         let project_id = request.project_id.clone();
+        cancellation.check()?;
         let mut generation_check = self.context_map.begin_immediate().await?;
         generation::require_current(&mut generation_check, &project_id, generation).await?;
         generation_check.commit().await?;
@@ -190,6 +209,7 @@ impl ProjectIndexer {
         let mut directory_nodes = HashMap::new();
         let mut seen_files = HashSet::new();
         for file in scan.files {
+            cancellation.check()?;
             let root_id = root_nodes
                 .get(&file.project_root)
                 .ok_or(ProjectIndexerError::UnrecognizedRoot)?;
@@ -232,6 +252,7 @@ impl ProjectIndexer {
             publication_duration_ms: 0,
         };
         if scan.inventory_complete {
+            cancellation.check()?;
             for root_id in root_nodes.values() {
                 report.missing_files += self
                     .mark_missing_files(&project_id, root_id, &seen_files, generation)
@@ -574,6 +595,8 @@ pub enum ProjectIndexerError {
     CountOverflow,
     #[error("project refresh was superseded by a newer generation")]
     SupersededRefresh,
+    #[error("project index operation was cancelled before it finished")]
+    Cancelled,
     #[error(transparent)]
     Hierarchy(#[from] HierarchyStoreError),
     #[error(transparent)]

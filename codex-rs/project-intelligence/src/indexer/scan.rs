@@ -12,6 +12,7 @@ use crate::ContextMapCoverage;
 use crate::ProjectRelativePath;
 use crate::SourceFingerprint;
 
+use super::IndexCancellation;
 use super::ProjectIndexerError;
 use super::hex_digest;
 use super::regions::MAX_PROJECT_REGIONS;
@@ -47,14 +48,20 @@ pub(super) struct ScannedFile {
     pub(super) regions: Vec<ScannedRegion>,
 }
 
-pub(super) fn scan_roots(roots: &[PathBuf]) -> Result<ScanResult, ProjectIndexerError> {
+pub(super) fn scan_roots(
+    roots: &[PathBuf],
+    cancellation: &IndexCancellation,
+) -> Result<ScanResult, ProjectIndexerError> {
     scan_roots_with_limits(
         roots,
         ScanLimits {
             max_files: MAX_FILES,
             max_project_regions: MAX_PROJECT_REGIONS,
         },
-        scan_file,
+        |root, path| {
+            cancellation.check()?;
+            scan_file(root, path)
+        },
     )
 }
 
@@ -116,6 +123,8 @@ pub(super) fn scan_roots_with_limits(
                     regions_scanned += file.regions.len();
                     files.push(file);
                 }
+                // A cancelled scan stops; it is not an unreadable file.
+                Err(ProjectIndexerError::Cancelled) => return Err(ProjectIndexerError::Cancelled),
                 Err(_) => {
                     files_skipped = files_skipped.saturating_add(1);
                     truncated = true;
