@@ -21,6 +21,7 @@ use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
@@ -33,10 +34,11 @@ use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::capture_policy::RecordOutcome;
-use crate::capture_policy::routine_summary_refusal;
 use crate::events::CaptureOutcome;
 use crate::events::KnowledgeCategory;
 use crate::events::receipt_text;
+use crate::recipe_applicability::is_recipe;
+use crate::recipe_capture::carries_credentials;
 use crate::services::ProjectIntelligenceServices;
 
 use crate::rule_capture::RulePlacement;
@@ -256,6 +258,7 @@ impl BlackboardRecorder {
         turn_id: &str,
         source_id: &str,
         project_roots: &[std::path::PathBuf],
+        history: &[codex_protocol::models::ResponseItem],
     ) -> Result<RecordOutcome, FunctionCallError> {
         let RecordArguments {
             idempotency_key,
@@ -288,14 +291,17 @@ impl BlackboardRecorder {
             return self
                 .record_instruction(turn_id, user_quote, rule_scope)
                 .await
-                .map(RecordOutcome::Created);
+                .map(|entry| RecordOutcome::Created {
+                    entry,
+                    recipe: None,
+                });
         }
         if user_quote.is_some() || rule_scope.is_some() {
             return Err(respond(
                 "userQuote and ruleScope apply to kind instruction only",
             ));
         }
-        if recipe_grounding::refuses_credentials(kind, &content) {
+        if is_recipe(kind, &content) && carries_credentials(&content) {
             return Err(respond(
                 "credentials: a recipe must not store passwords, tokens or keys; record it with a placeholder such as $TOKEN",
             ));
@@ -354,21 +360,33 @@ impl BlackboardRecorder {
             )
             .await?
         };
+        let mut grounding = None;
         let entry = if let Some(existing) = retried {
-            existing
+            // The replacement already committed: this replay saves nothing new.
+            return Ok(RecordOutcome::AlreadyPresent(existing));
         } else if supersedes.is_empty() {
-            if let Some(refusal) = routine_summary_refusal(value.kind, &value.content) {
-                return Err(respond(refusal));
-            }
-            if let Some(existing) = store
-                .active_agent_entry_with_content(&self.project_id, value.kind, &value.content)
+            grounding = recipe_grounding::resolve(
+                &self.services,
+                &self.thread_id,
+                value.kind,
+                &value.content,
+                history,
+            );
+            let context = grounding
+                .as_mut()
+                .and_then(|grounding| grounding.context.take());
+            // The entry and its recipe observation commit in one transaction; a replay or a
+            // record identical to current knowledge saves nothing.
+            match store
+                .create_agent_entry(id, value, context)
                 .await
                 .map_err(respond)?
-                && existing.id != id
             {
-                return Ok(RecordOutcome::AlreadyPresent(existing));
+                (entry, CreateOutcome::Created) => entry,
+                (entry, CreateOutcome::AlreadyPresent) => {
+                    return Ok(RecordOutcome::AlreadyPresent(entry));
+                }
             }
-            store.create_entry(id, value).await.map_err(respond)?
         } else {
             // The new entry and the end of the entries it replaces commit together.
             let replaced = resolve_superseded(
@@ -430,7 +448,10 @@ impl BlackboardRecorder {
                 text: receipt_text(&entry.value.content),
             });
         }
-        Ok(RecordOutcome::Created(entry))
+        Ok(RecordOutcome::Created {
+            entry,
+            recipe: grounding.map(|grounding| grounding.label),
+        })
     }
 
     async fn project_node_id(&self) -> Result<HierarchyNodeId, FunctionCallError> {
@@ -560,19 +581,18 @@ impl BlackboardBatchRecordTool {
             let record_key = record.idempotency_key.clone();
             match self
                 .recorder
-                .record(record, &call.turn_id, &call.call_id, &project_roots)
+                .record(
+                    record,
+                    &call.turn_id,
+                    &call.call_id,
+                    &project_roots,
+                    call.conversation_history.items(),
+                )
                 .await
             {
-                Ok(RecordOutcome::Created(entry)) => {
+                Ok(RecordOutcome::Created { entry, recipe }) => {
                     recorded += 1;
                     entry_ids.insert(record_key, entry.id.clone());
-                    let recipe = recipe_grounding::ground(
-                        &self.recorder.services,
-                        &self.recorder.thread_id,
-                        &entry,
-                        call.conversation_history.items(),
-                    )
-                    .await;
                     if recipe.as_deref().is_some_and(|label| {
                         label.starts_with("current") || label.starts_with("ran")
                     }) {
@@ -610,8 +630,7 @@ impl BlackboardBatchRecordTool {
                 }
                 Err(error) => {
                     if let FunctionCallError::RespondToModel(message) = &error
-                        && (message.starts_with("routineSummary:")
-                            || message.starts_with("credentials:"))
+                        && message.starts_with("credentials:")
                     {
                         self.recorder
                             .services

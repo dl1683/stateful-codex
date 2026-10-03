@@ -279,6 +279,12 @@ fn recipes_are_labelled_with_whether_they_still_apply() {
                     BlackboardProvenanceKind::Agent,
                     "Recipe: `uv run pytest` runs the tests.",
                 ),
+                hit(
+                    "unchecked-recipe",
+                    BlackboardKind::Fact,
+                    BlackboardProvenanceKind::Agent,
+                    "Recipe: `make test` runs everything.",
+                ),
             ],
             omitted_entries: 0,
             candidate_entries: 0,
@@ -300,13 +306,18 @@ fn recipes_are_labelled_with_whether_they_still_apply() {
     render_root_blackboard(&mut output, &RootBlackboardStatus::Available(root));
     let labels = output
         .lines()
-        .filter_map(|line| line.split_once(" recipe=").map(|(_, label)| label))
+        .filter_map(|line| {
+            line.split_once(" recipe=")
+                .and_then(|(_, rest)| rest.split_once(" content=Recipe:"))
+                .map(|(label, _)| label)
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         labels,
         vec![
             "current (seen succeeding with this executable and manifests; reuse it, do not set up another environment)",
             "needsCheck (uv.lock changed since; check once, then reuse what works)",
+            "unchecked (check once)",
         ]
     );
 }

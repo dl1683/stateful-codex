@@ -309,6 +309,7 @@ impl ToolLifecycleContributor for StatefulExtension {
                     call_id: input.call_id.to_string(),
                     script: crate::recipe_capture::command_script(input.command),
                     cwd: input.cwd.to_path_buf(),
+                    completed: None,
                 },
             );
         })
@@ -316,11 +317,26 @@ impl ToolLifecycleContributor for StatefulExtension {
 
     fn on_tool_finish<'a>(&'a self, input: ToolFinishInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
-            if let Some(services) = self.services.as_ref() {
-                services.observed_commands().finished(
-                    input.call_id,
-                    matches!(input.outcome, ToolCallOutcome::Completed { success: true }),
-                );
+            if let Some(services) = self.services.as_ref()
+                && let Some((thread_id, mut command)) =
+                    services.observed_commands().finished(input.call_id)
+                && matches!(input.outcome, ToolCallOutcome::Completed { success: true })
+            {
+                // The conditions are captured as the command completes, not when a recipe
+                // is later recorded.
+                let at_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| {
+                        i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+                    });
+                let captured = tokio::task::spawn_blocking(move || {
+                    command.completed = crate::recipe_capture::capture_conditions(&command, at_ms);
+                    command
+                })
+                .await;
+                if let Ok(command) = captured {
+                    services.observed_commands().keep(thread_id, command);
+                }
             }
             if let Some(thread) = input.thread_store.get::<SelectedThread>() {
                 self.run_activity.for_thread(&thread.thread_id).record(

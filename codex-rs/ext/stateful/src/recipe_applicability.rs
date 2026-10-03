@@ -2,14 +2,15 @@
 //!
 //! A host-observed recipe records the conditions it last succeeded under. Before the
 //! packet offers it, cheap local checks confirm those conditions: the working directory
-//! and executable still exist and the dependency manifests are unchanged. A failed check
-//! marks the recipe `needsCheck` with the reason, so the model discovers the environment
-//! once instead of trusting a dead interpreter or creating a second environment. A
-//! `Recipe:` entry the host never observed is shown as `notObserved`. Nothing here runs
-//! the recipe.
+//! exists, the executable still resolves to the same file (path, size and modification
+//! time), and the set of dependency manifests is unchanged (none added, removed or
+//! edited). A failed check marks the recipe `needsCheck` with the reason, so the model
+//! checks the environment once instead of trusting a dead interpreter or creating a second
+//! environment. Every recipe shown carries a label: `notObserved` when the host never saw
+//! it run, `unchecked` when its check could not be performed. Nothing here runs the recipe,
+//! and nothing here verifies which copy of a package tests import.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::path::PathBuf;
 
 use codex_project_intelligence::BlackboardKind;
@@ -21,22 +22,10 @@ use codex_project_intelligence::RootBlackboardProjection;
 use crate::recipe_capture::ExitStatus;
 use crate::recipe_capture::RecipeObservation;
 use crate::recipe_capture::manifest_fingerprints;
+use crate::recipe_capture::resolve_executable;
 
-/// Recipes checked per packet; others are shown without a check.
+/// Recipes checked per packet; others are labelled unchecked.
 const MAX_CHECKED_RECIPES: usize = 16;
-/// Shell words that are not executables on `PATH`.
-const SHELL_WORDS: &[&str] = &[
-    "cd",
-    "set",
-    "export",
-    "env",
-    "source",
-    ".",
-    "call",
-    "pushd",
-    "set-location",
-    "sl",
-];
 
 /// The packet label for one recipe entry.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +38,8 @@ pub(crate) enum RecipeCheck {
     NeedsCheck(String),
     /// Recorded by the model without a matching successful command.
     NotObserved,
+    /// Its conditions could not be checked for this packet.
+    Unchecked,
 }
 
 impl RecipeCheck {
@@ -64,6 +55,7 @@ impl RecipeCheck {
                 format!("needsCheck ({reason}; check once, then reuse what works)")
             }
             Self::NotObserved => "notObserved (never seen running; check once)".to_string(),
+            Self::Unchecked => "unchecked (check once)".to_string(),
         }
     }
 }
@@ -73,7 +65,8 @@ pub(crate) fn is_recipe(kind: BlackboardKind, content: &str) -> bool {
     kind == BlackboardKind::Fact && content.starts_with("Recipe:")
 }
 
-/// Checks the recipe entries shown in the root, by entry ID.
+/// Checks the recipe entries shown in the root, by entry ID. Recipes beyond the check
+/// budget, or whose observations cannot be loaded, are absent and render as unchecked.
 pub(crate) async fn check_root_recipes(
     store: &BlackboardStore,
     project_id: &str,
@@ -134,11 +127,17 @@ pub(crate) fn check_observation(observation: &RecipeObservation) -> RecipeCheck 
             observation.cwd
         ));
     }
-    if !executable_exists(&cwd, &observation.executable) {
-        return RecipeCheck::NeedsCheck(format!(
-            "executable {} no longer resolves",
-            observation.executable
-        ));
+    let typed = &observation.executable.typed;
+    match resolve_executable(&cwd, typed) {
+        None => {
+            return RecipeCheck::NeedsCheck(format!("executable {typed} no longer resolves"));
+        }
+        Some(current) if current != observation.executable => {
+            return RecipeCheck::NeedsCheck(format!(
+                "executable {typed} now resolves to a different or changed file"
+            ));
+        }
+        Some(_) => {}
     }
     let current = manifest_fingerprints(&cwd);
     for recorded in &observation.manifests {
@@ -146,7 +145,13 @@ pub(crate) fn check_observation(observation: &RecipeObservation) -> RecipeCheck 
             .iter()
             .find(|manifest| manifest.path == recorded.path)
         {
-            Some(manifest) if manifest.sha256 == recorded.sha256 => {}
+            Some(manifest) if manifest.sha256.is_none() || recorded.sha256.is_none() => {
+                return RecipeCheck::NeedsCheck(format!(
+                    "{} is too large to compare",
+                    recorded.path
+                ));
+            }
+            Some(manifest) if manifest == recorded => {}
             Some(_) => {
                 return RecipeCheck::NeedsCheck(format!("{} changed since", recorded.path));
             }
@@ -155,43 +160,18 @@ pub(crate) fn check_observation(observation: &RecipeObservation) -> RecipeCheck 
             }
         }
     }
+    if let Some(added) = current.iter().find(|manifest| {
+        !observation
+            .manifests
+            .iter()
+            .any(|recorded| recorded.path == manifest.path)
+    }) {
+        return RecipeCheck::NeedsCheck(format!("{} was added since", added.path));
+    }
     match observation.exit_status {
         ExitStatus::Zero => RecipeCheck::Current,
         ExitStatus::NonZero | ExitStatus::Unknown => RecipeCheck::CurrentExitUnconfirmed,
     }
-}
-
-/// Whether the executable a recipe starts with still resolves: a path relative to the
-/// working directory, or a bare name on `PATH`. An empty or shell-builtin word is not
-/// checked.
-fn executable_exists(cwd: &Path, executable: &str) -> bool {
-    if executable.is_empty()
-        || executable.starts_with('$')
-        || executable.contains('=')
-        || SHELL_WORDS.contains(&executable.to_ascii_lowercase().as_str())
-    {
-        return true;
-    }
-    let candidates = |base: PathBuf| {
-        let mut names = vec![base.clone()];
-        if cfg!(windows) && base.extension().is_none() {
-            names.extend(["exe", "cmd", "bat"].map(|extension| base.with_extension(extension)));
-        }
-        names
-    };
-    if executable.contains(['/', '\\']) {
-        return candidates(cwd.join(executable))
-            .iter()
-            .any(|path| path.is_file());
-    }
-    let Some(path) = std::env::var_os("PATH") else {
-        return true;
-    };
-    std::env::split_paths(&path).any(|directory| {
-        candidates(directory.join(executable))
-            .iter()
-            .any(|path| path.is_file())
-    })
 }
 
 #[cfg(test)]

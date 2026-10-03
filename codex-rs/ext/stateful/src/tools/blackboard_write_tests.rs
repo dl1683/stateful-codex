@@ -77,10 +77,10 @@ fn summary(output: &dyn codex_extension_api::ToolOutput) -> serde_json::Value {
     })
 }
 
-/// A repeated decision is a no-op that saves nothing new, a session-status summary is
-/// refused, and genuinely new outcomes are still recorded.
+/// A repeated record and a same-key replay save nothing new; the same wording with a
+/// different promotion, and new outcomes of any wording, are saved.
 #[tokio::test]
-async fn exact_duplicates_and_status_summaries_add_nothing_while_new_outcomes_are_saved() {
+async fn identical_records_and_replays_are_no_ops_while_distinct_records_are_saved() {
     let state_home = TempDir::new().expect("state home");
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
@@ -94,6 +94,8 @@ async fn exact_duplicates_and_status_summaries_add_nothing_while_new_outcomes_ar
         VisibleRootRegistry::default(),
     );
     let decision = "Fix the vendored Click ordering, because both consumers read the source.";
+    let mut promoted = record("decision-promoted", "decision", decision);
+    promoted["rootPromotion"] = json!("promoted");
 
     let first = tool
         .handle_call(batch_call(
@@ -107,15 +109,12 @@ async fn exact_duplicates_and_status_summaries_add_nothing_while_new_outcomes_ar
             "second",
             vec![
                 record("decision-again", "decision", decision),
+                record("decision-1", "decision", decision),
+                promoted,
                 record(
-                    "status",
+                    "finding",
                     "fact",
-                    "Yesterday's read-only investigation narrowed the bug to Click.",
-                ),
-                record(
-                    "ruled-out",
-                    "rejectedApproach",
-                    "SHIPIT_CONFIG contamination: unset in both reproductions.",
+                    "In this session we proved registration order reverses callbacks because the emitter prepends listeners.",
                 ),
             ],
         ))
@@ -127,37 +126,36 @@ async fn exact_duplicates_and_status_summaries_add_nothing_while_new_outcomes_ar
         [
             json!({"recorded": 1, "alreadyPresent": 0, "failed": 0, "errors": [null]}),
             json!({
-                "recorded": 1,
-                "alreadyPresent": 1,
-                "failed": 1,
-                "errors": [null, "routineSummary", null],
+                "recorded": 2,
+                "alreadyPresent": 2,
+                "failed": 0,
+                "errors": [null, null, null, null],
             }),
         ]
     );
     assert_eq!(
         services.cost_ledger().take("turn-1"),
         crate::cost_attribution::CostCounters {
-            memory_records_already_present: 1,
-            memory_records_refused: 1,
+            memory_records_already_present: 2,
             ..Default::default()
         }
     );
 }
 
-/// A recipe whose command the host saw exit 0 stores the conditions it ran under and is
-/// labelled current; one the host never saw run stays an unverified fact; a recipe that
-/// carries a credential is refused.
+/// A recipe naming a simple command the host saw exit 0 stores the conditions it ran
+/// under with the entry and is labelled current; one the host never saw run stays an
+/// unverified fact; a recipe that carries a credential is refused.
 #[tokio::test]
 async fn recipes_are_grounded_only_in_commands_the_host_saw_succeed() {
     let state_home = TempDir::new().expect("state home");
     let repo = TempDir::new().expect("repo");
     std::fs::write(
         repo.path().join("pyproject.toml"),
-        "[project]
-name='shipit'
-",
+        "[project]\nname='shipit'\n",
     )
     .expect("manifest");
+    std::fs::create_dir_all(repo.path().join(".venv")).expect("venv");
+    std::fs::write(repo.path().join(".venv").join("python"), "interpreter").expect("interpreter");
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
     let tool = BlackboardBatchRecordTool::new(
@@ -169,30 +167,24 @@ name='shipit'
         UserMessageRegistry::default(),
         VisibleRootRegistry::default(),
     );
-    services.observed_commands().started(
-        "thread-1",
-        crate::recipe_capture::ObservedCommand {
-            turn_id: "turn-1".to_string(),
-            call_id: "exec-1".to_string(),
-            script: "cd . && python -m pytest tests/test_cli.py -q".to_string(),
-            cwd: repo.path().to_path_buf(),
-        },
-    );
+    let mut command = crate::recipe_capture::ObservedCommand {
+        turn_id: "turn-1".to_string(),
+        call_id: "exec-1".to_string(),
+        script: ".venv/python -m pytest tests/test_cli.py -q".to_string(),
+        cwd: repo.path().to_path_buf(),
+        completed: None,
+    };
+    command.completed = crate::recipe_capture::capture_conditions(&command, /*at_ms*/ 7);
     services
         .observed_commands()
-        .finished("exec-1", /*succeeded*/ true);
+        .keep("thread-1".to_string(), command);
     let history = ConversationHistory::new(vec![ResponseItem::FunctionCallOutput {
         id: None,
         call_id: Some("exec-1".to_string()),
         name: None,
         namespace: None,
         output: FunctionCallOutputPayload::from_text(
-            "Wall time: 1.0 seconds
-Process exited with code 0
-Output:
-3 passed
-"
-            .to_string(),
+            "Wall time: 1.0 seconds\nProcess exited with code 0\nOutput:\n3 passed\n".to_string(),
         ),
         internal_chat_message_metadata_passthrough: None,
     }]);
@@ -204,7 +196,7 @@ Output:
                 record(
                     "observed",
                     "fact",
-                    "Recipe: `python -m pytest tests/test_cli.py -q` runs the CLI tests.",
+                    "Recipe: `.venv/python -m pytest tests/test_cli.py -q` runs the CLI tests.",
                 ),
                 record("unseen", "fact", "Recipe: `make test` runs everything."),
                 record(
@@ -254,6 +246,7 @@ Output:
             context.category,
             context.authority,
             observation.exit_status,
+            observation.observed_at_ms,
             observation
                 .manifests
                 .iter()
@@ -270,6 +263,7 @@ Output:
             codex_project_intelligence::KnowledgeCategory::Recipe,
             codex_project_intelligence::KnowledgeAuthority::HostObserved,
             crate::recipe_capture::ExitStatus::Zero,
+            7,
             vec!["pyproject.toml"],
             crate::recipe_applicability::RecipeCheck::Current,
         )

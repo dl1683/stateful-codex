@@ -1,19 +1,21 @@
 //! Host-observed grounding for recorded recipes.
 //!
 //! A recipe is worth reusing only when the host saw it work. Every builtin command a
-//! thread runs is observed at start (its script and working directory) and kept once it
-//! completes successfully; failed commands stay diagnostic and are never kept. When the
-//! model records a `Recipe:` fact, a backticked command in it is matched against those
-//! observations, and a match stores "last observed successful under these conditions":
-//! the command, working directory, executable, observation identity and time, and the
-//! fingerprints of dependency manifests beside it. The recipe is not guaranteed to work
-//! forever; `recipe_applicability` rechecks those conditions before it is offered again.
+//! thread runs is observed at start (its script and working directory). When it completes,
+//! a simple command (one executable with its arguments: no command chaining, pipes,
+//! substitution or credential-like arguments) has its conditions captured at that moment:
+//! the resolved executable's identity and the dependency manifests beside it. Compound and
+//! failed commands are never kept, so they can never ground a recipe.
 //!
-//! The lifecycle reports whether a command completed, not its exit status. The exit
-//! status is confirmed from the command's own output in the conversation when it is
-//! there (a direct command); a command known to have exited non-zero never grounds a
-//! recipe, and one whose status is not visible (inside a code-mode cell) is stored with
-//! `exitStatus: unknown` rather than claimed successful.
+//! When the model records a `Recipe:` fact, a backticked command in it must equal a kept
+//! command exactly (whitespace aside). A match stores "last observed successful under
+//! these conditions". The lifecycle reports whether a command completed, not its exit
+//! status, so the exit status is read from the host's own header in the command's output
+//! (the lines before `Output:`) when the conversation holds it; a command shown to exit
+//! non-zero never grounds a recipe, and one whose status is not visible is stored with
+//! `exitStatus: unknown`, never claimed successful. Paths are checked on this host: a
+//! command whose working directory is not a local directory (a remote executor) is not
+//! grounded.
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -41,28 +43,41 @@ const MANIFESTS: &[&str] = &[
     "Cargo.toml",
     "Cargo.lock",
 ];
-/// Larger manifests are not fingerprinted.
+/// Larger manifests are recorded as present but not fingerprinted.
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
-/// Argument spellings that carry credentials and must never be stored in a recipe.
+/// Spellings that carry credentials and must never be stored in a recipe.
 const CREDENTIAL_MARKERS: &[&str] = &[
     "password",
     "passwd",
-    "token=",
+    "token",
     "secret",
     "api_key",
     "apikey",
     "api-key",
-    "authorization:",
-    "bearer ",
+    "private_key",
+    "authorization",
+    "bearer",
+    "--key",
 ];
+/// Shell syntax that makes a script more than one simple command.
+const COMPOUND_SYNTAX: &[&str] = &["&&", "||", ";", "|", "&", "\n", "`", "$(", ">", "<"];
 
-/// One successful command the host observed.
+/// One command the host observed, with the conditions captured when it completed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ObservedCommand {
     pub(crate) turn_id: String,
     pub(crate) call_id: String,
     pub(crate) script: String,
     pub(crate) cwd: PathBuf,
+    /// Set when the command completes: the moment and conditions it ran under.
+    pub(crate) completed: Option<CompletedConditions>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CompletedConditions {
+    pub(crate) at_ms: i64,
+    pub(crate) executable: ExecutableIdentity,
+    pub(crate) manifests: Vec<ManifestFingerprint>,
 }
 
 /// The stored conditions under which a recipe was last observed to succeed.
@@ -71,16 +86,28 @@ pub(crate) struct ObservedCommand {
 pub(crate) struct RecipeObservation {
     pub(crate) command: String,
     pub(crate) cwd: String,
-    /// The command's first word as typed (`python`, `.venv/bin/python`, `uv`).
-    pub(crate) executable: String,
+    pub(crate) executable: ExecutableIdentity,
     pub(crate) observed_turn_id: String,
     pub(crate) observed_call_id: String,
+    /// When the command completed, not when the recipe was recorded.
     pub(crate) observed_at_ms: i64,
     pub(crate) exit_status: ExitStatus,
+    /// Every known manifest present in the working directory when the command completed.
     pub(crate) manifests: Vec<ManifestFingerprint>,
 }
 
-/// What the conversation shows about how an observed command exited.
+/// The executable a command resolved to, by path, size and modification time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExecutableIdentity {
+    /// The command's first word as typed (`python`, `.venv/bin/python`, `uv`).
+    pub(crate) typed: String,
+    pub(crate) resolved: String,
+    pub(crate) bytes: u64,
+    pub(crate) modified_ms: Option<i64>,
+}
+
+/// What the host's output header shows about how an observed command exited.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ExitStatus {
@@ -93,7 +120,8 @@ pub(crate) enum ExitStatus {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ManifestFingerprint {
     pub(crate) path: String,
-    pub(crate) sha256: String,
+    /// `None` when the manifest is present but too large to fingerprint.
+    pub(crate) sha256: Option<String>,
 }
 
 /// Commands observed by this process, by thread.
@@ -110,8 +138,12 @@ struct ObservedState {
 }
 
 impl ObservedCommands {
-    /// Remembers a command at start; it is kept only if it later succeeds.
+    /// Remembers a simple command at start; compound commands can never ground a recipe
+    /// and are not tracked.
     pub(crate) fn started(&self, thread_id: &str, command: ObservedCommand) {
+        if !is_simple_command(&command.script) {
+            return;
+        }
         let mut state = self.lock();
         let key = command.call_id.clone();
         if state
@@ -128,16 +160,20 @@ impl ObservedCommands {
         }
     }
 
-    /// Settles a started command: kept on success, forgotten otherwise.
-    pub(crate) fn finished(&self, call_id: &str, succeeded: bool) {
+    /// Removes a started command once its call finishes.
+    pub(crate) fn finished(&self, call_id: &str) -> Option<(String, ObservedCommand)> {
         let mut state = self.lock();
-        let Some((thread_id, command)) = state.pending.remove(call_id) else {
-            return;
-        };
+        let finished = state.pending.remove(call_id)?;
         state.pending_order.retain(|pending| pending != call_id);
-        if !succeeded {
+        Some(finished)
+    }
+
+    /// Keeps a completed command whose conditions were captured.
+    pub(crate) fn keep(&self, thread_id: String, command: ObservedCommand) {
+        if command.completed.is_none() {
             return;
         }
+        let mut state = self.lock();
         let kept = state.succeeded.entry(thread_id).or_default();
         kept.push_back(command);
         while kept.len() > MAX_OBSERVED_COMMANDS {
@@ -145,8 +181,8 @@ impl ObservedCommands {
         }
     }
 
-    /// The most recent successful command of the thread that a backticked command in
-    /// `content` names.
+    /// The most recent kept command of the thread that a backticked command in `content`
+    /// names exactly.
     pub(crate) fn matching(&self, thread_id: &str, content: &str) -> Option<ObservedCommand> {
         let candidates = backticked(content);
         if candidates.is_empty() {
@@ -162,7 +198,7 @@ impl ObservedCommands {
                 let script = normalized(&command.script);
                 candidates
                     .iter()
-                    .any(|candidate| script.contains(candidate.as_str()))
+                    .any(|candidate| *candidate == script)
                     .then(|| command.clone())
             })
     }
@@ -172,6 +208,23 @@ impl ObservedCommands {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+/// Captures the conditions of a command that just completed: the resolved executable and
+/// the manifests in its working directory. `None` when the working directory is not a
+/// local directory or the executable does not resolve. Blocking.
+pub(crate) fn capture_conditions(
+    command: &ObservedCommand,
+    at_ms: i64,
+) -> Option<CompletedConditions> {
+    if !command.cwd.is_dir() {
+        return None;
+    }
+    Some(CompletedConditions {
+        at_ms,
+        executable: resolve_executable(&command.cwd, &first_word(&command.script))?,
+        manifests: manifest_fingerprints(&command.cwd),
+    })
 }
 
 /// The script a resolved argv runs: the payload of a shell wrapper, or the argv itself.
@@ -194,49 +247,107 @@ pub(crate) fn command_script(argv: &[String]) -> String {
     }
 }
 
-/// Whether `content` contains a credential-like argument that must not be stored.
+/// Whether `content` contains a credential-like spelling that must not be stored.
 pub(crate) fn carries_credentials(content: &str) -> bool {
     let lowered = content.to_ascii_lowercase();
     CREDENTIAL_MARKERS
         .iter()
         .any(|marker| lowered.contains(marker))
+        || lowered.split("://").skip(1).any(|rest| {
+            rest.split(['/', ' '])
+                .next()
+                .is_some_and(|authority| authority.contains('@'))
+        })
 }
 
-/// Builds the stored observation for a matched command, fingerprinting the dependency
-/// manifests in its working directory. Blocking: call from a blocking context.
-pub(crate) fn observe_recipe(
+/// A single executable with arguments: no chaining, pipes, redirection, substitution,
+/// environment assignment, variable first word, or credential-like argument.
+pub(crate) fn is_simple_command(script: &str) -> bool {
+    let first = first_word(script);
+    // A leading PowerShell call operator runs one executable; it is not chaining.
+    let trimmed = script.trim_start();
+    let body = trimmed.strip_prefix("& ").unwrap_or(trimmed);
+    !first.is_empty()
+        && !COMPOUND_SYNTAX.iter().any(|syntax| body.contains(syntax))
+        && !first.starts_with('$')
+        && !first.contains('=')
+        && !carries_credentials(script)
+}
+
+/// Builds the stored observation for a matched, completed command.
+pub(crate) fn observation(
     command: &ObservedCommand,
-    observed_at_ms: i64,
     exit_status: ExitStatus,
-) -> RecipeObservation {
-    RecipeObservation {
+) -> Option<RecipeObservation> {
+    let completed = command.completed.as_ref()?;
+    Some(RecipeObservation {
         command: command.script.clone(),
         cwd: command.cwd.display().to_string(),
-        executable: first_word(&command.script),
+        executable: completed.executable.clone(),
         observed_turn_id: command.turn_id.clone(),
         observed_call_id: command.call_id.clone(),
-        observed_at_ms,
+        observed_at_ms: completed.at_ms,
         exit_status,
-        manifests: manifest_fingerprints(&command.cwd),
-    }
+        manifests: completed.manifests.clone(),
+    })
 }
 
+/// Every known manifest present in `cwd`, fingerprinted when small enough. Blocking.
 pub(crate) fn manifest_fingerprints(cwd: &Path) -> Vec<ManifestFingerprint> {
     MANIFESTS
         .iter()
         .filter_map(|name| {
             let path = cwd.join(name);
             let metadata = std::fs::metadata(&path).ok()?;
-            if !metadata.is_file() || metadata.len() > MAX_MANIFEST_BYTES {
+            if !metadata.is_file() {
                 return None;
             }
-            let bytes = std::fs::read(&path).ok()?;
+            let sha256 = (metadata.len() <= MAX_MANIFEST_BYTES)
+                .then(|| std::fs::read(&path).ok())
+                .flatten()
+                .map(|bytes| format!("{:x}", Sha256::digest(&bytes)));
             Some(ManifestFingerprint {
                 path: (*name).to_string(),
-                sha256: format!("{:x}", Sha256::digest(&bytes)),
+                sha256,
             })
         })
         .collect()
+}
+
+/// Resolves the executable a command starts with: a path relative to `cwd`, or a bare
+/// name on this host's `PATH`. Blocking.
+pub(crate) fn resolve_executable(cwd: &Path, typed: &str) -> Option<ExecutableIdentity> {
+    if typed.is_empty() {
+        return None;
+    }
+    let candidates = |base: PathBuf| {
+        let mut names = vec![base.clone()];
+        if cfg!(windows) && base.extension().is_none() {
+            names.extend(["exe", "cmd", "bat"].map(|extension| base.with_extension(extension)));
+        }
+        names
+    };
+    let resolved = if typed.contains(['/', '\\']) {
+        candidates(cwd.join(typed))
+            .into_iter()
+            .find(|path| path.is_file())?
+    } else {
+        let path = std::env::var_os("PATH")?;
+        std::env::split_paths(&path)
+            .flat_map(|directory| candidates(directory.join(typed)))
+            .find(|path| path.is_file())?
+    };
+    let metadata = std::fs::metadata(&resolved).ok()?;
+    Some(ExecutableIdentity {
+        typed: typed.to_string(),
+        resolved: resolved.display().to_string(),
+        bytes: metadata.len(),
+        modified_ms: metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok()),
+    })
 }
 
 /// The first word of a script, without surrounding quotes or a PowerShell call operator.
@@ -249,7 +360,8 @@ pub(crate) fn first_word(script: &str) -> String {
     word.to_string()
 }
 
-/// The exit status the conversation shows for the direct command `call_id`.
+/// The exit status the host's header shows for the direct command `call_id`. Only the
+/// header lines before `Output:` are read, so a command cannot report its own status.
 pub(crate) fn exit_status(history: &[ResponseItem], call_id: &str) -> ExitStatus {
     history
         .iter()
@@ -263,13 +375,15 @@ pub(crate) fn exit_status(history: &[ResponseItem], call_id: &str) -> ExitStatus
             _ => None,
         })
         .and_then(|text| {
-            text.lines().find_map(|line| {
-                line.strip_prefix("Process exited with code ")
-                    .map(|code| match code.trim() {
-                        "0" => ExitStatus::Zero,
-                        _ => ExitStatus::NonZero,
-                    })
-            })
+            text.lines()
+                .take_while(|line| *line != "Output:")
+                .find_map(|line| {
+                    line.strip_prefix("Process exited with code ")
+                        .map(|code| match code.trim() {
+                            "0" => ExitStatus::Zero,
+                            _ => ExitStatus::NonZero,
+                        })
+                })
         })
         .unwrap_or(ExitStatus::Unknown)
 }
@@ -280,7 +394,7 @@ fn backticked(content: &str) -> Vec<String> {
         .skip(1)
         .step_by(2)
         .map(normalized)
-        .filter(|command| command.len() >= 4)
+        .filter(|command| !command.is_empty())
         .collect()
 }
 

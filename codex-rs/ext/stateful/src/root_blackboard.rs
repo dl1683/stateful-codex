@@ -16,6 +16,7 @@ use sha2::Sha256;
 
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::recipe_applicability::RecipeCheck;
+use crate::recipe_applicability::is_recipe;
 use crate::source_freshness::AuditedEvidenceFreshness;
 use crate::source_freshness::AuditedPremiseFreshness;
 use crate::source_freshness::EvidenceAudit;
@@ -94,21 +95,25 @@ impl EntryLayout<'_> {
         evidence_aliases: &HashMap<ContextMapEntryId, String>,
     ) {
         let alias = format!("E{}", index + 1);
-        // A recipe's applicability is part of the entry: it is never dropped as decoration.
-        let recipe = self
-            .recipe_checks
-            .get(hit.entry.id.as_str())
-            .map_or_else(String::new, |check| format!(" recipe={}", check.label()));
-        let plain = format!(
-            "{}{recipe}",
-            render_hit(
-                &alias,
-                hit,
-                self.entry_aliases,
-                evidence_aliases,
-                self.evidence_audit,
-            )
-        );
+        // A recipe's applicability precedes its content, so truncating a long entry never
+        // drops it; a recipe that was not checked says so.
+        let recipe = is_recipe(hit.entry.value.kind, &hit.entry.value.content).then(|| {
+            self.recipe_checks
+                .get(hit.entry.id.as_str())
+                .unwrap_or(&RecipeCheck::Unchecked)
+                .label()
+        });
+        let with_recipe = |line: String| match &recipe {
+            Some(label) => line.replacen("] content=", &format!("] recipe={label} content="), 1),
+            None => line,
+        };
+        let plain = with_recipe(render_hit(
+            &alias,
+            hit,
+            self.entry_aliases,
+            evidence_aliases,
+            self.evidence_audit,
+        ));
         // What the current value replaced is decoration: it is dropped before the entry
         // itself is.
         // Only a decoration that keeps the whole entry within its bound is tried.
@@ -131,14 +136,14 @@ impl EntryLayout<'_> {
                 self.shown.push((index, alias));
             }
             let canonical = format!(
-                "{}{recipe}{}",
-                render_hit(
+                "{}{}",
+                with_recipe(render_hit(
                     hit.entry.id.as_str(),
                     hit,
                     &self.identity_aliases,
                     &self.identity_evidence,
                     self.evidence_audit,
-                ),
+                )),
                 predecessor.filter(|_| decorated_shown).map_or_else(
                     String::new,
                     |predecessor| format!("|replaces:{}@{}", predecessor.id, predecessor.revision)
