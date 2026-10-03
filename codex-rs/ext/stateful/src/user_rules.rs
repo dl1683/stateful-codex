@@ -165,12 +165,13 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
     // The scope of the list the current line belongs to, from its header. Blank lines keep
     // it (Markdown lists often follow a blank line); any other prose line replaces it.
     let mut list_header: Option<HeaderScope> = None;
+    let mut in_list = false;
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let is_list_item = list_item_body(trimmed).is_some();
+        let is_list_item = in_list_item(line, trimmed, &mut in_list);
         if !is_list_item {
             list_header = header_scope(trimmed);
         }
@@ -228,12 +229,13 @@ fn header_scope(line: &str) -> Option<HeaderScope> {
 /// The scope inherited by the list item of `text` that contains `clause`, if any.
 pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<HeaderScope> {
     let mut list_header = None;
+    let mut in_list = false;
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let is_list_item = list_item_body(trimmed).is_some();
+        let is_list_item = in_list_item(line, trimmed, &mut in_list);
         if !is_list_item {
             list_header = header_scope(trimmed);
         }
@@ -242,6 +244,15 @@ pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<HeaderScope> {
         }
     }
     None
+}
+
+/// Whether `line` belongs to a list item: an item itself, or an indented continuation of
+/// one (a Markdown lazy continuation keeps the item, and so the header, it continues).
+/// Tracks across lines whether a list is open.
+fn in_list_item(line: &str, trimmed: &str, in_list: &mut bool) -> bool {
+    let continuation = *in_list && line.starts_with([' ', '\t']);
+    *in_list = list_item_body(trimmed).is_some() || continuation;
+    *in_list
 }
 
 /// Whether `clause` reports what someone else said or advised rather than stating the

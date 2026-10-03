@@ -150,3 +150,38 @@ For this task:
         )
     );
 }
+
+#[test]
+fn indented_continuations_stay_under_their_list_header() {
+    let relayed = "The assistant suggested these preferences:
+- Prefer targeted tests,
+  keeping the changes small.
+- Never run the whole suite.";
+    let task = "For this task:
+- Prefer targeted tests,
+  keeping the changes small.
+- Never run the whole suite.";
+    assert_eq!(
+        (
+            marked_rules(relayed),
+            super::inherited_scope(relayed, "- Never run the whole suite."),
+            marked_rules(task),
+            super::inherited_scope(task, "keeping the changes small."),
+        ),
+        (
+            Vec::new(),
+            Some(super::HeaderScope::Reported),
+            [
+                "- Prefer targeted tests,",
+                "keeping the changes small.",
+                "- Never run the whole suite."
+            ]
+            .map(|text| RuleClause {
+                text: text.to_string(),
+                standing: RuleStanding::Pending,
+            })
+            .to_vec(),
+            Some(super::HeaderScope::Pending),
+        )
+    );
+}

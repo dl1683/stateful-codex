@@ -60,6 +60,15 @@ pub(crate) fn user_rule_entry_id(
     BlackboardEntryId::parse(id).ok()
 }
 
+/// The current time in Unix milliseconds, the clock entry timestamps use.
+pub(crate) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
 /// Restatements of one wording after which a rule is no longer re-established.
 const MAX_RULE_GENERATIONS: u32 = 8;
 
@@ -92,6 +101,8 @@ pub(crate) async fn capture_marked_rules(
                 thread_id,
                 turn_id,
                 receipt_turn_id: turn_id,
+                // The message starting this turn follows every retirement recorded so far.
+                stated_at_ms: i64::MAX,
             },
             &rule.text,
             rule.standing,
@@ -114,6 +125,8 @@ pub(crate) struct RuleSource<'a> {
     pub(crate) turn_id: &'a str,
     /// The turn being run now, which the receipt belongs to.
     pub(crate) receipt_turn_id: &'a str,
+    /// When the user wrote that message (Unix milliseconds).
+    pub(crate) stated_at_ms: i64,
 }
 
 /// Stores one rule in the user's exact words (the whole clause they wrote), or returns the
@@ -130,6 +143,7 @@ pub(crate) async fn store_user_rule(
         thread_id,
         turn_id,
         receipt_turn_id,
+        stated_at_ms,
     } = source;
     let store = services
         .blackboard()
@@ -156,6 +170,7 @@ pub(crate) async fn store_user_rule(
     };
     // The current generation of this wording, or the first free one after inactive history.
     let mut id = None;
+    let mut retired_at_ms = None;
     for generation in 0..MAX_RULE_GENERATIONS {
         let candidate = user_rule_entry_id(project_id, clause, generation)
             .ok_or_else(|| "the rule cannot be identified".to_string())?;
@@ -181,8 +196,18 @@ pub(crate) async fn store_user_rule(
                 .await;
             }
             // Retired or superseded: the user restating it re-establishes it below.
-            Some(_) => {}
+            Some(inactive) => {
+                retired_at_ms = retired_at_ms.max(Some(inactive.updated_at_ms));
+            }
         }
+    }
+    // Only a message written after the retirement restores the rule; quoting the message
+    // that first stated it (or any other earlier one) never does.
+    if retired_at_ms.is_some_and(|retired| stated_at_ms <= retired) {
+        return Err(
+            "nothing written: this rule was retired after the user wrote that message; only a later message from the user restores it"
+                .to_string(),
+        );
     }
     let id = id.ok_or_else(|| {
         "this rule was retired too many times to be stored again automatically".to_string()

@@ -273,3 +273,79 @@ async fn restating_a_retired_rule_reactivates_it() {
         )
     );
 }
+
+/// Quoting the message that stated a rule cannot bring the rule back once it is retired;
+/// a message written afterwards can.
+#[tokio::test]
+async fn a_retired_rule_returns_only_from_a_later_message() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let message = "From now on, never run the whole test suite.";
+    let stored = capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        message,
+    )
+    .await
+    .remove(0)
+    .entry;
+    let stated_before = stored.created_at_ms - 1;
+    let store = services.blackboard().await.expect("blackboard");
+    store
+        .update_entry(
+            "project-1",
+            &stored.id,
+            codex_project_intelligence::BlackboardEntryUpdate {
+                expected_revision: stored.revision,
+                kind: stored.value.kind,
+                content: stored.value.content.clone(),
+                structured_value: None,
+                confidence: stored.value.confidence,
+                verification: stored.value.verification,
+                importance: stored.value.importance,
+                root_promotion: stored.value.root_promotion,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                state: codex_project_intelligence::BlackboardEntryState::Tombstoned,
+                superseded_by: None,
+                provenance: stored.value.provenance.clone(),
+            },
+        )
+        .await
+        .expect("retire");
+    let replayed = super::store_user_rule(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        super::RuleSource {
+            thread_id: "thread-1",
+            turn_id: "turn-1",
+            receipt_turn_id: "turn-3",
+            stated_at_ms: stated_before,
+        },
+        message,
+        RuleStanding::Standing,
+    )
+    .await
+    .map(|captured| captured.newly_stored);
+    let restated = super::store_user_rule(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        super::RuleSource {
+            thread_id: "thread-1",
+            turn_id: "turn-4",
+            receipt_turn_id: "turn-4",
+            stated_at_ms: super::now_ms() + 1_000,
+        },
+        message,
+        RuleStanding::Standing,
+    )
+    .await
+    .map(|captured| captured.newly_stored);
+    assert_eq!((replayed.is_err(), restated), (true, Ok(true)));
+}

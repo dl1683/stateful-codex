@@ -194,7 +194,11 @@ impl BlackboardRecorder {
                 "nothing written: that sentence relays someone else's words, not the user's rule",
             ));
         }
-        let (thread_id, turn_id) = (self.thread_id.clone(), message.turn_id);
+        let (thread_id, turn_id, stated_at_ms) = (
+            self.thread_id.clone(),
+            message.turn_id,
+            message.received_at_ms,
+        );
         if clause.len() > MAX_RULE_BYTES {
             return Err(respond(format!(
                 "the sentence holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
@@ -208,6 +212,7 @@ impl BlackboardRecorder {
                 thread_id: &thread_id,
                 turn_id: &turn_id,
                 receipt_turn_id,
+                stated_at_ms,
             },
             &clause,
             RuleStanding::Standing,

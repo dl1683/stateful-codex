@@ -37,6 +37,9 @@ fn log_resolves_a_quote_to_its_clause_within_the_project() {
         project_id: "project-1".to_string(),
         turn_id: "turn-1".to_string(),
         text: "Hi. Please never run git commit yourself. Thanks.".to_string(),
+        received_at_ms: registry
+            .find("thread-1", "project-1", "never run git commit")
+            .map_or(0, |(message, _)| message.received_at_ms),
     };
     assert_eq!(
         (

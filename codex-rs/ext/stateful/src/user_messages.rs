@@ -24,6 +24,8 @@ pub(crate) struct UserMessage {
     pub(crate) project_id: String,
     pub(crate) turn_id: String,
     pub(crate) text: String,
+    /// When the host received the message (Unix milliseconds).
+    pub(crate) received_at_ms: i64,
 }
 
 #[derive(Default)]
@@ -78,6 +80,7 @@ impl UserMessageRegistry {
             project_id: project_id.to_string(),
             turn_id: turn_id.to_string(),
             text: text[..end].to_string(),
+            received_at_ms: crate::rule_capture::now_ms(),
         };
         let mut threads = self
             .threads
@@ -92,7 +95,13 @@ impl UserMessageRegistry {
             threads.order.push_back(thread_id.to_string());
         }
         let messages = threads.messages.entry(thread_id.to_string()).or_default();
-        if messages.iter().any(|existing| *existing == message) {
+        // A message recorded again (a cold resume re-records the current turn) keeps the
+        // time it was first received.
+        if messages.iter().any(|existing| {
+            existing.turn_id == message.turn_id
+                && existing.project_id == message.project_id
+                && existing.text == message.text
+        }) {
             return;
         }
         if messages.len() == MAX_MESSAGES_PER_THREAD {
