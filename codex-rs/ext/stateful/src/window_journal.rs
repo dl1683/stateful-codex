@@ -37,7 +37,6 @@ use crate::window_capture::command_text;
 use crate::window_capture::exit_code;
 use crate::window_capture::exit_text;
 use crate::window_capture::head;
-use crate::window_capture::is_validation_command;
 
 /// Publication content stays under the blackboard's 4,096-byte entry bound.
 const MAX_PUBLICATION_BYTES: usize = 3_800;
@@ -381,7 +380,7 @@ fn publication_content(
         if let Some(working) = commands.iter().find(|event| {
             event.event.payload["status"] == "completed"
                 && exit_code(event) == Some(0)
-                && is_validation_command(command_text(event))
+                && event.event.payload["validation"] == true
         }) {
             lines.push(receipt_line(format!(
                 "Last working test or check command (exit 0, not a test count), in {}, verbatim: `{}`.",
@@ -393,7 +392,7 @@ fn publication_content(
         }
         if let Some(test) = commands
             .iter()
-            .find(|event| is_validation_command(command_text(event)) && exit_code(event) != Some(0))
+            .find(|event| event.event.payload["validation"] == true && exit_code(event) != Some(0))
         {
             lines.push(receipt_line(format!(
                 "Last failing test or check command ({}): `{}`.",

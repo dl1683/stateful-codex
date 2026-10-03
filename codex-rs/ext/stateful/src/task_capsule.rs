@@ -31,7 +31,6 @@ use crate::window_capture::exit_code;
 use crate::window_capture::exit_text;
 use crate::window_capture::head;
 use crate::window_capture::tail;
-use crate::window_capture::validation_runner;
 
 const WORLD_STATE_ID: &str = "stateful_task_capsule";
 /// Stored for a window whose closed predecessor observed no work, so it is not rebuilt.
@@ -45,10 +44,20 @@ const UPDATE_END_MARKER: &str = "</stateful_task_capsule_update>";
 const LARGE_CAPS: CapsuleCaps = CapsuleCaps {
     bytes: 4_096,
     tokens: 1_024,
+    quote: 320,
+    command: 480,
+    cwd: 160,
+    closings: 3,
+    closing: 240,
 };
 const SMALL_CAPS: CapsuleCaps = CapsuleCaps {
     bytes: 2_048,
     tokens: 512,
+    quote: 180,
+    command: 280,
+    cwd: 100,
+    closings: 2,
+    closing: 160,
 };
 const SMALL_WINDOW_TOKENS: i64 = 80_000;
 const MAX_FILES: usize = 8;
@@ -56,23 +65,24 @@ const MAX_PROGRESS_DOCS: usize = 2;
 const PROGRESS_LINES: usize = 40;
 const MAX_PROGRESS_BYTES: usize = 600;
 const MAX_OUTPUT_TAIL_BYTES: usize = 320;
-const MAX_QUOTE_BYTES: usize = 320;
-const MAX_CLOSINGS: usize = 3;
-const MAX_CLOSING_BYTES: usize = 240;
-const MAX_WORKING_COMMAND_BYTES: usize = 480;
 const MAX_OTHER_COMMAND_BYTES: usize = 200;
-const MAX_CWD_BYTES: usize = 160;
 /// Observations of the newest page the capsule reads (newest first).
 const CAPSULE_PAGE: u32 = 64;
 const PROGRESS_NAMES: &[&str] = &[
     "WORKLOG", "PROGRESS", "STATUS", "TODO", "NOTES", "PLAN", "RESULT", "JOURNAL", "HANDOFF",
 ];
 
-/// A capsule's byte and token caps, markers included.
+/// A capsule's byte and token caps, markers included, and the sizes of the protected fields
+/// (next step, working command, closing words), chosen so those always fit together.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CapsuleCaps {
     bytes: usize,
     tokens: usize,
+    quote: usize,
+    command: usize,
+    cwd: usize,
+    closings: usize,
+    closing: usize,
 }
 
 /// The capsule caps for a model, from its automatic compaction limit.
@@ -254,7 +264,7 @@ async fn build_capsule(
     roots: Vec<PathBuf>,
     caps: CapsuleCaps,
 ) -> String {
-    let mut lines = lines(newest_first, through_seq, roots).await;
+    let mut lines = lines(newest_first, through_seq, roots, caps).await;
     let joined = |lines: &[(u8, String)]| {
         lines
             .iter()
@@ -294,6 +304,7 @@ async fn lines(
     newest_first: &[WindowEvent],
     through_seq: u64,
     roots: Vec<PathBuf>,
+    caps: CapsuleCaps,
 ) -> Vec<(u8, String)> {
     let commands = || {
         newest_first
@@ -314,16 +325,16 @@ async fn lines(
                 "Task capsule: where the work stood at compaction (host observations through journal event {through_seq} and the agent's own words; not a verified summary)."
             ),
         ),
-        (0, next_step(newest_first, through_seq)),
+        (0, next_step(newest_first, through_seq, caps.quote)),
     ];
     let working = commands().find(|event| event.event.payload["working"] == true);
     if let Some(working) = working {
-        lines.push((0, working_line(working, patched_after(working.seq))));
-        let runner = validation_runner(command_text(working));
+        lines.push((0, working_line(working, patched_after(working.seq), caps)));
+        let runner = &working.event.payload["runner"];
         if let Some(earlier) = commands().find(|event| {
             event.seq < working.seq
                 && exit_code(event).is_some_and(|code| code != 0)
-                && validation_runner(command_text(event)) == runner
+                && &event.event.payload["runner"] == runner
                 && command_text(event) != command_text(working)
         }) {
             lines.push((
@@ -336,7 +347,7 @@ async fn lines(
             ));
         }
     }
-    let closings = closings(newest_first, through_seq);
+    let closings = closings(newest_first, through_seq, caps);
     if !closings.is_empty() {
         lines.push((
             0,
@@ -409,25 +420,27 @@ async fn lines(
     lines
 }
 
-fn working_line(working: &WindowEvent, patched_after: bool) -> String {
-    let complete = working.event.payload["commandComplete"] != false;
+fn working_line(working: &WindowEvent, patched_after: bool, caps: CapsuleCaps) -> String {
+    let command = command_text(working);
+    let cwd = working.event.payload["cwd"]
+        .as_str()
+        .unwrap_or("an unrecorded directory");
+    // Reusable only when an exact shell script was captured whole and is shown whole.
+    let replayable = working.event.payload["replayable"] == true
+        && command.len() <= caps.command
+        && cwd.len() <= caps.cwd;
     format!(
-        "Last working test or check command (exit 0, a process exit code, not a test count){}{}: `{}` in {}.{}",
+        "Last working test/check run (exit 0; not a test count){}, {}: `{}` in {}.{}",
         working.event.payload["shell"]
             .as_str()
-            .map_or_else(String::new, |shell| format!(", run by {shell}")),
-        if complete {
-            "; reuse it verbatim, with its directory and any environment settings in it"
+            .map_or_else(String::new, |shell| format!(" by {shell}")),
+        if replayable {
+            "reusable verbatim"
         } else {
-            "; shortened or redacted here, so not replayable as shown"
+            "an excerpt, not replayable as shown (the thread's history has the exact command)"
         },
-        head(command_text(working), MAX_WORKING_COMMAND_BYTES),
-        head(
-            working.event.payload["cwd"]
-                .as_str()
-                .unwrap_or("an unrecorded directory"),
-            MAX_CWD_BYTES
-        ),
+        head(command, caps.command),
+        head(cwd, caps.cwd),
         if patched_after {
             " Files were patched after it."
         } else {
@@ -437,7 +450,7 @@ fn working_line(working: &WindowEvent, patched_after: bool) -> String {
 }
 
 /// The ends of the agent's most recent closing messages, one per turn, quoted exactly.
-fn closings(newest_first: &[WindowEvent], through_seq: u64) -> Vec<String> {
+fn closings(newest_first: &[WindowEvent], through_seq: u64, caps: CapsuleCaps) -> Vec<String> {
     let mut turns = Vec::<&str>::new();
     let mut closings = Vec::new();
     for event in newest_first.iter().filter(|event| {
@@ -454,9 +467,9 @@ fn closings(newest_first: &[WindowEvent], through_seq: u64) -> Vec<String> {
         closings.push(format!(
             "- {} observations before compaction: \"...{}\"",
             through_seq.saturating_sub(event.seq),
-            tail(text, MAX_CLOSING_BYTES).replace('\n', " ")
+            tail(text, caps.closing).replace('\n', " ")
         ));
-        if closings.len() == MAX_CLOSINGS {
+        if closings.len() == caps.closings {
             break;
         }
     }
@@ -465,7 +478,7 @@ fn closings(newest_first: &[WindowEvent], through_seq: u64) -> Vec<String> {
 
 /// The next step only from what the agent itself recorded, or unknown. The newest plan
 /// supersedes older plans even when all its steps are done.
-fn next_step(newest_first: &[WindowEvent], through_seq: u64) -> String {
+fn next_step(newest_first: &[WindowEvent], through_seq: u64, quote: usize) -> String {
     let later_user_message = |seq: u64| {
         newest_first
             .iter()
@@ -493,7 +506,7 @@ fn next_step(newest_first: &[WindowEvent], through_seq: u64) -> String {
         return format!(
             "Next step (the agent's last update_plan, {} observations before compaction): \"{}\".{}",
             through_seq.saturating_sub(seq),
-            head(&step, MAX_QUOTE_BYTES),
+            head(&step, quote),
             caveat(seq)
         );
     }
@@ -509,13 +522,17 @@ fn next_step(newest_first: &[WindowEvent], through_seq: u64) -> String {
             through_seq.saturating_sub(event.seq),
             head(
                 event.event.payload["text"].as_str().unwrap_or_default(),
-                MAX_QUOTE_BYTES
+                quote
             ),
             caveat(event.seq)
         );
     }
-    if completed_plan.is_some() {
-        return "Next step: unknown. The agent's last update_plan marked every step done; check the closing words below and the user's last message.".to_string();
+    if let Some(plan) = newest_plan {
+        return if plan.event.payload["moreSteps"].as_u64().unwrap_or_default() > 0 {
+            "Next step: unknown. The agent's last update_plan was only partly recorded; check the closing words below and the user's last message.".to_string()
+        } else {
+            "Next step: unknown. The agent's last update_plan marked every step done; check the closing words below and the user's last message.".to_string()
+        };
     }
     "Next step: unknown. No plan or statement of intent was recorded; check the closing words below and the user's last message.".to_string()
 }
@@ -578,7 +595,12 @@ async fn edited_files(
     }
     let mut files = Vec::with_capacity(seen.len());
     for (path, status) in seen {
-        let (observed, bytes) = match observer.observe(&path).await {
+        let observation = if status == "declined" {
+            Observation::NotRead("not read (the patch was declined)")
+        } else {
+            observer.observe(&path).await
+        };
+        let (observed, bytes) = match observation {
             Observation::Read(bytes) => (
                 format!("{} bytes, sha256 {}", bytes.len(), fingerprint(&bytes)),
                 Some(bytes),

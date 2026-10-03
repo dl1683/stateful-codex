@@ -24,7 +24,6 @@ use tempfile::TempDir;
 
 use super::publish_window;
 use crate::services::ProjectIntelligenceServices;
-use crate::window_capture::is_validation_command;
 use crate::window_capture::journal_item;
 
 pub(crate) fn command_item(id: &str, command: &str, exit_code: i32, output: &str) -> TurnItem {
@@ -86,13 +85,18 @@ pub(crate) fn message_item(id: &str, phase: MessagePhase, text: &str) -> TurnIte
 }
 
 #[test]
-fn validation_recognition_is_by_runner_name_only() {
-    assert!(is_validation_command("cargo test -p codex-core"));
-    assert!(is_validation_command(
-        "python -m pytest tests/test_scale.py"
-    ));
-    assert!(!is_validation_command("cargo fmt"));
-    assert!(!is_validation_command("git status"));
+fn validation_recognition_is_by_what_runs() {
+    use crate::runner::invoked_runner;
+    assert_eq!(
+        invoked_runner("cargo test -p codex-core"),
+        Some("cargo test")
+    );
+    assert_eq!(
+        invoked_runner("python -m pytest tests/test_scale.py"),
+        Some("pytest")
+    );
+    assert_eq!(invoked_runner("cargo fmt"), None);
+    assert_eq!(invoked_runner("git status"), None);
 }
 
 #[tokio::test]
@@ -320,7 +324,7 @@ fn a_long_failing_command_keeps_its_exit_code_in_the_publication() {
             project_id: "project-1".to_string(),
             turn_id: "turn-1".to_string(),
             kind: codex_stateful_runtime::WindowEventKind::Command,
-            payload: json!({"command": long, "status": "failed", "exitCode": 17}),
+            payload: json!({"command": long, "status": "failed", "exitCode": 17, "validation": true}),
         },
         created_at_ms: 0,
     };

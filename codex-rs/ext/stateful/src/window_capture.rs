@@ -168,7 +168,9 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
                     command.stderr.as_deref().unwrap_or_default()
                 )
             });
-            let (full_command, shell) = crate::runner::command_source(&command.command);
+            let form = crate::runner::CommandForm::of(&command.command);
+            let full_command = form.text();
+            let runner = form.runner();
             let redacted_command = codex_secrets::redact_secrets(full_command.clone());
             let completed_ok = status == "completed" && command.exit_code == Some(0);
             // Escaping can make text serialize larger than its bytes: halve the kept text
@@ -177,15 +179,15 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
             loop {
                 let command_line = head(&redacted_command, command_bytes);
                 let output_tail = clean_tail(&output, tail_bytes);
-                let validation = is_validation_command(&full_command);
                 let payload = json!({
                     // Let a capsule find test runs, and working ones, older than its page.
-                    "validation": validation,
-                    "working": validation && completed_ok,
+                    "validation": runner.is_some(),
+                    "runner": runner,
+                    "working": runner.is_some() && completed_ok,
                     "command": command_line,
-                    "shell": shell,
-                    // Replayable only when nothing was cut or redacted.
-                    "commandComplete": command_line == full_command,
+                    "shell": form.shell(),
+                    // Replayable only as an exact shell script with nothing cut or redacted.
+                    "replayable": form.replayable() && command_line == full_command,
                     "cwd": clean_head(&command.cwd.to_string(), MAX_CWD_BYTES),
                     "status": status,
                     "exitCode": command.exit_code,
@@ -321,8 +323,12 @@ fn plan_payload(arguments: &Value) -> Value {
         "moreSteps": 0,
     });
     let steps = arguments["plan"].as_array().cloned().unwrap_or_default();
-    let mut omitted = 0usize;
-    for (index, step) in steps.iter().enumerate() {
+    // Open steps are kept before completed ones, so a bounded plan never hides what is left.
+    let mut order = (0..steps.len()).collect::<Vec<_>>();
+    order.sort_by_key(|index| steps[*index]["status"] == "completed");
+    let mut kept = Vec::new();
+    for index in order {
+        let step = &steps[index];
         let entry = json!({
             "step": clean_head(step["step"].as_str().unwrap_or_default(), MAX_PLAN_STEP_BYTES),
             "status": head(step["status"].as_str().unwrap_or_default(), 32),
@@ -331,14 +337,15 @@ fn plan_payload(arguments: &Value) -> Value {
         candidate["steps"]
             .as_array_mut()
             .unwrap_or_else(|| unreachable!("steps is an array"))
-            .push(entry);
-        if index < MAX_PLAN_STEPS && serialized_len(&candidate) <= MAX_OBSERVATION_BYTES {
+            .push(entry.clone());
+        if kept.len() < MAX_PLAN_STEPS && serialized_len(&candidate) <= MAX_OBSERVATION_BYTES {
             payload = candidate;
-        } else {
-            omitted += 1;
+            kept.push((index, entry));
         }
     }
-    payload["moreSteps"] = json!(omitted);
+    kept.sort_by_key(|(index, _)| *index);
+    payload["moreSteps"] = json!(steps.len() - kept.len());
+    payload["steps"] = Value::Array(kept.into_iter().map(|(_, entry)| entry).collect());
     payload
 }
 
@@ -370,16 +377,6 @@ pub(crate) fn exit_text(event: &WindowEvent) -> String {
         (_, Some(code)) => format!("exit {code}"),
         (_, None) => "exit unknown".to_string(),
     }
-}
-
-/// Whether a command's source invokes a test or check runner (see `runner::invoked_runner`).
-pub(crate) fn is_validation_command(command: &str) -> bool {
-    validation_runner(command).is_some()
-}
-
-/// The test or check runner a command's source invokes.
-pub(crate) fn validation_runner(command: &str) -> Option<&'static str> {
-    crate::runner::invoked_runner(command)
 }
 
 /// The first `max` bytes of `text`, cut at a character boundary.

@@ -30,6 +30,16 @@ async fn only_files_inside_the_project_roots_are_read_and_reads_are_bounded() {
             .await,
         Observation::NotRead("missing at the boundary")
     ));
+    // A path that leaves the root through `..` is judged by where it really is.
+    let escaping = root
+        .path()
+        .join("..")
+        .join(outside.path().file_name().expect("name"))
+        .join("notes.md");
+    assert!(matches!(
+        observer.observe(&escaping.display().to_string()).await,
+        Observation::NotRead(reason) if reason.contains("outside the project roots")
+    ));
     let large = root.path().join("large.bin");
     std::fs::write(&large, vec![0u8; 4 * 1024 * 1024 + 1]).expect("write");
     assert!(matches!(

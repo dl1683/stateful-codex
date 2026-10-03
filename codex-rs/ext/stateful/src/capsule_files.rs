@@ -44,10 +44,32 @@ impl FileObserver {
     }
 
     pub(crate) async fn observe(&mut self, path: &str) -> Observation {
+        const OUTSIDE: &str = "not observed (outside the project roots on this host)";
         let path = Path::new(path);
         if !path.is_absolute() || !self.roots.iter().any(|root| path.starts_with(root)) {
-            return Observation::NotRead("not observed (outside the project roots on this host)");
+            return Observation::NotRead(OUTSIDE);
         }
+        // Links and `..` are resolved first: the file actually read must lie inside a root.
+        let real = match tokio::fs::canonicalize(path).await {
+            Ok(real) => real,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Observation::NotRead("missing at the boundary");
+            }
+            Err(_) => return Observation::NotRead("unreadable at the boundary"),
+        };
+        let mut inside = false;
+        for root in &self.roots {
+            if let Ok(root) = tokio::fs::canonicalize(root).await
+                && real.starts_with(&root)
+            {
+                inside = true;
+                break;
+            }
+        }
+        if !inside {
+            return Observation::NotRead(OUTSIDE);
+        }
+        let path = real.as_path();
         let Some(remaining) = READ_BUDGET.checked_sub(self.started.elapsed()) else {
             return Observation::NotRead("not observed (boundary read budget spent)");
         };

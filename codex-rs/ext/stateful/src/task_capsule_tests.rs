@@ -267,10 +267,7 @@ async fn without_an_open_plan_the_capsule_quotes_or_says_unknown_and_never_claim
     let body = capsule(&store, "window-1", Vec::new(), None).await;
     assert!(body.contains("marked every step done"), "{body}");
     assert!(!body.contains("\"Implement loader\""), "{body}");
-    assert!(
-        body.contains("(exit 0, a process exit code, not a test count)"),
-        "{body}"
-    );
+    assert!(body.contains("(exit 0; not a test count)"), "{body}");
     assert!(!body.contains("passed"), "{body}");
 
     say(
@@ -443,11 +440,91 @@ async fn the_next_step_before_a_detour_and_the_working_route_survive_pressure() 
 
     let body = capsule(&store, "window-9", Vec::new(), SMALL).await;
     assert!(body.contains(&format!("`{working}`")), "{body}");
-    assert!(body.contains("run by pwsh"), "{body}");
+    assert!(body.contains("by pwsh, reusable verbatim"), "{body}");
     assert!(
         body.contains("Next step: add the INI and JSON loaders behind the same loader interface, then the layering tests."),
         "{body}"
     );
     assert!(body.contains("Profiled: help rendering is 4 ms."), "{body}");
     within(&body, 2_048, 512);
+}
+
+/// The protected fields themselves at their limits: a long commentary, a long working command
+/// in a long directory, a long newest closing and the pre-detour closing with the next step,
+/// at the 50k caps. Both N5 and N7 must survive, and a cut command is not called replayable.
+#[tokio::test]
+async fn protected_fields_at_their_limits_keep_both_the_next_step_and_the_route() {
+    let home = TempDir::new().expect("home");
+    let store = store(&home).await;
+    let working = format!("python -m pytest -q --basetemp=.t {}", "k".repeat(470));
+    run(
+        &store,
+        "t02",
+        "t02-c1",
+        &["bash", "-lc", &working],
+        0,
+        "12 passed",
+    )
+    .await;
+    let next = "Next step: add the INI and JSON loaders, then the layering tests.";
+    say(
+        &store,
+        "t05",
+        "t05-final",
+        MessagePhase::FinalAnswer,
+        &format!("{}{next}", "w".repeat(2_000)),
+    )
+    .await;
+    say(
+        &store,
+        "t06",
+        "t06-m",
+        MessagePhase::Commentary,
+        &"c".repeat(400),
+    )
+    .await;
+    say(
+        &store,
+        "t06",
+        "t06-final",
+        MessagePhase::FinalAnswer,
+        &"d".repeat(400),
+    )
+    .await;
+    let body = capsule(&store, "window-3", Vec::new(), SMALL).await;
+    assert!(body.contains(next), "{body}");
+    assert!(body.contains("python -m pytest -q --basetemp=.t"), "{body}");
+    assert!(body.contains("not replayable as shown"), "{body}");
+    assert!(!body.contains("reusable verbatim"), "{body}");
+    within(&body, 2_048, 512);
+}
+
+/// A long plan whose only open step comes after sixteen completed ones keeps that step.
+#[tokio::test]
+async fn an_open_step_after_many_completed_steps_is_kept() {
+    let home = TempDir::new().expect("home");
+    let store = store(&home).await;
+    let mut steps = (0..16)
+        .map(|index| json!({"step": format!("Done {index}"), "status": "completed"}))
+        .collect::<Vec<_>>();
+    steps.push(json!({"step": "Add INI and JSON loaders", "status": "pending"}));
+    let turn_store = codex_extension_api::ExtensionData::new("turn-1");
+    crate::window_capture::remember_plan_call(
+        &turn_store,
+        &codex_extension_api::ToolName::plain("update_plan"),
+        "plan-1",
+        &codex_extension_api::ToolPayload::Function {
+            arguments: json!({"plan": steps}).to_string(),
+        },
+    );
+    crate::window_capture::journal_plan_call(
+        &store,
+        &turn_store,
+        ("project-1", "thread-1", "turn-1"),
+        "plan-1",
+        codex_extension_api::ToolCallOutcome::Completed { success: true },
+    )
+    .await;
+    let body = capsule(&store, "window-4", Vec::new(), None).await;
+    assert!(body.contains("\"Add INI and JSON loaders\""), "{body}");
 }
