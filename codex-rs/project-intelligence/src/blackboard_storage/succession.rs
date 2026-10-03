@@ -259,3 +259,36 @@ impl BlackboardStore {
         Ok(predecessors)
     }
 }
+
+impl BlackboardStore {
+    /// Entries of the project recorded or changed at or after `since_ms`, in any state, newest
+    /// first, at most `limit`; the flag says whether more exist.
+    pub async fn changed_since(
+        &self,
+        project_id: &str,
+        since_ms: i64,
+        limit: u32,
+    ) -> Result<(Vec<BlackboardEntry>, bool), BlackboardStoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let ids = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM blackboard_entries
+             WHERE project_id = ? AND updated_at_ms >= ?
+             ORDER BY updated_at_ms DESC, id LIMIT ?",
+        )
+        .bind(project_id)
+        .bind(since_ms)
+        .bind(i64::from(limit) + 1)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let more = ids.len() > limit as usize;
+        let mut entries = Vec::with_capacity(ids.len().min(limit as usize));
+        for id in ids.into_iter().take(limit as usize) {
+            let id = BlackboardEntryId::parse(id)?;
+            if let Some(entry) = load_entry(&mut transaction, project_id, &id).await? {
+                entries.push(entry);
+            }
+        }
+        transaction.commit().await?;
+        Ok((entries, more))
+    }
+}

@@ -52,7 +52,7 @@ fn replaces_suffix(predecessor: &BlackboardEntry) -> String {
     let until = crate::continuity::format_time(predecessor.updated_at_ms);
     let until = until.split(' ').next().unwrap_or(&until);
     format!(
-        " replaces: {} (until {until}; earlier versions: blackboard_query entryScope historical)",
+        " replaces: {} (until {until}; earlier versions: memory_read)",
         serde_json::Value::String(excerpt)
     )
 }

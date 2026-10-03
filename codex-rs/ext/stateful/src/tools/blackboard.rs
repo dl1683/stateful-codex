@@ -353,6 +353,12 @@ impl BlackboardQueryTool {
 }
 
 impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
+    fn exposure(&self) -> codex_extension_api::ToolExposure {
+        // memory_read is the first recall; this detailed query stays discoverable and
+        // callable from nested code mode.
+        codex_extension_api::ToolExposure::Deferred
+    }
+
     fn tool_name(&self) -> ToolName {
         ToolName::plain(TOOL_NAME)
     }

@@ -11,8 +11,9 @@ use crate::visible_root::VisibleRootRegistry;
 
 /// Serialized size of every Stateful tool (32,827 bytes before the 2026-10-02 trim). Verified
 /// user-rule fields on the record tool took it to 18,223 while the direct roster fell to
-/// 11,032; deferred tools are loaded only through tool search.
-const MAX_ROSTER_BYTES: usize = 18_500;
+/// 11,032; deferred tools are loaded only through tool search. memory_read (direct) with
+/// blackboard_query deferred: 19,158 in total, 9,895 direct.
+const MAX_ROSTER_BYTES: usize = 19_500;
 /// Every request carries the directly exposed tools, so their size is a fixed per-request
 /// cost; specialized tools are deferred to tool search.
 const MAX_DIRECT_ROSTER_BYTES: usize = 11_500;

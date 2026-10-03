@@ -7,6 +7,7 @@ mod blackboard_write;
 mod context_map;
 mod conversation_read;
 mod evidence;
+mod memory_read;
 mod obligation;
 mod run;
 mod run_read;
@@ -73,6 +74,11 @@ pub(super) fn project_intelligence_tools(
         )),
         Arc::new(conversation_read::ConversationReadTool::new(
             project_id.clone(),
+            projects.clone(),
+        )),
+        Arc::new(memory_read::MemoryReadTool::new(
+            project_id.clone(),
+            services.clone(),
             projects.clone(),
         )),
         Arc::new(context_map::ContextMapQueryTool::new(
