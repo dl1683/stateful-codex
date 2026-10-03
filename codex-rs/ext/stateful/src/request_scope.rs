@@ -462,11 +462,47 @@ pub(crate) fn classify(text: &str) -> RequestScope {
     };
     if opens_with_reply
         || mentions(REFERENTS)
+        || names_shared_work(&words)
         || (mentions(DEICTIC_REFERENTS) && !names_its_subject(text))
     {
         return RequestScope::Continuity;
     }
     RequestScope::SelfContained
+}
+
+/// Owners and pointers that, before a work noun, name earlier shared work ("your fix",
+/// "our version", "that variant"): a named file never supplies that work.
+const SHARED_WORK_DETERMINERS: &[&str] = &["your", "our", "that", "this", "these", "those", "same"];
+const WORK_NOUNS: &[&str] = &[
+    "fix",
+    "fixes",
+    "version",
+    "versions",
+    "variant",
+    "variants",
+    "approach",
+    "approaches",
+    "idea",
+    "ideas",
+    "plan",
+    "patch",
+    "change",
+    "changes",
+    "proposal",
+    "design",
+    "option",
+    "options",
+    "suggestion",
+    "solution",
+    "draft",
+    "refactor",
+    "implementation",
+];
+
+fn names_shared_work(words: &[&str]) -> bool {
+    words
+        .windows(2)
+        .any(|pair| SHARED_WORK_DETERMINERS.contains(&pair[0]) && WORK_NOUNS.contains(&pair[1]))
 }
 
 /// Whether the request names a concrete subject a deictic word can point at: a call such

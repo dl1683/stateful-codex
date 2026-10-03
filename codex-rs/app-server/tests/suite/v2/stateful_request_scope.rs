@@ -73,7 +73,13 @@ async fn self_contained_requests_defer_the_record_until_a_request_refers_to_earl
     let _: codex_app_server_protocol::TurnCompletedNotification =
         server.read_notification("turn/completed").await?;
     send_turn(&mut server, &fresh.thread.id, NARROW_REQUEST).await?;
-    send_turn(&mut server, &fresh.thread.id, "yes, as proposed").await?;
+    // A named file does not supply the earlier proposal it applies.
+    send_turn(
+        &mut server,
+        &fresh.thread.id,
+        "Apply your fix to utils.py and keep the public names",
+    )
+    .await?;
 
     let bodies = responses
         .received_requests()

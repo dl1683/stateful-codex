@@ -109,6 +109,12 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
             "Fix the issue you found in parser.rs",
             RequestScope::Continuity,
         ),
+        ("Apply our version to number.py", RequestScope::Continuity),
+        ("Use that variant in parser.rs", RequestScope::Continuity),
+        (
+            "Apply your fix to number.py and preserve public behavior",
+            RequestScope::Continuity,
+        ),
         // Without a named subject a deictic word points at earlier work.
         (
             "Please fix that bug in the parser module",
