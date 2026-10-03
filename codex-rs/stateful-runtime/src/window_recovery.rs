@@ -64,6 +64,35 @@ impl StatefulRunStore {
         parse_seq(seq)
     }
 
+    /// Closed windows of `project_id` whose suffix no publication covers yet, as
+    /// `(thread_id, latest closure)`, oldest first.
+    pub async fn unpublished_window_closures(
+        &self,
+        project_id: &str,
+        max_results: u32,
+    ) -> Result<Vec<(String, u64)>, StatefulRunStoreError> {
+        validate_list_limit(max_results)?;
+        let rows = sqlx::query_as::<_, (String, i64)>(
+            "SELECT closure.thread_id, MAX(closure.through_seq)
+             FROM stateful_window_closures AS closure
+             WHERE closure.project_id = ?
+             GROUP BY closure.thread_id
+             HAVING MAX(closure.through_seq) > COALESCE((
+                 SELECT MAX(publication.through_seq) FROM stateful_window_publications AS publication
+                 WHERE publication.thread_id = closure.thread_id
+                   AND publication.project_id = closure.project_id
+             ), 0)
+             ORDER BY MIN(closure.created_at_ms), closure.thread_id LIMIT ?",
+        )
+        .bind(project_id)
+        .bind(i64::from(max_results))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|(thread_id, seq)| Ok((thread_id, parse_seq(seq)?)))
+            .collect()
+    }
+
     /// Stages `publication` only if, under the write lock, the thread still has no observation
     /// for its project after `publication.through_seq` and none since `idle_since_ms`.
     pub async fn stage_idle_window_publication(

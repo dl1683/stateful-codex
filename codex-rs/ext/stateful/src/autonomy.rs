@@ -32,6 +32,10 @@ use crate::attribution::begin_turn_attribution;
 use crate::attribution::fail_turn_attribution;
 use crate::attribution::finish_turn_attribution;
 
+/// Attempts to admit a turn durably before falling back to the read-only run lookup.
+const ADMISSION_ATTEMPTS: u32 = 3;
+const ADMISSION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// One host request to continue a claimed Autonomous run on its thread.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutonomousContinuationRequest {
@@ -125,12 +129,7 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
                 input.thread_store.get::<SelectedProject>(),
                 self.services.as_ref(),
             ) {
-                crate::window_journal::recover_pending(
-                    services,
-                    selected.project_id(),
-                    &input.thread_id.to_string(),
-                )
-                .await;
+                crate::window_journal::recover_pending(services, selected.project_id()).await;
             }
         })
     }
@@ -320,28 +319,51 @@ impl TurnLifecycleContributor for StatefulExtension {
                 }
             };
             // Durable admission before the turn samples: a continuation (a keeper's resume, a
-            // restart) stays attributed to the run its thread is bound to.
-            match store
-                .admit_run_turn(selected.project_id(), &thread.thread_id, input.turn_id)
-                .await
-            {
-                Ok(Some((_, run))) => {
+            // restart) stays attributed to the run its thread is bound to. The lifecycle cannot
+            // block sampling, so a store that stays busy falls back to the read-only lookup:
+            // the turn keeps run ownership (cancellation, attribution) without an admission row.
+            let mut admitted = Err(None);
+            for attempt in 0..ADMISSION_ATTEMPTS {
+                match store
+                    .admit_run_turn(selected.project_id(), &thread.thread_id, input.turn_id)
+                    .await
+                {
+                    Ok(admission) => {
+                        admitted = Ok(admission.map(|(_, run)| run));
+                        break;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            thread_id = %thread.thread_id,
+                            attempt,
+                            %error,
+                            "failed to admit a turn to its Stateful run"
+                        );
+                        admitted = Err(Some(error));
+                        tokio::time::sleep(ADMISSION_RETRY_DELAY).await;
+                    }
+                }
+            }
+            let run = match admitted {
+                Ok(run) => run,
+                Err(_) => match store.run_for_thread(&thread.thread_id).await {
+                    Ok(run) => run.filter(|run| run.value.project_id == selected.project_id()),
+                    Err(error) => {
+                        tracing::warn!(thread_id = %thread.thread_id, %error, "failed to bind a Stateful run to its starting turn");
+                        None
+                    }
+                },
+            };
+            match run {
+                Some(run) => {
                     self.attribution.bind_run(input.turn_id, run.id.clone());
                     input.thread_store.insert(ActiveRunTurn {
                         run_id: run.id,
                         turn_id: input.turn_id.to_string(),
                     });
                 }
-                Ok(None) => {
+                None => {
                     input.thread_store.remove::<ActiveRunTurn>();
-                }
-                Err(error) => {
-                    input.thread_store.remove::<ActiveRunTurn>();
-                    tracing::warn!(
-                        thread_id = %thread.thread_id,
-                        %error,
-                        "failed to bind a Stateful run to its starting turn"
-                    );
                 }
             }
         })

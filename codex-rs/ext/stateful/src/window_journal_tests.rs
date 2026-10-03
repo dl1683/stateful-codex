@@ -140,9 +140,13 @@ async fn completed_items_are_journaled_redacted_and_published_once_per_window() 
         json!(PathBuf::from("/work/src/scale.py").display().to_string())
     );
 
-    publish_window(&services, "project-1", "thread-1").await;
+    publish_window(&services, "project-1", "thread-1")
+        .await
+        .expect("published");
     // Nothing new since the last publication: no second note.
-    publish_window(&services, "project-1", "thread-1").await;
+    publish_window(&services, "project-1", "thread-1")
+        .await
+        .expect("published");
     let blackboard = services.blackboard().await.expect("blackboard");
     let notes = blackboard
         .query(codex_project_intelligence::BlackboardQuery {
@@ -212,7 +216,9 @@ async fn work_older_than_the_newest_page_still_publishes_and_message_only_window
         )
         .await;
     }
-    publish_window(&services, "project-1", "thread-1").await;
+    publish_window(&services, "project-1", "thread-1")
+        .await
+        .expect("published");
     // A second thread that only exchanged messages closes without a note.
     journal_item(
         store,
@@ -222,7 +228,9 @@ async fn work_older_than_the_newest_page_still_publishes_and_message_only_window
         &message_item("msg-only", MessagePhase::Commentary, "Hello."),
     )
     .await;
-    publish_window(&services, "project-1", "thread-2").await;
+    publish_window(&services, "project-1", "thread-2")
+        .await
+        .expect("published");
 
     let notes = services
         .blackboard()
@@ -368,7 +376,7 @@ async fn recovery_closes_message_only_sentinels_and_retries_closed_windows() {
         .await
         .expect("closure");
 
-    super::recover_pending(&services, "project-1", "thread-2").await;
+    super::recover_pending(&services, "project-1").await;
 
     let notes = services
         .blackboard()
@@ -394,4 +402,63 @@ async fn recovery_closes_message_only_sentinels_and_retries_closed_windows() {
             .expect("pending"),
         Vec::new()
     );
+}
+
+/// Thread A closed a window through event 1 but never staged it, then kept working (event 2,
+/// open). A new thread B of the project publishes A's closed suffix and nothing of its open
+/// work, although A is too recent for idle recovery.
+#[tokio::test]
+async fn a_new_thread_publishes_another_threads_closed_window_but_not_its_open_work() {
+    let home = TempDir::new().expect("home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.path().abs()));
+    let store = services.runtime().await.expect("runtime");
+    journal_item(
+        store,
+        "project-1",
+        "thread-a",
+        "turn-1",
+        &command_item("exec-1", "cargo test", 1, "1 failed"),
+    )
+    .await;
+    store
+        .record_window_closure("thread-a", "project-1", 1)
+        .await
+        .expect("closure");
+    journal_item(
+        store,
+        "project-1",
+        "thread-a",
+        "turn-2",
+        &command_item("exec-2", "cargo build", 0, "ok"),
+    )
+    .await;
+
+    super::publish_open_windows(&services, "project-1").await;
+
+    assert_eq!(
+        store
+            .window_publication_watermark("thread-a", "project-1")
+            .await
+            .expect("watermark"),
+        1
+    );
+    let notes = services
+        .blackboard()
+        .await
+        .expect("blackboard")
+        .query(codex_project_intelligence::BlackboardQuery {
+            project_id: "project-1".to_string(),
+            text: Some("Host-observed work receipts".to_string()),
+            within_node: None,
+            root_promotion: None,
+            entry_scope: codex_project_intelligence::BlackboardEntryScope::Active,
+            max_results: 10,
+        })
+        .await
+        .expect("query")
+        .data;
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].entry.value.content.contains("events 1-1"));
+    assert!(!notes[0].entry.value.content.contains("cargo build"));
 }

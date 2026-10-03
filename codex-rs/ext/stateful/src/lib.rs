@@ -208,11 +208,13 @@ impl ContextContributor for StatefulExtension {
                     thread_record,
                 )
             });
-            if stored_window.is_none() {
-                // Before the packet is read, so it already shows the resulting revision.
+            // Before the packet is read, so it already shows the resulting revision.
+            let opening = if stored_window.is_none() {
                 self.publish_on_window_open(selected.project_id(), &thread_id, window.reason)
-                    .await;
-            }
+                    .await
+            } else {
+                WindowOpening::Recorded
+            };
             let continuation_window = window.mode == ContextWindowMode::Continuation;
             let run_activity = self.run_activity.for_thread(&thread_id);
             let run_status = self
@@ -345,11 +347,15 @@ impl ContextContributor for StatefulExtension {
                     } else {
                         ContextWindowMode::Full
                     };
-                    window_policy::decide_window(
-                        runtime_store,
-                        codex_stateful_runtime::ContextWindowDecision { mode, ..window },
-                    )
-                    .await
+                    let decision = codex_stateful_runtime::ContextWindowDecision { mode, ..window };
+                    match opening {
+                        WindowOpening::Recorded => {
+                            window_policy::decide_window(runtime_store, decision).await
+                        }
+                        // The closed window's closure was not recorded: leave the window
+                        // undecided, so the next step records it and publishes again.
+                        WindowOpening::Retry => decision,
+                    }
                 }
             };
             let continuation_window = window.mode == ContextWindowMode::Continuation;
@@ -429,6 +435,13 @@ impl ContextContributor for StatefulExtension {
     }
 }
 
+/// Whether opening a window recorded the previous window's closure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WindowOpening {
+    Recorded,
+    Retry,
+}
+
 impl StatefulExtension {
     /// A window opened by compaction or a reset closes the thread's previous window, so its
     /// journal suffix is published; a thread's first window publishes what earlier sessions of
@@ -438,19 +451,26 @@ impl StatefulExtension {
         project_id: &str,
         thread_id: &str,
         reason: codex_stateful_runtime::ContextWindowReason,
-    ) {
+    ) -> WindowOpening {
         let Some(services) = self.services.as_ref() else {
-            return;
+            return WindowOpening::Recorded;
         };
         match reason {
             codex_stateful_runtime::ContextWindowReason::ThreadStart => {
                 window_journal::publish_open_windows(services, project_id).await;
+                WindowOpening::Recorded
             }
             codex_stateful_runtime::ContextWindowReason::Compaction
             | codex_stateful_runtime::ContextWindowReason::Reset => {
-                window_journal::publish_window(services, project_id, thread_id).await;
+                match window_journal::publish_window(services, project_id, thread_id).await {
+                    Ok(()) => WindowOpening::Recorded,
+                    Err(error) => {
+                        tracing::warn!(%thread_id, %error, "failed to record a closed window");
+                        WindowOpening::Retry
+                    }
+                }
             }
-            codex_stateful_runtime::ContextWindowReason::Unknown => {}
+            codex_stateful_runtime::ContextWindowReason::Unknown => WindowOpening::Recorded,
         }
     }
 

@@ -62,10 +62,8 @@ pub(crate) async fn publish_window(
     services: &ProjectIntelligenceServices,
     project_id: &str,
     thread_id: &str,
-) {
-    let Ok(store) = services.runtime().await else {
-        return;
-    };
+) -> Result<(), StatefulRunStoreError> {
+    let store = services.runtime().await?;
     let closed = async {
         let through_seq = store.window_event_watermark(thread_id, project_id).await?;
         store
@@ -74,10 +72,10 @@ pub(crate) async fn publish_window(
         stage(store, project_id, thread_id, through_seq).await
     }
     .await;
-    if let Err(error) = closed {
-        tracing::warn!(%thread_id, %error, "failed to stage a closed window's publication");
-    }
     deliver_pending(services, store, project_id).await;
+    // The caller keeps the window undecided when the closure was not recorded, so the next
+    // step retries it.
+    closed
 }
 
 /// At the start of a new thread, publishes what earlier, idle sessions of the project left open.
@@ -90,6 +88,7 @@ pub(crate) async fn publish_open_windows(services: &ProjectIntelligenceServices,
         .ok()
         .and_then(|now| i64::try_from(now.as_millis()).ok())
         .map_or(0, |now| now.saturating_sub(IDLE_BEFORE_RECOVERY_MS));
+    stage_known_closures(store, project_id).await;
     let mut attempted = Vec::<String>::new();
     for _ in 0..MAX_RECOVERY_PAGES {
         let threads = match store
@@ -122,25 +121,42 @@ pub(crate) async fn publish_open_windows(services: &ProjectIntelligenceServices,
     deliver_pending(services, store, project_id).await;
 }
 
-/// When a thread of the project becomes ready: stages this thread's closed windows that were
-/// never staged, then delivers publications a crash or a failed write left pending.
-pub(crate) async fn recover_pending(
-    services: &ProjectIntelligenceServices,
-    project_id: &str,
-    thread_id: &str,
-) {
+/// When a thread of the project becomes ready: stages every thread's closed windows that were
+/// never staged (only through each closure, never open work), then delivers publications a
+/// crash or a failed write left pending.
+pub(crate) async fn recover_pending(services: &ProjectIntelligenceServices, project_id: &str) {
     let Ok(store) = services.runtime().await else {
         return;
     };
-    let closed = async {
-        let through_seq = store.latest_window_closure(thread_id, project_id).await?;
-        stage(store, project_id, thread_id, through_seq).await
-    }
-    .await;
-    if let Err(error) = closed {
-        tracing::warn!(%thread_id, %error, "failed to stage a closed window's publication");
-    }
+    stage_known_closures(store, project_id).await;
     deliver_pending(services, store, project_id).await;
+}
+
+async fn stage_known_closures(store: &StatefulRunStore, project_id: &str) {
+    let mut attempted = Vec::<String>::new();
+    for _ in 0..MAX_RECOVERY_PAGES {
+        let closures = match store.unpublished_window_closures(project_id, 100).await {
+            Ok(closures) => closures,
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to list closed windows");
+                return;
+            }
+        };
+        let fresh = closures
+            .into_iter()
+            .filter(|(thread, _)| !attempted.contains(thread))
+            .take(RECOVERY_PAGE as usize)
+            .collect::<Vec<_>>();
+        if fresh.is_empty() {
+            return;
+        }
+        for (thread_id, through_seq) in fresh {
+            if let Err(error) = stage(store, project_id, &thread_id, through_seq).await {
+                tracing::warn!(%thread_id, %error, "failed to stage a closed window's publication");
+            }
+            attempted.push(thread_id);
+        }
+    }
 }
 
 /// The frozen publication of the thread's unpublished suffix through `through_seq`, or `None`
