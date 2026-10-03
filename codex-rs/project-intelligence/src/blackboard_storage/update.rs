@@ -19,6 +19,18 @@ impl BlackboardStore {
         id: &BlackboardEntryId,
         update: BlackboardEntryUpdate,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.update_entry_recorded(project_id, id, update, /*change*/ None)
+            .await
+    }
+
+    /// Like `update_entry`, journaling `change` for the new revision in the same transaction.
+    pub async fn update_entry_recorded(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        update: BlackboardEntryUpdate,
+        change: Option<&crate::ChangeRecord>,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
         update.validate(id)?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| BlackboardStoreError::RevisionOverflow)?;
@@ -116,6 +128,16 @@ impl BlackboardStore {
             now,
         )
         .await?;
+        if let Some(change) = change {
+            super::knowledge::append_change(
+                &mut transaction,
+                project_id,
+                Some((id, next_revision)),
+                change,
+                now,
+            )
+            .await?;
+        }
         let entry = load_entry(&mut transaction, project_id, id)
             .await?
             .ok_or_else(|| BlackboardStoreError::EntryNotFound(id.to_string()))?;

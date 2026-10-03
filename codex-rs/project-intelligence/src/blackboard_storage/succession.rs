@@ -41,8 +41,22 @@ impl BlackboardStore {
     pub async fn create_successor(
         &self,
         id: BlackboardEntryId,
+        value: NewBlackboardEntry,
+        replaced: Vec<SupersededEntry>,
+    ) -> Result<Succession, BlackboardStoreError> {
+        self.create_successor_recorded(id, value, replaced, /*change*/ None)
+            .await
+    }
+
+    /// Like `create_successor`, journaling `change` for the successor in the same
+    /// transaction. The successor takes the context (category, scope, position) of the first
+    /// entry it replaces.
+    pub async fn create_successor_recorded(
+        &self,
+        id: BlackboardEntryId,
         mut value: NewBlackboardEntry,
         replaced: Vec<SupersededEntry>,
+        change: Option<&crate::ChangeRecord>,
     ) -> Result<Succession, BlackboardStoreError> {
         value.validate()?;
         let unique = replaced
@@ -112,6 +126,26 @@ impl BlackboardStore {
         }
         let now = unix_timestamp_millis()?;
         insert_new_entry(&mut transaction, &id, &value, now).await?;
+        if let Some(first) = replaced.first() {
+            super::knowledge::carry_context(
+                &mut transaction,
+                &value.project_id,
+                &first.id,
+                &id,
+                /*revision*/ 1,
+            )
+            .await?;
+        }
+        if let Some(change) = change {
+            super::knowledge::append_change(
+                &mut transaction,
+                &value.project_id,
+                Some((&id, 1)),
+                change,
+                now,
+            )
+            .await?;
+        }
         let mut superseded = Vec::with_capacity(current_entries.len());
         for current in current_entries {
             let expected_revision = i64::try_from(current.revision)

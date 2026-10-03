@@ -54,6 +54,14 @@ impl BlackboardStore {
                  WHEN revision.kind = 'decision' THEN 2
                  ELSE 3 END,
                CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                   THEN (SELECT context.source_sequence FROM knowledge_context AS context
+                         WHERE context.entry_id = entry.id
+                         ORDER BY context.revision DESC LIMIT 1) END,
+               CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                   THEN (SELECT context.unit_ordinal FROM knowledge_context AS context
+                         WHERE context.entry_id = entry.id
+                         ORDER BY context.revision DESC LIMIT 1) END,
+               CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
                    THEN entry.created_at_ms END,
                CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
                    THEN entry.rowid END,

@@ -29,6 +29,7 @@ use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
 mod fence;
+mod knowledge;
 mod query;
 mod relation;
 mod review;
@@ -36,6 +37,8 @@ mod succession;
 mod update;
 
 pub use fence::CompletionFence;
+pub use knowledge::CreateOutcome;
+pub use knowledge::MAX_CHANGES_PAGE;
 pub use review::ReviewPage;
 pub use succession::MAX_SUPERSEDED_ENTRIES;
 pub use succession::Succession;
@@ -549,6 +552,8 @@ pub enum BlackboardStoreError {
     NodeNotFound(String),
     #[error("blackboard entry not found: {0}")]
     EntryNotFound(String),
+    #[error("stored knowledge context is invalid: {0}")]
+    InvalidStoredKnowledge(String),
     #[error("blackboard entry ID was already used for different content: {0}")]
     EntryIdentityConflict(String),
     #[error("blackboard revision conflict: expected {expected}, found {actual}")]
