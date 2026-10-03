@@ -9,7 +9,6 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
-use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
@@ -21,7 +20,6 @@ use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
-use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
@@ -39,6 +37,7 @@ use crate::events::KnowledgeCategory;
 use crate::events::receipt_text;
 use crate::recipe_applicability::is_recipe;
 use crate::recipe_capture::carries_credentials;
+use crate::recipe_capture::recipe_commands;
 use crate::services::ProjectIntelligenceServices;
 
 use crate::rule_capture::RulePlacement;
@@ -52,6 +51,7 @@ use crate::user_rules::reports_speech;
 
 use crate::visible_root::VisibleRootRegistry;
 
+use super::agent_record;
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
 use super::blackboard_evidence::resolve_evidence;
@@ -66,7 +66,6 @@ use super::bounded_json_output;
 use super::parse_arguments;
 use super::preflight_receipts;
 use super::receipt_error;
-use super::recipe_grounding;
 use super::stable_id;
 use super::worst_identifier;
 use super::worst_receipt_error;
@@ -168,7 +167,7 @@ impl BlackboardRecorder {
         receipt_turn_id: &str,
         user_quote: Option<String>,
         rule_scope: Option<RuleScope>,
-    ) -> Result<BlackboardEntry, FunctionCallError> {
+    ) -> Result<RecordOutcome, FunctionCallError> {
         let (Some(quote), Some(scope)) = (user_quote, rule_scope) else {
             return Err(respond(
                 "kind instruction needs userQuote (the user's exact words for one rule) and ruleScope (standing or task)",
@@ -248,7 +247,16 @@ impl BlackboardRecorder {
             RuleStanding::Standing,
         )
         .await
-        .map(|captured| captured.entry)
+        .map(|captured| {
+            if captured.newly_stored {
+                RecordOutcome::Created {
+                    entry: captured.entry,
+                    recipe: None,
+                }
+            } else {
+                RecordOutcome::AlreadyPresent(captured.entry)
+            }
+        })
         .map_err(respond)
     }
 
@@ -290,18 +298,14 @@ impl BlackboardRecorder {
             }
             return self
                 .record_instruction(turn_id, user_quote, rule_scope)
-                .await
-                .map(|entry| RecordOutcome::Created {
-                    entry,
-                    recipe: None,
-                });
+                .await;
         }
         if user_quote.is_some() || rule_scope.is_some() {
             return Err(respond(
                 "userQuote and ruleScope apply to kind instruction only",
             ));
         }
-        if is_recipe(kind, &content) && carries_credentials(&content) {
+        if is_recipe(kind, &content) && recipe_commands(&content).any(carries_credentials) {
             return Err(respond(
                 "credentials: a recipe must not store passwords, tokens or keys; record it with a placeholder such as $TOKEN",
             ));
@@ -360,31 +364,22 @@ impl BlackboardRecorder {
             )
             .await?
         };
-        let mut grounding = None;
-        let entry = if let Some(existing) = retried {
+        let source = agent_record::RecordSource {
+            thread_id: &self.thread_id,
+            turn_id,
+            history,
+        };
+        let (entry, recipe) = if let Some(existing) = retried {
             // The replacement already committed: this replay saves nothing new.
             return Ok(RecordOutcome::AlreadyPresent(existing));
         } else if supersedes.is_empty() {
-            grounding = recipe_grounding::resolve(
-                &self.services,
-                &self.thread_id,
-                value.kind,
-                &value.content,
-                history,
-            );
-            let context = grounding
-                .as_mut()
-                .and_then(|grounding| grounding.context.take());
-            // The entry and its recipe observation commit in one transaction; a replay or a
-            // record identical to current knowledge saves nothing.
-            match store
-                .create_agent_entry(id, value, context)
+            match agent_record::create(&self.services, store, &source, id, value)
                 .await
                 .map_err(respond)?
             {
-                (entry, CreateOutcome::Created) => entry,
-                (entry, CreateOutcome::AlreadyPresent) => {
-                    return Ok(RecordOutcome::AlreadyPresent(entry));
+                RecordOutcome::Created { entry, recipe } => (entry, recipe),
+                already_present @ RecordOutcome::AlreadyPresent(_) => {
+                    return Ok(already_present);
                 }
             }
         } else {
@@ -412,7 +407,14 @@ impl BlackboardRecorder {
                     });
                 }
             }
-            succession.successor
+            let recipe = agent_record::ground_successor(
+                &self.services,
+                store,
+                &source,
+                &succession.successor,
+            )
+            .await;
+            (succession.successor, recipe)
         };
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::BlackboardUpdated {
@@ -448,10 +450,7 @@ impl BlackboardRecorder {
                 text: receipt_text(&entry.value.content),
             });
         }
-        Ok(RecordOutcome::Created {
-            entry,
-            recipe: grounding.map(|grounding| grounding.label),
-        })
+        Ok(RecordOutcome::Created { entry, recipe })
     }
 
     async fn project_node_id(&self) -> Result<HierarchyNodeId, FunctionCallError> {
@@ -737,7 +736,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record. sourceVerified needs evidence copied from evidence_read. Items are idempotent; an exact copy of current knowledge is alreadyPresent and not saved again, and progress or status summaries are refused."
+                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record. sourceVerified needs evidence copied from evidence_read. Items are idempotent; an identical copy of current knowledge is alreadyPresent and not saved again. Do not record progress or status summaries."
             ),
             strict: false,
             defer_loading: None,

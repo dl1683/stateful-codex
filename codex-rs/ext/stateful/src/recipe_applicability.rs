@@ -23,6 +23,7 @@ use crate::recipe_capture::ExitStatus;
 use crate::recipe_capture::RecipeObservation;
 use crate::recipe_capture::manifest_fingerprints;
 use crate::recipe_capture::resolve_executable;
+use crate::recipe_capture::single_recipe_command;
 
 /// Recipes checked per packet; others are labelled unchecked.
 const MAX_CHECKED_RECIPES: usize = 16;
@@ -72,16 +73,17 @@ pub(crate) async fn check_root_recipes(
     project_id: &str,
     projection: &RootBlackboardProjection,
 ) -> HashMap<String, RecipeCheck> {
-    let ids = projection
+    let recipes = projection
         .data
         .iter()
         .filter(|hit| is_recipe(hit.entry.value.kind, &hit.entry.value.content))
         .take(MAX_CHECKED_RECIPES)
-        .map(|hit| hit.entry.id.clone())
+        .map(|hit| (hit.entry.id.clone(), hit.entry.value.content.clone()))
         .collect::<Vec<_>>();
-    if ids.is_empty() {
+    if recipes.is_empty() {
         return HashMap::new();
     }
+    let ids = recipes.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
     let contexts = match store.knowledge_contexts(project_id, &ids).await {
         Ok(contexts) => contexts,
         Err(error) => {
@@ -89,27 +91,44 @@ pub(crate) async fn check_root_recipes(
             return HashMap::new();
         }
     };
-    let observations = ids
-        .iter()
-        .map(|id| {
-            let observation = contexts
+    let observations = recipes
+        .into_iter()
+        .map(|(id, content)| {
+            let observed = contexts
                 .get(id.as_str())
                 .filter(|context| {
                     context.category == KnowledgeCategory::Recipe
                         && context.authority == KnowledgeAuthority::HostObserved
                 })
-                .and_then(|context| context.payload.as_deref())
-                .and_then(|payload| serde_json::from_str::<RecipeObservation>(payload).ok());
-            (id.to_string(), observation)
+                .map(|context| {
+                    context
+                        .payload
+                        .as_deref()
+                        .and_then(|payload| serde_json::from_str::<RecipeObservation>(payload).ok())
+                });
+            (id.to_string(), content, observed)
         })
         .collect::<Vec<_>>();
     tokio::task::spawn_blocking(move || {
         observations
             .into_iter()
-            .map(|(id, observation)| {
-                let check = observation.map_or(RecipeCheck::NotObserved, |observation| {
-                    check_observation(&observation)
-                });
+            .map(|(id, content, observed)| {
+                let check = match observed {
+                    None => RecipeCheck::NotObserved,
+                    // Kept by an earlier build without executable identity: it ran, but its
+                    // conditions cannot be compared.
+                    Some(None) => RecipeCheck::NeedsCheck(
+                        "observed before its conditions were recorded".to_string(),
+                    ),
+                    // An observation of another command (one carried over from a replaced
+                    // recipe) does not ground this one.
+                    Some(Some(observation))
+                        if single_recipe_command(&content) != Some(observation.command.trim()) =>
+                    {
+                        RecipeCheck::NotObserved
+                    }
+                    Some(Some(observation)) => check_observation(&observation),
+                };
                 (id, check)
             })
             .collect()

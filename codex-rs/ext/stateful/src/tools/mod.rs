@@ -1,3 +1,4 @@
+mod agent_record;
 mod blackboard;
 mod blackboard_evidence;
 mod blackboard_premises;

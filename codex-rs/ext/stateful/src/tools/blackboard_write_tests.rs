@@ -269,3 +269,133 @@ async fn recipes_are_grounded_only_in_commands_the_host_saw_succeed() {
         )
     );
 }
+
+/// Identical recipe wording recorded after its command was seen succeeding gains that
+/// observation; a recipe that replaces an observed one never inherits its observation.
+#[tokio::test]
+async fn recipe_grounding_follows_new_observations_and_never_passes_to_a_successor() {
+    let state_home = TempDir::new().expect("state home");
+    let repo = TempDir::new().expect("repo");
+    std::fs::create_dir_all(repo.path().join(".venv")).expect("venv");
+    std::fs::write(repo.path().join(".venv").join("python"), "interpreter").expect("interpreter");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let tool = BlackboardBatchRecordTool::new(
+        "project-1".to_string(),
+        "thread-1".to_string(),
+        services.clone(),
+        Arc::new(InMemoryThreadStore::default()),
+        /*event_sink*/ None,
+        UserMessageRegistry::default(),
+        VisibleRootRegistry::default(),
+    );
+    let recipe = "Recipe: `.venv/python -m pytest tests/test_cli.py -q` runs the CLI tests.";
+    let history = || {
+        ConversationHistory::new(vec![ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: Some("exec-1".to_string()),
+            name: None,
+            namespace: None,
+            output: FunctionCallOutputPayload::from_text(
+                "Wall time: 1.0 seconds\nProcess exited with code 0\nOutput:\n3 passed\n"
+                    .to_string(),
+            ),
+            internal_chat_message_metadata_passthrough: None,
+        }])
+    };
+    let output_of = |output: Box<dyn codex_extension_api::ToolOutput>| {
+        serde_json::from_str::<serde_json::Value>(&output.log_output()).expect("JSON output")
+    };
+    let authority = |entry_id: &str| {
+        let services = services.clone();
+        let entry_id = entry_id.to_string();
+        async move {
+            services
+                .blackboard()
+                .await
+                .expect("blackboard")
+                .knowledge_context(
+                    "project-1",
+                    &codex_project_intelligence::BlackboardEntryId::parse(entry_id)
+                        .expect("entry id"),
+                )
+                .await
+                .expect("context loads")
+                .map(|context| context.authority)
+        }
+    };
+
+    let unseen = output_of(
+        tool.handle_call(batch_call_with_history(
+            "unseen",
+            vec![record("recipe-1", "fact", recipe)],
+            history(),
+        ))
+        .await
+        .expect("unseen recipe"),
+    );
+    let entry_id = unseen["results"][0]["entryId"]
+        .as_str()
+        .expect("entry id")
+        .to_string();
+    let before = authority(&entry_id).await;
+    let mut command = crate::recipe_capture::ObservedCommand {
+        turn_id: "turn-1".to_string(),
+        call_id: "exec-1".to_string(),
+        script: ".venv/python -m pytest tests/test_cli.py -q".to_string(),
+        cwd: repo.path().to_path_buf(),
+        completed: None,
+    };
+    command.completed = crate::recipe_capture::capture_conditions(&command, /*at_ms*/ 1);
+    services
+        .observed_commands()
+        .keep("thread-1".to_string(), command);
+    let again = output_of(
+        tool.handle_call(batch_call_with_history(
+            "again",
+            vec![record("recipe-2", "fact", recipe)],
+            history(),
+        ))
+        .await
+        .expect("same wording again"),
+    );
+    let after = authority(&entry_id).await;
+    let mut successor = record("recipe-3", "fact", "Recipe: `make test` runs every test.");
+    successor["supersedes"] = serde_json::json!([{"entryId": entry_id, "revision": 1}]);
+    let replaced = output_of(
+        tool.handle_call(batch_call_with_history(
+            "replace",
+            vec![successor],
+            history(),
+        ))
+        .await
+        .expect("successor recipe"),
+    );
+    let successor_id = replaced["results"][0]["entryId"]
+        .as_str()
+        .expect("successor id")
+        .to_string();
+
+    assert_eq!(
+        (
+            unseen["results"][0]["recipe"]
+                .as_str()
+                .and_then(|label| label.split(' ').next()),
+            before,
+            again["alreadyPresent"].clone(),
+            after,
+            replaced["results"][0]["recipe"]
+                .as_str()
+                .and_then(|label| label.split(' ').next()),
+            authority(&successor_id).await,
+        ),
+        (
+            Some("notObserved"),
+            None,
+            json!(1),
+            Some(codex_project_intelligence::KnowledgeAuthority::HostObserved),
+            Some("notObserved"),
+            Some(codex_project_intelligence::KnowledgeAuthority::AssistantReported),
+        )
+    );
+}

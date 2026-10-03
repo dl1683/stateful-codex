@@ -67,13 +67,15 @@ fn only_an_exactly_named_completed_simple_command_grounds_a_recipe() {
 
     assert_eq!(
         [
+            found("Recipe: `.venv/bin/python -m pytest tests/test_cli.py -q` runs the CLI tests."),
             found("Recipe: `.venv/bin/python  -m pytest tests/test_cli.py -q` runs the CLI tests."),
+            found("Recipe: `git status`, then `.venv/bin/python -m pytest tests/test_cli.py -q`."),
             found("Recipe: `python -m pytest` runs the tests."),
             found("Recipe: `-m pytest` runs the tests."),
             found("Recipe: `cd src && python -m pytest`"),
             found("Recipe: `uv run pytest`"),
         ],
-        [Some("ok".to_string()), None, None, None, None]
+        [Some("ok".to_string()), None, None, None, None, None, None]
     );
 }
 
@@ -131,10 +133,14 @@ fn credential_spellings_are_detected() {
             "Recipe: `curl -H 'Authorization: Bearer abc'`",
             "Recipe: `gh auth login --with-token ghp_x`",
             "Recipe: `git clone https://user:pw@example.com/repo`",
+            "curl -u alice:hunter2 https://example.test",
+            "mysql -pHunter2 shop",
             "Recipe: `python -m pytest tests -q`",
+            "uvicorn app:main --reload",
+            "python -u run.py",
         ]
         .map(carries_credentials),
-        [true, true, true, true, false]
+        [true, true, true, true, true, true, false, false, false]
     );
 }
 

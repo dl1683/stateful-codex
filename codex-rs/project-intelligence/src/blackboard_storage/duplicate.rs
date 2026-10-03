@@ -4,6 +4,7 @@ use crate::BlackboardEntry;
 use crate::BlackboardEntryId;
 use crate::BlackboardEntryState;
 use crate::BlackboardProvenanceKind;
+use crate::ChangeRecord;
 use crate::KnowledgeContext;
 use crate::NewBlackboardEntry;
 use crate::storage::unix_timestamp_millis;
@@ -13,21 +14,25 @@ use super::BlackboardStoreError;
 use super::CreateOutcome;
 use super::insert_new_entry;
 use super::kind_name;
+use super::knowledge::append_change;
 use super::knowledge::write_context;
 use super::load_entry;
 use super::load_entry_by_id;
 
 impl BlackboardStore {
-    /// Creates an agent-recorded entry with its optional context in one writer transaction,
-    /// unless the same record is already current knowledge: a replay of `id`, or an active
-    /// agent entry with the same kind, wording, node, structured value, verification,
-    /// promotion, evidence and premises. Confidence, importance and the recording call do
-    /// not make a record new. Records that differ in any meaningful field are created.
+    /// Creates an agent-recorded entry with its optional context and its journal row in one
+    /// writer transaction, unless the same record is already current knowledge: a replay of
+    /// `id`, or an active agent entry of the same project with the same kind, wording, node,
+    /// structured value, verification, promotion, evidence and premises. Confidence,
+    /// importance and the recording call do not make a record new. A new host observation
+    /// supplied with an already-present record replaces that entry's context, so identical
+    /// wording can still acquire fresh grounding; nothing else is written for it.
     pub async fn create_agent_entry(
         &self,
         id: BlackboardEntryId,
         value: NewBlackboardEntry,
         context: Option<KnowledgeContext>,
+        change: ChangeRecord,
     ) -> Result<(BlackboardEntry, CreateOutcome), BlackboardStoreError> {
         value.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -39,6 +44,7 @@ impl BlackboardStore {
             {
                 return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
             }
+            refresh_context(&mut transaction, &existing, context.as_ref()).await?;
             transaction.commit().await?;
             return Ok((existing, CreateOutcome::AlreadyPresent));
         }
@@ -65,6 +71,7 @@ impl BlackboardStore {
                     load_entry(&mut transaction, &value.project_id, &candidate).await?
                     && same_record(&existing.value, &value)
                 {
+                    refresh_context(&mut transaction, &existing, context.as_ref()).await?;
                     transaction.commit().await?;
                     return Ok((existing, CreateOutcome::AlreadyPresent));
                 }
@@ -75,6 +82,14 @@ impl BlackboardStore {
         if let Some(context) = &context {
             write_context(&mut transaction, &value.project_id, &id, 1, context).await?;
         }
+        append_change(
+            &mut transaction,
+            &value.project_id,
+            Some((&id, 1)),
+            &change,
+            now,
+        )
+        .await?;
         let entry = load_entry(&mut transaction, &value.project_id, &id)
             .await?
             .ok_or_else(|| BlackboardStoreError::EntryNotFound(id.to_string()))?;
@@ -83,8 +98,29 @@ impl BlackboardStore {
     }
 }
 
+async fn refresh_context(
+    connection: &mut sqlx::SqliteConnection,
+    existing: &BlackboardEntry,
+    context: Option<&KnowledgeContext>,
+) -> Result<(), BlackboardStoreError> {
+    let Some(context) = context else {
+        return Ok(());
+    };
+    let revision =
+        i64::try_from(existing.revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
+    write_context(
+        connection,
+        &existing.value.project_id,
+        &existing.id,
+        revision,
+        context,
+    )
+    .await
+}
+
 fn same_record(existing: &NewBlackboardEntry, new: &NewBlackboardEntry) -> bool {
-    existing.node_id == new.node_id
+    existing.project_id == new.project_id
+        && existing.node_id == new.node_id
         && existing.kind == new.kind
         && existing.content == new.content
         && existing.structured_value == new.structured_value

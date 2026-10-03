@@ -7,8 +7,9 @@
 //! the resolved executable's identity and the dependency manifests beside it. Compound and
 //! failed commands are never kept, so they can never ground a recipe.
 //!
-//! When the model records a `Recipe:` fact, a backticked command in it must equal a kept
-//! command exactly (whitespace aside). A match stores "last observed successful under
+//! When the model records a `Recipe:` fact, it must name exactly one backticked command,
+//! and that command must equal a kept command character for character (surrounding
+//! whitespace aside); a recipe naming several commands is not grounded. A match stores "last observed successful under
 //! these conditions". The lifecycle reports whether a command completed, not its exit
 //! status, so the exit status is read from the host's own header in the command's output
 //! (the lines before `Output:`) when the conversation holds it; a command shown to exit
@@ -49,6 +50,8 @@ const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const CREDENTIAL_MARKERS: &[&str] = &[
     "password",
     "passwd",
+    "--pass",
+    "credential",
     "token",
     "secret",
     "api_key",
@@ -181,23 +184,18 @@ impl ObservedCommands {
         }
     }
 
-    /// The most recent kept command of the thread that a backticked command in `content`
-    /// names exactly.
+    /// The most recent kept command of the thread that the recipe's single backticked
+    /// command names exactly.
     pub(crate) fn matching(&self, thread_id: &str, content: &str) -> Option<ObservedCommand> {
-        let candidates = backticked(content);
-        if candidates.is_empty() {
-            return None;
-        }
+        let named = single_recipe_command(content)?;
         let state = self.lock();
         state
             .succeeded
             .get(thread_id)?
             .iter()
             .rev()
-            .find_map(|command| {
-                let script = normalized(&command.script);
-                candidates.contains(&script).then(|| command.clone())
-            })
+            .find(|command| command.script.trim() == named)
+            .cloned()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ObservedState> {
@@ -244,9 +242,15 @@ pub(crate) fn command_script(argv: &[String]) -> String {
     }
 }
 
-/// Whether `content` contains a credential-like spelling that must not be stored.
-pub(crate) fn carries_credentials(content: &str) -> bool {
-    let lowered = content.to_ascii_lowercase();
+/// Whether a command contains a credential-like argument that must not be stored:
+/// credential words, URL userinfo, a `-u user:secret` pair, or an attached short password
+/// flag such as `-pSecret`.
+pub(crate) fn carries_credentials(command: &str) -> bool {
+    let lowered = command.to_ascii_lowercase();
+    let words = lowered
+        .split_whitespace()
+        .map(|word| word.trim_matches(['"', '\'']))
+        .collect::<Vec<_>>();
     CREDENTIAL_MARKERS
         .iter()
         .any(|marker| lowered.contains(marker))
@@ -255,6 +259,29 @@ pub(crate) fn carries_credentials(content: &str) -> bool {
                 .next()
                 .is_some_and(|authority| authority.contains('@'))
         })
+        || words.iter().any(|word| {
+            word.starts_with("-p") && word.len() > 2 && word.chars().nth(2) != Some('=')
+        })
+        || words
+            .windows(2)
+            .any(|pair| matches!(pair, ["-u" | "--user", value] if value.contains(':')))
+}
+
+/// The backticked commands a recipe names, each trimmed.
+pub(crate) fn recipe_commands(content: &str) -> impl Iterator<Item = &str> {
+    content
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+}
+
+/// The one command a recipe names, or `None` when it names none or several.
+pub(crate) fn single_recipe_command(content: &str) -> Option<&str> {
+    let mut commands = recipe_commands(content);
+    let command = commands.next()?;
+    commands.next().is_none().then_some(command)
 }
 
 /// A single executable with arguments: no chaining, pipes, redirection, substitution,
@@ -383,20 +410,6 @@ pub(crate) fn exit_status(history: &[ResponseItem], call_id: &str) -> ExitStatus
                 })
         })
         .unwrap_or(ExitStatus::Unknown)
-}
-
-fn backticked(content: &str) -> Vec<String> {
-    content
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(normalized)
-        .filter(|command| !command.is_empty())
-        .collect()
-}
-
-fn normalized(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
