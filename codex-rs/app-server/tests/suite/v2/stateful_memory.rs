@@ -112,6 +112,17 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
             .expect("listed")
     };
     let (suite, next) = (item(SUITE_RULE), item(NEXT_RULE));
+    let page = |thread_id: String, cursor: Option<String>| {
+        move |request_id| ClientRequest::StatefulMemoryRead {
+            request_id,
+            params: StatefulMemoryReadParams {
+                thread_id,
+                cursor,
+                limit: Some(1),
+            },
+        }
+    };
+    let first_page: StatefulMemoryReadResponse = server.request(page(first.clone(), None)).await?;
 
     let forgotten: StatefulMemoryForgetResponse = server
         .request(|request_id| ClientRequest::StatefulMemoryForget {
@@ -134,6 +145,24 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
             },
         })
         .await?;
+    // A cursor from before the changes is refused instead of skipping an entry.
+    let stale_id = server
+        .send_request(
+            "statefulMemory/read",
+            Some(serde_json::json!({
+                "threadId": first,
+                "cursor": first_page.next_cursor,
+                "limit": 1
+            })),
+        )
+        .await?;
+    let stale = server
+        .read_stream_until_error_message(codex_app_server_protocol::RequestId::Integer(stale_id))
+        .await?;
+    assert_eq!(
+        stale.error.message,
+        "project memory changed since this page was read; read it again from the start"
+    );
     // Browsing and correcting made no model request.
     assert_eq!(log.requests().len(), 1);
     assert_eq!(

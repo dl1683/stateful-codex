@@ -41,14 +41,31 @@ impl BlackboardRequestProcessor {
         params: StatefulMemoryReadParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let project_id = self.thread_project(&params.thread_id).await?;
+        let store = self.store().await?;
+        // A cursor names the memory revision its page came from; after any change the
+        // order may have shifted, so the reader starts again instead of skipping entries.
+        let revision = store
+            .project_revision(&project_id)
+            .await
+            .map_err(blackboard_error)?;
         let offset = match params.cursor.as_deref() {
             None => 0,
-            Some(cursor) => cursor
-                .parse::<u32>()
-                .map_err(|_| invalid_params("cursor is not one this method returned"))?,
+            Some(cursor) => {
+                let (cursor_revision, offset) = cursor
+                    .split_once(':')
+                    .and_then(|(revision, offset)| {
+                        Some((revision.parse::<u64>().ok()?, offset.parse::<u32>().ok()?))
+                    })
+                    .ok_or_else(|| invalid_params("cursor is not one this method returned"))?;
+                if cursor_revision != revision {
+                    return Err(invalid_params(
+                        "project memory changed since this page was read; read it again from the start",
+                    ));
+                }
+                offset
+            }
         };
         let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-        let store = self.store().await?;
         let (entries, more) = store
             .active_review_page(&project_id, offset, limit)
             .await
@@ -57,7 +74,7 @@ impl BlackboardRequestProcessor {
         for entry in entries {
             data.push(memory_item(store, entry).await?);
         }
-        let next_cursor = more.then(|| (offset + limit).to_string());
+        let next_cursor = more.then(|| format!("{revision}:{}", offset + limit));
         Ok(Some(
             StatefulMemoryReadResponse {
                 project_id,
