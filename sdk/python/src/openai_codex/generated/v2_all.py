@@ -5438,33 +5438,6 @@ class StatefulObligationPacket(BaseModel):
     uncertainty: list[str] | None = []
 
 
-class StatefulRecapDecision(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    reason: Annotated[
-        str | None,
-        Field(description="The recorded reason, when one was recorded; at most 240 bytes."),
-    ] = None
-    reported: Annotated[
-        bool, Field(description="The assistant's conclusion rather than the user's word.")
-    ]
-    text: Annotated[str, Field(description="At most 240 bytes.")]
-
-
-class StatefulRecapWork(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    finished_at: Annotated[
-        int, Field(alias="finishedAt", description="Unix seconds when it finished.")
-    ]
-    request: Annotated[
-        str | None, Field(description="The opening of what was asked, at most 240 bytes.")
-    ] = None
-    thread_id: Annotated[str, Field(alias="threadId")]
-
-
 class StatefulRunBudget(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
