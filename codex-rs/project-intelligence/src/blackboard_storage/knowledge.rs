@@ -493,7 +493,7 @@ fn bounded_preview(text: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(format!("{}\u{2026}", &text[..end]))
 }
 
-async fn context_of(
+pub(super) async fn context_of(
     connection: &mut SqliteConnection,
     project_id: &str,
     entry_id: &str,

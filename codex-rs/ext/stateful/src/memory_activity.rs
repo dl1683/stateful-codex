@@ -3,8 +3,6 @@
 //! journal of committed changes; nothing is estimated and no model is called.
 
 use codex_project_intelligence::BlackboardKind;
-use codex_project_intelligence::BlackboardStore;
-use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::CensusEntry;
 use codex_project_intelligence::ChangeCount;
 use codex_project_intelligence::ChangeOperation;
@@ -74,14 +72,6 @@ pub(crate) fn tally(entry: &CensusEntry) -> Option<Tally> {
         entry.root_promotion,
         &entry.id,
     )))
-}
-
-/// Counts the project's current memory.
-pub async fn memory_counts(
-    store: &BlackboardStore,
-    project_id: &str,
-) -> Result<MemoryCounts, BlackboardStoreError> {
-    Ok(count_census(&store.memory_census(project_id).await?))
 }
 
 /// Counts a census of current memory.

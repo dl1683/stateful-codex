@@ -63,8 +63,8 @@ impl BlackboardStore {
     }
 
     /// Like `create_successor_recorded`, also journaling `replaced_change` (with each replaced
-    /// entry's own text as its preview) for every entry the successor replaces, all in the
-    /// same transaction. A retry of a committed succession journals nothing.
+    /// entry's own text and category) for every entry the successor replaces, all in the same
+    /// transaction. A retry of a committed succession journals nothing.
     pub async fn create_successor_accounted(
         &self,
         id: BlackboardEntryId,
@@ -199,6 +199,14 @@ impl BlackboardStore {
             if let Some(replaced_change) = replaced_change {
                 let mut record = replaced_change.clone();
                 record.preview = current.value.content.clone();
+                // Each replaced entry keeps its own category (legacy when none was recorded).
+                record.category = super::knowledge::context_of(
+                    &mut transaction,
+                    &value.project_id,
+                    current.id.as_str(),
+                )
+                .await?
+                .map_or(crate::KnowledgeCategory::Legacy, |context| context.category);
                 super::knowledge::append_change(
                     &mut transaction,
                     &value.project_id,

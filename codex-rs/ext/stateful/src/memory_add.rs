@@ -155,86 +155,85 @@ pub async fn add_entry(
             vec![digest_id("stateful-memory-add-", project_id, action_id)?]
         }
     };
-    for id in candidates {
-        let Some(existing) = store.get_entry(project_id, &id).await? else {
-            let stored = store
-                .create_entry_with_context(
-                    id.clone(),
-                    value,
-                    KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect),
-                    origin.change(ChangeOperation::Saved, category, &text),
-                )
-                .await;
-            let (entry, created) = match stored {
-                Ok(stored) => stored,
-                // Another action stored the same words first; they are current.
-                Err(BlackboardStoreError::EntryIdentityConflict(_)) => {
-                    if let Some(existing) = store.get_entry(project_id, &id).await?
-                        && existing.state == BlackboardEntryState::Active
-                    {
-                        return Ok((existing, AddOutcome::AlreadyPresent));
-                    }
-                    return Err(MemoryControlError::Refused(
-                        "these words changed while they were being added; try again".to_string(),
-                    ));
-                }
-                Err(error) => return Err(error.into()),
+    // A write that loses a race is decided once more against what was stored meanwhile.
+    'attempt: for _ in 0..2 {
+        for id in candidates.iter().cloned() {
+            let Some(existing) = store.get_entry(project_id, &id).await? else {
+                let stored = store
+                    .create_entry_with_context(
+                        id.clone(),
+                        value.clone(),
+                        KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect),
+                        origin.change(ChangeOperation::Saved, category, &text),
+                    )
+                    .await;
+                let (entry, created) = match stored {
+                    Ok(stored) => stored,
+                    // Something else stored this identity first (another action, or host
+                    // capture): decide again against what is stored now.
+                    Err(BlackboardStoreError::EntryIdentityConflict(_)) => continue 'attempt,
+                    Err(error) => return Err(error.into()),
+                };
+                // A concurrent request of the same action may have stored it first.
+                let outcome = match created {
+                    CreateOutcome::Created => AddOutcome::Added,
+                    CreateOutcome::AlreadyPresent => AddOutcome::AlreadyDone,
+                };
+                return Ok((entry, outcome));
             };
-            // A concurrent request of the same action may have stored it first.
-            let outcome = match created {
-                CreateOutcome::Created => AddOutcome::Added,
-                CreateOutcome::AlreadyPresent => AddOutcome::AlreadyDone,
-            };
-            return Ok((entry, outcome));
-        };
-        // A retried action finds what it made, whatever happened to it since; it never
-        // restores words forgotten after it.
-        if existing.value.provenance.source_id == source_id {
-            return Ok((existing, AddOutcome::AlreadyDone));
-        }
-        if existing.state != BlackboardEntryState::Active {
-            continue;
-        }
-        // The user's direct rule applies even when the same words were kept as a
-        // task-limited rule.
-        if kind == BlackboardKind::Instruction
-            && existing.value.root_promotion != RootPromotion::Promoted
-        {
-            let promoted = store
-                .update_entry_recorded(
-                    project_id,
-                    &existing.id,
-                    BlackboardEntryUpdate {
-                        expected_revision: existing.revision,
-                        kind: existing.value.kind,
-                        content: existing.value.content.clone(),
-                        structured_value: existing.value.structured_value.clone(),
-                        confidence: existing.value.confidence,
-                        verification: existing.value.verification,
-                        importance: existing.value.importance,
-                        root_promotion: RootPromotion::Promoted,
-                        evidence: existing.value.evidence.clone(),
-                        premises: existing.value.premises.clone(),
-                        state: BlackboardEntryState::Active,
-                        superseded_by: None,
-                        provenance: BlackboardProvenance {
-                            kind: BlackboardProvenanceKind::User,
-                            source_id,
+            // A retried action finds what it made, whatever happened to it since; it never
+            // restores words forgotten after it.
+            if existing.value.provenance.source_id == source_id {
+                return Ok((existing, AddOutcome::AlreadyDone));
+            }
+            if existing.state != BlackboardEntryState::Active {
+                continue;
+            }
+            // The user's direct rule applies even when the same words were kept as a
+            // task-limited rule.
+            if kind == BlackboardKind::Instruction
+                && existing.value.root_promotion != RootPromotion::Promoted
+            {
+                let promoted = store
+                    .update_entry_recorded(
+                        project_id,
+                        &existing.id,
+                        BlackboardEntryUpdate {
+                            expected_revision: existing.revision,
+                            kind: existing.value.kind,
+                            content: existing.value.content.clone(),
+                            structured_value: existing.value.structured_value.clone(),
+                            confidence: existing.value.confidence,
+                            verification: existing.value.verification,
+                            importance: existing.value.importance,
+                            root_promotion: RootPromotion::Promoted,
+                            evidence: existing.value.evidence.clone(),
+                            premises: existing.value.premises.clone(),
+                            state: BlackboardEntryState::Active,
+                            superseded_by: None,
+                            provenance: BlackboardProvenance {
+                                kind: BlackboardProvenanceKind::User,
+                                source_id: source_id.clone(),
+                            },
                         },
-                    },
-                    Some(&origin.change(
-                        ChangeOperation::Promoted,
-                        category,
-                        &existing.value.content,
-                    )),
-                )
-                .await?;
-            return Ok((promoted, AddOutcome::Added));
+                        Some(&origin.change(
+                            ChangeOperation::Promoted,
+                            category,
+                            &existing.value.content,
+                        )),
+                    )
+                    .await?;
+                return Ok((promoted, AddOutcome::Added));
+            }
+            return Ok((existing, AddOutcome::AlreadyPresent));
         }
-        return Ok((existing, AddOutcome::AlreadyPresent));
+        return Err(MemoryControlError::Refused(
+            "these words were retired too many times to be added again".to_string(),
+        ));
     }
     Err(MemoryControlError::Refused(
-        "these words were retired too many times to be added again".to_string(),
+        "these words changed while they were being added; nothing was changed, try again"
+            .to_string(),
     ))
 }
 

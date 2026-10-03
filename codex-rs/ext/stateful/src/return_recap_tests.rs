@@ -224,6 +224,7 @@ fn recap_text_keeps_reasons_and_cuts_on_characters() {
                 /*reported*/ false
             ),
             commit_line("A note that is not a commit observation."),
+            commit_line("Commit \u{2014}\u{2014}\u{2014} (committed yesterday): kept text"),
         ),
         (
             RecapDecision {
@@ -232,6 +233,7 @@ fn recap_text_keeps_reasons_and_cuts_on_characters() {
                 reported: false,
             },
             "A note that is not a commit observation.".to_string(),
+            "Commit \u{2014}\u{2014}\u{2014} (committed yesterday): kept text".to_string(),
         )
     );
     let long = "\u{2014}".repeat(100);
@@ -243,5 +245,49 @@ fn recap_text_keeps_reasons_and_cuts_on_characters() {
             cut.chars().count()
         ),
         (true, true, 80)
+    );
+}
+
+/// Rules are shown in the order the user stated them (capture position), not by recency,
+/// and the ones not shown are counted.
+#[tokio::test]
+async fn recap_rules_keep_the_stated_order() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let seed = Seed { store, node_id };
+    // Stored newest-stated first, so storage order and stated order disagree.
+    for position in (1..=6_u64).rev() {
+        seed.add(
+            &format!("rule-{position}"),
+            (BlackboardKind::Instruction, BlackboardProvenanceKind::User),
+            &format!("Rule {position}."),
+            KnowledgeContext {
+                source_sequence: Some(position),
+                unit_ordinal: Some(0),
+                ..KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect)
+            },
+            BlackboardVerification::Unverified,
+        )
+        .await;
+    }
+    let recap = return_recap(
+        store,
+        &InMemoryThreadStore::default(),
+        "project-1",
+        "thread-1",
+    )
+    .await
+    .expect("recap");
+    assert_eq!(
+        (recap.rules, recap.more_rules),
+        (
+            (1..=5)
+                .map(|position| format!("Rule {position}."))
+                .collect::<Vec<_>>(),
+            1
+        )
     );
 }

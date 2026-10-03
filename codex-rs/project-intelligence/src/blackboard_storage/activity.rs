@@ -42,6 +42,10 @@ pub struct CensusEntry {
     pub verification: BlackboardVerification,
     /// The investigation or task it is limited to, if any.
     pub scope_id: Option<String>,
+    /// Where its source sits in the project's capture order, when recorded.
+    pub source_sequence: Option<u64>,
+    pub unit_ordinal: Option<u32>,
+    pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
 
@@ -134,28 +138,6 @@ impl BlackboardStore {
         change_totals_on(&mut connection, project_id, after, thread_ids).await
     }
 
-    /// Journal rows after `after`, oldest first, at most `limit`, optionally only those
-    /// recorded for `thread_ids`.
-    pub async fn memory_changes_for_threads(
-        &self,
-        project_id: &str,
-        after: u64,
-        thread_ids: Option<&[String]>,
-        limit: u32,
-    ) -> Result<Vec<MemoryChange>, BlackboardStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        memory_changes_for_threads_on(&mut connection, project_id, after, thread_ids, limit).await
-    }
-
-    /// The newest journal row of the project, if any.
-    pub async fn journal_head(
-        &self,
-        project_id: &str,
-    ) -> Result<Option<JournalHead>, BlackboardStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        journal_head_on(&mut connection, project_id).await
-    }
-
     /// The newest journal sequence recorded at or before `at_ms` (0 when none was).
     pub async fn sequence_at(
         &self,
@@ -171,28 +153,6 @@ impl BlackboardStore {
         .await?
         .unwrap_or(0);
         u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
-    }
-
-    /// The newest journal rows of one operation and category, newest first, at most `limit`.
-    pub async fn recent_changes(
-        &self,
-        project_id: &str,
-        operation: ChangeOperation,
-        category: KnowledgeCategory,
-        limit: u32,
-    ) -> Result<Vec<MemoryChange>, BlackboardStoreError> {
-        let rows = sqlx::query_as::<_, StoredChange>(
-            "SELECT * FROM memory_changes
-             WHERE project_id = ? AND operation = ? AND category = ?
-             ORDER BY sequence DESC LIMIT ?",
-        )
-        .bind(project_id)
-        .bind(operation.as_str())
-        .bind(category.as_str())
-        .bind(i64::from(limit.clamp(1, MAX_CHANGES_PAGE)))
-        .fetch_all(&self.pool)
-        .await?;
-        rows.into_iter().map(StoredChange::into_change).collect()
     }
 }
 
@@ -216,6 +176,13 @@ async fn memory_census_on(
                 (SELECT context.authority FROM knowledge_context AS context
                  WHERE context.entry_id = entry.id AND context.revision <= entry.revision
                  ORDER BY context.revision DESC LIMIT 1) AS authority,
+                (SELECT context.source_sequence FROM knowledge_context AS context
+                 WHERE context.entry_id = entry.id AND context.revision <= entry.revision
+                 ORDER BY context.revision DESC LIMIT 1) AS source_sequence,
+                (SELECT context.unit_ordinal FROM knowledge_context AS context
+                 WHERE context.entry_id = entry.id AND context.revision <= entry.revision
+                 ORDER BY context.revision DESC LIMIT 1) AS unit_ordinal,
+                entry.created_at_ms AS created_at_ms,
                 revision.verification AS verification,
                 entry.updated_at_ms AS updated_at_ms
          FROM blackboard_entries AS entry
@@ -259,6 +226,19 @@ async fn memory_census_on(
                     .transpose()?,
                 verification: parse_verification(&row.verification)?,
                 scope_id: row.scope_id,
+                source_sequence: row
+                    .source_sequence
+                    .map(|sequence| {
+                        u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
+                    })
+                    .transpose()?,
+                unit_ordinal: row
+                    .unit_ordinal
+                    .map(|ordinal| {
+                        u32::try_from(ordinal).map_err(|_| BlackboardStoreError::RevisionOverflow)
+                    })
+                    .transpose()?,
+                created_at_ms: row.created_at_ms,
                 updated_at_ms: row.updated_at_ms,
             })
         })
@@ -371,6 +351,9 @@ struct StoredCensus {
     category: Option<String>,
     validity: Option<String>,
     scope_id: Option<String>,
+    source_sequence: Option<i64>,
+    unit_ordinal: Option<i64>,
+    created_at_ms: i64,
     authority: Option<String>,
     verification: String,
     updated_at_ms: i64,

@@ -124,9 +124,10 @@ async fn census_totals_and_pages_follow_the_journal() {
         .await
         .expect("rule");
     let watermark = store
-        .journal_head(PROJECT_ID)
+        .memory_changes_snapshot(PROJECT_ID, 0, None, 1)
         .await
         .expect("head")
+        .1
         .expect("one row")
         .sequence;
     let long_preview = format!("{}\u{2014}tail", "a".repeat(MAX_CHANGE_PREVIEW_BYTES - 1));
@@ -168,6 +169,7 @@ async fn census_totals_and_pages_follow_the_journal() {
     assert!(census.iter().all(|entry| entry.updated_at_ms > 0));
     for entry in &mut census {
         entry.updated_at_ms = 0;
+        entry.created_at_ms = 0;
     }
     assert_eq!(
         census,
@@ -181,6 +183,9 @@ async fn census_totals_and_pages_follow_the_journal() {
                 validity: None,
                 verification: BlackboardVerification::Unverified,
                 scope_id: None,
+                source_sequence: None,
+                unit_ordinal: None,
+                created_at_ms: 0,
                 authority: None,
                 updated_at_ms: 0,
             },
@@ -193,6 +198,9 @@ async fn census_totals_and_pages_follow_the_journal() {
                 validity: Some(KnowledgeValidity::Current),
                 verification: BlackboardVerification::Unverified,
                 scope_id: None,
+                source_sequence: None,
+                unit_ordinal: None,
+                created_at_ms: 0,
                 authority: Some(KnowledgeAuthority::HumanDirect),
                 updated_at_ms: 0,
             },
@@ -205,6 +213,9 @@ async fn census_totals_and_pages_follow_the_journal() {
                 validity: Some(KnowledgeValidity::Current),
                 verification: BlackboardVerification::Unverified,
                 scope_id: None,
+                source_sequence: None,
+                unit_ordinal: None,
+                created_at_ms: 0,
                 authority: Some(KnowledgeAuthority::HostObserved),
                 updated_at_ms: 0,
             },
@@ -252,9 +263,10 @@ async fn census_totals_and_pages_follow_the_journal() {
     );
 
     let page = store
-        .memory_changes_for_threads(PROJECT_ID, 0, None, 10)
+        .memory_changes_snapshot(PROJECT_ID, 0, None, 10)
         .await
-        .expect("page");
+        .expect("page")
+        .0;
     let previews = page
         .iter()
         .map(|change| change.record.preview.clone())
@@ -267,30 +279,15 @@ async fn census_totals_and_pages_follow_the_journal() {
         ]
     );
     let page = store
-        .memory_changes_for_threads(PROJECT_ID, 0, Some(&session), 10)
+        .memory_changes_snapshot(PROJECT_ID, 0, Some(&session), 10)
         .await
-        .expect("page");
+        .expect("page")
+        .0;
     assert_eq!(
         page.iter()
             .map(|change| change.sequence)
             .collect::<Vec<_>>(),
         vec![watermark]
-    );
-    let recent = store
-        .recent_changes(
-            PROJECT_ID,
-            ChangeOperation::Saved,
-            KnowledgeCategory::CommitObservation,
-            5,
-        )
-        .await
-        .expect("recent");
-    assert_eq!(
-        recent
-            .iter()
-            .map(|change| change.sequence)
-            .collect::<Vec<_>>(),
-        vec![watermark + 1]
     );
     assert_eq!(
         (
@@ -323,9 +320,10 @@ async fn a_full_page_reports_that_more_follow() {
     }
     let session = vec!["thread-1".to_string()];
     let page = store
-        .memory_changes_for_threads(PROJECT_ID, 0, Some(&session), super::MAX_CHANGES_PAGE + 1)
+        .memory_changes_snapshot(PROJECT_ID, 0, Some(&session), super::MAX_CHANGES_PAGE + 1)
         .await
-        .expect("page");
+        .expect("page")
+        .0;
     assert_eq!(
         page.len(),
         usize::try_from(super::MAX_CHANGES_PAGE).expect("fits") + 1
@@ -384,14 +382,16 @@ async fn a_succession_accounts_for_what_it_replaced() {
             .expect("succession");
     }
     let journal = store
-        .memory_changes_for_threads(PROJECT_ID, 0, None, 10)
+        .memory_changes_snapshot(PROJECT_ID, 0, None, 10)
         .await
         .expect("journal")
+        .0
         .into_iter()
         .map(|change| {
             (
                 change.entry_id.unwrap_or_default(),
                 change.record.operation,
+                change.record.category,
                 change.record.preview,
             )
         })
@@ -402,16 +402,19 @@ async fn a_succession_accounts_for_what_it_replaced() {
             (
                 "new".to_string(),
                 ChangeOperation::Saved,
+                KnowledgeCategory::Decision,
                 "new decision".to_string()
             ),
             (
                 "old-1".to_string(),
                 ChangeOperation::Invalidated,
+                KnowledgeCategory::Legacy,
                 "old-1 \u{2014} decision".to_string()
             ),
             (
                 "old-2".to_string(),
                 ChangeOperation::Invalidated,
+                KnowledgeCategory::Legacy,
                 "old-2 \u{2014} decision".to_string()
             ),
         ]

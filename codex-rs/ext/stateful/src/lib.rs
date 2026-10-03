@@ -87,7 +87,6 @@ pub use memory_activity::ChangeTotals;
 pub use memory_activity::MemoryCounts;
 pub use memory_activity::change_totals;
 pub use memory_activity::count_census;
-pub use memory_activity::memory_counts;
 pub use memory_add::AddOutcome;
 pub use memory_add::MemoryAddition;
 pub use memory_add::add_entry;

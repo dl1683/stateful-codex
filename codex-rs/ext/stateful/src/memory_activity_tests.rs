@@ -18,7 +18,7 @@ use tempfile::TempDir;
 use super::ChangeTotals;
 use super::MemoryCounts;
 use super::change_totals;
-use super::memory_counts;
+use super::count_census;
 use crate::memory_add::MemoryAddition;
 use crate::memory_add::add_entry;
 use crate::memory_controls::ControlOrigin;
@@ -115,7 +115,7 @@ async fn counts_and_journal_follow_direct_controls() {
         .expect("forget");
 
     assert_eq!(
-        memory_counts(store, "project-1").await.expect("counts"),
+        count_census(&store.memory_census("project-1").await.expect("census")),
         MemoryCounts {
             decisions: 1,
             open_checks: 1,
@@ -150,9 +150,10 @@ async fn counts_and_journal_follow_direct_controls() {
         )
     );
     let previews = store
-        .memory_changes_for_threads("project-1", 0, None, 10)
+        .memory_changes_snapshot("project-1", 0, None, 10)
         .await
         .expect("page")
+        .0
         .into_iter()
         .map(|change| (change.record.operation, change.record.preview))
         .collect::<Vec<_>>();
