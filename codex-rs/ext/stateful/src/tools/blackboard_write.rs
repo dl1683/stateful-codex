@@ -189,6 +189,11 @@ impl BlackboardRecorder {
                 "nothing written: the user limited that sentence to the current task",
             ));
         }
+        if crate::user_rules::asks_about_rules(&clause) {
+            return Err(respond(
+                "nothing written: that sentence asks about rules; it does not state one",
+            ));
+        }
         if reports_speech(&clause) || header == Some(HeaderScope::Reported) {
             return Err(respond(
                 "nothing written: that sentence relays someone else's words, not the user's rule",

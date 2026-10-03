@@ -349,3 +349,61 @@ async fn a_retired_rule_returns_only_from_a_later_message() {
     .map(|captured| captured.newly_stored);
     assert_eq!((replayed.is_err(), restated), (true, Ok(true)));
 }
+
+/// After a retirement, a pending restatement from another thread exists; quoting the message
+/// that stated the retired rule cannot promote it.
+#[tokio::test]
+async fn an_old_quote_cannot_promote_a_pending_restatement() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let stated_before = super::now_ms() - 1;
+    let rule = capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-a",
+        "turn-1",
+        "My working preferences:\n- Never run migrations.",
+    )
+    .await
+    .remove(0)
+    .entry;
+    let store = services.blackboard().await.expect("blackboard");
+    crate::memory_controls::forget_entry(store, "project-1", &rule.id, rule.revision)
+        .await
+        .expect("retire");
+    let pending = capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-b",
+        "turn-2",
+        "For this task:\n- Never run migrations.",
+    )
+    .await
+    .remove(0);
+    let replayed = super::store_user_rule(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        super::RuleSource {
+            thread_id: "thread-a",
+            turn_id: "turn-1",
+            receipt_turn_id: "turn-3",
+            stated_at_ms: stated_before,
+        },
+        "- Never run migrations.",
+        RuleStanding::Standing,
+    )
+    .await;
+    let current = store
+        .get_entry("project-1", &pending.entry.id)
+        .await
+        .expect("read")
+        .expect("pending entry");
+    assert_eq!(
+        (replayed.is_err(), current.value.root_promotion),
+        (true, RootPromotion::Candidate)
+    );
+}

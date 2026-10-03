@@ -181,7 +181,7 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
                 continue;
             }
             let normalized = normalize(clause);
-            if is_reported_speech(&normalized) {
+            if is_reported_speech(&normalized) || is_request_about_rules(&normalized) {
                 continue;
             }
             let standing = match inherited {
@@ -250,9 +250,48 @@ pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<HeaderScope> {
 /// one (a Markdown lazy continuation keeps the item, and so the header, it continues).
 /// Tracks across lines whether a list is open.
 fn in_list_item(line: &str, trimmed: &str, in_list: &mut bool) -> bool {
-    let continuation = *in_list && line.starts_with([' ', '\t']);
+    // An indented header ("  For this task:") opens its own nested scope instead.
+    let continuation = *in_list && line.starts_with([' ', '\t']) && !trimmed.ends_with(':');
     *in_list = list_item_body(trimmed).is_some() || continuation;
     *in_list
+}
+
+/// Asking for rules ("list the standing rules I gave you") names rules without stating one.
+const RULE_REQUEST_PHRASES: &[&str] = &[
+    "list the",
+    "list my",
+    "list all",
+    "list every",
+    "show me",
+    "show the",
+    "repeat the",
+    "recite",
+    "remind me",
+    "tell me the",
+    "tell me what",
+    "what are the",
+    "what are my",
+    "what rules",
+    "which rules",
+    "word for word",
+    "rules i gave you",
+];
+const RULE_NOUNS: &[&str] = &[
+    "rule",
+    "rules",
+    "preference",
+    "preferences",
+    "instruction",
+    "instructions",
+];
+
+/// Whether `clause` asks about the user's rules rather than stating one.
+pub(crate) fn asks_about_rules(clause: &str) -> bool {
+    is_request_about_rules(&normalize(clause))
+}
+
+fn is_request_about_rules(normalized: &str) -> bool {
+    has_phrase(normalized, RULE_REQUEST_PHRASES) && has_phrase(normalized, RULE_NOUNS)
 }
 
 /// Whether `clause` reports what someone else said or advised rather than stating the

@@ -185,3 +185,44 @@ fn indented_continuations_stay_under_their_list_header() {
         )
     );
 }
+
+#[test]
+fn nested_headers_and_requests_about_rules() {
+    let nested = "My working preferences:
+- Work carefully.
+  For this task:
+  - Never run migrations.";
+    let relayed = "My working preferences:
+- Work carefully.
+  The assistant suggested these preferences:
+  - Never run migrations.";
+    let request = "Also, a new teammate is joining: list the standing rules I gave you when we started working on this fork, word for word if you can.";
+    assert_eq!(
+        (
+            marked_rules(nested),
+            super::inherited_scope(nested, "- Never run migrations."),
+            marked_rules(relayed),
+            marked_rules(request),
+            super::asks_about_rules(request),
+        ),
+        (
+            vec![
+                RuleClause {
+                    text: "- Work carefully.".to_string(),
+                    standing: RuleStanding::Standing,
+                },
+                RuleClause {
+                    text: "- Never run migrations.".to_string(),
+                    standing: RuleStanding::Pending,
+                },
+            ],
+            Some(super::HeaderScope::Pending),
+            vec![RuleClause {
+                text: "- Work carefully.".to_string(),
+                standing: RuleStanding::Standing,
+            }],
+            Vec::new(),
+            true,
+        )
+    );
+}

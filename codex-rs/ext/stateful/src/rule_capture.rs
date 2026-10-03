@@ -69,6 +69,8 @@ pub(crate) fn now_ms() -> i64 {
         })
 }
 
+const RETIRED_BEFORE_MESSAGE: &str = "nothing written: this rule was retired after the user wrote that message; only a later message from the user restores it";
+
 /// Restatements of one wording after which a rule is no longer re-established.
 const MAX_RULE_GENERATIONS: u32 = 8;
 
@@ -184,6 +186,14 @@ pub(crate) async fn store_user_rule(
                 break;
             }
             Some(existing) if existing.state == BlackboardEntryState::Active => {
+                // Promoting a pending wording needs the same authority as re-establishing a
+                // retired one: a message written after the retirement.
+                if standing == RuleStanding::Standing
+                    && existing.value.root_promotion != RootPromotion::Promoted
+                    && retired_at_ms.is_some_and(|retired| stated_at_ms <= retired)
+                {
+                    return Err(RETIRED_BEFORE_MESSAGE.to_string());
+                }
                 return reconcile_active_rule(
                     store,
                     event_sink,
@@ -204,10 +214,7 @@ pub(crate) async fn store_user_rule(
     // Only a message written after the retirement restores the rule; quoting the message
     // that first stated it (or any other earlier one) never does.
     if retired_at_ms.is_some_and(|retired| stated_at_ms <= retired) {
-        return Err(
-            "nothing written: this rule was retired after the user wrote that message; only a later message from the user restores it"
-                .to_string(),
-        );
+        return Err(RETIRED_BEFORE_MESSAGE.to_string());
     }
     let id = id.ok_or_else(|| {
         "this rule was retired too many times to be stored again automatically".to_string()
