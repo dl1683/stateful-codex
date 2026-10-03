@@ -48,3 +48,13 @@ test("a draft longer than an entry is kept whole and judged in UTF-8 bytes", () 
     [MAX_ENTRY_BYTES + 1, false, true, false],
   );
 });
+
+test("changing an addition after a failed save makes it a new action", () => {
+  const drafts = createDrafts(memoryStorage(), "thread-1");
+  drafts.editAddition("content", "Months use mth.");
+  drafts.editAddition("actionId", "action-1");
+  // A retry of the same words keeps the action; other words start a new one.
+  const retried = drafts.addition().actionId;
+  drafts.editAddition("content", "Months use mo.");
+  assert.deepEqual([retried, drafts.addition().actionId], ["action-1", undefined]);
+});

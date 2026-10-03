@@ -53,8 +53,11 @@ export function createDrafts(storage, threadId) {
     addition() {
       return drafts.addition;
     },
+    // Changing what is to be added makes it a new action: a retry of the earlier words
+    // (which may have been saved before a timeout) never carries the new ones.
     editAddition(field, value) {
       drafts.addition = { ...drafts.addition, [field]: bounded(String(value)) };
+      if (field !== "actionId") delete drafts.addition.actionId;
       save();
     },
     clearAddition() {
