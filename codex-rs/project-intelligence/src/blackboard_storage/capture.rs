@@ -12,11 +12,15 @@ use crate::CaptureMember;
 use crate::CaptureSource;
 use crate::CaptureUnit;
 use crate::CommittedCapture;
+use crate::ExistingMatch;
 use crate::MemberOutcome;
 use crate::storage::unix_timestamp_millis;
 
 use super::BlackboardStore;
 use super::BlackboardStoreError;
+use super::identity::identities_cover;
+use super::identity::identity_matches;
+use super::identity::record_identity;
 use super::insert_new_entry;
 use super::knowledge::append_change;
 use super::knowledge::context_of;
@@ -60,6 +64,9 @@ impl BlackboardStore {
             ));
         }
         let now = unix_timestamp_millis()?;
+        // Identity lookups are complete only when every entry has an identity; until then
+        // nothing new is created, so forgotten words cannot slip through an unindexed entry.
+        let covered = identities_cover(&mut transaction, &group.project_id).await?;
         let mut members = Vec::with_capacity(units.len());
         for (ordinal, unit) in units.into_iter().enumerate() {
             let ordinal =
@@ -67,81 +74,28 @@ impl BlackboardStore {
             let (entry_id, outcome, note) = match unit {
                 CaptureUnit::Entry {
                     id,
-                    retired_identities,
+                    identity_keys,
+                    existing,
                     value,
                     context,
                     change,
-                } => match load_entry_by_id(&mut transaction, &id).await? {
-                    Some(existing)
-                        if existing.state == BlackboardEntryState::Active
-                            && same_meaning(&existing, &value) =>
-                    {
-                        (Some(id.to_string()), MemberOutcome::AlreadyPresent, None)
-                    }
-                    Some(existing) if existing.state == BlackboardEntryState::Active => (
-                        None,
-                        MemberOutcome::Omitted,
-                        Some(format!("changed since it was saved: {}", change.preview)),
-                    ),
-                    Some(_) => (None, MemberOutcome::NotRestored, Some(change.preview)),
-                    None if retired(&mut transaction, &retired_identities).await? => {
-                        (None, MemberOutcome::NotRestored, Some(change.preview))
-                    }
-                    None => match value.validate() {
-                        Ok(()) => {
-                            insert_new_entry(&mut transaction, &id, &value, now).await?;
-                            write_context(&mut transaction, &value.project_id, &id, 1, &context)
-                                .await?;
-                            append_change(
-                                &mut transaction,
-                                &value.project_id,
-                                Some((&id, 1)),
-                                &change,
-                                now,
-                            )
-                            .await?;
-                            (Some(id.to_string()), MemberOutcome::Saved, None)
-                        }
-                        Err(error) => (
-                            None,
-                            MemberOutcome::Omitted,
-                            Some(format!("{error}: {}", change.preview)),
-                        ),
-                    },
-                },
-                CaptureUnit::Existing {
-                    id,
-                    revision,
-                    context,
-                } => match load_entry(&mut transaction, &group.project_id, &id).await? {
-                    Some(existing)
-                        if existing.state == BlackboardEntryState::Active
-                            && existing.revision == revision =>
-                    {
-                        if context_of(&mut transaction, &group.project_id, id.as_str())
-                            .await?
-                            .is_none()
-                        {
-                            let revision = i64::try_from(existing.revision)
-                                .map_err(|_| BlackboardStoreError::RevisionOverflow)?;
-                            write_context(
-                                &mut transaction,
-                                &group.project_id,
-                                &id,
-                                revision,
-                                &context,
-                            )
-                            .await?;
-                        }
-                        (Some(id.to_string()), MemberOutcome::AlreadyPresent, None)
-                    }
-                    Some(existing) if existing.state == BlackboardEntryState::Active => (
-                        None,
-                        MemberOutcome::Omitted,
-                        Some(format!("{id} changed while this was being saved")),
-                    ),
-                    _ => (None, MemberOutcome::NotRestored, Some(id.to_string())),
-                },
+                } => {
+                    commit_entry(
+                        &mut transaction,
+                        &group.project_id,
+                        covered,
+                        EntryUnit {
+                            id,
+                            identity_keys,
+                            existing,
+                            value: *value,
+                            context: *context,
+                            change: *change,
+                        },
+                        now,
+                    )
+                    .await?
+                }
                 CaptureUnit::Omitted { note } => (None, MemberOutcome::Omitted, Some(note)),
             };
             members.push(CaptureMember {
@@ -193,27 +147,100 @@ impl BlackboardStore {
     }
 }
 
-/// Whether an identity's stored entry still holds the same knowledge: same kind and the
-/// same words apart from spacing.
-fn same_meaning(existing: &BlackboardEntry, value: &crate::NewBlackboardEntry) -> bool {
-    let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-    existing.value.kind == value.kind && words(&existing.value.content) == words(&value.content)
+/// One entry unit of a capture.
+struct EntryUnit {
+    id: crate::BlackboardEntryId,
+    identity_keys: Vec<String>,
+    existing: ExistingMatch,
+    value: crate::NewBlackboardEntry,
+    context: crate::KnowledgeContext,
+    change: crate::ChangeRecord,
 }
 
-/// Whether any of `ids` exists and is no longer active.
-async fn retired(
+/// Judges and commits one entry unit inside the capture transaction: words forgotten under
+/// any of its identities stay forgotten, words already active are the same unit, anything
+/// else is created with its context, journal row and identity.
+async fn commit_entry(
     connection: &mut SqliteConnection,
-    ids: &[crate::BlackboardEntryId],
-) -> Result<bool, BlackboardStoreError> {
-    for id in ids {
-        if load_entry_by_id(&mut *connection, id)
-            .await?
-            .is_some_and(|entry| entry.state != BlackboardEntryState::Active)
-        {
-            return Ok(true);
-        }
+    project_id: &str,
+    covered: bool,
+    unit: EntryUnit,
+    now: i64,
+) -> Result<(Option<String>, MemberOutcome, Option<String>), BlackboardStoreError> {
+    let EntryUnit {
+        id,
+        identity_keys,
+        existing,
+        value,
+        context,
+        change,
+    } = unit;
+    if !covered {
+        return Ok((
+            None,
+            MemberOutcome::Omitted,
+            Some(format!(
+                "not saved while older entries are being indexed (the answer keeps it): {}",
+                change.preview
+            )),
+        ));
     }
-    Ok(false)
+    let matches = identity_matches(&mut *connection, project_id, &identity_keys).await?;
+    let own = load_entry_by_id(&mut *connection, &id).await?;
+    let retired = matches
+        .iter()
+        .any(|entry| entry.state != BlackboardEntryState::Active)
+        || own
+            .as_ref()
+            .is_some_and(|entry| entry.state != BlackboardEntryState::Active);
+    if retired {
+        return Ok((None, MemberOutcome::NotRestored, Some(change.preview)));
+    }
+    if let Some(own) = own {
+        return Ok((
+            Some(own.id.to_string()),
+            MemberOutcome::AlreadyPresent,
+            None,
+        ));
+    }
+    if existing == ExistingMatch::Reuse
+        && let Some(active) = matches.first()
+    {
+        if context_of(&mut *connection, project_id, active.id.as_str())
+            .await?
+            .is_none()
+        {
+            let revision = i64::try_from(active.revision)
+                .map_err(|_| BlackboardStoreError::RevisionOverflow)?;
+            write_context(&mut *connection, project_id, &active.id, revision, &context).await?;
+        }
+        return Ok((
+            Some(active.id.to_string()),
+            MemberOutcome::AlreadyPresent,
+            None,
+        ));
+    }
+    if let Err(error) = value.validate() {
+        return Ok((
+            None,
+            MemberOutcome::Omitted,
+            Some(format!("{error}: {}", change.preview)),
+        ));
+    }
+    insert_new_entry(&mut *connection, &id, &value, now).await?;
+    write_context(&mut *connection, &value.project_id, &id, 1, &context).await?;
+    append_change(
+        &mut *connection,
+        &value.project_id,
+        Some((&id, 1)),
+        &change,
+        now,
+    )
+    .await?;
+    if let Some(key) = identity_keys.first() {
+        record_identity(&mut *connection, project_id, key, &id).await?;
+    }
+    Ok((Some(id.to_string()), MemberOutcome::Saved, None))
 }
 
 async fn write_group(

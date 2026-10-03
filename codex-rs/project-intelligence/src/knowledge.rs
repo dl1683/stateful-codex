@@ -199,25 +199,29 @@ pub enum MemberOutcome {
 /// One unit of a capture, in source order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CaptureUnit {
-    /// A new entry under `id`, unless that identity is already stored, or it or one of
-    /// `retired_identities` (the same words elsewhere) was forgotten or replaced.
+    /// A new entry under `id`, unless its canonical identity already holds the same words:
+    /// any forgotten or replaced entry under one of `identity_keys` keeps them forgotten,
+    /// and an active one is the same unit. The first key is the entry's own identity; the
+    /// others are where else the words would apply (project-wide for a scoped unit).
     Entry {
         id: crate::BlackboardEntryId,
-        retired_identities: Vec<crate::BlackboardEntryId>,
+        identity_keys: Vec<String>,
+        existing: ExistingMatch,
         value: Box<crate::NewBlackboardEntry>,
-        context: KnowledgeContext,
-        change: ChangeRecord,
-    },
-    /// An entry already holding exactly these words (a model write of this turn); it gets
-    /// `context` if it has none and is listed as already present.
-    Existing {
-        id: crate::BlackboardEntryId,
-        /// The revision whose words matched; a changed entry is not counted as the unit.
-        revision: u64,
-        context: KnowledgeContext,
+        context: Box<KnowledgeContext>,
+        change: Box<ChangeRecord>,
     },
     /// Recognized but not kept; `note` says what it was and why.
     Omitted { note: String },
+}
+
+/// What a capture does with an active entry already holding a unit's words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExistingMatch {
+    /// Count it as the unit, and give it the unit's context if it has none.
+    Reuse,
+    /// Leave it alone and create the unit's own entry (its context must be written with it).
+    KeepSeparate,
 }
 
 /// Where a capture's units were read from.

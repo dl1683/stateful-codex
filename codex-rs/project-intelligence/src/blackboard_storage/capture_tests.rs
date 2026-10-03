@@ -23,6 +23,7 @@ use crate::ChangeOperation;
 use crate::ChangeOrigin;
 use crate::ChangeRecord;
 use crate::ConfidenceScore;
+use crate::ExistingMatch;
 use crate::HierarchyNodeId;
 use crate::HierarchyStore;
 use crate::KnowledgeAuthority;
@@ -72,12 +73,11 @@ fn context(ordinal: u32) -> KnowledgeContext {
 fn unit(ordinal: u32, content: &str) -> CaptureUnit {
     CaptureUnit::Entry {
         id: BlackboardEntryId::parse(format!("ruled-out-{content}")).expect("ID"),
-        retired_identities: vec![
-            BlackboardEntryId::parse(format!("elsewhere-{content}")).expect("ID"),
-        ],
+        identity_keys: vec![format!("key-{content}"), format!("project-key-{content}")],
+        existing: ExistingMatch::Reuse,
         value: Box::new(value(BlackboardKind::RejectedApproach, content)),
-        context: context(ordinal),
-        change: ChangeRecord {
+        context: Box::new(context(ordinal)),
+        change: Box::new(ChangeRecord {
             operation: ChangeOperation::Saved,
             origin: ChangeOrigin::HostCapture,
             category: KnowledgeCategory::RuledOut,
@@ -86,7 +86,7 @@ fn unit(ordinal: u32, content: &str) -> CaptureUnit {
             turn_id: Some("turn-1".to_string()),
             group_id: Some(GROUP_ID.to_string()),
             preview: content.to_string(),
-        },
+        }),
     }
 }
 
@@ -182,138 +182,171 @@ async fn forget(store: &BlackboardStore, entry: &BlackboardEntry) {
 /// journal row, words already saved are listed, forgotten words stay forgotten, a model
 /// entry of the same words gets the context, and an overlength unit is listed as omitted.
 /// The same source committed again changes nothing.
+/// Indexes every entry not yet indexed, giving each the key `key-<content>`.
+async fn index_all(store: &BlackboardStore) {
+    loop {
+        let (batch, covered, newest) = store
+            .identity_backfill_batch(PROJECT_ID, /*limit*/ 100)
+            .await
+            .expect("batch");
+        if covered >= newest {
+            return;
+        }
+        let through = batch.last().map_or(newest, |entry| entry.rowid);
+        let identities = batch
+            .iter()
+            .map(|entry| (format!("key-{}", entry.content), entry.id.clone()))
+            .collect::<Vec<_>>();
+        store
+            .record_identity_backfill(PROJECT_ID, covered, through, &identities)
+            .await
+            .expect("record");
+    }
+}
+
+/// Every unit is judged in one transaction against the identity index: new words are
+/// saved with context, journal row and identity; words active under any identity are the
+/// same unit (a model entry gets the context); words forgotten under any identity, however
+/// old, stay forgotten; an omitted unit is listed. The same source again changes nothing.
 #[tokio::test]
 async fn a_capture_commits_whole_and_replays_unchanged() {
     let temp_dir = TempDir::new().expect("tempdir");
     let store = store(&temp_dir).await;
-    let earlier = store
-        .create_entry(
-            BlackboardEntryId::parse("ruled-out-b").expect("ID"),
-            value(BlackboardKind::RejectedApproach, "b"),
-        )
-        .await
-        .expect("earlier");
+    for (id, content) in [("model-b", "b"), ("model-c", "c"), ("model-d", "d")] {
+        store
+            .create_entry(
+                BlackboardEntryId::parse(id).expect("ID"),
+                value(BlackboardKind::RejectedApproach, content),
+            )
+            .await
+            .expect("model write");
+    }
     let forgotten = store
-        .create_entry(
-            BlackboardEntryId::parse("ruled-out-c").expect("ID"),
-            value(BlackboardKind::RejectedApproach, "c"),
+        .get_entry(
+            PROJECT_ID,
+            &BlackboardEntryId::parse("model-c").expect("ID"),
         )
         .await
-        .expect("forgotten");
+        .expect("read")
+        .expect("c");
     forget(&store, &forgotten).await;
-    let elsewhere = store
-        .create_entry(
-            BlackboardEntryId::parse("elsewhere-e").expect("ID"),
-            value(BlackboardKind::RejectedApproach, "e"),
-        )
-        .await
-        .expect("elsewhere");
-    forget(&store, &elsewhere).await;
-    let model_write = store
-        .create_entry(
-            BlackboardEntryId::parse("model-write").expect("ID"),
-            value(BlackboardKind::RejectedApproach, "d"),
-        )
-        .await
-        .expect("model write");
+    index_all(&store).await;
     let units = vec![
         unit(0, "a"),
         unit(1, "b"),
         unit(2, "c"),
-        CaptureUnit::Existing {
-            id: model_write.id.clone(),
-            revision: model_write.revision,
-            context: context(3),
-        },
         CaptureUnit::Omitted {
             note: "too long: xxxx".to_string(),
         },
-        unit(5, "e"),
     ];
     let (committed, entries) = store
         .commit_capture(&group(), &source("digest-1"), units.clone())
         .await
         .expect("commit");
     assert_eq!(
-        (
-            committed.group.clone(),
-            committed.members.clone(),
-            committed.newly_committed
-        ),
+        (committed.group.clone(), committed.members.clone()),
         (
             CaptureGroup {
-                recognized: 6,
+                recognized: 4,
                 saved: 1,
-                already_present: 2,
-                omitted: 3,
+                already_present: 1,
+                omitted: 2,
                 ..group()
             },
             vec![
                 member(0, Some("ruled-out-a"), MemberOutcome::Saved),
-                member(1, Some("ruled-out-b"), MemberOutcome::AlreadyPresent),
+                member(1, Some("model-b"), MemberOutcome::AlreadyPresent),
                 CaptureMember {
                     note: Some("c".to_string()),
                     ..member(2, None, MemberOutcome::NotRestored)
                 },
-                member(3, Some("model-write"), MemberOutcome::AlreadyPresent),
                 CaptureMember {
                     note: Some("too long: xxxx".to_string()),
-                    ..member(4, None, MemberOutcome::Omitted)
-                },
-                CaptureMember {
-                    note: Some("e".to_string()),
-                    ..member(5, None, MemberOutcome::NotRestored)
+                    ..member(3, None, MemberOutcome::Omitted)
                 },
             ],
-            true,
         )
-    );
-    assert_eq!(
-        entries
-            .iter()
-            .map(|entry| entry.id.to_string())
-            .collect::<Vec<_>>(),
-        vec!["ruled-out-a", "ruled-out-b", "model-write"]
     );
     let contexts = store
-        .knowledge_contexts(
-            PROJECT_ID,
-            &[
-                entries[0].id.clone(),
-                earlier.id.clone(),
-                model_write.id.clone(),
-            ],
-        )
+        .knowledge_contexts(PROJECT_ID, &[entries[0].id.clone(), entries[1].id.clone()])
         .await
         .expect("contexts");
     assert_eq!(
-        (
-            contexts.get("ruled-out-a"),
-            contexts.get("ruled-out-b"),
-            contexts.get("model-write")
-        ),
-        (Some(&context(0)), None, Some(&context(3)))
+        (contexts.get("ruled-out-a"), contexts.get("model-b")),
+        (Some(&context(0)), Some(&context(1)))
     );
-    let journal = store
-        .memory_changes(PROJECT_ID, None, /*after*/ 0, /*limit*/ 10)
-        .await
-        .expect("journal");
-    assert_eq!(journal.len(), 1);
-
     let (replayed, _) = store
         .commit_capture(&group(), &source("digest-1"), units)
         .await
         .expect("replay");
     assert_eq!(
-        replayed,
-        crate::CommittedCapture {
-            newly_committed: false,
-            ..committed.clone()
-        }
+        (replayed.newly_committed, replayed.members),
+        (false, committed.members)
     );
+    // The saved unit's own identity is indexed: forgetting it keeps it forgotten.
+    let saved = store
+        .get_entry(
+            PROJECT_ID,
+            &BlackboardEntryId::parse("ruled-out-a").expect("ID"),
+        )
+        .await
+        .expect("read")
+        .expect("a");
+    forget(&store, &saved).await;
+    index_all(&store).await;
+    let mut again = group();
+    again.group_id = "ruled-out-2".to_string();
+    let (later, _) = store
+        .commit_capture(&again, &source("digest-2"), vec![unit(0, "a")])
+        .await
+        .expect("commit");
+    assert_eq!(later.members[0].outcome, MemberOutcome::NotRestored);
+}
+
+/// Until every entry is indexed, a capture creates nothing (forgotten words in an
+/// unindexed entry could otherwise come back); an entry kept separate is created beside
+/// an active match; another source under a group's ID is refused.
+#[tokio::test]
+async fn unindexed_entries_close_capture_and_sources_are_fixed() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let store = store(&temp_dir).await;
+    store
+        .create_entry(
+            BlackboardEntryId::parse("model-x").expect("ID"),
+            value(BlackboardKind::RejectedApproach, "x"),
+        )
+        .await
+        .expect("model write");
+    let (closed, _) = store
+        .commit_capture(&group(), &source("digest-1"), vec![unit(0, "y")])
+        .await
+        .expect("commit");
+    index_all(&store).await;
+    let mut separate = unit(0, "x");
+    if let CaptureUnit::Entry { existing, .. } = &mut separate {
+        *existing = ExistingMatch::KeepSeparate;
+    }
+    let mut other = group();
+    other.group_id = "ruled-out-2".to_string();
+    let (kept, _) = store
+        .commit_capture(&other, &source("digest-2"), vec![separate])
+        .await
+        .expect("commit");
+    let conflict = store
+        .commit_capture(&group(), &source("digest-3"), vec![unit(0, "z")])
+        .await
+        .map(|(committed, _)| committed.group.saved)
+        .map_err(|error| error.to_string());
     assert_eq!(
-        store.capture(PROJECT_ID, GROUP_ID).await.expect("read"),
-        Some(committed)
+        (closed.members[0].outcome, kept.members[0].clone(), conflict),
+        (
+            MemberOutcome::Omitted,
+            member(0, Some("ruled-out-x"), MemberOutcome::Saved),
+            Err(
+                crate::BlackboardStoreError::EntryIdentityConflict(GROUP_ID.to_string())
+                    .to_string()
+            ),
+        )
     );
 }
 
@@ -346,6 +379,7 @@ async fn categorized_entries_are_read_before_any_ranking() {
         )
         .await
         .expect("unrelated");
+    index_all(&store).await;
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     let mut obsolete = unit(2, "obsolete");
     if let CaptureUnit::Entry { context, .. } = &mut obsolete {
@@ -432,70 +466,6 @@ async fn categorized_entries_are_read_before_any_ranking() {
     );
 }
 
-/// Another source under a committed group's ID is refused; an entry that changed after its
-/// words were matched, or an identity now holding other words, is not counted as the unit.
-#[tokio::test]
-async fn changed_sources_and_entries_are_not_counted() {
-    let temp_dir = TempDir::new().expect("tempdir");
-    let store = store(&temp_dir).await;
-    store
-        .commit_capture(&group(), &source("digest-1"), vec![unit(0, "a")])
-        .await
-        .expect("commit");
-    let conflict = store
-        .commit_capture(&group(), &source("digest-2"), vec![unit(0, "a")])
-        .await
-        .map(|(committed, _)| committed.group.saved);
-    let model_write = store
-        .create_entry(
-            BlackboardEntryId::parse("model-write").expect("ID"),
-            value(BlackboardKind::RejectedApproach, "d"),
-        )
-        .await
-        .expect("model write");
-    store
-        .create_entry(
-            BlackboardEntryId::parse("ruled-out-b").expect("ID"),
-            value(BlackboardKind::Note, "b"),
-        )
-        .await
-        .expect("other kind under the identity");
-    let mut other = group();
-    other.group_id = "ruled-out-2".to_string();
-    let (committed, _) = store
-        .commit_capture(
-            &other,
-            &source("digest-3"),
-            vec![
-                CaptureUnit::Existing {
-                    id: model_write.id.clone(),
-                    revision: model_write.revision + 1,
-                    context: context(0),
-                },
-                unit(1, "b"),
-            ],
-        )
-        .await
-        .expect("commit");
-    assert_eq!(
-        (
-            conflict.map_err(|error| error.to_string()),
-            committed
-                .members
-                .iter()
-                .map(|member| member.outcome)
-                .collect::<Vec<_>>()
-        ),
-        (
-            Err(
-                crate::BlackboardStoreError::EntryIdentityConflict(GROUP_ID.to_string())
-                    .to_string()
-            ),
-            vec![MemberOutcome::Omitted, MemberOutcome::Omitted]
-        )
-    );
-}
-
 /// Word lookup ignores spacing and ASCII case and is bounded only after eligibility; topic
 /// reads search content and recorded answer openings (not other metadata), in any case.
 #[tokio::test]
@@ -527,6 +497,7 @@ async fn word_and_topic_reads_match_what_recall_and_capture_mean() {
                 .to_string(),
         );
     }
+    index_all(&store).await;
     store
         .commit_capture(&group(), &source("digest-1"), vec![with_opening])
         .await

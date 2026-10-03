@@ -14,6 +14,7 @@ mod continuity_source;
 mod conversation_capture;
 mod conversation_summaries;
 mod events;
+mod knowledge_identity;
 mod limits;
 mod memory_add;
 mod memory_controls;

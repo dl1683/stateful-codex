@@ -105,6 +105,7 @@ pub use knowledge::ChangeOperation;
 pub use knowledge::ChangeOrigin;
 pub use knowledge::ChangeRecord;
 pub use knowledge::CommittedCapture;
+pub use knowledge::ExistingMatch;
 pub use knowledge::KnowledgeAuthority;
 pub use knowledge::KnowledgeCategory;
 pub use knowledge::KnowledgeContext;

@@ -3,7 +3,6 @@
 //! forgot), the atomic commit, and the receipt of what was actually committed.
 
 use codex_project_intelligence::BlackboardEntryId;
-use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
@@ -13,11 +12,11 @@ use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::CaptureGroup;
 use codex_project_intelligence::CaptureSource;
 use codex_project_intelligence::CaptureUnit;
-use codex_project_intelligence::CategorizedEntry;
 use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ChangeOrigin;
 use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::ExistingMatch;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::KnowledgeAuthority;
 use codex_project_intelligence::KnowledgeCategory as Category;
@@ -37,6 +36,8 @@ use crate::events::GroupReceipt;
 use crate::events::GroupReceiptItem;
 use crate::events::KnowledgeCategory;
 use crate::events::receipt_text;
+use crate::knowledge_identity::identity_key;
+use crate::knowledge_identity::index_identities;
 use crate::user_rules::normalize;
 
 /// Confidence recorded for what an answer reported: the assistant's account, unverified.
@@ -119,16 +120,11 @@ pub(crate) async fn commit_group(
             group_kind,
         ],
     );
-    // An entry already holding exactly this unit's words (a model write, or a project-wide
-    // entry when this thread works in an investigation) is the same unit, not a second one;
-    // the same words forgotten or replaced earlier, under any identity, stay forgotten.
-    let applies = |candidate: &CategorizedEntry| match &candidate.context {
-        Some(other) => {
-            other.authority == KnowledgeAuthority::AssistantReported
-                && (other.scope_id.is_none() || other.scope_id == placement.scope_id)
-        }
-        None => candidate.provenance_kind == BlackboardProvenanceKind::Agent,
-    };
+    // Words already saved or forgotten are found by their canonical identity, which needs
+    // every entry indexed first; the writer creates nothing while that is incomplete.
+    if let Err(error) = index_identities(store, source.project_id).await {
+        tracing::warn!(project_id = %source.project_id, %error, "failed to index memory for an answer capture");
+    }
     let mut units = Vec::with_capacity(planned.len());
     for (ordinal, planned) in planned.into_iter().enumerate() {
         let (content, payload) = match planned {
@@ -139,7 +135,6 @@ pub(crate) async fn commit_group(
             }
         };
         let words = normalize(&content);
-        let words_digest = format!("{:x}", Sha256::digest(words.as_bytes()));
         let context = KnowledgeContext {
             scope_id: placement.scope_id.clone(),
             source_sequence: placement.source_sequence,
@@ -150,51 +145,12 @@ pub(crate) async fn commit_group(
                     "sourceLocator": source.capture.locator,
                     "sourceDigest": source.capture.digest,
                     "answerOpening": source.opening,
-                    "wordsDigest": words_digest,
                     "details": payload,
                 })
                 .to_string(),
             ),
             ..KnowledgeContext::new(category, KnowledgeAuthority::AssistantReported)
         };
-        let same_words = match store
-            .entries_with_words(
-                source.project_id,
-                category,
-                entry_kind,
-                placement.scope_id.as_deref(),
-                &content
-                    .chars()
-                    .filter(|character| !matches!(character, ' ' | '\t' | '\n' | '\r'))
-                    .collect::<String>()
-                    .to_ascii_lowercase(),
-                &words_digest,
-            )
-            .await
-        {
-            Ok(entries) => entries
-                .into_iter()
-                .filter(|candidate| applies(candidate) && normalize(&candidate.content) == words)
-                .collect::<Vec<_>>(),
-            Err(error) => {
-                tracing::warn!(project_id = %source.project_id, %error, "failed to read memory for an answer capture");
-                return;
-            }
-        };
-        // An open check is only ever created with its context, never attached to an entry
-        // another writer could be changing, so its protection holds from its first revision.
-        let reusable = category != Category::OpenCheck;
-        if let Some(same) = same_words
-            .iter()
-            .find(|candidate| reusable && candidate.state == BlackboardEntryState::Active)
-        {
-            units.push(CaptureUnit::Existing {
-                id: same.id.clone(),
-                revision: same.revision,
-                context,
-            });
-            continue;
-        }
         let Some(id) = unit_entry_id(
             source.project_id,
             category,
@@ -210,23 +166,27 @@ pub(crate) async fn commit_group(
         else {
             return;
         };
-        // Words forgotten project-wide stay forgotten inside an investigation too, and so do
-        // words forgotten under another identity (a model write this capture once matched).
-        let retired_identities = placement
-            .scope_id
-            .as_ref()
-            .and_then(|_| unit_entry_id(source.project_id, category, None, &words))
-            .into_iter()
-            .chain(
-                same_words
-                    .iter()
-                    .filter(|candidate| candidate.state != BlackboardEntryState::Active)
-                    .map(|candidate| candidate.id.clone()),
-            )
-            .collect();
+        // Its own identity, then the project-wide one: words forgotten project-wide stay
+        // forgotten inside an investigation too.
+        let mut identity_keys = vec![identity_key(
+            category,
+            placement.scope_id.as_deref(),
+            &words,
+        )];
+        if placement.scope_id.is_some() {
+            identity_keys.push(identity_key(category, None, &words));
+        }
         units.push(CaptureUnit::Entry {
             id,
-            retired_identities,
+            identity_keys,
+            // An open check is only ever created with its context, never attached to an
+            // entry another writer could be changing, so its protection holds from its
+            // first revision.
+            existing: if category == Category::OpenCheck {
+                ExistingMatch::KeepSeparate
+            } else {
+                ExistingMatch::Reuse
+            },
             value: Box::new(NewBlackboardEntry {
                 project_id: source.project_id.to_string(),
                 node_id: placement.node_id.clone(),
@@ -244,8 +204,8 @@ pub(crate) async fn commit_group(
                     source_id: source.capture.locator.clone(),
                 },
             }),
-            context,
-            change: ChangeRecord {
+            context: Box::new(context),
+            change: Box::new(ChangeRecord {
                 operation: ChangeOperation::Saved,
                 origin: ChangeOrigin::HostCapture,
                 category,
@@ -254,7 +214,7 @@ pub(crate) async fn commit_group(
                 turn_id: Some(source.turn_id.to_string()),
                 group_id: Some(group_id.clone()),
                 preview: content,
-            },
+            }),
         });
     }
     let group = CaptureGroup {
