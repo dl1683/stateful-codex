@@ -186,20 +186,9 @@ async fn material_root_checklist(
     visible_root: Option<&VisibleRoot>,
 ) -> Result<MaterialChecklist, FunctionCallError> {
     let store = services.blackboard().await.map_err(respond)?;
-    let mut projection = store
-        .root_projection(RootBlackboardQuery {
-            project_id: project_id.to_string(),
-            max_entries: 256,
-        })
+    let projection = applicable_root_projection(store, project_id, thread_id)
         .await
         .map_err(respond)?;
-    // Aliases are positions in the projection the packet showed, which never holds rules
-    // that are not in the user's own words, nor rules of an investigation this thread is not
-    // part of.
-    crate::root_blackboard::retain_applicable_rules(&mut projection);
-    crate::rule_scope::ScopeView::load(store, &projection, thread_id)
-        .await
-        .retain_applicable(&mut projection);
     if projection.revision != expected_root_revision {
         return Err(respond(format!(
             "root blackboard changed from revision {expected_root_revision} to {}; review the current root aliases before completing",
@@ -563,6 +552,30 @@ fn entry_state_name(state: BlackboardEntryState) -> &'static str {
 
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
+}
+
+/// The root projection whose positions are the E aliases of this thread's packet: it never holds
+/// rules that are not in the user's own words, nor rules of an investigation this thread is not
+/// part of. Completion resolves aliases against it, and queries report aliases from it.
+pub(crate) async fn applicable_root_projection(
+    store: &codex_project_intelligence::BlackboardStore,
+    project_id: &str,
+    thread_id: &str,
+) -> Result<
+    codex_project_intelligence::RootBlackboardProjection,
+    codex_project_intelligence::BlackboardStoreError,
+> {
+    let mut projection = store
+        .root_projection(RootBlackboardQuery {
+            project_id: project_id.to_string(),
+            max_entries: 256,
+        })
+        .await?;
+    crate::root_blackboard::retain_applicable_rules(&mut projection);
+    crate::rule_scope::ScopeView::load(store, &projection, thread_id)
+        .await
+        .retain_applicable(&mut projection);
+    Ok(projection)
 }
 
 #[cfg(test)]

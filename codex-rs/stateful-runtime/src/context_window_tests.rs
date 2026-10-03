@@ -16,6 +16,7 @@ async fn the_first_decision_for_a_window_is_final() {
         .expect("store");
     let continuation = ContextWindowDecision {
         thread_id: "thread-1".to_string(),
+        project_id: "project-1".to_string(),
         window_id: "window-2".to_string(),
         window_number: 1,
         mode: ContextWindowMode::Continuation,
@@ -23,7 +24,7 @@ async fn the_first_decision_for_a_window_is_final() {
     };
     assert_eq!(
         store
-            .context_window("thread-1", "window-2")
+            .context_window("thread-1", "project-1", "window-2")
             .await
             .expect("read"),
         None
@@ -55,5 +56,18 @@ async fn the_first_decision_for_a_window_is_final() {
     assert_eq!(
         store.decide_context_window(&fork).await.expect("fork"),
         fork
+    );
+    // Another project selected in the same thread has its own decisions.
+    assert!(
+        !store
+            .thread_has_context_windows("thread-1", "project-2")
+            .await
+            .expect("project-2")
+    );
+    assert!(
+        store
+            .thread_has_context_windows("thread-1", "project-1")
+            .await
+            .expect("project-1")
     );
 }

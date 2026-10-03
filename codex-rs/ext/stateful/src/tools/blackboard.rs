@@ -214,6 +214,38 @@ impl BlackboardQueryTool {
                 .map(|_| visible),
             None => None,
         };
+        // Positional aliases of promoted entries, as completion resolves them, so an entry the
+        // packet does not show (a continuation window shows only the user's rules) can still
+        // be selected as a material finding.
+        let projection_aliases = if result.data.iter().any(|hit| {
+            hit.entry.value.root_promotion == codex_project_intelligence::RootPromotion::Promoted
+        }) {
+            match crate::completion::applicable_root_projection(
+                blackboard,
+                &self.project_id,
+                &self.thread_id,
+            )
+            .await
+            {
+                Ok(projection) => projection
+                    .data
+                    .iter()
+                    .enumerate()
+                    .map(|(index, hit)| {
+                        (
+                            (hit.entry.id.to_string(), hit.entry.revision),
+                            (format!("E{}", index + 1), projection.revision),
+                        )
+                    })
+                    .collect::<std::collections::HashMap<_, _>>(),
+                Err(error) => {
+                    tracing::warn!(project_id = %self.project_id, %error, "failed to resolve root aliases");
+                    Default::default()
+                }
+            }
+        } else {
+            Default::default()
+        };
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let hit_count = result.data.len();
         let mut data = Vec::new();
@@ -227,6 +259,8 @@ impl BlackboardQueryTool {
                 premise_freshness,
             );
             let evidence_count = hit.entry.value.evidence.len();
+            let hit_entry_id = hit.entry.id.to_string();
+            let hit_revision = hit.entry.revision;
             let root_alias = visible_root
                 .as_ref()
                 .and_then(|visible| visible.alias_for(hit.entry.id.as_str(), hit.entry.revision));
@@ -288,6 +322,14 @@ impl BlackboardQueryTool {
                     })).collect::<Vec<_>>(),
                 })
             };
+            if root_alias.is_none()
+                && let Some((alias, root_revision)) =
+                    projection_aliases.get(&(hit_entry_id.clone(), hit_revision))
+                && let serde_json::Value::Object(item) = &mut item
+            {
+                item.insert("rootAlias".to_string(), json!(alias));
+                item.insert("rootRevision".to_string(), json!(root_revision));
+            }
             if evidence_query && root_alias.is_none() {
                 let serde_json::Value::Object(item) = &mut item else {
                     unreachable!("static blackboard query item should be an object");

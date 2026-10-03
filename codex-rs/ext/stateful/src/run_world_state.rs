@@ -402,6 +402,18 @@ pub(super) fn run_continuation_section(
     WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
             PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
+            // A change inside the window replaces the compact run state without a second
+            // carrier.
+            PreviousWorldStateSection::Known(previous)
+                if previous.get("mode") == snapshot.get("mode")
+                    && previous.get("runId") == snapshot.get("runId") =>
+            {
+                Some(RenderedWorldStateFragment::new(
+                    "developer",
+                    (UPDATE_START_MARKER, UPDATE_END_MARKER),
+                    format!("This replaces the run state shown earlier in this window.\n{body}"),
+                ))
+            }
             PreviousWorldStateSection::Absent
             | PreviousWorldStateSection::Unknown
             | PreviousWorldStateSection::Known(_) => Some(RenderedWorldStateFragment::new(

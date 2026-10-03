@@ -33,6 +33,9 @@ pub enum ContextWindowReason {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextWindowDecision {
     pub thread_id: String,
+    /// The selected project the decision is for: selecting another project in the same
+    /// thread opens that project's own startup, never this decision.
+    pub project_id: String,
     pub window_id: String,
     pub window_number: u64,
     pub mode: ContextWindowMode,
@@ -42,6 +45,7 @@ pub struct ContextWindowDecision {
 #[derive(FromRow)]
 struct StoredWindow {
     thread_id: String,
+    project_id: String,
     window_id: String,
     window_number: i64,
     mode: String,
@@ -55,7 +59,11 @@ impl StatefulRunStore {
         &self,
         decision: &ContextWindowDecision,
     ) -> Result<ContextWindowDecision, StatefulRunStoreError> {
-        for identity in [&decision.thread_id, &decision.window_id] {
+        for identity in [
+            &decision.thread_id,
+            &decision.project_id,
+            &decision.window_id,
+        ] {
             if identity.is_empty()
                 || identity.len() > MAX_IDENTITY_BYTES
                 || identity.chars().any(char::is_control)
@@ -68,11 +76,12 @@ impl StatefulRunStore {
         let now = unix_timestamp_millis()?;
         sqlx::query(
             "INSERT INTO stateful_context_windows (
-                thread_id, window_id, window_number, mode, reason, created_at_ms
-             ) VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT (thread_id, window_id) DO NOTHING",
+                thread_id, project_id, window_id, window_number, mode, reason, created_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (thread_id, project_id, window_id) DO NOTHING",
         )
         .bind(&decision.thread_id)
+        .bind(&decision.project_id)
         .bind(&decision.window_id)
         .bind(window_number)
         .bind(mode_name(decision.mode))
@@ -80,27 +89,35 @@ impl StatefulRunStore {
         .bind(now)
         .execute(&self.pool)
         .await?;
-        self.context_window(&decision.thread_id, &decision.window_id)
-            .await?
-            .ok_or_else(|| StatefulRunStoreError::RunNotFound(decision.window_id.clone()))
+        self.context_window(
+            &decision.thread_id,
+            &decision.project_id,
+            &decision.window_id,
+        )
+        .await?
+        .ok_or_else(|| StatefulRunStoreError::RunNotFound(decision.window_id.clone()))
     }
 
     pub async fn context_window(
         &self,
         thread_id: &str,
+        project_id: &str,
         window_id: &str,
     ) -> Result<Option<ContextWindowDecision>, StatefulRunStoreError> {
         let row = sqlx::query_as::<_, StoredWindow>(
-            "SELECT thread_id, window_id, window_number, mode, reason
-             FROM stateful_context_windows WHERE thread_id = ? AND window_id = ?",
+            "SELECT thread_id, project_id, window_id, window_number, mode, reason
+             FROM stateful_context_windows
+             WHERE thread_id = ? AND project_id = ? AND window_id = ?",
         )
         .bind(thread_id)
+        .bind(project_id)
         .bind(window_id)
         .fetch_optional(&self.pool)
         .await?;
         row.map(|row| {
             Ok(ContextWindowDecision {
                 thread_id: row.thread_id,
+                project_id: row.project_id,
                 window_id: row.window_id,
                 window_number: u64::try_from(row.window_number)
                     .map_err(|_| StatefulRunStoreError::CorruptCount)?,
@@ -109,6 +126,26 @@ impl StatefulRunStore {
             })
         })
         .transpose()
+    }
+
+    /// Whether this thread already opened a window for this project. A window it has not
+    /// decided yet was then opened inside the thread (a compaction whose initial context is
+    /// injected later), not by a fork or a project switch, which start without any record.
+    pub async fn thread_has_context_windows(
+        &self,
+        thread_id: &str,
+        project_id: &str,
+    ) -> Result<bool, StatefulRunStoreError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS (
+                SELECT 1 FROM stateful_context_windows WHERE thread_id = ? AND project_id = ?
+             )",
+        )
+        .bind(thread_id)
+        .bind(project_id)
+        .fetch_one(&self.pool)
+        .await?
+            != 0)
     }
 }
 

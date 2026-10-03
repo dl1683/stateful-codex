@@ -175,7 +175,11 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
     );
 
     let seeded = RootView::of(over_limit, &project_id);
+    // Opening a window publishes the closed window's host receipts first, so each opening
+    // packet already shows the revision after that publication.
+    let continued = RootView::of(mid_turn_continuation, &project_id);
     let revised = RootView::of(revised_step, &project_id);
+    let resumed = RootView::of(resumed_from_checkpoint, &project_id);
     assert_eq!(
         [
             over_limit,
@@ -192,16 +196,21 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
         [
             RootView::seeded(seeded.root_revision),
             RootView::seeded(seeded.root_revision),
-            RootView::continuation(seeded.root_revision),
-            RootView::continuation(seeded.root_revision),
-            RootView::receipt(seeded.root_revision, revised.update_revision),
-            RootView::receipt(seeded.root_revision, revised.update_revision),
-            RootView::continuation(revised.update_revision),
-            RootView::continuation(revised.update_revision),
-            RootView::continuation(revised.update_revision),
+            RootView::continuation(continued.root_revision),
+            RootView::continuation(continued.root_revision),
+            RootView::receipt(continued.root_revision, revised.update_revision),
+            RootView::receipt(continued.root_revision, revised.update_revision),
+            RootView::continuation(resumed.root_revision),
+            RootView::continuation(resumed.root_revision),
+            RootView::continuation(resumed.root_revision),
         ]
     );
-    assert!(seeded.root_revision.is_some() && revised.update_revision > seeded.root_revision);
+    // This conversation ran no command and changed no file, so there were no receipts to
+    // publish and no revision moved except for the promoted fact.
+    assert!(seeded.root_revision.is_some());
+    assert_eq!(continued.root_revision, seeded.root_revision);
+    assert!(revised.update_revision > continued.root_revision);
+    assert_eq!(resumed.root_revision, revised.update_revision);
 
     // The mid-turn checkpoint installs the packet; the manual checkpoint leaves it to the next turn.
     assert_eq!(checkpoint_root_counts(&rollout)?, vec![1, 0]);

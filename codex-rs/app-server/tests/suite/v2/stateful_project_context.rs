@@ -143,7 +143,8 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
     run_turn(&mut server, &started.thread.id).await?;
     assert_latest_request_has_continuation(&responses, &created.project.id).await?;
 
-    // A fork is another thread: it starts with the full packet.
+    // A fork copies the compacted history with its continuation carrier: it keeps that one
+    // carrier rather than appending a full packet beside it.
     let forked: ThreadForkResponse = server
         .request(|request_id| ClientRequest::ThreadFork {
             request_id,
@@ -154,7 +155,7 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
         })
         .await?;
     run_turn(&mut server, &forked.thread.id).await?;
-    assert_latest_request_has_project(&responses, &created.project.id).await?;
+    assert_latest_request_has_continuation(&responses, &created.project.id).await?;
 
     drop(server);
     let mut server = TestAppServer::builder()

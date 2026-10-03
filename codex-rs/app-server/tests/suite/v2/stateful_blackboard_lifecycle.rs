@@ -578,6 +578,9 @@ async fn model_can_enumerate_active_knowledge_affected_by_a_changed_route() -> R
             "storedEvidenceFreshness": "stale",
             "importance": "high",
             "rootPromotion": "promoted",
+            // Its completion alias, as the applicable root projection numbers it.
+            "rootAlias": "E1",
+            "rootRevision": dependent_query_output["projectRevision"],
             "evidenceCount": 1,
             "premises": [],
             "premiseFreshness": "notApplicable",

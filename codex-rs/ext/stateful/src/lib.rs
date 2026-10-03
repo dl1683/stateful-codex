@@ -182,16 +182,27 @@ impl ContextContributor for StatefulExtension {
                 Some(services) => services.runtime().await.ok(),
                 None => None,
             };
-            let stored_window =
-                window_policy::stored_window(runtime_store, &thread_id, &input.context_window)
-                    .await;
+            let (stored_window, thread_record) = window_policy::stored_window(
+                runtime_store,
+                &thread_id,
+                selected.project_id(),
+                &input.context_window,
+            )
+            .await;
             let window = stored_window.clone().unwrap_or_else(|| {
                 window_policy::proposed_window(
                     &thread_id,
+                    selected.project_id(),
                     &input.context_window,
                     input.previous_world_state,
+                    thread_record,
                 )
             });
+            if stored_window.is_none() {
+                // Before the packet is read, so it already shows the resulting revision.
+                self.publish_on_window_open(selected.project_id(), &thread_id, window.reason)
+                    .await;
+            }
             let continuation_window = window.mode == ContextWindowMode::Continuation;
             let run_activity = self.run_activity.for_thread(&thread_id);
             let run_status = self
@@ -295,10 +306,22 @@ impl ContextContributor for StatefulExtension {
                 ProjectIntelligenceStatus::Missing { .. }
                 | ProjectIntelligenceStatus::Unavailable { .. } => None,
             };
-            // A continuation window keeps the full project packet when its rules do not fit
-            // whole, so no rule is dropped; a new window records that as its decision.
+            // A new window opens as a continuation only when every user rule and background
+            // entry fits whole; otherwise it records the full packet. A window that already
+            // opened as a continuation keeps rendering as one, with notices for what does not.
             let continuation_project = continuation_window
-                .then(|| continuation::continuation_project(&status))
+                .then(|| {
+                    continuation::continuation_project(
+                        &status,
+                        if stored_window.is_some()
+                            || window.reason == codex_stateful_runtime::ContextWindowReason::Unknown
+                        {
+                            continuation::Admission::Opened
+                        } else {
+                            continuation::Admission::Opening
+                        },
+                    )
+                })
                 .flatten();
             let window = match stored_window {
                 Some(stored) => stored,
@@ -308,13 +331,11 @@ impl ContextContributor for StatefulExtension {
                     } else {
                         ContextWindowMode::Full
                     };
-                    let decided = window_policy::decide_window(
+                    window_policy::decide_window(
                         runtime_store,
                         codex_stateful_runtime::ContextWindowDecision { mode, ..window },
                     )
-                    .await;
-                    self.publish_on_window_open(selected.project_id(), &thread_id, &decided);
-                    decided
+                    .await
                 }
             };
             let continuation_window = window.mode == ContextWindowMode::Continuation;
@@ -366,31 +387,26 @@ impl ContextContributor for StatefulExtension {
 impl StatefulExtension {
     /// A window opened by compaction or a reset closes the thread's previous window, so its
     /// journal suffix is published; a thread's first window publishes what earlier sessions of
-    /// the project left open. Publication runs off the sampling path.
-    fn publish_on_window_open(
+    /// the project left open. Publication is idempotent, so a retried step adds nothing.
+    async fn publish_on_window_open(
         &self,
         project_id: &str,
         thread_id: &str,
-        window: &codex_stateful_runtime::ContextWindowDecision,
+        reason: codex_stateful_runtime::ContextWindowReason,
     ) {
-        let Some(services) = self.services.clone() else {
+        let Some(services) = self.services.as_ref() else {
             return;
         };
-        let project_id = project_id.to_string();
-        let thread_id = thread_id.to_string();
-        let reason = window.reason;
-        tokio::spawn(async move {
-            match reason {
-                codex_stateful_runtime::ContextWindowReason::ThreadStart => {
-                    window_journal::publish_open_windows(&services, &project_id).await;
-                }
-                codex_stateful_runtime::ContextWindowReason::Compaction
-                | codex_stateful_runtime::ContextWindowReason::Reset => {
-                    window_journal::publish_window(&services, &project_id, &thread_id).await;
-                }
-                codex_stateful_runtime::ContextWindowReason::Unknown => {}
+        match reason {
+            codex_stateful_runtime::ContextWindowReason::ThreadStart => {
+                window_journal::publish_open_windows(services, project_id).await;
             }
-        });
+            codex_stateful_runtime::ContextWindowReason::Compaction
+            | codex_stateful_runtime::ContextWindowReason::Reset => {
+                window_journal::publish_window(services, project_id, thread_id).await;
+            }
+            codex_stateful_runtime::ContextWindowReason::Unknown => {}
+        }
     }
 
     async fn project_refresh_status(&self, project_id: &str) -> Option<ProjectRefreshStatus> {

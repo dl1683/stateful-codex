@@ -6,6 +6,7 @@ use codex_project_intelligence::RootBlackboardProjection;
 use codex_stateful_runtime::WorkflowMode;
 use pretty_assertions::assert_eq;
 
+use super::Admission;
 use super::MAX_CONTINUATION_PROJECT_BYTES;
 use super::continuation_project;
 use super::continuation_project_section;
@@ -79,7 +80,7 @@ fn continuation_keeps_rules_and_background_but_not_other_knowledge() {
         background_entry(),
     ]);
     let (full_body, _) = status.render();
-    let project = continuation_project(&status).expect("rules fit");
+    let project = continuation_project(&status, Admission::Opening).expect("rules fit");
     let registry = VisibleRootRegistry::default();
     let section = continuation_project_section(project, (registry.clone(), "thread-1".to_string()));
     let body = rendered(&section, PreviousWorldStateSection::Absent).expect("rendered");
@@ -110,11 +111,64 @@ fn continuation_keeps_rules_and_background_but_not_other_knowledge() {
 fn rules_that_do_not_fit_keep_the_full_packet() {
     let long_rule = "Always explain every unit conversion step by step, with the source and the rounding used. ".repeat(4);
     let status = status_with((1..=12).map(|index| user_rule(index, &long_rule)).collect());
-    assert!(continuation_project(&status).is_none());
+    assert!(continuation_project(&status, Admission::Opening).is_none());
     let unavailable = ProjectIntelligenceStatus::Unavailable {
         project_id: "project-1".to_string(),
     };
-    assert!(continuation_project(&unavailable).is_none());
+    assert!(continuation_project(&unavailable, Admission::Opening).is_none());
+
+    // A window that already opened as a continuation keeps its carrier and says what it
+    // cannot show whole, instead of switching to the full packet.
+    let truncated_rule = status_with(vec![user_rule(1, &"Keep every unit. ".repeat(300))]);
+    let opened = continuation_project(&truncated_rule, Admission::Opened).expect("kept");
+    let body = rendered(
+        &continuation_project_section(
+            opened,
+            (VisibleRootRegistry::default(), "thread-1".to_string()),
+        ),
+        PreviousWorldStateSection::Absent,
+    )
+    .expect("rendered");
+    assert!(body.contains("could not be shown whole here"), "{body}");
+    let unreadable = continuation_project(&unavailable, Admission::Opened).expect("kept");
+    let body = rendered(
+        &continuation_project_section(
+            unreadable,
+            (VisibleRootRegistry::default(), "thread-1".to_string()),
+        ),
+        PreviousWorldStateSection::Absent,
+    )
+    .expect("rendered");
+    assert!(body.contains("could not be read for this step"), "{body}");
+}
+
+#[test]
+fn a_changed_rule_is_one_exact_correction_not_a_second_carrier() {
+    let section = |rules: Vec<codex_project_intelligence::BlackboardHit>| {
+        continuation_project_section(
+            continuation_project(&status_with(rules), Admission::Opened).expect("kept"),
+            (VisibleRootRegistry::default(), "thread-1".to_string()),
+        )
+    };
+    let before = section(vec![
+        user_rule(1, "Metric units only."),
+        user_rule(2, "Ask before editing recipes.json."),
+    ]);
+    let after = section(vec![
+        user_rule(1, "Metric units only, grams for flour."),
+        promoted_entry(2),
+    ]);
+    let fragment = after
+        .render_diff(PreviousWorldStateSection::Known(before.snapshot()))
+        .expect("correction");
+    assert_eq!(
+        fragment.markers(),
+        ("<stateful_project_update>", "</stateful_project_update>")
+    );
+    let body = fragment.body();
+    assert!(body.contains("grams for flour"), "{body}");
+    assert!(body.contains("No longer shown or in force: E2."), "{body}");
+    assert!(!body.contains("Project name"), "{body}");
 }
 
 #[test]
@@ -138,7 +192,7 @@ fn a_revision_only_change_is_a_receipt_and_an_unchanged_window_renders_nothing()
             root_blackboard: Box::new(RootBlackboardStatus::Available(root)),
         };
         continuation_project_section(
-            continuation_project(&status).expect("fits"),
+            continuation_project(&status, Admission::Opening).expect("fits"),
             (VisibleRootRegistry::default(), "thread-1".to_string()),
         )
     };
@@ -150,7 +204,7 @@ fn a_revision_only_change_is_a_receipt_and_an_unchanged_window_renders_nothing()
     );
     let receipt =
         rendered(&later, PreviousWorldStateSection::Known(first.snapshot())).expect("receipt");
-    assert!(receipt.contains("advanced from 12 to 13"), "{receipt}");
+    assert!(receipt.contains("revision is now 13"), "{receipt}");
     assert!(!receipt.contains("Metric units only"), "{receipt}");
 }
 
