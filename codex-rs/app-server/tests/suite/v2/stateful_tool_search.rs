@@ -203,13 +203,17 @@ async fn deferred_stateful_tools_load_through_tool_search() -> Result<()> {
         "steering_reconcile",
         "blackboard_query",
         "conversation_read",
+        "blackboard_record_batch",
+        "stateful_run_update",
+        "evidence_read",
+        "context_map_query",
     ] {
         assert!(
             !initial.iter().any(|name| name == deferred),
             "{deferred} in {initial:?}"
         );
     }
-    for direct in ["memory_read", "stateful_run_update"] {
+    for direct in ["memory_read"] {
         assert!(
             initial.iter().any(|name| name == direct),
             "{direct} missing from {initial:?}"

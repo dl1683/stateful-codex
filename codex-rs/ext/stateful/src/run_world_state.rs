@@ -35,7 +35,7 @@ const MAX_ESTIMATED_TOKENS: usize = 3 * 1024;
 const MAX_RENDERED_STEERING: usize = 5;
 const MAX_RENDERED_GOAL_BYTES: usize = 2 * 1024;
 const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
-const WRITE_TOOLS_ARE_DIRECT: &str = "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec.";
+const WRITE_TOOLS_ARE_DIRECT: &str = "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are function tools loaded through tool search when needed, and are not callable inside exec.";
 const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across the user's turns and the host records every final answer, so do not complete it at the end of a turn. Complete it only when the user says the overall goal is done or asks to close it; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed, completionDisposition noReusableLearning and result when nothing reusable was learned; otherwise durableLearning with expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
 const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 

@@ -208,6 +208,11 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
         ToolName::plain(TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::Deferred
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),

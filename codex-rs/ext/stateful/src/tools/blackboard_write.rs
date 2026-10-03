@@ -633,9 +633,10 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
+        // Discoverable through tool search instead of riding in every request. Prose-bearing
+        // mutations stay out of nested code mode: model-written JS string literals break on
+        // quotes inside long semantic fields.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {

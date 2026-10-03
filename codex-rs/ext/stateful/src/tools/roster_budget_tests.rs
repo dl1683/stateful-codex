@@ -15,8 +15,10 @@ use crate::visible_root::VisibleRootRegistry;
 /// blackboard_query deferred: 19,158 in total, 9,895 direct.
 const MAX_ROSTER_BYTES: usize = 19_500;
 /// Every request carries the directly exposed tools, so their size is a fixed per-request
-/// cost; specialized tools are deferred to tool search.
-const MAX_DIRECT_ROSTER_BYTES: usize = 11_500;
+/// cost; everything but memory_read is deferred to tool search. The serialized byte count
+/// bounds the token count from above (in-session spec target: at most 300 tokens).
+/// memory_read alone: 662 bytes; the 2026-10-03 direct roster before deferral was 9,419.
+const MAX_DIRECT_ROSTER_BYTES: usize = 1_200;
 
 #[test]
 fn stateful_tool_roster_stays_within_its_request_budget() {
