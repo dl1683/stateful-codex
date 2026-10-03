@@ -8,9 +8,12 @@ use crate::shell_detect::detect_shell_type;
 
 const POWERSHELL_FLAGS: &[&str] = &["-nologo", "-noprofile", "-command", "-c"];
 
-/// Prefixed command for powershell shell calls to request UTF-8 console output.
-pub const UTF8_OUTPUT_PREFIX: &str =
-    "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}\n";
+/// Prefixed command for powershell shell calls to request UTF-8 console output, and UTF-8 as
+/// the default encoding of the cmdlets that read text files: Windows PowerShell reads a file
+/// without a byte-order mark in the ANSI code page, which turns UTF-8 text such as an em dash
+/// into mojibake that later edits then fail to match or write back. Writing cmdlets keep their
+/// defaults.
+pub const UTF8_OUTPUT_PREFIX: &str = "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $PSDefaultParameterValues['Get-Content:Encoding']='utf8'; $PSDefaultParameterValues['Select-String:Encoding']='utf8'; $PSDefaultParameterValues['Import-Csv:Encoding']='utf8' } catch {}\n";
 
 pub fn prefix_powershell_script_with_utf8(command: &[String]) -> Vec<String> {
     let Some((_, script)) = extract_powershell_command(command) else {
