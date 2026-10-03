@@ -95,10 +95,10 @@ async fn observe_turn_start_unbounded(
     let Ok(_permit) = services.checkout_lock(project_id).acquire_owned().await else {
         return None;
     };
-    let hold = || {
-        services.set_checkout_hold(project_id, /*held*/ true);
-        None
-    };
+    // Held from the moment this start owns the project until its comparison completes: a
+    // timeout drops this future (and the permit) at any await, and a turn end queued on
+    // the permit must then still see the hold rather than publish over unprocessed changes.
+    services.set_checkout_hold(project_id, /*held*/ true);
     let budget = GitObservationBudget::until(tokio::time::Instant::now() + OBSERVATION_BUDGET);
     let Some((current, samples)) = sample(project_id, roots, &budget).await else {
         return None;
@@ -107,14 +107,14 @@ async fn observe_turn_start_unbounded(
         Ok(store) => store,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to open repository observations");
-            return hold();
+            return None;
         }
     };
     let previous = match store.latest(project_id).await {
         Ok(previous) => previous,
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to read the latest repository observation");
-            return hold();
+            return None;
         }
     };
     let (report, compared) = match previous {

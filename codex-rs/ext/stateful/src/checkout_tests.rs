@@ -133,3 +133,26 @@ async fn checkout_reconciliation_is_serialized_per_project() {
     ending.await.expect("end completes");
     assert_eq!(waited, true);
 }
+
+/// A turn-start observation cut off by its time bound leaves the project held, so a turn end
+/// waiting on the permit cannot publish a baseline over changes no turn has processed.
+#[tokio::test]
+async fn an_interrupted_start_leaves_the_baseline_held() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let root = state_home.path().display().to_string();
+    let roots = [root];
+    let interrupted = tokio::time::timeout(
+        std::time::Duration::ZERO,
+        super::observe_turn_start_unbounded(&services, "project-1", &roots, "turn-1"),
+    )
+    .await;
+    assert_eq!(
+        (interrupted.is_err(), services.checkout_held("project-1")),
+        (true, true)
+    );
+}
