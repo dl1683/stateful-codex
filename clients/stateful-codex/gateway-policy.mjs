@@ -181,6 +181,9 @@ const EXECUTION_PARAMS = {
     kind: (kind) => ["rule", "background", "decision", "note"].includes(kind),
     content: (content) => isString(content) && content.trim().length > 0 && content.length <= 2000,
     reason: (reason) => reason === null || (isString(reason) && reason.length <= 1000),
+    // A rule limited to the open investigation this thread continues; the server refuses it
+    // when there is none.
+    scope: (scope) => scope === null || (isString(scope) && scope.length <= 500),
     clientActionId: (id) => isString(id) && id.length > 0 && id.length <= 128,
     backgroundSection: isBoolean,
   },

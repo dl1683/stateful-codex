@@ -443,6 +443,11 @@ function capturePlace(container) {
       active && active !== container && container.contains(active)
         ? elementKey(active)
         : null,
+    // The caret or selection inside the focused text field, kept across the re-render.
+    selection:
+      active && typeof active.selectionStart === "number"
+        ? [active.selectionStart, active.selectionEnd, active.selectionDirection]
+        : null,
     scrolls: SCROLLERS.flatMap((selector) =>
       [...container.querySelectorAll(selector)].map((node, index) => [
         selector,
@@ -455,7 +460,7 @@ function capturePlace(container) {
   };
 }
 
-function restorePlace(container, { focusKey, scrolls, open }) {
+function restorePlace(container, { focusKey, selection, scrolls, open }) {
   [...container.querySelectorAll("details")].forEach((details, index) => {
     if (open[index]) details.open = true;
   });
@@ -466,7 +471,15 @@ function restorePlace(container, { focusKey, scrolls, open }) {
     node.scrollLeft = left;
   }
   if (focusKey) {
-    [...container.querySelectorAll(focusKey.selector)].find(focusKey.matches)?.focus();
+    const target = [...container.querySelectorAll(focusKey.selector)].find(focusKey.matches);
+    target?.focus();
+    if (target && selection && typeof target.setSelectionRange === "function") {
+      try {
+        target.setSelectionRange(...selection);
+      } catch {
+        // A field whose type has no selection keeps the browser's caret.
+      }
+    }
   }
 }
 
@@ -476,6 +489,7 @@ function elementKey(element) {
     "name",
     "data-action",
     "data-entry-id",
+    "data-revision",
     "data-node-id",
     "data-disclosure",
   ]

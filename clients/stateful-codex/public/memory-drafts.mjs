@@ -4,7 +4,14 @@
 // cancels it. A correction draft remembers the revision it started from, so a change made
 // elsewhere meanwhile is shown as a conflict instead of being overwritten.
 
-const MAX_DRAFT_CHARS = 2000;
+// The most the server keeps for one entry; a longer draft is kept whole and refused on
+// submit, never cut short.
+export const MAX_ENTRY_BYTES = 2000;
+
+// Whether `text` fits one entry (counted in UTF-8 bytes, as the server counts it).
+export function fitsEntry(text) {
+  return new TextEncoder().encode(text).length <= MAX_ENTRY_BYTES;
+}
 
 export function createDrafts(storage, threadId) {
   const key = `stateful-memory-drafts:${threadId}`;
@@ -74,5 +81,5 @@ function emptyAddition() {
 }
 
 function bounded(text) {
-  return String(text).slice(0, MAX_DRAFT_CHARS);
+  return String(text);
 }

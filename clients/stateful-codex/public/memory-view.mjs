@@ -59,7 +59,7 @@ function renderAddForm(addition) {
   const options = ADD_KINDS.map(
     ([kind, label]) => `<option value="${kind}"${draft.kind === kind ? " selected" : ""}>${label}</option>`,
   ).join("");
-  return `<form class="stack memory-add" data-memory-add="1"><h3>Add to memory</h3><label>What it is <select name="kind">${options}</select></label><textarea name="content" aria-label="Words to save" required>${escapeHtml(draft.content)}</textarea><input name="reason" aria-label="Reason (for a decision)" placeholder="Reason (for a decision)" value="${escapeHtml(draft.reason)}"><div class="control-row"><button class="primary">Add</button></div></form>`;
+  return `<form class="stack memory-add" data-memory-add="1"><h3>Add to memory</h3><label>What it is <select name="kind">${options}</select></label><textarea name="content" data-entry-id="memory-add" aria-label="Words to save" required>${escapeHtml(draft.content)}</textarea><input name="reason" aria-label="Reason (for a decision)" placeholder="Reason (for a decision)" value="${escapeHtml(draft.reason)}"><div class="control-row"><button class="primary">Add</button></div></form>`;
 }
 
 function renderOrphan(entryId, draft) {
@@ -96,7 +96,7 @@ function renderItem(item, draft) {
     ? `<small>Too long to correct here; forget it and state the new wording instead.</small>`
     : `<button class="text-button" data-action="memory-correct" data-entry-id="${id}">Correct</button>`;
   const correct = editing && !item.contentTruncated
-    ? `<form class="stack memory-correct" data-memory-correct="${id}" data-revision="${draft.baseRevision}">${conflict}<textarea name="content" aria-label="Corrected text" required>${escapeHtml(draft.content)}</textarea><div class="control-row"><button class="primary">${item.section === "unverifiedRule" ? "Correct and apply as your rule" : "Save correction"}</button><button type="button" class="secondary" data-action="memory-cancel" data-entry-id="${id}">Cancel</button></div></form>`
+    ? `<form class="stack memory-correct" data-memory-correct="${id}" data-revision="${draft.baseRevision}">${conflict}<textarea name="content" data-entry-id="${id}" data-revision="${draft.baseRevision}" aria-label="Corrected text" required>${escapeHtml(draft.content)}</textarea><div class="control-row"><button class="primary">${item.section === "unverifiedRule" ? "Correct and apply as your rule" : "Save correction"}</button><button type="button" class="secondary" data-action="memory-cancel" data-entry-id="${id}">Cancel</button></div></form>`
     : `<div class="control-row">${correctButton}<button class="text-button" data-action="memory-forget" data-entry-id="${id}" data-revision="${item.revision}">Forget</button></div>`;
   return `<article data-memory-entry="${id}"><p>${escapeHtml(item.content)}${item.contentTruncated ? "…" : ""}</p>${scope}${attributed}${replaces}${correct}</article>`;
 }

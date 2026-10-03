@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDrafts } from "../public/memory-drafts.mjs";
+import { MAX_ENTRY_BYTES, createDrafts, fitsEntry } from "../public/memory-drafts.mjs";
 
 function memoryStorage() {
   const values = new Map();
@@ -30,5 +30,21 @@ test("a correction draft survives a reload in the same tab until it is closed", 
   assert.deepEqual(
     [createDrafts(storage, "thread-1").correction("rule-1"), createDrafts(storage, "thread-1").addition().content],
     [null, ""],
+  );
+});
+
+test("a draft longer than an entry is kept whole and judged in UTF-8 bytes", () => {
+  const drafts = createDrafts(memoryStorage(), "thread-1");
+  const long = "a".repeat(MAX_ENTRY_BYTES + 1);
+  drafts.editAddition("content", long);
+  // 1,000 two-byte characters fit; 1,001 do not.
+  assert.deepEqual(
+    [
+      drafts.addition().content.length,
+      fitsEntry(long),
+      fitsEntry("é".repeat(MAX_ENTRY_BYTES / 2)),
+      fitsEntry("é".repeat(MAX_ENTRY_BYTES / 2 + 1)),
+    ],
+    [MAX_ENTRY_BYTES + 1, false, true, false],
   );
 });

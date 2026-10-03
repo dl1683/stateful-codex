@@ -109,7 +109,7 @@ test("drafts survive re-rendering, conflicts keep the text, and orphaned drafts 
     },
     memoryAddition: { kind: "decision", content: "Months use mth.", reason: "minutes" },
   });
-  assert.match(html, /<textarea name="content" aria-label="Corrected text" required>Never commit or push\.<\/textarea>/);
+  assert.match(html, /<textarea name="content" data-entry-id="rule-1" data-revision="2" aria-label="Corrected text" required>Never commit or push\.<\/textarea>/);
   assert.match(html, /data-revision="2"/);
   assert.match(html, /changed elsewhere since you began/);
   assert.match(html, /My unsaved words\./);

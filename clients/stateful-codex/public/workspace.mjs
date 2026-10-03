@@ -13,7 +13,7 @@ import {
   sendFirstTurn,
   startFollowUp,
 } from "./follow-up.mjs";
-import { createDrafts } from "./memory-drafts.mjs";
+import { MAX_ENTRY_BYTES, createDrafts, fitsEntry } from "./memory-drafts.mjs";
 import { createWorkspaceDom, watchFindingFilter } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
 import {
@@ -494,6 +494,11 @@ app.addEventListener("submit", async (event) => {
       const draft = memoryDrafts.correction(entryId);
       const content = (draft?.content ?? form.querySelector('[name="content"]').value).trim();
       if (!content || !draft) return;
+      if (!fitsEntry(content)) {
+        state.notice = `Nothing saved: a correction can hold at most ${MAX_ENTRY_BYTES} bytes; your text is kept so you can shorten it.`;
+        render();
+        return;
+      }
       // The revision the draft started from: a change made elsewhere meanwhile is refused,
       // and the draft stays for the person to copy.
       const response = await action("Saving the correction", () =>
@@ -505,7 +510,10 @@ app.addEventListener("submit", async (event) => {
           backgroundSection: true,
         }),
       );
-      memoryDrafts.close(entryId);
+      // Words typed while the save ran stay as the draft; only what was saved is cleared.
+      if (memoryDrafts.correction(entryId)?.content.trim() === content) {
+        memoryDrafts.close(entryId);
+      }
       state.notice = `Corrected: "${response.item.content}".`;
       await refresh();
     } else if (form.dataset.memoryAdd) {
@@ -516,17 +524,29 @@ app.addEventListener("submit", async (event) => {
       }
       const addition = memoryDrafts.addition();
       const content = addition.content.trim();
+      if (!fitsEntry(content)) {
+        state.notice = `Nothing added: an entry can hold at most ${MAX_ENTRY_BYTES} bytes; your text is kept so you can shorten it.`;
+        render();
+        return;
+      }
       const response = await action("Adding to memory", () =>
         rpc("statefulMemory/add", {
           threadId,
           kind: addition.kind,
           content,
           reason: addition.kind === "decision" && addition.reason.trim() ? addition.reason.trim() : null,
+          scope: null,
           clientActionId: addition.actionId,
           backgroundSection: true,
         }),
       );
-      memoryDrafts.clearAddition();
+      // Words typed while the save ran stay as a new addition; only what was saved is cleared.
+      const now = memoryDrafts.addition();
+      if (now.content.trim() === content && now.kind === addition.kind && now.reason === addition.reason) {
+        memoryDrafts.clearAddition();
+      } else {
+        memoryDrafts.editAddition("actionId", "");
+      }
       state.notice =
         response.outcome === "added"
           ? `Added: "${response.item.content}".`
