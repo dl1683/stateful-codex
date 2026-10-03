@@ -3,6 +3,7 @@
 mod attribution;
 mod autonomy;
 mod background;
+mod capsule_files;
 mod checkout;
 mod checkpoint;
 mod completion;
@@ -23,6 +24,7 @@ mod rule_group;
 mod rule_scope;
 mod rule_units;
 mod run_world_state;
+mod runner;
 mod services;
 mod socratic;
 mod source_freshness;
@@ -395,27 +397,32 @@ impl ContextContributor for StatefulExtension {
                     run_world_state_section(run_status)
                 });
             }
-            if continuation_window
-                && let Some(store) = runtime_store
-                && let Some(capsule) = task_capsule::window_capsule(
+            if continuation_window && let Some(store) = runtime_store {
+                let roots = self
+                    .project_roots(selected.project_id())
+                    .await
+                    .into_iter()
+                    .map(std::path::PathBuf::from)
+                    .collect();
+                if let Some(capsule) = task_capsule::window_capsule(
                     store,
-                    &thread_id,
-                    selected.project_id(),
-                    &window.window_id,
-                    task_capsule::capsule_bytes(input.model_info.auto_compact_token_limit()),
+                    (&thread_id, selected.project_id(), &window.window_id),
+                    roots,
+                    task_capsule::capsule_caps(input.model_info.auto_compact_token_limit()),
                 )
                 .await
-                && task_capsule::has_content(&capsule)
-            {
-                let stale = store
-                    .edited_after(&thread_id, selected.project_id(), capsule.through_seq)
-                    .await
-                    .unwrap_or_default();
-                sections.push(task_capsule::capsule_section(
-                    &window.window_id,
-                    &capsule,
-                    stale,
-                ));
+                .filter(task_capsule::has_content)
+                {
+                    let stale = store
+                        .changed_after(&thread_id, selected.project_id(), capsule.through_seq)
+                        .await
+                        .unwrap_or_default();
+                    sections.push(task_capsule::capsule_section(
+                        &window.window_id,
+                        &capsule,
+                        stale,
+                    ));
+                }
             }
             sections
         })

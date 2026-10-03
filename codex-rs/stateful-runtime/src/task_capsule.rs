@@ -71,8 +71,9 @@ impl StatefulRunStore {
         .transpose()
     }
 
-    /// Whether the thread journaled an edit for `project_id` after `after_seq`.
-    pub async fn edited_after(
+    /// Whether the thread may have changed files for `project_id` after `after_seq`: a patch
+    /// that was not declined, or any command (scripts can write files the host cannot see).
+    pub async fn changed_after(
         &self,
         thread_id: &str,
         project_id: &str,
@@ -81,7 +82,9 @@ impl StatefulRunStore {
         Ok(sqlx::query_scalar::<_, i64>(
             "SELECT EXISTS (
                 SELECT 1 FROM stateful_window_events
-                WHERE thread_id = ? AND project_id = ? AND seq > ? AND kind = 'edit'
+                WHERE thread_id = ? AND project_id = ? AND seq > ?
+                  AND (kind = 'command'
+                       OR (kind = 'edit' AND instr(payload_json, '\"status\":\"declined\"') = 0))
              )",
         )
         .bind(thread_id)

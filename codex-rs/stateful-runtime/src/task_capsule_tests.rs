@@ -39,31 +39,64 @@ async fn a_window_keeps_its_first_capsule_and_later_edits_are_detected() {
     );
     assert!(
         !store
-            .edited_after("thread-1", "project-1", 0)
+            .changed_after("thread-1", "project-1", 0)
             .await
             .expect("edited")
     );
-    store
-        .append_window_event(&NewWindowEvent {
+    let append = |key: &str, kind: WindowEventKind, payload: serde_json::Value| {
+        let event = NewWindowEvent {
             thread_id: "thread-1".to_string(),
-            event_key: "patch-1:edit".to_string(),
+            event_key: key.to_string(),
             project_id: "project-1".to_string(),
             turn_id: "turn-1".to_string(),
-            kind: WindowEventKind::Edit,
-            payload: json!({"status": "applied"}),
-        })
-        .await
-        .expect("append");
+            kind,
+            payload,
+        };
+        let store = store.clone();
+        async move { store.append_window_event(&event).await.expect("append") }
+    };
+    // A declined patch writes nothing.
+    append(
+        "patch-1:edit",
+        WindowEventKind::Edit,
+        json!({"status": "declined"}),
+    )
+    .await;
+    assert!(
+        !store
+            .changed_after("thread-1", "project-1", 0)
+            .await
+            .expect("declined")
+    );
+    // A command may have written files the host cannot see.
+    append(
+        "exec-1:command",
+        WindowEventKind::Command,
+        json!({"exitCode": 0}),
+    )
+    .await;
     assert!(
         store
-            .edited_after("thread-1", "project-1", 0)
+            .changed_after("thread-1", "project-1", 0)
             .await
-            .expect("edited")
+            .expect("command")
+    );
+    append(
+        "patch-2:edit",
+        WindowEventKind::Edit,
+        json!({"status": "applied"}),
+    )
+    .await;
+    assert!(
+        store
+            .changed_after("thread-1", "project-1", 2)
+            .await
+            .expect("applied")
     );
     assert!(
         !store
-            .edited_after("thread-1", "project-1", 1)
+            .changed_after("thread-1", "project-1", 3)
             .await
-            .expect("edited")
+            .expect("none after")
     );
 }

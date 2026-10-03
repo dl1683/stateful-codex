@@ -168,18 +168,24 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
                     command.stderr.as_deref().unwrap_or_default()
                 )
             });
-            let full_command = command.command.join(" ");
+            let (full_command, shell) = crate::runner::command_source(&command.command);
+            let redacted_command = codex_secrets::redact_secrets(full_command.clone());
+            let completed_ok = status == "completed" && command.exit_code == Some(0);
             // Escaping can make text serialize larger than its bytes: halve the kept text
             // until the whole receipt fits, keeping status and exit code intact.
             let (mut command_bytes, mut tail_bytes) = (MAX_COMMAND_BYTES, MAX_OUTPUT_TAIL_BYTES);
             loop {
-                let command_line = clean_head(&full_command, command_bytes);
+                let command_line = head(&redacted_command, command_bytes);
                 let output_tail = clean_tail(&output, tail_bytes);
+                let validation = is_validation_command(&full_command);
                 let payload = json!({
-                    // Lets a capsule find test runs older than its page.
-                    "validation": is_validation_command(&command_line),
+                    // Let a capsule find test runs, and working ones, older than its page.
+                    "validation": validation,
+                    "working": validation && completed_ok,
                     "command": command_line,
-                    "commandComplete": command_line.len() == full_command.len(),
+                    "shell": shell,
+                    // Replayable only when nothing was cut or redacted.
+                    "commandComplete": command_line == full_command,
                     "cwd": clean_head(&command.cwd.to_string(), MAX_CWD_BYTES),
                     "status": status,
                     "exitCode": command.exit_code,
@@ -271,6 +277,8 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
                 WindowEventKind::Message,
                 {
                     let mut payload = json!({
+                        // Lets a capsule find a turn's closing words older than its page.
+                        "closing": phase != "commentary",
                         "phase": phase,
                         "text": clean_head(&text, MAX_MESSAGE_BYTES),
                         "textBytes": text.len(),
@@ -364,44 +372,14 @@ pub(crate) fn exit_text(event: &WindowEvent) -> String {
     }
 }
 
-/// Whether a command looks like a test or check runner. Recognition is by name only: it says
-/// nothing about what passed, and a compound command's exit code is its last command's.
+/// Whether a command's source invokes a test or check runner (see `runner::invoked_runner`).
 pub(crate) fn is_validation_command(command: &str) -> bool {
     validation_runner(command).is_some()
 }
 
-/// The test or check runner a command names (see [`is_validation_command`]).
+/// The test or check runner a command's source invokes.
 pub(crate) fn validation_runner(command: &str) -> Option<&'static str> {
-    const RUNNERS: &[&str] = &[
-        "cargo test",
-        "cargo nextest",
-        "just test",
-        "pytest",
-        "unittest",
-        "npm test",
-        "npm run test",
-        "pnpm test",
-        "yarn test",
-        "go test",
-        "dotnet test",
-        "mvn test",
-        "gradle test",
-        "make test",
-        "ctest",
-        "rspec",
-        "jest",
-        "vitest",
-        "tox",
-        "phpunit",
-        "cargo check",
-        "cargo clippy",
-        "tsc",
-    ];
-    let command = command.to_ascii_lowercase();
-    RUNNERS
-        .iter()
-        .find(|runner| command.contains(*runner))
-        .copied()
+    crate::runner::invoked_runner(command)
 }
 
 /// The first `max` bytes of `text`, cut at a character boundary.

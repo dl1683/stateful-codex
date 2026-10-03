@@ -1,22 +1,100 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
 use codex_extension_api::PreviousWorldStateSection;
+use codex_protocol::items::AgentMessageContent;
+use codex_protocol::items::AgentMessageItem;
+use codex_protocol::items::CommandExecutionItem;
+use codex_protocol::items::CommandExecutionStatus;
+use codex_protocol::items::TurnItem;
+use codex_protocol::models::MessagePhase;
+use codex_protocol::protocol::ExecCommandSource;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::NewWindowEvent;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::WindowEventKind;
 use codex_utils_absolute_path::test_support::PathExt;
+use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
-use super::capsule_bytes;
+use super::capsule_caps;
 use super::capsule_section;
+use super::estimated_tokens;
 use super::window_capsule;
+use crate::window_capture::journal_item;
+
+const SMALL: Option<i64> = Some(50_000);
 
 async fn store(home: &TempDir) -> StatefulRunStore {
     StatefulRunStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await
         .expect("store")
+}
+
+/// Journals a real command item, as the host does when it completes.
+async fn run(
+    store: &StatefulRunStore,
+    turn: &str,
+    id: &str,
+    argv: &[&str],
+    exit_code: i32,
+    output: &str,
+) {
+    let cwd = TempDir::new().expect("cwd");
+    journal_item(
+        store,
+        "project-1",
+        "thread-1",
+        turn,
+        &TurnItem::CommandExecution(CommandExecutionItem {
+            model_context: None,
+            sandbox_type: None,
+            id: id.to_string(),
+            plugin_id: None,
+            script_path: None,
+            process_id: None,
+            command: argv.iter().map(|word| word.to_string()).collect(),
+            cwd: PathUri::from_abs_path(&cwd.path().abs()),
+            parsed_cmd: Vec::new(),
+            source: ExecCommandSource::Agent,
+            interaction_input: None,
+            status: if exit_code == 0 {
+                CommandExecutionStatus::Completed
+            } else {
+                CommandExecutionStatus::Failed
+            },
+            stdout: Some(output.to_string()),
+            stderr: Some(String::new()),
+            aggregated_output: Some(output.to_string()),
+            exit_code: Some(exit_code),
+            duration: Some(Duration::from_millis(5)),
+            formatted_output: None,
+        }),
+    )
+    .await;
+}
+
+async fn say(store: &StatefulRunStore, turn: &str, id: &str, phase: MessagePhase, text: &str) {
+    journal_item(
+        store,
+        "project-1",
+        "thread-1",
+        turn,
+        &TurnItem::AgentMessage(AgentMessageItem {
+            id: id.to_string(),
+            content: vec![AgentMessageContent::Text {
+                text: text.to_string(),
+            }],
+            phase: Some(phase),
+            memory_citation: None,
+            delivery: None,
+            questions: None,
+        }),
+    )
+    .await;
 }
 
 async fn append(store: &StatefulRunStore, key: &str, kind: WindowEventKind, payload: Value) {
@@ -33,19 +111,35 @@ async fn append(store: &StatefulRunStore, key: &str, kind: WindowEventKind, payl
         .expect("append");
 }
 
-fn command(command: &str, exit_code: i64, output: &str) -> Value {
-    json!({
-        "validation": crate::window_capture::is_validation_command(command),
-        "command": command,
-        "status": if exit_code == 0 { "completed" } else { "failed" },
-        "exitCode": exit_code,
-        "outputBytes": output.len(),
-        "outputTail": output,
-    })
+fn edit(path: &std::path::Path, status: &str) -> Value {
+    json!({"status": status, "paths": [{"path": path.display().to_string(), "change": "update"}], "morePaths": 0})
 }
 
-fn edit(path: &std::path::Path) -> Value {
-    json!({"status": "applied", "paths": [{"path": path.display().to_string(), "change": "update"}], "morePaths": 0})
+async fn capsule(
+    store: &StatefulRunStore,
+    window: &str,
+    roots: Vec<PathBuf>,
+    limit: Option<i64>,
+) -> String {
+    window_capsule(
+        store,
+        ("thread-1", "project-1", window),
+        roots,
+        capsule_caps(limit),
+    )
+    .await
+    .expect("capsule")
+    .body
+}
+
+fn within(body: &str, caps_bytes: usize, caps_tokens: usize) {
+    let wrapped = format!("<stateful_task_capsule>{body}</stateful_task_capsule>");
+    assert!(
+        wrapped.len() <= caps_bytes,
+        "{} bytes: {body}",
+        wrapped.len()
+    );
+    assert!(estimated_tokens(&wrapped) <= caps_tokens, "{body}");
 }
 
 #[tokio::test]
@@ -64,16 +158,20 @@ async fn the_capsule_reports_observations_and_the_agents_own_next_step() {
     )
     .expect("worklog");
     let store = store(&home).await;
-    append(&store, "e1", WindowEventKind::Edit, edit(&source)).await;
     append(
         &store,
+        "e1",
+        WindowEventKind::Edit,
+        edit(&source, "applied"),
+    )
+    .await;
+    run(
+        &store,
+        "turn-1",
         "c1",
-        WindowEventKind::Command,
-        command(
-            "bash -lc pytest -q",
-            1,
-            "FAILED test_eggs\n1 failed, 4 passed",
-        ),
+        &["bash", "-lc", "pytest -q"],
+        1,
+        "FAILED test_eggs\n1 failed, 4 passed",
     )
     .await;
     append(
@@ -83,29 +181,23 @@ async fn the_capsule_reports_observations_and_the_agents_own_next_step() {
         json!({"steps": [
             {"step": "Reproduce the egg rounding failure", "status": "completed"},
             {"step": "Round eggs at output, not input", "status": "in_progress"},
-            {"step": "Rerun the tests", "status": "pending"},
         ]}),
     )
     .await;
-    append(&store, "e2", WindowEventKind::Edit, edit(&worklog)).await;
-
-    let capsule = window_capsule(
+    append(
         &store,
-        "thread-1",
-        "project-1",
-        "window-2",
-        capsule_bytes(None),
+        "e2",
+        WindowEventKind::Edit,
+        edit(&worklog, "applied"),
     )
-    .await
-    .expect("capsule");
-    let body = &capsule.body;
-    assert_eq!(capsule.through_seq, 4);
+    .await;
+    let body = capsule(&store, "window-2", vec![work.path().to_path_buf()], None).await;
     assert!(
         body.contains("Next step (the agent's last update_plan, 1 observations before compaction): \"Round eggs at output, not input\"."),
         "{body}"
     );
     assert!(
-        body.contains("Last test or check command: `bash -lc pytest -q` exit 1; files were changed after it, so it may no longer hold."),
+        body.contains("Last test or check command (exit 1): `pytest -q`; files were patched after it, so it may no longer hold."),
         "{body}"
     );
     assert!(body.contains("1 failed, 4 passed"), "{body}");
@@ -113,72 +205,80 @@ async fn the_capsule_reports_observations_and_the_agents_own_next_step() {
         body.contains("scale.py: in a patch that applied;"),
         "{body}"
     );
-    assert!(body.contains("sha256"), "{body}");
     assert!(body.contains("the end of its lines 21-60 of 60"), "{body}");
-    assert!(body.contains("entry 60"), "{body}");
-    assert!(!body.contains("entry 20\n"), "{body}");
-    assert!(body.len() + "<stateful_task_capsule></stateful_task_capsule>".len() <= 4_096);
-
-    // The capsule is captured once per window.
-    append(
+    within(&body, 4_096, 1_024);
+    // Captured once per window.
+    run(
         &store,
+        "turn-1",
         "c2",
-        WindowEventKind::Command,
-        command("bash -lc pytest -q", 0, "5 passed"),
+        &["bash", "-lc", "pytest -q"],
+        0,
+        "5 passed",
     )
     .await;
-    assert_eq!(
-        window_capsule(
-            &store,
-            "thread-1",
-            "project-1",
-            "window-2",
-            capsule_bytes(None)
-        )
-        .await,
-        Some(capsule.clone())
-    );
+    assert_eq!(capsule(&store, "window-2", Vec::new(), None).await, body);
 }
 
 #[tokio::test]
-async fn without_a_plan_the_capsule_quotes_or_says_unknown_and_never_claims_a_pass() {
+async fn files_outside_the_project_roots_are_not_read() {
+    let home = TempDir::new().expect("home");
+    let elsewhere = TempDir::new().expect("elsewhere");
+    let notes = elsewhere.path().join("PROGRESS.md");
+    std::fs::write(&notes, "secret host-local progress").expect("notes");
+    let store = store(&home).await;
+    append(&store, "e1", WindowEventKind::Edit, edit(&notes, "applied")).await;
+    let body = capsule(&store, "window-2", Vec::new(), None).await;
+    assert!(
+        body.contains("not observed (outside the project roots on this host)"),
+        "{body}"
+    );
+    assert!(!body.contains("secret host-local progress"), "{body}");
+}
+
+#[tokio::test]
+async fn without_an_open_plan_the_capsule_quotes_or_says_unknown_and_never_claims_a_pass() {
     let home = TempDir::new().expect("home");
     let store = store(&home).await;
-    append(
+    run(
         &store,
+        "turn-1",
         "c1",
-        WindowEventKind::Command,
-        command("cargo test -p scaler && cargo fmt", 0, "test result: ok"),
+        &["bash", "-lc", "cargo test -p scaler && cargo fmt"],
+        0,
+        "test result: ok",
     )
     .await;
-    let unknown = window_capsule(
-        &store,
-        "thread-1",
-        "project-1",
-        "window-1",
-        capsule_bytes(None),
-    )
-    .await
-    .expect("capsule");
-    assert!(
-        unknown.body.contains("Next step: unknown."),
-        "{}",
-        unknown.body
-    );
-    assert!(
-        unknown
-            .body
-            .contains("(exit 0, a process exit code, not a test count;"),
-        "{}",
-        unknown.body
-    );
-    assert!(!unknown.body.contains("passed"), "{}", unknown.body);
-
+    // The newest plan has every step done: an older open step is not resurrected.
     append(
         &store,
+        "p0",
+        WindowEventKind::Plan,
+        json!({"steps": [{"step": "Implement loader", "status": "in_progress"}]}),
+    )
+    .await;
+    append(
+        &store,
+        "p1",
+        WindowEventKind::Plan,
+        json!({"steps": [{"step": "Implement loader", "status": "completed"}]}),
+    )
+    .await;
+    let body = capsule(&store, "window-1", Vec::new(), None).await;
+    assert!(body.contains("marked every step done"), "{body}");
+    assert!(!body.contains("\"Implement loader\""), "{body}");
+    assert!(
+        body.contains("(exit 0, a process exit code, not a test count)"),
+        "{body}"
+    );
+    assert!(!body.contains("passed"), "{body}");
+
+    say(
+        &store,
+        "turn-2",
         "m1",
-        WindowEventKind::Message,
-        json!({"phase": "commentary", "text": "I will add the crepes recipe next."}),
+        MessagePhase::Commentary,
+        "I will add the crepes recipe next.",
     )
     .await;
     append(
@@ -188,45 +288,37 @@ async fn without_a_plan_the_capsule_quotes_or_says_unknown_and_never_claims_a_pa
         json!({"text": "Actually stop and ask first."}),
     )
     .await;
-    let quoted = window_capsule(
-        &store,
-        "thread-1",
-        "project-1",
-        "window-2",
-        capsule_bytes(Some(60_000)),
-    )
-    .await
-    .expect("capsule");
+    let body = capsule(&store, "window-2", Vec::new(), SMALL).await;
     assert!(
-        quoted.body.contains("Last announced intention (the agent's own words, 1 observations before compaction): \"I will add the crepes recipe next.\". A later user message may have changed it"),
-        "{}",
-        quoted.body
+        body.contains("Last announced intention (the agent's own words, 1 observations before compaction): \"I will add the crepes recipe next.\". A later user message may have changed it"),
+        "{body}"
     );
-    assert!(quoted.body.len() + "<stateful_task_capsule></stateful_task_capsule>".len() <= 2_048);
+    within(&body, 2_048, 512);
 }
 
 #[tokio::test]
-async fn the_capsule_renders_once_and_later_edits_add_one_notice() {
+async fn the_capsule_renders_once_and_later_work_adds_one_notice() {
     let home = TempDir::new().expect("home");
     let store = store(&home).await;
-    append(
+    run(
         &store,
+        "turn-1",
         "c1",
-        WindowEventKind::Command,
-        command("go test ./...", 1, "FAIL"),
+        &["bash", "-lc", "go test ./..."],
+        1,
+        "FAIL",
     )
     .await;
-    let capsule = window_capsule(
+    let stored = window_capsule(
         &store,
-        "thread-1",
-        "project-1",
-        "window-1",
-        capsule_bytes(None),
+        ("thread-1", "project-1", "window-1"),
+        Vec::new(),
+        capsule_caps(None),
     )
     .await
     .expect("capsule");
-    let fresh = capsule_section("window-1", &capsule, /*stale*/ false);
-    let stale = capsule_section("window-1", &capsule, /*stale*/ true);
+    let fresh = capsule_section("window-1", &stored, /*stale*/ false);
+    let stale = capsule_section("window-1", &stored, /*stale*/ true);
     let rendered = |section: &codex_extension_api::WorldStateSectionContribution,
                     previous: PreviousWorldStateSection<'_>| {
         section
@@ -235,7 +327,7 @@ async fn the_capsule_renders_once_and_later_edits_add_one_notice() {
     };
     assert_eq!(
         rendered(&fresh, PreviousWorldStateSection::Absent),
-        Some(capsule.body.clone())
+        Some(stored.body.clone())
     );
     assert_eq!(
         rendered(&fresh, PreviousWorldStateSection::Known(fresh.snapshot())),
@@ -243,170 +335,119 @@ async fn the_capsule_renders_once_and_later_edits_add_one_notice() {
     );
     let notice =
         rendered(&stale, PreviousWorldStateSection::Known(fresh.snapshot())).expect("notice");
-    assert!(notice.contains("now historical"), "{notice}");
+    assert!(notice.contains("may be historical"), "{notice}");
     assert_eq!(
         rendered(&stale, PreviousWorldStateSection::Known(stale.snapshot())),
         None
     );
 }
 
-/// within1: the agent learned that pytest needs a project-local temp directory on this Windows
-/// host (the default one fails with an ACL error), then compaction came. The capsule must carry
-/// the working form verbatim, with its directory, and the failing form it replaced, even when a
-/// later unrelated command failed and the budget is the small one.
+/// within1 N5 and N7 under pressure: a working pytest route found early (after a failing form),
+/// then many failing runs, a search that only mentions pytest, a commentary-heavy detour and
+/// long commands, before compaction at the 50k caps. The route stays verbatim, a mention does
+/// not replace it, and the next step stated at the end of t05 survives.
 #[tokio::test]
-async fn the_capsule_keeps_the_last_working_validation_and_the_workaround_it_needed() {
+async fn the_next_step_before_a_detour_and_the_working_route_survive_pressure() {
     let home = TempDir::new().expect("home");
     let store = store(&home).await;
-    let failing = "powershell -Command python -m pytest -q";
-    let working =
-        r"powershell -Command $env:TMP='C:\work\.tmp'; python -m pytest -q --basetemp=.pytest_tmp";
-    let mut failing_payload = command(
-        failing,
-        1,
-        r"PermissionError: [WinError 5] Access is denied: 'C:\Users\me\AppData\Local\Temp\pytest-of-me'",
-    );
-    failing_payload["cwd"] = json!(r"C:\work\recipes");
-    let mut working_payload = command(working, 0, "12 passed in 0.40s");
-    working_payload["cwd"] = json!(r"C:\work\recipes");
-    append(&store, "c1", WindowEventKind::Command, failing_payload).await;
-    append(&store, "c2", WindowEventKind::Command, working_payload).await;
-    append(
+    let failing = "python -m pytest tests/test_config.py -q";
+    let working = r"$env:TMP='C:\tmpdir'; python -m pytest tests/test_config.py -q --basetemp C:\tmpdir\click-config-tests";
+    run(
         &store,
-        "c3",
-        WindowEventKind::Command,
-        command("powershell -Command git push", 128, "fatal: no upstream"),
+        "t02",
+        "t02-c1",
+        &["pwsh", "-Command", failing],
+        1,
+        "PermissionError: [WinError 5]",
     )
     .await;
-    let capsule = window_capsule(
+    run(
         &store,
-        "thread-1",
-        "project-1",
-        "window-2",
-        capsule_bytes(Some(60_000)),
-    )
-    .await
-    .expect("capsule");
-    let body = &capsule.body;
-    assert!(
-        body.contains(&format!(
-            r"Last working test or check command (exit 0, a process exit code, not a test count; reuse it verbatim, with its directory and any environment settings in it): `{working}` in C:\work\recipes. It replaced a form that failed: `{failing}` exit 1."
-        )),
-        "{body}"
-    );
-    assert!(
-        body.contains(
-            "Latest command without exit code 0: `powershell -Command git push` exit 128."
-        ),
-        "{body}"
-    );
-    assert!(body.len() + "<stateful_task_capsule></stateful_task_capsule>".len() <= 2_048);
-}
-
-async fn append_in_turn(
-    store: &StatefulRunStore,
-    key: &str,
-    turn: &str,
-    kind: WindowEventKind,
-    payload: Value,
-) {
-    store
-        .append_window_event(&NewWindowEvent {
-            thread_id: "thread-1".to_string(),
-            event_key: key.to_string(),
-            project_id: "project-1".to_string(),
-            turn_id: turn.to_string(),
-            kind,
-            payload,
-        })
-        .await
-        .expect("append");
-}
-
-/// within1 N5 and N7: a working pytest route found early, a next step stated at the end of t05,
-/// then a long t06 detour pushes both out of the newest page. A 50k-limit capsule (2,048
-/// bytes) still carries the route verbatim and the t05 closing words.
-#[tokio::test]
-async fn the_next_step_stated_before_a_detour_and_an_old_working_route_survive() {
-    let home = TempDir::new().expect("home");
-    let store = store(&home).await;
-    let mut working = command(
-        r"powershell -Command python -m pytest tests/test_config.py -q --basetemp C:\tmpdir\click-config-tests",
+        "t02",
+        "t02-c2",
+        &["pwsh", "-Command", working],
         0,
         "12 passed",
-    );
-    working["cwd"] = json!(r"C:\work\click");
-    append_in_turn(&store, "t02-c1", "t02", WindowEventKind::Command, working).await;
-    let closing = format!(
-        "{} Next step: add the INI and JSON loaders behind the same loader interface, then the layering tests.",
-        "Implemented TOML loading and precedence. ".repeat(40)
-    );
-    append_in_turn(
-        &store,
-        "t05-m1",
-        "t05",
-        WindowEventKind::Message,
-        json!({
-            "phase": "final",
-            "text": head_of(&closing, 1_024),
-            "tail": tail_of(&closing, 512),
-            "textBytes": closing.len(),
-        }),
     )
     .await;
-    append_in_turn(
+    for index in 0..20 {
+        run(
+            &store,
+            "t03",
+            &format!("t03-f{index}"),
+            &["pwsh", "-Command", "python -m pytest -q"],
+            1,
+            "WinError 5",
+        )
+        .await;
+    }
+    run(
+        &store,
+        "t04",
+        "t04-rg",
+        &["pwsh", "-Command", "rg pytest README.md"],
+        0,
+        "README.md: pytest",
+    )
+    .await;
+    let closing = format!(
+        "{}Next step: add the INI and JSON loaders behind the same loader interface, then the layering tests.",
+        "Implemented TOML loading and precedence. ".repeat(40)
+    );
+    say(
+        &store,
+        "t05",
+        "t05-final",
+        MessagePhase::FinalAnswer,
+        &closing,
+    )
+    .await;
+    append(
         &store,
         "t06-u1",
-        "t06",
         WindowEventKind::User,
         json!({"text": "Quick detour: profile the help output."}),
     )
     .await;
-    for index in 0..80 {
-        append_in_turn(
+    for index in 0..40 {
+        say(
             &store,
-            &format!("t06-c{index}"),
             "t06",
-            WindowEventKind::Command,
-            command("powershell -Command python bench.py", 0, "ok"),
+            &format!("t06-m{index}"),
+            MessagePhase::Commentary,
+            &format!("Profiling step {index}."),
+        )
+        .await;
+        run(
+            &store,
+            "t06",
+            &format!("t06-c{index}"),
+            &[
+                "pwsh",
+                "-Command",
+                &format!("python bench.py --case {index} {}", "x".repeat(400)),
+            ],
+            0,
+            "ok",
         )
         .await;
     }
-    append_in_turn(
+    say(
         &store,
-        "t06-m1",
         "t06",
-        WindowEventKind::Message,
-        json!({"phase": "final", "text": "Profiled: help rendering is 4 ms.", "textBytes": 33}),
+        "t06-final",
+        MessagePhase::FinalAnswer,
+        "Profiled: help rendering is 4 ms.",
     )
     .await;
 
-    let capsule = window_capsule(
-        &store,
-        "thread-1",
-        "project-1",
-        "window-9",
-        capsule_bytes(Some(50_000)),
-    )
-    .await
-    .expect("capsule");
-    let body = &capsule.body;
-    assert!(
-        body.contains(r"`powershell -Command python -m pytest tests/test_config.py -q --basetemp C:\tmpdir\click-config-tests` in C:\work\click."),
-        "{body}"
-    );
+    let body = capsule(&store, "window-9", Vec::new(), SMALL).await;
+    assert!(body.contains(&format!("`{working}`")), "{body}");
+    assert!(body.contains("run by pwsh"), "{body}");
     assert!(
         body.contains("Next step: add the INI and JSON loaders behind the same loader interface, then the layering tests."),
         "{body}"
     );
     assert!(body.contains("Profiled: help rendering is 4 ms."), "{body}");
-    assert!(body.len() + "<stateful_task_capsule></stateful_task_capsule>".len() <= 2_048);
-}
-
-fn head_of(text: &str, max: usize) -> String {
-    crate::window_capture::head(text, max)
-}
-
-fn tail_of(text: &str, max: usize) -> String {
-    crate::window_capture::tail(text, max)
+    within(&body, 2_048, 512);
 }

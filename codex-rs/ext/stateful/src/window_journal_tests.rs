@@ -87,11 +87,11 @@ pub(crate) fn message_item(id: &str, phase: MessagePhase, text: &str) -> TurnIte
 
 #[test]
 fn validation_recognition_is_by_runner_name_only() {
-    assert!(is_validation_command("bash -lc cargo test -p codex-core"));
+    assert!(is_validation_command("cargo test -p codex-core"));
     assert!(is_validation_command(
         "python -m pytest tests/test_scale.py"
     ));
-    assert!(!is_validation_command("bash -lc cargo fmt"));
+    assert!(!is_validation_command("cargo fmt"));
     assert!(!is_validation_command("git status"));
 }
 
@@ -173,7 +173,7 @@ async fn completed_items_are_journaled_redacted_and_published_once_per_window() 
     assert!(
         note.value
             .content
-            .contains("Last failing test or check command (exit 1): `bash -lc pytest -q`.")
+            .contains("Last failing test or check command (exit 1): `pytest -q`.")
     );
     assert_eq!(
         store
@@ -289,7 +289,7 @@ async fn long_paths_never_crowd_out_the_test_and_failure_receipts() {
     let content = super::publication_content("thread-1", 0, 9, &events);
     assert!(content.len() <= 3_800);
     assert!(
-        content.contains("Last failing test or check command (exit 1): `bash -lc pytest -q`."),
+        content.contains("Last failing test or check command (exit 1): `pytest -q`."),
         "{content}"
     );
     assert!(

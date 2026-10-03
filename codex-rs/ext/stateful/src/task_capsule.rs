@@ -1,19 +1,20 @@
 //! The task capsule of a continuation window: a bounded, host-built view of where the work
 //! stood when compaction closed the previous window. It sits beside the native compaction
-//! summary and is built only from host observations (the window journal and the files on disk
-//! at the boundary) and the agent's own recorded words. It never invents a next step and never
-//! turns an exit code into a test result.
+//! summary and is built only from host observations (the window journal and project files on
+//! this host at the boundary) and the agent's own recorded words. It never invents a next step
+//! and never turns an exit code into a test result.
 //!
 //! The capsule is captured once per window, so every step, retry and same-thread resume shows
-//! the same text. Later edits do not rewrite it; they add one short notice that it is now
-//! historical.
+//! the same text. Later commands or patches do not rewrite it; they add one short notice that
+//! it may be historical.
 
-use std::path::Path;
+use std::path::PathBuf;
 
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_stateful_runtime::StatefulRunStore;
+use codex_stateful_runtime::StatefulRunStoreError;
 use codex_stateful_runtime::TaskCapsule;
 use codex_stateful_runtime::WindowEvent;
 use codex_stateful_runtime::WindowEventKind;
@@ -22,11 +23,13 @@ use serde_json::json;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::capsule_files::FileObserver;
+use crate::capsule_files::Observation;
+use crate::capsule_files::fingerprint;
 use crate::window_capture::command_text;
 use crate::window_capture::exit_code;
 use crate::window_capture::exit_text;
 use crate::window_capture::head;
-use crate::window_capture::is_validation_command;
 use crate::window_capture::tail;
 use crate::window_capture::validation_runner;
 
@@ -37,48 +40,77 @@ const START_MARKER: &str = "<stateful_task_capsule>";
 const END_MARKER: &str = "</stateful_task_capsule>";
 const UPDATE_START_MARKER: &str = "<stateful_task_capsule_update>";
 const UPDATE_END_MARKER: &str = "</stateful_task_capsule_update>";
-/// Capsule bound, markers included (the in-session spec's 4,096-byte cap), and the smaller
-/// bound for models that compact at 80k tokens or less.
-const MAX_CAPSULE_BYTES: usize = 4_096;
-const MAX_SMALL_WINDOW_CAPSULE_BYTES: usize = 2_048;
+/// The in-session spec's caps, markers included: 1,024 tokens and 4,096 bytes, or 512 tokens
+/// and 2,048 bytes for models that compact at 80k tokens or less.
+const LARGE_CAPS: CapsuleCaps = CapsuleCaps {
+    bytes: 4_096,
+    tokens: 1_024,
+};
+const SMALL_CAPS: CapsuleCaps = CapsuleCaps {
+    bytes: 2_048,
+    tokens: 512,
+};
 const SMALL_WINDOW_TOKENS: i64 = 80_000;
 const MAX_FILES: usize = 8;
 const MAX_PROGRESS_DOCS: usize = 2;
 const PROGRESS_LINES: usize = 40;
-const MAX_PROGRESS_BYTES: usize = 700;
-const MAX_VALIDATION_TAIL_BYTES: usize = 480;
-const MAX_FAILURE_TAIL_BYTES: usize = 320;
-const MAX_QUOTE_BYTES: usize = 400;
-/// Closing messages quoted, and the bytes of each quoted from its end.
+const MAX_PROGRESS_BYTES: usize = 600;
+const MAX_OUTPUT_TAIL_BYTES: usize = 320;
+const MAX_QUOTE_BYTES: usize = 320;
 const MAX_CLOSINGS: usize = 3;
-const MAX_CLOSING_BYTES: usize = 320;
-/// The working command is quoted verbatim, so it gets more room than other command lines.
-const MAX_WORKING_COMMAND_BYTES: usize = 600;
-/// Files larger than this are named but not hashed or read at the boundary.
-const MAX_OBSERVED_FILE_BYTES: u64 = 4 * 1024 * 1024;
-/// Observations the capsule is built from (newest first).
+const MAX_CLOSING_BYTES: usize = 240;
+const MAX_WORKING_COMMAND_BYTES: usize = 480;
+const MAX_OTHER_COMMAND_BYTES: usize = 200;
+const MAX_CWD_BYTES: usize = 160;
+/// Observations of the newest page the capsule reads (newest first).
 const CAPSULE_PAGE: u32 = 64;
 const PROGRESS_NAMES: &[&str] = &[
     "WORKLOG", "PROGRESS", "STATUS", "TODO", "NOTES", "PLAN", "RESULT", "JOURNAL", "HANDOFF",
 ];
 
-/// The capsule bound for a model, from its automatic compaction limit.
-pub(crate) fn capsule_bytes(auto_compact_token_limit: Option<i64>) -> usize {
+/// A capsule's byte and token caps, markers included.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CapsuleCaps {
+    bytes: usize,
+    tokens: usize,
+}
+
+/// The capsule caps for a model, from its automatic compaction limit.
+pub(crate) fn capsule_caps(auto_compact_token_limit: Option<i64>) -> CapsuleCaps {
     match auto_compact_token_limit {
-        Some(limit) if limit <= SMALL_WINDOW_TOKENS => MAX_SMALL_WINDOW_CAPSULE_BYTES,
-        Some(_) | None => MAX_CAPSULE_BYTES,
+        Some(limit) if limit <= SMALL_WINDOW_TOKENS => SMALL_CAPS,
+        Some(_) | None => LARGE_CAPS,
     }
+}
+
+/// A conservative token count without a tokenizer: one token per three bytes of ASCII and one
+/// per non-ASCII character, which overestimates ordinary prose, code and paths (about four
+/// bytes per token). It is an estimate, not a proof for adversarial text.
+fn estimated_tokens(text: &str) -> usize {
+    let ascii = text.bytes().filter(u8::is_ascii).count();
+    let other = text
+        .chars()
+        .filter(|character| !character.is_ascii())
+        .count();
+    ascii.div_ceil(3) + other
+}
+
+fn fits(text: &str, caps: CapsuleCaps) -> bool {
+    let wrapped = START_MARKER.len() + text.len() + END_MARKER.len();
+    let wrapped_tokens =
+        estimated_tokens(START_MARKER) + estimated_tokens(text) + estimated_tokens(END_MARKER);
+    wrapped <= caps.bytes && wrapped_tokens <= caps.tokens
 }
 
 /// The window's capsule: the stored one, or one captured now from the journal. `None` when the
 /// thread has journaled nothing yet.
 pub(crate) async fn window_capsule(
     store: &StatefulRunStore,
-    thread_id: &str,
-    project_id: &str,
-    window_id: &str,
-    max_bytes: usize,
+    identity: (&str, &str, &str),
+    roots: Vec<PathBuf>,
+    caps: CapsuleCaps,
 ) -> Option<TaskCapsule> {
+    let (thread_id, project_id, window_id) = identity;
     match store.task_capsule(thread_id, window_id).await {
         Ok(Some(capsule)) => return Some(capsule),
         Ok(None) => {}
@@ -110,7 +142,7 @@ pub(crate) async fn window_capsule(
             && event.event.payload["phase"] == "commentary")
     });
     let body = if observed_work {
-        build_capsule(&events, through_seq, max_bytes).await
+        build_capsule(&events, through_seq, roots, caps).await
     } else {
         NO_CAPSULE.to_string()
     };
@@ -131,25 +163,35 @@ pub(crate) fn has_content(capsule: &TaskCapsule) -> bool {
     capsule.body != NO_CAPSULE
 }
 
-/// The newest page of the journal plus the newest observations of each kind the capsule needs,
-/// so a working command, a plan or a closing message older than the page still reaches it.
+/// The newest page of the journal plus dedicated pages for what the capsule must not lose to
+/// page overflow: working test runs, test runs, turns' closing messages, the newest plan and
+/// commentary, and user messages.
 async fn capsule_events(
     store: &StatefulRunStore,
     thread_id: &str,
     project_id: &str,
     through_seq: u64,
-) -> Result<Vec<WindowEvent>, codex_stateful_runtime::StatefulRunStoreError> {
+) -> Result<Vec<WindowEvent>, StatefulRunStoreError> {
     let mut events = store
         .window_events_newest_first(thread_id, project_id, 0, through_seq, CAPSULE_PAGE)
         .await?;
-    let mut pages = store
-        .window_validation_commands(thread_id, project_id, through_seq, 16)
-        .await?;
+    let mut pages = Vec::new();
+    for (kind, flag, limit) in [
+        (WindowEventKind::Command, "working", 1),
+        (WindowEventKind::Command, "validation", 16),
+        (WindowEventKind::Message, "closing", 12),
+    ] {
+        pages.extend(
+            store
+                .window_events_flagged(thread_id, project_id, kind, flag, through_seq, limit)
+                .await?,
+        );
+    }
     for (kind, limit) in [
-        (WindowEventKind::Command, 16),
-        (WindowEventKind::Message, 32),
-        (WindowEventKind::Plan, 4),
+        (WindowEventKind::Plan, 1),
+        (WindowEventKind::Message, 4),
         (WindowEventKind::User, 16),
+        (WindowEventKind::Command, 16),
     ] {
         pages.extend(
             store
@@ -166,7 +208,7 @@ async fn capsule_events(
     Ok(events)
 }
 
-/// The capsule section. `stale` reports journaled edits after the capsule's capture.
+/// The capsule section. `stale` reports commands or patches after the capsule's capture.
 pub(crate) fn capsule_section(
     window_id: &str,
     capsule: &TaskCapsule,
@@ -188,7 +230,7 @@ pub(crate) fn capsule_section(
                     RenderedWorldStateFragment::new(
                         "developer",
                         (UPDATE_START_MARKER, UPDATE_END_MARKER),
-                        "Files were changed after the task capsule above was captured: its file hashes, progress notes and validation status are now historical.",
+                        "Commands ran or patches applied after the task capsule above was captured: its file hashes, progress notes and test results may be historical.",
                     )
                 })
             }
@@ -203,76 +245,16 @@ pub(crate) fn capsule_section(
     })
 }
 
-struct Sections {
-    header: String,
-    next_step: String,
-    validation: Option<(String, String)>,
-    /// The last test or check command that exited 0, verbatim with its working directory, and
-    /// the failing form of the same runner it replaced. Kept whatever else is trimmed.
-    working: Option<String>,
-    failure: Option<(String, String)>,
-    /// The closing words of the most recent turns, quoted (a next step stated before a
-    /// detour lives here).
-    closings: Vec<String>,
-    files: Vec<String>,
-    more_files: usize,
-    progress: Vec<String>,
-    footer: String,
-}
-
-impl Sections {
-    /// Lines in display order, each with the priority it is kept at (0 is kept longest).
-    fn lines(&self) -> Vec<(u8, String)> {
-        let mut lines = vec![(0, self.header.clone()), (0, self.next_step.clone())];
-        if let Some(working) = &self.working {
-            lines.push((0, working.clone()));
-        }
-        if !self.closings.is_empty() {
-            lines.push((
-                1,
-                "Closing words of recent turns (the agent's own, newest first):".to_string(),
-            ));
-            for (index, closing) in self.closings.iter().enumerate() {
-                lines.push((
-                    1 + u8::try_from(index).unwrap_or(u8::MAX).min(2),
-                    closing.clone(),
-                ));
-            }
-        }
-        for (line, output) in [&self.failure, &self.validation].into_iter().flatten() {
-            lines.push((2, line.clone()));
-            if !output.is_empty() {
-                lines.push((5, output.clone()));
-            }
-        }
-        if !self.files.is_empty() {
-            lines.push((
-                4,
-                format!(
-                    "Paths in recent patches, newest first, with the patch's overall outcome (which files a failed patch changed was not observed; scripts may have changed others):{}",
-                    if self.more_files > 0 {
-                        format!(" {} more not listed.", self.more_files)
-                    } else {
-                        String::new()
-                    }
-                ),
-            ));
-            for (index, file) in self.files.iter().enumerate() {
-                lines.push((if index < 3 { 4 } else { 6 }, file.clone()));
-            }
-        }
-        lines.extend(self.progress.iter().map(|note| (7, note.clone())));
-        lines.push((3, self.footer.clone()));
-        lines
-    }
-}
-
-/// Builds the capsule text within `max_bytes` (markers included). Lines are dropped from the
-/// lowest priority up (progress notes, older files, output tails, files, closing words) until
-/// the rest fits; the next step and the working command are kept, cut if they must be.
-async fn build_capsule(newest_first: &[WindowEvent], through_seq: u64, max_bytes: usize) -> String {
-    let budget = max_bytes.saturating_sub(START_MARKER.len() + END_MARKER.len());
-    let mut lines = sections(newest_first, through_seq).await.lines();
+/// Builds the capsule within its caps. Lines are dropped from the lowest priority up
+/// (progress notes, older files, output tails, files, failures), then the text is cut; the
+/// next step, the working command and the turns' closing words are kept longest.
+async fn build_capsule(
+    newest_first: &[WindowEvent],
+    through_seq: u64,
+    roots: Vec<PathBuf>,
+    caps: CapsuleCaps,
+) -> String {
+    let mut lines = lines(newest_first, through_seq, roots).await;
     let joined = |lines: &[(u8, String)]| {
         lines
             .iter()
@@ -280,7 +262,7 @@ async fn build_capsule(newest_first: &[WindowEvent], through_seq: u64, max_bytes
             .collect::<Vec<_>>()
             .join("\n")
     };
-    while joined(&lines).len() > budget {
+    while !fits(&joined(&lines), caps) {
         let lowest = lines
             .iter()
             .map(|(priority, _)| *priority)
@@ -294,112 +276,164 @@ async fn build_capsule(newest_first: &[WindowEvent], through_seq: u64, max_bytes
             lines.remove(index);
         }
     }
-    let text = joined(&lines);
-    if text.len() <= budget {
-        return text;
+    let mut text = joined(&lines);
+    while !fits(&text, caps) && !text.is_empty() {
+        text = head(&text, text.len().saturating_sub(64));
     }
-    let mut text = head(&text, budget.saturating_sub(40));
-    text.push_str("\n[task capsule shortened]");
+    if text.len() < joined(&lines).len() {
+        text.push_str(" [shortened]");
+        while !fits(&text, caps) {
+            text = format!("{} [shortened]", head(&text, text.len().saturating_sub(80)));
+        }
+    }
     text
 }
 
-async fn sections(newest_first: &[WindowEvent], through_seq: u64) -> Sections {
-    let validation = newest_first.iter().find(|event| {
-        event.event.kind == WindowEventKind::Command && is_validation_command(command_text(event))
+/// Capsule lines in display order, each with the priority it is kept at (0 is kept longest).
+async fn lines(
+    newest_first: &[WindowEvent],
+    through_seq: u64,
+    roots: Vec<PathBuf>,
+) -> Vec<(u8, String)> {
+    let commands = || {
+        newest_first
+            .iter()
+            .filter(|event| event.event.kind == WindowEventKind::Command)
+    };
+    let patched_after = |seq: u64| {
+        newest_first.iter().any(|event| {
+            event.event.kind == WindowEventKind::Edit
+                && event.seq > seq
+                && event.event.payload["status"] != "declined"
+        })
+    };
+    let mut lines = vec![
+        (
+            0,
+            format!(
+                "Task capsule: where the work stood at compaction (host observations through journal event {through_seq} and the agent's own words; not a verified summary)."
+            ),
+        ),
+        (0, next_step(newest_first, through_seq)),
+    ];
+    let working = commands().find(|event| event.event.payload["working"] == true);
+    if let Some(working) = working {
+        lines.push((0, working_line(working, patched_after(working.seq))));
+        let runner = validation_runner(command_text(working));
+        if let Some(earlier) = commands().find(|event| {
+            event.seq < working.seq
+                && exit_code(event).is_some_and(|code| code != 0)
+                && validation_runner(command_text(event)) == runner
+                && command_text(event) != command_text(working)
+        }) {
+            lines.push((
+                2,
+                format!(
+                    "  An earlier, differently written run of the same runner ({}): `{}`.",
+                    exit_text(earlier),
+                    head(command_text(earlier), MAX_OTHER_COMMAND_BYTES)
+                ),
+            ));
+        }
+    }
+    let closings = closings(newest_first, through_seq);
+    if !closings.is_empty() {
+        lines.push((
+            0,
+            "Closing words of recent turns (the agent's own, newest first):".to_string(),
+        ));
+        lines.extend(closings.into_iter().map(|closing| (0, closing)));
+    }
+    let validation = commands().find(|event| {
+        event.event.payload["validation"] == true
+            && working.is_none_or(|working| working.seq != event.seq)
     });
-    let failure = newest_first.iter().find(|event| {
-        event.event.kind == WindowEventKind::Command
-            && event.event.payload["status"] != "declined"
+    let failure = commands().find(|event| {
+        event.event.payload["status"] != "declined"
             && exit_code(event) != Some(0)
             && validation.is_none_or(|validation| validation.seq != event.seq)
     });
-    let edited_after = |seq: u64| {
-        newest_first
-            .iter()
-            .any(|event| event.event.kind == WindowEventKind::Edit && event.seq > seq)
-    };
-    let working = newest_first.iter().find(|event| {
-        event.event.kind == WindowEventKind::Command
-            && event.event.payload["status"] == "completed"
-            && exit_code(event) == Some(0)
-            && is_validation_command(command_text(event))
-    });
-    let working_line = working.map(|working| {
-        let runner = validation_runner(command_text(working));
-        // A learned workaround: an earlier failing invocation of the same runner, written
-        // differently from the form that then worked.
-        let replaced = newest_first.iter().find(|event| {
-            event.seq < working.seq
-                && event.event.kind == WindowEventKind::Command
-                && exit_code(event) != Some(0)
-                && event.event.payload["status"] != "declined"
-                && validation_runner(command_text(event)) == runner
-                && command_text(event) != command_text(working)
-        });
-        format!(
-            "Last working test or check command (exit 0, a process exit code, not a test count; reuse it verbatim, with its directory and any environment settings in it): `{}` in {}.{}{}",
-            head(command_text(working), MAX_WORKING_COMMAND_BYTES),
-            head(working.event.payload["cwd"].as_str().unwrap_or("an unrecorded directory"), 240),
-            replaced.map_or_else(String::new, |failed| format!(
-                " It replaced a form that failed: `{}` {}.",
-                head(command_text(failed), 240),
-                exit_text(failed)
-            )),
-            if edited_after(working.seq) {
-                " Files were changed after it."
-            } else {
-                ""
-            }
-        )
-    });
-    // The newest test command is shown again only when it is not the working one.
-    let validation =
-        validation.filter(|event| working.is_none_or(|working| working.seq != event.seq));
-    let validation = validation.map(|event| {
-        (
+    for (label, event) in [
+        ("Last test or check command", validation),
+        ("Latest command without exit code 0", failure),
+    ] {
+        let Some(event) = event else {
+            continue;
+        };
+        lines.push((
+            3,
             format!(
-                "Last test or check command: `{}` {}{}{}.",
-                head(command_text(event), 240),
+                "{label} ({}{}): `{}`{}.",
                 exit_text(event),
                 if exit_code(event) == Some(0) {
-                    " (the process exit code, not a test count)"
+                    ", a process exit code, not a test count"
                 } else {
                     ""
                 },
-                if edited_after(event.seq) {
-                    "; files were changed after it, so it may no longer hold"
+                head(command_text(event), MAX_OTHER_COMMAND_BYTES),
+                if patched_after(event.seq) {
+                    "; files were patched after it, so it may no longer hold"
                 } else {
                     ""
                 }
             ),
-            output_tail(event, MAX_VALIDATION_TAIL_BYTES),
-        )
-    });
-    let failure = failure.map(|event| {
-        (
-            format!(
-                "Latest command without exit code 0: `{}` {}.",
-                head(command_text(event), 240),
-                exit_text(event)
-            ),
-            output_tail(event, MAX_FAILURE_TAIL_BYTES),
-        )
-    });
-    let (files, more_files) = edited_files(newest_first).await;
-    Sections {
-        header: format!(
-            "Task capsule: where the work stood at compaction (host observations through journal event {through_seq} and the agent's own words; not a verified summary)."
-        ),
-        next_step: next_step(newest_first, through_seq),
-        validation,
-        working: working_line,
-        failure,
-        closings: closings(newest_first, through_seq),
-        files: files.iter().map(|(_, line)| line.clone()).collect(),
-        more_files,
-        progress: progress_notes(&files).await,
-        footer: "Older detail is in the thread's history and in the published window receipts (memory_read). Read a file again before editing it if it may have changed.".to_string(),
+        ));
+        let output = output_tail(event);
+        if !output.is_empty() {
+            lines.push((6, output));
+        }
     }
+    let mut observer = FileObserver::new(roots);
+    let (files, more_files) = edited_files(newest_first, &mut observer).await;
+    if !files.is_empty() {
+        lines.push((
+            5,
+            format!(
+                "Paths in recent patches, newest first, with the patch's overall outcome (which files a failed patch changed was not observed; scripts may have changed others):{}",
+                if more_files > 0 {
+                    format!(" {more_files} more not listed.")
+                } else {
+                    String::new()
+                }
+            ),
+        ));
+        for (index, (_, line, _)) in files.iter().enumerate() {
+            lines.push((if index < 3 { 5 } else { 7 }, line.clone()));
+        }
+    }
+    lines.extend(progress_notes(&files).into_iter().map(|note| (8, note)));
+    lines.push((
+        4,
+        "Older detail is in the thread's history and in the published window receipts (memory_read). Read a file again before editing it if it may have changed.".to_string(),
+    ));
+    lines
+}
+
+fn working_line(working: &WindowEvent, patched_after: bool) -> String {
+    let complete = working.event.payload["commandComplete"] != false;
+    format!(
+        "Last working test or check command (exit 0, a process exit code, not a test count){}{}: `{}` in {}.{}",
+        working.event.payload["shell"]
+            .as_str()
+            .map_or_else(String::new, |shell| format!(", run by {shell}")),
+        if complete {
+            "; reuse it verbatim, with its directory and any environment settings in it"
+        } else {
+            "; shortened or redacted here, so not replayable as shown"
+        },
+        head(command_text(working), MAX_WORKING_COMMAND_BYTES),
+        head(
+            working.event.payload["cwd"]
+                .as_str()
+                .unwrap_or("an unrecorded directory"),
+            MAX_CWD_BYTES
+        ),
+        if patched_after {
+            " Files were patched after it."
+        } else {
+            ""
+        }
+    )
 }
 
 /// The ends of the agent's most recent closing messages, one per turn, quoted exactly.
@@ -429,7 +463,8 @@ fn closings(newest_first: &[WindowEvent], through_seq: u64) -> Vec<String> {
     closings
 }
 
-/// The next step only from what the agent itself recorded, or unknown.
+/// The next step only from what the agent itself recorded, or unknown. The newest plan
+/// supersedes older plans even when all its steps are done.
 fn next_step(newest_first: &[WindowEvent], through_seq: u64) -> String {
     let later_user_message = |seq: u64| {
         newest_first
@@ -443,18 +478,18 @@ fn next_step(newest_first: &[WindowEvent], through_seq: u64) -> String {
             ""
         }
     };
-    let plan = newest_first.iter().find_map(|event| {
-        if event.event.kind != WindowEventKind::Plan {
-            return None;
-        }
-        let steps = event.event.payload["steps"].as_array()?;
+    let newest_plan = newest_first
+        .iter()
+        .find(|event| event.event.kind == WindowEventKind::Plan);
+    let open_step = newest_plan.and_then(|plan| {
+        let steps = plan.event.payload["steps"].as_array()?;
         let step = steps
             .iter()
             .find(|step| step["status"] == "in_progress")
             .or_else(|| steps.iter().find(|step| step["status"] == "pending"))?;
-        Some((event.seq, step["step"].as_str()?.to_string()))
+        Some((plan.seq, step["step"].as_str()?.to_string()))
     });
-    if let Some((seq, step)) = plan {
+    if let Some((seq, step)) = open_step {
         return format!(
             "Next step (the agent's last update_plan, {} observations before compaction): \"{}\".{}",
             through_seq.saturating_sub(seq),
@@ -462,12 +497,15 @@ fn next_step(newest_first: &[WindowEvent], through_seq: u64) -> String {
             caveat(seq)
         );
     }
+    let completed_plan = newest_plan.map(|plan| plan.seq);
     let intention = newest_first.iter().find(|event| {
-        event.event.kind == WindowEventKind::Message && event.event.payload["phase"] == "commentary"
+        event.event.kind == WindowEventKind::Message
+            && event.event.payload["phase"] == "commentary"
+            && completed_plan.is_none_or(|plan| event.seq > plan)
     });
     if let Some(event) = intention {
         return format!(
-            "Next step: no plan was recorded. Last announced intention (the agent's own words, {} observations before compaction): \"{}\".{}",
+            "Next step: no open plan step. Last announced intention (the agent's own words, {} observations before compaction): \"{}\".{}",
             through_seq.saturating_sub(event.seq),
             head(
                 event.event.payload["text"].as_str().unwrap_or_default(),
@@ -476,17 +514,20 @@ fn next_step(newest_first: &[WindowEvent], through_seq: u64) -> String {
             caveat(event.seq)
         );
     }
-    "Next step: unknown. No plan or statement of intent was recorded; check the latest failure and the user's last message.".to_string()
+    if completed_plan.is_some() {
+        return "Next step: unknown. The agent's last update_plan marked every step done; check the closing words below and the user's last message.".to_string();
+    }
+    "Next step: unknown. No plan or statement of intent was recorded; check the closing words below and the user's last message.".to_string()
 }
 
-fn output_tail(event: &WindowEvent, max: usize) -> String {
+fn output_tail(event: &WindowEvent) -> String {
     let output = event.event.payload["outputTail"]
         .as_str()
         .unwrap_or_default();
     if output.trim().is_empty() {
         return String::new();
     }
-    let excerpt = tail(output, max);
+    let excerpt = tail(output, MAX_OUTPUT_TAIL_BYTES);
     format!(
         "  output, last {} of {} bytes: {}",
         excerpt.len(),
@@ -497,8 +538,11 @@ fn output_tail(event: &WindowEvent, max: usize) -> String {
     )
 }
 
-/// Up to eight edited paths, newest first, with what is on disk at the boundary.
-async fn edited_files(newest_first: &[WindowEvent]) -> (Vec<(String, String)>, usize) {
+/// Up to eight patched paths, newest first, with what this host saw at the boundary.
+async fn edited_files(
+    newest_first: &[WindowEvent],
+    observer: &mut FileObserver,
+) -> (Vec<(String, String, Option<Vec<u8>>)>, usize) {
     let mut seen = Vec::<(String, String)>::new();
     let mut more = 0;
     for event in newest_first
@@ -534,75 +578,50 @@ async fn edited_files(newest_first: &[WindowEvent]) -> (Vec<(String, String)>, u
     }
     let mut files = Vec::with_capacity(seen.len());
     for (path, status) in seen {
-        let observed = observe_file(Path::new(&path)).await;
+        let (observed, bytes) = match observer.observe(&path).await {
+            Observation::Read(bytes) => (
+                format!("{} bytes, sha256 {}", bytes.len(), fingerprint(&bytes)),
+                Some(bytes),
+            ),
+            Observation::NotRead(reason) => (reason.to_string(), None),
+        };
         files.push((
             path.clone(),
             format!("- {path}: in a patch that {status}; {observed}"),
+            bytes,
         ));
     }
     (files, more)
 }
 
-async fn observe_file(path: &Path) -> String {
-    if !path.is_absolute() {
-        return "not observed here".to_string();
-    }
-    match tokio::fs::metadata(path).await {
-        Ok(metadata) if !metadata.is_file() => "not a regular file".to_string(),
-        Ok(metadata) if metadata.len() > MAX_OBSERVED_FILE_BYTES => {
-            format!("{} bytes, too large to hash", metadata.len())
-        }
-        Ok(_) => match tokio::fs::read(path).await {
-            Ok(bytes) => format!(
-                "{} bytes, sha256 {}",
-                bytes.len(),
-                &format!("{:x}", Sha256::digest(&bytes))[..16]
-            ),
-            Err(_) => "unreadable here".to_string(),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            "missing at the boundary".to_string()
-        }
-        Err(_) => "unreadable here".to_string(),
-    }
-}
-
-/// The last lines of up to two edited files named like progress notes.
-async fn progress_notes(files: &[(String, String)]) -> Vec<String> {
+/// The last lines of up to two patched files named like progress notes, from the bytes already
+/// read at the boundary.
+fn progress_notes(files: &[(String, String, Option<Vec<u8>>)]) -> Vec<String> {
     let mut notes = Vec::new();
-    for (path, _) in files {
+    for (path, _, bytes) in files {
         if notes.len() == MAX_PROGRESS_DOCS {
             break;
         }
-        let path = Path::new(path);
-        let name = path
+        let Some(bytes) = bytes else {
+            continue;
+        };
+        let name = std::path::Path::new(path)
             .file_name()
             .map(|name| name.to_string_lossy().to_ascii_uppercase())
             .unwrap_or_default();
-        if !PROGRESS_NAMES.iter().any(|marker| name.contains(marker)) || !path.is_absolute() {
+        if !PROGRESS_NAMES.iter().any(|marker| name.contains(marker)) {
             continue;
         }
-        let Ok(metadata) = tokio::fs::metadata(path).await else {
-            continue;
-        };
-        if !metadata.is_file() || metadata.len() > MAX_OBSERVED_FILE_BYTES {
-            continue;
-        }
-        let Ok(bytes) = tokio::fs::read(path).await else {
-            continue;
-        };
-        let text = String::from_utf8_lossy(&bytes);
+        let text = String::from_utf8_lossy(bytes);
         let lines = text.lines().collect::<Vec<_>>();
         let first = lines.len().saturating_sub(PROGRESS_LINES);
         let excerpt = tail(&lines[first..].join("\n"), MAX_PROGRESS_BYTES);
         notes.push(format!(
-            "Progress note {} (chosen by its name), the end of its lines {}-{} of {} (sha256 {}); earlier sections are not shown:\n{}",
-            path.display(),
+            "Progress note {path} (chosen by its name), the end of its lines {}-{} of {} (sha256 {}); earlier sections are not shown:\n{excerpt}",
             first + 1,
             lines.len(),
             lines.len(),
-            &format!("{:x}", Sha256::digest(&bytes))[..16],
-            excerpt
+            fingerprint(bytes),
         ));
     }
     notes

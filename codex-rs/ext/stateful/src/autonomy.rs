@@ -201,7 +201,7 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
 
 impl StatefulExtension {
     /// The selected project's configured roots, or none when it cannot be read.
-    async fn project_roots(&self, project_id: &str) -> Vec<String> {
+    pub(crate) async fn project_roots(&self, project_id: &str) -> Vec<String> {
         match self.projects.read_project(project_id.to_string()).await {
             Ok(Some(project)) => project.roots.into_iter().map(|root| root.path).collect(),
             Ok(None) => Vec::new(),

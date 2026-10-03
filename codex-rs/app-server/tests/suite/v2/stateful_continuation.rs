@@ -245,7 +245,7 @@ async fn mid_turn_compaction_installs_one_capsule_from_host_receipts() -> Result
     assert_eq!(installed.len(), 1, "{installed:?}");
     let capsule = &installed[0];
     assert!(
-        capsule.contains("Latest command without exit code 0:"),
+        capsule.contains("Latest command without exit code 0 (exit 3): `exit 3`."),
         "{capsule}"
     );
     assert!(capsule.contains("exit 3"), "{capsule}");

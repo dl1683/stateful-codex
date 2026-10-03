@@ -226,27 +226,38 @@ impl StatefulRunStore {
         rows.into_iter().map(parse_event).collect()
     }
 
-    /// The newest commands the host marked as test or check runs (payload `validation: true`),
-    /// newest first, however many other commands came after them.
-    pub async fn window_validation_commands(
+    /// The newest observations of `kind` whose payload carries the boolean flag `flag` set to
+    /// true (such as a command marked `working`), newest first, however many others followed.
+    pub async fn window_events_flagged(
         &self,
         thread_id: &str,
         project_id: &str,
+        kind: WindowEventKind,
+        flag: &str,
         through_seq: u64,
         max_results: u32,
     ) -> Result<Vec<WindowEvent>, StatefulRunStoreError> {
         validate_list_limit(max_results)?;
+        if flag.is_empty()
+            || !flag
+                .chars()
+                .all(|character| character.is_ascii_alphabetic())
+        {
+            return Err(StatefulRunStoreError::InvalidRecordId);
+        }
         let rows = sqlx::query_as::<_, StoredEvent>(
             "SELECT thread_id, seq, event_key, project_id, turn_id, kind, payload_json,
                     created_at_ms
              FROM stateful_window_events
-             WHERE thread_id = ? AND project_id = ? AND kind = 'command' AND seq <= ?
-               AND payload_json LIKE '%\"validation\":true%'
+             WHERE thread_id = ? AND project_id = ? AND kind = ? AND seq <= ?
+               AND instr(payload_json, ?) > 0
              ORDER BY seq DESC LIMIT ?",
         )
         .bind(thread_id)
         .bind(project_id)
+        .bind(kind_name(kind))
         .bind(to_i64(through_seq)?)
+        .bind(format!("\"{flag}\":true"))
         .bind(i64::from(max_results))
         .fetch_all(&self.pool)
         .await?;
