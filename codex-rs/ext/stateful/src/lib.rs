@@ -15,6 +15,7 @@ mod memory_add;
 mod memory_controls;
 mod quotation;
 mod read_receipts;
+mod relayed;
 mod request_scope;
 mod root_blackboard;
 mod rule_capture;
@@ -212,6 +213,13 @@ impl ContextContributor for StatefulExtension {
                     .get::<checkout::CheckoutReport>()
                     .as_deref(),
             );
+            let relayed_note = relayed::RelayedNotePlan::new(
+                input
+                    .previous_world_state
+                    .and_then(|previous| previous.get(relayed::WORLD_STATE_ID)),
+                input.turn_id,
+                input.turn_store.get::<relayed::RelayedNote>().as_deref(),
+            );
             let mut continuity = None;
             let status = match self
                 .projects
@@ -269,7 +277,8 @@ impl ContextContributor for StatefulExtension {
                         + run_world_state::END_MARKER.len()
                 })
                 + scope_note.window_bytes
-                + checkout_report.window_bytes;
+                + checkout_report.window_bytes
+                + relayed_note.window_bytes;
             let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
             let available_project_id = match &status {
                 ProjectIntelligenceStatus::Available { project, .. } => Some(project.id.clone()),
@@ -292,6 +301,7 @@ impl ContextContributor for StatefulExtension {
             }
             sections.push(scope_note.section());
             sections.push(checkout_report.section());
+            sections.push(relayed_note.section());
             if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }

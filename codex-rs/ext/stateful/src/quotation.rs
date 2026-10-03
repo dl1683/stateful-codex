@@ -37,11 +37,18 @@ struct Span {
     open: usize,
     /// Byte offset just past the closing quote.
     close: usize,
+    /// Inline code (a backtick run) rather than quoted words: a literal, never a quoted
+    /// instruction.
+    code: bool,
 }
 
-/// Words that, just before a speech verb, make it the user's own activity ("I wrote our Go
-/// backend", "and wrote the docs") rather than someone else's speech.
-const FIRST_PERSON_SUBJECTS: &[&str] = &["i", "we", "and", "also", "then", "have", "had", "ve"];
+/// Subjects that make a speech verb the user's own activity ("I wrote our Go backend").
+const FIRST_PERSON_SUBJECTS: &[&str] = &["i", "we"];
+/// Words that may stand between a subject and its verb ("I also wrote", "we then said") or
+/// join a second verb to the sentence's subject ("I'm a developer and wrote ...").
+const VERB_LINKS: &[&str] = &["and", "also", "then", "have", "had", "ve", "m", "just"];
+/// Words that open a sentence without being its subject.
+const SENTENCE_OPENERS: &[&str] = &["also", "and", "so", "oh", "fyi", "but", "well", "btw"];
 
 /// Words that open a sentence referring back to the quotation before it.
 const BACK_REFERENCES: &[&str] = &[
@@ -95,9 +102,10 @@ impl<'a> Quotations<'a> {
                     .is_some_and(|next| next.refers_back && next.reports_speech);
                 // A quoted instruction ("\"From now on, never commit.\"") is someone's
                 // words even unattributed; a quoted term ('Next:') is not.
-                let instruction = crate::user_rules::reads_as_instruction(
-                    &crate::user_rules::normalize(&text[span.open..span.close]),
-                );
+                let instruction = !span.code
+                    && crate::user_rules::reads_as_instruction(&crate::user_rules::normalize(
+                        &text[span.open..span.close],
+                    ));
                 own || introduced || referred_back || instruction
             })
             .collect();
@@ -163,6 +171,33 @@ impl<'a> Quotations<'a> {
             .any(|span| span.open <= start && end <= span.close && span.close > start)
     }
 
+    /// Quotations attributed to someone else (not code), each with the sentence that
+    /// attributes it.
+    pub(crate) fn attributed_quotes(&self) -> Vec<(&'a str, &'a str)> {
+        const MARKS: [char; 8] = [
+            '"', '\'', '\u{201c}', '\u{201d}', '\u{2018}', '\u{2019}', '\u{ab}', '\u{bb}',
+        ];
+        let sentences = sentences(self.text, &self.spans);
+        self.spans
+            .iter()
+            .zip(&self.attributed)
+            .filter(|(span, attributed)| **attributed && !span.code)
+            .map(|(span, _)| {
+                let index = sentences.partition_point(|sentence| sentence.end <= span.open);
+                let start = index
+                    .checked_sub(1)
+                    .and_then(|previous| sentences.get(previous))
+                    .map_or(0, |previous| previous.end);
+                let end = sentences
+                    .get(index)
+                    .map_or(self.text.len(), |sentence| sentence.end)
+                    .max(span.close);
+                let quote = self.text[span.open..span.close].trim_matches(MARKS).trim();
+                (quote, self.text[start..end].trim())
+            })
+            .collect()
+    }
+
     /// Like `relays`, for a clause found in the message (judged alone if not found).
     pub(crate) fn relays_clause(&self, clause: &str) -> bool {
         match self.text.find(clause) {
@@ -220,10 +255,7 @@ fn sentences(text: &str, spans: &[Span]) -> Vec<Sentence> {
         sentences.push(Sentence {
             end,
             reports_speech: words.iter().enumerate().any(|(index, word)| {
-                SPEECH_VERBS.contains(&word.as_str())
-                    && !index.checked_sub(1).is_some_and(|previous| {
-                        FIRST_PERSON_SUBJECTS.contains(&words[previous].as_str())
-                    })
+                SPEECH_VERBS.contains(&word.as_str()) && !users_own_verb(&words, index)
             }),
             introduces: outside.trim_end().ends_with(':'),
             refers_back: words
@@ -233,6 +265,32 @@ fn sentences(text: &str, spans: &[Span]) -> Vec<Sentence> {
         start = end;
     }
     sentences
+}
+
+/// Whether the speech verb at `index` belongs to the user: its subject, directly or through
+/// linking words ("I also wrote"), is first person, or it is joined ("and wrote") to a
+/// sentence whose subject is first person.
+fn users_own_verb(words: &[String], index: usize) -> bool {
+    let mut position = index;
+    while let Some(previous) = position.checked_sub(1) {
+        let word = words[previous].as_str();
+        if FIRST_PERSON_SUBJECTS.contains(&word) {
+            return true;
+        }
+        if !VERB_LINKS.contains(&word) {
+            break;
+        }
+        if word == "and" {
+            // A second verb shares the sentence's subject.
+            let subject = words
+                .iter()
+                .find(|word| !SENTENCE_OPENERS.contains(&word.as_str()));
+            return subject
+                .is_some_and(|subject| FIRST_PERSON_SUBJECTS.contains(&subject.as_str()));
+        }
+        position = previous;
+    }
+    false
 }
 
 /// `text[start..end]` with each quotation replaced by a space.
@@ -255,11 +313,60 @@ fn outside_quotations(text: &str, spans: &[Span], start: usize, end: usize) -> S
     outside
 }
 
-fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
-    let characters = text.char_indices().collect::<Vec<_>>();
+/// Inline code spans: a run of backticks closes at the next run of the same length. A run
+/// with no partner is a stray mark and opens nothing.
+fn code_spans(text: &str) -> Vec<Span> {
+    let bytes = text.as_bytes();
+    let mut runs = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'`' {
+            let start = index;
+            while index < bytes.len() && bytes[index] == b'`' {
+                index += 1;
+            }
+            runs.push((start, index - start));
+        } else {
+            index += 1;
+        }
+    }
     let mut spans = Vec::new();
+    let mut next = 0;
+    while next < runs.len() {
+        let (open, length) = runs[next];
+        match runs[next + 1..]
+            .iter()
+            .position(|(_, other)| *other == length)
+        {
+            Some(offset) => {
+                let (close, _) = runs[next + 1 + offset];
+                spans.push(Span {
+                    open,
+                    close: close + length,
+                    code: true,
+                });
+                next += offset + 2;
+            }
+            None => next += 1,
+        }
+    }
+    spans
+}
+
+fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
+    let code = code_spans(text);
+    let in_code = |offset: usize| {
+        code.iter()
+            .any(|span| span.open <= offset && offset < span.close)
+    };
+    let characters = text.char_indices().collect::<Vec<_>>();
+    let mut quotes = Vec::new();
     let mut open: Option<(usize, char)> = None;
     for (index, &(offset, character)) in characters.iter().enumerate() {
+        // Quotation marks inside code are part of the code.
+        if in_code(offset) {
+            continue;
+        }
         let before = index.checked_sub(1).map(|previous| characters[previous].1);
         let after = characters.get(index + 1).map(|next| next.1);
         let end = offset + character.len_utf8();
@@ -267,7 +374,6 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
             Some((_, '"')) => character == '"',
             Some((_, '\u{201c}')) => character == '\u{201d}',
             Some((_, '\u{ab}')) => character == '\u{bb}',
-            Some((_, '`')) => character == '`',
             Some((_, '\'' | '\u{2018}')) => {
                 let word_end = matches!(character, '\'' | '\u{2019}')
                     && before.is_some_and(|before| !before.is_whitespace())
@@ -281,16 +387,17 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
         };
         if closes {
             if let Some((start, _)) = open.take() {
-                spans.push(Span {
+                quotes.push(Span {
                     open: start,
                     close: end,
+                    code: false,
                 });
             }
             continue;
         }
         if open.is_none() {
             let opens = match character {
-                '"' | '\u{201c}' | '\u{ab}' | '`' => true,
+                '"' | '\u{201c}' | '\u{ab}' => true,
                 '\'' | '\u{2018}' => {
                     !before.is_some_and(char::is_alphanumeric)
                         && after.is_some_and(char::is_alphanumeric)
@@ -302,19 +409,31 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
             }
         }
     }
-    match open {
-        // An unclosed backtick is a stray mark, not a quotation.
-        Some((_, '`')) => (spans, None),
+    let ambiguous_from = match open {
         Some((start, '"' | '\u{201c}' | '\u{ab}')) => {
-            spans.push(Span {
+            quotes.push(Span {
                 open: start,
                 close: text.len(),
+                code: false,
             });
-            (spans, None)
+            None
         }
-        Some((start, _)) => (spans, Some(start)),
-        None => (spans, None),
-    }
+        Some((start, _)) => Some(start),
+        None => None,
+    };
+    // Code inside a quotation belongs to the quotation; spans stay disjoint and sorted.
+    let kept_code = code
+        .into_iter()
+        .filter(|code| {
+            !quotes
+                .iter()
+                .any(|quote| quote.open <= code.open && code.close <= quote.close)
+        })
+        .collect::<Vec<_>>();
+    let mut spans = quotes;
+    spans.extend(kept_code);
+    spans.sort_by_key(|span| span.open);
+    (spans, ambiguous_from)
 }
 
 #[cfg(test)]

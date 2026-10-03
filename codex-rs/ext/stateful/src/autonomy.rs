@@ -264,6 +264,21 @@ impl TurnLifecycleContributor for StatefulExtension {
                         &text,
                     )
                     .await;
+                    // Someone else's instruction the user passes on is kept as attributed
+                    // context and noted for this turn as carrying no authority.
+                    let relayed = crate::relayed::relayed_instructions(&text);
+                    crate::relayed::capture_relayed(
+                        services,
+                        self.event_sink.as_deref(),
+                        selected.project_id(),
+                        &thread.thread_id,
+                        input.turn_id,
+                        &relayed,
+                    )
+                    .await;
+                    if let Some(note) = crate::relayed::RelayedNote::for_quotes(&relayed) {
+                        input.turn_store.insert(note);
+                    }
                     if let Ok(store) = services.blackboard().await {
                         crate::rule_scope::observe_turn_start(
                             store,
