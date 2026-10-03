@@ -219,8 +219,12 @@ pub(crate) struct RuleSource<'a> {
     pub(crate) turn_id: &'a str,
     /// The turn being run now, which the receipt belongs to.
     pub(crate) receipt_turn_id: &'a str,
-    /// When the user wrote that message (Unix milliseconds).
+    /// When the user wrote that message (Unix milliseconds); orders it only against
+    /// retirements the journal did not record.
     pub(crate) stated_at_ms: i64,
+    /// The memory-change journal position of that message: retirements journaled after it
+    /// are later than the message. None when unknown, which never restores a retired rule.
+    pub(crate) after_change: Option<u64>,
     /// Where the rule sits: its scope, its position in the conversation, its capture group.
     pub(crate) placement: RulePlacement,
 }
@@ -287,6 +291,7 @@ pub(crate) async fn store_user_rule(
         turn_id,
         receipt_turn_id,
         stated_at_ms,
+        after_change,
         mut placement,
     } = source;
     let change = |operation, entry_text: &str| ChangeRecord {
@@ -331,7 +336,9 @@ pub(crate) async fn store_user_rule(
     };
     // The current generation of this wording, or the first free one after inactive history.
     let mut id = None;
-    let mut retired_at_ms = None;
+    // Whether some generation was retired after the message stating it now: only a later
+    // message restores (or promotes) it.
+    let mut retired_after_message = false;
     for generation in 0..MAX_RULE_GENERATIONS {
         let candidate = user_rule_entry_id(
             project_id,
@@ -354,7 +361,7 @@ pub(crate) async fn store_user_rule(
                 // retired one: a message written after the retirement.
                 if standing == RuleStanding::Standing
                     && existing.value.root_promotion != RootPromotion::Promoted
-                    && retired_at_ms.is_some_and(|retired| stated_at_ms <= retired)
+                    && retired_after_message
                 {
                     return Err(RETIRED_BEFORE_MESSAGE.to_string());
                 }
@@ -372,13 +379,23 @@ pub(crate) async fn store_user_rule(
             }
             // Retired or superseded: the user restating it re-establishes it below.
             Some(inactive) => {
-                retired_at_ms = retired_at_ms.max(Some(inactive.updated_at_ms));
+                let retired = store
+                    .retirement_sequence(&inactive)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let message_is_later = match (retired, after_change) {
+                    (Some(retired), Some(position)) => position >= retired,
+                    (Some(_), None) => false,
+                    // An older retirement the journal did not record.
+                    (None, _) => stated_at_ms > inactive.updated_at_ms,
+                };
+                retired_after_message |= !message_is_later;
             }
         }
     }
     // Only a message written after the retirement restores the rule; quoting the message
     // that first stated it (or any other earlier one) never does.
-    if retired_at_ms.is_some_and(|retired| stated_at_ms <= retired) {
+    if retired_after_message {
         return Err(RETIRED_BEFORE_MESSAGE.to_string());
     }
     let id = id.ok_or_else(|| {

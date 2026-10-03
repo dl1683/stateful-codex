@@ -34,6 +34,7 @@ mod query;
 mod relation;
 mod review;
 mod scopes;
+mod source_order;
 mod succession;
 mod update;
 

@@ -326,6 +326,7 @@ async fn a_retired_rule_returns_only_from_a_later_message() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-3",
             stated_at_ms: stated_before,
+            after_change: Some(0),
             placement: super::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::ModelTool,
             ),
@@ -344,6 +345,7 @@ async fn a_retired_rule_returns_only_from_a_later_message() {
             turn_id: "turn-4",
             receipt_turn_id: "turn-4",
             stated_at_ms: super::now_ms() + 1_000,
+            after_change: Some(u64::MAX),
             placement: super::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::ModelTool,
             ),
@@ -404,6 +406,7 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-3",
             stated_at_ms: stated_before,
+            after_change: Some(0),
             placement: super::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::ModelTool,
             ),

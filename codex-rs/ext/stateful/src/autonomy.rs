@@ -223,11 +223,24 @@ impl TurnLifecycleContributor for StatefulExtension {
                     input.user_input,
                 );
                 if let Some(thread) = input.thread_store.get::<SelectedThread>() {
+                    // Where the message stands among journaled memory changes, so a retired
+                    // rule is restored only by a message written after its retirement.
+                    let after_change = match self.services.as_ref() {
+                        Some(services) => match services.blackboard().await {
+                            Ok(store) => store
+                                .latest_change_sequence(selected.project_id())
+                                .await
+                                .ok(),
+                            Err(_) => None,
+                        },
+                        None => None,
+                    };
                     self.user_messages.record(
                         &thread.thread_id,
                         selected.project_id(),
                         input.turn_id,
                         input.user_input,
+                        after_change,
                     );
                 }
                 if let (Some(thread), Some(services)) = (

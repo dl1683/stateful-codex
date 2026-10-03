@@ -139,9 +139,18 @@ fn a_quote_from_any_sentence_resolves_to_the_whole_item() {
     ));
     assert_eq!(
         (
-            rule_for_clause(message, "Experiments outside the repo are fine.")
-                .map(|rule| rule.clause),
-            rule_for_clause(message, "Throwaway branches are fine too.").map(|rule| rule.clause),
+            rule_for_clause(
+                message,
+                "Experiments outside the repo are fine.",
+                "Experiments outside the repo are fine."
+            )
+            .map(|rule| rule.clause),
+            rule_for_clause(
+                message,
+                "Throwaway branches are fine too.",
+                "Throwaway branches are fine too."
+            )
+            .map(|rule| rule.clause),
             marked_rules(message).into_iter().next(),
         ),
         (rule.clone(), rule.clone(), rule)
@@ -269,14 +278,69 @@ fn multiline_qualifications_and_quotes_resolve_to_the_host_unit() {
     assert_eq!(
         (
             marked_rules(message),
-            rule_for_clause(message, "If you need packages, use a local venv.")
-                .map(|rule| rule.clause),
-            rule_for_clause(message, "Never install anything globally.").map(|rule| rule.clause),
+            rule_for_clause(
+                message,
+                "If you need packages, use a local venv.",
+                "If you need packages, use a local venv."
+            )
+            .map(|rule| rule.clause),
+            rule_for_clause(
+                message,
+                "Never install anything globally.",
+                "Never install anything globally."
+            )
+            .map(|rule| rule.clause),
         ),
         (
             vec![standing(whole)],
             Some(standing(whole)),
             Some(standing(whole)),
+        )
+    );
+}
+
+/// Item 1 review 2: a quote resolves to the rule at its position (the second coordinated
+/// directive, one framed item); framed items never split inside a quotation; a qualification
+/// decides its rule's standing; a quote inside a rule too long to keep comes back whole for
+/// the caller to refuse.
+#[test]
+fn quotes_resolve_by_position_and_qualifications_decide_standing() {
+    let coordinated = "From now on never commit and always end with a Next: line.";
+    let framed =
+        "Some ground rules for this essay: use 'red; green' as the palette name; British spelling.";
+    let qualified = "Never edit the docs. This means for this task only.";
+    let long = format!(
+        "From now on always keep {} short. Never mind.",
+        "every reply ".repeat(MAX_RULE_BYTES / 12 + 1)
+    );
+    let long_clause = long.split(". ").next().expect("clause").to_string() + ".";
+    assert_eq!(
+        (
+            rule_for_clause(coordinated, coordinated, "always end with a Next:")
+                .map(|rule| rule.clause),
+            marked_rules(framed),
+            rule_for_clause(framed, framed, "British spelling").map(|rule| rule.clause),
+            marked_rules(qualified)
+                .into_iter()
+                .map(|rule| rule.standing)
+                .collect::<Vec<_>>(),
+            rule_for_clause(&long, &long_clause, "always keep every").map(|rule| rule
+                .clause
+                .text
+                .len()
+                > MAX_RULE_BYTES),
+        ),
+        (
+            Some(standing("always end with a Next: line.")),
+            vec![
+                standing("Some ground rules for this essay: use 'red; green' as the palette name."),
+                standing("Some ground rules for this essay: British spelling."),
+            ],
+            Some(standing(
+                "Some ground rules for this essay: British spelling."
+            )),
+            vec![RuleStanding::Pending],
+            Some(true),
         )
     );
 }

@@ -22,7 +22,6 @@ fn only_the_users_own_words_release_an_investigation() {
 /// continues the investigation, not in another thread, and stop when the user ends it.
 #[tokio::test]
 async fn investigation_rules_follow_their_threads() {
-    use codex_project_intelligence::RootBlackboardQuery;
     use codex_state::SqliteConfig;
     use codex_utils_absolute_path::test_support::PathExt;
 
@@ -41,20 +40,16 @@ async fn investigation_rules_follow_their_threads() {
     )
     .await;
     let store = services.blackboard().await.expect("store");
-    let projection = store
-        .root_projection(RootBlackboardQuery {
-            project_id: "project-1".to_string(),
-            max_entries: 16,
-        })
-        .await
-        .expect("root");
-    let applies_in = |view: &super::ScopeView| {
-        let mut projection = projection.clone();
-        view.retain_applicable(&mut projection);
-        projection.data.len()
+    let applies_in = async |thread_id: &str| {
+        super::applicable_projection(store, "project-1", thread_id)
+            .await
+            .expect("root")
+            .0
+            .data
+            .len()
     };
-    let opened = super::ScopeView::load(store, &projection, "thread-1").await;
-    let other = super::ScopeView::load(store, &projection, "thread-2").await;
+    let opened = applies_in("thread-1").await;
+    let other = applies_in("thread-2").await;
     super::observe_turn_start(
         store,
         "project-1",
@@ -64,7 +59,7 @@ async fn investigation_rules_follow_their_threads() {
         crate::request_scope::RequestScope::Continuity,
     )
     .await;
-    let continued = super::ScopeView::load(store, &projection, "thread-3").await;
+    let continued = applies_in("thread-3").await;
     super::observe_turn_start(
         store,
         "project-1",
@@ -74,15 +69,9 @@ async fn investigation_rules_follow_their_threads() {
         crate::request_scope::RequestScope::Continuity,
     )
     .await;
-    let ended = super::ScopeView::load(store, &projection, "thread-3").await;
+    let ended = applies_in("thread-3").await;
     assert_eq!(
-        (
-            captured.len(),
-            applies_in(&opened),
-            applies_in(&other),
-            applies_in(&continued),
-            applies_in(&ended),
-        ),
+        (captured.len(), opened, other, continued, ended),
         (2, 2, 0, 2, 0)
     );
 }
@@ -102,6 +91,10 @@ fn releases_are_affirmative_and_bindings_are_explicit() {
                 "> End this investigation.",
                 "```\nend this investigation\n```",
                 "OK, we've agreed on the root cause.",
+                "We agree on lunch.",
+                "End this investigation if the test passes.",
+                "We have agreed on the root cause when the test passes.",
+                "The investigation is over.",
             ]
             .map(|text| releases(text, condition)),
             releases("We have agreed on the root cause.", Some("until I say so")),
@@ -113,7 +106,9 @@ fn releases_are_affirmative_and_bindings_are_explicit() {
             .map(super::refers_to_investigation),
         ),
         (
-            [false, false, false, false, false, true],
+            [
+                false, false, false, false, false, true, false, false, false, true
+            ],
             false,
             [false, true, true],
         )
@@ -169,5 +164,60 @@ async fn one_message_opens_one_investigation() {
             full.data.len()
         ),
         (2, 0, 1, 2)
+    );
+}
+
+/// Item 1 review 2: a later message adding a rule "during this investigation" in the same
+/// thread adds it to the open investigation instead of replacing it, so every rule of the
+/// investigation still applies there and nowhere else.
+#[tokio::test]
+async fn a_follow_up_rule_joins_the_open_investigation() {
+    use codex_state::SqliteConfig;
+    use codex_utils_absolute_path::test_support::PathExt;
+
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        SqliteConfig::new_for_testing(state_home.path().abs()),
+    );
+    for (turn_id, message) in [
+        (
+            "turn-1",
+            "Some ground rules for this whole investigation:\n- Do NOT change any code until we have agreed on the root cause.\n- Never push.",
+        ),
+        ("turn-2", "During this investigation, never delete logs."),
+    ] {
+        crate::rule_group::capture_marked_rules(
+            &services,
+            /*event_sink*/ None,
+            "project-1",
+            "thread-1",
+            turn_id,
+            message,
+        )
+        .await;
+    }
+    let store = services.blackboard().await.expect("store");
+    let applies_in = async |thread_id: &str| {
+        super::applicable_projection(store, "project-1", thread_id)
+            .await
+            .expect("root")
+            .0
+            .data
+            .len()
+    };
+    let open = store
+        .scopes(
+            "project-1",
+            Some(codex_project_intelligence::ScopeState::Open),
+        )
+        .await
+        .expect("scopes");
+    assert_eq!(
+        (
+            open.len(),
+            applies_in("thread-1").await,
+            applies_in("thread-2").await
+        ),
+        (1, 3, 0)
     );
 }

@@ -7,7 +7,7 @@ use super::marked_rules;
 
 /// The standing of the rule the unit holding `clause` states; None when it is relayed.
 fn scope(text: &str, clause: &str) -> Option<RuleStanding> {
-    crate::rule_units::rule_for_clause(text, clause).map(|rule| rule.clause.standing)
+    crate::rule_units::rule_for_clause(text, clause, clause).map(|rule| rule.clause.standing)
 }
 
 fn standing(text: &str) -> RuleClause {

@@ -17,19 +17,17 @@ use codex_project_intelligence::KnowledgeScope;
 use codex_project_intelligence::RootBlackboardProjection;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_project_intelligence::ScopeState;
+use codex_project_intelligence::ThreadScopes;
 
 use crate::quotation::Quotations;
 use crate::request_scope::RequestScope;
 use crate::rule_capture::user_message_source;
+use crate::rule_units::names_limited_scope;
 use crate::user_rules::Fence;
-use crate::user_rules::INVESTIGATION_PHRASES;
-use crate::user_rules::has_phrase;
 use crate::user_rules::normalize;
 
 /// Root entries a packet or completion considers.
 pub(crate) const ROOT_ENTRIES: u32 = 256;
-/// Most entries read to fill `ROOT_ENTRIES` with applicable ones.
-const MAX_ROOT_CANDIDATES: u32 = 1024;
 /// Longest scope title shown in the packet.
 const MAX_SHOWN_TITLE_CHARS: usize = 120;
 /// Investigations named in one packet note.
@@ -42,117 +40,83 @@ pub(crate) struct ScopeView {
     pub(crate) inapplicable: HashSet<String>,
     /// The open investigation this thread continues, if any.
     pub(crate) bound_title: Option<String>,
+    /// The investigation this thread continued until the user ended it.
+    pub(crate) ended_title: Option<String>,
     /// Open investigations this thread is not part of, by title.
     pub(crate) other_open_titles: Vec<String>,
+    /// Rules storage left out because they belong to an investigation this thread does not
+    /// continue.
+    pub(crate) scoped_elsewhere: u64,
     /// Older rules naming an investigation that none was recorded for.
     pub(crate) unscoped_legacy: u64,
-    /// Scopes could not be read, so every rule naming an investigation is held back.
+    /// Rule meanings could not be read, so every rule naming an investigation is held back.
     pub(crate) unavailable: bool,
 }
 
-/// The project's root projection with only the rules that apply in `thread_id`, filled to
-/// `ROOT_ENTRIES` from further candidates when inapplicable rules took places, and the view
-/// that explains what was left out.
+/// The project's root projection with only the rules that apply in `thread_id`, and the view
+/// that explains what was left out. Storage leaves out rules of other investigations before
+/// its cap, in the same snapshot as the thread's binding; older rules that name an
+/// investigation without a recorded one are then held back here. A projection whose revision
+/// moved while it was explained is read again, so aliases never mix two states.
 pub(crate) async fn applicable_projection(
     store: &BlackboardStore,
     project_id: &str,
     thread_id: &str,
 ) -> Result<(RootBlackboardProjection, ScopeView), BlackboardStoreError> {
-    let mut max_entries = ROOT_ENTRIES;
+    let mut attempts = 0;
     loop {
-        let mut projection = store
-            .root_projection(RootBlackboardQuery {
-                project_id: project_id.to_string(),
-                max_entries,
-            })
+        attempts += 1;
+        let (mut projection, scopes) = store
+            .root_projection_for_thread(
+                RootBlackboardQuery {
+                    project_id: project_id.to_string(),
+                    max_entries: ROOT_ENTRIES,
+                },
+                thread_id,
+            )
             .await?;
-        let view = ScopeView::load(store, &projection, thread_id).await;
-        let removed = view.retain_applicable(&mut projection);
-        let truncated = projection.omitted_entries > 0;
-        let wanted = ROOT_ENTRIES
-            .saturating_add(u32::try_from(removed).unwrap_or(u32::MAX))
-            .min(MAX_ROOT_CANDIDATES);
-        if removed == 0 || !truncated || wanted <= max_entries {
-            let limit = usize::try_from(ROOT_ENTRIES).unwrap_or(usize::MAX);
-            if projection.data.len() > limit {
-                let extra = projection.data.len() - limit;
-                projection.data.truncate(limit);
-                projection.omitted_entries = projection
-                    .omitted_entries
-                    .saturating_add(u64::try_from(extra).unwrap_or(u64::MAX));
-            }
+        let view = ScopeView::load(store, &projection, scopes).await;
+        view.retain_applicable(&mut projection);
+        if attempts >= MAX_SNAPSHOT_ATTEMPTS
+            || store.project_revision(project_id).await? == projection.revision
+        {
             return Ok((projection, view));
         }
-        max_entries = wanted;
     }
 }
 
+/// Reads of a projection before one that did not move is used anyway.
+const MAX_SNAPSHOT_ATTEMPTS: u32 = 3;
+
 impl ScopeView {
-    /// Computes the view for `projection` in `thread_id`. Rules without a scope apply
-    /// everywhere, except older rules that name an investigation without a recorded one,
-    /// which wait for the user.
+    /// Computes the view for `projection` (already limited to the thread's investigation by
+    /// storage) from `scopes`, read in the same snapshot. Rules without a recorded meaning
+    /// that name a limited piece of work wait for the user; when meanings cannot be read,
+    /// every such rule is held back.
     pub(crate) async fn load(
         store: &BlackboardStore,
         projection: &RootBlackboardProjection,
-        thread_id: &str,
+        scopes: ThreadScopes,
     ) -> Self {
         let project_id = projection.project_id.as_str();
         let rules = projection
             .data
             .iter()
             .filter(|hit| hit.entry.value.kind == BlackboardKind::Instruction)
+            .filter(|hit| names_limited_scope(&normalize(&hit.entry.value.content)))
             .collect::<Vec<_>>();
         let rule_ids = rules
             .iter()
             .map(|hit| hit.entry.id.clone())
             .collect::<Vec<BlackboardEntryId>>();
-        let names_investigation = |content: &str| {
-            let normalized = normalize(content);
-            has_phrase(&normalized, INVESTIGATION_PHRASES) || normalized.contains("investigation")
-        };
-        let (contexts, bound, scopes) = match (
-            store.knowledge_contexts(project_id, &rule_ids).await,
-            store.thread_scope(project_id, thread_id).await,
-            store.scopes(project_id, /*state*/ None).await,
-        ) {
-            (Ok(contexts), Ok(bound), Ok(scopes)) => (contexts, bound, scopes),
-            (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => {
-                tracing::warn!(%project_id, %error, "failed to load rule scopes");
-                // Unknown applicability is never widened to everywhere.
-                return Self {
-                    inapplicable: rules
-                        .iter()
-                        .filter(|hit| names_investigation(&hit.entry.value.content))
-                        .map(|hit| hit.entry.id.to_string())
-                        .collect(),
-                    unavailable: true,
-                    ..Self::default()
-                };
-            }
-        };
-        let bound_open = bound.filter(|scope| scope.state == ScopeState::Open);
-        let mut inapplicable = HashSet::new();
-        let mut unscoped_legacy = 0;
-        for hit in &rules {
-            let id = hit.entry.id.as_str();
-            match contexts.get(id) {
-                Some(context) => {
-                    if let Some(scope_id) = &context.scope_id
-                        && bound_open
-                            .as_ref()
-                            .is_none_or(|bound| &bound.scope_id != scope_id)
-                    {
-                        inapplicable.insert(id.to_string());
-                    }
-                }
-                None if names_investigation(&hit.entry.value.content) => {
-                    unscoped_legacy += 1;
-                    inapplicable.insert(id.to_string());
-                }
-                None => {}
-            }
-        }
+        let ended_title = scopes
+            .bound
+            .as_ref()
+            .filter(|scope| scope.state == ScopeState::Ended)
+            .map(|scope| shown_title(&scope.title));
+        let bound_open = scopes.bound.filter(|scope| scope.state == ScopeState::Open);
         let other_open_titles = scopes
+            .scopes
             .iter()
             .filter(|scope| scope.state == ScopeState::Open)
             .filter(|scope| {
@@ -163,13 +127,30 @@ impl ScopeView {
             .take(MAX_SHOWN_SCOPES)
             .map(|scope| shown_title(&scope.title))
             .collect();
-        Self {
-            inapplicable,
+        let mut view = Self {
             bound_title: bound_open.map(|scope| shown_title(&scope.title)),
+            ended_title,
             other_open_titles,
-            unscoped_legacy,
-            unavailable: false,
+            scoped_elsewhere: scopes.scoped_elsewhere,
+            ..Self::default()
+        };
+        let contexts = match store.knowledge_contexts(project_id, &rule_ids).await {
+            Ok(contexts) => contexts,
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to load rule meanings");
+                // Unknown applicability is never widened to everywhere.
+                view.inapplicable = rule_ids.iter().map(ToString::to_string).collect();
+                view.unavailable = true;
+                return view;
+            }
+        };
+        for id in &rule_ids {
+            if !contexts.contains_key(id.as_str()) {
+                view.unscoped_legacy += 1;
+                view.inapplicable.insert(id.to_string());
+            }
         }
+        view
     }
 
     /// Removes the rules that do not apply here from `projection` and returns how many.
@@ -193,8 +174,8 @@ impl ScopeView {
                 .join(", ")
         };
         let held_back = u64::try_from(self.inapplicable.len()).unwrap_or(u64::MAX);
-        if self.unavailable {
-            return (held_back > 0).then(|| format!(
+        if self.unavailable && held_back > 0 {
+            return Some(format!(
                 "- Investigation scopes could not be read: {held_back} rules that name an investigation are not applied now. If the work depends on them, ask the user."
             ));
         }
@@ -205,7 +186,13 @@ impl ScopeView {
                 serde_json::Value::String(title.clone())
             ));
         }
-        let other = held_back.saturating_sub(self.unscoped_legacy);
+        if let Some(title) = &self.ended_title {
+            lines.push(format!(
+                "- The investigation {} ended; its rules no longer apply, even where shown earlier.",
+                serde_json::Value::String(title.clone())
+            ));
+        }
+        let other = self.scoped_elsewhere;
         if other > 0 {
             lines.push(format!(
                 "- {other} rules belong to an investigation this thread is not part of{}; they do not apply here. If this work continues one, ask the user before following its rules.",
@@ -373,10 +360,17 @@ pub(crate) fn releases(text: &str, end_condition: Option<&str>) -> bool {
         }
         offset += line.len();
     }
+    let subject = end_condition.map(agreement_subject).unwrap_or_default();
     END_PHRASES
         .iter()
-        .chain(AGREEMENT_PHRASES.iter().filter(|_| agreement_condition))
-        .any(|phrase| {
+        .map(|phrase| (phrase, false))
+        .chain(
+            AGREEMENT_PHRASES
+                .iter()
+                .filter(|_| agreement_condition)
+                .map(|phrase| (phrase, true)),
+        )
+        .any(|(phrase, agreement)| {
             lower.match_indices(phrase).any(|(start, matched)| {
                 let end = start + matched.len();
                 if excluded.iter().any(|range| range.contains(&start))
@@ -393,13 +387,45 @@ pub(crate) fn releases(text: &str, end_condition: Option<&str>) -> bool {
                     .find(['.', '!', '?', '\n', ';'])
                     .map_or(lower.len(), |index| end + index);
                 let before = normalize(&lower[sentence_start..start]);
+                let after = normalize(&lower[end..sentence_end]);
                 let questioning = lower[sentence_end..].starts_with('?');
+                // The whole act is affirmative: nothing before or after the phrase makes it
+                // conditional ("... if the test passes"), and an agreement is about what the
+                // condition names, not anything else ("we agree on lunch").
+                let after_words = after.split(' ').collect::<Vec<_>>();
                 !questioning
                     && !before
                         .split(' ')
+                        .chain(after_words.iter().copied())
                         .any(|word| NOT_AFFIRMATIVE.contains(&word))
+                    && (!agreement
+                        || subject.iter().all(|word| {
+                            after_words.contains(&word.as_str())
+                                || phrase.split(' ').any(|part| part == word)
+                        }))
             })
         })
+}
+
+/// Words that carry no subject in an agreement condition.
+const AGREEMENT_FILLER: &[&str] = &[
+    "the", "a", "an", "on", "about", "that", "to", "what", "which", "is", "it", "we", "i", "you",
+    "both", "all", "of", "have", "has", "agreed", "agree", "until", "till", "upon", "with",
+];
+
+/// What an "until we agree on the root cause" condition is about ("root", "cause"); empty
+/// when it names nothing ("until we agree").
+fn agreement_subject(condition: &str) -> Vec<String> {
+    let lower = normalize(&condition.to_ascii_lowercase());
+    let Some(index) = lower.find("agree") else {
+        return Vec::new();
+    };
+    lower[index..]
+        .split(' ')
+        .map(|word| word.trim_matches(|c: char| !c.is_ascii_alphanumeric()))
+        .filter(|word| !word.is_empty() && !AGREEMENT_FILLER.contains(word))
+        .map(str::to_string)
+        .collect()
 }
 
 fn release_change(scope: &KnowledgeScope, thread_id: &str, turn_id: &str) -> ChangeRecord {

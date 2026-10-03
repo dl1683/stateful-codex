@@ -290,3 +290,15 @@ string_enum!(MemberOutcome {
     Omitted => "omitted",
     Failed => "failed",
 });
+
+/// How investigations bear on one thread, read with the root projection it explains.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ThreadScopes {
+    /// The scope the thread is bound to, open or ended.
+    pub bound: Option<KnowledgeScope>,
+    /// All of the project's scopes, newest first.
+    pub scopes: Vec<KnowledgeScope>,
+    /// Promoted entries left out because they belong to an open investigation the thread does
+    /// not continue (entries of ended investigations are left out without a count).
+    pub scoped_elsewhere: u64,
+}

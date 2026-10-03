@@ -107,6 +107,7 @@ pub use knowledge::MemberOutcome;
 pub use knowledge::MemoryChange;
 pub use knowledge::ScopeKind;
 pub use knowledge::ScopeState;
+pub use knowledge::ThreadScopes;
 pub use repository_observation::RepositoryDirtyCoverage;
 pub use repository_observation::RepositoryHead;
 pub use repository_observation::RepositoryObservation;

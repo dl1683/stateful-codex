@@ -1,6 +1,7 @@
 //! Storage of investigation scopes and the threads bound to them.
 
 use sqlx::FromRow;
+use sqlx::SqliteConnection;
 
 use crate::ChangeRecord;
 use crate::KnowledgeScope;
@@ -11,6 +12,72 @@ use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::knowledge::append_change;
 use super::knowledge::parse;
+
+/// Leaves out an entry (`entry` in the enclosing query) whose current meaning limits it to
+/// an investigation other than the open one the thread (the bound parameter) continues.
+pub(super) const OUTSIDE_THREAD_SCOPE: &str = "
+               AND NOT EXISTS (
+                   SELECT 1 FROM knowledge_context AS scoped
+                   WHERE scoped.entry_id = entry.id
+                     AND scoped.revision = (
+                         SELECT MAX(latest.revision) FROM knowledge_context AS latest
+                         WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
+                     AND scoped.scope_id IS NOT NULL
+                     AND scoped.scope_id IS NOT (
+                         SELECT binding.scope_id FROM knowledge_scope_bindings AS binding
+                         JOIN knowledge_scopes AS bound
+                           ON bound.project_id = binding.project_id
+                          AND bound.scope_id = binding.scope_id
+                         WHERE binding.project_id = entry.project_id AND binding.thread_id = ?
+                           AND bound.state = 'open'))";
+
+/// Keeps an entry whose current meaning limits it to an open investigation other than the one
+/// the thread (the bound parameter) continues.
+pub(super) const IN_OTHER_OPEN_SCOPE: &str = "
+               AND EXISTS (
+                   SELECT 1 FROM knowledge_context AS scoped
+                   JOIN knowledge_scopes AS open_scope
+                     ON open_scope.project_id = scoped.project_id
+                    AND open_scope.scope_id = scoped.scope_id AND open_scope.state = 'open'
+                   WHERE scoped.entry_id = entry.id
+                     AND scoped.revision = (
+                         SELECT MAX(latest.revision) FROM knowledge_context AS latest
+                         WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
+                     AND scoped.scope_id IS NOT (
+                         SELECT binding.scope_id FROM knowledge_scope_bindings AS binding
+                         WHERE binding.project_id = entry.project_id AND binding.thread_id = ?))";
+
+/// The scope `thread_id` is bound to and all of the project's scopes (newest first), read on
+/// `connection` so they belong to the caller's snapshot.
+pub(super) async fn thread_scopes_on(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    thread_id: &str,
+) -> Result<(Option<KnowledgeScope>, Vec<KnowledgeScope>), BlackboardStoreError> {
+    let bound = sqlx::query_as::<_, StoredScope>(
+        "SELECT scope.* FROM knowledge_scope_bindings AS binding
+         JOIN knowledge_scopes AS scope
+           ON scope.project_id = binding.project_id AND scope.scope_id = binding.scope_id
+         WHERE binding.project_id = ? AND binding.thread_id = ?",
+    )
+    .bind(project_id)
+    .bind(thread_id)
+    .fetch_optional(&mut *connection)
+    .await?
+    .map(StoredScope::into_scope)
+    .transpose()?;
+    let scopes = sqlx::query_as::<_, StoredScope>(
+        "SELECT * FROM knowledge_scopes WHERE project_id = ?
+         ORDER BY created_at_ms DESC, scope_id",
+    )
+    .bind(project_id)
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .map(StoredScope::into_scope)
+    .collect::<Result<_, _>>()?;
+    Ok((bound, scopes))
+}
 
 impl BlackboardStore {
     /// Opens `scope` unless a scope with its ID exists; returns the stored scope.

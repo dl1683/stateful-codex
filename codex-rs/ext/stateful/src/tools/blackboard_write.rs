@@ -200,7 +200,7 @@ impl BlackboardRecorder {
         }
         // The rule is the whole unit holding the quote (a list item with its header's scope),
         // exactly as host capture stores it, so both paths share one wording and identity.
-        let rule = rule_for_clause(&message.text, &clause).ok_or(relayed)?;
+        let rule = rule_for_clause(&message.text, &clause, &quote).ok_or(relayed)?;
         if rule.clause.standing == RuleStanding::Pending {
             return Err(respond(
                 "nothing written: the user limited that sentence to the current task",
@@ -216,6 +216,31 @@ impl BlackboardRecorder {
                 "the rule holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
             )));
         }
+        // A rule of an investigation keeps the scope host capture gave the same message; one
+        // whose investigation is unknown is not stored as a rule for all work.
+        let scope_id = match &rule.scope {
+            Some(_) => {
+                let store = self
+                    .services
+                    .blackboard()
+                    .await
+                    .map_err(|error| respond(error.to_string()))?;
+                Some(
+                    crate::rule_group::message_scope_id(
+                        store,
+                        &self.project_id,
+                        &thread_id,
+                        &turn_id,
+                        &message.text,
+                    )
+                    .await
+                    .ok_or_else(|| {
+                        respond("nothing written: the investigation that rule is limited to is not recorded")
+                    })?,
+                )
+            }
+            None => None,
+        };
         store_user_rule(
             &self.services,
             self.event_sink.as_deref(),
@@ -225,16 +250,9 @@ impl BlackboardRecorder {
                 turn_id: &turn_id,
                 receipt_turn_id,
                 stated_at_ms,
-                // A rule of an investigation keeps the scope host capture gave the same message.
+                after_change: message.after_change,
                 placement: RulePlacement {
-                    scope_id: rule.scope.as_ref().and_then(|_| {
-                        crate::rule_group::message_scope_id(
-                            &self.project_id,
-                            &thread_id,
-                            &turn_id,
-                            &message.text,
-                        )
-                    }),
+                    scope_id,
                     end_condition: rule
                         .scope
                         .as_ref()

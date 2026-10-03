@@ -4,10 +4,14 @@
 //! applied, too long to keep, failed). The group and every member's outcome are stored, and a
 //! repeated capture of the same message replays the first record instead of recounting.
 
+use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::CaptureGroup;
 use codex_project_intelligence::CaptureGroupMember;
+use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ChangeOrigin;
+use codex_project_intelligence::ChangeRecord;
+use codex_project_intelligence::KnowledgeCategory as ProjectCategory;
 use codex_project_intelligence::KnowledgeScope;
 use codex_project_intelligence::MemberOutcome;
 use codex_project_intelligence::ScopeKind;
@@ -32,6 +36,39 @@ use crate::rule_units::ScopeHint;
 use crate::rule_units::marked_rule_units;
 use crate::services::ProjectIntelligenceServices;
 use crate::user_rules::RuleStanding;
+
+/// Capture groups being recorded in this process.
+static IN_FLIGHT: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Holds one capture group for this process until dropped.
+struct InFlight(String);
+
+impl InFlight {
+    /// Waits until no other capture of `group_id` runs in this process, then holds it.
+    async fn hold(group_id: &str) -> Self {
+        loop {
+            {
+                let mut in_flight = IN_FLIGHT
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !in_flight.iter().any(|held| held == group_id) {
+                    in_flight.push(group_id.to_string());
+                    return Self(group_id.to_string());
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        IN_FLIGHT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|held| held != &self.0);
+    }
+}
 
 /// Stores the rules `text` marks (standing ones applied, task-limited ones kept but not
 /// applied), binds this thread to the investigation the message opens, records the group,
@@ -70,11 +107,25 @@ pub(crate) async fn capture_marked_rules(
             return Vec::new();
         }
     };
+    // Captures of one message run one at a time in this process, so a concurrent capture of
+    // the same message replays the first one's record instead of recording its saves as
+    // already present.
+    let _held = InFlight::hold(&group_id).await;
     // A repeated capture of the same message (a resumed turn) replays what it first saved.
     if let Ok(Some(stored)) = store.capture_group(project_id, &group_id).await {
-        emit(event_sink, receipt(&stored, /*scope_title*/ None));
+        let scope_title = recorded_scope_title(store, project_id, &stored).await;
+        emit(event_sink, receipt(&stored, scope_title));
         return Vec::new();
     }
+    // The message's place among journaled changes, kept by a retried capture of it.
+    let after_change = store
+        .message_watermark(project_id, thread_id, turn_id)
+        .await
+        .map_err(|error| {
+            tracing::warn!(%project_id, %error, "failed to read the message's journal position");
+        })
+        .ok();
+    let stated_at_ms = crate::rule_capture::now_ms();
     let source_sequence = match store.allocate_source_sequence(project_id).await {
         Ok(sequence) => Some(sequence),
         Err(error) => {
@@ -133,8 +184,8 @@ pub(crate) async fn capture_marked_rules(
                 thread_id,
                 turn_id,
                 receipt_turn_id: turn_id,
-                // The message starting this turn follows every retirement recorded so far.
-                stated_at_ms: i64::MAX,
+                stated_at_ms,
+                after_change,
                 placement,
             },
             &rule.clause.text,
@@ -197,15 +248,40 @@ pub(crate) async fn capture_marked_rules(
             }
         }
         Err(error) => {
+            // The rules above are committed, but the group is not: the journal says the
+            // capture is incomplete, and no counted receipt claims a recorded group.
             tracing::warn!(%project_id, %error, "failed to record a rule capture group");
+            let incomplete = ChangeRecord {
+                operation: ChangeOperation::CaptureIncomplete,
+                origin: ChangeOrigin::HostCapture,
+                category: ProjectCategory::Rule,
+                action_id: None,
+                thread_id: Some(thread_id.to_string()),
+                turn_id: Some(turn_id.to_string()),
+                group_id: Some(group_id.clone()),
+                preview: format!("{} of {} rules saved", captured.len(), group.recognized),
+            };
+            if let Err(error) = store.record_change(project_id, None, &incomplete).await {
+                tracing::warn!(%project_id, %error, "failed to journal an incomplete capture");
+            }
+            return captured;
         }
     }
     emit(event_sink, receipt(&group, hint.map(|hint| hint.title)));
     captured
 }
 
-/// Opens (or finds) the investigation `hint` names in this message and binds the thread to
-/// it, returning its scope.
+/// Words with which a message starts an investigation other than the one its thread continues.
+const ANOTHER_INVESTIGATION: &[&str] = &[
+    "new investigation",
+    "another investigation",
+    "separate investigation",
+    "different investigation",
+];
+
+/// The investigation the rules of this message belong to: the open one the thread continues
+/// ("During this investigation, never push" adds to it), unless the message starts another;
+/// otherwise the one this message opens, to which the thread is then bound.
 async fn open_investigation(
     store: &BlackboardStore,
     project_id: &str,
@@ -214,6 +290,21 @@ async fn open_investigation(
     hint: &ScopeHint,
 ) -> Result<Option<String>, String> {
     let scope_id = scope_id_for(project_id, thread_id, turn_id, &hint.title);
+    let starts_another = {
+        let title = hint.title.to_lowercase();
+        ANOTHER_INVESTIGATION
+            .iter()
+            .any(|phrase| title.contains(phrase))
+    };
+    if !starts_another
+        && let Some(bound) = store
+            .thread_scope(project_id, thread_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .filter(|scope| scope.state == ScopeState::Open && scope.scope_id != scope_id)
+    {
+        return Ok(Some(bound.scope_id));
+    }
     store
         .open_scope(&KnowledgeScope {
             project_id: project_id.to_string(),
@@ -234,6 +325,27 @@ async fn open_investigation(
         .await
         .map_err(|error| error.to_string())?;
     Ok(Some(scope_id))
+}
+
+/// The investigation a recorded group's rules were saved under, read back from the first
+/// stored member's recorded meaning.
+async fn recorded_scope_title(
+    store: &BlackboardStore,
+    project_id: &str,
+    group: &CaptureGroup,
+) -> Option<String> {
+    let ids = group
+        .members
+        .iter()
+        .filter_map(|member| member.entry_id.clone())
+        .map(BlackboardEntryId::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    let contexts = store.knowledge_contexts(project_id, &ids).await.ok()?;
+    let scope_id = ids
+        .iter()
+        .find_map(|id| contexts.get(id.as_str())?.scope_id.clone())?;
+    Some(store.scope(project_id, &scope_id).await.ok()??.title)
 }
 
 fn member(
@@ -306,19 +418,31 @@ fn emit(event_sink: Option<&dyn StatefulEventSink>, receipt: GroupReceipt) {
     }
 }
 
-/// The investigation scope a user message opens, if it names one: the scope host capture
-/// gave the message's rules.
-pub(crate) fn message_scope_id(
+/// The investigation host capture gave the rules of a user message that names one: the scope
+/// that message opened, or else the open one its thread continues. None when neither exists,
+/// so the rule is not stored as one for all work.
+pub(crate) async fn message_scope_id(
+    store: &BlackboardStore,
     project_id: &str,
     thread_id: &str,
     turn_id: &str,
     text: &str,
 ) -> Option<String> {
-    marked_rule_units(text)
+    let hint = marked_rule_units(text)
         .rules
         .into_iter()
-        .find_map(|rule| rule.scope)
-        .map(|hint| scope_id_for(project_id, thread_id, turn_id, &hint.title))
+        .find_map(|rule| rule.scope)?;
+    let opened = scope_id_for(project_id, thread_id, turn_id, &hint.title);
+    if let Ok(Some(_)) = store.scope(project_id, &opened).await {
+        return Some(opened);
+    }
+    store
+        .thread_scope(project_id, thread_id)
+        .await
+        .ok()
+        .flatten()
+        .filter(|scope| scope.state == ScopeState::Open)
+        .map(|scope| scope.scope_id)
 }
 
 /// The scope an investigation named in one user message gets; host capture and the model's

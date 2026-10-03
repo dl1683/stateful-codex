@@ -62,6 +62,7 @@ async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-2",
             stated_at_ms,
+            after_change: Some(0),
             placement: crate::rule_capture::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::HostCapture,
             ),
