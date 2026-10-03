@@ -226,6 +226,42 @@ pub async fn staged_changes(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// The patch commit `oid` made against its first parent (or the empty tree for a root
+/// commit): unified diff with three context lines, no rename detection, no external diff or
+/// text conversion. Bounded by the budget's shared output allowance.
+pub async fn commit_patch(
+    root: &AbsolutePathBuf,
+    oid: &GitSha,
+    budget: &GitObservationBudget,
+) -> Result<String, GitObservationFailure> {
+    let output = run(
+        root.as_path(),
+        &[
+            "-c",
+            "core.quotePath=false",
+            "diff-tree",
+            "--no-commit-id",
+            "-p",
+            "--unified=3",
+            "--no-color",
+            "--no-renames",
+            "--no-ext-diff",
+            "--root",
+            "-m",
+            "--first-parent",
+            "--end-of-options",
+            &oid.0,
+        ],
+        budget,
+        GitCommandOutputCap::SharedAllowance,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(command_failed(&output));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 async fn run(
     cwd: &Path,
     args: &[&str],

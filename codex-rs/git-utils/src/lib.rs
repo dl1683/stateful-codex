@@ -61,6 +61,7 @@ pub use observation::GitRepositoryObservation;
 pub use observation::GitWorktreeObservation;
 pub use observation::GitWorktreePaths;
 pub use observation::changed_paths;
+pub use observation::commit_patch;
 pub use observation::commits_between;
 pub use observation::observe_repository;
 pub use observation::staged_changes;

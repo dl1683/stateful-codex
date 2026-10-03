@@ -11,6 +11,7 @@ use super::GitChangedPath;
 use super::GitCommitRange;
 use super::GitWorktreePaths;
 use super::changed_paths;
+use super::commit_patch;
 use super::commits_between;
 use super::staged_changes;
 use crate::observation::GitObservationBudget;
@@ -218,5 +219,43 @@ async fn staged_changes_name_the_staged_blob() {
             first == second
         ),
         (true, true, false)
+    );
+}
+
+#[tokio::test]
+async fn commit_patch_shows_what_one_commit_changed() {
+    let temp = TempDir::new().expect("tempdir");
+    let path = temp.path();
+    git(path, &["init", "-q"]);
+    commit(
+        path,
+        "units.py",
+        "YEARS = \"y\"
+",
+    );
+    let changed = commit(
+        path,
+        "units.py",
+        "YEARS = \"yr\"
+",
+    );
+    let root = AbsolutePathBuf::from_absolute_path(path).expect("absolute path");
+
+    let patch = commit_patch(&root, &changed, &budget())
+        .await
+        .expect("patch");
+
+    let lines = patch
+        .lines()
+        .filter(|line| line.starts_with(['+', '-']))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lines,
+        vec![
+            "--- a/units.py",
+            "+++ b/units.py",
+            "-YEARS = \"y\"",
+            "+YEARS = \"yr\"",
+        ]
     );
 }
