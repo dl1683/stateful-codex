@@ -59,14 +59,17 @@ use crate::world_state::project_world_state_section;
 /// S17 made 19 conversation reads) took it to 13,741 (project 7,368); truncated-rule,
 /// strategy-supersession and root-relative path guidance to 13,866 (project 7,493); a
 /// background entry and the guidance on relayed words (tui8) to 14,129 (project 7,756).
-const MAX_FIXTURE_PACKET_BYTES: usize = 14_250;
+/// Saying that the host journals and publishes activity (agents record once per task, not per
+/// turn) took Autonomous to about 14,350.
+const MAX_FIXTURE_PACKET_BYTES: usize = 14_450;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010. The recall,
 /// truncated-rule, strategy and root-relative path guidance (field evidence from horizon2,
 /// prop2 and learn2) took it to 10,560 against 12,702. A background entry in the fixture
 /// and the guidance on relayed words and claims about the user (tui8) took it to 10,823
-/// against 12,965.
-const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_950;
+/// against 12,965. Saying that the host journals and publishes activity (so the agent records
+/// once per task, not per turn) took it to about 11,050.
+const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 11_150;
 
 const PROJECT_ID: &str = "project-1";
 

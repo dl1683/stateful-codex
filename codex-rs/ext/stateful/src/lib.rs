@@ -30,6 +30,7 @@ mod tools;
 mod user_messages;
 mod user_rules;
 mod visible_root;
+mod window_journal;
 mod window_policy;
 mod world_state;
 
@@ -307,11 +308,13 @@ impl ContextContributor for StatefulExtension {
                     } else {
                         ContextWindowMode::Full
                     };
-                    window_policy::decide_window(
+                    let decided = window_policy::decide_window(
                         runtime_store,
                         codex_stateful_runtime::ContextWindowDecision { mode, ..window },
                     )
-                    .await
+                    .await;
+                    self.publish_on_window_open(selected.project_id(), &thread_id, &decided);
+                    decided
                 }
             };
             let continuation_window = window.mode == ContextWindowMode::Continuation;
@@ -361,6 +364,35 @@ impl ContextContributor for StatefulExtension {
 }
 
 impl StatefulExtension {
+    /// A window opened by compaction or a reset closes the thread's previous window, so its
+    /// journal suffix is published; a thread's first window publishes what earlier sessions of
+    /// the project left open. Publication runs off the sampling path.
+    fn publish_on_window_open(
+        &self,
+        project_id: &str,
+        thread_id: &str,
+        window: &codex_stateful_runtime::ContextWindowDecision,
+    ) {
+        let Some(services) = self.services.clone() else {
+            return;
+        };
+        let project_id = project_id.to_string();
+        let thread_id = thread_id.to_string();
+        let reason = window.reason;
+        tokio::spawn(async move {
+            match reason {
+                codex_stateful_runtime::ContextWindowReason::ThreadStart => {
+                    window_journal::publish_open_windows(&services, &project_id).await;
+                }
+                codex_stateful_runtime::ContextWindowReason::Compaction
+                | codex_stateful_runtime::ContextWindowReason::Reset => {
+                    window_journal::publish_window(&services, &project_id, &thread_id).await;
+                }
+                codex_stateful_runtime::ContextWindowReason::Unknown => {}
+            }
+        });
+    }
+
     async fn project_refresh_status(&self, project_id: &str) -> Option<ProjectRefreshStatus> {
         let services = self.services.as_ref()?;
         let hierarchy = match services.hierarchy().await {

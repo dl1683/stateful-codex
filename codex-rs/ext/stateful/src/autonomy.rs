@@ -217,6 +217,9 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             begin_turn_attribution(self, input.turn_id, input.thread_store);
+            input.turn_store.insert(crate::window_journal::JournalTurn(
+                input.turn_id.to_string(),
+            ));
             if let Some(selected) = input.thread_store.get::<SelectedProject>() {
                 crate::request_scope::RequestScope::record_turn_start(
                     input.turn_store,
@@ -338,7 +341,26 @@ impl TurnLifecycleContributor for StatefulExtension {
         {
             crate::request_scope::RequestScope::observe_user_message(turn_store, &message.content);
         }
-        Box::pin(std::future::ready(()))
+        Box::pin(async move {
+            let (Some(selected), Some(thread), Some(turn), Some(services)) = (
+                thread_store.get::<SelectedProject>(),
+                thread_store.get::<SelectedThread>(),
+                turn_store.get::<crate::window_journal::JournalTurn>(),
+                self.services.as_ref(),
+            ) else {
+                return;
+            };
+            if let Ok(store) = services.runtime().await {
+                crate::window_journal::journal_item(
+                    store,
+                    selected.project_id(),
+                    &thread.thread_id,
+                    &turn.0,
+                    item,
+                )
+                .await;
+            }
+        })
     }
 
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {

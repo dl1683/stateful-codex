@@ -275,6 +275,12 @@ fn stateful_tool_name(name: &codex_extension_api::ToolName) -> Option<&str> {
 impl ToolLifecycleContributor for StatefulExtension {
     fn on_tool_start<'a>(&'a self, input: ToolStartInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
+            crate::window_journal::remember_plan_call(
+                input.turn_store,
+                input.tool_name,
+                input.call_id,
+                input.payload,
+            );
             if stateful_tool_name(input.tool_name) == Some(STATEFUL_RUN_UPDATE) {
                 self.attribution.prepare_material_findings(
                     input.turn_id,
@@ -287,6 +293,21 @@ impl ToolLifecycleContributor for StatefulExtension {
 
     fn on_tool_finish<'a>(&'a self, input: ToolFinishInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
+            if let (Some(selected), Some(thread), Some(services)) = (
+                input.thread_store.get::<SelectedProject>(),
+                input.thread_store.get::<SelectedThread>(),
+                self.services.as_ref(),
+            ) && let Ok(store) = services.runtime().await
+            {
+                crate::window_journal::journal_plan_call(
+                    store,
+                    input.turn_store,
+                    (selected.project_id(), &thread.thread_id, input.turn_id),
+                    input.call_id,
+                    input.outcome,
+                )
+                .await;
+            }
             if let Some(thread) = input.thread_store.get::<SelectedThread>() {
                 self.run_activity.for_thread(&thread.thread_id).record(
                     matches!(input.source, ToolCallSource::Direct),
