@@ -34,6 +34,14 @@ impl ChatWidget {
         self.set_memory_view(thread_id, MemoryView::Unavailable);
     }
 
+    /// Forgets the shown memory of `thread_id` (its project changed).
+    pub(crate) fn clear_stateful_memory(&mut self, thread_id: ThreadId) {
+        if self.thread_id == Some(thread_id) {
+            self.stateful_memory = None;
+            self.refresh_status_line();
+        }
+    }
+
     fn set_memory_view(&mut self, thread_id: ThreadId, view: MemoryView) {
         if self.thread_id != Some(thread_id) {
             return;

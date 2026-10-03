@@ -864,6 +864,8 @@ impl App {
             }
             AppEvent::StatefulMemoryProjectChanged { thread_id } => {
                 self.memory_status.project_changed(thread_id);
+                // The old project's numbers no longer describe this thread.
+                self.chat_widget.clear_stateful_memory(thread_id);
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     self.memory_status
                         .attach(

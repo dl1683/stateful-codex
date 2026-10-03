@@ -198,11 +198,22 @@ fn recap_is_dated_and_grounded() {
     let format_time = |seconds: i64| format!("T{seconds}");
     let cell = recap_cell(&recap, &format_time).expect("recap");
     insta::assert_snapshot!("memory_return_recap", render(&cell, /*width*/ 160));
-    let empty = StatefulMemoryRecapResponse {
+    // No finished work and a complete history: nothing to return to. Unreadable history
+    // still says so.
+    let unknown = StatefulMemoryRecapResponse {
         last_work: None,
-        ..recap
+        ..recap.clone()
+    };
+    let empty = StatefulMemoryRecapResponse {
+        history_complete: true,
+        ..unknown.clone()
     };
     assert_eq!(recap_cell(&empty, &format_time).is_none(), true);
+    let unknown = recap_cell(&unknown, &format_time).expect("partial recap");
+    assert_eq!(
+        render(&unknown, /*width*/ 160).contains("The last finished work could not be determined."),
+        true
+    );
 }
 
 /// Commits found in the workspace history say where they came from, never who made them;

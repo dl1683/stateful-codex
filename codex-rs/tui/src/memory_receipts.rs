@@ -251,12 +251,15 @@ pub(crate) fn exit_lines(
     lines
 }
 
-/// The dated return card, or `None` when the project has no finished work to return to.
+/// The dated return card, or `None` when there is no finished work to return to and the
+/// history was read completely.
 pub(crate) fn recap_cell(
     recap: &StatefulMemoryRecapResponse,
     format_time: &dyn Fn(i64) -> String,
 ) -> Option<PlainHistoryCell> {
-    let work = recap.last_work.as_ref()?;
+    if recap.last_work.is_none() && recap.history_complete {
+        return None;
+    }
     let mut lines: Vec<Line<'static>> = vec![
         vec![
             "Where things stand".bold(),
@@ -264,12 +267,22 @@ pub(crate) fn recap_cell(
         ]
         .into(),
     ];
-    let request = work
-        .request
-        .as_deref()
-        .map(|request| format!(": {}", preview(request)))
-        .unwrap_or_default();
-    lines.push(format!("  Last finished {}{request}", format_time(work.finished_at)).into());
+    match &recap.last_work {
+        Some(work) => {
+            let request = work
+                .request
+                .as_deref()
+                .map(|request| format!(": {}", preview(request)))
+                .unwrap_or_default();
+            lines
+                .push(format!("  Last finished {}{request}", format_time(work.finished_at)).into());
+        }
+        None => lines.push(
+            "  The last finished work could not be determined."
+                .dim()
+                .into(),
+        ),
+    }
     if !recap.rules.is_empty() || recap.more_rules > 0 {
         lines.push(
             format!(
@@ -343,6 +356,11 @@ pub(crate) fn recap_cell(
             .into(),
         );
     }
+    lines.push(
+        "  Capture gaps from before the last finished work are not tracked here."
+            .dim()
+            .into(),
+    );
     if !recap.history_complete {
         lines.push(
             "  Some earlier work could not be read, so this may not be the latest."

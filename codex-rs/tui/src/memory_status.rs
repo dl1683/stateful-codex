@@ -46,6 +46,8 @@ struct State {
     /// counted per project) and every thread of this session that belonged to it.
     projects: BTreeMap<String, Visited>,
     recap_shown: bool,
+    /// Per thread, bumped whenever its binding changes; a read started before is obsolete.
+    generations: HashMap<ThreadId, u64>,
     /// Some project's memory could not be read when needed, so counts may be incomplete.
     incomplete: bool,
     /// The newest refresh request; a running refresh takes it before finishing.
@@ -79,6 +81,7 @@ struct Target {
 impl State {
     /// Records that `thread_id` now belongs to `project_id`, whose journal head is `head`.
     fn bind(&mut self, thread_id: ThreadId, project_id: String, head: u64) {
+        self.bump(thread_id);
         let visited = self.projects.entry(project_id.clone()).or_insert(Visited {
             watermark: head,
             threads: BTreeSet::new(),
@@ -86,6 +89,17 @@ impl State {
         visited.threads.insert(thread_id.to_string());
         self.threads
             .insert(thread_id, ThreadMemory::Project(project_id));
+    }
+
+    fn bump(&mut self, thread_id: ThreadId) {
+        *self.generations.entry(thread_id).or_default() += 1;
+    }
+
+    fn generation(&self, thread_id: ThreadId) -> u64 {
+        self.generations
+            .get(&thread_id)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// The project, watermark and participating threads `thread_id` is counted with.
@@ -118,16 +132,28 @@ impl MemoryStatus {
         thread_id: ThreadId,
         app_event_tx: AppEventSender,
     ) {
-        let known = matches!(
-            self.lock().threads.get(&thread_id),
-            Some(ThreadMemory::NotStateful | ThreadMemory::Project(_))
-        );
+        // A thread without a project is read again each time: it may have been given one
+        // while this client was not listening.
+        let (known, generation) = {
+            let state = self.lock();
+            (
+                matches!(
+                    state.threads.get(&thread_id),
+                    Some(ThreadMemory::Project(_))
+                ),
+                state.generation(thread_id),
+            )
+        };
         if !known {
             let read = summary(
                 &handle, thread_id, /*since*/ None, /*threads*/ None,
             )
             .await;
             let mut state = self.lock();
+            if state.generation(thread_id) != generation {
+                // The binding changed while reading; the newer activation decides.
+                return;
+            }
             match read {
                 Ok(response) => {
                     state.bind(thread_id, response.project_id, response.latest_sequence);
@@ -169,7 +195,9 @@ impl MemoryStatus {
     /// The thread's project was assigned or changed: forget its binding, keeping what it did
     /// in its earlier project, so the next activation reads its current project.
     pub(crate) fn project_changed(&self, thread_id: ThreadId) {
-        self.lock().threads.remove(&thread_id);
+        let mut state = self.lock();
+        state.bump(thread_id);
+        state.threads.remove(&thread_id);
     }
 
     /// Reads the summary again in the background. Requests made while one runs collapse
@@ -198,7 +226,7 @@ impl MemoryStatus {
         let status = self.clone();
         tokio::spawn(async move {
             loop {
-                let (target, (project, since, threads)) = {
+                let (target, (project, since, threads), generation) = {
                     let mut state = status.lock();
                     let Some(target) = state.target.take() else {
                         state.refreshing = false;
@@ -207,10 +235,21 @@ impl MemoryStatus {
                     let Some(scope) = state.scope_of(target.thread_id) else {
                         continue;
                     };
-                    (target, scope)
+                    let generation = state.generation(target.thread_id);
+                    (target, scope, generation)
                 };
                 let read =
                     summary(&target.handle, target.thread_id, Some(since), Some(threads)).await;
+                {
+                    // The thread's binding changed while reading: this answer is obsolete.
+                    let mut state = status.lock();
+                    if state.generation(target.thread_id) != generation {
+                        if state.target.is_none() {
+                            state.target = Some(target);
+                        }
+                        continue;
+                    }
+                }
                 match read {
                     Ok(response) if response.project_id == project => {
                         let partial = status.lock().incomplete;
