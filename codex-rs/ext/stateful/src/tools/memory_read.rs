@@ -47,7 +47,8 @@ use super::parse_arguments;
 use super::respond;
 
 const TOOL_NAME: &str = "memory_read";
-const MAX_TERMS: usize = 12;
+/// Enough for a multi-topic question ("why sign, and why mth and yr?").
+const MAX_TERMS: usize = 24;
 const MAX_SEARCH_HITS: u32 = 30;
 /// Successor lookups one call may make while resolving matches to their current entries.
 const MAX_SUCCESSOR_LOOKUPS: usize = 64;
@@ -74,7 +75,9 @@ const STOPWORDS: &[&str] = &[
     "your", "with", "that", "this", "from", "have", "has", "had", "into", "about", "which", "when",
     "where", "who", "can", "could", "would", "should", "will", "there", "their", "them", "then",
     "than", "they", "its", "it's", "not", "but", "all", "any", "each", "some", "since", "been",
-    "also", "just", "on", "off",
+    "also", "just", "on", "off", "is", "to", "of", "in", "it", "we", "be", "do", "go", "my", "me",
+    "up", "so", "no", "or", "an", "as", "at", "by", "if", "us", "am", "he", "she", "her", "him",
+    "his", "out", "too", "one", "now", "new", "get", "got", "let", "say", "said", "use", "used",
 ];
 
 #[derive(Deserialize)]
@@ -510,13 +513,14 @@ fn match_count(text: &str, terms: &[String]) -> usize {
         .count()
 }
 
-/// Content words of a question: lowercase, at least three characters, no stopwords.
+/// Content words of a question: lowercase, at least two characters (symbols such as `yr`
+/// are topics), no stopwords.
 pub(super) fn question_terms(question: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     question
         .split(|character: char| !character.is_alphanumeric() && character != '_')
         .map(str::to_lowercase)
-        .filter(|term| term.chars().count() >= 3 && !STOPWORDS.contains(&term.as_str()))
+        .filter(|term| term.chars().count() >= 2 && !STOPWORDS.contains(&term.as_str()))
         .filter(|term| seen.insert(term.clone()))
         .take(MAX_TERMS)
         .collect()

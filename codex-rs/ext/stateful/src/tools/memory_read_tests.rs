@@ -22,6 +22,21 @@ fn question_terms_keep_content_words_only() {
     assert_eq!(question_terms("why is it on?"), Vec::<String>::new());
 }
 
+/// The horizon2 S17 question keeps every topic, including the short symbols it asks about.
+#[test]
+fn a_long_multi_topic_question_keeps_its_later_topics() {
+    let terms = question_terms(
+        "A reviewer asked two things and I want to answer from what we actually decided, not from scratch: why is the overdue sign opt-in instead of always on, and why do months and years use \"mth\" and \"yr\"? Also, a new teammate is joining: list the standing rules I gave you when we started working on this fork, word for word if you can.",
+    );
+    assert_eq!(
+        [
+            "overdue", "sign", "months", "years", "mth", "yr", "standing", "rules"
+        ]
+        .map(|term| terms.contains(&term.to_string())),
+        [true; 8]
+    );
+}
+
 #[test]
 fn matching_and_excerpts_follow_the_question() {
     let text = format!(
