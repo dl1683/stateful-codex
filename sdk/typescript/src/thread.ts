@@ -1,5 +1,5 @@
 import { CodexOptions } from "./codexOptions";
-import { RunTrajectory, ThreadEvent, ThreadError, Usage } from "./events";
+import { RunTrajectory, StatefulAttribution, ThreadEvent, ThreadError, Usage } from "./events";
 import { CodexExec } from "./exec";
 import { ThreadItem } from "./items";
 import { ThreadOptions } from "./threadOptions";
@@ -127,9 +127,14 @@ export class Thread {
             model_tool_calls: parsed.model_tool_calls ?? 0,
             tool_output_bytes: parsed.tool_output_bytes ?? 0,
           };
+        } else if (parsed.type === "stateful.attribution") {
+          normalizeAttribution(parsed.attribution);
         } else if (parsed.type === "turn.completed") {
           parsed.usage.cache_write_input_tokens ??= 0;
           parsed.trajectory ??= emptyTrajectory();
+          if (parsed.stateful_attribution) {
+            normalizeAttribution(parsed.stateful_attribution);
+          }
         } else if (parsed.type === "turn.failed") {
           parsed.usage ??= {
             input_tokens: 0,
@@ -188,4 +193,16 @@ function normalizeInput(input: Input): { prompt: string; images: string[] } {
     }
   }
   return { prompt: promptParts.join("\n\n"), images };
+}
+
+/** Counters added after older exec binaries; they omit them, which reads as zero. */
+function normalizeAttribution(attribution: StatefulAttribution): void {
+  attribution.packet_project_bytes ??= 0;
+  attribution.packet_continuity_bytes ??= 0;
+  attribution.memory_records_already_present ??= 0;
+  attribution.memory_records_refused ??= 0;
+  attribution.recipes_grounded ??= 0;
+  attribution.index_operations ??= 0;
+  attribution.index_operations_pending ??= 0;
+  attribution.index_wait_ms ??= 0;
 }
