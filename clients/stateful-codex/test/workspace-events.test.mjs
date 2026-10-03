@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createExecution } from "../public/execution-state.mjs";
 import { applyWorkspaceEvent } from "../public/workspace-events.mjs";
 
 function workspaceState() {
@@ -10,6 +11,7 @@ function workspaceState() {
     run: { id: "run-1" },
     pendingRequests: [],
     notice: null,
+    execution: createExecution(),
   };
 }
 
@@ -48,7 +50,7 @@ test("only this thread's turn start resets the live text", () => {
     }),
     { sections: ["header"], refresh: true, turnStarted: "t3" },
   );
-  assert.equal(state.turnInProgress, true);
+  assert.equal(state.execution.phase, "working");
 });
 
 test("turn completion and knowledge receipts update what the person sees", () => {
@@ -60,7 +62,7 @@ test("turn completion and knowledge receipts update what the person sees", () =>
   assert.deepEqual(
     applyWorkspaceEvent(state, {
       method: "turn/completed",
-      params: { threadId: "thread-a", turn: { id: "t3" } },
+      params: { threadId: "thread-a", turn: { id: "t3", status: "completed" } },
     }),
     { sections: ["header"], refresh: true },
   );
@@ -77,8 +79,8 @@ test("turn completion and knowledge receipts update what the person sees", () =>
   applyWorkspaceEvent(state, receipt("alreadyStored"));
   applyWorkspaceEvent(state, receipt("stored"));
   assert.deepEqual(
-    [state.turnInProgress, state.answeredOnce, state.receipts],
-    [false, true, ['Saved your rule: "Never run the whole suite."']],
+    [state.execution.phase, state.receipts],
+    ["finished", ['Saved your rule: "Never run the whole suite."']],
   );
 });
 

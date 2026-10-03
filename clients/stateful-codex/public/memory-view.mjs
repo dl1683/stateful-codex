@@ -2,6 +2,8 @@
 // decisions and other knowledge, each with Forget and Correct. Browsing and correcting never
 // start a model turn (statefulMemory/read, /forget and /correct).
 
+import { executionLabel } from "./execution-state.mjs";
+
 const SECTIONS = [
   ["userRule", "Your rules", "Applied to all work in this project."],
   ["pendingRule", "Task-limited rules", "Kept, not applied."],
@@ -58,18 +60,22 @@ function renderItem(item, editing) {
   return `<article data-memory-entry="${id}"><p>${escapeHtml(item.content)}${item.contentTruncated ? "…" : ""}</p>${replaces}${correct}</article>`;
 }
 
-// The run's durable state and the current execution, said separately: a Collaborative run
-// stays open after an answer finishes and after the page closes.
+// The current execution and the run's durable state, said separately and plainly: a run that
+// stays open is not work in progress, and nothing says "not working" before an authoritative
+// read or live event has shown it.
 export function runStateLabel(state) {
   const run = state.run;
-  if (!run) return "preparing";
+  const now = executionLabel(state.execution, state.pendingRequests?.length ?? 0);
+  if (!run) return now;
   const mode = `${run.mode[0].toUpperCase()}${run.mode.slice(1)}`;
-  if (!["pending", "running", "paused"].includes(run.status)) return `${mode} run ${run.status}`;
-  const durable = run.status === "paused" ? `${mode} run paused` : `${mode} run open`;
-  if (state.pendingRequests?.length) return `Waiting for you · ${durable}`;
-  if (state.turnInProgress) return `Working · ${durable}`;
-  if (state.answeredOnce) return `Answer finished · ${durable}`;
-  return `Idle · ${durable}`;
+  if (!["pending", "running", "paused"].includes(run.status)) return `${now} · ${mode} run ${run.status}`;
+  return `${now} · ${durableRunLabel(run, mode)}`;
+}
+
+function durableRunLabel(run, mode) {
+  if (run.status === "paused") return `${mode} run paused`;
+  if (run.mode === "autonomous") return `${mode} run open; it may continue on its own`;
+  return `${mode} run stays open between answers`;
 }
 
 // The document title carries waiting approvals so a background tab still shows them.

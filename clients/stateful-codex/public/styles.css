@@ -265,6 +265,30 @@ textarea {
   color: var(--muted);
   font-weight: 700;
 }
+.steering-panel summary h2 {
+  display: inline;
+  margin: 0 8px 0 0;
+  font-size: 0.96rem;
+  color: var(--text, inherit);
+}
+.steering-panel summary .microcopy {
+  font-weight: 400;
+}
+.memory-status {
+  margin: 6px 0 0;
+}
+.recap h3 {
+  margin: 12px 0 4px;
+  font-size: 0.86rem;
+}
+.recap ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.recap small {
+  display: block;
+  color: var(--muted);
+}
 .panel-heading {
   display: flex;
   align-items: center;

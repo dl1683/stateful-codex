@@ -3,6 +3,8 @@ import { reply, rpc, subscribe } from "./rpc.mjs";
 import { findTurnMeasurement, latestAnswerTurn } from "./answer-provenance.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
+import { applySnapshot, beginSnapshot, createExecution } from "./execution-state.mjs";
+import { readExecutionSnapshot, readMemorySummary, readRecap } from "./status-reads.mjs";
 import { createSourceSearch } from "./source-search.mjs";
 import { submitSteering } from "./steering-submit.mjs";
 import {
@@ -60,8 +62,11 @@ const state = {
   blackboardTruncated: false,
   answerMeasurement: null,
   liveTurnId: null,
-  turnInProgress: false,
-  answeredOnce: false,
+  // Unknown until thread/read or a live turn event says otherwise; never assumed idle.
+  execution: createExecution(),
+  memorySummary: null,
+  recap: null,
+  recapDismissed: false,
   receipts: [],
   memory: null,
   memoryEditing: null,
@@ -93,6 +98,9 @@ async function boot() {
   try {
     await ensureRun();
     await refresh();
+    // The return card is read once per page load; it describes where things stood on arrival.
+    state.recap = await readRecap(rpc, threadId);
+    render(["recap"]);
   } catch (error) {
     fail(error);
   }
@@ -186,7 +194,10 @@ async function refreshWorkspace() {
     state.refreshFailed = false;
   }
   render(["notices"]);
+  const executionToken = beginSnapshot(state.execution);
   const [
+    snapshot,
+    memorySummary,
     project,
     run,
     status,
@@ -199,6 +210,8 @@ async function refreshWorkspace() {
     activity,
     unavailableRoots,
   ] = await Promise.all([
+    readExecutionSnapshot(rpc, threadId),
+    readMemorySummary(rpc, { threadId, storage: sessionStorage }),
     rpc("project/read", { projectId }),
     rpc("statefulRun/read", runReadParams()),
     rpc("projectIntelligence/status", { projectId }),
@@ -231,6 +244,9 @@ async function refreshWorkspace() {
     }),
     findUnavailableRoots(rpc, state.project?.roots),
   ]);
+  // A live turn event that arrived while these reads were in flight is newer; it stands.
+  applySnapshot(state.execution, executionToken, snapshot);
+  state.memorySummary = memorySummary;
   if (generation !== state.runGeneration) {
     refresh();
     return;
@@ -496,6 +512,10 @@ app.addEventListener("click", async (event) => {
       case "memory-correct":
         state.memoryEditing = button.dataset.entryId;
         render(["memory"]);
+        break;
+      case "recap-dismiss":
+        state.recapDismissed = true;
+        render(["recap"]);
         break;
       case "memory-cancel":
         state.memoryEditing = null;

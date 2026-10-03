@@ -26,6 +26,8 @@ export const WEB_RPC_METHODS = new Set([
   "statefulMemory/correct",
   "statefulMemory/forget",
   "statefulMemory/read",
+  "statefulMemory/recap",
+  "statefulMemory/summary",
   "statefulMeasurement/summary",
   "statefulRun/cancel",
   "statefulRun/pause",
@@ -41,6 +43,7 @@ export const WEB_RPC_METHODS = new Set([
   "thread/read",
   "thread/resume",
   "thread/start",
+  "thread/turns/list",
   "turn/start",
 ]);
 

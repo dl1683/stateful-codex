@@ -125,7 +125,7 @@ test("recorded activity outranks a partial streamed patch", () => {
 test("a reconnect snapshot with an unknown approval item asks for a refresh", () => {
   const { apply } = workspace();
   const snapshot = { method: "gateway/pendingRequests", params: { threadId: "thread-a", requests: [fileApproval] } };
-  assert.deepEqual(apply(snapshot), { sections: ["requests"], refresh: true });
+  assert.deepEqual(apply(snapshot), { sections: ["requests", "header"], refresh: true });
 });
 
 test("recorded activity supplies the changed files after a reconnect", () => {

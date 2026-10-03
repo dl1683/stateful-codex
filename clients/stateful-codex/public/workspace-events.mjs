@@ -1,4 +1,8 @@
 import { belongsToWorkspace, eventScope } from "./event-scope.mjs";
+import { noteConnectionLost, noteTurnEvent } from "./execution-state.mjs";
+import { groupReceipt, knowledgeReceipt } from "./memory-receipts.mjs";
+
+export { knowledgeReceipt };
 
 const REQUEST_ITEM_LIMIT = 50;
 // Per remembered item; a larger patch is kept truncated and flagged, never silently.
@@ -6,22 +10,8 @@ const REQUEST_ITEM_DIFF_CHARACTERS = 256 * 1024;
 const FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval";
 const RECEIPT_LIMIT = 3;
 
-const RECEIPT_LABELS = {
-  rule: "Saved your rule",
-  pendingRule: "Saved a task-limited rule (not applied)",
-  decision: "Saved a decision",
-  recipe: "Saved a project recipe",
-  finding: "Saved a finding",
-  background: "Saved what you said about yourself",
-};
-
-// One line for something newly saved; a repeat of what was already saved says nothing.
-export function knowledgeReceipt(params) {
-  if (!params || params.outcome !== "stored") return null;
-  const label = RECEIPT_LABELS[params.category] ?? "Saved";
-  return `${label}: "${params.text ?? ""}"`;
-}
-
+// Recent receipts shown as banners. Totals never come from these: the memory status line
+// counts the journal (statefulMemory/summary).
 const REFRESH_METHODS =
   /^(statefulRun|statefulAttribution|statefulKnowledge|obligation|steering|blackboard|project|thread|turn)\//;
 
@@ -59,11 +49,13 @@ export function applyWorkspaceEvent(state, message) {
     // Authoritative on (re)connect: requests answered elsewhere while away disappear.
     if (message.params?.threadId !== state.threadId) return { sections: [], refresh: false };
     state.pendingRequests = [...(message.params?.requests ?? [])];
-    return { sections: ["requests"], refresh: missingApprovalItems(state) };
+    // Sent on every (re)connect: events may have been missed, so re-read what is running.
+    return { sections: ["requests", "header"], refresh: true };
   }
   if (message.method === "gateway/error") {
     state.notice = message.params?.message ?? null;
-    return { sections: ["notices"], refresh: false };
+    if (state.execution) noteConnectionLost(state.execution);
+    return { sections: ["notices", "header"], refresh: false };
   }
   if (message.method === "serverRequest/resolved") {
     const requestId = message.params?.requestId;
@@ -90,16 +82,21 @@ export function applyWorkspaceEvent(state, message) {
   }
   if (message.method === "turn/started") {
     const turnId = message.params?.turn?.id ?? message.params?.turnId ?? null;
-    state.turnInProgress = true;
+    if (state.execution) noteTurnEvent(state.execution, message.method, message.params);
     return { sections: ["header"], refresh, turnStarted: turnId };
   }
   if (message.method === "turn/completed") {
-    state.turnInProgress = false;
-    state.answeredOnce = true;
+    if (state.execution) noteTurnEvent(state.execution, message.method, message.params);
     return { sections: ["header"], refresh };
   }
   if (message.method === "statefulKnowledge/captured") {
     const receipt = knowledgeReceipt(message.params);
+    if (!receipt) return { sections: [], refresh: true };
+    state.receipts = [...(state.receipts ?? []), receipt].slice(-RECEIPT_LIMIT);
+    return { sections: ["notices"], refresh: true };
+  }
+  if (message.method === "statefulKnowledge/groupCaptured") {
+    const receipt = groupReceipt(message.params);
     if (!receipt) return { sections: [], refresh: true };
     state.receipts = [...(state.receipts ?? []), receipt].slice(-RECEIPT_LIMIT);
     return { sections: ["notices"], refresh: true };

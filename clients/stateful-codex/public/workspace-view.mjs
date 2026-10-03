@@ -4,6 +4,7 @@ import {
 } from "./approval-view.mjs";
 import { describeAnswer, normalizeThreadItem } from "./answer-provenance.mjs";
 import { renderMemory, runStateLabel } from "./memory-view.mjs";
+import { renderMemoryStatus, renderRecap } from "./memory-status.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { effectiveFreshness, isRootUnavailable, rootKey } from "./source-availability.mjs";
 
@@ -25,6 +26,8 @@ const packetSections = [
 export const WORKSPACE_SLOTS = {
   header: renderHeader,
   notices: renderNotices,
+  "memory-status": renderMemoryStatus,
+  recap: renderRecap,
   intelligence: renderIntelligence,
   hierarchy: renderHierarchy,
   "routing-results": renderRoutingResults,
@@ -57,6 +60,7 @@ export function renderWorkspaceShell(state, slotHtml) {
     <main class="workspace-shell">
       ${renderPendingBar(state)}
       ${slot("header")}
+      ${slot("memory-status")}
       <div class="notices" data-slot="notices" role="status">${slotHtml("notices")}</div>
       <div class="workspace-grid">
         <aside class="stack-panel">
@@ -66,6 +70,7 @@ export function renderWorkspaceShell(state, slotHtml) {
         </aside>
         <section class="stack-panel main-work">
           ${renderRequests(state)}
+          ${slot("recap")}
           ${slot("obligation")}
           ${slot("strategy")}
           ${slot("result")}
@@ -76,7 +81,7 @@ export function renderWorkspaceShell(state, slotHtml) {
         <aside class="stack-panel controls-panel">
           <section class="workspace-panel"><div class="panel-heading"><h2>Run controls</h2></div>${slot("controls-state")}${slot("mode-form")}${slot("controls-detail")}</section>
           ${slot("measured")}
-          <section class="workspace-panel"><div class="panel-heading"><h2>Steer the work</h2></div>${slot("steering-form")}${slot("steering-status")}${slot("steering-list")}</section>
+          <details class="workspace-panel steering-panel"><summary><h2>Steer the run</h2><span class="microcopy">A standing direction for the run, not a chat message</span></summary>${slot("steering-form")}${slot("steering-status")}${slot("steering-list")}</details>
         </aside>
         <section class="findings-work">
           ${slot("memory")}
@@ -435,7 +440,7 @@ function renderMeasuredWork(summary) {
 function renderSteeringForm(state) {
   return isTerminalRun(state.run)
     ? `<p class="microcopy">Steering is closed with this outcome. Use Continue in this thread to give the agent a follow-up; steering opens again while it works.</p>`
-    : `<form id="steering-form" class="stack"><textarea name="steering" placeholder="Follow this fact, connect these findings, or change direction…" required></textarea><button class="primary">Submit steering</button></form>`;
+    : `<form id="steering-form" class="stack"><textarea name="steering" aria-label="Steering for the run" placeholder="Follow this fact, connect these findings, or change direction…" required></textarea><button class="secondary">Save steering</button></form>`;
 }
 
 function renderSteeringStatus(state) {
@@ -587,8 +592,8 @@ function renderInstructionForm(state) {
     );
   }
   return panel(
-    "Add an instruction",
-    `<form id="message-form" class="inline-form"><textarea name="message" placeholder="Ask, clarify, or direct the active thread…" required></textarea><button class="primary">Send</button></form>`,
+    "Message the agent",
+    `<form id="message-form" class="inline-form"><textarea name="message" aria-label="Message to the agent" placeholder="Ask, clarify, or direct the work…" required></textarea><button class="primary">Send</button></form>`,
   );
 }
 
