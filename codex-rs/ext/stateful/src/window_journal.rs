@@ -58,6 +58,8 @@ const MAX_PUBLICATION_BYTES: usize = 3_800;
 /// Observations read to build one publication.
 const PUBLICATION_PAGE: u32 = 100;
 const UPDATE_PLAN: &str = "update_plan";
+/// The frozen content of a suffix that has nothing worth publishing.
+const NOTHING_TO_PUBLISH: &str = "no receipts";
 
 /// Records one completed item. A failure to journal is logged, never surfaced to the turn.
 pub(crate) async fn journal_item(
@@ -360,17 +362,24 @@ async fn stage(
         .await?;
     let content = publication_content(thread_id, from_seq, through_seq, &events);
     let entry_id = stable_entry_id(project_id, thread_id, from_seq, through_seq);
-    store
+    let staged = store
         .stage_window_publication(&WindowPublication {
             thread_id: thread_id.to_string(),
             from_seq,
             through_seq,
             project_id: project_id.to_string(),
             entry_id,
-            content,
+            content: content.unwrap_or_else(|| NOTHING_TO_PUBLISH.to_string()),
             state: WindowPublicationState::Pending,
         })
         .await?;
+    // A window that only exchanged messages (already in the thread's history) has no receipt
+    // worth a memory entry: its suffix is closed without writing one.
+    if staged.content == NOTHING_TO_PUBLISH {
+        store
+            .mark_window_publication_published(thread_id, from_seq)
+            .await?;
+    }
     Ok(())
 }
 
@@ -454,7 +463,16 @@ fn publication_content(
     from_seq: u64,
     through_seq: u64,
     newest_first: &[WindowEvent],
-) -> String {
+) -> Option<String> {
+    let substantive = newest_first.iter().any(|event| {
+        matches!(
+            event.event.kind,
+            WindowEventKind::Edit | WindowEventKind::Command | WindowEventKind::Plan
+        )
+    });
+    if !substantive {
+        return None;
+    }
     let mut lines = vec![format!(
         "Host-observed work receipts (activity, not verified conclusions) from thread {thread_id}, events {}-{through_seq}.",
         from_seq + 1
@@ -557,7 +575,7 @@ fn publication_content(
     if content.len() > MAX_PUBLICATION_BYTES {
         content = head(&content, MAX_PUBLICATION_BYTES);
     }
-    content.trim().to_string()
+    Some(content.trim().to_string())
 }
 
 pub(crate) fn command_text(event: &WindowEvent) -> &str {
