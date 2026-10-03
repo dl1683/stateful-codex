@@ -155,3 +155,37 @@ test("the allowlist covers every method the client calls", async () => {
   for (const control of ["pause", "resume", "cancel"]) called.add(`statefulRun/${control}`);
   assert.deepEqual([...called].filter((method) => !WEB_RPC_METHODS.has(method)), []);
 });
+
+test("memory methods accept exactly the shapes the page sends", () => {
+  assert.equal(checkRpcParams("statefulMemory/read", { threadId: "t", cursor: null, limit: 50 }), null);
+  assert.equal(
+    checkRpcParams("statefulMemory/forget", { threadId: "t", entryId: "e", expectedRevision: 2 }),
+    null,
+  );
+  assert.equal(
+    checkRpcParams("statefulMemory/correct", {
+      threadId: "t",
+      entryId: "e",
+      expectedRevision: 2,
+      content: "Run only the affected tests.",
+    }),
+    null,
+  );
+  assert.equal(
+    checkRpcParams("statefulMemory/forget", { threadId: "t", entryId: "e" }),
+    "statefulMemory/forget requires expectedRevision",
+  );
+  assert.equal(
+    checkRpcParams("statefulMemory/correct", {
+      threadId: "t",
+      entryId: "e",
+      expectedRevision: 2,
+      content: "x".repeat(2001),
+    }),
+    "statefulMemory/correct content has an unsupported value",
+  );
+  assert.equal(
+    checkRpcParams("statefulMemory/read", { threadId: "t", cursor: null, limit: 500 }),
+    "statefulMemory/read limit has an unsupported value",
+  );
+});

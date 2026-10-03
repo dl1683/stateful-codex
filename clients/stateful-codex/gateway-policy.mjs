@@ -23,6 +23,9 @@ export const WEB_RPC_METHODS = new Set([
   "projectIntelligence/status",
   "projectIntelligence/tree",
   "statefulMeasurement/list",
+  "statefulMemory/correct",
+  "statefulMemory/forget",
+  "statefulMemory/read",
   "statefulMeasurement/summary",
   "statefulRun/cancel",
   "statefulRun/pause",
@@ -130,6 +133,7 @@ export function admitRpcMethod(method) {
 const isString = (value) => typeof value === "string" && value.length > 0;
 const isStringList = (value) => Array.isArray(value) && value.every(isString);
 const isBoolean = (value) => typeof value === "boolean";
+const isRevision = (value) => Number.isInteger(value) && value > 0;
 // The only input the page sends: one plain text item.
 const isTextInput = (value) =>
   Array.isArray(value) &&
@@ -153,6 +157,19 @@ const EXECUTION_PARAMS = {
     excludeTurns: isBoolean,
   },
   "turn/start": { threadId: isString, input: isTextInput },
+  // Memory changes act with the user's authority, so their shapes are exact as well.
+  "statefulMemory/read": {
+    threadId: isString,
+    cursor: (cursor) => cursor === null || isString(cursor),
+    limit: (limit) => Number.isInteger(limit) && limit > 0 && limit <= 100,
+  },
+  "statefulMemory/forget": { threadId: isString, entryId: isString, expectedRevision: isRevision },
+  "statefulMemory/correct": {
+    threadId: isString,
+    entryId: isString,
+    expectedRevision: isRevision,
+    content: (content) => isString(content) && content.length <= 2000,
+  },
 };
 
 // Returns null when the parameters are acceptable, otherwise a message naming the problem.

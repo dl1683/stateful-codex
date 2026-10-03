@@ -3,6 +3,7 @@ import {
   renderFileChangeApproval,
 } from "./approval-view.mjs";
 import { describeAnswer, normalizeThreadItem } from "./answer-provenance.mjs";
+import { renderMemory, runStateLabel } from "./memory-view.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { effectiveFreshness, isRootUnavailable, rootKey } from "./source-availability.mjs";
 
@@ -40,6 +41,7 @@ export const WORKSPACE_SLOTS = {
   "steering-status": renderSteeringStatus,
   "steering-list": renderSteeringList,
   findings: renderFindings,
+  memory: renderMemory,
 };
 
 export function renderWorkspace(state) {
@@ -77,6 +79,7 @@ export function renderWorkspaceShell(state, slotHtml) {
           <section class="workspace-panel"><div class="panel-heading"><h2>Steer the work</h2></div>${slot("steering-form")}${slot("steering-status")}${slot("steering-list")}</section>
         </aside>
         <section class="findings-work">
+          ${slot("memory")}
           ${renderFindingFilter()}
           ${slot("findings")}
         </section>
@@ -90,7 +93,7 @@ export function isLoadingScreen(state) {
 }
 
 function renderNotices(state) {
-  return `${state.error ? `<p class="banner error">${escapeHtml(state.error)}</p>` : ""}${state.notice ? `<p class="banner">${escapeHtml(state.notice)}</p>` : ""}${state.busyAction ? `<p class="working"><span></span>${escapeHtml(state.busyAction)}</p>` : ""}`;
+  return `${state.error ? `<p class="banner error">${escapeHtml(state.error)}</p>` : ""}${state.notice ? `<p class="banner">${escapeHtml(state.notice)}</p>` : ""}${(state.receipts ?? []).map((receipt) => `<p class="banner receipt">${escapeHtml(receipt)}</p>`).join("")}${state.busyAction ? `<p class="working"><span></span>${escapeHtml(state.busyAction)}</p>` : ""}`;
 }
 
 function renderLoading(state) {
@@ -101,7 +104,7 @@ function renderHeader(state) {
   const run = state.run;
   return `<header class="workspace-header">
     <div><p class="eyebrow">Stateful Codex · ${escapeHtml(run?.mode ?? "preparing")}</p><h1>${escapeHtml(state.project?.name ?? "Project")}</h1><p class="path">${escapeHtml(state.project?.roots?.map((root) => root.path).join(" · ") ?? "")}</p>${renderMissingRoots(state)}</div>
-    <div class="run-summary"><span class="badge ${escapeHtml(run?.status ?? "pending")}">${escapeHtml(run?.status ?? "preparing")}</span><span>strategy r${run?.strategyRevision ?? 0}</span><span>${run?.continuationsUsed ?? 0}/${run?.budget?.maxContinuations ?? 0} continuations</span><button class="text-button" data-action="refresh">Refresh</button></div>
+    <div class="run-summary"><span class="badge ${escapeHtml(run?.status ?? "pending")}" data-run-state>${escapeHtml(runStateLabel(state))}</span><span>strategy r${run?.strategyRevision ?? 0}</span><span>${run?.continuationsUsed ?? 0}/${run?.budget?.maxContinuations ?? 0} continuations</span><button class="text-button" data-action="refresh">Refresh</button></div>
   </header>`;
 }
 

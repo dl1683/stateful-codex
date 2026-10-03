@@ -46,7 +46,39 @@ test("only this thread's turn start resets the live text", () => {
       method: "turn/started",
       params: { threadId: "thread-a", turn: { id: "t3" } },
     }),
-    { sections: [], refresh: true, turnStarted: "t3" },
+    { sections: ["header"], refresh: true, turnStarted: "t3" },
+  );
+  assert.equal(state.turnInProgress, true);
+});
+
+test("turn completion and knowledge receipts update what the person sees", () => {
+  const state = workspaceState();
+  applyWorkspaceEvent(state, {
+    method: "turn/started",
+    params: { threadId: "thread-a", turn: { id: "t3" } },
+  });
+  assert.deepEqual(
+    applyWorkspaceEvent(state, {
+      method: "turn/completed",
+      params: { threadId: "thread-a", turn: { id: "t3" } },
+    }),
+    { sections: ["header"], refresh: true },
+  );
+  const receipt = (outcome) => ({
+    method: "statefulKnowledge/captured",
+    params: {
+      threadId: "thread-a",
+      turnId: "t3",
+      category: "rule",
+      outcome,
+      text: "Never run the whole suite.",
+    },
+  });
+  applyWorkspaceEvent(state, receipt("alreadyStored"));
+  applyWorkspaceEvent(state, receipt("stored"));
+  assert.deepEqual(
+    [state.turnInProgress, state.answeredOnce, state.receipts],
+    [false, true, ['Saved your rule: "Never run the whole suite."']],
   );
 });
 

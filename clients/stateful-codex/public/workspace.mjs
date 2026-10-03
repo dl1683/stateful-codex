@@ -1,3 +1,4 @@
+import { documentTitle } from "./memory-view.mjs";
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { findTurnMeasurement, latestAnswerTurn } from "./answer-provenance.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
@@ -59,6 +60,12 @@ const state = {
   blackboardTruncated: false,
   answerMeasurement: null,
   liveTurnId: null,
+  turnInProgress: false,
+  answeredOnce: false,
+  receipts: [],
+  memory: null,
+  memoryEditing: null,
+  answering: new Set(),
   runGeneration: 0,
   activityTruncated: false,
   loading: true,
@@ -185,6 +192,7 @@ async function refreshWorkspace() {
     status,
     hierarchy,
     blackboard,
+    memory,
     obligations,
     steering,
     measurementSummary,
@@ -196,6 +204,7 @@ async function refreshWorkspace() {
     rpc("projectIntelligence/status", { projectId }),
     readHierarchy(),
     rpc("blackboard/query", { projectId, text: null, limit: 50 }),
+    readMemory(),
     state.run
       ? rpc("obligation/list", {
           runId: state.run.id,
@@ -233,6 +242,7 @@ async function refreshWorkspace() {
   state.hierarchy = hierarchy;
   state.blackboard = blackboard.data;
   state.blackboardTruncated = blackboard.truncated === true;
+  state.memory = memory;
   state.obligations = obligations.data;
   // The list is read oldest first and capped, so keep steering confirmed in this page view,
   // marked stale when the capped read no longer includes it.
@@ -259,6 +269,27 @@ async function refreshWorkspace() {
   state.loading = false;
   state.busyAction = null;
   render();
+}
+
+// Two pages at most; a failure is shown in the panel rather than failing the whole refresh.
+async function readMemory() {
+  try {
+    const items = [];
+    let cursor = null;
+    for (let page = 0; page < 2; page += 1) {
+      const response = await rpc("statefulMemory/read", { threadId, cursor, limit: 50 });
+      items.push(...response.data);
+      cursor = response.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    return { items, more: Boolean(cursor), error: null };
+  } catch (error) {
+    return { items: [], more: false, error: error.message };
+  }
+}
+
+function memoryItem(entryId) {
+  return state.memory?.items.find((item) => item.entryId === entryId) ?? null;
 }
 
 // An error names its source's root when known; otherwise any missing root keeps it.
@@ -294,8 +325,11 @@ async function readHierarchy() {
 
 // Updates the named slots (all by default); before the first mount it renders the loading
 // screen or mounts the workspace.
+const baseTitle = document.title;
+
 function render(sections) {
   view.update(state, sections);
+  document.title = documentTitle(baseTitle, state.pendingRequests.length);
 }
 
 function handleEvent(message) {
@@ -379,6 +413,20 @@ app.addEventListener("submit", async (event) => {
       );
       // Refresh after the submission settles, so the clean selector shows the persisted mode.
       await refresh();
+    } else if (form.dataset.memoryCorrect) {
+      const content = form.querySelector('[name="content"]').value.trim();
+      if (!content) return;
+      const response = await action("Saving the correction", () =>
+        rpc("statefulMemory/correct", {
+          threadId,
+          entryId: form.dataset.memoryCorrect,
+          expectedRevision: Number(form.dataset.revision),
+          content,
+        }),
+      );
+      state.memoryEditing = null;
+      state.notice = `Corrected: "${response.item.content}".`;
+      await refresh();
     } else if (form.dataset.requestKey) {
       await answerUserRequest(form);
     } else if (form.id === "context-search") {
@@ -445,6 +493,28 @@ app.addEventListener("click", async (event) => {
       case "show-requests":
         view.showRequests();
         break;
+      case "memory-correct":
+        state.memoryEditing = button.dataset.entryId;
+        render(["memory"]);
+        break;
+      case "memory-cancel":
+        state.memoryEditing = null;
+        render(["memory"]);
+        break;
+      case "memory-forget": {
+        const item = memoryItem(button.dataset.entryId);
+        if (!item) break;
+        await action("Forgetting", () =>
+          rpc("statefulMemory/forget", {
+            threadId,
+            entryId: item.entryId,
+            expectedRevision: Number(button.dataset.revision),
+          }),
+        );
+        state.notice = `Forgot: "${item.content}". It stays in history but no longer applies.`;
+        await refresh();
+        break;
+      }
       case "approve":
       case "decline":
         await answerApproval(
@@ -564,11 +634,27 @@ async function answerApproval(key, actionName) {
   const request = state.pendingRequests.find(
     (item) => requestKey(item.id) === key,
   );
-  if (!request) return;
-  await reply(threadId, {
-    id: request.id,
-    result: { decision: actionName === "approve" ? "accept" : "decline" },
-  });
+  // A second click while the first answer is on its way sends nothing.
+  if (!request || state.answering.has(key)) return;
+  state.answering.add(key);
+  const card = app.querySelector(`[data-request-key="${CSS.escape(key)}"]`);
+  const buttons = card ? [...card.querySelectorAll("button[data-action]")] : [];
+  for (const button of buttons) button.disabled = true;
+  const pressed = buttons.find((button) => button.dataset.action === actionName);
+  const label = pressed?.textContent;
+  if (pressed) pressed.textContent = "Sending…";
+  try {
+    await reply(threadId, {
+      id: request.id,
+      result: { decision: actionName === "approve" ? "accept" : "decline" },
+    });
+  } catch (error) {
+    for (const button of buttons) button.disabled = false;
+    if (pressed) pressed.textContent = label;
+    throw new Error(`Your answer was not delivered; try again. ${error.message}`);
+  } finally {
+    state.answering.delete(key);
+  }
   state.pendingRequests = state.pendingRequests.filter(
     (item) => item.id !== request.id,
   );

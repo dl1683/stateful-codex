@@ -4,9 +4,26 @@ const REQUEST_ITEM_LIMIT = 50;
 // Per remembered item; a larger patch is kept truncated and flagged, never silently.
 const REQUEST_ITEM_DIFF_CHARACTERS = 256 * 1024;
 const FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval";
+const RECEIPT_LIMIT = 3;
+
+const RECEIPT_LABELS = {
+  rule: "Saved your rule",
+  pendingRule: "Saved a task-limited rule (not applied)",
+  decision: "Saved a decision",
+  recipe: "Saved a project recipe",
+  finding: "Saved a finding",
+  background: "Saved what you said about yourself",
+};
+
+// One line for something newly saved; a repeat of what was already saved says nothing.
+export function knowledgeReceipt(params) {
+  if (!params || params.outcome !== "stored") return null;
+  const label = RECEIPT_LABELS[params.category] ?? "Saved";
+  return `${label}: "${params.text ?? ""}"`;
+}
 
 const REFRESH_METHODS =
-  /^(statefulRun|statefulAttribution|obligation|steering|blackboard|project|thread|turn)\//;
+  /^(statefulRun|statefulAttribution|statefulKnowledge|obligation|steering|blackboard|project|thread|turn)\//;
 
 // Apply one app-server message to the workspace state. Returns what the caller should do next:
 // `sections` names the workspace slots to update ("requests" reconciles request cards),
@@ -73,7 +90,19 @@ export function applyWorkspaceEvent(state, message) {
   }
   if (message.method === "turn/started") {
     const turnId = message.params?.turn?.id ?? message.params?.turnId ?? null;
-    return { sections: [], refresh, turnStarted: turnId };
+    state.turnInProgress = true;
+    return { sections: ["header"], refresh, turnStarted: turnId };
+  }
+  if (message.method === "turn/completed") {
+    state.turnInProgress = false;
+    state.answeredOnce = true;
+    return { sections: ["header"], refresh };
+  }
+  if (message.method === "statefulKnowledge/captured") {
+    const receipt = knowledgeReceipt(message.params);
+    if (!receipt) return { sections: [], refresh: true };
+    state.receipts = [...(state.receipts ?? []), receipt].slice(-RECEIPT_LIMIT);
+    return { sections: ["notices"], refresh: true };
   }
   return { sections: [], refresh };
 }
