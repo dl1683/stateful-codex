@@ -215,7 +215,7 @@ async fn user_rules_are_kept_in_the_users_words_and_nothing_else_becomes_a_rule(
 /// model as the user's rule; the user's own rule in the same message is.
 #[tokio::test]
 async fn a_quoted_colleagues_preference_is_never_the_users_rule() -> Result<()> {
-    const MESSAGE: &str = "About me: I'm a backend engineer. Standing rule for all future sessions: never touch the docs folder. My colleague wrote in our chat: \"I always want tests written first\" - that's her preference, not mine.";
+    const MESSAGE: &str = "About me: I'm a backend engineer. Standing rule for all future sessions: never touch the docs folder. My colleague wrote in our chat: \"I always want tests written first\".";
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())

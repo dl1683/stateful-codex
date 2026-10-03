@@ -2,10 +2,10 @@
 //! taken as the user's own rule.
 //!
 //! A quotation is a span between double quotes, curly double quotes, or single quotes that
-//! open at a word start. Double quotes may cross sentences and lines (an unclosed one runs to
-//! the end); a single quote closes before punctuation, at the end of the text, or before a
-//! capitalized word, and otherwise at the end of its line, so a possessive ("users' docs")
-//! does not end it.
+//! open at a word start. Quotations may cross sentences and lines; an unclosed double quote
+//! runs to the end. A single quote closes at the end of a word, except a plural possessive
+//! ("users' docs"); a single quote left unclosed is ambiguous, and when the message reports
+//! speech everything after it is treated as possibly relayed.
 //!
 //! The rule is deliberately conservative: when a message attributes words to someone
 //! (a speech verb outside every quotation, such as "wrote" or "said"), no clause that
@@ -13,25 +13,20 @@
 //! also reporting speech can restate the rule without quotes; a stranger's preference must
 //! never be applied as theirs.
 
-/// Words that attribute words to someone.
+/// Past-tense verbs that report someone's words. Present forms ("a line that says ...",
+/// "if it asks ...") are how instructions describe output, so they do not count.
 const SPEECH_VERBS: &[&str] = &[
     "wrote",
-    "writes",
     "said",
-    "says",
     "asked",
-    "asks",
     "told",
-    "tells",
     "mentioned",
     "posted",
     "replied",
     "commented",
     "suggested",
     "noted",
-    "quote",
     "quoted",
-    "quoting",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,13 +40,16 @@ struct Span {
 /// The quotations of one message, computed once.
 pub(crate) struct Quotations<'a> {
     text: &'a str,
+    /// Sorted by opening offset and non-overlapping.
     spans: Vec<Span>,
+    /// Where an unclosed single quote opened, if any.
+    ambiguous_from: Option<usize>,
     attributes_speech: bool,
 }
 
 impl<'a> Quotations<'a> {
     pub(crate) fn new(text: &'a str) -> Self {
-        let spans = spans(text);
+        let (spans, ambiguous_from) = spans(text);
         let mut outside = String::with_capacity(text.len());
         let mut position = 0;
         for span in &spans {
@@ -66,6 +64,7 @@ impl<'a> Quotations<'a> {
         Self {
             text,
             spans,
+            ambiguous_from,
             attributes_speech,
         }
     }
@@ -74,10 +73,18 @@ impl<'a> Quotations<'a> {
     /// it begins inside a quotation, or the message attributes speech and the part holds a
     /// quotation.
     pub(crate) fn relays(&self, start: usize, end: usize) -> bool {
-        self.spans.iter().any(|span| {
-            (span.open < start && start < span.close)
-                || (self.attributes_speech && span.open >= start && span.open < end)
-        })
+        // Spans are sorted and disjoint: the last one opening before `start` is the only one
+        // that can contain it, and the next one tells whether any opens inside the part.
+        let first_at_or_after = self.spans.partition_point(|span| span.open < start);
+        let inside = first_at_or_after
+            .checked_sub(1)
+            .is_some_and(|index| start < self.spans[index].close);
+        let holds = self
+            .spans
+            .get(first_at_or_after)
+            .is_some_and(|span| span.open < end);
+        let after_ambiguous = self.ambiguous_from.is_some_and(|open| open < end);
+        inside || (self.attributes_speech && (holds || after_ambiguous))
     }
 
     /// Like `relays`, for a clause found in the message (judged alone if not found).
@@ -92,81 +99,62 @@ impl<'a> Quotations<'a> {
     }
 }
 
-fn spans(text: &str) -> Vec<Span> {
+fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
     let characters = text.char_indices().collect::<Vec<_>>();
     let mut spans = Vec::new();
     let mut open: Option<(usize, char)> = None;
     for (index, &(offset, character)) in characters.iter().enumerate() {
         let before = index.checked_sub(1).map(|previous| characters[previous].1);
         let after = characters.get(index + 1).map(|next| next.1);
-        let after_next = characters.get(index + 2).map(|next| next.1);
         let end = offset + character.len_utf8();
-        match open {
-            Some((start, '"')) if character == '"' => {
-                spans.push(Span {
-                    open: start,
-                    close: end,
-                });
-                open = None;
-            }
-            Some((start, '\u{201c}')) if character == '\u{201d}' => {
-                spans.push(Span {
-                    open: start,
-                    close: end,
-                });
-                open = None;
-            }
-            Some((start, '\'' | '\u{2018}')) => {
-                let candidate = matches!(character, '\'' | '\u{2019}')
+        let closes = match open {
+            Some((_, '"')) => character == '"',
+            Some((_, '\u{201c}')) => character == '\u{201d}',
+            Some((_, '\'' | '\u{2018}')) => {
+                let word_end = matches!(character, '\'' | '\u{2019}')
                     && before.is_some_and(|before| !before.is_whitespace())
                     && !after.is_some_and(char::is_alphanumeric);
-                let closes = candidate
-                    && match after {
-                        None => true,
-                        Some(next) if next.is_ascii_punctuation() => true,
-                        Some(next) if next.is_whitespace() => {
-                            after_next.is_none_or(|word| !word.is_lowercase())
-                        }
-                        Some(_) => false,
-                    };
-                if closes {
-                    spans.push(Span {
-                        open: start,
-                        close: end,
-                    });
-                    open = None;
-                } else if character == '\n' {
-                    // An unmatched single quote ends with its line.
-                    spans.push(Span {
-                        open: start,
-                        close: offset,
-                    });
-                    open = None;
-                }
+                // "users' docs": a plural possessive, not the end of the quotation.
+                let possessive = before == Some('s') && after.is_some_and(char::is_whitespace);
+                word_end && !possessive
             }
-            Some(_) => {}
-            None => {
-                let opens = match character {
-                    '"' | '\u{201c}' => true,
-                    '\'' | '\u{2018}' => {
-                        !before.is_some_and(char::is_alphanumeric)
-                            && after.is_some_and(char::is_alphanumeric)
-                    }
-                    _ => false,
-                };
-                if opens {
-                    open = Some((offset, character));
+            Some(_) => false,
+            None => false,
+        };
+        if closes {
+            if let Some((start, _)) = open.take() {
+                spans.push(Span {
+                    open: start,
+                    close: end,
+                });
+            }
+            continue;
+        }
+        if open.is_none() {
+            let opens = match character {
+                '"' | '\u{201c}' => true,
+                '\'' | '\u{2018}' => {
+                    !before.is_some_and(char::is_alphanumeric)
+                        && after.is_some_and(char::is_alphanumeric)
                 }
+                _ => false,
+            };
+            if opens {
+                open = Some((offset, character));
             }
         }
     }
-    if let Some((start, _)) = open {
-        spans.push(Span {
-            open: start,
-            close: text.len(),
-        });
+    match open {
+        Some((start, '"' | '\u{201c}')) => {
+            spans.push(Span {
+                open: start,
+                close: text.len(),
+            });
+            (spans, None)
+        }
+        Some((start, _)) => (spans, Some(start)),
+        None => (spans, None),
     }
-    spans
 }
 
 #[cfg(test)]

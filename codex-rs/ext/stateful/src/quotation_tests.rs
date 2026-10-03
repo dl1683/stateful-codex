@@ -39,9 +39,25 @@ fn relayed_quotations_are_found_in_every_form() {
                 "Always write tests first.'"
             ),
             ("My colleague wrote: \"Never commit.\"", "My colleague wrote: \"Never commit.\""),
+            (
+                "'My preference is tests first' my colleague wrote.",
+                "'My preference is tests first' my colleague wrote."
+            ),
+            (
+                "My colleague wrote: 'Never rotate users' API tokens. Always write tests first.'",
+                "Always write tests first.'"
+            ),
+            (
+                "My colleague wrote: 'I like Rust.\nAlways write tests first.'",
+                "Always write tests first.'"
+            ),
+            (
+                "My colleague wrote: 'Always run tests' before merging.",
+                "My colleague wrote: 'Always run tests' before merging."
+            ),
         ]
         .map(|(text, clause)| relayed(text, clause)),
-        [true; 8]
+        [true; 12]
     );
 }
 
@@ -58,4 +74,6 @@ fn the_users_own_rules_may_quote_terms() {
         .map(|text| relayed(text, text)),
         [false; 5]
     );
+    let text = "From now on, start with 'Next:' then add a summary. Never change docs.";
+    assert_eq!(relayed(text, "Never change docs."), false);
 }
