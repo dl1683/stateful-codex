@@ -198,6 +198,61 @@ impl StatefulRunStore {
         rows.into_iter().map(parse_event).collect()
     }
 
+    /// The newest observations of one kind for `project_id` up to `through_seq`, newest first,
+    /// so a capsule can reach a working command or a closing message older than its main page.
+    pub async fn window_events_of_kind(
+        &self,
+        thread_id: &str,
+        project_id: &str,
+        kind: WindowEventKind,
+        through_seq: u64,
+        max_results: u32,
+    ) -> Result<Vec<WindowEvent>, StatefulRunStoreError> {
+        validate_list_limit(max_results)?;
+        let rows = sqlx::query_as::<_, StoredEvent>(
+            "SELECT thread_id, seq, event_key, project_id, turn_id, kind, payload_json,
+                    created_at_ms
+             FROM stateful_window_events
+             WHERE thread_id = ? AND project_id = ? AND kind = ? AND seq <= ?
+             ORDER BY seq DESC LIMIT ?",
+        )
+        .bind(thread_id)
+        .bind(project_id)
+        .bind(kind_name(kind))
+        .bind(to_i64(through_seq)?)
+        .bind(i64::from(max_results))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(parse_event).collect()
+    }
+
+    /// The newest commands the host marked as test or check runs (payload `validation: true`),
+    /// newest first, however many other commands came after them.
+    pub async fn window_validation_commands(
+        &self,
+        thread_id: &str,
+        project_id: &str,
+        through_seq: u64,
+        max_results: u32,
+    ) -> Result<Vec<WindowEvent>, StatefulRunStoreError> {
+        validate_list_limit(max_results)?;
+        let rows = sqlx::query_as::<_, StoredEvent>(
+            "SELECT thread_id, seq, event_key, project_id, turn_id, kind, payload_json,
+                    created_at_ms
+             FROM stateful_window_events
+             WHERE thread_id = ? AND project_id = ? AND kind = 'command' AND seq <= ?
+               AND payload_json LIKE '%\"validation\":true%'
+             ORDER BY seq DESC LIMIT ?",
+        )
+        .bind(thread_id)
+        .bind(project_id)
+        .bind(to_i64(through_seq)?)
+        .bind(i64::from(max_results))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(parse_event).collect()
+    }
+
     /// Whether `(after_seq, through_seq]` holds work worth publishing (an edit, a command or a
     /// plan), checked over the whole range rather than one page.
     pub async fn has_window_work(

@@ -49,6 +49,9 @@ const MAX_PROGRESS_BYTES: usize = 700;
 const MAX_VALIDATION_TAIL_BYTES: usize = 480;
 const MAX_FAILURE_TAIL_BYTES: usize = 320;
 const MAX_QUOTE_BYTES: usize = 400;
+/// Closing messages quoted, and the bytes of each quoted from its end.
+const MAX_CLOSINGS: usize = 3;
+const MAX_CLOSING_BYTES: usize = 320;
 /// The working command is quoted verbatim, so it gets more room than other command lines.
 const MAX_WORKING_COMMAND_BYTES: usize = 600;
 /// Files larger than this are named but not hashed or read at the boundary.
@@ -91,10 +94,7 @@ pub(crate) async fn window_capsule(
     if through_seq == 0 {
         return None;
     }
-    let events = match store
-        .window_events_newest_first(thread_id, project_id, 0, through_seq, CAPSULE_PAGE)
-        .await
-    {
+    let events = match capsule_events(store, thread_id, project_id, through_seq).await {
         Ok(events) => events,
         Err(error) => {
             tracing::warn!(%thread_id, %error, "failed to read the window journal");
@@ -129,6 +129,41 @@ pub(crate) async fn window_capsule(
 /// Whether a stored capsule has anything to show.
 pub(crate) fn has_content(capsule: &TaskCapsule) -> bool {
     capsule.body != NO_CAPSULE
+}
+
+/// The newest page of the journal plus the newest observations of each kind the capsule needs,
+/// so a working command, a plan or a closing message older than the page still reaches it.
+async fn capsule_events(
+    store: &StatefulRunStore,
+    thread_id: &str,
+    project_id: &str,
+    through_seq: u64,
+) -> Result<Vec<WindowEvent>, codex_stateful_runtime::StatefulRunStoreError> {
+    let mut events = store
+        .window_events_newest_first(thread_id, project_id, 0, through_seq, CAPSULE_PAGE)
+        .await?;
+    let mut pages = store
+        .window_validation_commands(thread_id, project_id, through_seq, 16)
+        .await?;
+    for (kind, limit) in [
+        (WindowEventKind::Command, 16),
+        (WindowEventKind::Message, 32),
+        (WindowEventKind::Plan, 4),
+        (WindowEventKind::User, 16),
+    ] {
+        pages.extend(
+            store
+                .window_events_of_kind(thread_id, project_id, kind, through_seq, limit)
+                .await?,
+        );
+    }
+    for event in pages {
+        if !events.iter().any(|known| known.seq == event.seq) {
+            events.push(event);
+        }
+    }
+    events.sort_by(|left, right| right.seq.cmp(&left.seq));
+    Ok(events)
 }
 
 /// The capsule section. `stale` reports journaled edits after the capsule's capture.
@@ -176,6 +211,9 @@ struct Sections {
     /// the failing form of the same runner it replaced. Kept whatever else is trimmed.
     working: Option<String>,
     failure: Option<(String, String)>,
+    /// The closing words of the most recent turns, quoted (a next step stated before a
+    /// detour lives here).
+    closings: Vec<String>,
     files: Vec<String>,
     more_files: usize,
     progress: Vec<String>,
@@ -183,55 +221,84 @@ struct Sections {
 }
 
 impl Sections {
-    fn render(&self, files: usize, output_tails: bool, progress: bool) -> String {
-        let mut lines = vec![self.header.clone(), self.next_step.clone()];
+    /// Lines in display order, each with the priority it is kept at (0 is kept longest).
+    fn lines(&self) -> Vec<(u8, String)> {
+        let mut lines = vec![(0, self.header.clone()), (0, self.next_step.clone())];
         if let Some(working) = &self.working {
-            lines.push(working.clone());
+            lines.push((0, working.clone()));
         }
-        for (line, output) in [&self.validation, &self.failure].into_iter().flatten() {
-            lines.push(line.clone());
-            if output_tails && !output.is_empty() {
-                lines.push(output.clone());
+        if !self.closings.is_empty() {
+            lines.push((
+                1,
+                "Closing words of recent turns (the agent's own, newest first):".to_string(),
+            ));
+            for (index, closing) in self.closings.iter().enumerate() {
+                lines.push((
+                    1 + u8::try_from(index).unwrap_or(u8::MAX).min(2),
+                    closing.clone(),
+                ));
+            }
+        }
+        for (line, output) in [&self.failure, &self.validation].into_iter().flatten() {
+            lines.push((2, line.clone()));
+            if !output.is_empty() {
+                lines.push((5, output.clone()));
             }
         }
         if !self.files.is_empty() {
-            let omitted = self.more_files + self.files.len().saturating_sub(files);
-            lines.push(format!(
-                "Paths in recent patches, newest first, each with its patch's overall outcome (which files a failed patch changed was not observed; scripts may have changed others; hashes are of the bytes found at the boundary):{}",
-                if omitted > 0 {
-                    format!(" {omitted} more not listed.")
-                } else {
-                    String::new()
-                }
+            lines.push((
+                4,
+                format!(
+                    "Paths in recent patches, newest first, with the patch's overall outcome (which files a failed patch changed was not observed; scripts may have changed others):{}",
+                    if self.more_files > 0 {
+                        format!(" {} more not listed.", self.more_files)
+                    } else {
+                        String::new()
+                    }
+                ),
             ));
-            lines.extend(self.files.iter().take(files).cloned());
+            for (index, file) in self.files.iter().enumerate() {
+                lines.push((if index < 3 { 4 } else { 6 }, file.clone()));
+            }
         }
-        if progress {
-            lines.extend(self.progress.iter().cloned());
-        }
-        lines.push(self.footer.clone());
-        lines.join("\n")
+        lines.extend(self.progress.iter().map(|note| (7, note.clone())));
+        lines.push((3, self.footer.clone()));
+        lines
     }
 }
 
-/// Builds the capsule text within `max_bytes` (markers included), dropping progress notes,
-/// then output tails, then older files before cutting the text itself.
+/// Builds the capsule text within `max_bytes` (markers included). Lines are dropped from the
+/// lowest priority up (progress notes, older files, output tails, files, closing words) until
+/// the rest fits; the next step and the working command are kept, cut if they must be.
 async fn build_capsule(newest_first: &[WindowEvent], through_seq: u64, max_bytes: usize) -> String {
     let budget = max_bytes.saturating_sub(START_MARKER.len() + END_MARKER.len());
-    let sections = sections(newest_first, through_seq).await;
-    for (files, output_tails, progress) in [
-        (MAX_FILES, true, true),
-        (MAX_FILES, true, false),
-        (MAX_FILES, false, false),
-        (3, false, false),
-        (0, false, false),
-    ] {
-        let text = sections.render(files, output_tails, progress);
-        if text.len() <= budget {
-            return text;
+    let mut lines = sections(newest_first, through_seq).await.lines();
+    let joined = |lines: &[(u8, String)]| {
+        lines
+            .iter()
+            .map(|(_, line)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    while joined(&lines).len() > budget {
+        let lowest = lines
+            .iter()
+            .map(|(priority, _)| *priority)
+            .max()
+            .unwrap_or(0);
+        if lowest == 0 {
+            break;
+        }
+        // Drop the last line at the lowest priority (older items are listed later).
+        if let Some(index) = lines.iter().rposition(|(priority, _)| *priority == lowest) {
+            lines.remove(index);
         }
     }
-    let mut text = head(&sections.render(0, false, false), budget.saturating_sub(40));
+    let text = joined(&lines);
+    if text.len() <= budget {
+        return text;
+    }
+    let mut text = head(&text, budget.saturating_sub(40));
     text.push_str("\n[task capsule shortened]");
     text
 }
@@ -270,7 +337,7 @@ async fn sections(newest_first: &[WindowEvent], through_seq: u64) -> Sections {
                 && command_text(event) != command_text(working)
         });
         format!(
-            "Last working test or check command (exit 0, the process exit code, not a test count; reuse it verbatim, with its working directory and any environment settings it contains): `{}` in {}.{}{}",
+            "Last working test or check command (exit 0, a process exit code, not a test count; reuse it verbatim, with its directory and any environment settings in it): `{}` in {}.{}{}",
             head(command_text(working), MAX_WORKING_COMMAND_BYTES),
             head(working.event.payload["cwd"].as_str().unwrap_or("an unrecorded directory"), 240),
             replaced.map_or_else(String::new, |failed| format!(
@@ -321,17 +388,45 @@ async fn sections(newest_first: &[WindowEvent], through_seq: u64) -> Sections {
     let (files, more_files) = edited_files(newest_first).await;
     Sections {
         header: format!(
-            "Task capsule: where the work stood when compaction closed the previous window (host observations through journal event {through_seq}, and the agent's own recorded words; not a verified summary)."
+            "Task capsule: where the work stood at compaction (host observations through journal event {through_seq} and the agent's own words; not a verified summary)."
         ),
         next_step: next_step(newest_first, through_seq),
         validation,
         working: working_line,
         failure,
+        closings: closings(newest_first, through_seq),
         files: files.iter().map(|(_, line)| line.clone()).collect(),
         more_files,
         progress: progress_notes(&files).await,
         footer: "Older detail is in the thread's history and in the published window receipts (memory_read). Read a file again before editing it if it may have changed.".to_string(),
     }
+}
+
+/// The ends of the agent's most recent closing messages, one per turn, quoted exactly.
+fn closings(newest_first: &[WindowEvent], through_seq: u64) -> Vec<String> {
+    let mut turns = Vec::<&str>::new();
+    let mut closings = Vec::new();
+    for event in newest_first.iter().filter(|event| {
+        event.event.kind == WindowEventKind::Message && event.event.payload["phase"] != "commentary"
+    }) {
+        if turns.contains(&event.event.turn_id.as_str()) {
+            continue;
+        }
+        turns.push(&event.event.turn_id);
+        let text = event.event.payload["tail"]
+            .as_str()
+            .or_else(|| event.event.payload["text"].as_str())
+            .unwrap_or_default();
+        closings.push(format!(
+            "- {} observations before compaction: \"...{}\"",
+            through_seq.saturating_sub(event.seq),
+            tail(text, MAX_CLOSING_BYTES).replace('\n', " ")
+        ));
+        if closings.len() == MAX_CLOSINGS {
+            break;
+        }
+    }
+    closings
 }
 
 /// The next step only from what the agent itself recorded, or unknown.

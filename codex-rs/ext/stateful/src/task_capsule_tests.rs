@@ -35,6 +35,7 @@ async fn append(store: &StatefulRunStore, key: &str, kind: WindowEventKind, payl
 
 fn command(command: &str, exit_code: i64, output: &str) -> Value {
     json!({
+        "validation": crate::window_capture::is_validation_command(command),
         "command": command,
         "status": if exit_code == 0 { "completed" } else { "failed" },
         "exitCode": exit_code,
@@ -167,7 +168,7 @@ async fn without_a_plan_the_capsule_quotes_or_says_unknown_and_never_claims_a_pa
     assert!(
         unknown
             .body
-            .contains("(exit 0, the process exit code, not a test count;"),
+            .contains("(exit 0, a process exit code, not a test count;"),
         "{}",
         unknown.body
     );
@@ -289,7 +290,7 @@ async fn the_capsule_keeps_the_last_working_validation_and_the_workaround_it_nee
     let body = &capsule.body;
     assert!(
         body.contains(&format!(
-            r"Last working test or check command (exit 0, the process exit code, not a test count; reuse it verbatim, with its working directory and any environment settings it contains): `{working}` in C:\work\recipes. It replaced a form that failed: `{failing}` exit 1."
+            r"Last working test or check command (exit 0, a process exit code, not a test count; reuse it verbatim, with its directory and any environment settings in it): `{working}` in C:\work\recipes. It replaced a form that failed: `{failing}` exit 1."
         )),
         "{body}"
     );
@@ -300,4 +301,112 @@ async fn the_capsule_keeps_the_last_working_validation_and_the_workaround_it_nee
         "{body}"
     );
     assert!(body.len() + "<stateful_task_capsule></stateful_task_capsule>".len() <= 2_048);
+}
+
+async fn append_in_turn(
+    store: &StatefulRunStore,
+    key: &str,
+    turn: &str,
+    kind: WindowEventKind,
+    payload: Value,
+) {
+    store
+        .append_window_event(&NewWindowEvent {
+            thread_id: "thread-1".to_string(),
+            event_key: key.to_string(),
+            project_id: "project-1".to_string(),
+            turn_id: turn.to_string(),
+            kind,
+            payload,
+        })
+        .await
+        .expect("append");
+}
+
+/// within1 N5 and N7: a working pytest route found early, a next step stated at the end of t05,
+/// then a long t06 detour pushes both out of the newest page. A 50k-limit capsule (2,048
+/// bytes) still carries the route verbatim and the t05 closing words.
+#[tokio::test]
+async fn the_next_step_stated_before_a_detour_and_an_old_working_route_survive() {
+    let home = TempDir::new().expect("home");
+    let store = store(&home).await;
+    let mut working = command(
+        r"powershell -Command python -m pytest tests/test_config.py -q --basetemp C:\tmpdir\click-config-tests",
+        0,
+        "12 passed",
+    );
+    working["cwd"] = json!(r"C:\work\click");
+    append_in_turn(&store, "t02-c1", "t02", WindowEventKind::Command, working).await;
+    let closing = format!(
+        "{} Next step: add the INI and JSON loaders behind the same loader interface, then the layering tests.",
+        "Implemented TOML loading and precedence. ".repeat(40)
+    );
+    append_in_turn(
+        &store,
+        "t05-m1",
+        "t05",
+        WindowEventKind::Message,
+        json!({
+            "phase": "final",
+            "text": head_of(&closing, 1_024),
+            "tail": tail_of(&closing, 512),
+            "textBytes": closing.len(),
+        }),
+    )
+    .await;
+    append_in_turn(
+        &store,
+        "t06-u1",
+        "t06",
+        WindowEventKind::User,
+        json!({"text": "Quick detour: profile the help output."}),
+    )
+    .await;
+    for index in 0..80 {
+        append_in_turn(
+            &store,
+            &format!("t06-c{index}"),
+            "t06",
+            WindowEventKind::Command,
+            command("powershell -Command python bench.py", 0, "ok"),
+        )
+        .await;
+    }
+    append_in_turn(
+        &store,
+        "t06-m1",
+        "t06",
+        WindowEventKind::Message,
+        json!({"phase": "final", "text": "Profiled: help rendering is 4 ms.", "textBytes": 33}),
+    )
+    .await;
+
+    let capsule = window_capsule(
+        &store,
+        "thread-1",
+        "project-1",
+        "window-9",
+        capsule_bytes(Some(50_000)),
+    )
+    .await
+    .expect("capsule");
+    let body = &capsule.body;
+    assert!(
+        body.contains(r"`powershell -Command python -m pytest tests/test_config.py -q --basetemp C:\tmpdir\click-config-tests` in C:\work\click."),
+        "{body}"
+    );
+    assert!(
+        body.contains("Next step: add the INI and JSON loaders behind the same loader interface, then the layering tests."),
+        "{body}"
+    );
+    assert!(body.contains("Profiled: help rendering is 4 ms."), "{body}");
+    assert!(body.len() + "<stateful_task_capsule></stateful_task_capsule>".len() <= 2_048);
+}
+
+fn head_of(text: &str, max: usize) -> String {
+    crate::window_capture::head(text, max)
+}
+
+fn tail_of(text: &str, max: usize) -> String {
+    crate::window_capture::tail(text, max)
 }

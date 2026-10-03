@@ -31,6 +31,7 @@ const MAX_COMMAND_BYTES: usize = 1_024;
 const MAX_CWD_BYTES: usize = 512;
 const MAX_OUTPUT_TAIL_BYTES: usize = 2_048;
 const MAX_MESSAGE_BYTES: usize = 1_024;
+const MAX_MESSAGE_TAIL_BYTES: usize = 512;
 const MAX_USER_BYTES: usize = 512;
 const MAX_PATH_BYTES: usize = 512;
 const MAX_PLAN_STEPS: usize = 16;
@@ -179,11 +180,14 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
                     MAX_OUTPUT_TAIL_BYTES,
                 ),
             };
+            let command_line = clean_head(&command.command.join(" "), MAX_COMMAND_BYTES);
             Some((
                 format!("{}:command", command.id),
                 WindowEventKind::Command,
                 json!({
-                    "command": clean_head(&command.command.join(" "), MAX_COMMAND_BYTES),
+                    // Lets a capsule find test runs older than its page.
+                    "validation": is_validation_command(&command_line),
+                    "command": command_line,
                     "cwd": clean_head(&command.cwd.to_string(), MAX_CWD_BYTES),
                     "status": status,
                     "exitCode": command.exit_code,
@@ -259,11 +263,18 @@ fn observation(item: &TurnItem) -> Option<(String, WindowEventKind, Value)> {
             Some((
                 format!("{}:message", message.id),
                 WindowEventKind::Message,
-                json!({
-                    "phase": phase,
-                    "text": clean_head(&text, MAX_MESSAGE_BYTES),
-                    "textBytes": text.len(),
-                }),
+                {
+                    let mut payload = json!({
+                        "phase": phase,
+                        "text": clean_head(&text, MAX_MESSAGE_BYTES),
+                        "textBytes": text.len(),
+                    });
+                    // A closing message often states the next step at its end.
+                    if text.len() > MAX_MESSAGE_BYTES {
+                        payload["tail"] = json!(clean_tail(&text, MAX_MESSAGE_TAIL_BYTES));
+                    }
+                    payload
+                },
             ))
         }
         TurnItem::UserMessage(message) => {

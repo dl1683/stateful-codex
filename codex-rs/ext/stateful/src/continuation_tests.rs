@@ -328,3 +328,32 @@ fn a_rule_retired_during_an_outage_is_revoked_when_memory_is_read_again() {
         "{correction}"
     );
 }
+
+/// The post-compaction render must be smaller than the full packets it replaces, even with a
+/// task capsule at its 50k-limit cap (2,048 bytes).
+#[test]
+fn a_continuation_window_with_a_full_capsule_carries_less_than_the_full_packets() {
+    let status = project_status();
+    let (full_project, _) = status.render();
+    let full_run = run_status(WorkflowMode::Collaborative).render();
+    let project = rendered(
+        &continuation_project_section(
+            continuation_project(&status, Admission::Opening).expect("fits"),
+            None,
+            (VisibleRootRegistry::default(), "thread-1".to_string()),
+        ),
+        PreviousWorldStateSection::Absent,
+    )
+    .expect("project");
+    let run = rendered(
+        &run_continuation_section(run_status(WorkflowMode::Collaborative)),
+        PreviousWorldStateSection::Absent,
+    )
+    .expect("run");
+    let continuation = project.len() + run.len() + 2_048;
+    let full = full_project.len() + full_run.len();
+    // Measured 2026-10-03 on the packet fixture: full project 7,883 + run 2,424 = 10,307
+    // bytes before the conversation record; continuation project 1,207 + run 1,048 + a
+    // capsule of at most 2,048 = at most 4,303.
+    assert!(continuation * 2 < full + 1_000, "{continuation} vs {full}");
+}
