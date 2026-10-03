@@ -27,10 +27,10 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
             "Add a unit test for parse_duration covering negative inputs",
             RequestScope::SelfContained,
         ),
-        // Deictic words are ambiguous, so even a relative "that" keeps continuity.
+        // A deictic word in a request that names its own subject points at that subject.
         (
             "Add a unit test for parse_duration that covers negative inputs",
-            RequestScope::Continuity,
+            RequestScope::SelfContained,
         ),
         (
             "Rename the helper in utils.py to snake_case and update its callers",
@@ -51,7 +51,7 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
         ),
         (
             "Add another supported per unit for weeks to rate.py",
-            RequestScope::Continuity,
+            RequestScope::SelfContained,
         ),
         (
             "What do you remember about me and my working style?",
@@ -77,11 +77,11 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
         ),
         (
             "Make it handle Windows paths in path_utils.py",
-            RequestScope::Continuity,
+            RequestScope::SelfContained,
         ),
         (
             "Add Windows path handling to path_utils.py too",
-            RequestScope::Continuity,
+            RequestScope::SelfContained,
         ),
         (
             "You have permission to edit recipes.json for the crepes",
@@ -102,6 +102,40 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
         (
             "Implement the patch you described in parser.rs",
             RequestScope::Continuity,
+        ),
+        // Without a named subject a deictic word points at earlier work.
+        (
+            "Please fix that bug in the parser module",
+            RequestScope::Continuity,
+        ),
+        (
+            "Now do the same for the other functions too",
+            RequestScope::Continuity,
+        ),
+        // Field requests from the horizon runs that name their own subject.
+        (
+            "Bug report from finance: ordinal(-3) comes out as \"-3th\" on the ledger page. Negative numbers should get the right suffix, like \"-3rd\", \"-11th\", \"-22nd\". Please fix it.",
+            RequestScope::SelfContained,
+        ),
+        (
+            "The dashboard team wants numbers to fit narrow cells too, not just durations. Look at number.py and give me your three best ideas for compact number output, ranked, with a sentence on the tradeoff of each. Don't implement anything yet.",
+            RequestScope::SelfContained,
+        ),
+        (
+            "Finance found another one: intcomma(-0.5, 0) shows \"-0\" in the quarterly report. A negative zero makes no sense to them. Can you fix that?",
+            RequestScope::SelfContained,
+        ),
+        (
+            "time.py is getting long and the compact duration code is spread around in it. Pull the compact-formatting pieces into their own private module so precisedelta and naturaldelta share one implementation. No behaviour change.",
+            RequestScope::SelfContained,
+        ),
+        (
+            "New request from the reports team: natural_list should be able to say \"or\" instead of \"and\", and optionally use an Oxford comma (\"a, b, and c\"). Current output must stay the default.",
+            RequestScope::SelfContained,
+        ),
+        (
+            "Saw this in a log: intword(10**110) printed \"10000000000.0 googol\". That's silly. Make huge numbers past a googol come out sensibly.",
+            RequestScope::SelfContained,
         ),
     ];
     let actual = cases

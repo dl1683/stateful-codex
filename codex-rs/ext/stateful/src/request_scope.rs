@@ -344,17 +344,10 @@ const REFERENTS: &[&str] = &[
     "as planned",
     "the plan",
     "our plan",
-    "idea",
-    "ideas",
-    "option",
-    "options",
     "as before",
     "as usual",
     "same as",
     "like before",
-    "also",
-    "instead",
-    "another",
     "standing",
     "preference",
     "preferences",
@@ -391,32 +384,11 @@ const REFERENTS: &[&str] = &[
     "last",
     "latter",
     "former",
-    "it",
-    "this",
-    "that",
-    "these",
-    "those",
-    "them",
-    "they",
-    "too",
-    "approach",
-    "version",
-    "variant",
     // First-person-plural and second-person possessive references to shared work.
-    "we",
-    "our",
-    "ours",
-    "us",
-    "your",
-    "yours",
     "recommended",
     "recommendation",
     "recommend",
     "identified",
-    "found",
-    "noticed",
-    "flagged",
-    "spotted",
     "mentioned",
     "pointed out",
     "outlined",
@@ -425,17 +397,23 @@ const REFERENTS: &[&str] = &[
     "explained",
     "drafted",
     "sketched",
-    "showed",
-    "shown",
-    "provided",
     "gave",
-    "given",
     // Approval and authorization.
     "permission",
     "authorize",
     "authorized",
     "allowed",
     "go ahead",
+];
+
+/// Deictic and shared-work words: earlier work when the request names nothing they could
+/// point at, but ordinary words in a request that names its own subject ("Finance found
+/// another one: intcomma(-0.5, 0) shows -0. Can you fix that?").
+const DEICTIC_REFERENTS: &[&str] = &[
+    "also", "instead", "another", "it", "this", "that", "these", "those", "them", "they", "too",
+    "approach", "version", "variant", "we", "our", "ours", "us", "your", "yours", "found",
+    "noticed", "flagged", "spotted", "shown", "showed", "provided", "given", "idea", "ideas",
+    "option", "options",
 ];
 
 /// Classifies one submitted request from its text alone.
@@ -449,14 +427,56 @@ pub(crate) fn classify(text: &str) -> RequestScope {
     let opens_with_reply = REPLY_OPENINGS
         .iter()
         .any(|opening| padded.starts_with(&format!(" {opening} ")));
-    if opens_with_reply
-        || REFERENTS
+    let mentions = |phrases: &[&str]| {
+        phrases
             .iter()
-            .any(|referent| padded.contains(&format!(" {referent} ")))
+            .any(|phrase| padded.contains(&format!(" {phrase} ")))
+    };
+    if opens_with_reply
+        || mentions(REFERENTS)
+        || (mentions(DEICTIC_REFERENTS) && !names_its_subject(text))
     {
         return RequestScope::Continuity;
     }
     RequestScope::SelfContained
+}
+
+/// Whether the request names a concrete subject a deictic word can point at: a call such
+/// as `intcomma(-0.5, 0)`, a file such as `number.py`, a snake_case identifier, inline
+/// code, or a quoted value.
+fn names_its_subject(text: &str) -> bool {
+    if text.contains('`') {
+        return true;
+    }
+    let quoted = text.split('"').count() >= 3 || text.split(['\u{201c}', '\u{201d}']).count() >= 3;
+    quoted
+        || text.split_whitespace().any(|token| {
+            let token = token.trim_matches(|character: char| {
+                !(character.is_alphanumeric() || matches!(character, '_' | '(' | '.'))
+            });
+            let identifier = |part: &str| {
+                part.chars().next().is_some_and(char::is_alphabetic)
+                    && part
+                        .chars()
+                        .all(|character| character.is_alphanumeric() || character == '_')
+            };
+            let call = token
+                .split_once('(')
+                .is_some_and(|(name, _)| identifier(name));
+            let snake =
+                identifier(token) && token.contains('_') && token.chars().any(char::is_alphabetic);
+            let file = token.rsplit_once('.').is_some_and(|(stem, extension)| {
+                !stem.is_empty()
+                    && (1..=4).contains(&extension.len())
+                    && extension
+                        .chars()
+                        .all(|character| character.is_ascii_lowercase())
+                    && stem.chars().all(|character| {
+                        character.is_alphanumeric() || matches!(character, '_' | '-' | '/' | '.')
+                    })
+            });
+            call || snake || file
+        })
 }
 
 /// Lowercases and turns every character that cannot be part of a word into a space, so
