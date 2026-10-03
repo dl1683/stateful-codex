@@ -11,7 +11,6 @@ use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
-use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
@@ -57,6 +56,7 @@ use super::blackboard_premises::PremiseArguments;
 use super::blackboard_premises::premise_schema;
 use super::blackboard_premises::resolve_premises;
 use super::blackboard_supersede::SupersedeReference;
+use super::blackboard_supersede::committed_succession;
 use super::blackboard_supersede::resolve_superseded;
 use super::blackboard_supersede::supersedes_schema;
 use super::bounded_json_output;
@@ -302,20 +302,18 @@ impl BlackboardRecorder {
         let retried = if supersedes.is_empty() {
             None
         } else {
-            // A repeated record whose succession already committed returns it; the entries it
-            // replaced are no longer current, so the first-write checks would refuse it.
-            store
-                .get_entry(&self.project_id, &id)
-                .await
-                .map_err(respond)?
-                .filter(|existing| {
-                    existing.state == BlackboardEntryState::Active
-                        && NewBlackboardEntry {
-                            root_promotion: existing.value.root_promotion,
-                            provenance: existing.value.provenance.clone(),
-                            ..value.clone()
-                        } == existing.value
-                })
+            // A repeated record whose replacement already committed returns it; the entries
+            // it replaced are no longer current, so the first-write checks would refuse it.
+            committed_succession(
+                store,
+                &self.visible_root,
+                &self.project_id,
+                &self.thread_id,
+                &id,
+                &value,
+                &supersedes,
+            )
+            .await?
         };
         let entry = if let Some(existing) = retried {
             existing

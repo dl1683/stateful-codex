@@ -5,12 +5,14 @@
 //! revision the caller saw. A user rule can be replaced only by another user rule.
 
 use codex_extension_api::FunctionCallError;
+use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::MAX_SUPERSEDED_ENTRIES;
+use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::SupersededEntry;
 use serde::Deserialize;
 use serde_json::json;
@@ -49,6 +51,61 @@ pub(super) fn supersedes_schema() -> serde_json::Value {
             "additionalProperties": false
         }
     })
+}
+
+/// The stored successor when this exact replacement already committed: the successor is
+/// current with the requested value, and it replaced exactly the referenced entries (an
+/// entry reference at the revision given; an alias at the revision this thread was shown).
+/// `None` means it has not committed; a different committed replacement is refused.
+pub(super) async fn committed_succession(
+    store: &BlackboardStore,
+    visible_root: &VisibleRootRegistry,
+    project_id: &str,
+    thread_id: &str,
+    id: &BlackboardEntryId,
+    value: &NewBlackboardEntry,
+    references: &[SupersedeReference],
+) -> Result<Option<BlackboardEntry>, FunctionCallError> {
+    let Some(existing) = store.get_entry(project_id, id).await.map_err(respond)? else {
+        return Ok(None);
+    };
+    let replaced = store.superseded_by(project_id, id).await.map_err(respond)?;
+    let same_value = existing.state == BlackboardEntryState::Active
+        && NewBlackboardEntry {
+            root_promotion: existing.value.root_promotion,
+            provenance: existing.value.provenance.clone(),
+            ..value.clone()
+        } == existing.value;
+    // A repeated call named what an earlier call resolved: the packet record current then,
+    // which a later delta may have cleared.
+    let shown = [
+        visible_root.get(thread_id),
+        visible_root.last_cleared(thread_id),
+    ];
+    let same_replacement = replaced.len() == references.len()
+        && references.iter().all(|reference| {
+            let named = match reference {
+                SupersedeReference::Alias { alias } => shown
+                    .iter()
+                    .flatten()
+                    .find_map(|root| root.entry_for_alias(alias))
+                    .map(|(entry_id, revision)| (entry_id.to_string(), revision)),
+                SupersedeReference::Entry { entry_id, revision } => {
+                    Some((entry_id.clone(), *revision))
+                }
+            };
+            named.is_some_and(|(entry_id, revision)| {
+                replaced.iter().any(|entry| {
+                    entry.id.as_str() == entry_id && entry.revision == revision.saturating_add(1)
+                })
+            })
+        });
+    if same_value && same_replacement {
+        return Ok(Some(existing));
+    }
+    Err(respond(format!(
+        "{id} was already recorded with a different value or replacement; read it with blackboard_query and record any change under a new idempotencyKey"
+    )))
 }
 
 /// Resolves references to the exact revisions to replace, refusing anything that is not

@@ -59,19 +59,18 @@ impl BlackboardStore {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
             // A retry is accepted only when it is the same request against a successor that
-            // is still current: same value (with the promotion it inherited), and every named
-            // entry superseded by it.
-            let mut superseded = Vec::with_capacity(replaced.len());
-            for entry in &replaced {
-                let current = load_entry(&mut transaction, &value.project_id, &entry.id)
-                    .await?
-                    .ok_or_else(|| BlackboardStoreError::EntryNotFound(entry.id.to_string()))?;
-                if current.state != BlackboardEntryState::Superseded
-                    || current.superseded_by.as_ref() != Some(&id)
-                {
-                    return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
-                }
-                superseded.push(current);
+            // is still current: same value (with the promotion it inherited), and exactly the
+            // named entries superseded by it, each at the revision the request named.
+            let superseded = load_superseded_by(&mut transaction, &value.project_id, &id).await?;
+            let same_request = superseded.len() == replaced.len()
+                && replaced.iter().all(|entry| {
+                    superseded.iter().any(|current| {
+                        current.id == entry.id
+                            && current.revision == entry.expected_revision.saturating_add(1)
+                    })
+                });
+            if !same_request {
+                return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
             }
             let mut expected = value.clone();
             if superseded
@@ -173,7 +172,46 @@ impl BlackboardStore {
 #[path = "succession_tests.rs"]
 mod tests;
 
+/// The entries currently recorded as superseded by `successor_id`.
+async fn load_superseded_by(
+    connection: &mut sqlx::SqliteConnection,
+    project_id: &str,
+    successor_id: &BlackboardEntryId,
+) -> Result<Vec<BlackboardEntry>, BlackboardStoreError> {
+    let ids = sqlx::query_scalar::<_, String>(
+        "SELECT entry.id
+         FROM blackboard_entries AS entry
+         JOIN blackboard_entry_revisions AS revision
+           ON revision.entry_id = entry.id AND revision.revision = entry.revision
+         WHERE entry.project_id = ? AND revision.state = 'superseded'
+           AND revision.superseded_by = ?
+         ORDER BY entry.id",
+    )
+    .bind(project_id)
+    .bind(successor_id.as_str())
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut entries = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = BlackboardEntryId::parse(id)?;
+        if let Some(entry) = load_entry(&mut *connection, project_id, &id).await? {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
 impl BlackboardStore {
+    /// The entries `successor_id` replaced, as currently recorded.
+    pub async fn superseded_by(
+        &self,
+        project_id: &str,
+        successor_id: &BlackboardEntryId,
+    ) -> Result<Vec<BlackboardEntry>, BlackboardStoreError> {
+        let mut connection = self.pool.acquire().await?;
+        load_superseded_by(&mut connection, project_id, successor_id).await
+    }
+
     /// The newest entry each of `successor_ids` replaced, for showing what a current value
     /// replaced and since when. Entries that replaced nothing are absent.
     pub async fn newest_predecessors(

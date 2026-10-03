@@ -231,3 +231,74 @@ async fn conflicting_retries_are_refused() {
         (true, true)
     );
 }
+
+/// A retry must name exactly the entries the successor replaced, at the revisions it named.
+#[tokio::test]
+async fn a_retry_must_name_the_same_replacement() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let store = store(&temp_dir).await;
+    let a_id = BlackboardEntryId::parse("decision-a").expect("ID");
+    let b_id = BlackboardEntryId::parse("decision-b").expect("ID");
+    let a = store
+        .create_entry(a_id.clone(), decision("A.", RootPromotion::NotPromoted))
+        .await
+        .expect("A");
+    let b = store
+        .create_entry(b_id.clone(), decision("B.", RootPromotion::NotPromoted))
+        .await
+        .expect("B");
+    let merged_id = BlackboardEntryId::parse("decision-ab").expect("ID");
+    let both = vec![
+        SupersededEntry {
+            id: a_id.clone(),
+            expected_revision: a.revision,
+        },
+        SupersededEntry {
+            id: b_id,
+            expected_revision: b.revision,
+        },
+    ];
+    store
+        .create_successor(
+            merged_id.clone(),
+            decision("A and B.", RootPromotion::NotPromoted),
+            both.clone(),
+        )
+        .await
+        .expect("merge");
+    let retry = |replaced: Vec<SupersededEntry>| {
+        store.create_successor(
+            merged_id.clone(),
+            decision("A and B.", RootPromotion::NotPromoted),
+            replaced,
+        )
+    };
+    let exact = retry(both).await;
+    let only_a = retry(vec![SupersededEntry {
+        id: a_id.clone(),
+        expected_revision: a.revision,
+    }])
+    .await;
+    let wrong_revision = retry(vec![
+        SupersededEntry {
+            id: a_id,
+            expected_revision: 7,
+        },
+        SupersededEntry {
+            id: BlackboardEntryId::parse("decision-b").expect("ID"),
+            expected_revision: b.revision,
+        },
+    ])
+    .await;
+    assert_eq!(
+        (
+            exact.is_ok(),
+            matches!(only_a, Err(BlackboardStoreError::EntryIdentityConflict(_))),
+            matches!(
+                wrong_revision,
+                Err(BlackboardStoreError::EntryIdentityConflict(_))
+            ),
+        ),
+        (true, true, true)
+    );
+}

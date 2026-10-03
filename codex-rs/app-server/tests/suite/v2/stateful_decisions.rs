@@ -66,6 +66,12 @@ async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced(
             ),
             assistant("Recorded ONE."),
             // In a fresh thread the packet shows ONE as E1; the user changes the decision.
+            // Reusing the plain ONE record's key with a replacement is not a retry.
+            tool_call(
+                "reuse-plain",
+                "blackboard_record_batch",
+                decision("one", ONE, json!([{"alias": "E1"}])),
+            ),
             tool_call(
                 "stale-alias",
                 "blackboard_record_batch",
@@ -114,6 +120,7 @@ async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced(
     assert_eq!(
         (
             output("stale-alias")?["results"][0]["error"].clone(),
+            output("reuse-plain")?["results"][0]["recorded"].clone(),
             output("record-two")?["results"][0]["recorded"].clone(),
             output("record-two-again")?["results"][0]["entryId"].clone()
                 == output("record-two")?["results"][0]["entryId"].clone(),
@@ -122,6 +129,7 @@ async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced(
             json!(
                 "E9 is not shown in full in this thread's current packet; pass entryId and revision from blackboard_query"
             ),
+            json!(false),
             json!(true),
             true,
         )
