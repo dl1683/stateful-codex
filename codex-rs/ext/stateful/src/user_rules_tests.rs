@@ -313,3 +313,16 @@ fn quoted_fenced_and_relayed_text_is_not_background_and_requests_stay_requests()
         (vec!["I know Go well.".to_string()], true, false)
     );
 }
+
+#[test]
+fn background_skips_lines_that_quote_show_code_or_relay() {
+    assert_eq!(
+        (
+            super::background_statements(
+                "Translate this sentence: \"I know Python. I'm a beginner.\"\nShe wrote: I'm a doctor.\n`I'm a pilot.`\nI'm a teacher."
+            ),
+            super::asks_about_rules("- List the preferences I gave you for all our work."),
+        ),
+        (vec!["I'm a teacher.".to_string()], true)
+    );
+}

@@ -265,7 +265,9 @@ impl EvidenceReadTool {
                         .project_intelligence_status(&self.project_id)
                         .await
                         .is_ok_and(|status| status.last_refresh.is_none());
-                    if !never_indexed {
+                    // One attempt per project and process: a scan cut off by the time bound
+                    // keeps running in the background and must not be started again.
+                    if !never_indexed || !self.services.claim_index_attempt(&self.project_id) {
                         return Err(read_error(error));
                     }
                     match tokio::time::timeout(

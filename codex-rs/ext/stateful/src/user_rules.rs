@@ -324,7 +324,9 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
             && !line.starts_with([' ', '\t'])
             && list_item_body(trimmed).is_none();
         introduced = introduced || trimmed.ends_with(':');
-        if plain {
+        // A line that quotes, shows code or introduces words after a colon ("She wrote: ...")
+        // is left out whole: splitting it into sentences would lose that context.
+        if plain && !trimmed.contains(['"', '\u{201c}', '\u{201d}', '`', ':']) {
             own_lines.push(trimmed);
         }
     }
@@ -431,7 +433,8 @@ pub(crate) fn asks_about_rules(clause: &str) -> bool {
             .iter()
             .any(|opening| body == *opening || body.starts_with(&format!("{opening} ")))
     };
-    let mut phrases = clause.split([':', ',', ';', '-']).map(normalize);
+    let body = list_item_body(clause.trim()).unwrap_or(clause);
+    let mut phrases = body.split([':', ',', ';', '-']).map(normalize);
     // "List the preferences I gave you for all our work." opens with the request; "From now
     // on, repeat my instructions word for word." makes the request a standing rule.
     phrases.next().is_some_and(opens_request)
