@@ -103,6 +103,7 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
             // a ...") is not part of the description; the words after it are.
             let statement = match clause.split_once(": ") {
                 Some((framing, _)) if describes_self(framing) => clause,
+                Some((framing, _)) if names_a_source(framing) => continue,
                 Some((_, rest)) if describes_self(rest) => rest.trim(),
                 Some(_) => continue,
                 None if describes_self(clause) => clause,
@@ -118,6 +119,46 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
 const QUOTE_OR_CODE_MARKS: [char; 7] = [
     '"', '\u{201c}', '\u{201d}', '\u{2018}', '`', '\u{ab}', '\u{bb}',
 ];
+
+/// Words of a framing ("From the docs:", "My colleague says:") that make what follows
+/// someone else's words.
+const SOURCE_WORDS: &[&str] = &[
+    "says",
+    "say",
+    "said",
+    "writes",
+    "wrote",
+    "written",
+    "asks",
+    "asked",
+    "told",
+    "tells",
+    "from",
+    "according",
+    "docs",
+    "doc",
+    "readme",
+    "quote",
+    "quoted",
+    "transcript",
+    "message",
+    "email",
+    "chat",
+    "colleague",
+    "teammate",
+    "she",
+    "he",
+    "they",
+    "her",
+    "his",
+    "their",
+];
+
+fn names_a_source(framing: &str) -> bool {
+    normalize(framing)
+        .split(' ')
+        .any(|word| SOURCE_WORDS.contains(&word))
+}
 
 /// Whether a phrase of `clause` opens with a first-person description of the user or the
 /// work ("I know Python well", "I'm not changing any code").

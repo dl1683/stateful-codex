@@ -20,7 +20,8 @@ pub enum StatefulMemorySection {
     /// A rule not in the user's own words; never applied.
     UnverifiedRule,
     Decision,
-    /// What the user said about themselves or the whole work, in their own words.
+    /// What the user said about themselves or the whole work, in their own words. Sent only
+    /// to clients that ask for it with `backgroundSection`.
     Background,
     Knowledge,
 }
@@ -68,6 +69,10 @@ pub struct StatefulMemoryReadParams {
     /// At most 100; defaults to 50.
     #[ts(optional = nullable)]
     pub limit: Option<u32>,
+    /// Set by clients that know the `background` section; without it, the user's background
+    /// is reported in the `knowledge` section so older clients keep working.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background_section: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -111,6 +116,10 @@ pub struct StatefulMemoryCorrectParams {
     #[ts(type = "number")]
     pub expected_revision: u64,
     pub content: String,
+    /// Set by clients that know the `background` section; without it, the user's background
+    /// is reported in the `knowledge` section so older clients keep working.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background_section: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

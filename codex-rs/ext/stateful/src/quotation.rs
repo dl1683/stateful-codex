@@ -1,7 +1,8 @@
 //! Where a message quotes someone else's words, so a quoted or relayed preference is never
 //! taken as the user's own rule.
 //!
-//! A quotation is a span between double quotes, curly double quotes, or single quotes that
+//! A quotation is a span between double quotes, curly double quotes, guillemets or
+//! backticks (code shows someone's words just as a quotation does), or single quotes that
 //! open at a word start. Quotations may cross sentences and lines; an unclosed double quote
 //! runs to the end. A single quote closes at the end of a word, except a plural possessive
 //! ("users' docs"); a single quote left unclosed is ambiguous, and when the message reports
@@ -37,6 +38,10 @@ struct Span {
     /// Byte offset just past the closing quote.
     close: usize,
 }
+
+/// Words that, just before a speech verb, make it the user's own activity ("I wrote our Go
+/// backend", "and wrote the docs") rather than someone else's speech.
+const FIRST_PERSON_SUBJECTS: &[&str] = &["i", "we", "and", "also", "then", "have", "had", "ve"];
 
 /// Words that open a sentence referring back to the quotation before it.
 const BACK_REFERENCES: &[&str] = &[
@@ -214,9 +219,12 @@ fn sentences(text: &str, spans: &[Span]) -> Vec<Sentence> {
             .collect::<Vec<_>>();
         sentences.push(Sentence {
             end,
-            reports_speech: words
-                .iter()
-                .any(|word| SPEECH_VERBS.contains(&word.as_str())),
+            reports_speech: words.iter().enumerate().any(|(index, word)| {
+                SPEECH_VERBS.contains(&word.as_str())
+                    && !index.checked_sub(1).is_some_and(|previous| {
+                        FIRST_PERSON_SUBJECTS.contains(&words[previous].as_str())
+                    })
+            }),
             introduces: outside.trim_end().ends_with(':'),
             refers_back: words
                 .first()
@@ -258,6 +266,8 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
         let closes = match open {
             Some((_, '"')) => character == '"',
             Some((_, '\u{201c}')) => character == '\u{201d}',
+            Some((_, '\u{ab}')) => character == '\u{bb}',
+            Some((_, '`')) => character == '`',
             Some((_, '\'' | '\u{2018}')) => {
                 let word_end = matches!(character, '\'' | '\u{2019}')
                     && before.is_some_and(|before| !before.is_whitespace())
@@ -280,7 +290,7 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
         }
         if open.is_none() {
             let opens = match character {
-                '"' | '\u{201c}' => true,
+                '"' | '\u{201c}' | '\u{ab}' | '`' => true,
                 '\'' | '\u{2018}' => {
                     !before.is_some_and(char::is_alphanumeric)
                         && after.is_some_and(char::is_alphanumeric)
@@ -293,7 +303,9 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
         }
     }
     match open {
-        Some((start, '"' | '\u{201c}')) => {
+        // An unclosed backtick is a stray mark, not a quotation.
+        Some((_, '`')) => (spans, None),
+        Some((start, '"' | '\u{201c}' | '\u{ab}')) => {
             spans.push(Span {
                 open: start,
                 close: text.len(),

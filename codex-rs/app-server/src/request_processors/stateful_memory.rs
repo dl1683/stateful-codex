@@ -78,7 +78,7 @@ impl BlackboardRequestProcessor {
             })?;
         let mut data = Vec::with_capacity(page.entries.len());
         for entry in page.entries {
-            data.push(memory_item(store, entry).await?);
+            data.push(memory_item(store, entry, Sections::of(params.background_section)).await?);
         }
         let revision = page.revision;
         let next_cursor = page
@@ -140,7 +140,12 @@ impl BlackboardRequestProcessor {
         self.announce(&succession.successor);
         Ok(Some(
             StatefulMemoryCorrectResponse {
-                item: memory_item(store, succession.successor).await?,
+                item: memory_item(
+                    store,
+                    succession.successor,
+                    Sections::of(params.background_section),
+                )
+                .await?,
             }
             .into(),
         ))
@@ -183,9 +188,28 @@ impl BlackboardRequestProcessor {
     }
 }
 
+/// The sections a client understands.
+#[derive(Clone, Copy)]
+enum Sections {
+    /// Clients from before the background section: background is reported as knowledge.
+    Legacy,
+    WithBackground,
+}
+
+impl Sections {
+    fn of(background_section: bool) -> Self {
+        if background_section {
+            Self::WithBackground
+        } else {
+            Self::Legacy
+        }
+    }
+}
+
 async fn memory_item(
     store: &BlackboardStore,
     entry: BlackboardEntry,
+    sections: Sections,
 ) -> Result<StatefulMemoryItem, JSONRPCErrorError> {
     let replaced = store
         .superseded_by(&entry.value.project_id, &entry.id)
@@ -205,7 +229,10 @@ async fn memory_item(
         MemorySection::PendingRule => ApiSection::PendingRule,
         MemorySection::UnverifiedRule => ApiSection::UnverifiedRule,
         MemorySection::Decision => ApiSection::Decision,
-        MemorySection::Background => ApiSection::Background,
+        MemorySection::Background => match sections {
+            Sections::WithBackground => ApiSection::Background,
+            Sections::Legacy => ApiSection::Knowledge,
+        },
         MemorySection::Knowledge => ApiSection::Knowledge,
     };
     let (content, content_truncated) = bounded(&entry.value.content, MAX_CONTENT_BYTES);

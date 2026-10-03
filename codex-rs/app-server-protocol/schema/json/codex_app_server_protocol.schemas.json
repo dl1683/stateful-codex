@@ -21887,7 +21887,7 @@
             "type": "string"
           },
           {
-            "description": "What the user said about themselves or the whole work, in their own words.",
+            "description": "What the user said about themselves or the whole work, in their own words. Sent only to clients that ask for it with `backgroundSection`.",
             "enum": [
               "background"
             ],

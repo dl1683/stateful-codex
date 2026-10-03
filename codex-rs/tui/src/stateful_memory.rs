@@ -162,6 +162,7 @@ async fn list(
                     thread_id: thread_id.to_string(),
                     cursor,
                     limit: Some(PAGE_SIZE),
+                    background_section: true,
                 },
             })
             .await
@@ -232,6 +233,7 @@ async fn correct(
                 entry_id: item.entry_id.clone(),
                 expected_revision: item.revision,
                 content: text,
+                background_section: true,
             },
         })
         .await

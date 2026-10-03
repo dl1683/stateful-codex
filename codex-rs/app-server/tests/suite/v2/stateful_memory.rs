@@ -74,6 +74,7 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
                 thread_id,
                 cursor: None,
                 limit: None,
+                background_section: false,
             },
         }
     };
@@ -119,6 +120,7 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
                 thread_id,
                 cursor,
                 limit: Some(1),
+                background_section: false,
             },
         }
     };
@@ -142,6 +144,7 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
                 entry_id: next.entry_id.clone(),
                 expected_revision: next.revision,
                 content: CORRECTED.to_string(),
+                background_section: false,
             },
         })
         .await?;
@@ -207,6 +210,126 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
             packet.contains(&format!("replaces: \\\"{NEXT_RULE}\\\"")),
         ),
         (false, true, 1, true)
+    );
+    Ok(())
+}
+
+/// What the user says about themselves is reviewed under its own section by clients that
+/// know it and as knowledge by older ones; it stays background through corrections, and a
+/// forgotten statement leaves the next fresh packet.
+#[tokio::test]
+async fn background_is_reviewed_corrected_and_forgotten_as_background() -> Result<()> {
+    const BACKGROUND: &str = "I'm a backend developer, mostly Go for the last six years.";
+    const CORRECTED_BACKGROUND: &str =
+        "I'm a backend developer, mostly Go, and new to Python packaging.";
+    const AGAIN: &str = "I'm a backend developer, mostly Go, and I know Python packaging now.";
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Background".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "background-project".to_string(),
+            },
+        })
+        .await?;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        (0..2)
+            .map(|_| {
+                responses::sse(vec![
+                    responses::ev_assistant_message("assistant-message", "Done."),
+                    responses::ev_completed("assistant-response"),
+                ])
+            })
+            .collect(),
+    )
+    .await;
+    let thread = start_thread(&mut server, &project.project.id).await?;
+    run_turn(&mut server, &thread, &format!("Hi! {BACKGROUND}")).await?;
+    let read = |thread_id: String, background_section: bool| {
+        move |request_id| ClientRequest::StatefulMemoryRead {
+            request_id,
+            params: StatefulMemoryReadParams {
+                thread_id,
+                cursor: None,
+                limit: None,
+                background_section,
+            },
+        }
+    };
+    let current: StatefulMemoryReadResponse = server.request(read(thread.clone(), true)).await?;
+    let legacy: StatefulMemoryReadResponse = server.request(read(thread.clone(), false)).await?;
+    let item = current.data[0].clone();
+    let correct = |entry_id: String, expected_revision: u64, content: &str| {
+        let thread_id = thread.clone();
+        let content = content.to_string();
+        move |request_id| ClientRequest::StatefulMemoryCorrect {
+            request_id,
+            params: StatefulMemoryCorrectParams {
+                thread_id,
+                entry_id,
+                expected_revision,
+                content,
+                background_section: true,
+            },
+        }
+    };
+    let corrected: StatefulMemoryCorrectResponse = server
+        .request(correct(
+            item.entry_id.clone(),
+            item.revision,
+            CORRECTED_BACKGROUND,
+        ))
+        .await?;
+    let again: StatefulMemoryCorrectResponse = server
+        .request(correct(
+            corrected.item.entry_id.clone(),
+            corrected.item.revision,
+            AGAIN,
+        ))
+        .await?;
+    let _: StatefulMemoryForgetResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryForget {
+            request_id,
+            params: StatefulMemoryForgetParams {
+                thread_id: thread.clone(),
+                entry_id: again.item.entry_id.clone(),
+                expected_revision: again.item.revision,
+            },
+        })
+        .await?;
+    let fresh = start_thread(&mut server, &project.project.id).await?;
+    run_turn(&mut server, &fresh, "Rename the helper in utils.py").await?;
+    let packet = log.requests()[1].body_json().to_string();
+    assert_eq!(
+        (
+            (item.section, item.content.clone()),
+            legacy.data[0].section,
+            (corrected.item.section, corrected.item.content),
+            again.item.section,
+            packet.contains("backend developer"),
+        ),
+        (
+            (StatefulMemorySection::Background, BACKGROUND.to_string()),
+            StatefulMemorySection::Knowledge,
+            (
+                StatefulMemorySection::Background,
+                CORRECTED_BACKGROUND.to_string()
+            ),
+            StatefulMemorySection::Background,
+            false,
+        )
     );
     Ok(())
 }

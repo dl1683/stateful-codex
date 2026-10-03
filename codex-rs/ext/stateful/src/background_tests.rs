@@ -100,3 +100,27 @@ fn reported_and_ambiguous_words_are_not_background() {
         ]
     );
 }
+
+/// Review round 1: inline code and guillemets hold someone's words across sentences; a
+/// framing naming another source makes the rest theirs; the user's own past activity
+/// ("wrote our Go backend") is not reported speech.
+#[test]
+fn code_guillemets_sources_and_the_users_own_activity() {
+    assert_eq!(
+        [
+            "`I'm a pilot. I know Go. I'm a nurse.`",
+            "Translate \u{ab}I'm a pilot. I know Go. I'm a nurse.\u{bb}",
+            "From the docs: I'm a nurse.",
+            "My colleague says: I'm a nurse.",
+            "I'm a backend developer and wrote our Go backend.",
+        ]
+        .map(background_statements),
+        [
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec!["I'm a backend developer and wrote our Go backend.".to_string()],
+        ]
+    );
+}
