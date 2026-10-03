@@ -43,6 +43,9 @@ use crate::rule_capture::store_user_rule;
 use crate::rule_units::rule_for_clause;
 use crate::user_messages::UserMessageRegistry;
 use crate::user_rules::MAX_RULE_BYTES;
+
+/// Longest user decision kept whole from the user's message.
+const MAX_USER_DECISION_BYTES: usize = 2_000;
 use crate::user_rules::RuleStanding;
 use crate::user_rules::reports_speech;
 
@@ -224,12 +227,12 @@ impl BlackboardRecorder {
                 stated_at_ms,
                 // A rule of an investigation keeps the scope host capture gave the same message.
                 placement: RulePlacement {
-                    scope_id: rule.scope.as_ref().map(|hint| {
-                        crate::rule_group::scope_id_for(
+                    scope_id: rule.scope.as_ref().and_then(|_| {
+                        crate::rule_group::message_scope_id(
                             &self.project_id,
                             &thread_id,
                             &turn_id,
-                            &hint.title,
+                            &message.text,
                         )
                     }),
                     end_condition: rule
@@ -245,6 +248,37 @@ impl BlackboardRecorder {
         .await
         .map(|captured| captured.entry)
         .map_err(respond)
+    }
+
+    /// The whole decision of a recorded user message holding `quote` (the item or line it is
+    /// in), with its source. Relayed words are refused.
+    fn user_decision(&self, quote: &str) -> Result<(String, String), FunctionCallError> {
+        let (message, clause) = self
+            .user_messages
+            .find(&self.thread_id, &self.project_id, quote)
+            .ok_or_else(|| {
+                respond(
+                    "userQuote is not inside exactly one complete sentence of a user message recorded in this thread",
+                )
+            })?;
+        if reports_speech(&clause)
+            || crate::quotation::Quotations::new(&message.text).relays_clause(&clause)
+        {
+            return Err(respond(
+                "nothing written: that sentence relays someone else's words, not the user's decision",
+            ));
+        }
+        let decision =
+            crate::rule_units::unit_text_for_clause(&message.text, &clause).unwrap_or(clause);
+        if decision.len() > MAX_USER_DECISION_BYTES {
+            return Err(respond(format!(
+                "the user's decision holding userQuote exceeds {MAX_USER_DECISION_BYTES} bytes; record it without userQuote"
+            )));
+        }
+        Ok((
+            decision,
+            crate::rule_capture::user_message_source(&self.thread_id, &message.turn_id),
+        ))
     }
 
     async fn record(
@@ -286,11 +320,35 @@ impl BlackboardRecorder {
                 .record_instruction(turn_id, user_quote, rule_scope)
                 .await;
         }
-        if user_quote.is_some() || rule_scope.is_some() {
-            return Err(respond(
-                "userQuote and ruleScope apply to kind instruction only",
-            ));
+        if rule_scope.is_some() {
+            return Err(respond("ruleScope applies to kind instruction only"));
         }
+        // The user's own decision is kept whole and verbatim (all its sentences: the choice,
+        // its reason, any limit), with the user as its author; only kind decision may quote.
+        let (content, provenance) = match user_quote {
+            Some(quote) if kind == BlackboardKind::Decision => {
+                let (text, source) = self.user_decision(&quote)?;
+                (
+                    text,
+                    BlackboardProvenance {
+                        kind: BlackboardProvenanceKind::User,
+                        source_id: source,
+                    },
+                )
+            }
+            Some(_) => {
+                return Err(respond(
+                    "userQuote applies to kind instruction (a rule) or decision (the user's own decision)",
+                ));
+            }
+            None => (
+                content,
+                BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::Agent,
+                    source_id: source_id.to_string(),
+                },
+            ),
+        };
         let (evidence, inferred_node_id) = resolve_evidence(
             &self.project_id,
             &self.thread_id,
@@ -323,10 +381,7 @@ impl BlackboardRecorder {
             root_promotion,
             evidence,
             premises,
-            provenance: BlackboardProvenance {
-                kind: BlackboardProvenanceKind::Agent,
-                source_id: source_id.to_string(),
-            },
+            provenance,
         };
         let store = self.services.blackboard().await.map_err(respond)?;
         let retried = if supersedes.is_empty() {
@@ -642,7 +697,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record. sourceVerified needs evidence copied from evidence_read. Items are idempotent."
+                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record; a decision the user stated, as kind decision with userQuote (kept whole and verbatim). sourceVerified needs evidence copied from evidence_read. Items are idempotent."
             ),
             strict: false,
             defer_loading: None,

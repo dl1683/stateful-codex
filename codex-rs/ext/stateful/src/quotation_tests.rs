@@ -123,3 +123,14 @@ fn subjects_code_runs_and_stray_backticks() {
         )
     );
 }
+
+/// Item 2 review round 3: the user's own earlier words, quoted, are reported history, not a
+/// rule stated now.
+#[test]
+fn quoted_self_speech_is_reported_history() {
+    assert_eq!(
+        crate::user_rules::marked_rules("I wrote last week: \"My preference is tests first.\"")
+            .len(),
+        0
+    );
+}

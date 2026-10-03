@@ -376,9 +376,15 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
     .remove(0)
     .entry;
     let store = services.blackboard().await.expect("blackboard");
-    crate::memory_controls::forget_entry(store, "project-1", &rule.id, rule.revision)
-        .await
-        .expect("retire");
+    crate::memory_controls::forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+    )
+    .await
+    .expect("retire");
     let pending = capture_marked_rules(
         &services,
         /*event_sink*/ None,
@@ -402,7 +408,7 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
                 codex_project_intelligence::ChangeOrigin::ModelTool,
             ),
         },
-        "- Never run migrations.",
+        "Never run migrations.",
         RuleStanding::Standing,
     )
     .await;
@@ -496,7 +502,7 @@ async fn rules_keep_the_order_the_user_wrote_them_in() {
         .expect("review")
         .expect("page");
     let first_words = |content: &str| content.split(' ').take(2).collect::<Vec<_>>().join(" ");
-    let expected = ["1. Only", "2. Never", "3. Don't", "4. End"]
+    let expected = ["Only run", "Never install", "Don't touch", "End every"]
         .map(str::to_string)
         .to_vec();
     assert_eq!(

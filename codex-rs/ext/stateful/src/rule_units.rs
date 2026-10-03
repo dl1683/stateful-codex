@@ -88,17 +88,22 @@ pub(crate) fn marked_rule_units(text: &str) -> MarkedRules {
             marked.omitted.push(opening(&rule.clause.text));
         }
     };
+    // The prose rule the previous sentence of this paragraph produced, which a qualifying
+    // sentence extends, even on the next line.
+    let mut extendable: Option<MarkedRule> = None;
     for unit in rule_units(text) {
         let kept = kept_clauses(text, &quotations, &unit);
+        if unit.item || unit.separated {
+            if let Some(rule) = extendable.take() {
+                keep(rule, &mut marked);
+            }
+        }
         if unit.item {
             if let Some(rule) = item_rule(&unit, &kept, Marker::Required) {
                 keep(rule, &mut marked);
             }
             continue;
         }
-        // The prose rule the previous sentence of this line produced, which a qualifying
-        // sentence extends.
-        let mut extendable: Option<MarkedRule> = None;
         for clause in kept {
             let normalized = normalize(clause);
             if let Some(rule) = extendable.as_mut()
@@ -130,9 +135,9 @@ pub(crate) fn marked_rule_units(text: &str) -> MarkedRules {
             }
             extendable = last.map(prose_rule);
         }
-        if let Some(rule) = extendable {
-            keep(rule, &mut marked);
-        }
+    }
+    if let Some(rule) = extendable {
+        keep(rule, &mut marked);
     }
     marked
 }
@@ -141,6 +146,16 @@ pub(crate) fn marked_rule_units(text: &str) -> MarkedRules {
 /// with its header's scope, or the sentence itself in prose. None when the clause is not in
 /// `text` or its list relays someone else's words. The caller checks the length.
 pub(crate) fn rule_for_clause(text: &str, clause: &str) -> Option<MarkedRule> {
+    // The unit host capture keeps for this sentence, whole (qualifications attached,
+    // coordinated directives split), so both paths store the same words.
+    let collapse = |value: &str| value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let wanted = collapse(clause);
+    if let Some(rule) = marked_rule_units(text).rules.into_iter().find(|rule| {
+        collapse(&rule.clause.text).contains(&wanted)
+            || wanted.contains(&collapse(&rule.clause.text))
+    }) {
+        return Some(rule);
+    }
     let start = text.find(clause)?;
     let end = start + clause.len();
     let quotations = Quotations::new(text);
@@ -239,8 +254,8 @@ fn framed_list(clause: &str) -> Option<Vec<String>> {
     let names_rules = ["rules", "preferences", "conventions", "guidelines"]
         .iter()
         .any(|noun| framing_words.split(' ').any(|word| word == *noun));
-    let items = list
-        .split("; ")
+    let items = split_outside_quotes(list)
+        .into_iter()
         .map(|item| item.trim().trim_end_matches(['.', ';']).trim())
         .filter(|item| !item.is_empty())
         .collect::<Vec<_>>();
@@ -250,6 +265,28 @@ fn framed_list(clause: &str) -> Option<Vec<String>> {
             .map(|item| format!("{framing}: {item}."))
             .collect()
     })
+}
+
+/// Splits a list at "; " outside code and quotations.
+fn split_outside_quotes(list: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut code = false;
+    let mut quoted = false;
+    let bytes = list.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        match byte {
+            b'`' => code = !code,
+            b'"' if !code => quoted = !quoted,
+            b';' if !code && !quoted && bytes.get(index + 1) == Some(&b' ') => {
+                items.push(&list[start..index]);
+                start = index + 2;
+            }
+            _ => {}
+        }
+    }
+    items.push(&list[start.min(list.len())..]);
+    items
 }
 
 fn prose_rule(clause: &str) -> MarkedRule {
@@ -323,6 +360,22 @@ fn opening(text: &str) -> String {
     }
 }
 
+/// The complete unit of `text` (a list item with its continuation lines, or a prose line)
+/// holding `clause`, in the user's words.
+pub(crate) fn unit_text_for_clause(text: &str, clause: &str) -> Option<String> {
+    let start = text.find(clause)?;
+    let end = start + clause.len();
+    rule_units(text)
+        .into_iter()
+        .find(|unit| {
+            unit.lines.iter().any(|line| {
+                let line_start = line.as_ptr() as usize - text.as_ptr() as usize;
+                line_start <= start && end <= line_start + line.len()
+            })
+        })
+        .map(|unit| unit.lines.join(" "))
+}
+
 /// Whether an unheaded list item needs a standing marker in one of its sentences.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Marker {
@@ -362,7 +415,11 @@ fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<Marke
     if kept.is_empty() {
         return None;
     }
-    let body = kept.join(" ");
+    // The list marker ("1.", "-") is the message's layout, not the rule's words.
+    let joined = kept.join(" ");
+    let body = list_item_body(&joined)
+        .map_or(joined.as_str(), str::trim)
+        .to_string();
     let normalized = normalize(&body);
     match unit.header {
         // Items relayed from someone else are never the user's rules.
@@ -387,7 +444,7 @@ fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<Marke
             let (text, scope) = match header.limited_scope {
                 // The header's limited scope stays with the rule, in the user's words.
                 Some(scope) => {
-                    let item = list_item_body(&body).map_or(body.as_str(), str::trim);
+                    let item = body.as_str();
                     let hint = ScopeHint {
                         title: scope.trim_end_matches(':').trim().to_string(),
                         end_condition: end_condition(item),
@@ -430,6 +487,8 @@ struct RuleUnit<'a> {
     header: Option<ListHeader<'a>>,
     item: bool,
     lines: Vec<&'a str>,
+    /// A blank line, fence or blockquote separates it from the unit before.
+    separated: bool,
 }
 
 /// Groups `text` into prose lines and list items (an item with its indented continuation
@@ -442,13 +501,16 @@ fn rule_units(text: &str) -> Vec<RuleUnit<'_>> {
     let mut in_list = false;
     let mut item_open = false;
     let mut fence = Fence::default();
+    let mut separated = false;
     for line in text.lines() {
         let trimmed = line.trim();
         if fence.skips(trimmed) || trimmed.starts_with('>') {
             item_open = false;
+            separated = true;
             continue;
         }
         if trimmed.is_empty() {
+            separated = true;
             continue;
         }
         let was_in_list = in_list;
@@ -458,7 +520,9 @@ fn rule_units(text: &str) -> Vec<RuleUnit<'_>> {
                 header: None,
                 item: false,
                 lines: vec![trimmed],
+                separated,
             });
+            separated = false;
             item_open = false;
             continue;
         }
@@ -469,8 +533,10 @@ fn rule_units(text: &str) -> Vec<RuleUnit<'_>> {
                 header: list_header,
                 item: true,
                 lines: vec![trimmed],
+                separated,
             }),
         }
+        separated = false;
         item_open = true;
     }
     units

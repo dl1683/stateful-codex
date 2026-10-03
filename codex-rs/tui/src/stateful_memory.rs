@@ -71,6 +71,22 @@ pub(crate) fn memory_lines(
             if let Some(replaced) = item.replaces.first() {
                 lines.push(vec!["     replaces: ".dim(), preview(&replaced.content).dim()].into());
             }
+            if let Some(scope) = &item.scope_title {
+                lines.push(
+                    vec![
+                        "     only in the investigation: ".dim(),
+                        preview(scope).dim(),
+                    ]
+                    .into(),
+                );
+            }
+            if let Some(speaker) = &item.attributed_to {
+                lines.push(
+                    format!("     {speaker}'s words you passed on, not your rule")
+                        .dim()
+                        .into(),
+                );
+            }
         }
     }
     if footer == Footer::More {
@@ -362,7 +378,7 @@ pub(crate) fn group_receipt_cell(
             .into(),
         );
     }
-    let recognized = notification.saved + notification.pending + notification.already_present;
+    let recognized = notification.recognized;
     if let Some(declared) = notification.declared_count
         && declared != recognized
     {

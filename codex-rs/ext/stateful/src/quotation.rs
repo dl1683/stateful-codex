@@ -17,7 +17,7 @@
 
 /// Past-tense verbs that report someone's words. Present forms ("a line that says ...",
 /// "if it asks ...") are how instructions describe output, so they do not count.
-const SPEECH_VERBS: &[&str] = &[
+pub(crate) const SPEECH_VERBS: &[&str] = &[
     "wrote",
     "said",
     "asked",
@@ -60,8 +60,11 @@ const BACK_REFERENCES: &[&str] = &[
 struct Sentence {
     /// Byte offset just past its end.
     end: usize,
-    /// A speech verb appears in it outside every quotation.
+    /// A speech verb of someone else appears in it outside every quotation.
     reports_speech: bool,
+    /// Any speech verb appears in it, the user's own included ("I wrote last week: ..."):
+    /// a quotation it introduces is reported words, not a statement made now.
+    quotes_speech: bool,
     /// Its text outside quotations ends with a colon ("She wrote:").
     introduces: bool,
     /// Its first word refers back to what came before ("That is what she wrote.").
@@ -92,14 +95,14 @@ impl<'a> Quotations<'a> {
                 let index = sentences.partition_point(|sentence| sentence.end <= span.open);
                 let own = sentences
                     .get(index)
-                    .is_some_and(|sentence| sentence.reports_speech);
+                    .is_some_and(|sentence| sentence.quotes_speech);
                 let introduced = index
                     .checked_sub(1)
                     .and_then(|previous| sentences.get(previous))
-                    .is_some_and(|previous| previous.introduces && previous.reports_speech);
+                    .is_some_and(|previous| previous.introduces && previous.quotes_speech);
                 let referred_back = sentences
                     .get(index + 1)
-                    .is_some_and(|next| next.refers_back && next.reports_speech);
+                    .is_some_and(|next| next.refers_back && next.quotes_speech);
                 // A quoted instruction ("\"From now on, never commit.\"") is someone's
                 // words even unattributed; a quoted term ('Next:') is not.
                 let instruction = !span.code
@@ -136,6 +139,16 @@ impl<'a> Quotations<'a> {
             .any(|(_, attributed)| *attributed);
         let after_ambiguous = self.ambiguous_from.is_some_and(|open| open < end);
         inside || holds_attributed || (self.attributes_speech && after_ambiguous)
+    }
+
+    /// Whether the part from `start` to `end` begins inside a quotation or code span, holds a
+    /// quotation (code inside it is a literal of the user's sentence), or follows an unclosed
+    /// single quote.
+    pub(crate) fn touches_words(&self, start: usize, end: usize) -> bool {
+        self.spans.iter().any(|span| {
+            (span.open <= start && start < span.close)
+                || (!span.code && span.open < end && start < span.close)
+        }) || self.ambiguous_from.is_some_and(|open| open < end)
     }
 
     /// Whether the part from `start` to `end` holds or begins inside any quotation, or
@@ -184,7 +197,16 @@ impl<'a> Quotations<'a> {
             .filter(|(span, attributed)| **attributed && !span.code)
             .map(|(span, _)| {
                 let index = sentences.partition_point(|sentence| sentence.end <= span.open);
-                let start = index
+                // A quotation on the line after "Priya wrote:" is named by that line.
+                let named_before = !sentences
+                    .get(index)
+                    .is_some_and(|sentence| sentence.quotes_speech);
+                let first = if named_before {
+                    index.saturating_sub(1)
+                } else {
+                    index
+                };
+                let start = first
                     .checked_sub(1)
                     .and_then(|previous| sentences.get(previous))
                     .map_or(0, |previous| previous.end);
@@ -257,6 +279,9 @@ fn sentences(text: &str, spans: &[Span]) -> Vec<Sentence> {
             reports_speech: words.iter().enumerate().any(|(index, word)| {
                 SPEECH_VERBS.contains(&word.as_str()) && !users_own_verb(&words, index)
             }),
+            quotes_speech: words
+                .iter()
+                .any(|word| SPEECH_VERBS.contains(&word.as_str())),
             introduces: outside.trim_end().ends_with(':'),
             refers_back: words
                 .first()

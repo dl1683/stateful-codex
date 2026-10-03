@@ -1,6 +1,8 @@
 //! The user adds to project memory directly, with no model turn: a rule, something about
 //! themselves, a decision with its reason, or a note. The entry carries the user's authority
-//! because the request comes from the user's own client action, never from a model tool.
+//! because the request comes from the user's own client action, never from a model tool. Each
+//! addition is journaled with its action identity, so a retried action returns what it did
+//! and an action identity reused for different words is refused.
 
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
@@ -12,14 +14,20 @@ use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::KnowledgeAuthority;
+use codex_project_intelligence::KnowledgeCategory;
+use codex_project_intelligence::KnowledgeContext;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RootPromotion;
 use sha2::Digest;
 use sha2::Sha256;
 
 use crate::memory_controls::MAX_CORRECTION_BYTES;
+use crate::memory_controls::MemoryActor;
 use crate::memory_controls::MemoryControlError;
 use crate::memory_controls::USER_BACKGROUND_ID_PREFIX;
 use crate::rule_capture::user_rule_entry_id;
@@ -31,8 +39,8 @@ const MAX_GENERATIONS: u32 = 8;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MemoryAddition {
     /// A rule in the user's words. With a scope ("this whole investigation into the config
-    /// bug, until we agree on the root cause") it applies only there; the scope is kept in
-    /// the user's words ahead of the rule, as host capture keeps a header's scope.
+    /// bug, until we agree on the root cause") the scope is kept in the user's words ahead of
+    /// the rule.
     Rule { scope: Option<String> },
     /// Something about the user or the whole work.
     Background,
@@ -54,16 +62,21 @@ pub enum AddOutcome {
     AlreadyDone,
 }
 
-/// Adds `content` to the project's memory as the user's own words. `action_id` identifies
-/// the user's action, so a retried request returns what the first one did.
+/// Adds `content` to the project's memory as the user's own words. `actor.action_id`
+/// identifies the user's action.
 pub async fn add_entry(
     store: &BlackboardStore,
+    actor: &MemoryActor,
     project_id: &str,
     node_id: HierarchyNodeId,
     addition: MemoryAddition,
     content: &str,
-    action_id: &str,
 ) -> Result<(BlackboardEntry, AddOutcome), MemoryControlError> {
+    let action_id = actor
+        .action_id
+        .as_deref()
+        .filter(|action| !action.trim().is_empty())
+        .ok_or_else(|| MemoryControlError::Refused("an action identity is required".to_string()))?;
     let content = content.trim();
     let non_empty = |value: &Option<String>| {
         value
@@ -88,12 +101,32 @@ pub async fn add_entry(
             "the text (with its scope or reason) must be 1-{MAX_CORRECTION_BYTES} bytes"
         )));
     }
-    let source_id = format!("memory-add:{action_id}");
-    let kind = match addition {
-        MemoryAddition::Rule { .. } => BlackboardKind::Instruction,
-        MemoryAddition::Decision { .. } => BlackboardKind::Decision,
-        MemoryAddition::Background | MemoryAddition::Note => BlackboardKind::Fact,
+    // A retried action returns what it did; the same identity for other words is refused.
+    if let Some(done) = store.change_for_action(project_id, action_id).await? {
+        let entry_id = done
+            .entry_id
+            .as_deref()
+            .and_then(|id| BlackboardEntryId::parse(id).ok());
+        let entry = match entry_id {
+            Some(id) => store.get_entry(project_id, &id).await?,
+            None => None,
+        };
+        return match entry {
+            Some(entry) if entry.value.content == text || done.record.preview == text => {
+                Ok((entry, AddOutcome::AlreadyDone))
+            }
+            Some(_) | None => Err(MemoryControlError::Refused(
+                "this action already added different words; nothing was added".to_string(),
+            )),
+        };
+    }
+    let (kind, category) = match addition {
+        MemoryAddition::Rule { .. } => (BlackboardKind::Instruction, KnowledgeCategory::Rule),
+        MemoryAddition::Decision { .. } => (BlackboardKind::Decision, KnowledgeCategory::Decision),
+        MemoryAddition::Background => (BlackboardKind::Fact, KnowledgeCategory::Background),
+        MemoryAddition::Note => (BlackboardKind::Fact, KnowledgeCategory::Note),
     };
+    let source_id = format!("memory-add:{action_id}");
     let confidence = ConfidenceScore::from_basis_points(10_000)
         .map_err(|error| MemoryControlError::Refused(error.to_string()))?;
     let value = NewBlackboardEntry {
@@ -137,12 +170,23 @@ pub async fn add_entry(
             vec![digest_id("stateful-memory-add-", project_id, action_id)?]
         }
     };
+    let change = actor.change(ChangeOperation::Saved, category, &text);
     for id in candidates {
         let Some(existing) = store.get_entry(project_id, &id).await? else {
-            return Ok((store.create_entry(id, value).await?, AddOutcome::Added));
+            let (entry, created) = store
+                .create_entry_with_context(
+                    id,
+                    value,
+                    KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect),
+                    change,
+                )
+                .await?;
+            let outcome = match created {
+                CreateOutcome::Created => AddOutcome::Added,
+                CreateOutcome::AlreadyPresent => AddOutcome::AlreadyPresent,
+            };
+            return Ok((entry, outcome));
         };
-        // A retried action finds what it made, whatever happened to it since; it never
-        // restores words forgotten after it.
         if existing.value.provenance.source_id == source_id {
             return Ok((existing, AddOutcome::AlreadyDone));
         }
@@ -155,7 +199,7 @@ pub async fn add_entry(
             && existing.value.root_promotion != RootPromotion::Promoted
         {
             let promoted = store
-                .update_entry(
+                .update_entry_recorded(
                     project_id,
                     &existing.id,
                     BlackboardEntryUpdate {
@@ -176,6 +220,7 @@ pub async fn add_entry(
                             source_id,
                         },
                     },
+                    Some(&actor.change(ChangeOperation::Promoted, category, &text)),
                 )
                 .await?;
             return Ok((promoted, AddOutcome::Added));

@@ -7,10 +7,9 @@ fn background_is_the_users_description_of_themselves_and_the_work() {
     let text = "Hi! I know Python well but only a little Rust. I'm not changing any code, just reading. From now on, explain Rust ideas with Python comparisons. Do you know tokio? The assistant said I'm a beginner.";
     assert_eq!(
         background_statements(text),
-        vec![
-            "I know Python well but only a little Rust.".to_string(),
-            "I'm not changing any code, just reading.".to_string(),
-        ]
+        // "I'm not changing any code" describes this piece of work, not the user: it is not
+        // kept as lasting background.
+        vec!["I know Python well but only a little Rust.".to_string()]
     );
 }
 
@@ -121,6 +120,43 @@ fn code_guillemets_sources_and_the_users_own_activity() {
             Vec::new(),
             Vec::new(),
             vec!["I'm a backend developer and wrote our Go backend.".to_string()],
+        ]
+    );
+}
+
+/// Item 2 review round 3: items under the user's own "About me:" header and a self-statement
+/// naming code are the user's background; a self-description with project wording is not a
+/// rule.
+#[test]
+fn about_me_lists_code_terms_and_scope_wording() {
+    let message = "About me:\n- Backend developer, mostly Go.\n- Rusty Python.\n\nI know `Go` well. I'm a backend developer for this project.";
+    assert_eq!(
+        (
+            background_statements(message),
+            crate::user_rules::marked_rules("I'm a backend developer for this project."),
+        ),
+        (
+            vec![
+                "Backend developer, mostly Go.".to_string(),
+                "Rusty Python.".to_string(),
+                "I know `Go` well.".to_string(),
+                "I'm a backend developer for this project.".to_string(),
+            ],
+            Vec::new(),
+        )
+    );
+}
+
+/// research1: a colon-framed self-description and the sentence after it are both kept.
+#[test]
+fn a_framed_self_description_is_kept() {
+    assert_eq!(
+        background_statements(
+            "Some background: I'm an ML engineer moving into research on LLM scaling and capabilities. I know transformers and training well, but I don't know this literature yet, so pitch explanations at that level.\n\nGround rules for this whole project, in every session from now on:\n1. Cite the paper (arXiv id) and the section for every claim."
+        ),
+        vec![
+            "I'm an ML engineer moving into research on LLM scaling and capabilities.".to_string(),
+            "I know transformers and training well, but I don't know this literature yet, so pitch explanations at that level.".to_string(),
         ]
     );
 }

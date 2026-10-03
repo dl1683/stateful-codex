@@ -37,13 +37,13 @@ fn a_list_item_is_one_rule_with_all_its_sentences() {
     assert_eq!(
         marked_rules(message),
         vec![
-            standing("1. Only run the tests relevant to what you changed, never the whole suite."),
+            standing("Only run the tests relevant to what you changed, never the whole suite."),
             standing(
-                "2. Never install anything into my global Python. If you need an environment, make a local venv inside the repo."
+                "Never install anything into my global Python. If you need an environment, make a local venv inside the repo."
             ),
-            standing("3. Don't touch docs/ or any changelog."),
+            standing("Don't touch docs/ or any changelog."),
             standing(
-                "4. End every reply with one line starting with `Next:` that suggests the next step. It should name one concrete step."
+                "End every reply with one line starting with `Next:` that suggests the next step. It should name one concrete step."
             ),
         ]
     );
@@ -89,10 +89,10 @@ fn an_unheaded_list_item_keeps_its_conditions() {
         marked_rules(message),
         vec![
             standing(
-                "- Never install anything globally. If you need an environment, use a local venv."
+                "Never install anything globally. If you need an environment, use a local venv."
             ),
             RuleClause {
-                text: "- Never touch the lockfile. This applies for this task only.".to_string(),
+                text: "Never touch the lockfile. This applies for this task only.".to_string(),
                 standing: RuleStanding::Pending,
             },
         ]
@@ -125,7 +125,7 @@ fn an_oversized_item_is_not_captured_in_part() {
     let message = format!("Standing rules:\n- Never touch {long}.\n- Never push to main.");
     assert_eq!(
         marked_rules(&message),
-        vec![standing("- Never push to main.")]
+        vec![standing("Never push to main.")]
     );
 }
 
@@ -255,6 +255,28 @@ fn a_framed_style_list_is_one_rule_per_item() {
             .map(|item| standing(&format!("{framing}: {item}")))
             .to_vec(),
             vec!["I'm a founder, not an academic.".to_string()],
+        )
+    );
+}
+
+/// Item 1 review: a qualification on the next line of the same paragraph stays with its
+/// rule; the model's quote of either part resolves to the same complete unit host capture
+/// stores.
+#[test]
+fn multiline_qualifications_and_quotes_resolve_to_the_host_unit() {
+    let message = "Never install anything globally.\nIf you need packages, use a local venv.\n\nAlso fix the bug.";
+    let whole = "Never install anything globally. If you need packages, use a local venv.";
+    assert_eq!(
+        (
+            marked_rules(message),
+            rule_for_clause(message, "If you need packages, use a local venv.")
+                .map(|rule| rule.clause),
+            rule_for_clause(message, "Never install anything globally.").map(|rule| rule.clause),
+        ),
+        (
+            vec![standing(whole)],
+            Some(standing(whole)),
+            Some(standing(whole)),
         )
     );
 }

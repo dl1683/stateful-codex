@@ -44,9 +44,15 @@ async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
     .remove(0)
     .entry;
     let store = services.blackboard().await.expect("store");
-    let forgotten = forget_entry(store, "project-1", &rule.id, rule.revision)
-        .await
-        .expect("forget");
+    let forgotten = forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+    )
+    .await
+    .expect("forget");
     let replayed = store_user_rule(
         &services,
         /*event_sink*/ None,
@@ -97,13 +103,34 @@ async fn correcting_a_rule_replaces_it_and_a_retry_is_idempotent() {
     .entry;
     let store = services.blackboard().await.expect("store");
     let corrected = "Never run the whole test suite; run the affected tests.";
-    let first = correct_entry(store, "project-1", &rule.id, rule.revision, corrected)
-        .await
-        .expect("correct");
-    let retry = correct_entry(store, "project-1", &rule.id, rule.revision, corrected)
-        .await
-        .expect("retry");
-    let stale = forget_entry(store, "project-1", &rule.id, rule.revision).await;
+    let first = correct_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+        corrected,
+    )
+    .await
+    .expect("correct");
+    let retry = correct_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+        corrected,
+    )
+    .await
+    .expect("retry");
+    let stale = forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+    )
+    .await;
     assert_eq!(
         (
             first.successor.id.clone(),
@@ -167,6 +194,7 @@ async fn corrections_of_agent_rules_and_decisions() {
         .expect("decision");
     let rule = correct_entry(
         store,
+        &crate::memory_controls::MemoryActor::default(),
         "project-1",
         &agent_rule.id,
         1,
@@ -176,6 +204,7 @@ async fn corrections_of_agent_rules_and_decisions() {
     .expect("rule");
     let corrected = correct_entry(
         store,
+        &crate::memory_controls::MemoryActor::default(),
         "project-1",
         &decision.id,
         1,
@@ -230,6 +259,7 @@ async fn background_is_its_own_section_before_and_after_correction() {
     let background = page.entries[0].clone();
     let corrected = correct_entry(
         store,
+        &crate::memory_controls::MemoryActor::default(),
         "project-1",
         &background.id,
         background.revision,

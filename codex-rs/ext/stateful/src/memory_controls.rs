@@ -12,7 +12,11 @@ use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
+use codex_project_intelligence::ChangeOrigin;
+use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::KnowledgeCategory;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RootPromotion;
 use codex_project_intelligence::Succession;
@@ -68,6 +72,55 @@ pub fn memory_section(entry: &BlackboardEntry) -> MemorySection {
     }
 }
 
+/// Who acts through a direct control: the user, from a thread, with an action identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MemoryActor {
+    pub thread_id: Option<String>,
+    pub action_id: Option<String>,
+}
+
+impl MemoryActor {
+    /// The journal record of a direct control's change to `entry`.
+    pub(crate) fn change(
+        &self,
+        operation: ChangeOperation,
+        category: KnowledgeCategory,
+        preview: &str,
+    ) -> ChangeRecord {
+        ChangeRecord {
+            operation,
+            origin: ChangeOrigin::DirectControl,
+            category,
+            action_id: self.action_id.clone(),
+            thread_id: self.thread_id.clone(),
+            turn_id: None,
+            group_id: None,
+            preview: preview.to_string(),
+        }
+    }
+}
+
+/// The journal category of an entry: its recorded category, or one derived from its kind.
+pub(crate) async fn entry_category(
+    store: &BlackboardStore,
+    entry: &BlackboardEntry,
+) -> KnowledgeCategory {
+    if let Ok(Some(context)) = store
+        .knowledge_context(&entry.value.project_id, &entry.id)
+        .await
+    {
+        return context.category;
+    }
+    match memory_section(entry) {
+        MemorySection::UserRule | MemorySection::PendingRule | MemorySection::UnverifiedRule => {
+            KnowledgeCategory::Rule
+        }
+        MemorySection::Decision => KnowledgeCategory::Decision,
+        MemorySection::Background => KnowledgeCategory::Background,
+        MemorySection::Knowledge => KnowledgeCategory::Legacy,
+    }
+}
+
 /// Why a control changed nothing.
 #[derive(Debug)]
 pub enum MemoryControlError {
@@ -86,6 +139,7 @@ impl From<BlackboardStoreError> for MemoryControlError {
 /// the message that first stated a retired rule cannot bring it back.
 pub async fn forget_entry(
     store: &BlackboardStore,
+    actor: &MemoryActor,
     project_id: &str,
     id: &BlackboardEntryId,
     expected_revision: u64,
@@ -99,9 +153,14 @@ pub async fn forget_entry(
             "entry {id} is already retired or replaced"
         )));
     }
+    let change = actor.change(
+        ChangeOperation::Forgotten,
+        entry_category(store, &current).await,
+        &current.value.content,
+    );
     // Authorship is unchanged: the retired text is still attributed to whoever wrote it.
     Ok(store
-        .update_entry(
+        .update_entry_recorded(
             project_id,
             id,
             BlackboardEntryUpdate {
@@ -119,6 +178,7 @@ pub async fn forget_entry(
                 superseded_by: None,
                 provenance: current.value.provenance,
             },
+            Some(&change),
         )
         .await?)
 }
@@ -129,6 +189,7 @@ pub async fn forget_entry(
 /// retry of the same correction returns the stored result.
 pub async fn correct_entry(
     store: &BlackboardStore,
+    actor: &MemoryActor,
     project_id: &str,
     id: &BlackboardEntryId,
     expected_revision: u64,
@@ -186,6 +247,13 @@ pub async fn correct_entry(
             source_id: format!("memory-correct:{id}:{expected_revision}"),
         },
     };
+    let category = entry_category(store, &current).await;
+    let change = actor.change(ChangeOperation::Corrected, category, content);
+    // A corrected rule keeps the investigation it was limited to, in its identity too.
+    let scope_id = store
+        .knowledge_context(project_id, id)
+        .await?
+        .and_then(|context| context.scope_id);
     let replaced = vec![SupersededEntry {
         id: id.clone(),
         expected_revision,
@@ -209,12 +277,14 @@ pub async fn correct_entry(
         };
         let successor = BlackboardEntryId::parse(format!("{prefix}-{:x}", hasher.finalize()))
             .map_err(|error| MemoryControlError::Refused(error.to_string()))?;
-        return Ok(store.create_successor(successor, value, replaced).await?);
+        return Ok(store
+            .create_successor_recorded(successor, value, replaced, Some(&change))
+            .await?);
     }
     // A corrected rule takes the identity of its new wording, so the user stating the same
     // words later finds it instead of storing it twice.
     for generation in 0..MAX_RULE_GENERATIONS {
-        let candidate = user_rule_entry_id(project_id, /*scope_id*/ None, content, generation)
+        let candidate = user_rule_entry_id(project_id, scope_id.as_deref(), content, generation)
             .ok_or_else(|| {
                 MemoryControlError::Refused("the corrected rule cannot be identified".to_string())
             })?;
@@ -222,7 +292,7 @@ pub async fn correct_entry(
             Some(existing) if existing.state != BlackboardEntryState::Active => continue,
             Some(_) => {
                 return store
-                    .create_successor(candidate, value, replaced)
+                    .create_successor_recorded(candidate, value, replaced, Some(&change))
                     .await
                     .map_err(|error| match error {
                         BlackboardStoreError::EntryIdentityConflict(_) => {
@@ -234,7 +304,11 @@ pub async fn correct_entry(
                         error => MemoryControlError::Store(error),
                     });
             }
-            None => return Ok(store.create_successor(candidate, value, replaced).await?),
+            None => {
+                return Ok(store
+                    .create_successor_recorded(candidate, value, replaced, Some(&change))
+                    .await?);
+            }
         }
     }
     Err(MemoryControlError::Refused(

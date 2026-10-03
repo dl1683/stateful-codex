@@ -5279,6 +5279,14 @@ class StatefulMemoryAddOutcome(Enum):
     already_done = "alreadyDone"
 
 
+class StatefulMemoryAuthority(Enum):
+    legacy_unknown = "legacyUnknown"
+    human_direct = "humanDirect"
+    assistant_reported = "assistantReported"
+    reported_third_party = "reportedThirdParty"
+    host_observed = "hostObserved"
+
+
 class StatefulMemoryReplaced(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5286,6 +5294,31 @@ class StatefulMemoryReplaced(BaseModel):
     content: Annotated[str, Field(description="At most 240 bytes.")]
     entry_id: Annotated[str, Field(alias="entryId")]
     replaced_at: Annotated[int, Field(alias="replacedAt", description="Unix seconds.")]
+
+
+class StatefulMemoryScope(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    end_condition: Annotated[
+        str | None,
+        Field(
+            alias="endCondition", description="When its rules stop applying, in the user's words."
+        ),
+    ] = None
+    open: bool
+    scope_id: Annotated[str, Field(alias="scopeId")]
+    this_thread: Annotated[
+        bool, Field(alias="thisThread", description="Whether this thread continues it.")
+    ]
+    title: Annotated[str, Field(description="The user's words naming it.")]
+
+
+class StatefulMemoryScopeAction(Enum):
+    list = "list"
+    join = "join"
+    leave = "leave"
+    end = "end"
 
 
 class StatefulMemorySectionValue(Enum):
@@ -10398,6 +10431,19 @@ class StatefulMemoryItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    attributed_to: Annotated[
+        str | None,
+        Field(
+            alias="attributedTo",
+            description="Whose words a relayed note keeps, as the user named them.",
+        ),
+    ] = None
+    authority: Annotated[
+        StatefulMemoryAuthority | None,
+        Field(
+            description="On whose authority the entry rests, when recorded (older entries have none)."
+        ),
+    ] = None
     content: Annotated[
         str, Field(description="At most 2,000 bytes; `contentTruncated` says whether more exists.")
     ]
@@ -10409,6 +10455,13 @@ class StatefulMemoryItem(BaseModel):
         Field(description="What this entry replaced, newest first, at most three."),
     ]
     revision: Annotated[int, Field(ge=0)]
+    scope_title: Annotated[
+        str | None,
+        Field(
+            alias="scopeTitle",
+            description="The investigation a rule is limited to, in the user's words.",
+        ),
+    ] = None
     section: StatefulMemorySection
     source: Annotated[BlackboardProvenanceKind, Field(description="Who wrote this text.")]
     updated_at: Annotated[int, Field(alias="updatedAt", description="Unix seconds.")]

@@ -33,6 +33,7 @@ mod knowledge;
 mod query;
 mod relation;
 mod review;
+mod scopes;
 mod succession;
 mod update;
 

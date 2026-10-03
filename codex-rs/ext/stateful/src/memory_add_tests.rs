@@ -27,9 +27,19 @@ async fn the_user_adds_each_kind_directly() {
     let add = |addition: MemoryAddition, content: &'static str, action: &'static str| {
         let node_id = node_id.clone();
         async move {
-            add_entry(store, "project-1", node_id, addition, content, action)
-                .await
-                .expect("added")
+            add_entry(
+                store,
+                &crate::memory_controls::MemoryActor {
+                    thread_id: None,
+                    action_id: Some(action.to_string()),
+                },
+                "project-1",
+                node_id,
+                addition,
+                content,
+            )
+            .await
+            .expect("added")
         }
     };
     let rule = add(
@@ -54,15 +64,40 @@ async fn the_user_adds_each_kind_directly() {
     )
     .await;
     let retried = add(
-        MemoryAddition::Decision { reason: None },
+        MemoryAddition::Decision {
+            reason: Some("dashboards read it as minutes".to_string()),
+        },
         "Months use mth.",
         "a4",
     )
     .await;
+    // The same action identity for other words is refused, never applied.
+    let reused = add_entry(
+        store,
+        &crate::memory_controls::MemoryActor {
+            thread_id: None,
+            action_id: Some("a4".to_string()),
+        },
+        "project-1",
+        node_id.clone(),
+        MemoryAddition::Note,
+        "Something else.",
+    )
+    .await;
+    assert!(matches!(
+        reused,
+        Err(crate::memory_controls::MemoryControlError::Refused(_))
+    ));
     let note = add(MemoryAddition::Note, "The CI runs on Windows.", "a5").await;
-    forget_entry(store, "project-1", &rule.0.id, rule.0.revision)
-        .await
-        .expect("forget");
+    forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.0.id,
+        rule.0.revision,
+    )
+    .await
+    .expect("forget");
     // A retry of the first action after the forget returns what it made, without restoring
     // it; a new action restores the words.
     let retry = add(
@@ -205,11 +240,14 @@ async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
     let store = services.blackboard().await.expect("store");
     let (added, outcome) = add_entry(
         store,
+        &crate::memory_controls::MemoryActor {
+            thread_id: None,
+            action_id: Some("action-1".to_string()),
+        },
         "project-1",
         node_id,
         MemoryAddition::Rule { scope: None },
         "Never run migrations during this pass.",
-        "action-1",
     )
     .await
     .expect("added");

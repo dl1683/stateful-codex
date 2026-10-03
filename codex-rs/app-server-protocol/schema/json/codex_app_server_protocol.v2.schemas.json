@@ -19699,9 +19699,66 @@
         }
       ]
     },
+    "StatefulMemoryAuthority": {
+      "description": "On whose authority a memory entry rests.",
+      "oneOf": [
+        {
+          "enum": [
+            "legacyUnknown"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The user's own words or control action.",
+          "enum": [
+            "humanDirect"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "What the assistant said; not the user's word and not verified.",
+          "enum": [
+            "assistantReported"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Someone else's words the user passed on.",
+          "enum": [
+            "reportedThirdParty"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Observed by the host (a command, a commit, source bytes).",
+          "enum": [
+            "hostObserved"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "StatefulMemoryItem": {
       "description": "One current entry of project memory.",
       "properties": {
+        "attributedTo": {
+          "description": "Whose words a relayed note keeps, as the user named them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authority": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StatefulMemoryAuthority"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "On whose authority the entry rests, when recorded (older entries have none)."
+        },
         "content": {
           "description": "At most 2,000 bytes; `contentTruncated` says whether more exists.",
           "type": "string"
@@ -19726,6 +19783,13 @@
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "scopeTitle": {
+          "description": "The investigation a rule is limited to, in the user's words.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "section": {
           "$ref": "#/definitions/StatefulMemorySection"
@@ -19779,6 +19843,72 @@
         "replacedAt"
       ],
       "type": "object"
+    },
+    "StatefulMemoryScope": {
+      "description": "One investigation rules can be limited to.",
+      "properties": {
+        "endCondition": {
+          "description": "When its rules stop applying, in the user's words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "scopeId": {
+          "type": "string"
+        },
+        "thisThread": {
+          "description": "Whether this thread continues it.",
+          "type": "boolean"
+        },
+        "title": {
+          "description": "The user's words naming it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "open",
+        "scopeId",
+        "thisThread",
+        "title"
+      ],
+      "type": "object"
+    },
+    "StatefulMemoryScopeAction": {
+      "description": "What the user does with the investigations rules can be limited to.",
+      "oneOf": [
+        {
+          "description": "List the project's investigations and which one this thread continues.",
+          "enum": [
+            "list"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This thread continues the named investigation; its rules apply here.",
+          "enum": [
+            "join"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This thread no longer continues any investigation.",
+          "enum": [
+            "leave"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "End the named investigation; its rules stop applying everywhere (kept in history).",
+          "enum": [
+            "end"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "StatefulMemorySection": {
       "description": "Where a memory item belongs, matching what new work applies.",

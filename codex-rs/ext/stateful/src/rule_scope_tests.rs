@@ -13,7 +13,7 @@ fn only_the_users_own_words_release_an_investigation() {
             "Do NOT change any code until we have agreed on the root cause.",
             "Keep investigating.",
         ]
-        .map(releases),
+        .map(|text| releases(text, Some("until we have agreed on the root cause"))),
         [true, true, false, false, false, false]
     );
 }
@@ -84,5 +84,90 @@ async fn investigation_rules_follow_their_threads() {
             applies_in(&ended),
         ),
         (2, 2, 0, 2, 0)
+    );
+}
+
+/// Item 1 review: conditional, negated, questioning, blockquoted and fenced mentions never
+/// end an investigation; an agreement ends one only when that was its condition; a request
+/// joins an investigation only when it refers to one.
+#[test]
+fn releases_are_affirmative_and_bindings_are_explicit() {
+    let condition = Some("until we have agreed on the root cause");
+    assert_eq!(
+        (
+            [
+                "Do not end this investigation.",
+                "If tomorrow we agree on the root cause, start the fix.",
+                "Should we end this investigation?",
+                "> End this investigation.",
+                "```\nend this investigation\n```",
+                "OK, we've agreed on the root cause.",
+            ]
+            .map(|text| releases(text, condition)),
+            releases("We have agreed on the root cause.", Some("until I say so")),
+            [
+                "Format utils.py",
+                "Remind me what we ruled out.",
+                "Where are we on the investigation?",
+            ]
+            .map(super::refers_to_investigation),
+        ),
+        (
+            [false, false, false, false, false, true],
+            false,
+            [false, true, true],
+        )
+    );
+}
+
+/// Item 1 review: two prose rules for one investigation share its scope, so both apply in
+/// the thread that stated them; a legacy rule naming an investigation waits for the user.
+#[tokio::test]
+async fn one_message_opens_one_investigation() {
+    use codex_project_intelligence::RootBlackboardQuery;
+    use codex_state::SqliteConfig;
+    use codex_utils_absolute_path::test_support::PathExt;
+
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        SqliteConfig::new_for_testing(state_home.path().abs()),
+    );
+    let message =
+        "During this investigation, never change code. For this whole investigation, never push.";
+    crate::rule_group::capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        message,
+    )
+    .await;
+    let store = services.blackboard().await.expect("store");
+    let (projection, view) = super::applicable_projection(store, "project-1", "thread-1")
+        .await
+        .expect("root");
+    let open = store
+        .scopes(
+            "project-1",
+            Some(codex_project_intelligence::ScopeState::Open),
+        )
+        .await
+        .expect("scopes");
+    let full = store
+        .root_projection(RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 16,
+        })
+        .await
+        .expect("root");
+    assert_eq!(
+        (
+            projection.data.len(),
+            view.inapplicable.len(),
+            open.len(),
+            full.data.len()
+        ),
+        (2, 0, 1, 2)
     );
 }

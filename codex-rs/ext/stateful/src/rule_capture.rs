@@ -18,6 +18,7 @@ use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ChangeOrigin;
 use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::KnowledgeAuthority;
 use codex_project_intelligence::KnowledgeCategory as ChangeCategory;
 use codex_project_intelligence::KnowledgeContext;
@@ -286,7 +287,7 @@ pub(crate) async fn store_user_rule(
         turn_id,
         receipt_turn_id,
         stated_at_ms,
-        placement,
+        mut placement,
     } = source;
     let change = |operation, entry_text: &str| ChangeRecord {
         operation,
@@ -302,6 +303,11 @@ pub(crate) async fn store_user_rule(
         .blackboard()
         .await
         .map_err(|error| error.to_string())?;
+    // A rule recorded outside a capture group still takes its place after everything
+    // captured before it.
+    if placement.source_sequence.is_none() {
+        placement.source_sequence = store.allocate_source_sequence(project_id).await.ok();
+    }
     let receipt = |entry: &BlackboardEntry, outcome: CaptureOutcome| {
         let category = if entry.value.root_promotion == RootPromotion::Promoted {
             KnowledgeCategory::Rule
@@ -381,7 +387,7 @@ pub(crate) async fn store_user_rule(
     let node_id = services.project_node_id(project_id).await?;
     let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
         .map_err(|error| error.to_string())?;
-    let (entry, _) = store
+    let (entry, created) = store
         .create_entry_with_context(
             id,
             NewBlackboardEntry {
@@ -409,6 +415,15 @@ pub(crate) async fn store_user_rule(
         )
         .await
         .map_err(|error| error.to_string())?;
+    // A concurrent capture of the same words stored it first: only one save is claimed.
+    if created == CreateOutcome::AlreadyPresent {
+        receipt(&entry, CaptureOutcome::AlreadyStored);
+        return Ok(CapturedRule {
+            entry,
+            standing,
+            newly_stored: false,
+        });
+    }
     if let Some(event_sink) = event_sink {
         event_sink.emit(StatefulEvent::BlackboardUpdated {
             project_id: project_id.to_string(),

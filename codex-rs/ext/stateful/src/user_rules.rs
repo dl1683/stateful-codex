@@ -90,6 +90,12 @@ const STANDING_PHRASES: &[&str] = &[
     "rules for this",
     "house rules",
     "style rules",
+];
+
+/// Phrases naming how long a rule lasts ("for the whole time we work on it"). They mark a
+/// rule only in a directive, never in the user's description of themselves ("I'm a backend
+/// developer for this project").
+const DURATION_PHRASES: &[&str] = &[
     "for the whole time",
     "the whole time we work",
     "while we work on",
@@ -504,6 +510,16 @@ pub(crate) fn has_standing_marker(normalized: &str) -> bool {
         .any(|phrase| format!(" {body} ").contains(phrase))
         || has_phrase(normalized, STANDING_PHRASES)
         || has_phrase(normalized, INVESTIGATION_PHRASES)
+        || (has_phrase(normalized, DURATION_PHRASES) && !describes_the_user(body))
+}
+
+/// Whether a sentence describes the user rather than directing the work.
+fn describes_the_user(body: &str) -> bool {
+    [
+        "i'm ", "i am ", "i know ", "i've ", "i have ", "i work ", "my ",
+    ]
+    .iter()
+    .any(|opening| body.starts_with(opening))
 }
 
 pub(crate) fn strip_list_marker(normalized: &str) -> &str {

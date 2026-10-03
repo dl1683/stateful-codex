@@ -46,7 +46,6 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::WorldStateContributionInput;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::ProjectRefreshStatus;
-use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
 
@@ -85,6 +84,7 @@ pub use memory_add::AddOutcome;
 pub use memory_add::MemoryAddition;
 pub use memory_add::add_entry;
 pub use memory_controls::MAX_CORRECTION_BYTES;
+pub use memory_controls::MemoryActor;
 pub use memory_controls::MemoryControlError;
 pub use memory_controls::MemorySection;
 pub use memory_controls::correct_entry;
@@ -347,14 +347,10 @@ impl StatefulExtension {
                 return RootBlackboardStatus::Unavailable;
             }
         };
-        match store
-            .root_projection(RootBlackboardQuery {
-                project_id: project_id.to_string(),
-                max_entries: 256,
-            })
-            .await
-        {
-            Ok(projection) => {
+        // Only the rules that apply in this thread are candidates, so rules of another
+        // investigation never take a place in the bounded root.
+        match rule_scope::applicable_projection(store, project_id, thread_id).await {
+            Ok((projection, scope_view)) => {
                 let context_map = match services.context_map().await {
                     Ok(context_map) => context_map,
                     Err(error) => {
@@ -365,8 +361,6 @@ impl StatefulExtension {
                             /*audit*/ None,
                             /*audit_recomputed*/ false,
                         );
-                        let scope_view =
-                            rule_scope::ScopeView::load(store, &projection, thread_id).await;
                         return RootBlackboardStatus::Available(
                             ResolvedRootBlackboard::new(
                                 projection,
@@ -379,7 +373,7 @@ impl StatefulExtension {
                                     observed_sources: 0,
                                 }),
                             )
-                            .with_scope_view(&scope_view),
+                            .with_scope_note(scope_view.note()),
                         );
                     }
                 };
@@ -460,15 +454,9 @@ impl StatefulExtension {
                         (audit, true)
                     }
                 };
-                let projection = if audit_recomputed {
-                    match store
-                        .root_projection(RootBlackboardQuery {
-                            project_id: project_id.to_string(),
-                            max_entries: 256,
-                        })
-                        .await
-                    {
-                        Ok(projection) => projection,
+                let (projection, scope_view) = if audit_recomputed {
+                    match rule_scope::applicable_projection(store, project_id, thread_id).await {
+                        Ok(reloaded) => reloaded,
                         Err(error) => {
                             tracing::warn!(
                                 %project_id,
@@ -479,7 +467,7 @@ impl StatefulExtension {
                         }
                     }
                 } else {
-                    projection
+                    (projection, scope_view)
                 };
                 self.attribution.record_world_state(
                     turn_id,
@@ -488,14 +476,13 @@ impl StatefulExtension {
                     audit_recomputed,
                 );
                 let predecessors = root_predecessors(store, project_id, &projection).await;
-                let scope_view = rule_scope::ScopeView::load(store, &projection, thread_id).await;
                 RootBlackboardStatus::Available(
                     ResolvedRootBlackboard::new(
                         projection,
                         evidence_routes,
                         Some((*evidence_audit).clone()),
                     )
-                    .with_scope_view(&scope_view)
+                    .with_scope_note(scope_view.note())
                     .with_predecessors(predecessors),
                 )
             }

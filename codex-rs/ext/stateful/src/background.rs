@@ -34,14 +34,12 @@ const BACKGROUND_OPENINGS: &[&str] = &[
     "i am learning",
     "i'm a",
     "i am a",
+    "i'm an",
+    "i am an",
+    "i'm moving into",
+    "i'm switching to",
     "i work as",
     "my background",
-    "i'm not changing",
-    "i am not changing",
-    "i won't be changing",
-    "i will not be changing",
-    "i'm only reading",
-    "i'm just reading",
     "i maintain",
     "i'm the maintainer",
     "i am the maintainer",
@@ -66,6 +64,8 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
     // line) may be someone else's words.
     let mut fence = crate::user_rules::Fence::default();
     let mut introduced = false;
+    // Under the user's own "About me:" header, its items are the user's words.
+    let mut about_me = false;
     let mut statements = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim();
@@ -75,20 +75,31 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
         if trimmed.is_empty() {
             // An introduced block ends at a blank line.
             introduced = false;
+            about_me = false;
             continue;
         }
-        let plain = !introduced
-            && !trimmed.starts_with('>')
-            && !line.starts_with([' ', '\t'])
-            && list_item_body(trimmed).is_none();
+        let item = list_item_body(trimmed).map(str::trim);
+        let plain = (about_me && !trimmed.starts_with('>'))
+            || (!introduced
+                && !trimmed.starts_with('>')
+                && !line.starts_with([' ', '\t'])
+                && item.is_none());
+        if trimmed.ends_with(':') && !introduced {
+            about_me = names_the_user(trimmed);
+        }
         introduced = introduced || trimmed.ends_with(':');
         if !plain {
             continue;
         }
-        for clause in clauses(trimmed) {
+        let line_text = if about_me {
+            item.unwrap_or(trimmed)
+        } else {
+            trimmed
+        };
+        for clause in clauses(line_text) {
             // Clauses are slices of `text`, so their offsets locate them in its quotations.
             let start = clause.as_ptr() as usize - text.as_ptr() as usize;
-            if quotations.touches_quotation(start, start + clause.len())
+            if quotations.touches_words(start, start + clause.len())
                 || quotations.in_reported_sentence(start)
                 || clause.contains(QUOTE_OR_CODE_MARKS)
                 || clause.ends_with('?')
@@ -106,6 +117,8 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
                 Some((framing, _)) if names_a_source(framing) => continue,
                 Some((_, rest)) if describes_self(rest) => rest.trim(),
                 Some(_) => continue,
+                // An item under "About me:" is the user's description, whatever its opening.
+                None if about_me => clause,
                 None if describes_self(clause) => clause,
                 None => continue,
             };
@@ -116,9 +129,24 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
 }
 
 /// Marks that show a quotation or code in a clause.
-const QUOTE_OR_CODE_MARKS: [char; 7] = [
-    '"', '\u{201c}', '\u{201d}', '\u{2018}', '`', '\u{ab}', '\u{bb}',
-];
+const QUOTE_OR_CODE_MARKS: [char; 6] =
+    ['"', '\u{201c}', '\u{201d}', '\u{2018}', '\u{ab}', '\u{bb}'];
+
+/// Whether a header introduces the user's own description ("About me:", "Background:").
+fn names_the_user(header: &str) -> bool {
+    let header = normalize(header);
+    [
+        "about me",
+        "a bit about me",
+        "about myself",
+        "background",
+        "my background",
+        "some background",
+        "who i am",
+    ]
+    .iter()
+    .any(|opening| header == *opening || header.starts_with(&format!("{opening} ")))
+}
 
 /// Words of a framing ("From the docs:", "My colleague says:") that make what follows
 /// someone else's words.

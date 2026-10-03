@@ -321,6 +321,15 @@ impl BlackboardUpdateTool {
                 root_promotion,
                 ..
             } => {
+                // Someone else's words the user passed on are kept for explanation only; they
+                // never join the applied root.
+                if current.id.as_str().starts_with("stateful-relayed-")
+                    && root_promotion != RootPromotion::NotPromoted
+                {
+                    return Err(respond(
+                        "that note keeps someone else's words the user passed on; it is never promoted",
+                    ));
+                }
                 update.expected_revision = expected_revision;
                 update.root_promotion = root_promotion;
             }

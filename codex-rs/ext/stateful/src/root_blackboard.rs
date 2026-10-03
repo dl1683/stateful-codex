@@ -212,11 +212,10 @@ impl ResolvedRootBlackboard {
         }
     }
 
-    /// Leaves out rules of investigations this thread is not part of, before any alias is
-    /// assigned, and notes them.
-    pub(super) fn with_scope_view(mut self, view: &crate::rule_scope::ScopeView) -> Self {
-        let not_applied = view.retain_applicable(&mut self.projection);
-        self.scope_note = view.note(not_applied);
+    /// Notes which investigation rules were left out of the projection (they were removed
+    /// before any alias was assigned).
+    pub(super) fn with_scope_note(mut self, note: Option<String>) -> Self {
+        self.scope_note = note;
         self
     }
 

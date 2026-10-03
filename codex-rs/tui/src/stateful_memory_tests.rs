@@ -41,6 +41,9 @@ fn item(
         source: BlackboardProvenanceKind::User,
         updated_at: 1_790_000_000,
         replaces: Vec::new(),
+        authority: None,
+        scope_title: None,
+        attributed_to: None,
     }
 }
 
@@ -223,7 +226,7 @@ fn group_receipts_count_what_was_committed() {
         turn_id: "turn-1".to_string(),
         group_id: "group-1".to_string(),
         category: StatefulKnowledgeCategory::Rule,
-        declared_count: Some(4),
+        declared_count: Some(5),
         recognized: 4,
         saved: 2,
         already_present: 1,
