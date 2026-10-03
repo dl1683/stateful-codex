@@ -319,15 +319,20 @@ impl TurnLifecycleContributor for StatefulExtension {
                     return;
                 }
             };
-            match store.run_for_thread(&thread.thread_id).await {
-                Ok(Some(run)) if run.value.project_id == selected.project_id() => {
+            // Durable admission before the turn samples: a continuation (a keeper's resume, a
+            // restart) stays attributed to the run its thread is bound to.
+            match store
+                .admit_run_turn(selected.project_id(), &thread.thread_id, input.turn_id)
+                .await
+            {
+                Ok(Some((_, run))) => {
                     self.attribution.bind_run(input.turn_id, run.id.clone());
                     input.thread_store.insert(ActiveRunTurn {
                         run_id: run.id,
                         turn_id: input.turn_id.to_string(),
                     });
                 }
-                Ok(_) => {
+                Ok(None) => {
                     input.thread_store.remove::<ActiveRunTurn>();
                 }
                 Err(error) => {
