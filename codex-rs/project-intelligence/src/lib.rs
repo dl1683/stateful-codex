@@ -54,6 +54,7 @@ pub use blackboard_storage::CategorizedEntry;
 pub use blackboard_storage::CategoryQuery;
 pub use blackboard_storage::CompletionFence;
 pub use blackboard_storage::CreateOutcome;
+pub use blackboard_storage::LegacyEntry;
 pub use blackboard_storage::MAX_CATEGORIZED_ENTRIES;
 pub use blackboard_storage::MAX_CHANGES_PAGE;
 pub use blackboard_storage::MAX_SUPERSEDED_ENTRIES;
