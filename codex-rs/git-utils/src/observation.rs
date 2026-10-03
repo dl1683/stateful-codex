@@ -23,8 +23,15 @@ use crate::git_process::GitCommandBudget;
 use crate::git_process::GitCommandError;
 use crate::git_process::GitSpawnError;
 
+mod history;
 mod parse;
 mod probe;
+
+pub use history::GitCommitRange;
+pub use history::GitCommitSummary;
+pub use history::GitWorktreePaths;
+pub use history::changed_paths;
+pub use history::commits_between;
 
 use parse::ParseFailure;
 use parse::PorcelainStatus;
@@ -352,29 +359,34 @@ async fn run_probe(
     runner
         .run(probe, cwd, budget)
         .await
-        .map_err(|error| match error {
-            GitCommandError::Spawn(GitSpawnError::Spawn(error)) => {
-                // Starting a process in a missing directory fails like a
-                // missing executable, so check the directory first. Only an
-                // established absence counts as missing.
-                match std::fs::metadata(cwd) {
-                    Ok(metadata) if !metadata.is_dir() => GitObservationFailure::MissingRoot,
-                    Err(metadata_error) if metadata_error.kind() == io::ErrorKind::NotFound => {
-                        GitObservationFailure::MissingRoot
-                    }
-                    Ok(_) if error.kind() == io::ErrorKind::NotFound => {
-                        GitObservationFailure::GitUnavailable
-                    }
-                    Ok(_) | Err(_) => GitObservationFailure::Spawn((&error).into()),
+        .map_err(|error| command_error(error, cwd))
+}
+
+/// Maps a bounded command failure to the observation failure it establishes.
+fn command_error(error: GitCommandError, cwd: &Path) -> GitObservationFailure {
+    match error {
+        GitCommandError::Spawn(GitSpawnError::Spawn(error)) => {
+            // Starting a process in a missing directory fails like a
+            // missing executable, so check the directory first. Only an
+            // established absence counts as missing.
+            match std::fs::metadata(cwd) {
+                Ok(metadata) if !metadata.is_dir() => GitObservationFailure::MissingRoot,
+                Err(metadata_error) if metadata_error.kind() == io::ErrorKind::NotFound => {
+                    GitObservationFailure::MissingRoot
                 }
+                Ok(_) if error.kind() == io::ErrorKind::NotFound => {
+                    GitObservationFailure::GitUnavailable
+                }
+                Ok(_) | Err(_) => GitObservationFailure::Spawn((&error).into()),
             }
-            GitCommandError::Spawn(GitSpawnError::Containment(error)) => {
-                GitObservationFailure::Containment((&error).into())
-            }
-            GitCommandError::Timeout => GitObservationFailure::Timeout,
-            GitCommandError::OutputLimit => GitObservationFailure::OutputLimit,
-            GitCommandError::Io(error) => GitObservationFailure::Io((&error).into()),
-        })
+        }
+        GitCommandError::Spawn(GitSpawnError::Containment(error)) => {
+            GitObservationFailure::Containment((&error).into())
+        }
+        GitCommandError::Timeout => GitObservationFailure::Timeout,
+        GitCommandError::OutputLimit => GitObservationFailure::OutputLimit,
+        GitCommandError::Io(error) => GitObservationFailure::Io((&error).into()),
+    }
 }
 
 fn command_failed(output: &Output) -> GitObservationFailure {

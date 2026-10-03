@@ -187,6 +187,32 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
     }
 }
 
+impl StatefulExtension {
+    /// The selected project's configured roots, or none when it cannot be read.
+    async fn project_roots(&self, project_id: &str) -> Vec<String> {
+        match self.projects.read_project(project_id.to_string()).await {
+            Ok(Some(project)) => project.roots.into_iter().map(|root| root.path).collect(),
+            Ok(None) => Vec::new(),
+            Err(error) => {
+                tracing::warn!(%project_id, %error, "failed to read project roots");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Records the checkout as a turn left it, so the next turn reports only later changes.
+    async fn observe_checkout_at_turn_end(&self, thread_store: &ExtensionData) {
+        let (Some(selected), Some(services)) = (
+            thread_store.get::<SelectedProject>(),
+            self.services.as_ref(),
+        ) else {
+            return;
+        };
+        let roots = self.project_roots(selected.project_id()).await;
+        crate::checkout::observe_turn_end(services, selected.project_id(), &roots).await;
+    }
+}
+
 impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
@@ -229,6 +255,17 @@ impl TurnLifecycleContributor for StatefulExtension {
                         &text,
                     )
                     .await;
+                    let roots = self.project_roots(selected.project_id()).await;
+                    if let Some(report) = crate::checkout::observe_turn_start(
+                        services,
+                        selected.project_id(),
+                        &roots,
+                        input.turn_id,
+                    )
+                    .await
+                    {
+                        input.turn_store.insert(report);
+                    }
                 }
             }
             let (Some(selected), Some(thread), Some(services)) = (
@@ -287,12 +324,14 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Completed);
+            self.observe_checkout_at_turn_end(input.thread_store).await;
         })
     }
 
     fn on_turn_abort<'a>(&'a self, input: TurnAbortInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
+            self.observe_checkout_at_turn_end(input.thread_store).await;
         })
     }
 

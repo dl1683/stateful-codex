@@ -132,6 +132,7 @@ mod sleep;
 mod stateful_blackboard_lifecycle;
 mod stateful_cancel;
 mod stateful_capture;
+mod stateful_checkout;
 mod stateful_checkpoint;
 mod stateful_code_mode;
 mod stateful_compaction;

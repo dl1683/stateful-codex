@@ -9,6 +9,8 @@ use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::HierarchyStore;
 use codex_project_intelligence::HierarchyStoreError;
 use codex_project_intelligence::ProjectIndexer;
+use codex_project_intelligence::RepositoryObservationStore;
+use codex_project_intelligence::RepositoryObservationStoreError;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
@@ -24,6 +26,7 @@ pub(super) struct ProjectIntelligenceServices {
     hierarchy: Arc<OnceCell<HierarchyStore>>,
     read_receipts: EvidenceReadReceipts,
     runtime: Arc<OnceCell<StatefulRunStore>>,
+    repository_observations: Arc<OnceCell<RepositoryObservationStore>>,
     /// One on-demand index per project, so concurrent first queries index it once and the
     /// others wait for that publication.
     on_demand_index: Arc<std::sync::Mutex<HashMap<String, Arc<OnceCell<()>>>>>,
@@ -38,6 +41,7 @@ impl ProjectIntelligenceServices {
             hierarchy: Arc::new(OnceCell::new()),
             read_receipts: EvidenceReadReceipts::default(),
             runtime: Arc::new(OnceCell::new()),
+            repository_observations: Arc::new(OnceCell::new()),
             on_demand_index: Arc::default(),
         }
     }
@@ -96,6 +100,14 @@ impl ProjectIntelligenceServices {
             .await
             .map(|node| node.id)
             .map_err(|error| error.to_string())
+    }
+
+    pub(super) async fn repository_observations(
+        &self,
+    ) -> Result<&RepositoryObservationStore, RepositoryObservationStoreError> {
+        self.repository_observations
+            .get_or_try_init(|| RepositoryObservationStore::open(&self.sqlite))
+            .await
     }
 
     pub(super) async fn runtime(&self) -> Result<&StatefulRunStore, StatefulRunStoreError> {

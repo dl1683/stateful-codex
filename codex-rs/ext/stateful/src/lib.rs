@@ -2,6 +2,7 @@
 
 mod attribution;
 mod autonomy;
+mod checkout;
 mod checkpoint;
 mod completion;
 mod continuity;
@@ -183,6 +184,16 @@ impl ContextContributor for StatefulExtension {
                     .get::<request_scope::RequestHead>()
                     .as_deref(),
             );
+            let checkout_report = checkout::CheckoutReportPlan::new(
+                input
+                    .previous_world_state
+                    .and_then(|previous| previous.get(checkout::WORLD_STATE_ID)),
+                input.turn_id,
+                input
+                    .turn_store
+                    .get::<checkout::CheckoutReport>()
+                    .as_deref(),
+            );
             let mut continuity = None;
             let status = match self
                 .projects
@@ -239,7 +250,8 @@ impl ContextContributor for StatefulExtension {
                         + run.render().len()
                         + run_world_state::END_MARKER.len()
                 })
-                + scope_note.window_bytes;
+                + scope_note.window_bytes
+                + checkout_report.window_bytes;
             let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
             let available_project_id = match &status {
                 ProjectIntelligenceStatus::Available { project, .. } => Some(project.id.clone()),
@@ -261,6 +273,7 @@ impl ContextContributor for StatefulExtension {
                 (None, None) => {}
             }
             sections.push(scope_note.section());
+            sections.push(checkout_report.section());
             if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }

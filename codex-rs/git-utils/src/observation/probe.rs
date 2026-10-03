@@ -116,17 +116,24 @@ impl GitProbeRunner for BoundedGitRunner {
         cwd: &Path,
         budget: &GitCommandBudget,
     ) -> Result<Output, GitCommandError> {
-        let mut command = Command::new("git");
-        for variable in REPOSITORY_SELECTOR_VARIABLES {
-            command.env_remove(variable);
-        }
-        command
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .args(["-c", SAFE_BARE_REPOSITORY_CONFIG])
-            .args(["-c", &format!("core.hooksPath={DISABLED_HOOKS_PATH}")])
-            .args(["-c", FsmonitorOverride::Disabled.git_config_arg()])
-            .args(probe.args())
-            .current_dir(cwd);
+        let mut command = hardened_git_command(cwd, probe.args());
         run_git_command_with_budget(&mut command, budget, probe.output_cap()).await
     }
+}
+
+/// A Git command for `cwd` that ignores repository-selecting environment variables, takes
+/// no optional locks, and runs no repository hooks or fsmonitor helpers.
+pub(super) fn hardened_git_command(cwd: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    for variable in REPOSITORY_SELECTOR_VARIABLES {
+        command.env_remove(variable);
+    }
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(["-c", SAFE_BARE_REPOSITORY_CONFIG])
+        .args(["-c", &format!("core.hooksPath={DISABLED_HOOKS_PATH}")])
+        .args(["-c", FsmonitorOverride::Disabled.git_config_arg()])
+        .args(args)
+        .current_dir(cwd);
+    command
 }

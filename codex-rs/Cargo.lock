@@ -4660,6 +4660,7 @@ name = "codex-stateful-extension"
 version = "0.159.2"
 dependencies = [
  "codex-extension-api",
+ "codex-git-utils",
  "codex-project-intelligence",
  "codex-protocol",
  "codex-state",

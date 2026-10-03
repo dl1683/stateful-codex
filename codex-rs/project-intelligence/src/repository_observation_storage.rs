@@ -124,6 +124,29 @@ impl RepositoryObservationStore {
         transaction.commit().await?;
         Ok(observation.filter(|observation| observation.project_id == project_id))
     }
+
+    /// The project's most recently completed observation.
+    pub async fn latest(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<RepositoryObservation>, RepositoryObservationStoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let id = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM repository_observations WHERE project_id = ?
+             ORDER BY completed_at_ms DESC, id DESC LIMIT 1",
+        )
+        .bind(project_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let observation = match id {
+            Some(id) => {
+                load_observation(&mut transaction, &RepositoryObservationId::parse(id)?).await?
+            }
+            None => None,
+        };
+        transaction.commit().await?;
+        Ok(observation)
+    }
 }
 
 async fn insert_root(
