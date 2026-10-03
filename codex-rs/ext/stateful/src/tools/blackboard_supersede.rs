@@ -82,40 +82,38 @@ pub(super) async fn committed_succession(
         visible_root.get(thread_id),
         visible_root.last_cleared(thread_id),
     ];
-    // Every reference must name a distinct committed predecessor, and together they must
-    // name all of them; an alias may be checked against any packet record it could have
-    // meant, since a later full packet can reuse the alias for another entry.
-    let mut matched = std::collections::HashSet::new();
-    let mut same_replacement = replaced.len() == references.len();
-    for reference in references {
-        if !same_replacement {
-            break;
-        }
-        let candidates = match reference {
-            SupersedeReference::Alias { alias } => shown
-                .iter()
-                .flatten()
-                .filter_map(|root| root.entry_for_alias(alias))
-                .map(|(entry_id, revision)| (entry_id.to_string(), revision))
-                .collect::<Vec<_>>(),
-            SupersedeReference::Entry { entry_id, revision } => {
-                vec![(entry_id.clone(), *revision)]
-            }
-        };
-        let hit = replaced.iter().find(|entry| {
-            !matched.contains(entry.id.as_str())
-                && candidates.iter().any(|(entry_id, revision)| {
-                    entry.id.as_str() == entry_id && entry.revision == revision.saturating_add(1)
+    // The references must resolve, all against one packet record (the current one or the
+    // one a later delta cleared), to exactly the committed predecessors: a later full packet
+    // can reuse an alias for another entry, so aliases are never mixed across records.
+    let snapshots = shown.iter().flatten().map(Some).collect::<Vec<_>>();
+    let snapshots = if snapshots.is_empty() {
+        vec![None]
+    } else {
+        snapshots
+    };
+    let same_replacement = snapshots.into_iter().any(|root| {
+        let resolved = references
+            .iter()
+            .map(|reference| match reference {
+                SupersedeReference::Alias { alias } => root
+                    .and_then(|root| root.entry_for_alias(alias))
+                    .map(|(entry_id, revision)| (entry_id.to_string(), revision)),
+                SupersedeReference::Entry { entry_id, revision } => {
+                    Some((entry_id.clone(), *revision))
+                }
+            })
+            .collect::<Option<std::collections::HashSet<_>>>();
+        resolved.is_some_and(|resolved| {
+            resolved.len() == references.len()
+                && resolved.len() == replaced.len()
+                && replaced.iter().all(|entry| {
+                    resolved.iter().any(|(entry_id, revision)| {
+                        entry.id.as_str() == entry_id
+                            && entry.revision == revision.saturating_add(1)
+                    })
                 })
-        });
-        match hit {
-            Some(entry) => {
-                matched.insert(entry.id.to_string());
-            }
-            None => same_replacement = false,
-        }
-    }
-    let same_replacement = same_replacement && matched.len() == replaced.len();
+        })
+    });
     if same_value && same_replacement {
         return Ok(Some(existing));
     }

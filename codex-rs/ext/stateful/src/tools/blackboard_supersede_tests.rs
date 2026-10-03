@@ -22,7 +22,8 @@ use crate::visible_root::VisibleRootRegistry;
 const PROJECT_ID: &str = "project-1";
 
 /// A retry must name each committed predecessor exactly once; an alias reused by a later
-/// packet for another entry still matches the predecessor it named when the call ran.
+/// packet for another entry still matches the predecessor it named when the call ran, and
+/// all aliases of one call resolve against the same packet record.
 #[tokio::test]
 async fn retries_must_cover_the_committed_replacement_exactly_once() {
     let state_home = TempDir::new().expect("state home");
@@ -76,10 +77,12 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
     let registry = VisibleRootRegistry::default();
     let mut earlier = VisibleRoot::new(1);
     earlier.insert("a".to_string(), "E1".to_string(), 1);
+    earlier.insert("z".to_string(), "E2".to_string(), 1);
     registry.record("thread-1", earlier);
     registry.clear("thread-1");
     let mut later = VisibleRoot::new(2);
     later.insert("x".to_string(), "E1".to_string(), 1);
+    later.insert("b".to_string(), "E2".to_string(), 1);
     registry.record("thread-1", later);
 
     let entry = |id: &str| SupersedeReference::Entry {
@@ -96,6 +99,14 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
         vec![entry("a"), entry("a")],
         vec![alias(), entry("a")],
         vec![entry("a")],
+        // E1 meant A only in the earlier record and E2 meant B only in the later one; one
+        // call never saw both, so mixing the records is refused.
+        vec![
+            alias(),
+            SupersedeReference::Alias {
+                alias: "E2".to_string(),
+            },
+        ],
     ] {
         outcomes.push(
             committed_succession(
@@ -111,5 +122,5 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
             .is_ok_and(|found| found.is_some()),
         );
     }
-    assert_eq!(outcomes, vec![true, true, false, false, false]);
+    assert_eq!(outcomes, vec![true, true, false, false, false, false]);
 }
