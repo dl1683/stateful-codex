@@ -211,6 +211,89 @@ async fn user_rules_are_kept_in_the_users_words_and_nothing_else_becomes_a_rule(
     Ok(())
 }
 
+/// A colleague's quoted preference is neither captured by the host nor recordable by the
+/// model as the user's rule; the user's own rule in the same message is.
+#[tokio::test]
+async fn a_quoted_colleagues_preference_is_never_the_users_rule() -> Result<()> {
+    const MESSAGE: &str = "About me: I'm a backend engineer. Standing rule for all future sessions: never touch the docs folder. My colleague wrote in our chat: \"I always want tests written first\" - that's her preference, not mine.";
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Relayed".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "relayed-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            tool_call(
+                "record-relayed",
+                "blackboard_record_batch",
+                json!({"records": [{
+                    "idempotencyKey": "relayed",
+                    "kind": "instruction",
+                    "content": "I always want tests written first",
+                    "confidenceBasisPoints": 10000,
+                    "verification": "unverified",
+                    "importance": "high",
+                    "rootPromotion": "promoted",
+                    "userQuote": "I always want tests written first",
+                    "ruleScope": "standing"
+                }]}),
+            ),
+            assistant("Noted."),
+            assistant("Fresh."),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &thread, MESSAGE).await?;
+    let output: Value = serde_json::from_str(
+        &log.requests()[1]
+            .function_call_output_text("record-relayed")
+            .expect("record output"),
+    )?;
+    let fresh = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut server, &fresh, "Rename the helper in utils.py").await?;
+    let packet = log.requests()[2].body_json().to_string();
+    assert_eq!(
+        (
+            output["results"][0]["recorded"].clone(),
+            packet.contains("never touch the docs folder"),
+            packet.contains("I always want tests written first"),
+        ),
+        (json!(false), true, false)
+    );
+    Ok(())
+}
+
 fn tool_call(call_id: &str, tool: &str, arguments: Value) -> String {
     responses::sse(vec![
         responses::ev_function_call(call_id, tool, &arguments.to_string()),

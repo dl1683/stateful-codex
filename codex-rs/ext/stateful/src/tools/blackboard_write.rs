@@ -195,7 +195,7 @@ impl BlackboardRecorder {
             ));
         }
         if reports_speech(&clause)
-            || crate::quotation::is_relayed_in(&message.text, &clause)
+            || crate::quotation::Quotations::new(&message.text).relays_clause(&clause)
             || header == Some(HeaderScope::Reported)
         {
             return Err(respond(

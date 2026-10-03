@@ -170,6 +170,7 @@ const WEAK_TASK_PHRASES: &[&str] = &[
 /// Clauses of `text` that the user explicitly marked as standing (or pending) rules.
 pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
     let mut rules = Vec::new();
+    let quotations = crate::quotation::Quotations::new(text);
     // The scope of the list the current line belongs to, from its header. Blank lines keep
     // it (Markdown lists often follow a blank line); any other prose line replaces it.
     let mut list_header: Option<HeaderScope> = None;
@@ -193,7 +194,7 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
             // Clauses are slices of `text`, so their offsets locate them in its quotations.
             let start = clause.as_ptr() as usize - text.as_ptr() as usize;
             if is_reported_speech(&normalized)
-                || crate::quotation::is_relayed(text, start, start + clause.len())
+                || quotations.relays(start, start + clause.len())
                 || asks_about_rules(clause)
             {
                 continue;
@@ -483,7 +484,8 @@ pub(crate) fn asks_about_rules(clause: &str) -> bool {
 /// Whether `clause` reports what someone else said or advised rather than stating the
 /// user's own rule; an assistant's advice must never become the user's rule.
 pub(crate) fn reports_speech(clause: &str) -> bool {
-    is_reported_speech(&normalize(clause)) || crate::quotation::is_relayed_in(clause, clause)
+    is_reported_speech(&normalize(clause))
+        || crate::quotation::Quotations::new(clause).relays_clause(clause)
 }
 
 fn standing_of(normalized: &str) -> RuleStanding {
@@ -525,11 +527,26 @@ fn clauses(line: &str) -> Vec<&str> {
     for (index, byte) in bytes.iter().enumerate() {
         let terminal = matches!(byte, b'.' | b'!' | b'?');
         // A sentence may end inside a closing quote ("... first." Next sentence).
-        let quote_closes = matches!(bytes.get(index + 1), Some(b'"' | b'\''))
-            && bytes.get(index + 2).is_none_or(u8::is_ascii_whitespace);
+        let quote_len = if terminal {
+            line[index + 1..]
+                .chars()
+                .next()
+                .filter(|next| matches!(next, '"' | '\'' | '\u{201d}' | '\u{2019}'))
+                .map_or(0, char::len_utf8)
+        } else {
+            0
+        };
+        let quote_closes = quote_len > 0
+            && bytes
+                .get(index + 1 + quote_len)
+                .is_none_or(u8::is_ascii_whitespace);
         let at_boundary = bytes.get(index + 1).is_none_or(u8::is_ascii_whitespace) || quote_closes;
         if terminal && at_boundary && !ends_with_abbreviation(&line[start..=index]) {
-            let end = if quote_closes { index + 1 } else { index };
+            let end = if quote_closes {
+                index + quote_len
+            } else {
+                index
+            };
             let clause = line[start..=end].trim();
             if !clause.is_empty() && !is_list_marker_only(clause) {
                 clauses.push(clause);

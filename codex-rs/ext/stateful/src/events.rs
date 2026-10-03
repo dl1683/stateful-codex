@@ -80,8 +80,9 @@ pub(crate) fn receipt_text(content: &str) -> String {
     // End at a word boundary when one is near, so the receipt never stops mid-word.
     let cut = &content[..end];
     let cut = match cut.rfind(char::is_whitespace) {
-        Some(space) if end - space <= 40 => cut[..space].trim_end(),
-        _ => cut,
+        Some(space) => cut[..space].trim_end(),
+        // One unbroken token (a long path) can only be cut inside it.
+        None => cut,
     };
     format!("{cut}...")
 }

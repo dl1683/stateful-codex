@@ -2,10 +2,18 @@
 //! taken as the user's own rule.
 //!
 //! A quotation is a span between double quotes, curly double quotes, or single quotes that
-//! open and close at word boundaries (an apostrophe inside a word, as in "I'm", is not a
-//! quote). Spans may cross sentences and lines; an unclosed quote runs to the end.
+//! open at a word start. Double quotes may cross sentences and lines (an unclosed one runs to
+//! the end); a single quote closes before punctuation, at the end of the text, or before a
+//! capitalized word, and otherwise at the end of its line, so a possessive ("users' docs")
+//! does not end it.
+//!
+//! The rule is deliberately conservative: when a message attributes words to someone
+//! (a speech verb outside every quotation, such as "wrote" or "said"), no clause that
+//! begins inside or contains a quotation is the user's rule. A user who quotes a term while
+//! also reporting speech can restate the rule without quotes; a stranger's preference must
+//! never be applied as theirs.
 
-/// Words that introduce what someone said or wrote.
+/// Words that attribute words to someone.
 const SPEECH_VERBS: &[&str] = &[
     "wrote",
     "writes",
@@ -21,19 +29,67 @@ const SPEECH_VERBS: &[&str] = &[
     "commented",
     "suggested",
     "noted",
+    "quote",
+    "quoted",
+    "quoting",
 ];
-
-/// A quoted phrase this long is someone's statement; a shorter one names a term or UI text
-/// ("never use the word \"simply\"", "start with 'Next:'").
-const MIN_STATEMENT_WORDS: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Span {
     /// Byte offset of the opening quote.
     open: usize,
-    /// Byte offset just past the closing quote (or the end of the text).
+    /// Byte offset just past the closing quote.
     close: usize,
-    words: usize,
+}
+
+/// The quotations of one message, computed once.
+pub(crate) struct Quotations<'a> {
+    text: &'a str,
+    spans: Vec<Span>,
+    attributes_speech: bool,
+}
+
+impl<'a> Quotations<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        let spans = spans(text);
+        let mut outside = String::with_capacity(text.len());
+        let mut position = 0;
+        for span in &spans {
+            outside.push_str(&text[position..span.open]);
+            outside.push(' ');
+            position = span.close;
+        }
+        outside.push_str(&text[position.min(text.len())..]);
+        let attributes_speech = outside
+            .split(|character: char| !character.is_alphanumeric())
+            .any(|word| SPEECH_VERBS.contains(&word.to_lowercase().as_str()));
+        Self {
+            text,
+            spans,
+            attributes_speech,
+        }
+    }
+
+    /// Whether the part from `start` to `end` (byte offsets) may be someone else's words:
+    /// it begins inside a quotation, or the message attributes speech and the part holds a
+    /// quotation.
+    pub(crate) fn relays(&self, start: usize, end: usize) -> bool {
+        self.spans.iter().any(|span| {
+            (span.open < start && start < span.close)
+                || (self.attributes_speech && span.open >= start && span.open < end)
+        })
+    }
+
+    /// Like `relays`, for a clause found in the message (judged alone if not found).
+    pub(crate) fn relays_clause(&self, clause: &str) -> bool {
+        match self.text.find(clause) {
+            Some(start) => self.relays(start, start + clause.len()),
+            None => {
+                let alone = Quotations::new(clause);
+                alone.relays(0, clause.len())
+            }
+        }
+    }
 }
 
 fn spans(text: &str) -> Vec<Span> {
@@ -43,75 +99,74 @@ fn spans(text: &str) -> Vec<Span> {
     for (index, &(offset, character)) in characters.iter().enumerate() {
         let before = index.checked_sub(1).map(|previous| characters[previous].1);
         let after = characters.get(index + 1).map(|next| next.1);
-        let word_before = before.is_some_and(char::is_alphanumeric);
-        let word_after = after.is_some_and(char::is_alphanumeric);
-        let closing = match (open, character) {
-            (Some((_, '"')), '"') | (Some((_, '\u{201c}')), '\u{201d}') => true,
-            (Some((_, '\'' | '\u{2018}')), '\'' | '\u{2019}') => {
-                before.is_some_and(|before| !before.is_whitespace()) && !word_after
+        let after_next = characters.get(index + 2).map(|next| next.1);
+        let end = offset + character.len_utf8();
+        match open {
+            Some((start, '"')) if character == '"' => {
+                spans.push(Span {
+                    open: start,
+                    close: end,
+                });
+                open = None;
             }
-            _ => false,
-        };
-        if closing {
-            if let Some((start, _)) = open.take() {
-                spans.push(span(text, start, offset + character.len_utf8()));
+            Some((start, '\u{201c}')) if character == '\u{201d}' => {
+                spans.push(Span {
+                    open: start,
+                    close: end,
+                });
+                open = None;
             }
-            continue;
-        }
-        if open.is_none() {
-            let opens = match character {
-                '"' | '\u{201c}' => true,
-                '\'' | '\u{2018}' => !word_before && word_after,
-                _ => false,
-            };
-            if opens {
-                open = Some((offset, character));
+            Some((start, '\'' | '\u{2018}')) => {
+                let candidate = matches!(character, '\'' | '\u{2019}')
+                    && before.is_some_and(|before| !before.is_whitespace())
+                    && !after.is_some_and(char::is_alphanumeric);
+                let closes = candidate
+                    && match after {
+                        None => true,
+                        Some(next) if next.is_ascii_punctuation() => true,
+                        Some(next) if next.is_whitespace() => {
+                            after_next.is_none_or(|word| !word.is_lowercase())
+                        }
+                        Some(_) => false,
+                    };
+                if closes {
+                    spans.push(Span {
+                        open: start,
+                        close: end,
+                    });
+                    open = None;
+                } else if character == '\n' {
+                    // An unmatched single quote ends with its line.
+                    spans.push(Span {
+                        open: start,
+                        close: offset,
+                    });
+                    open = None;
+                }
+            }
+            Some(_) => {}
+            None => {
+                let opens = match character {
+                    '"' | '\u{201c}' => true,
+                    '\'' | '\u{2018}' => {
+                        !before.is_some_and(char::is_alphanumeric)
+                            && after.is_some_and(char::is_alphanumeric)
+                    }
+                    _ => false,
+                };
+                if opens {
+                    open = Some((offset, character));
+                }
             }
         }
     }
     if let Some((start, _)) = open {
-        spans.push(span(text, start, text.len()));
+        spans.push(Span {
+            open: start,
+            close: text.len(),
+        });
     }
     spans
-}
-
-fn span(text: &str, open: usize, close: usize) -> Span {
-    Span {
-        open,
-        close,
-        words: text[open..close].split_whitespace().count(),
-    }
-}
-
-/// Whether the part of `text` from `start` to `end` (byte offsets) is someone else's words:
-/// it begins inside a quotation, or it holds a quoted statement and names who said it
-/// (a speech verb, before or after the quote).
-pub(crate) fn is_relayed(text: &str, start: usize, end: usize) -> bool {
-    let spans = spans(text);
-    if spans
-        .iter()
-        .any(|span| span.open < start && start < span.close)
-    {
-        return true;
-    }
-    let statement = spans
-        .iter()
-        .any(|span| span.open >= start && span.open < end && span.words >= MIN_STATEMENT_WORDS);
-    statement && mentions_speech(&text[start..end])
-}
-
-/// Whether `clause`, found in `text`, is someone else's words; a clause not found in the
-/// text is judged on its own.
-pub(crate) fn is_relayed_in(text: &str, clause: &str) -> bool {
-    match text.find(clause) {
-        Some(start) => is_relayed(text, start, start + clause.len()),
-        None => is_relayed(clause, 0, clause.len()),
-    }
-}
-
-fn mentions_speech(text: &str) -> bool {
-    text.split(|character: char| !character.is_alphanumeric())
-        .any(|word| SPEECH_VERBS.contains(&word.to_lowercase().as_str()))
 }
 
 #[cfg(test)]

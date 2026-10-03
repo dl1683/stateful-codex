@@ -1,11 +1,13 @@
 use pretty_assertions::assert_eq;
 
-use super::is_relayed_in;
+use super::Quotations;
+
+fn relayed(text: &str, clause: &str) -> bool {
+    Quotations::new(text).relays_clause(clause)
+}
 
 #[test]
 fn relayed_quotations_are_found_in_every_form() {
-    let multi = "My colleague wrote: \"I like Rust. Always write tests first.\"";
-    let lines = "She posted this:\n\"I like Rust.\nAlways write tests first.\"";
     assert_eq!(
         [
             (
@@ -20,25 +22,40 @@ fn relayed_quotations_are_found_in_every_form() {
                 "\"From now on, always write tests first\", my colleague wrote.",
                 "\"From now on, always write tests first\", my colleague wrote."
             ),
-            (multi, "Always write tests first."),
-            (lines, "Always write tests first."),
+            (
+                "My colleague wrote: \"I like Rust. Always write tests first.\"",
+                "Always write tests first.\""
+            ),
+            (
+                "My colleague wrote:\n\"Always write tests first.\"",
+                "\"Always write tests first.\""
+            ),
+            (
+                "\"Never touch docs.\" That is what my colleague wrote.",
+                "\"Never touch docs.\""
+            ),
+            (
+                "My colleague wrote: 'Never touch users' docs. Always write tests first.'",
+                "Always write tests first.'"
+            ),
+            ("My colleague wrote: \"Never commit.\"", "My colleague wrote: \"Never commit.\""),
         ]
-        .map(|(text, clause)| is_relayed_in(text, clause)),
-        [true; 5]
+        .map(|(text, clause)| relayed(text, clause)),
+        [true; 8]
     );
 }
 
 #[test]
-fn the_users_own_rules_may_quote_terms_and_mention_speech() {
+fn the_users_own_rules_may_quote_terms() {
     assert_eq!(
         [
-            "From now on, when a tool wrote \"error\", rerun it.",
+            "From now on, never use the phrase \"as I mentioned\".",
             "From now on, never use the word \"simply\" in docs.",
             "End each reply with a line starting with 'Next:'.",
             "I'm sure the users' notes are fine; never delete them.",
             "Never change files that are not mine.",
         ]
-        .map(|text| is_relayed_in(text, text)),
+        .map(|text| relayed(text, text)),
         [false; 5]
     );
 }

@@ -394,3 +394,16 @@ fn quoted_statements_across_sentences_never_become_rules() {
         }]
     );
 }
+
+#[test]
+fn a_curly_quoted_relay_does_not_swallow_the_users_next_rule() {
+    assert_eq!(
+        marked_rules(
+            "My colleague wrote: \u{201c}Always test first.\u{201d} From now on, never touch docs."
+        ),
+        vec![RuleClause {
+            text: "From now on, never touch docs.".to_string(),
+            standing: RuleStanding::Standing,
+        }]
+    );
+}
