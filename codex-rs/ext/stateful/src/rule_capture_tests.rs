@@ -6,7 +6,7 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
-use super::capture_marked_rules;
+use crate::rule_group::capture_marked_rules;
 use crate::services::ProjectIntelligenceServices;
 use crate::user_rules::RuleStanding;
 
@@ -326,6 +326,9 @@ async fn a_retired_rule_returns_only_from_a_later_message() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-3",
             stated_at_ms: stated_before,
+            placement: super::RulePlacement::project(
+                codex_project_intelligence::ChangeOrigin::ModelTool,
+            ),
         },
         message,
         RuleStanding::Standing,
@@ -341,6 +344,9 @@ async fn a_retired_rule_returns_only_from_a_later_message() {
             turn_id: "turn-4",
             receipt_turn_id: "turn-4",
             stated_at_ms: super::now_ms() + 1_000,
+            placement: super::RulePlacement::project(
+                codex_project_intelligence::ChangeOrigin::ModelTool,
+            ),
         },
         message,
         RuleStanding::Standing,
@@ -392,6 +398,9 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-3",
             stated_at_ms: stated_before,
+            placement: super::RulePlacement::project(
+                codex_project_intelligence::ChangeOrigin::ModelTool,
+            ),
         },
         "- Never run migrations.",
         RuleStanding::Standing,

@@ -214,9 +214,10 @@ pub async fn correct_entry(
     // A corrected rule takes the identity of its new wording, so the user stating the same
     // words later finds it instead of storing it twice.
     for generation in 0..MAX_RULE_GENERATIONS {
-        let candidate = user_rule_entry_id(project_id, content, generation).ok_or_else(|| {
-            MemoryControlError::Refused("the corrected rule cannot be identified".to_string())
-        })?;
+        let candidate = user_rule_entry_id(project_id, /*scope_id*/ None, content, generation)
+            .ok_or_else(|| {
+                MemoryControlError::Refused("the corrected rule cannot be identified".to_string())
+            })?;
         match store.get_entry(project_id, &candidate).await? {
             Some(existing) if existing.state != BlackboardEntryState::Active => continue,
             Some(_) => {

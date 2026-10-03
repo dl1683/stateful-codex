@@ -349,6 +349,32 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             ServerNotification::RawResponseCompleted(_)
             | ServerNotification::RawResponseItemCompleted(_)
             | ServerNotification::ContextCompacted(_) => CodexStatus::Running,
+            ServerNotification::StatefulKnowledgeGroupCaptured(notification) => {
+                let (receipts, summary) = crate::exec_events::group_receipts(&notification);
+                for receipt in receipts {
+                    if matches!(
+                        receipt.outcome,
+                        crate::exec_events::StatefulCaptureOutcome::Stored
+                    ) {
+                        *self
+                            .memory_saved
+                            .entry(receipt.category.label())
+                            .or_default() += 1;
+                    }
+                    eprintln!(
+                        "{} {}",
+                        "stateful:".style(self.cyan).style(self.bold),
+                        receipt.summary(),
+                    );
+                }
+                if let Some(summary) = summary {
+                    eprintln!(
+                        "{} {summary}",
+                        "stateful:".style(self.cyan).style(self.bold),
+                    );
+                }
+                CodexStatus::Running
+            }
             ServerNotification::StatefulKnowledgeCaptured(notification) => {
                 let receipt = crate::exec_events::StatefulKnowledgeEvent::from(&notification);
                 if matches!(

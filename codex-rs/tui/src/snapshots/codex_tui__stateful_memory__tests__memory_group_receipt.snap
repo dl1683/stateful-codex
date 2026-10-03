@@ -1,0 +1,10 @@
+---
+source: tui/src/stateful_memory_tests.rs
+expression: "super::group_receipt_cell(&notification).map(|cell|\nrender(cell.display_lines(200))).unwrap_or_default()"
+---
+• Saved 2 rules · /memory to review
+    1. "never run git commit or anything else that rewrites history - I review and commit everything myself."
+    2. "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step."
+    1 rule was already saved
+    Not saved, too long to keep whole: "From now on, never touch xxxxxxxx..."
+    You mentioned 4; 3 were recognized. /memory add rule <text> adds a missing one.

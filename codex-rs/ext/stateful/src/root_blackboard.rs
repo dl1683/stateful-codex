@@ -176,6 +176,8 @@ pub(super) struct ResolvedRootBlackboard {
     quarantined_rules: u64,
     /// The newest entry each projected entry replaced, by successor entry ID.
     predecessors: HashMap<String, BlackboardEntry>,
+    /// What the packet says about investigation-scoped rules.
+    scope_note: Option<String>,
 }
 
 /// Removes rules that are not in the user's own words from a root projection, before any
@@ -206,7 +208,16 @@ impl ResolvedRootBlackboard {
             evidence_audit,
             quarantined_rules,
             predecessors: HashMap::new(),
+            scope_note: None,
         }
+    }
+
+    /// Leaves out rules of investigations this thread is not part of, before any alias is
+    /// assigned, and notes them.
+    pub(super) fn with_scope_view(mut self, view: &crate::rule_scope::ScopeView) -> Self {
+        let not_applied = view.retain_applicable(&mut self.projection);
+        self.scope_note = view.note(not_applied);
+        self
     }
 
     /// Attaches what shown entries replaced, so the packet can say "replaces: ..." without
@@ -338,6 +349,9 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             output,
             "- No knowledge has been promoted to the root blackboard yet.",
         );
+    }
+    if let Some(note) = &root.scope_note {
+        append_line(output, note);
     }
     if root.quarantined_rules > 0 {
         append_line(

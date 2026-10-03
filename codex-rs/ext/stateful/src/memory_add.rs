@@ -118,7 +118,9 @@ pub async fn add_entry(
         // direct addition is a fresh act of the user, so retired words come back under the
         // next generation.
         MemoryAddition::Rule { .. } => (0..MAX_GENERATIONS)
-            .filter_map(|generation| user_rule_entry_id(project_id, &text, generation))
+            .filter_map(|generation| {
+                user_rule_entry_id(project_id, /*scope_id*/ None, &text, generation)
+            })
             .collect(),
         // Background keeps the identity host capture gives the same words.
         MemoryAddition::Background => {

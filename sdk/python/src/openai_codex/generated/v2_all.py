@@ -5255,6 +5255,17 @@ class StatefulKnowledgeCategory(
     ]
 
 
+class StatefulKnowledgeGroupItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    category: StatefulKnowledgeCategory
+    entry_id: Annotated[str, Field(alias="entryId")]
+    outcome: StatefulCaptureOutcome
+    revision: Annotated[int, Field(ge=0)]
+    text: Annotated[str, Field(description="The entry's content, at most 240 bytes.")]
+
+
 class StatefulMemoryAddKind(Enum):
     rule = "rule"
     background = "background"
@@ -10315,6 +10326,47 @@ class StatefulKnowledgeCapturedNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class StatefulKnowledgeGroupCapturedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    already_present: Annotated[int, Field(alias="alreadyPresent", ge=0)]
+    category: StatefulKnowledgeCategory
+    declared_count: Annotated[
+        int | None,
+        Field(
+            alias="declaredCount",
+            description='A count the user\'s words declared ("Two standing rules"), when they did.',
+            ge=0,
+        ),
+    ] = None
+    failed: Annotated[int, Field(ge=0)]
+    group_id: Annotated[str, Field(alias="groupId")]
+    items: Annotated[
+        list[StatefulKnowledgeGroupItem],
+        Field(description="Saved, kept and already-saved units in the order written."),
+    ]
+    omitted: Annotated[
+        int, Field(description="Recognized but too long to keep whole; not saved.", ge=0)
+    ]
+    omitted_items: Annotated[
+        list[str], Field(alias="omittedItems", description="Openings of omitted units.")
+    ]
+    pending: Annotated[int, Field(description="Saved but not applied (limited to a task).", ge=0)]
+    project_id: Annotated[str, Field(alias="projectId")]
+    recognized: Annotated[int, Field(ge=0)]
+    saved: Annotated[int, Field(description="Saved and applied.", ge=0)]
+    scope_title: Annotated[
+        str | None,
+        Field(
+            alias="scopeTitle",
+            description="The investigation these rules are limited to, in the user's words.",
+        ),
+    ] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class StatefulMeasurementSummary(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11960,6 +12012,24 @@ class StatefulKnowledgeCapturedServerNotification(BaseModel):
         Field(title="StatefulKnowledge/capturedNotificationMethod"),
     ]
     params: StatefulKnowledgeCapturedNotification
+
+
+class StatefulKnowledgeGroupCapturedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["statefulKnowledge/groupCaptured"],
+        Field(title="StatefulKnowledge/groupCapturedNotificationMethod"),
+    ]
+    params: StatefulKnowledgeGroupCapturedNotification
 
 
 class ThreadSettingsUpdatedServerNotification(BaseModel):
@@ -13733,6 +13803,7 @@ class ServerNotification(
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
         | StatefulKnowledgeCapturedServerNotification
+        | StatefulKnowledgeGroupCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
@@ -13830,6 +13901,7 @@ class ServerNotification(
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
         | StatefulKnowledgeCapturedServerNotification
+        | StatefulKnowledgeGroupCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification

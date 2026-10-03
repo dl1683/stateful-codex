@@ -18,6 +18,8 @@ mod read_receipts;
 mod request_scope;
 mod root_blackboard;
 mod rule_capture;
+mod rule_group;
+mod rule_scope;
 mod rule_units;
 mod run_world_state;
 mod services;
@@ -72,6 +74,8 @@ pub use autonomy::RunAdmissionFence;
 pub use autonomy::bound_run_turn;
 pub use events::BlackboardEntityKind;
 pub use events::CaptureOutcome;
+pub use events::GroupReceipt;
+pub use events::GroupReceiptItem;
 pub use events::KnowledgeCategory;
 pub use events::MAX_RECEIPT_TEXT_BYTES;
 pub use events::StatefulEvent;
@@ -231,7 +235,7 @@ impl ContextContributor for StatefulExtension {
                         );
                     }
                     let root_blackboard = self
-                        .root_blackboard(&project, input.turn_id, input.turn_store)
+                        .root_blackboard(&project, &thread_id, input.turn_id, input.turn_store)
                         .await;
                     let last_refresh = self.project_refresh_status(&project.id).await;
                     ProjectIntelligenceStatus::Available {
@@ -318,6 +322,7 @@ impl StatefulExtension {
     async fn root_blackboard(
         &self,
         project: &codex_thread_store::StoredProject,
+        thread_id: &str,
         turn_id: &str,
         turn_store: &ExtensionData,
     ) -> RootBlackboardStatus {
@@ -350,17 +355,22 @@ impl StatefulExtension {
                             /*audit*/ None,
                             /*audit_recomputed*/ false,
                         );
-                        return RootBlackboardStatus::Available(ResolvedRootBlackboard::new(
-                            projection,
-                            Default::default(),
-                            Some(EvidenceAudit {
-                                project_id: project_id.to_string(),
-                                statuses: Default::default(),
-                                cache_key: None,
-                                hashed_bytes: 0,
-                                observed_sources: 0,
-                            }),
-                        ));
+                        let scope_view =
+                            rule_scope::ScopeView::load(store, &projection, thread_id).await;
+                        return RootBlackboardStatus::Available(
+                            ResolvedRootBlackboard::new(
+                                projection,
+                                Default::default(),
+                                Some(EvidenceAudit {
+                                    project_id: project_id.to_string(),
+                                    statuses: Default::default(),
+                                    cache_key: None,
+                                    hashed_bytes: 0,
+                                    observed_sources: 0,
+                                }),
+                            )
+                            .with_scope_view(&scope_view),
+                        );
                     }
                 };
                 let mut evidence_routes = std::collections::HashMap::new();
@@ -468,12 +478,14 @@ impl StatefulExtension {
                     audit_recomputed,
                 );
                 let predecessors = root_predecessors(store, project_id, &projection).await;
+                let scope_view = rule_scope::ScopeView::load(store, &projection, thread_id).await;
                 RootBlackboardStatus::Available(
                     ResolvedRootBlackboard::new(
                         projection,
                         evidence_routes,
                         Some((*evidence_audit).clone()),
                     )
+                    .with_scope_view(&scope_view)
                     .with_predecessors(predecessors),
                 )
             }

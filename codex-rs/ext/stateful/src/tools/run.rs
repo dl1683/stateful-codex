@@ -259,6 +259,7 @@ impl StatefulRunUpdateTool {
                 &self.services,
                 CompletionRequest {
                     project_id: &self.project_id,
+                    thread_id: &self.thread_id,
                     project_roots: &project_roots,
                     result,
                     packet: &final_obligation,

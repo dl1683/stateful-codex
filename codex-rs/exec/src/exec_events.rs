@@ -251,6 +251,72 @@ impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
     }
 }
 
+/// The per-entry receipts of a counted group, and the line that counts them.
+pub(crate) fn group_receipts(
+    notification: &codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification,
+) -> (Vec<StatefulKnowledgeEvent>, Option<String>) {
+    let receipts = notification
+        .items
+        .iter()
+        .map(|item| {
+            StatefulKnowledgeEvent::from(
+                &codex_app_server_protocol::StatefulKnowledgeCapturedNotification {
+                    project_id: notification.project_id.clone(),
+                    thread_id: notification.thread_id.clone(),
+                    turn_id: notification.turn_id.clone(),
+                    entry_id: item.entry_id.clone(),
+                    revision: item.revision,
+                    category: item.category,
+                    outcome: item.outcome,
+                    text: item.text.clone(),
+                },
+            )
+        })
+        .collect();
+    let rules = |count: u32| {
+        if count == 1 {
+            "1 rule".to_string()
+        } else {
+            format!("{count} rules")
+        }
+    };
+    let mut parts = Vec::new();
+    if notification.saved > 0 {
+        parts.push(format!(
+            "saved {} from your message",
+            rules(notification.saved)
+        ));
+    }
+    if notification.pending > 0 {
+        parts.push(format!(
+            "kept {} for this task only",
+            rules(notification.pending)
+        ));
+    }
+    if notification.already_present > 0 {
+        parts.push(format!(
+            "{} already saved",
+            rules(notification.already_present)
+        ));
+    }
+    for omitted in &notification.omitted_items {
+        parts.push(format!("not saved (too long to keep whole): \"{omitted}\""));
+    }
+    if notification.failed > 0 {
+        parts.push(format!("{} could not be saved", rules(notification.failed)));
+    }
+    let recognized = notification.saved + notification.pending + notification.already_present;
+    if let Some(declared) = notification.declared_count
+        && declared != recognized
+    {
+        parts.push(format!("you mentioned {declared}, {recognized} recognized"));
+    }
+    let changed =
+        notification.saved + notification.pending + notification.omitted + notification.failed;
+    let summary = (changed > 0).then(|| parts.join("; "));
+    (receipts, summary)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 pub struct StatefulAttributionEvent {
     pub turn_status: StatefulTurnStatus,

@@ -550,7 +550,7 @@ async fn retire_is_refused_before_mutation_when_its_disclosure_cannot_be_returne
 #[tokio::test]
 async fn user_rules_cannot_be_rewritten_or_promoted_from_pending() {
     let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
-    let pending = crate::rule_capture::capture_marked_rules(
+    let pending = crate::rule_group::capture_marked_rules(
         &tool.services,
         /*event_sink*/ None,
         PROJECT_ID,
@@ -602,7 +602,7 @@ async fn user_rules_cannot_be_rewritten_or_promoted_from_pending() {
 #[tokio::test]
 async fn a_user_rule_is_superseded_only_by_a_user_rule() {
     let (_temp_dir, tool, _entry_id, successor_id, project_root, _receipt_id) = fixture().await;
-    let rule = crate::rule_capture::capture_marked_rules(
+    let rule = crate::rule_group::capture_marked_rules(
         &tool.services,
         /*event_sink*/ None,
         PROJECT_ID,
@@ -638,7 +638,7 @@ async fn a_user_rule_is_superseded_only_by_a_user_rule() {
 async fn lifecycle_changes_keep_the_texts_authorship() {
     let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
     let capture = |turn: &'static str, text: &'static str| {
-        crate::rule_capture::capture_marked_rules(
+        crate::rule_group::capture_marked_rules(
             &tool.services,
             /*event_sink*/ None,
             PROJECT_ID,

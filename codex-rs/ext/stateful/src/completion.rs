@@ -42,6 +42,8 @@ pub(crate) struct CompletionRecord {
 
 pub(crate) struct CompletionRequest<'a> {
     pub(crate) project_id: &'a str,
+    /// The thread completing; scoped rules of other investigations are not in its root.
+    pub(crate) thread_id: &'a str,
     pub(crate) project_roots: &'a [PathBuf],
     pub(crate) result: &'a str,
     pub(crate) packet: &'a ObligationPacket,
@@ -72,6 +74,7 @@ pub(crate) async fn prepare_completion(
 ) -> Result<CompletionRecord, FunctionCallError> {
     let CompletionRequest {
         project_id,
+        thread_id,
         project_roots,
         result,
         packet,
@@ -111,6 +114,7 @@ pub(crate) async fn prepare_completion(
 
     let mut material = material_root_checklist(
         project_id,
+        thread_id,
         services,
         project_roots,
         root_revision,
@@ -174,16 +178,15 @@ pub(crate) async fn prepare_completion(
 
 async fn material_root_checklist(
     project_id: &str,
+    thread_id: &str,
     services: &ProjectIntelligenceServices,
     project_roots: &[PathBuf],
     expected_root_revision: u64,
     requested_references: &[String],
     visible_root: Option<&VisibleRoot>,
 ) -> Result<MaterialChecklist, FunctionCallError> {
-    let mut projection = services
-        .blackboard()
-        .await
-        .map_err(respond)?
+    let store = services.blackboard().await.map_err(respond)?;
+    let mut projection = store
         .root_projection(RootBlackboardQuery {
             project_id: project_id.to_string(),
             max_entries: 256,
@@ -191,8 +194,12 @@ async fn material_root_checklist(
         .await
         .map_err(respond)?;
     // Aliases are positions in the projection the packet showed, which never holds rules
-    // that are not in the user's own words.
+    // that are not in the user's own words, nor rules of an investigation this thread is not
+    // part of.
     crate::root_blackboard::retain_applicable_rules(&mut projection);
+    crate::rule_scope::ScopeView::load(store, &projection, thread_id)
+        .await
+        .retain_applicable(&mut projection);
     if projection.revision != expected_root_revision {
         return Err(respond(format!(
             "root blackboard changed from revision {expected_root_revision} to {}; review the current root aliases before completing",

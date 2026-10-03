@@ -42,6 +42,46 @@ pub enum StatefulEvent {
         /// The entry's content, at most `MAX_RECEIPT_TEXT_BYTES` bytes.
         text: String,
     },
+    /// What one capture committed, counted: sent once after every unit of a message was
+    /// stored or refused, so a receipt never claims more than was saved.
+    KnowledgeGroupCaptured(GroupReceipt),
+}
+
+/// The committed outcome of one capture.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GroupReceipt {
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub group_id: String,
+    pub category: KnowledgeCategory,
+    /// A count the user's words declared ("Two standing rules"), when they did.
+    pub declared_count: Option<u32>,
+    pub recognized: u32,
+    /// Units now saved and applied.
+    pub saved: u32,
+    pub already_present: u32,
+    /// Units saved but not applied (limited to a task).
+    pub pending: u32,
+    /// Units recognized but not stored (too long to keep whole).
+    pub omitted: u32,
+    pub failed: u32,
+    /// Saved, pending and already-present units in the order written.
+    pub items: Vec<GroupReceiptItem>,
+    /// Openings of omitted units.
+    pub omitted_items: Vec<String>,
+    /// The investigation these rules are limited to, in the user's words.
+    pub scope_title: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GroupReceiptItem {
+    pub entry_id: String,
+    pub revision: u64,
+    pub category: KnowledgeCategory,
+    pub outcome: CaptureOutcome,
+    /// At most `MAX_RECEIPT_TEXT_BYTES` bytes.
+    pub text: String,
 }
 
 /// Longest content excerpt carried by a receipt.

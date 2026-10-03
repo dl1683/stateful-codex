@@ -225,6 +225,7 @@ async fn renders_an_exact_selected_historical_finding_into_completion() {
     let completion = prepare_completion(
         &services,
         CompletionRequest {
+            thread_id: "thread-1",
             project_id: PROJECT_ID,
             project_roots: &[],
             result: &format!("Recovered prior evidence {SOURCE_FINGERPRINT}."),
@@ -327,6 +328,7 @@ async fn completion_echoes_findings_already_shown_in_full_by_alias() {
     let completion = prepare_completion(
         &services,
         CompletionRequest {
+            thread_id: "thread-1",
             project_id: PROJECT_ID,
             project_roots: &[project_root.path().to_path_buf()],
             result: "Threshold remains 10.",
@@ -425,6 +427,7 @@ async fn completion_rejects_material_root_finding_changed_after_world_state_audi
     let result = prepare_completion(
         &services,
         CompletionRequest {
+            thread_id: "thread-1",
             project_id: PROJECT_ID,
             project_roots: &[project_root.path().to_path_buf()],
             result: "Threshold remains 10.",
@@ -507,6 +510,7 @@ async fn completion_aliases_skip_quarantined_rules() {
     let completion = prepare_completion(
         &services,
         CompletionRequest {
+            thread_id: "thread-1",
             project_id: PROJECT_ID,
             project_roots: &[],
             result: "Done.",

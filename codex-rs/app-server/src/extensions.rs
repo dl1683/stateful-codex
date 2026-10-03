@@ -332,37 +332,44 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                     turn_id,
                     entry_id,
                     revision,
-                    category: match category {
-                        codex_stateful_extension::KnowledgeCategory::Rule => {
-                            codex_app_server_protocol::StatefulKnowledgeCategory::Rule
-                        }
-                        codex_stateful_extension::KnowledgeCategory::PendingRule => {
-                            codex_app_server_protocol::StatefulKnowledgeCategory::PendingRule
-                        }
-                        codex_stateful_extension::KnowledgeCategory::Decision => {
-                            codex_app_server_protocol::StatefulKnowledgeCategory::Decision
-                        }
-                        codex_stateful_extension::KnowledgeCategory::Recipe => {
-                            codex_app_server_protocol::StatefulKnowledgeCategory::Recipe
-                        }
-                        codex_stateful_extension::KnowledgeCategory::Finding => {
-                            codex_app_server_protocol::StatefulKnowledgeCategory::Finding
-                        }
-                        codex_stateful_extension::KnowledgeCategory::Background => {
-                            codex_app_server_protocol::StatefulKnowledgeCategory::Background
-                        }
-                    },
-                    outcome: match outcome {
-                        codex_stateful_extension::CaptureOutcome::Stored => {
-                            codex_app_server_protocol::StatefulCaptureOutcome::Stored
-                        }
-                        codex_stateful_extension::CaptureOutcome::AlreadyStored => {
-                            codex_app_server_protocol::StatefulCaptureOutcome::AlreadyStored
-                        }
-                    },
+                    category: api_category(category),
+                    outcome: api_outcome(outcome),
                     text,
                 },
             ),
+            StatefulEvent::KnowledgeGroupCaptured(receipt) => {
+                ServerNotification::StatefulKnowledgeGroupCaptured(
+                    codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification {
+                        project_id: receipt.project_id,
+                        thread_id: receipt.thread_id,
+                        turn_id: receipt.turn_id,
+                        group_id: receipt.group_id,
+                        category: api_category(receipt.category),
+                        declared_count: receipt.declared_count,
+                        recognized: receipt.recognized,
+                        saved: receipt.saved,
+                        already_present: receipt.already_present,
+                        pending: receipt.pending,
+                        omitted: receipt.omitted,
+                        failed: receipt.failed,
+                        items: receipt
+                            .items
+                            .into_iter()
+                            .map(
+                                |item| codex_app_server_protocol::StatefulKnowledgeGroupItem {
+                                    entry_id: item.entry_id,
+                                    revision: item.revision,
+                                    category: api_category(item.category),
+                                    outcome: api_outcome(item.outcome),
+                                    text: item.text,
+                                },
+                            )
+                            .collect(),
+                        omitted_items: receipt.omitted_items,
+                        scope_title: receipt.scope_title,
+                    },
+                )
+            }
             StatefulEvent::AttributionCompleted { summary } => {
                 let notification = StatefulAttributionCompletedNotification {
                     project_id: summary.project_id,
@@ -683,6 +690,32 @@ impl ExtensionEventSink for AppServerExtensionEventSink {
             }
             send_thread_warning(&outgoing, &thread_state_manager, thread_id, message).await;
         });
+    }
+}
+
+fn api_category(
+    category: codex_stateful_extension::KnowledgeCategory,
+) -> codex_app_server_protocol::StatefulKnowledgeCategory {
+    use codex_app_server_protocol::StatefulKnowledgeCategory as Api;
+    use codex_stateful_extension::KnowledgeCategory;
+    match category {
+        KnowledgeCategory::Rule => Api::Rule,
+        KnowledgeCategory::PendingRule => Api::PendingRule,
+        KnowledgeCategory::Decision => Api::Decision,
+        KnowledgeCategory::Recipe => Api::Recipe,
+        KnowledgeCategory::Finding => Api::Finding,
+        KnowledgeCategory::Background => Api::Background,
+    }
+}
+
+fn api_outcome(
+    outcome: codex_stateful_extension::CaptureOutcome,
+) -> codex_app_server_protocol::StatefulCaptureOutcome {
+    use codex_app_server_protocol::StatefulCaptureOutcome as Api;
+    use codex_stateful_extension::CaptureOutcome;
+    match outcome {
+        CaptureOutcome::Stored => Api::Stored,
+        CaptureOutcome::AlreadyStored => Api::AlreadyStored,
     }
 }
 

@@ -91,7 +91,7 @@ const STANDING_PHRASES: &[&str] = &[
 ];
 
 /// Phrases that scope a rule to a whole investigation, which may span sessions.
-const INVESTIGATION_PHRASES: &[&str] = &[
+pub(crate) const INVESTIGATION_PHRASES: &[&str] = &[
     "for this investigation",
     "for this whole investigation",
     "for the whole investigation",

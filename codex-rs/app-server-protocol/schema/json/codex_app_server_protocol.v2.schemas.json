@@ -17193,6 +17193,26 @@
           "properties": {
             "method": {
               "enum": [
+                "statefulKnowledge/groupCaptured"
+              ],
+              "title": "StatefulKnowledge/groupCapturedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/StatefulKnowledgeGroupCapturedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "StatefulKnowledge/groupCapturedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/project/updated"
               ],
               "title": "Thread/project/updatedNotificationMethod",
@@ -19384,6 +19404,138 @@
           "type": "string"
         }
       ]
+    },
+    "StatefulKnowledgeGroupCapturedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "The committed outcome of one capture (all the rules one message marked), counted: sent once after every unit was stored or refused, so it never claims more than was saved.",
+      "properties": {
+        "alreadyPresent": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "declaredCount": {
+          "description": "A count the user's words declared (\"Two standing rules\"), when they did.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failed": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "items": {
+          "description": "Saved, kept and already-saved units in the order written.",
+          "items": {
+            "$ref": "#/definitions/StatefulKnowledgeGroupItem"
+          },
+          "type": "array"
+        },
+        "omitted": {
+          "description": "Recognized but too long to keep whole; not saved.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "omittedItems": {
+          "description": "Openings of omitted units.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pending": {
+          "description": "Saved but not applied (limited to a task).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "recognized": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "saved": {
+          "description": "Saved and applied.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "scopeTitle": {
+          "description": "The investigation these rules are limited to, in the user's words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alreadyPresent",
+        "category",
+        "failed",
+        "groupId",
+        "items",
+        "omitted",
+        "omittedItems",
+        "pending",
+        "projectId",
+        "recognized",
+        "saved",
+        "threadId",
+        "turnId"
+      ],
+      "title": "StatefulKnowledgeGroupCapturedNotification",
+      "type": "object"
+    },
+    "StatefulKnowledgeGroupItem": {
+      "description": "One saved unit of a counted group receipt.",
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/definitions/StatefulCaptureOutcome"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "text": {
+          "description": "The entry's content, at most 240 bytes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "entryId",
+        "outcome",
+        "revision",
+        "text"
+      ],
+      "type": "object"
     },
     "StatefulMeasurementSummary": {
       "description": "Exact totals over a bounded newest-first window of project measurements.\n\nToken counts are exposed without estimating monetary cost because the persisted records do not contain authoritative provider pricing, units, or currency.",

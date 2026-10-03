@@ -190,7 +190,7 @@ async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
     let state_home = TempDir::new().expect("state home");
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
-    let pending = crate::rule_capture::capture_marked_rules(
+    let pending = crate::rule_group::capture_marked_rules(
         &services,
         /*event_sink*/ None,
         "project-1",

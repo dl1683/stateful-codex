@@ -37,6 +37,7 @@ use crate::events::KnowledgeCategory;
 use crate::events::receipt_text;
 use crate::services::ProjectIntelligenceServices;
 
+use crate::rule_capture::RulePlacement;
 use crate::rule_capture::RuleSource;
 use crate::rule_capture::store_user_rule;
 use crate::rule_units::rule_for_clause;
@@ -197,7 +198,7 @@ impl BlackboardRecorder {
         // The rule is the whole unit holding the quote (a list item with its header's scope),
         // exactly as host capture stores it, so both paths share one wording and identity.
         let rule = rule_for_clause(&message.text, &clause).ok_or(relayed)?;
-        if rule.standing == RuleStanding::Pending {
+        if rule.clause.standing == RuleStanding::Pending {
             return Err(respond(
                 "nothing written: the user limited that sentence to the current task",
             ));
@@ -207,7 +208,7 @@ impl BlackboardRecorder {
             message.turn_id,
             message.received_at_ms,
         );
-        if rule.text.len() > MAX_RULE_BYTES {
+        if rule.clause.text.len() > MAX_RULE_BYTES {
             return Err(respond(format!(
                 "the rule holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
             )));
@@ -221,8 +222,24 @@ impl BlackboardRecorder {
                 turn_id: &turn_id,
                 receipt_turn_id,
                 stated_at_ms,
+                // A rule of an investigation keeps the scope host capture gave the same message.
+                placement: RulePlacement {
+                    scope_id: rule.scope.as_ref().map(|hint| {
+                        crate::rule_group::scope_id_for(
+                            &self.project_id,
+                            &thread_id,
+                            &turn_id,
+                            &hint.title,
+                        )
+                    }),
+                    end_condition: rule
+                        .scope
+                        .as_ref()
+                        .and_then(|hint| hint.end_condition.clone()),
+                    ..RulePlacement::project(codex_project_intelligence::ChangeOrigin::ModelTool)
+                },
             },
-            &rule.text,
+            &rule.clause.text,
             RuleStanding::Standing,
         )
         .await

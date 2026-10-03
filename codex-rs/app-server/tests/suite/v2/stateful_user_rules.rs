@@ -14,6 +14,7 @@ use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::StatefulCaptureOutcome;
 use codex_app_server_protocol::StatefulKnowledgeCapturedNotification;
 use codex_app_server_protocol::StatefulKnowledgeCategory;
+use codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
@@ -119,17 +120,34 @@ async fn user_rules_are_kept_in_the_users_words_and_nothing_else_becomes_a_rule(
             ),
         ]
     );
-    // Receipts name what was saved, in the user's words, for this turn.
-    let mut receipts = Vec::new();
-    for _ in 0..4 {
-        let receipt: StatefulKnowledgeCapturedNotification = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            server.read_notification("statefulKnowledge/captured"),
-        )
-        .await??;
-        assert_eq!(receipt.thread_id, first);
-        receipts.push((receipt.category, receipt.outcome, receipt.text));
-    }
+    // Receipts name what was saved, in the user's words, for this turn: one counted group
+    // for the host's capture, one receipt for the rule the model quoted.
+    let group: StatefulKnowledgeGroupCapturedNotification = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        server.read_notification("statefulKnowledge/groupCaptured"),
+    )
+    .await??;
+    assert_eq!(
+        (
+            group.thread_id.as_str(),
+            group.recognized,
+            group.saved,
+            group.omitted
+        ),
+        (first.as_str(), 3, 3, 0)
+    );
+    let mut receipts = group
+        .items
+        .into_iter()
+        .map(|item| (item.category, item.outcome, item.text))
+        .collect::<Vec<_>>();
+    let quoted: StatefulKnowledgeCapturedNotification = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        server.read_notification("statefulKnowledge/captured"),
+    )
+    .await??;
+    assert_eq!(quoted.thread_id, first);
+    receipts.push((quoted.category, quoted.outcome, quoted.text));
     receipts.sort_by(|left, right| left.2.cmp(&right.2));
     assert_eq!(
         receipts,
@@ -337,20 +355,28 @@ async fn every_rule_of_a_natural_opening_is_captured_in_order() -> Result<()> {
     )
     .await;
     run_turn(&mut server, &thread, OPENING).await?;
-    // Two rules and the user's background; the colleague's quoted habit is neither.
-    let mut rule_receipts = Vec::new();
-    let mut background_receipts = Vec::new();
-    for _ in 0..3 {
-        let receipt: StatefulKnowledgeCapturedNotification = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            server.read_notification("statefulKnowledge/captured"),
-        )
-        .await??;
-        match receipt.category {
-            StatefulKnowledgeCategory::Rule => rule_receipts.push((receipt.outcome, receipt.text)),
-            _ => background_receipts.push((receipt.category, receipt.text)),
-        }
-    }
+    // Two rules, counted against the two the user declared, and the user's background; the
+    // colleague's quoted habit is neither.
+    let background: StatefulKnowledgeCapturedNotification = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        server.read_notification("statefulKnowledge/captured"),
+    )
+    .await??;
+    let background_receipts = vec![(background.category, background.text)];
+    let group: StatefulKnowledgeGroupCapturedNotification = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        server.read_notification("statefulKnowledge/groupCaptured"),
+    )
+    .await??;
+    assert_eq!(
+        (group.declared_count, group.recognized, group.saved),
+        (Some(2), 2, 2)
+    );
+    let rule_receipts = group
+        .items
+        .into_iter()
+        .map(|item| (item.outcome, item.text))
+        .collect::<Vec<_>>();
     assert_eq!(
         background_receipts,
         vec![(

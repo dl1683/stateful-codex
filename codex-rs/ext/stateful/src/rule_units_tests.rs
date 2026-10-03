@@ -139,8 +139,9 @@ fn a_quote_from_any_sentence_resolves_to_the_whole_item() {
     ));
     assert_eq!(
         (
-            rule_for_clause(message, "Experiments outside the repo are fine."),
-            rule_for_clause(message, "Throwaway branches are fine too."),
+            rule_for_clause(message, "Experiments outside the repo are fine.")
+                .map(|rule| rule.clause),
+            rule_for_clause(message, "Throwaway branches are fine too.").map(|rule| rule.clause),
             marked_rules(message).into_iter().next(),
         ),
         (rule.clone(), rule.clone(), rule)
@@ -184,5 +185,51 @@ fn investigation_scope_survives_its_own_words_and_nested_headers() {
             standing(&format!("{scope} Work carefully.")),
             standing(&format!("{scope} Never touch docs.")),
         ]
+    );
+}
+
+/// Spec item 1: independent directives joined in one sentence are separate rules; a following
+/// qualification stays with its rule; a declared count is reported; an overlength unit is
+/// reported as omitted rather than dropped; an investigation rule carries its end condition.
+#[test]
+fn prose_rules_are_complete_and_counted() {
+    let long = "x".repeat(super::MAX_RULE_BYTES);
+    let message = format!(
+        "Three standing rules for all our work: never commit and always end each reply with a 'Next:' line. Never install anything globally. If you need an environment, make a local venv inside the repo. From now on, never touch {long}."
+    );
+    let marked = super::marked_rule_units(&message);
+    let investigation = super::marked_rule_units(
+        "During this investigation, never push a branch until we have agreed on the fix. Thanks.",
+    );
+    assert_eq!(
+        (
+            marked
+                .rules
+                .iter()
+                .map(|rule| rule.clause.text.clone())
+                .collect::<Vec<_>>(),
+            marked.omitted.len(),
+            marked.declared_count,
+            investigation
+                .rules
+                .iter()
+                .map(|rule| rule.scope.clone())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            vec![
+                "Three standing rules for all our work: never commit".to_string(),
+                "always end each reply with a 'Next:' line.".to_string(),
+                "Never install anything globally. If you need an environment, make a local venv inside the repo."
+                    .to_string(),
+            ],
+            1,
+            Some(3),
+            vec![Some(super::ScopeHint {
+                title: "During this investigation, never push a branch until we have agreed on the fix"
+                    .to_string(),
+                end_condition: Some("until we have agreed on the fix".to_string()),
+            })],
+        )
     );
 }

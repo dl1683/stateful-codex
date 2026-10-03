@@ -14,7 +14,13 @@ use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
+use codex_project_intelligence::ChangeOrigin;
+use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::KnowledgeAuthority;
+use codex_project_intelligence::KnowledgeCategory as ChangeCategory;
+use codex_project_intelligence::KnowledgeContext;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RootPromotion;
 use sha2::Digest;
@@ -28,7 +34,6 @@ use crate::events::KnowledgeCategory;
 use crate::events::receipt_text;
 use crate::services::ProjectIntelligenceServices;
 use crate::user_rules::RuleStanding;
-use crate::user_rules::marked_rules;
 
 /// Confidence recorded for a rule quoted from the user's own message.
 const USER_RULE_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
@@ -38,12 +43,12 @@ pub(crate) fn user_message_source(thread_id: &str, turn_id: &str) -> String {
     format!("user-message:{thread_id}/{turn_id}")
 }
 
-/// Stable entry identity for a rule's exact wording within a project.
 /// Stable identity for a rule's exact wording within a project. Retired or superseded
 /// entries are immutable history, so restating such a rule stores it again under the next
 /// generation of the same identity.
 pub(crate) fn user_rule_entry_id(
     project_id: &str,
+    scope_id: Option<&str>,
     clause: &str,
     generation: u32,
 ) -> Option<BlackboardEntryId> {
@@ -52,6 +57,12 @@ pub(crate) fn user_rule_entry_id(
     hasher.update(project_id.as_bytes());
     hasher.update([0]);
     hasher.update(normalized.as_bytes());
+    // The same words in two investigations are two rules; project-wide rules keep the
+    // identity they always had.
+    if let Some(scope_id) = scope_id {
+        hasher.update([0]);
+        hasher.update(scope_id.as_bytes());
+    }
     let digest = hasher.finalize();
     let id = match generation {
         0 => format!("stateful-user-rule-{digest:x}"),
@@ -137,8 +148,8 @@ async fn store_background(
             let node_id = services.project_node_id(project_id).await?;
             let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
                 .map_err(|error| error.to_string())?;
-            let entry = store
-                .create_entry(
+            let (entry, _) = store
+                .create_entry_with_context(
                     id,
                     NewBlackboardEntry {
                         project_id: project_id.to_string(),
@@ -156,6 +167,20 @@ async fn store_background(
                             kind: BlackboardProvenanceKind::User,
                             source_id: user_message_source(thread_id, turn_id),
                         },
+                    },
+                    KnowledgeContext::new(
+                        ChangeCategory::Background,
+                        KnowledgeAuthority::HumanDirect,
+                    ),
+                    ChangeRecord {
+                        operation: ChangeOperation::Saved,
+                        origin: ChangeOrigin::HostCapture,
+                        category: ChangeCategory::Background,
+                        action_id: None,
+                        thread_id: Some(thread_id.to_string()),
+                        turn_id: Some(turn_id.to_string()),
+                        group_id: None,
+                        preview: statement.to_string(),
                     },
                 )
                 .await
@@ -186,43 +211,6 @@ async fn store_background(
     Ok(())
 }
 
-/// Stores the rules `text` explicitly marks: standing ones promoted, pending ones (marked
-/// as standing but also task-limited) as candidates that are never applied.
-pub(crate) async fn capture_marked_rules(
-    services: &ProjectIntelligenceServices,
-    event_sink: Option<&dyn StatefulEventSink>,
-    project_id: &str,
-    thread_id: &str,
-    turn_id: &str,
-    text: &str,
-) -> Vec<CapturedRule> {
-    let mut captured = Vec::new();
-    for rule in marked_rules(text) {
-        match store_user_rule(
-            services,
-            event_sink,
-            project_id,
-            RuleSource {
-                thread_id,
-                turn_id,
-                receipt_turn_id: turn_id,
-                // The message starting this turn follows every retirement recorded so far.
-                stated_at_ms: i64::MAX,
-            },
-            &rule.text,
-            rule.standing,
-        )
-        .await
-        {
-            Ok(rule) => captured.push(rule),
-            Err(error) => {
-                tracing::warn!(%project_id, %error, "failed to capture a user rule");
-            }
-        }
-    }
-    captured
-}
-
 /// Where a rule came from and which turn's receipt reports it.
 pub(crate) struct RuleSource<'a> {
     pub(crate) thread_id: &'a str,
@@ -232,6 +220,55 @@ pub(crate) struct RuleSource<'a> {
     pub(crate) receipt_turn_id: &'a str,
     /// When the user wrote that message (Unix milliseconds).
     pub(crate) stated_at_ms: i64,
+    /// Where the rule sits: its scope, its position in the conversation, its capture group.
+    pub(crate) placement: RulePlacement,
+}
+
+/// Where a stored rule applies and where it came from in the conversation.
+#[derive(Clone, Debug)]
+pub(crate) struct RulePlacement {
+    pub(crate) origin: ChangeOrigin,
+    pub(crate) scope_id: Option<String>,
+    pub(crate) end_condition: Option<String>,
+    pub(crate) source_sequence: Option<u64>,
+    pub(crate) unit_ordinal: Option<u32>,
+    pub(crate) group_id: Option<String>,
+    pub(crate) receipt: ReceiptStyle,
+}
+
+impl RulePlacement {
+    /// A project-wide rule with its own receipt.
+    pub(crate) fn project(origin: ChangeOrigin) -> Self {
+        Self {
+            origin,
+            scope_id: None,
+            end_condition: None,
+            source_sequence: None,
+            unit_ordinal: None,
+            group_id: None,
+            receipt: ReceiptStyle::Each,
+        }
+    }
+
+    fn context(&self) -> KnowledgeContext {
+        KnowledgeContext {
+            scope_id: self.scope_id.clone(),
+            end_condition: self.end_condition.clone(),
+            source_sequence: self.source_sequence,
+            unit_ordinal: self.unit_ordinal,
+            group_id: self.group_id.clone(),
+            ..KnowledgeContext::new(ChangeCategory::Rule, KnowledgeAuthority::HumanDirect)
+        }
+    }
+}
+
+/// How a stored rule is reported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReceiptStyle {
+    /// Its own receipt.
+    Each,
+    /// The capture group's counted receipt reports it.
+    Grouped,
 }
 
 /// Stores one rule in the user's exact words (the whole clause they wrote), or returns the
@@ -249,7 +286,18 @@ pub(crate) async fn store_user_rule(
         turn_id,
         receipt_turn_id,
         stated_at_ms,
+        placement,
     } = source;
+    let change = |operation, entry_text: &str| ChangeRecord {
+        operation,
+        origin: placement.origin,
+        category: ChangeCategory::Rule,
+        action_id: None,
+        thread_id: Some(thread_id.to_string()),
+        turn_id: Some(receipt_turn_id.to_string()),
+        group_id: placement.group_id.clone(),
+        preview: entry_text.to_string(),
+    };
     let store = services
         .blackboard()
         .await
@@ -260,7 +308,9 @@ pub(crate) async fn store_user_rule(
         } else {
             KnowledgeCategory::PendingRule
         };
-        if let Some(event_sink) = event_sink {
+        if let Some(event_sink) = event_sink
+            && placement.receipt == ReceiptStyle::Each
+        {
             event_sink.emit(StatefulEvent::KnowledgeCaptured {
                 project_id: project_id.to_string(),
                 thread_id: thread_id.to_string(),
@@ -277,8 +327,13 @@ pub(crate) async fn store_user_rule(
     let mut id = None;
     let mut retired_at_ms = None;
     for generation in 0..MAX_RULE_GENERATIONS {
-        let candidate = user_rule_entry_id(project_id, clause, generation)
-            .ok_or_else(|| "the rule cannot be identified".to_string())?;
+        let candidate = user_rule_entry_id(
+            project_id,
+            placement.scope_id.as_deref(),
+            clause,
+            generation,
+        )
+        .ok_or_else(|| "the rule cannot be identified".to_string())?;
         match store
             .get_entry(project_id, &candidate)
             .await
@@ -305,6 +360,7 @@ pub(crate) async fn store_user_rule(
                     existing,
                     standing,
                     &receipt,
+                    &change(ChangeOperation::Promoted, clause),
                 )
                 .await;
             }
@@ -325,8 +381,8 @@ pub(crate) async fn store_user_rule(
     let node_id = services.project_node_id(project_id).await?;
     let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
         .map_err(|error| error.to_string())?;
-    let entry = store
-        .create_entry(
+    let (entry, _) = store
+        .create_entry_with_context(
             id,
             NewBlackboardEntry {
                 project_id: project_id.to_string(),
@@ -348,6 +404,8 @@ pub(crate) async fn store_user_rule(
                     source_id: user_message_source(thread_id, turn_id),
                 },
             },
+            placement.context(),
+            change(ChangeOperation::Saved, clause),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -377,6 +435,7 @@ async fn reconcile_active_rule(
     existing: BlackboardEntry,
     standing: RuleStanding,
     receipt: &impl Fn(&BlackboardEntry, CaptureOutcome),
+    promotion: &ChangeRecord,
 ) -> Result<CapturedRule, String> {
     if standing != RuleStanding::Standing
         || existing.value.root_promotion == RootPromotion::Promoted
@@ -389,7 +448,7 @@ async fn reconcile_active_rule(
         });
     }
     let promoted = store
-        .update_entry(
+        .update_entry_recorded(
             project_id,
             &existing.id,
             BlackboardEntryUpdate {
@@ -410,6 +469,7 @@ async fn reconcile_active_rule(
                     source_id,
                 },
             },
+            Some(promotion),
         )
         .await
         .map_err(|error| error.to_string())?;

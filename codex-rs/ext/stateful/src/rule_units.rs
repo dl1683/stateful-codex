@@ -32,41 +32,106 @@ const LIMITED_SCOPE_PHRASES: &[&str] = &[
     "this debugging",
 ];
 
+/// A rule found in a message, with the investigation it is limited to, if any.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MarkedRule {
+    pub(crate) clause: RuleClause,
+    pub(crate) scope: Option<ScopeHint>,
+}
+
+/// Where a rule applies, in the user's words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ScopeHint {
+    /// The words naming the investigation ("Some ground rules for this whole investigation").
+    pub(crate) title: String,
+    /// When the rule stops applying ("until we have agreed on the root cause").
+    pub(crate) end_condition: Option<String>,
+}
+
+/// Everything one message says about rules: the rules in the order written, the units that
+/// were recognized but could not be kept whole, and a count the user declared.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MarkedRules {
+    pub(crate) rules: Vec<MarkedRule>,
+    /// Openings of recognized rules too long to store whole.
+    pub(crate) omitted: Vec<String>,
+    /// "Two standing rules ..." declares 2.
+    pub(crate) declared_count: Option<u32>,
+}
+
 /// Clauses of `text` that the user explicitly marked as standing (or pending) rules, in the
-/// order the user wrote them. A list item is one rule, whole (all its sentences and indented
-/// continuation lines); a prose sentence is one rule. Fenced and blockquoted lines are never
-/// the user's rules, and a unit longer than `MAX_RULE_BYTES` is not captured at all rather
-/// than captured in part.
+/// order the user wrote them.
 pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
+    marked_rule_units(text)
+        .rules
+        .into_iter()
+        .map(|rule| rule.clause)
+        .collect()
+}
+
+/// The rules `text` marks, in the order written. A list item is one rule, whole (all its
+/// sentences and indented continuation lines). In prose each marked sentence is a rule;
+/// independent directives joined in one sentence ("never commit and always end with Next:")
+/// are separate rules, and a following sentence that qualifies a rule ("If you need an
+/// environment, ...") stays with it. Fenced and blockquoted lines are never the user's rules,
+/// and a unit longer than `MAX_RULE_BYTES` is reported as omitted, never stored in part.
+pub(crate) fn marked_rule_units(text: &str) -> MarkedRules {
     let quotations = Quotations::new(text);
-    let mut rules = Vec::new();
+    let mut marked = MarkedRules {
+        declared_count: declared_count(text),
+        ..MarkedRules::default()
+    };
+    let keep = |rule: MarkedRule, marked: &mut MarkedRules| {
+        if rule.clause.text.len() <= MAX_RULE_BYTES {
+            marked.rules.push(rule);
+        } else {
+            marked.omitted.push(opening(&rule.clause.text));
+        }
+    };
     for unit in rule_units(text) {
         let kept = kept_clauses(text, &quotations, &unit);
         if unit.item {
-            if let Some(rule) = item_rule(&unit, &kept, Marker::Required)
-                && rule.text.len() <= MAX_RULE_BYTES
-            {
-                rules.push(rule);
+            if let Some(rule) = item_rule(&unit, &kept, Marker::Required) {
+                keep(rule, &mut marked);
             }
             continue;
         }
+        // The prose rule the previous sentence of this line produced, which a qualifying
+        // sentence extends.
+        let mut extendable: Option<MarkedRule> = None;
         for clause in kept {
             let normalized = normalize(clause);
-            if clause.len() <= MAX_RULE_BYTES && has_standing_marker(&normalized) {
-                rules.push(RuleClause {
-                    text: clause.to_string(),
-                    standing: standing_of(&normalized),
-                });
+            if let Some(rule) = extendable.as_mut()
+                && qualifies_previous(&normalized)
+                && !has_standing_marker(&normalized)
+            {
+                rule.clause.text = format!("{} {clause}", rule.clause.text);
+                continue;
             }
+            if let Some(rule) = extendable.take() {
+                keep(rule, &mut marked);
+            }
+            if !has_standing_marker(&normalized) {
+                continue;
+            }
+            let mut pieces = coordinated_directives(text, &quotations, clause);
+            let last = pieces.pop();
+            for piece in pieces {
+                keep(prose_rule(piece), &mut marked);
+            }
+            extendable = last.map(prose_rule);
+        }
+        if let Some(rule) = extendable {
+            keep(rule, &mut marked);
         }
     }
-    rules
+    marked
 }
 
 /// The rule the unit holding `clause` (a sentence of `text`) states: the whole list item
 /// with its header's scope, or the sentence itself in prose. None when the clause is not in
 /// `text` or its list relays someone else's words. The caller checks the length.
-pub(crate) fn rule_for_clause(text: &str, clause: &str) -> Option<RuleClause> {
+pub(crate) fn rule_for_clause(text: &str, clause: &str) -> Option<MarkedRule> {
     let start = text.find(clause)?;
     let end = start + clause.len();
     let quotations = Quotations::new(text);
@@ -77,13 +142,155 @@ pub(crate) fn rule_for_clause(text: &str, clause: &str) -> Option<RuleClause> {
         })
     })?;
     if !unit.item {
-        return Some(RuleClause {
-            text: clause.to_string(),
-            standing: standing_of(&normalize(clause)),
-        });
+        return Some(prose_rule(clause));
     }
     let kept = kept_clauses(text, &quotations, &unit);
     item_rule(&unit, &kept, Marker::NotRequired)
+}
+
+/// Openings of a sentence that qualifies the rule before it rather than stating a new one.
+const QUALIFIER_OPENINGS: &[&str] = &[
+    "if",
+    "unless",
+    "except",
+    "otherwise",
+    "that way",
+    "this means",
+    "in that case",
+    "instead",
+    "but if",
+    "when",
+    "only if",
+];
+
+fn qualifies_previous(normalized: &str) -> bool {
+    QUALIFIER_OPENINGS
+        .iter()
+        .any(|opening| normalized == *opening || normalized.starts_with(&format!("{opening} ")))
+}
+
+/// Joins inside one sentence after which an independent directive starts.
+const DIRECTIVE_JOINS: &[&str] = &[
+    ", and always ",
+    ", and never ",
+    " and always ",
+    " and never ",
+    "; always ",
+    "; never ",
+    ", and please always ",
+    ", and please never ",
+];
+
+/// Splits a marked sentence into independent directives ("never X and always Y"), outside
+/// quotations, keeping each part in the user's words. A sentence with no such join, or whose
+/// first part is not itself a directive, is one rule.
+fn coordinated_directives<'a>(
+    text: &str,
+    quotations: &Quotations<'_>,
+    clause: &'a str,
+) -> Vec<&'a str> {
+    let base = clause.as_ptr() as usize - text.as_ptr() as usize;
+    let lower = clause.to_ascii_lowercase();
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let mut search = 0;
+    while let Some((offset, join)) = DIRECTIVE_JOINS
+        .iter()
+        .filter_map(|join| {
+            lower[search..]
+                .find(join)
+                .map(|found| (search + found, *join))
+        })
+        .min_by_key(|(found, _)| *found)
+    {
+        // The right part starts at its directive word ("please always", "always", "never").
+        let next = offset
+            + ["please", "always", "never"]
+                .iter()
+                .find_map(|word| join.find(word))
+                .unwrap_or(join.len());
+        let left = clause[start..offset].trim();
+        let inside_quotation =
+            quotations.touches_quotation(base + offset, base + offset + join.len());
+        if !inside_quotation && has_standing_marker(&normalize(left)) {
+            pieces.push(left);
+            start = next;
+        }
+        search = offset + join.len();
+    }
+    pieces.push(clause[start..].trim());
+    pieces
+}
+
+fn prose_rule(clause: &str) -> MarkedRule {
+    let normalized = normalize(clause);
+    MarkedRule {
+        scope: has_phrase(&normalized, crate::user_rules::INVESTIGATION_PHRASES).then(|| {
+            ScopeHint {
+                title: clause.trim_end_matches(['.', '!']).to_string(),
+                end_condition: end_condition(clause),
+            }
+        }),
+        clause: RuleClause {
+            text: clause.to_string(),
+            standing: standing_of(&normalized),
+        },
+    }
+}
+
+/// The user's words for when a rule stops applying: from "until" to the end of its sentence.
+pub(crate) fn end_condition(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let start = lower.find(" until ")? + 1;
+    let rest = &text[start..];
+    let end = rest.find(['.', ';', '!']).unwrap_or(rest.len());
+    Some(rest[..end].trim().to_string())
+}
+
+/// A count the user declared for their rules ("Two standing rules", "3 ground rules").
+fn declared_count(text: &str) -> Option<u32> {
+    const NUMBERS: &[(&str, u32)] = &[
+        ("two", 2),
+        ("three", 3),
+        ("four", 4),
+        ("five", 5),
+        ("six", 6),
+        ("seven", 7),
+        ("eight", 8),
+        ("nine", 9),
+        ("ten", 10),
+    ];
+    let words = normalize(text);
+    let words = words.split(' ').collect::<Vec<_>>();
+    words.iter().enumerate().find_map(|(index, word)| {
+        let count = NUMBERS
+            .iter()
+            .find(|(name, _)| name == word)
+            .map(|(_, count)| *count)
+            .or_else(|| {
+                word.parse::<u32>()
+                    .ok()
+                    .filter(|count| (2..=20).contains(count))
+            })?;
+        let following = words.get(index + 1..(index + 4).min(words.len()))?;
+        let noun = following
+            .iter()
+            .position(|word| matches!(*word, "rules" | "preferences"))?;
+        following[..noun]
+            .iter()
+            .all(|word| matches!(*word, "standing" | "ground" | "house" | "working"))
+            .then_some(count)
+    })
+}
+
+/// The first words of a unit, for reporting what could not be kept.
+fn opening(text: &str) -> String {
+    const MAX_OPENING_CHARS: usize = 80;
+    let single = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match single.char_indices().nth(MAX_OPENING_CHARS) {
+        Some((end, _)) => format!("{}...", &single[..end]),
+        None => single,
+    }
 }
 
 /// Whether an unheaded list item needs a standing marker in one of its sentences.
@@ -121,7 +328,7 @@ fn kept_clauses<'a>(text: &str, quotations: &Quotations<'_>, unit: &RuleUnit<'a>
 
 /// The one rule a list item states, judged as a whole so an ending condition or a task limit
 /// in any of its sentences applies to all of it.
-fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<RuleClause> {
+fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<MarkedRule> {
     if kept.is_empty() {
         return None;
     }
@@ -147,15 +354,25 @@ fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<RuleC
                     }
                 }
             };
-            let text = match header.limited_scope {
+            let (text, scope) = match header.limited_scope {
                 // The header's limited scope stays with the rule, in the user's words.
                 Some(scope) => {
                     let item = list_item_body(&body).map_or(body.as_str(), str::trim);
-                    format!("{scope} {item}")
+                    let hint = ScopeHint {
+                        title: scope.trim_end_matches(':').trim().to_string(),
+                        end_condition: end_condition(item),
+                    };
+                    (format!("{scope} {item}"), Some(hint))
                 }
-                None => body,
+                None => {
+                    let scope = prose_rule(&body).scope;
+                    (body, scope)
+                }
             };
-            Some(RuleClause { text, standing })
+            Some(MarkedRule {
+                clause: RuleClause { text, standing },
+                scope,
+            })
         }
         None => {
             if marker == Marker::Required
@@ -165,10 +382,7 @@ fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<RuleC
             {
                 return None;
             }
-            Some(RuleClause {
-                standing: standing_of(&normalized),
-                text: body,
-            })
+            Some(prose_rule(&body))
         }
     }
 }

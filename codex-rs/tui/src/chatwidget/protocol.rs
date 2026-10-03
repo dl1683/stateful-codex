@@ -400,6 +400,13 @@ impl ChatWidget {
             | ServerNotification::BlackboardUpdated(_)
             | ServerNotification::StatefulAttributionCompleted(_)
             | ServerNotification::TurnTrajectoryUpdated(_) => {}
+            ServerNotification::StatefulKnowledgeGroupCaptured(notification) => {
+                if replay_kind.is_none()
+                    && let Some(cell) = crate::stateful_memory::group_receipt_cell(&notification)
+                {
+                    self.add_to_history(cell);
+                }
+            }
             ServerNotification::StatefulKnowledgeCaptured(notification) => {
                 if replay_kind.is_none()
                     && let Some(cell) = self.memory_receipts.receipt_cell(&notification)
