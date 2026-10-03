@@ -174,3 +174,16 @@ fn what_is_installed_settles_ordinary_steps_before_any_stored_decision() {
         None
     );
 }
+
+#[test]
+fn an_undecided_window_after_another_projects_window_starts_full() {
+    // The thread's latest decided window was for another project (it was selected, and its
+    // window may have been compacted since): returning to this project is a new selection.
+    assert_eq!(
+        proposal(
+            &view(4, WindowBuild::OrdinaryStep),
+            ThreadRecord::OtherProject
+        ),
+        (ContextWindowMode::Full, ContextWindowReason::Unknown)
+    );
+}

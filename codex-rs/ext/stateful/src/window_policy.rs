@@ -27,9 +27,11 @@ pub(crate) const WORLD_STATE_ID: &str = "stateful_window";
 /// Where a thread stands for the selected project, from its own durable records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ThreadRecord {
-    /// This thread already opened a window for this project.
+    /// The thread's most recently decided window was for this project.
     Known,
-    /// No window of this thread was recorded for this project, or the store is unreadable.
+    /// The thread's most recently decided window was for another project.
+    OtherProject,
+    /// No window of this thread was recorded, or the store is unreadable.
     Unrecorded,
 }
 
@@ -82,7 +84,8 @@ pub(crate) fn proposed_window(
             ContextWindowMode::Continuation,
             ContextWindowReason::Compaction,
         ),
-        (WindowBuild::OrdinaryStep, ThreadRecord::Unrecorded) => {
+        // A fork, a newly selected project, or a thread recorded before windows were.
+        (WindowBuild::OrdinaryStep, ThreadRecord::OtherProject | ThreadRecord::Unrecorded) => {
             (ContextWindowMode::Full, ContextWindowReason::Unknown)
         }
     };
@@ -123,12 +126,10 @@ pub(crate) async fn stored_window(
             return (None, ThreadRecord::Unrecorded);
         }
     };
-    let record = match store
-        .thread_has_context_windows(thread_id, project_id)
-        .await
-    {
-        Ok(true) => ThreadRecord::Known,
-        Ok(false) => ThreadRecord::Unrecorded,
+    let record = match store.latest_context_window_project(thread_id).await {
+        Ok(Some(latest)) if latest == project_id => ThreadRecord::Known,
+        Ok(Some(_)) => ThreadRecord::OtherProject,
+        Ok(None) => ThreadRecord::Unrecorded,
         Err(error) => {
             tracing::warn!(%thread_id, %error, "failed to read a thread's window records");
             ThreadRecord::Unrecorded

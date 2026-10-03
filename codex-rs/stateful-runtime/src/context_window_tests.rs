@@ -57,17 +57,31 @@ async fn the_first_decision_for_a_window_is_final() {
         store.decide_context_window(&fork).await.expect("fork"),
         fork
     );
-    // Another project selected in the same thread has its own decisions.
-    assert!(
-        !store
-            .thread_has_context_windows("thread-1", "project-2")
-            .await
-            .expect("project-2")
-    );
-    assert!(
+    assert_eq!(
         store
-            .thread_has_context_windows("thread-1", "project-1")
+            .latest_context_window_project("thread-1")
             .await
-            .expect("project-1")
+            .expect("latest"),
+        Some("project-1".to_string())
+    );
+    // Selecting another project in the same thread makes it the latest decided.
+    let other = ContextWindowDecision {
+        project_id: "project-2".to_string(),
+        ..continuation.clone()
+    };
+    store.decide_context_window(&other).await.expect("other");
+    assert_eq!(
+        store
+            .latest_context_window_project("thread-1")
+            .await
+            .expect("latest"),
+        Some("project-2".to_string())
+    );
+    assert_eq!(
+        store
+            .latest_context_window_project("thread-unknown")
+            .await
+            .expect("none"),
+        None
     );
 }

@@ -330,6 +330,12 @@ impl ContextContributor for StatefulExtension {
                 })
                 .flatten();
             let window = match settled_window {
+                // Settled by what is installed, but not yet this thread's own record (a first
+                // selection of this project, or a fork): record it, so a later compaction that
+                // removes the installed marker still knows this window's project and mode.
+                Some(settled) if stored_window.is_none() => {
+                    window_policy::decide_window(runtime_store, settled).await
+                }
                 Some(settled) => settled,
                 None => {
                     let mode = if continuation_project.is_some() {
@@ -349,9 +355,13 @@ impl ContextContributor for StatefulExtension {
             let mut sections = vec![
                 window_policy::window_section(&window),
                 match continuation_project.filter(|_| continuation_window) {
-                    Some(project) => {
-                        continuation::continuation_project_section(project, visible_root)
-                    }
+                    Some(project) => continuation::continuation_project_section(
+                        project,
+                        input
+                            .previous_world_state
+                            .and_then(|previous| previous.get(world_state::WORLD_STATE_ID)),
+                        visible_root,
+                    ),
                     None => project_world_state_section(status, Some(visible_root)),
                 },
             ];

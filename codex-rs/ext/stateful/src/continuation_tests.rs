@@ -82,7 +82,8 @@ fn continuation_keeps_rules_and_background_but_not_other_knowledge() {
     let (full_body, _) = status.render();
     let project = continuation_project(&status, Admission::Opening).expect("rules fit");
     let registry = VisibleRootRegistry::default();
-    let section = continuation_project_section(project, (registry.clone(), "thread-1".to_string()));
+    let section =
+        continuation_project_section(project, None, (registry.clone(), "thread-1".to_string()));
     let body = rendered(&section, PreviousWorldStateSection::Absent).expect("rendered");
 
     // The rule keeps its alias from the full packet, so completion resolves the same entry.
@@ -124,6 +125,7 @@ fn rules_that_do_not_fit_keep_the_full_packet() {
     let body = rendered(
         &continuation_project_section(
             opened,
+            None,
             (VisibleRootRegistry::default(), "thread-1".to_string()),
         ),
         PreviousWorldStateSection::Absent,
@@ -137,6 +139,7 @@ fn rules_that_do_not_fit_keep_the_full_packet() {
     let body = rendered(
         &continuation_project_section(
             unreadable,
+            None,
             (VisibleRootRegistry::default(), "thread-1".to_string()),
         ),
         PreviousWorldStateSection::Absent,
@@ -150,6 +153,7 @@ fn a_changed_rule_is_one_exact_correction_not_a_second_carrier() {
     let section = |rules: Vec<codex_project_intelligence::BlackboardHit>| {
         continuation_project_section(
             continuation_project(&status_with(rules), Admission::Opened).expect("kept"),
+            None,
             (VisibleRootRegistry::default(), "thread-1".to_string()),
         )
     };
@@ -196,6 +200,7 @@ fn a_revision_only_change_is_a_receipt_and_an_unchanged_window_renders_nothing()
         };
         continuation_project_section(
             continuation_project(&status, Admission::Opening).expect("fits"),
+            None,
             (VisibleRootRegistry::default(), "thread-1".to_string()),
         )
     };
@@ -240,6 +245,7 @@ fn unreadable_memory_never_revokes_a_rule_and_an_unchanged_outage_is_silent() {
             Admission::Opening,
         )
         .expect("fits"),
+        None,
         registry(),
     );
     let unavailable = ProjectIntelligenceStatus::Unavailable {
@@ -247,6 +253,7 @@ fn unreadable_memory_never_revokes_a_rule_and_an_unchanged_outage_is_silent() {
     };
     let outage = continuation_project_section(
         continuation_project(&unavailable, Admission::Opened).expect("kept"),
+        Some(readable.snapshot()),
         registry(),
     );
     let notice = outage
@@ -272,9 +279,52 @@ fn unreadable_memory_never_revokes_a_rule_and_an_unchanged_outage_is_silent() {
         .expect("restored")
         .body()
         .to_string();
-    assert!(restored.contains("Metric units only."), "{restored}");
     assert!(
         !restored.contains("No longer shown or in force"),
         "{restored}"
+    );
+}
+
+#[test]
+fn a_rule_retired_during_an_outage_is_revoked_when_memory_is_read_again() {
+    let registry = || (VisibleRootRegistry::default(), "thread-1".to_string());
+    let both = continuation_project_section(
+        continuation_project(
+            &status_with(vec![
+                user_rule(1, "Metric units only."),
+                user_rule(2, "Ask before editing recipes.json."),
+            ]),
+            Admission::Opening,
+        )
+        .expect("fits"),
+        None,
+        registry(),
+    );
+    let unavailable = ProjectIntelligenceStatus::Unavailable {
+        project_id: "project-1".to_string(),
+    };
+    let outage = continuation_project_section(
+        continuation_project(&unavailable, Admission::Opened).expect("kept"),
+        Some(both.snapshot()),
+        registry(),
+    );
+    // While memory is unreadable, the rules shown earlier keep their identity.
+    let recovered = continuation_project_section(
+        continuation_project(
+            &status_with(vec![user_rule(1, "Metric units only.")]),
+            Admission::Opened,
+        )
+        .expect("kept"),
+        Some(outage.snapshot()),
+        registry(),
+    );
+    let correction = recovered
+        .render_diff(PreviousWorldStateSection::Known(outage.snapshot()))
+        .expect("correction")
+        .body()
+        .to_string();
+    assert!(
+        correction.contains("No longer shown or in force: E2."),
+        "{correction}"
     );
 }

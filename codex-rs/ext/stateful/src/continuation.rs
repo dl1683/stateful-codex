@@ -126,7 +126,7 @@ pub(crate) fn continuation_project(
         Admission::Opened if shown.incomplete > 0 => append_line(
             &mut body,
             &format!(
-                "{} of the user's rules or background entries are not shown whole here; they still apply. blackboard_query with rootPromotion \"promoted\" (following its pages) returns each with its full text.",
+                "{} of the user's rules or background entries are not shown whole here; they still apply as shown earlier. blackboard_query with detail \"full\" and words from one entry returns that entry's full text.",
                 shown.incomplete
             ),
         ),
@@ -150,6 +150,7 @@ pub(crate) fn continuation_project(
 /// alias shift, a notice) are sent as one exact correction.
 pub(crate) fn continuation_project_section(
     project: ContinuationProject,
+    previous: Option<&Value>,
     visible_root: (VisibleRootRegistry, String),
 ) -> WorldStateSectionContribution {
     let ContinuationProject {
@@ -159,7 +160,16 @@ pub(crate) fn continuation_project_section(
         complete_entries,
         coverage,
     } = project;
-    let lines = stable_lines(&body);
+    let mut lines = stable_lines(&body);
+    // Without complete current coverage, entries shown earlier keep their identity in the
+    // snapshot (they still apply), so complete coverage later can reconcile them exactly.
+    if coverage == Coverage::Partial {
+        for (key, digest) in outstanding_entries(previous) {
+            if !lines.iter().any(|(current, _)| *current == key) {
+                lines.push((key, digest));
+            }
+        }
+    }
     let fingerprint = short_digest(
         &lines
             .iter()
@@ -238,6 +248,24 @@ pub(crate) fn continuation_project_section(
     .with_retained_fragment_matcher(move |role, text| {
         is_project_fragment(role, text, &matcher_project_id)
     })
+}
+
+/// The entry lines a previous continuation snapshot holds.
+fn outstanding_entries(previous: Option<&Value>) -> Vec<(String, String)> {
+    let Some(previous) = previous.filter(|previous| previous["mode"] == "continuation") else {
+        return Vec::new();
+    };
+    previous["lines"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|pair| {
+            let key = pair.get(0)?.as_str()?;
+            let digest = pair.get(1)?.as_str()?;
+            key.starts_with('E')
+                .then(|| (key.to_string(), digest.to_string()))
+        })
+        .collect()
 }
 
 /// (key, digest) of each body line except the revision line, which changes with every write.
@@ -322,7 +350,7 @@ fn correction(
         }
         text.truncate(end);
         text.push_str(
-            "\n[correction shortened; memory_read with \"what are my rules\" returns them exactly]",
+            "\n[correction shortened; blackboard_query with detail \"full\" and words from an entry returns its full text]",
         );
     }
     text

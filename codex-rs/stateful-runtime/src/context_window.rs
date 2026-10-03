@@ -128,24 +128,20 @@ impl StatefulRunStore {
         .transpose()
     }
 
-    /// Whether this thread already opened a window for this project. A window it has not
-    /// decided yet was then opened inside the thread (a compaction whose initial context is
-    /// injected later), not by a fork or a project switch, which start without any record.
-    pub async fn thread_has_context_windows(
+    /// The project of the thread's most recently decided window. An undecided window of the
+    /// project decided last was opened inside the thread (a compaction whose initial context is
+    /// injected later); a fork, or a selection of another project, starts otherwise.
+    pub async fn latest_context_window_project(
         &self,
         thread_id: &str,
-        project_id: &str,
-    ) -> Result<bool, StatefulRunStoreError> {
-        Ok(sqlx::query_scalar::<_, i64>(
-            "SELECT EXISTS (
-                SELECT 1 FROM stateful_context_windows WHERE thread_id = ? AND project_id = ?
-             )",
+    ) -> Result<Option<String>, StatefulRunStoreError> {
+        Ok(sqlx::query_scalar::<_, String>(
+            "SELECT project_id FROM stateful_context_windows WHERE thread_id = ?
+             ORDER BY created_at_ms DESC, rowid DESC LIMIT 1",
         )
         .bind(thread_id)
-        .bind(project_id)
-        .fetch_one(&self.pool)
-        .await?
-            != 0)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 }
 

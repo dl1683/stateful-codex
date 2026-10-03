@@ -364,3 +364,68 @@ fn number_after(text: &str, label: &str) -> Option<u64> {
         .parse()
         .ok()
 }
+
+/// Select B, compact B with deferred injection, then return to A before B's next turn: no
+/// installed marker survives, and A must still start with its full packet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn returning_to_a_project_after_another_projects_deferred_compaction_starts_full()
+-> Result<()> {
+    let server = responses::start_mock_server().await;
+    let reply = |id: &str| {
+        responses::sse(vec![
+            responses::ev_assistant_message(&format!("{id}-message"), "Done"),
+            responses::ev_completed(id),
+        ])
+    };
+    let mock = responses::mount_sse_sequence(
+        &server,
+        vec![
+            reply("first"),
+            reply("other"),
+            reply("other-summary"),
+            reply("returned"),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .enable_feature(Feature::Sqlite)
+        .with_provider_config("supports_websockets = false")
+        .write(codex_home.path())?;
+    let mut app = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let first = create_project(&mut app, "Return project", "return-a").await?;
+    let other = create_project(&mut app, "Interim project", "return-b").await?;
+    seed_root_blackboard(codex_home.path(), &first).await?;
+    seed_root_blackboard(codex_home.path(), &other).await?;
+    let thread_id = app
+        .start_thread(ThreadStartParams {
+            project_id: Some(first.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut app, &thread_id).await?;
+    select_project(&mut app, &thread_id, &other).await?;
+    run_turn(&mut app, &thread_id).await?;
+    compact(&mut app, &thread_id).await?;
+    select_project(&mut app, &thread_id, &first).await?;
+    run_turn(&mut app, &thread_id).await?;
+
+    let requests = mock.requests();
+    let returned = requests.last().expect("a request after the return");
+    let carriers = project_carriers(returned)
+        .into_iter()
+        .filter(|carrier| carrier.contains(&format!("Project ID: {first}")))
+        .collect::<Vec<_>>();
+    let newest = carriers.last().expect("a carrier for the returned project");
+    assert!(newest.contains(SEEDED_FACT), "{carriers:?}");
+    assert!(
+        !newest.contains("continues the same thread after context compaction"),
+        "{carriers:?}"
+    );
+    Ok(())
+}
