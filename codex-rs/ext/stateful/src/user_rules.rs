@@ -124,6 +124,13 @@ const REPORTED_SPEECH_PHRASES: &[&str] = &[
     "the assistant told",
     "the assistant suggested",
     "the assistant recommended",
+    "her preference",
+    "his preference",
+    "their preference",
+    "her rule",
+    "his rule",
+    "their rule",
+    "not mine",
 ];
 
 /// Explicit limits to the current task; no standing marker overrides them.
@@ -182,7 +189,10 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
                 continue;
             }
             let normalized = normalize(clause);
-            if is_reported_speech(&normalized) || asks_about_rules(clause) {
+            if is_reported_speech(&normalized)
+                || relays_quotation(clause)
+                || asks_about_rules(clause)
+            {
                 continue;
             }
             let standing = match inherited {
@@ -470,7 +480,35 @@ pub(crate) fn asks_about_rules(clause: &str) -> bool {
 /// Whether `clause` reports what someone else said or advised rather than stating the
 /// user's own rule; an assistant's advice must never become the user's rule.
 pub(crate) fn reports_speech(clause: &str) -> bool {
-    is_reported_speech(&normalize(clause))
+    is_reported_speech(&normalize(clause)) || relays_quotation(clause)
+}
+
+/// Words that introduce what someone said or wrote.
+const SPEECH_VERBS: &[&str] = &[
+    "wrote",
+    "writes",
+    "said",
+    "says",
+    "asked",
+    "asks",
+    "told",
+    "tells",
+    "mentioned",
+    "posted",
+    "replied",
+    "commented",
+    "suggested",
+    "noted",
+];
+
+/// Whether `clause` quotes someone's words after a speech verb ("My colleague wrote: \"I
+/// always want tests first\""). A quoted word in the user's own rule ("never use the word
+/// \"simply\"") has no speech verb before it.
+fn relays_quotation(clause: &str) -> bool {
+    let Some(open) = clause.find(['"', '\u{201c}']) else {
+        return false;
+    };
+    has_phrase(&normalize(&clause[..open]), SPEECH_VERBS)
 }
 
 fn standing_of(normalized: &str) -> RuleStanding {

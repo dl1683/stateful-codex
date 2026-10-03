@@ -346,3 +346,33 @@ fn a_message_that_quotes_anywhere_contributes_no_background() {
         ]
     );
 }
+
+/// A preference quoted from someone else, or attributed to them, is never the user's rule,
+/// while the user's own rule may still quote a word.
+#[test]
+fn quoted_or_attributed_preferences_are_not_the_users_rules() {
+    let text = "About me: I'm a backend engineer. Standing rule for all future sessions: never touch the docs folder. My colleague wrote in our chat: \"I always want tests written first\" - that's her preference, not mine.";
+    assert_eq!(
+        (
+            marked_rules(text),
+            marked_rules("From now on, never use the word \"simply\" in docs."),
+            super::reports_speech(
+                "My colleague wrote in our chat: \"I always want tests written first\"."
+            ),
+            super::reports_speech("Always run the linter; that is his preference, not mine."),
+        ),
+        (
+            vec![RuleClause {
+                text: "Standing rule for all future sessions: never touch the docs folder."
+                    .to_string(),
+                standing: RuleStanding::Standing,
+            }],
+            vec![RuleClause {
+                text: "From now on, never use the word \"simply\" in docs.".to_string(),
+                standing: RuleStanding::Standing,
+            }],
+            true,
+            true,
+        )
+    );
+}
