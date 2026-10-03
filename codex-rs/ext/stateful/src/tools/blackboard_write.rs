@@ -64,6 +64,7 @@ use super::bounded_json_output;
 use super::parse_arguments;
 use super::preflight_receipts;
 use super::receipt_error;
+use super::recipe_grounding;
 use super::stable_id;
 use super::worst_identifier;
 use super::worst_receipt_error;
@@ -294,6 +295,11 @@ impl BlackboardRecorder {
                 "userQuote and ruleScope apply to kind instruction only",
             ));
         }
+        if recipe_grounding::refuses_credentials(kind, &content) {
+            return Err(respond(
+                "credentials: a recipe must not store passwords, tokens or keys; record it with a placeholder such as $TOKEN",
+            ));
+        }
         let (evidence, inferred_node_id) = resolve_evidence(
             &self.project_id,
             &self.thread_id,
@@ -518,6 +524,7 @@ impl BlackboardBatchRecordTool {
                         "revision": u64::MAX,
                         "recorded": false,
                         "alreadyPresent": false,
+                        "recipe": crate::recipe_applicability::RecipeCheck::Current.label(),
                         "error": worst_receipt_error(),
                     }))
                     .collect::<Vec<_>>(),
@@ -559,11 +566,19 @@ impl BlackboardBatchRecordTool {
                 Ok(RecordOutcome::Created(entry)) => {
                     recorded += 1;
                     entry_ids.insert(record_key, entry.id.clone());
+                    let recipe = recipe_grounding::ground(
+                        &self.recorder.services,
+                        &self.recorder.thread_id,
+                        &entry,
+                        call.conversation_history.items(),
+                    )
+                    .await;
                     results.push(json!({
                         "index": index,
                         "entryId": entry.id.to_string(),
                         "revision": entry.revision,
                         "recorded": true,
+                        "recipe": recipe,
                     }));
                 }
                 // The same wording is already current: relations may point at it, but

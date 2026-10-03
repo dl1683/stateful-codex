@@ -18,6 +18,7 @@ use tokio::sync::OnceCell;
 
 use crate::index_gate::IndexGates;
 use crate::read_receipts::EvidenceReadReceipts;
+use crate::recipe_capture::ObservedCommands;
 
 #[derive(Clone)]
 pub(super) struct ProjectIntelligenceServices {
@@ -36,6 +37,8 @@ pub(super) struct ProjectIntelligenceServices {
     checkout_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
     /// One index operation per project at a time, bounded for its caller.
     index_gates: IndexGates,
+    /// Commands each thread ran successfully, which ground recorded recipes.
+    observed_commands: ObservedCommands,
 }
 
 impl ProjectIntelligenceServices {
@@ -51,6 +54,7 @@ impl ProjectIntelligenceServices {
             checkout_holds: Arc::default(),
             checkout_locks: Arc::default(),
             index_gates: IndexGates::default(),
+            observed_commands: ObservedCommands::default(),
         }
     }
 
@@ -78,6 +82,10 @@ impl ProjectIntelligenceServices {
 
     pub(super) fn index_gates(&self) -> &IndexGates {
         &self.index_gates
+    }
+
+    pub(super) fn observed_commands(&self) -> &ObservedCommands {
+        &self.observed_commands
     }
 
     /// The project's hierarchy node, created without a source scan when the project was

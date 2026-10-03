@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
+use codex_extension_api::CommandStartInput;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ToolCallOutcome;
 use codex_extension_api::ToolCallSource;
@@ -285,8 +286,34 @@ impl ToolLifecycleContributor for StatefulExtension {
         })
     }
 
+    fn on_command_start<'a>(&'a self, input: CommandStartInput<'a>) -> ToolLifecycleFuture<'a> {
+        Box::pin(async move {
+            let (Some(thread), Some(services)) = (
+                input.thread_store.get::<SelectedThread>(),
+                self.services.as_ref(),
+            ) else {
+                return;
+            };
+            services.observed_commands().started(
+                &thread.thread_id,
+                crate::recipe_capture::ObservedCommand {
+                    turn_id: input.turn_id.to_string(),
+                    call_id: input.call_id.to_string(),
+                    script: crate::recipe_capture::command_script(input.command),
+                    cwd: input.cwd.to_path_buf(),
+                },
+            );
+        })
+    }
+
     fn on_tool_finish<'a>(&'a self, input: ToolFinishInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
+            if let Some(services) = self.services.as_ref() {
+                services.observed_commands().finished(
+                    input.call_id,
+                    matches!(input.outcome, ToolCallOutcome::Completed { success: true }),
+                );
+            }
             if let Some(thread) = input.thread_store.get::<SelectedThread>() {
                 self.run_activity.for_thread(&thread.thread_id).record(
                     matches!(input.source, ToolCallSource::Direct),

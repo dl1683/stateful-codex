@@ -15,6 +15,7 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
+use crate::recipe_applicability::RecipeCheck;
 use crate::source_freshness::AuditedEvidenceFreshness;
 use crate::source_freshness::AuditedPremiseFreshness;
 use crate::source_freshness::EvidenceAudit;
@@ -77,6 +78,8 @@ struct EntryLayout<'a> {
     evidence_audit: Option<&'a EvidenceAudit>,
     /// The newest entry each shown entry replaced, by entry ID.
     predecessors: &'a HashMap<String, BlackboardEntry>,
+    /// Whether each shown recipe still applies, by entry ID.
+    recipe_checks: &'a HashMap<String, RecipeCheck>,
     entries: Vec<LaidOutLine>,
     shown: Vec<(usize, String)>,
     omitted: u64,
@@ -91,12 +94,20 @@ impl EntryLayout<'_> {
         evidence_aliases: &HashMap<ContextMapEntryId, String>,
     ) {
         let alias = format!("E{}", index + 1);
-        let plain = render_hit(
-            &alias,
-            hit,
-            self.entry_aliases,
-            evidence_aliases,
-            self.evidence_audit,
+        // A recipe's applicability is part of the entry: it is never dropped as decoration.
+        let recipe = self
+            .recipe_checks
+            .get(hit.entry.id.as_str())
+            .map_or_else(String::new, |check| format!(" recipe={}", check.label()));
+        let plain = format!(
+            "{}{recipe}",
+            render_hit(
+                &alias,
+                hit,
+                self.entry_aliases,
+                evidence_aliases,
+                self.evidence_audit,
+            )
         );
         // What the current value replaced is decoration: it is dropped before the entry
         // itself is.
@@ -120,7 +131,7 @@ impl EntryLayout<'_> {
                 self.shown.push((index, alias));
             }
             let canonical = format!(
-                "{}{}",
+                "{}{recipe}{}",
                 render_hit(
                     hit.entry.id.as_str(),
                     hit,
@@ -178,6 +189,8 @@ pub(super) struct ResolvedRootBlackboard {
     predecessors: HashMap<String, BlackboardEntry>,
     /// What the packet says about investigation-scoped rules.
     scope_note: Option<String>,
+    /// Whether each shown recipe still applies, by entry ID.
+    recipe_checks: HashMap<String, RecipeCheck>,
 }
 
 /// Removes rules that are not in the user's own words from a root projection, before any
@@ -209,6 +222,7 @@ impl ResolvedRootBlackboard {
             quarantined_rules,
             predecessors: HashMap::new(),
             scope_note: None,
+            recipe_checks: HashMap::new(),
         }
     }
 
@@ -227,6 +241,12 @@ impl ResolvedRootBlackboard {
         predecessors: impl IntoIterator<Item = (String, BlackboardEntry)>,
     ) -> Self {
         self.predecessors = predecessors.into_iter().collect();
+        self
+    }
+
+    /// Attaches whether shown recipes still apply, so the packet labels each one.
+    pub(super) fn with_recipe_checks(mut self, checks: HashMap<String, RecipeCheck>) -> Self {
+        self.recipe_checks = checks;
         self
     }
 }
@@ -303,6 +323,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             .map(|route| (route.clone(), route.to_string()))
             .collect(),
         evidence_audit: root.evidence_audit.as_ref(),
+        recipe_checks: &root.recipe_checks,
         predecessors: &root.predecessors,
         entries: Vec::with_capacity(projection.data.len()),
         shown: Vec::with_capacity(projection.data.len()),

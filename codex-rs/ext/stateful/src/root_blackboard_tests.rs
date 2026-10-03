@@ -19,6 +19,7 @@ use super::ResolvedRootBlackboard;
 use super::RootBlackboardStatus;
 use super::USER_RULES_HEADER;
 use super::render_root_blackboard;
+use crate::recipe_applicability::RecipeCheck;
 
 fn hit(
     id: &str,
@@ -254,5 +255,58 @@ fn history_is_shown_only_when_it_fits_and_its_presence_is_part_of_the_digest() {
             short_history_digest == short_plain_digest,
         ),
         (true, true, false, true, false, false)
+    );
+}
+
+/// A recipe carries whether it still applies, so the model reuses a working environment
+/// and checks a changed one once.
+#[test]
+fn recipes_are_labelled_with_whether_they_still_apply() {
+    let root = ResolvedRootBlackboard::new(
+        RootBlackboardProjection {
+            project_id: "project-1".to_string(),
+            revision: 2,
+            data: vec![
+                hit(
+                    "venv-recipe",
+                    BlackboardKind::Fact,
+                    BlackboardProvenanceKind::Agent,
+                    "Recipe: `.venv/bin/python -m pytest tests -q` runs the tests.",
+                ),
+                hit(
+                    "old-recipe",
+                    BlackboardKind::Fact,
+                    BlackboardProvenanceKind::Agent,
+                    "Recipe: `uv run pytest` runs the tests.",
+                ),
+            ],
+            omitted_entries: 0,
+            candidate_entries: 0,
+        },
+        Default::default(),
+        None,
+    )
+    .with_recipe_checks(
+        [
+            ("venv-recipe".to_string(), RecipeCheck::Current),
+            (
+                "old-recipe".to_string(),
+                RecipeCheck::NeedsCheck("uv.lock changed since".to_string()),
+            ),
+        ]
+        .into(),
+    );
+    let mut output = String::new();
+    render_root_blackboard(&mut output, &RootBlackboardStatus::Available(root));
+    let labels = output
+        .lines()
+        .filter_map(|line| line.split_once(" recipe=").map(|(_, label)| label))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        vec![
+            "current (seen succeeding with this executable and manifests; reuse it, do not set up another environment)",
+            "needsCheck (uv.lock changed since; check once, then reuse what works)",
+        ]
     );
 }

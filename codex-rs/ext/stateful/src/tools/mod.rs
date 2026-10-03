@@ -10,6 +10,7 @@ mod evidence;
 mod evidence_refresh;
 mod memory_read;
 mod obligation;
+mod recipe_grounding;
 mod run;
 mod run_read;
 mod steering;

@@ -17,6 +17,8 @@ mod memory_add;
 mod memory_controls;
 mod quotation;
 mod read_receipts;
+mod recipe_applicability;
+mod recipe_capture;
 mod request_scope;
 mod root_blackboard;
 mod rule_capture;
@@ -481,6 +483,8 @@ impl StatefulExtension {
                 );
                 let predecessors = root_predecessors(store, project_id, &projection).await;
                 let scope_view = rule_scope::ScopeView::load(store, &projection, thread_id).await;
+                let recipe_checks =
+                    recipe_applicability::check_root_recipes(store, project_id, &projection).await;
                 RootBlackboardStatus::Available(
                     ResolvedRootBlackboard::new(
                         projection,
@@ -488,7 +492,8 @@ impl StatefulExtension {
                         Some((*evidence_audit).clone()),
                     )
                     .with_scope_view(&scope_view)
-                    .with_predecessors(predecessors),
+                    .with_predecessors(predecessors)
+                    .with_recipe_checks(recipe_checks),
                 )
             }
             Err(error) => {
