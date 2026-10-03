@@ -298,3 +298,122 @@ async fn since_matches_beyond_the_hit_cap_are_reported() {
         (super::MAX_SEARCH_HITS as usize, true)
     );
 }
+
+/// With A -> ... -> F, older matches arriving first (A, then B) still resolve to F: B is not
+/// stopped at an entry that only A's walk had reached.
+#[tokio::test]
+async fn older_matches_first_still_reach_the_current_entry() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let id = |value: &str| codex_project_intelligence::BlackboardEntryId::parse(value).expect("id");
+    store
+        .create_entry(
+            id("a"),
+            decision(&node_id, "Rounding rounding starts at one place."),
+        )
+        .await
+        .expect("A");
+    for (previous, next, content) in [
+        ("a", "b", "Rounding is now two places."),
+        ("b", "c", "Third value."),
+        ("c", "d", "Fourth value."),
+        ("d", "e", "Fifth value."),
+        ("e", "f", "Sixth value."),
+    ] {
+        store
+            .create_successor(
+                id(next),
+                decision(&node_id, content),
+                vec![codex_project_intelligence::SupersededEntry {
+                    id: id(previous),
+                    expected_revision: 1,
+                }],
+            )
+            .await
+            .expect("successor");
+    }
+    let tool = super::MemoryReadTool::new(
+        "project-1".to_string(),
+        services.clone(),
+        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+    );
+    let mut heads = Vec::new();
+    for include_history in [false, true] {
+        let (groups, _) = tool
+            .knowledge(store, &question_terms("rounding"), Some(0), include_history)
+            .await
+            .expect("knowledge");
+        heads.push(
+            groups
+                .iter()
+                .map(|group| group[0]["entryId"].as_str().unwrap_or_default().to_string())
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(heads, vec![vec!["f".to_string()], vec!["f".to_string()]]);
+}
+
+/// A replaced entry keeps the authorship of its own words: a user-authored entry replaced by
+/// an agent record is still labelled as the user's.
+#[tokio::test]
+async fn replaced_entries_keep_their_own_authorship() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let id = |value: &str| codex_project_intelligence::BlackboardEntryId::parse(value).expect("id");
+    let mut by_user = decision(&node_id, "Rounding uses one place.");
+    by_user.provenance.kind = codex_project_intelligence::BlackboardProvenanceKind::User;
+    store.create_entry(id("a"), by_user).await.expect("A");
+    store
+        .create_successor(
+            id("b"),
+            decision(&node_id, "Rounding uses two places."),
+            vec![codex_project_intelligence::SupersededEntry {
+                id: id("a"),
+                expected_revision: 1,
+            }],
+        )
+        .await
+        .expect("B");
+    let tool = super::MemoryReadTool::new(
+        "project-1".to_string(),
+        services.clone(),
+        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+    );
+    let (groups, _) = tool
+        .knowledge(
+            store,
+            &question_terms("rounding"),
+            /*since_ms*/ None,
+            /*include_history*/ true,
+        )
+        .await
+        .expect("knowledge");
+    let sources = groups[0]
+        .iter()
+        .map(|row| {
+            (
+                row["entryId"].as_str().unwrap_or_default().to_string(),
+                row["source"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sources,
+        vec![
+            ("b".to_string(), "agent record".to_string()),
+            ("a".to_string(), "user".to_string()),
+        ]
+    );
+}

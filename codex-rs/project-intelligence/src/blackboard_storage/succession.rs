@@ -135,17 +135,13 @@ impl BlackboardStore {
             if rows_affected != 1 {
                 return Err(BlackboardStoreError::ConcurrentMutation);
             }
-            // The superseded revision keeps its meaning and evidence; it records who
-            // replaced it through the successor's provenance.
-            let historical = NewBlackboardEntry {
-                provenance: value.provenance.clone(),
-                ..current.value.clone()
-            };
+            // The superseded revision keeps its meaning, evidence and authorship; who
+            // replaced it is the successor's provenance.
             write_revision(
                 &mut transaction,
                 &current.id,
                 next_revision,
-                &historical,
+                &current.value,
                 BlackboardEntryState::Superseded,
                 Some(&id),
                 now,

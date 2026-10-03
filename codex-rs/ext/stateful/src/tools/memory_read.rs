@@ -49,7 +49,8 @@ use super::respond;
 const TOOL_NAME: &str = "memory_read";
 const MAX_TERMS: usize = 12;
 const MAX_SEARCH_HITS: u32 = 30;
-const MAX_SUCCESSOR_HOPS: usize = 4;
+/// Successor lookups one call may make while resolving matches to their current entries.
+const MAX_SUCCESSOR_LOOKUPS: usize = 64;
 const MAX_ENTRY_CONTENT_BYTES: usize = 600;
 const MAX_RELATION_EXCERPT_BYTES: usize = 160;
 const MAX_RELATIONS_PER_ENTRY: usize = 4;
@@ -190,7 +191,7 @@ impl MemoryReadTool {
         include_history: bool,
     ) -> Result<(Vec<Vec<Value>>, bool), FunctionCallError> {
         let mut hits = Vec::new();
-        let truncated;
+        let mut truncated;
         if let Some(since) = since_ms {
             // The date filter comes first; matching then ranks within the period.
             let (entries, more) = store
@@ -231,56 +232,73 @@ impl MemoryReadTool {
             hits = result.data;
         }
 
-        // Resolve every match to its current entry; matches that reach an entry already
-        // shown join that entry's group, so every entry appears once and no matching
-        // history is dropped.
-        let mut owner: HashMap<String, usize> = HashMap::new();
+        // Resolve every match to its current entry, remembering each resolution, so matches
+        // of one chain share the group of its current entry whatever order they arrive in,
+        // and every entry appears once. A match whose current entry cannot be reached within
+        // the lookup budget is left out and reported as more matching knowledge.
+        let mut resolved: HashMap<String, String> = HashMap::new();
+        let mut heads: HashMap<String, usize> = HashMap::new();
+        let mut shown: HashSet<String> = HashSet::new();
         let mut groups: Vec<Vec<Value>> = Vec::new();
+        let mut lookups = 0usize;
         for hit in hits {
             let mut current = hit;
-            let mut chain = Vec::new();
-            let mut index = owner.get(&current.entry.id.to_string()).copied();
-            for _ in 0..MAX_SUCCESSOR_HOPS {
-                if index.is_some() {
-                    break;
+            let mut path = Vec::new();
+            let target = loop {
+                let id = current.entry.id.to_string();
+                if let Some(target) = resolved.get(&id) {
+                    break Some(target.clone());
                 }
                 let Some(successor_id) = current.entry.superseded_by.clone() else {
-                    break;
+                    break Some(id);
                 };
+                if lookups == MAX_SUCCESSOR_LOOKUPS {
+                    break None;
+                }
+                lookups += 1;
                 let Some(successor) = store
                     .get_hit(&self.project_id, &successor_id)
                     .await
                     .map_err(respond)?
                 else {
-                    break;
+                    break Some(id);
                 };
-                chain.push(current);
-                current = successor;
-                index = owner.get(&current.entry.id.to_string()).copied();
+                path.push(std::mem::replace(&mut current, successor));
+            };
+            let Some(target) = target else {
+                truncated = true;
+                continue;
+            };
+            for older in &path {
+                resolved.insert(older.entry.id.to_string(), target.clone());
             }
-            let index = match index {
-                Some(index) => index,
+            let index = match heads.get(&target) {
+                Some(index) => *index,
                 None => {
+                    // Not resolved earlier, so the walk ended on the current entry itself.
                     let index = groups.len();
-                    owner.insert(current.entry.id.to_string(), index);
-                    let row = entry_item(store, &self.project_id, &current, terms).await;
-                    groups.push(vec![row]);
+                    heads.insert(target.clone(), index);
+                    resolved.insert(target.clone(), target.clone());
+                    shown.insert(target.clone());
+                    groups.push(vec![
+                        entry_item(store, &self.project_id, &current, terms).await,
+                    ]);
                     if include_history {
                         let replaced = store
                             .superseded_by(&self.project_id, &current.entry.id)
                             .await
                             .map_err(respond)?;
                         for predecessor in replaced {
-                            if !owner.contains_key(&predecessor.id.to_string())
+                            if !shown.contains(&predecessor.id.to_string())
                                 && let Some(predecessor) = store
                                     .get_hit(&self.project_id, &predecessor.id)
                                     .await
                                     .map_err(respond)?
                             {
-                                owner.insert(predecessor.entry.id.to_string(), index);
-                                let row =
-                                    entry_item(store, &self.project_id, &predecessor, terms).await;
-                                groups[index].push(row);
+                                shown.insert(predecessor.entry.id.to_string());
+                                groups[index].push(
+                                    entry_item(store, &self.project_id, &predecessor, terms).await,
+                                );
                             }
                         }
                     }
@@ -288,11 +306,10 @@ impl MemoryReadTool {
                 }
             };
             if include_history {
-                for older in chain {
-                    if let std::collections::hash_map::Entry::Vacant(e) = owner.entry(older.entry.id.to_string()) {
-                        e.insert(index);
-                        let row = entry_item(store, &self.project_id, &older, terms).await;
-                        groups[index].push(row);
+                for older in path {
+                    if shown.insert(older.entry.id.to_string()) {
+                        groups[index]
+                            .push(entry_item(store, &self.project_id, &older, terms).await);
                     }
                 }
             }
