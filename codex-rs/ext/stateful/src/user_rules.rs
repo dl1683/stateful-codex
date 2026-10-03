@@ -88,6 +88,16 @@ const STANDING_PHRASES: &[&str] = &[
     "all of our work",
     "ground rules",
     "rules for this",
+    "house rules",
+    "style rules",
+    "for the whole time",
+    "the whole time we work",
+    "while we work on",
+    "throughout this project",
+    "for this project",
+    "for this essay",
+    "for this book",
+    "for this document",
 ];
 
 /// Phrases that scope a rule to a whole investigation, which may span sessions.
@@ -104,6 +114,9 @@ pub(crate) const INVESTIGATION_PHRASES: &[&str] = &[
 
 /// Markers that make a rule's standing unambiguous even next to a task word.
 pub(crate) const STRONG_STANDING_PHRASES: &[&str] = &[
+    "for the whole time",
+    "the whole time we work",
+    "throughout this project",
     "from now on",
     "going forward",
     "in future",

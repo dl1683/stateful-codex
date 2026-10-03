@@ -233,3 +233,28 @@ fn prose_rules_are_complete_and_counted() {
         )
     );
 }
+
+/// write1: style rules listed after a framing for the whole piece of work are four rules,
+/// standing for the project; the background beside them is the user's.
+#[test]
+fn a_framed_style_list_is_one_rule_per_item() {
+    let message = "Help me plan an essay on protecting your voice from AI cloning.\n\nSome ground rules for this essay, for the whole time we work on it: write in the second person (\"you\"); no jargon without a one-line plain-English definition the first time it appears; British spelling; short paragraphs (three or four sentences at most).\n\nAbout me: I'm a founder, not an academic. I want this to read like a founder talking straight to creators, not like a paper.\n\nFor today, I just want us to agree on an outline.";
+    let framing = "Some ground rules for this essay, for the whole time we work on it";
+    assert_eq!(
+        (
+            marked_rules(message),
+            crate::background::background_statements(message),
+        ),
+        (
+            [
+                "write in the second person (\"you\").",
+                "no jargon without a one-line plain-English definition the first time it appears.",
+                "British spelling.",
+                "short paragraphs (three or four sentences at most).",
+            ]
+            .map(|item| standing(&format!("{framing}: {item}")))
+            .to_vec(),
+            vec!["I'm a founder, not an academic.".to_string()],
+        )
+    );
+}

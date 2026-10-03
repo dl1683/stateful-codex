@@ -114,6 +114,15 @@ pub(crate) fn marked_rule_units(text: &str) -> MarkedRules {
             if !has_standing_marker(&normalized) {
                 continue;
             }
+            // "Some ground rules for this essay: second person; British spelling; ..." lists
+            // its rules after a framing colon; each item is its own rule, keeping the framing
+            // so its scope stays in the user's words.
+            if let Some(items) = framed_list(clause) {
+                for item in items {
+                    keep(prose_rule(&item), &mut marked);
+                }
+                continue;
+            }
             let mut pieces = coordinated_directives(text, &quotations, clause);
             let last = pieces.pop();
             for piece in pieces {
@@ -220,6 +229,27 @@ fn coordinated_directives<'a>(
     }
     pieces.push(clause[start..].trim());
     pieces
+}
+
+/// The items of "<framing that names rules>: a; b; c", each with the framing, when the
+/// framing names rules or preferences and at least two items follow.
+fn framed_list(clause: &str) -> Option<Vec<String>> {
+    let (framing, list) = clause.split_once(": ")?;
+    let framing_words = normalize(framing);
+    let names_rules = ["rules", "preferences", "conventions", "guidelines"]
+        .iter()
+        .any(|noun| framing_words.split(' ').any(|word| word == *noun));
+    let items = list
+        .split("; ")
+        .map(|item| item.trim().trim_end_matches(['.', ';']).trim())
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    (names_rules && items.len() >= 2).then(|| {
+        items
+            .into_iter()
+            .map(|item| format!("{framing}: {item}."))
+            .collect()
+    })
 }
 
 fn prose_rule(clause: &str) -> MarkedRule {
