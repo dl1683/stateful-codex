@@ -215,7 +215,14 @@ pub(crate) fn listing(items: &[StatefulMemoryItem]) -> String {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            out.push_str(&format!("  - {content}\n    {}\n", target(item)));
+            // A shortened entry says so: correcting it replaces the whole entry, not the part
+            // shown.
+            let shortened = if item.content_truncated {
+                " [shortened; the full text is longer]"
+            } else {
+                ""
+            };
+            out.push_str(&format!("  - {content}{shortened}\n    {}\n", target(item)));
             if let Some(scope) = &item.scope_title {
                 out.push_str(&format!("    only in the investigation: {scope}\n"));
             }

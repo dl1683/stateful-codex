@@ -232,8 +232,8 @@ impl Listing {
 pub(crate) struct MemoryListing {
     shown: Arc<Mutex<Option<Listing>>>,
     next_generation: Arc<Mutex<u64>>,
-    /// The last investigations list shown, by thread: scope IDs by number.
-    investigations: Arc<Mutex<Option<(String, Vec<String>)>>>,
+    /// The last investigations list shown: its generation, thread, and scope IDs by number.
+    investigations: Arc<Mutex<Option<(u64, String, Vec<String>)>>>,
 }
 
 impl MemoryListing {
@@ -396,15 +396,20 @@ async fn list(request: &Requests<'_>, listing: &MemoryListing) -> Result<PlainHi
     };
     shown.append(page.data);
     let lines = memory_lines(&numbered(&shown, 1), footer(&shown), run.as_ref());
-    // A newer listing started meanwhile owns the numbers; this one is shown but not kept.
+    // A newer listing started meanwhile owns the numbers; this older one is not shown, so
+    // no visible number can point at a different entry.
     {
         let mut current = listing.lock();
         let newer = current
             .as_ref()
             .is_some_and(|current| current.generation > generation);
-        if !newer {
-            *current = Some(shown);
+        if newer {
+            return Ok(new_info_event(
+                "A newer /memory list replaced this one; use its numbers.".to_string(),
+                /*hint*/ None,
+            ));
         }
+        *current = Some(shown);
     }
     Ok(PlainHistoryCell::new(lines))
 }
@@ -564,13 +569,12 @@ async fn investigations(
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
-            let Some((thread_id, scopes)) = shown.filter(|(thread, _)| thread == request.thread_id)
+            let Some((_, _, scopes)) = shown.filter(|(_, thread, _)| thread == request.thread_id)
             else {
                 return Err(
                     "Run /memory investigations first; numbers refer to its list.".to_string(),
                 );
             };
-            let _ = thread_id;
             Some(
                 scopes.get(number - 1).cloned().ok_or_else(|| {
                     format!("There is no investigation {number} in the last list.")
@@ -579,6 +583,7 @@ async fn investigations(
         }
         None => None,
     };
+    let generation = listing.begin();
     let response: StatefulMemoryScopeResponse = request
         .handle
         .request_typed(ClientRequest::StatefulMemoryScope {
@@ -591,17 +596,27 @@ async fn investigations(
         })
         .await
         .map_err(|error| format!("Nothing changed: {error}"))?;
-    *listing
-        .investigations
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((
-        request.thread_id.to_string(),
-        response
-            .scopes
-            .iter()
-            .map(|scope| scope.scope_id.clone())
-            .collect(),
-    ));
+    // Only the newest investigations list owns the numbers.
+    {
+        let mut shown = listing
+            .investigations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if shown
+            .as_ref()
+            .is_none_or(|(shown_generation, _, _)| *shown_generation < generation)
+        {
+            *shown = Some((
+                generation,
+                request.thread_id.to_string(),
+                response
+                    .scopes
+                    .iter()
+                    .map(|scope| scope.scope_id.clone())
+                    .collect(),
+            ));
+        }
+    }
     let done = match action {
         StatefulMemoryScopeAction::List => None,
         StatefulMemoryScopeAction::Join => {

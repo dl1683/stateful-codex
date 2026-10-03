@@ -112,14 +112,59 @@ async fn the_user_adds_each_kind_directly() {
         "a6",
     )
     .await;
-    let scoped = add(
-        MemoryAddition::Rule {
-            scope: Some("For this whole investigation, until we agree on the cause".to_string()),
-        },
-        "Do not change any code.",
-        "a7",
-    )
-    .await;
+    // A scoped rule needs an open investigation in the thread; it then applies only there.
+    let scoped_rule = |thread_id: &'static str, action: &'static str| {
+        let node_id = node_id.clone();
+        async move {
+            add_entry(
+                store,
+                &crate::memory_controls::MemoryActor {
+                    thread_id: Some(thread_id.to_string()),
+                    action_id: Some(action.to_string()),
+                },
+                "project-1",
+                node_id,
+                MemoryAddition::Rule {
+                    scope: Some(
+                        "For this whole investigation, until we agree on the cause".to_string(),
+                    ),
+                },
+                "Do not change any code.",
+            )
+            .await
+        }
+    };
+    let unbound = scoped_rule("thread-2", "a7").await;
+    assert!(matches!(
+        unbound,
+        Err(crate::memory_controls::MemoryControlError::Refused(_))
+    ));
+    store
+        .open_scope(&codex_project_intelligence::KnowledgeScope {
+            project_id: "project-1".to_string(),
+            scope_id: "scope-1".to_string(),
+            kind: codex_project_intelligence::ScopeKind::Investigation,
+            title: "the config bug".to_string(),
+            state: codex_project_intelligence::ScopeState::Open,
+            end_condition: None,
+            opened_source: "test".to_string(),
+            ended_source: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        })
+        .await
+        .expect("scope");
+    store
+        .bind_thread_scope("project-1", "thread-1", "scope-1")
+        .await
+        .expect("bind");
+    let scoped = scoped_rule("thread-1", "a8").await.expect("scoped");
+    let scope_of = store
+        .knowledge_context("project-1", &scoped.0.id)
+        .await
+        .expect("context")
+        .and_then(|context| context.scope_id);
+    assert_eq!(scope_of, Some("scope-1".to_string()));
     let summary = |(entry, outcome): &(codex_project_intelligence::BlackboardEntry, AddOutcome)| {
         (
             memory_section(entry),

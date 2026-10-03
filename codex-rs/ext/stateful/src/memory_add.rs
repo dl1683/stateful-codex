@@ -33,14 +33,15 @@ use crate::memory_controls::USER_BACKGROUND_ID_PREFIX;
 use crate::rule_capture::user_rule_entry_id;
 
 /// Generations of one wording tried before giving up.
-const MAX_GENERATIONS: u32 = 8;
+const MAX_GENERATIONS: u32 = 64;
 
 /// What the user is adding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MemoryAddition {
     /// A rule in the user's words. With a scope ("this whole investigation into the config
-    /// bug, until we agree on the root cause") the scope is kept in the user's words ahead of
-    /// the rule.
+    /// bug, until we agree on the root cause") the rule is limited to the open investigation
+    /// the thread continues, and the scope is kept in the user's words ahead of the rule; with
+    /// no such investigation the addition is refused rather than applied to all work.
     Rule { scope: Option<String> },
     /// Something about the user or the whole work.
     Background,
@@ -101,7 +102,15 @@ pub async fn add_entry(
             "the text (with its scope or reason) must be 1-{MAX_CORRECTION_BYTES} bytes"
         )));
     }
-    // A retried action returns what it did; the same identity for other words is refused.
+    let (kind, category) = match addition {
+        MemoryAddition::Rule { .. } => (BlackboardKind::Instruction, KnowledgeCategory::Rule),
+        MemoryAddition::Decision { .. } => (BlackboardKind::Decision, KnowledgeCategory::Decision),
+        MemoryAddition::Background => (BlackboardKind::Fact, KnowledgeCategory::Background),
+        MemoryAddition::Note => (BlackboardKind::Fact, KnowledgeCategory::Note),
+    };
+    // A retried action returns what it did; the same identity for anything else (other
+    // words, another kind) is refused. The entry the action wrote keeps its words whatever
+    // happened to it since, so the comparison is on the complete stored text.
     if let Some(done) = store.change_for_action(project_id, action_id).await? {
         let entry_id = done
             .entry_id
@@ -112,19 +121,39 @@ pub async fn add_entry(
             None => None,
         };
         return match entry {
-            Some(entry) if entry.value.content == text || done.record.preview == text => {
+            Some(entry)
+                if entry.value.content == text
+                    && entry.value.kind == kind
+                    && done.record.category == category =>
+            {
                 Ok((entry, AddOutcome::AlreadyDone))
             }
             Some(_) | None => Err(MemoryControlError::Refused(
-                "this action already added different words; nothing was added".to_string(),
+                "this action already added something else; nothing was added".to_string(),
             )),
         };
     }
-    let (kind, category) = match addition {
-        MemoryAddition::Rule { .. } => (BlackboardKind::Instruction, KnowledgeCategory::Rule),
-        MemoryAddition::Decision { .. } => (BlackboardKind::Decision, KnowledgeCategory::Decision),
-        MemoryAddition::Background => (BlackboardKind::Fact, KnowledgeCategory::Background),
-        MemoryAddition::Note => (BlackboardKind::Fact, KnowledgeCategory::Note),
+    // A scoped rule belongs to the open investigation this thread continues.
+    let scope_id = match &addition {
+        MemoryAddition::Rule { scope } if non_empty(scope).is_some() => {
+            let thread_id = actor.thread_id.as_deref().ok_or_else(|| {
+                MemoryControlError::Refused(
+                    "a rule limited to an investigation needs the thread that continues it"
+                        .to_string(),
+                )
+            })?;
+            let bound = store
+                .thread_scope(project_id, thread_id)
+                .await?
+                .filter(|scope| scope.state == codex_project_intelligence::ScopeState::Open)
+                .ok_or_else(|| {
+                    MemoryControlError::Refused(
+                        "this thread continues no open investigation; join one (/memory investigations) or add the rule without a scope".to_string(),
+                    )
+                })?;
+            Some(bound.scope_id)
+        }
+        _ => None,
     };
     let source_id = format!("memory-add:{action_id}");
     let confidence = ConfidenceScore::from_basis_points(10_000)
@@ -152,7 +181,7 @@ pub async fn add_entry(
         // next generation.
         MemoryAddition::Rule { .. } => (0..MAX_GENERATIONS)
             .filter_map(|generation| {
-                user_rule_entry_id(project_id, /*scope_id*/ None, &text, generation)
+                user_rule_entry_id(project_id, scope_id.as_deref(), &text, generation)
             })
             .collect(),
         // Background keeps the identity host capture gives the same words.
@@ -177,7 +206,10 @@ pub async fn add_entry(
                 .create_entry_with_context(
                     id,
                     value,
-                    KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect),
+                    KnowledgeContext {
+                        scope_id,
+                        ..KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect)
+                    },
                     change,
                 )
                 .await?;
@@ -225,6 +257,15 @@ pub async fn add_entry(
                 .await?;
             return Ok((promoted, AddOutcome::Added));
         }
+        // The action is journaled even though nothing changed, so a retry after the entry is
+        // forgotten reports this outcome instead of adding the words again.
+        store
+            .record_change(
+                project_id,
+                Some(&existing),
+                &actor.change(ChangeOperation::Saved, category, &text),
+            )
+            .await?;
         return Ok((existing, AddOutcome::AlreadyPresent));
     }
     Err(MemoryControlError::Refused(

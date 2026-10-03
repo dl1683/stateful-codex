@@ -1182,6 +1182,10 @@ async fn cli_main(
                 "memory",
             )?;
             let mut exec_cli = ExecCli::try_parse_from(["codex", "exec"])?;
+            // Root options (--profile, -C, ...) choose the configuration and so the store.
+            exec_cli
+                .shared
+                .inherit_exec_root_options(&interactive.shared);
             exec_cli.command = Some(ExecCommand::Memory(memory_args));
             exec_cli.strict_config = root_strict_config;
             prepend_config_flags(
