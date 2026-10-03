@@ -20,6 +20,7 @@ use codex_project_intelligence::EvidenceReadResult;
 use codex_project_intelligence::EvidenceReader;
 use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::ProjectIndexFileRequest;
+use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
 use codex_project_intelligence::SourceFingerprint;
@@ -239,25 +240,43 @@ impl EvidenceReadTool {
             Ok(result) => Ok((result, false)),
             Err(
                 error @ (EvidenceReadError::SourceChanged
-                | EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Stale)),
+                | EvidenceReadError::SourceNotCurrent(ContextMapFreshness::Stale)
+                | EvidenceReadError::SourceNotIndexed(_)),
             ) => {
                 let Some((project_root, relative_path)) = refresh_source else {
                     return Err(read_error(error));
                 };
-                let project_root = self
-                    .refresh_root(&project_roots, project_root.as_ref(), &relative_path)
-                    .await?;
-                ProjectIndexer::new(
+                let indexer = ProjectIndexer::new(
                     self.services.hierarchy().await.map_err(respond)?.clone(),
                     self.services.context_map().await.map_err(respond)?.clone(),
-                )
-                .refresh_file(ProjectIndexFileRequest {
-                    project_id: self.project_id.clone(),
-                    project_root,
-                    relative_path,
-                })
-                .await
-                .map_err(respond)?;
+                );
+                if matches!(error, EvidenceReadError::SourceNotIndexed(_)) {
+                    // A project whose source map was never built (for example a documents-only
+                    // project) is indexed on demand, once, so the read can proceed.
+                    indexer
+                        .refresh(ProjectIndexRequest {
+                            project_id: self.project_id.clone(),
+                            roots: project_roots.clone(),
+                        })
+                        .await
+                        .map_err(|refresh| {
+                            respond(format!(
+                                "{error}; indexing the project failed ({refresh}). Read the file directly instead; an evidence receipt is optional"
+                            ))
+                        })?;
+                } else {
+                    let project_root = self
+                        .refresh_root(&project_roots, project_root.as_ref(), &relative_path)
+                        .await?;
+                    indexer
+                        .refresh_file(ProjectIndexFileRequest {
+                            project_id: self.project_id.clone(),
+                            project_root,
+                            relative_path,
+                        })
+                        .await
+                        .map_err(respond)?;
+                }
                 reader
                     .read(request)
                     .await
@@ -433,6 +452,9 @@ fn read_error(error: EvidenceReadError) -> FunctionCallError {
         EvidenceReadError::SourceChanged => {
             "Refresh the affected file; query again if you need the corresponding region."
         }
+        EvidenceReadError::SourceNotIndexed(_) => {
+            "The project index does not contain this file (even after indexing on demand). Read it directly instead; an evidence receipt is optional."
+        }
         EvidenceReadError::SourceNotCurrent(ContextMapFreshness::SourceUnavailable) => {
             "Check its path or removal and refresh the index."
         }
@@ -440,7 +462,6 @@ fn read_error(error: EvidenceReadError) -> FunctionCallError {
         | EvidenceReadError::InvalidRequest
         | EvidenceReadError::InvalidLineRange
         | EvidenceReadError::RootOutsideProject
-        | EvidenceReadError::SourceNotIndexed(_)
         | EvidenceReadError::InvalidRegionAnchor
         | EvidenceReadError::UnsupportedRegionAnchor(_)
         | EvidenceReadError::AmbiguousSource(_)

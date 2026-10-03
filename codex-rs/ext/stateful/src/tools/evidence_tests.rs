@@ -537,3 +537,39 @@ fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
         ]
     );
 }
+
+/// A project whose source map was never built is indexed on demand by the first read.
+#[tokio::test]
+async fn a_never_indexed_project_is_indexed_on_demand() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    std::fs::write(
+        project_root.path().join("proposal.md"),
+        "# Proposal\nCost — low\n",
+    )
+    .expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let tool = EvidenceReadTool::new(
+        "project-1".to_string(),
+        "thread-1".to_string(),
+        services,
+        Arc::new(InMemoryThreadStore::default()),
+    );
+    let (read, source_refreshed) = tool
+        .read_with_refresh(
+            vec![project_root.path().to_path_buf()],
+            EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path: ProjectRelativePath::parse("proposal.md").expect("path"),
+                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
+            },
+            1024,
+        )
+        .await
+        .expect("indexed on demand and read");
+    assert_eq!(
+        (read.content.as_str(), source_refreshed),
+        ("Cost — low\n", true)
+    );
+}
