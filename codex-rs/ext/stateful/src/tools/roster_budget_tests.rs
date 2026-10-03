@@ -14,10 +14,14 @@ use crate::visible_root::VisibleRootRegistry;
 /// 11,032; deferred tools are loaded only through tool search. memory_read (direct) with
 /// blackboard_query deferred: 19,158 in total, 9,895 direct.
 const MAX_ROSTER_BYTES: usize = 19_500;
-/// Every request carries the directly exposed tools, so their size is a fixed per-request
-/// cost; everything but memory_read is deferred to tool search. The serialized byte count
-/// bounds the token count from above (in-session spec target: at most 300 tokens).
-/// memory_read alone: 662 bytes; the 2026-10-03 direct roster before deferral was 9,419.
+/// Every request of a model with tool search carries the directly exposed tools, so their size
+/// is a fixed per-request cost; everything but memory_read is deferred to tool search.
+/// This is a byte regression guard on the extension's own specs, not a proof of the in-session
+/// spec's 300-token target: no tokenizer is available here (memory_read is 662 bytes, roughly
+/// 165 tokens at 4 bytes per token), and the finalized outbound request adds host framing.
+/// Models without tool search still receive every deferred tool directly (core falls back to
+/// direct exposure), so this budget does not apply to them.
+/// The 2026-10-03 direct roster before deferral was 9,419 bytes.
 const MAX_DIRECT_ROSTER_BYTES: usize = 1_200;
 
 #[test]
