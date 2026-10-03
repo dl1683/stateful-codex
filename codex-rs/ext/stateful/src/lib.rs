@@ -7,6 +7,7 @@ mod capture_policy;
 mod checkout;
 mod checkpoint;
 mod completion;
+mod continuation_card;
 mod continuity;
 mod continuity_source;
 mod conversation_summaries;
@@ -228,15 +229,22 @@ impl ContextContributor for StatefulExtension {
                         None => None,
                     };
                     if scope == RequestScope::Continuity {
-                        continuity = Some(
-                            continuity_source::gather_continuity(
-                                self.projects.as_ref(),
-                                runtime,
-                                &project.id,
-                                &thread_id,
-                            )
-                            .await,
+                        let mut record = continuity_source::gather_continuity(
+                            self.projects.as_ref(),
+                            runtime,
+                            &project.id,
+                            &thread_id,
+                        )
+                        .await;
+                        continuation_card::focus_on_request(
+                            &mut record,
+                            input
+                                .turn_store
+                                .get::<request_scope::RequestHead>()
+                                .as_deref()
+                                .map(|head| head.0.as_str()),
                         );
+                        continuity = Some(record);
                     }
                     let root_blackboard = self
                         .root_blackboard(&project, &thread_id, input.turn_id, input.turn_store)

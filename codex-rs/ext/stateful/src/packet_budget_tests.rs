@@ -248,6 +248,7 @@ fn continuity_record() -> ContinuityRecord {
             })
             .collect(),
         more_turns: true,
+        unrelated_omitted: 0,
         unreadable_threads: 0,
         history_unavailable: false,
         latest_run: Some(LatestRun {

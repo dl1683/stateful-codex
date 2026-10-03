@@ -78,6 +78,8 @@ pub(super) struct ContinuityRecord {
     pub(super) turns: Vec<CapturedTurn>,
     /// Whether turns exist beyond `turns` (older pages or threads not scanned).
     pub(super) more_turns: bool,
+    /// Gathered turns left out because they share nothing with the current request.
+    pub(super) unrelated_omitted: usize,
     /// Threads whose summaries could not be read (for example legacy history).
     pub(super) unreadable_threads: usize,
     /// The project's thread list itself could not be read.
@@ -220,6 +222,12 @@ impl ContinuityRecord {
         if omitted > 0 {
             notes.push(format!(
                 "{omitted} gathered turns did not fit this bounded view"
+            ));
+        }
+        if self.unrelated_omitted > 0 {
+            notes.push(format!(
+                "{} older turns unrelated to this request",
+                self.unrelated_omitted
             ));
         }
         if self.more_turns {

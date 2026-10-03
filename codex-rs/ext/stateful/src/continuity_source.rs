@@ -115,6 +115,7 @@ pub(super) async fn gather_continuity(
                 i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
             }),
         more_turns,
+        unrelated_omitted: 0,
         unreadable_threads,
         history_unavailable,
         latest_run: match (runtime, newest_bound_run(&turns)) {
