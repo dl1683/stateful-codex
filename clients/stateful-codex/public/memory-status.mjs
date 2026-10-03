@@ -16,6 +16,8 @@ export function memoryStatusLine(summary) {
     plural(counts.openChecks, "open check"),
     plural(counts.background, "note about you", "notes about you"),
     plural(counts.commits, "remembered commit"),
+    plural(counts.unverifiedRules, "rule not in your words (not applied)", "rules not in your words (not applied)"),
+    plural(counts.other, "other entry", "other entries"),
   ].filter(Boolean);
   const held = parts.length ? parts.join(" · ") : "nothing saved yet";
   const session = sessionChanges(summary.since);

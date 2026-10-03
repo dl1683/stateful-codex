@@ -60,7 +60,7 @@ test("a file-change approval shows the changed paths and diff before it can be a
   });
   const effect = apply(fileApproval);
 
-  assert.deepEqual(effect, { sections: ["requests"], refresh: false });
+  assert.deepEqual(effect, { sections: ["requests", "header"], refresh: false });
   assert.deepEqual(
     card().querySelectorAll(".approval-file code").map((code) => code.textContent),
     ["textkit/legacy/dates.py", "textkit/new_module.py"],
@@ -76,7 +76,7 @@ test("a file-change approval shows the changed paths and diff before it can be a
 test("an approval whose files are unknown cannot be approved until they arrive", () => {
   const { apply, card, state } = workspace();
   const effect = apply(fileApproval);
-  assert.deepEqual(effect, { sections: ["requests"], refresh: true });
+  assert.deepEqual(effect, { sections: ["requests", "header"], refresh: true });
   assert.equal(card().querySelector('[data-action="approve"]').disabled, true);
   assert.match(card().textContent, /changed files for this request are not available yet/);
   assert.equal(card().querySelector('[data-action="decline"]').disabled, false);

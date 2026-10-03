@@ -1,5 +1,5 @@
 import { belongsToWorkspace, eventScope } from "./event-scope.mjs";
-import { noteConnectionLost, noteTurnEvent } from "./execution-state.mjs";
+import { noteConnectionLost, noteThreadStatus, noteTurnEvent } from "./execution-state.mjs";
 import { groupReceipt, knowledgeReceipt } from "./memory-receipts.mjs";
 
 export { knowledgeReceipt };
@@ -43,13 +43,15 @@ export function applyWorkspaceEvent(state, message) {
       ...state.pendingRequests.filter((item) => item.id !== message.id),
       message,
     ];
-    return { sections: ["requests"], refresh: missingApprovalItems(state) };
+    return { sections: ["requests", "header"], refresh: missingApprovalItems(state) };
   }
   if (message.method === "gateway/pendingRequests") {
     // Authoritative on (re)connect: requests answered elsewhere while away disappear.
     if (message.params?.threadId !== state.threadId) return { sections: [], refresh: false };
     state.pendingRequests = [...(message.params?.requests ?? [])];
-    // Sent on every (re)connect: events may have been missed, so re-read what is running.
+    // Sent on every (re)connect: events may have been missed, so reads begun before it are
+    // stale and what is running is re-read.
+    if (state.execution) noteConnectionLost(state.execution);
     return { sections: ["requests", "header"], refresh: true };
   }
   if (message.method === "gateway/error") {
@@ -62,7 +64,7 @@ export function applyWorkspaceEvent(state, message) {
     state.pendingRequests = state.pendingRequests.filter(
       (item) => item.id !== requestId,
     );
-    return { sections: ["requests"], refresh: false };
+    return { sections: ["requests", "header"], refresh: false };
   }
   const refresh = REFRESH_METHODS.test(message.method ?? "");
   if (rememberRequestItem(state, message)) {
@@ -84,6 +86,10 @@ export function applyWorkspaceEvent(state, message) {
     const turnId = message.params?.turn?.id ?? message.params?.turnId ?? null;
     if (state.execution) noteTurnEvent(state.execution, message.method, message.params);
     return { sections: ["header"], refresh, turnStarted: turnId };
+  }
+  if (message.method === "thread/status/changed") {
+    if (state.execution) noteThreadStatus(state.execution, message.params?.status);
+    return { sections: ["header"], refresh };
   }
   if (message.method === "turn/completed") {
     if (state.execution) noteTurnEvent(state.execution, message.method, message.params);

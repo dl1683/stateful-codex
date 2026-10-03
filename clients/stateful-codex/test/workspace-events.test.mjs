@@ -92,7 +92,7 @@ test("only this thread's requests enter the drawer, and resolution removes them"
     params: { threadId: "thread-a", turnId: "t", itemId: "i", startedAtMs: 1 },
   };
   const foreign = { ...own, id: 12, params: { ...own.params, threadId: "thread-b" } };
-  assert.deepEqual(applyWorkspaceEvent(state, own), { sections: ["requests"], refresh: false });
+  assert.deepEqual(applyWorkspaceEvent(state, own), { sections: ["requests", "header"], refresh: false });
   assert.deepEqual(applyWorkspaceEvent(state, foreign), { sections: [], refresh: false });
   assert.deepEqual(state.pendingRequests.map((item) => item.id), [11]);
   applyWorkspaceEvent(state, {

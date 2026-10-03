@@ -10,7 +10,6 @@ const RECEIPT_LABELS = {
   recipe: "Saved a project recipe",
   finding: "Saved a finding",
   background: "Saved what you said about yourself",
-  commit: "Remembered a commit from workspace history",
 };
 
 const PREVIEW_CHARACTERS = 160;
@@ -34,13 +33,15 @@ export function groupReceipt(params) {
   if (saved + pending === 0 && lost === 0) return null;
   const stored = (params.items ?? []).filter((item) => item.outcome === "stored");
   if (params.category === "commit") {
-    if (saved === 1 && stored.length === 1) return commitLine(stored[0].text);
-    const listed = stored
-      .slice(0, LISTED_COMMITS)
-      .map((item) => clipText(item.text ?? "", 80))
-      .join("; ");
-    const more = stored.length > LISTED_COMMITS ? `; and ${stored.length - LISTED_COMMITS} more` : "";
-    return `Remembered ${saved} commits from workspace history: ${listed}${more}`;
+    const failures = lost ? ` · ${lost} could not be saved` : "";
+    if (saved === 0) return `No commit from workspace history could be saved${failures}`;
+    if (saved === 1 && stored.length === 1) return `${commitLine(stored[0].text)}${failures}`;
+    // The notification may carry fewer items than were saved; the count comes from `saved`.
+    const shown = stored.slice(0, LISTED_COMMITS);
+    if (!shown.length) return `Remembered ${saved} commits from workspace history${failures}`;
+    const listed = shown.map((item) => clipText(item.text ?? "", 80)).join("; ");
+    const more = saved > shown.length ? `; and ${saved - shown.length} more` : "";
+    return `Remembered ${saved} commits from workspace history: ${listed}${more}${failures}`;
   }
   const noun = params.category === "rule" || params.category === "pendingRule" ? "rule" : "entry";
   const parts = [];

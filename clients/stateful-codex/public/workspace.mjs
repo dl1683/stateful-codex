@@ -4,7 +4,7 @@ import { findTurnMeasurement, latestAnswerTurn } from "./answer-provenance.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { applySnapshot, beginSnapshot, createExecution } from "./execution-state.mjs";
-import { readExecutionSnapshot, readMemorySummary, readRecap } from "./status-reads.mjs";
+import { createSummaryReader, readExecutionSnapshot, readRecap } from "./status-reads.mjs";
 import { createSourceSearch } from "./source-search.mjs";
 import { submitSteering } from "./steering-submit.mjs";
 import {
@@ -91,11 +91,15 @@ const sourceSearch = createSourceSearch({
   projectId,
 });
 const drafts = view.drafts;
+const readMemorySummary = createSummaryReader(rpc, { threadId, storage: sessionStorage });
 
 async function boot() {
   render();
   subscribe(handleEvent, { threadId, projectId });
   try {
+    // The session's memory watermark is set before the opening turn can save anything.
+    state.memorySummary = await readMemorySummary();
+    render(["memory-status"]);
     await ensureRun();
     await refresh();
     // The return card is read once per page load; it describes where things stood on arrival.
@@ -194,10 +198,49 @@ async function refreshWorkspace() {
     state.refreshFailed = false;
   }
   render(["notices"]);
+  // What is running and what memory holds are reconciled even when an unrelated panel read
+  // fails; neither reader rejects.
   const executionToken = beginSnapshot(state.execution);
+  const statusReads = Promise.all([readExecutionSnapshot(rpc, threadId), readMemorySummary()]);
+  const applyStatus = async () => {
+    const [snapshot, memorySummary] = await statusReads;
+    // A run that changed meanwhile makes these reads obsolete; a newer live event wins.
+    if (generation !== state.runGeneration) return;
+    applySnapshot(state.execution, executionToken, snapshot);
+    state.memorySummary = memorySummary;
+    render(["header", "memory-status"]);
+  };
+  let reads;
+  try {
+    reads = await Promise.all([
+      rpc("project/read", { projectId }),
+      rpc("statefulRun/read", runReadParams()),
+      rpc("projectIntelligence/status", { projectId }),
+      readHierarchy(),
+      rpc("blackboard/query", { projectId, text: null, limit: 50 }),
+      readMemory(),
+      state.run
+        ? rpc("obligation/list", { runId: state.run.id, cursor: null, limit: 100 })
+        : { data: [] },
+      state.run
+        ? rpc("steering/list", { runId: state.run.id, cursor: null, limit: 100 })
+        : { data: [] },
+      rpc("statefulMeasurement/summary", { projectId, limit: 100 }),
+      rpc("thread/items/list", {
+        threadId,
+        cursor: null,
+        limit: 100,
+        sortDirection: "desc",
+      }).catch((error) => {
+        if (error.code === -32601) return { data: [] };
+        throw error;
+      }),
+      findUnavailableRoots(rpc, state.project?.roots),
+    ]);
+  } finally {
+    await applyStatus();
+  }
   const [
-    snapshot,
-    memorySummary,
     project,
     run,
     status,
@@ -209,44 +252,7 @@ async function refreshWorkspace() {
     measurementSummary,
     activity,
     unavailableRoots,
-  ] = await Promise.all([
-    readExecutionSnapshot(rpc, threadId),
-    readMemorySummary(rpc, { threadId, storage: sessionStorage }),
-    rpc("project/read", { projectId }),
-    rpc("statefulRun/read", runReadParams()),
-    rpc("projectIntelligence/status", { projectId }),
-    readHierarchy(),
-    rpc("blackboard/query", { projectId, text: null, limit: 50 }),
-    readMemory(),
-    state.run
-      ? rpc("obligation/list", {
-          runId: state.run.id,
-          cursor: null,
-          limit: 100,
-        })
-      : { data: [] },
-    state.run
-      ? rpc("steering/list", {
-          runId: state.run.id,
-          cursor: null,
-          limit: 100,
-        })
-      : { data: [] },
-    rpc("statefulMeasurement/summary", { projectId, limit: 100 }),
-    rpc("thread/items/list", {
-      threadId,
-      cursor: null,
-      limit: 100,
-      sortDirection: "desc",
-    }).catch((error) => {
-      if (error.code === -32601) return { data: [] };
-      throw error;
-    }),
-    findUnavailableRoots(rpc, state.project?.roots),
-  ]);
-  // A live turn event that arrived while these reads were in flight is newer; it stands.
-  applySnapshot(state.execution, executionToken, snapshot);
-  state.memorySummary = memorySummary;
+  ] = reads;
   if (generation !== state.runGeneration) {
     refresh();
     return;
@@ -678,7 +684,7 @@ async function answerApproval(key, actionName) {
   state.pendingRequests = state.pendingRequests.filter(
     (item) => item.id !== request.id,
   );
-  render(["requests"]);
+  render(["requests", "header"]);
 }
 
 async function answerUserRequest(form) {
@@ -697,7 +703,7 @@ async function answerUserRequest(form) {
   state.pendingRequests = state.pendingRequests.filter(
     (item) => item.id !== request.id,
   );
-  render(["requests"]);
+  render(["requests", "header"]);
 }
 
 // Records an action's error; a background refresh marks its own errors after calling this.

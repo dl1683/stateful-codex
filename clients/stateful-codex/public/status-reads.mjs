@@ -17,27 +17,47 @@ export async function readExecutionSnapshot(rpc, threadId) {
 
 const watermarkKey = (threadId) => `stateful-memory-since:${threadId}`;
 
-// The project's memory counts, plus what changed since this page session began. The session
-// start watermark is the journal sequence at the first read, kept across reloads of this tab.
-export async function readMemorySummary(rpc, { threadId, storage }) {
-  const stored = readWatermark(storage, threadId);
-  try {
-    const summary = await rpc("statefulMemory/summary", {
-      threadId,
-      sinceSequence: stored,
-      threadIds: [threadId],
-    });
-    if (stored === null) {
-      try {
-        storage?.setItem(watermarkKey(threadId), String(summary.latestSequence ?? 0));
-      } catch {
-        // Without storage the session totals restart on reload; the counts stay exact.
+// Reads the project's memory counts plus what changed since this page session began. The
+// session starts at the journal sequence of the first successful read, kept in memory for this
+// page and in storage (when available) across reloads of the tab. Read it once before the
+// opening turn is sent, so that turn's saves count as this session's.
+export function createSummaryReader(rpc, { threadId, storage }) {
+  let watermark = readWatermark(storage, threadId);
+  return async function readMemorySummary() {
+    try {
+      const summary = await rpc("statefulMemory/summary", {
+        threadId,
+        sinceSequence: watermark,
+        threadIds: [threadId],
+      });
+      if (watermark === null && Number.isInteger(summary.latestSequence)) {
+        watermark = summary.latestSequence;
+        try {
+          storage?.setItem(watermarkKey(threadId), String(watermark));
+        } catch {
+          // Without storage the session totals restart on reload; this page keeps them.
+        }
+        // The first read only sets where the session starts: nothing changed in it yet.
+        return { ...summary, since: summary.since ?? emptyTotals() };
       }
+      return summary;
+    } catch (error) {
+      return { error: error.message };
     }
-    return summary;
-  } catch (error) {
-    return { error: error.message };
-  }
+  };
+}
+
+function emptyTotals() {
+  return {
+    saved: 0,
+    commitsRemembered: 0,
+    promoted: 0,
+    corrected: 0,
+    forgotten: 0,
+    invalidated: 0,
+    scopesEnded: 0,
+    captureIncomplete: 0,
+  };
 }
 
 function readWatermark(storage, threadId) {

@@ -5,13 +5,14 @@ import {
   applySnapshot,
   beginSnapshot,
   createExecution,
+  noteConnectionLost,
   snapshotPhase,
 } from "../public/execution-state.mjs";
 import { admitRpcMethod } from "../gateway-policy.mjs";
 import { runStateLabel } from "../public/memory-view.mjs";
 import { clipText, groupReceipt, knowledgeReceipt } from "../public/memory-receipts.mjs";
 import { memoryStatusLine, renderRecap } from "../public/memory-status.mjs";
-import { readMemorySummary } from "../public/status-reads.mjs";
+import { createSummaryReader } from "../public/status-reads.mjs";
 import { createWorkspaceDom } from "../public/workspace-dom.mjs";
 import { applyWorkspaceEvent } from "../public/workspace-events.mjs";
 import { renderWorkspace } from "../public/workspace-view.mjs";
@@ -123,7 +124,8 @@ test("an approval snapshot replaces the waiting list and takes priority", () => 
     params: { threadId: "thread-a", requests: [] },
   });
   assert.deepEqual(state.pendingRequests, []);
-  assert.match(runStateLabel(state), /^Working/);
+  // A reconnect may have missed events: no claim until the next read.
+  assert.match(runStateLabel(state), /^Checking what is running…/);
 });
 
 test("a remembered commit is said plainly, from workspace history", () => {
@@ -204,15 +206,82 @@ test("the session watermark is the first read's journal sequence", async () => {
   const calls = [];
   const rpc = async (method, params) => {
     calls.push(params.sinceSequence);
-    return { counts: {}, latestSequence: 41, since: params.sinceSequence === null ? null : {} };
+    return { counts: {}, latestSequence: 41 + calls.length, since: params.sinceSequence === null ? null : { saved: 1 } };
   };
-  await readMemorySummary(rpc, { threadId: "thread-a", storage: store });
-  await readMemorySummary(rpc, { threadId: "thread-a", storage: store });
-  assert.deepEqual(calls, [null, 41]);
-  const failed = await readMemorySummary(async () => {
+  const read = createSummaryReader(rpc, { threadId: "thread-a", storage: store });
+  const first = await read();
+  assert.equal(first.since.saved, 0, "the first read starts the session with nothing changed");
+  await read();
+  // A reload of the tab continues the same session from storage.
+  await createSummaryReader(rpc, { threadId: "thread-a", storage: store })();
+  assert.deepEqual(calls, [null, 42, 42]);
+  const failed = await createSummaryReader(async () => {
     throw new Error("method not found");
-  }, { threadId: "thread-a", storage: store });
+  }, { threadId: "thread-a", storage: store })();
   assert.deepEqual(failed, { error: "method not found" });
+});
+
+test("without working storage the page still keeps its own session watermark", async () => {
+  for (const storage of [
+    undefined,
+    { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } },
+    { getItem: () => null, setItem: () => { throw new Error("full"); } },
+  ]) {
+    const calls = [];
+    let sequence = 10;
+    const read = createSummaryReader(async (method, params) => {
+      calls.push(params.sinceSequence);
+      sequence += 5;
+      return { counts: {}, latestSequence: sequence, since: null };
+    }, { threadId: "thread-a", storage });
+    await read();
+    await read();
+    assert.deepEqual(calls, [null, 15]);
+  }
+});
+
+test("a reconnect fences reads begun during the gap", () => {
+  const state = liveState();
+  applyWorkspaceEvent(state, { method: "gateway/error", params: { message: "interrupted" } });
+  const duringGap = beginSnapshot(state.execution);
+  applyWorkspaceEvent(state, { method: "gateway/pendingRequests", params: { threadId: "thread-a", requests: [] } });
+  assert.equal(applySnapshot(state.execution, duringGap, { thread: IDLE, latestTurn: null }), false);
+  assert.equal(state.execution.phase, "checking");
+  const afterReconnect = beginSnapshot(state.execution);
+  assert.equal(applySnapshot(state.execution, afterReconnect, { thread: IDLE, latestTurn: null }), true);
+  assert.equal(state.execution.phase, "idle");
+  noteConnectionLost(state.execution);
+  assert.equal(state.execution.phase, "checking");
+});
+
+test("thread status changes are authoritative and fence older reads", () => {
+  for (const [status, phase] of [
+    [{ type: "active", activeFlags: ["waitingOnApproval"] }, "waiting"],
+    [{ type: "active", activeFlags: [] }, "working"],
+    [{ type: "systemError" }, "error"],
+  ]) {
+    const state = liveState();
+    const token = beginSnapshot(state.execution);
+    const effect = applyWorkspaceEvent(state, {
+      method: "thread/status/changed",
+      params: { threadId: "thread-a", status },
+    });
+    assert.ok(effect.sections.includes("header"));
+    assert.equal(applySnapshot(state.execution, token, { thread: IDLE, latestTurn: null }), false);
+    assert.equal(state.execution.phase, phase);
+  }
+  // Idle after work says the turn ended but not how: check rather than claim.
+  const state = liveState();
+  applySnapshot(state.execution, beginSnapshot(state.execution), { thread: ACTIVE, latestTurn: null });
+  applyWorkspaceEvent(state, { method: "thread/status/changed", params: { threadId: "thread-a", status: { type: "idle" } } });
+  assert.equal(state.execution.phase, "checking");
+});
+
+test("memory holding only unverified rules or other entries is not called empty", () => {
+  assert.equal(
+    memoryStatusLine({ counts: { other: 1, unverifiedRules: 1 } }),
+    "Memory: 1 rule not in your words (not applied) · 1 other entry",
+  );
 });
 
 test("the return card is dated, bounded, and invents no next step", () => {
@@ -273,4 +342,43 @@ test("section signs, dashes, curly quotes and names round-trip through clipping 
   view.update(state, ["notices"]);
   assert.equal(root.querySelector(".receipt").textContent, `Saved your rule: "${UNICODE}"`);
   assert.match(root.querySelector("[data-recap]").textContent, /Check § 7 of the amendment — does it change the threshold\?/);
+});
+
+test("commit counts come from the committed totals, and failures are said", () => {
+  // The producer previews at most ten items, some already present.
+  const items = Array.from({ length: 10 }, (_, index) => ({ outcome: index < 4 ? "alreadyStored" : "stored", text: `c${index} Commit ${index}` }));
+  assert.equal(
+    groupReceipt({ category: "commit", saved: 50, items }),
+    "Remembered 50 commits from workspace history: c4 Commit 4; c5 Commit 5; c6 Commit 6; and 47 more",
+  );
+  assert.equal(
+    groupReceipt({ category: "commit", saved: 3, items: items.slice(0, 4) }),
+    "Remembered 3 commits from workspace history",
+  );
+  assert.equal(
+    groupReceipt({ category: "commit", saved: 1, failed: 2, items: [{ outcome: "stored", text: "ab12 Fix" }] }),
+    "Remembered commit ab12: Fix · from workspace history · 2 could not be saved",
+  );
+  assert.equal(
+    groupReceipt({ category: "commit", saved: 12, failed: 1, items: [{ outcome: "stored", text: "a1 One" }] }),
+    "Remembered 12 commits from workspace history: a1 One; and 11 more · 1 could not be saved",
+  );
+  assert.equal(
+    groupReceipt({ category: "commit", saved: 0, failed: 2, items: [] }),
+    "No commit from workspace history could be saved · 2 could not be saved",
+  );
+});
+
+test("an approval arriving or resolving updates the header badge", () => {
+  const state = liveState();
+  const approval = {
+    id: 9,
+    method: "item/commandExecution/requestApproval",
+    params: { threadId: "thread-a", turnId: "t", itemId: "i", startedAtMs: 1 },
+  };
+  assert.ok(applyWorkspaceEvent(state, approval).sections.includes("header"));
+  assert.ok(
+    applyWorkspaceEvent(state, { method: "serverRequest/resolved", params: { threadId: "thread-a", requestId: 9 } })
+      .sections.includes("header"),
+  );
 });

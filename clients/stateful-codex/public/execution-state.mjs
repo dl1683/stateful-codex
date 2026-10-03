@@ -24,10 +24,24 @@ export function noteTurnEvent(execution, method, params) {
   return false;
 }
 
-// The live connection dropped: events may have been missed.
+// The live connection dropped, or was (re)established: events may have been missed, so every
+// read begun before now is stale and the state is unknown until a read begun after it lands.
 export function noteConnectionLost(execution) {
   execution.events += 1;
   return setPhase(execution, "checking");
+}
+
+// thread/status/changed: authoritative for whether a turn is live. An active or errored status
+// is decisive; an idle one says the turn ended but not how, so a read must reconcile it.
+export function noteThreadStatus(execution, status) {
+  execution.events += 1;
+  if (status?.type === "active" || status?.type === "systemError") {
+    return setPhase(execution, snapshotPhase({ status }, null));
+  }
+  if (execution.phase === "working" || execution.phase === "waiting") {
+    return setPhase(execution, "checking");
+  }
+  return false;
 }
 
 // Starts an authoritative read; pass the token to applySnapshot when it returns.
@@ -92,9 +106,4 @@ const PHASE_LABELS = {
 export function executionLabel(execution, pendingCount = 0) {
   if (pendingCount > 0) return PHASE_LABELS.waiting;
   return PHASE_LABELS[execution?.phase ?? "checking"] ?? PHASE_LABELS.unknown;
-}
-
-// True only when a live turn is known to be running.
-export function isWorking(execution) {
-  return execution?.phase === "working" || execution?.phase === "waiting";
 }
