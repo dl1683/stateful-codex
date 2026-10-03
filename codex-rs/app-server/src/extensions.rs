@@ -414,6 +414,16 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                         run_update_calls: summary.counters.run_update_calls,
                         steering_write_calls: summary.counters.steering_write_calls,
                         material_findings_reused: summary.counters.material_findings_reused,
+                        packet_project_bytes: summary.counters.packet_project_bytes,
+                        packet_continuity_bytes: summary.counters.packet_continuity_bytes,
+                        memory_records_already_present: summary
+                            .counters
+                            .memory_records_already_present,
+                        memory_records_refused: summary.counters.memory_records_refused,
+                        recipes_grounded: summary.counters.recipes_grounded,
+                        index_operations: summary.counters.index_operations,
+                        index_operations_pending: summary.counters.index_operations_pending,
+                        index_wait_ms: summary.counters.index_wait_ms,
                     },
                 };
                 let measurement = summary.run_id.map(|run_id| NewStatefulTurnMeasurement {
@@ -464,6 +474,16 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                         run_update_calls: notification.counters.run_update_calls,
                         steering_write_calls: notification.counters.steering_write_calls,
                         material_findings_reused: notification.counters.material_findings_reused,
+                        packet_project_bytes: notification.counters.packet_project_bytes,
+                        packet_continuity_bytes: notification.counters.packet_continuity_bytes,
+                        memory_records_already_present: notification
+                            .counters
+                            .memory_records_already_present,
+                        memory_records_refused: notification.counters.memory_records_refused,
+                        recipes_grounded: notification.counters.recipes_grounded,
+                        index_operations: notification.counters.index_operations,
+                        index_operations_pending: notification.counters.index_operations_pending,
+                        index_wait_ms: notification.counters.index_wait_ms,
                     },
                 });
                 if let Some(measurement) = measurement {

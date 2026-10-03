@@ -25,6 +25,7 @@ use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::cost_attribution::record_index_operation;
 use crate::read_receipts::READ_RECEIPT_ID_BYTES;
 use crate::services::ProjectIntelligenceServices;
 
@@ -147,9 +148,24 @@ impl EvidenceReadTool {
                 ));
             }
         };
-        let (result, source_refreshed) = self
+        let started = std::time::Instant::now();
+        let read = self
             .read_with_refresh(project_roots, locator, max_bytes)
-            .await?;
+            .await;
+        let pending = matches!(
+            &read,
+            Err(FunctionCallError::RespondToModel(message))
+                if message.starts_with("timedOutWorkPending:")
+        );
+        if pending || matches!(read, Ok((_, true))) {
+            record_index_operation(
+                self.services.cost_ledger(),
+                &call.turn_id,
+                started.elapsed(),
+                pending,
+            );
+        }
+        let (result, source_refreshed) = read?;
 
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let hit = &result.hit;

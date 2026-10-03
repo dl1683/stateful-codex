@@ -11,6 +11,7 @@ mod continuation_card;
 mod continuity;
 mod continuity_source;
 mod conversation_summaries;
+mod cost_attribution;
 mod events;
 mod index_gate;
 mod limits;
@@ -272,8 +273,9 @@ impl ContextContributor for StatefulExtension {
             };
             // One aggregate budget for a fresh window: the conversation record gets what the
             // project and run packets leave, within its own bounds.
+            let project_bytes = status.render().0.len();
             let packet_bytes = world_state::START_MARKER.len()
-                + status.render().0.len()
+                + project_bytes
                 + world_state::END_MARKER.len()
                 + run_status.as_ref().map_or(0, |run| {
                     run_world_state::START_MARKER.len()
@@ -283,6 +285,19 @@ impl ContextContributor for StatefulExtension {
                 + scope_note.window_bytes
                 + checkout_report.window_bytes;
             let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
+            if let Some(services) = self.services.as_ref() {
+                let rendered_continuity = continuity
+                    .as_ref()
+                    .map_or(0, |record| record.render(continuity_bytes).len());
+                services.cost_ledger().record(input.turn_id, |counters| {
+                    let bytes = |length: usize| u64::try_from(length).unwrap_or(u64::MAX);
+                    counters.packet_project_bytes =
+                        counters.packet_project_bytes.max(bytes(project_bytes));
+                    counters.packet_continuity_bytes = counters
+                        .packet_continuity_bytes
+                        .max(bytes(rendered_continuity));
+                });
+            }
             let available_project_id = match &status {
                 ProjectIntelligenceStatus::Available { project, .. } => Some(project.id.clone()),
                 ProjectIntelligenceStatus::Missing { .. }

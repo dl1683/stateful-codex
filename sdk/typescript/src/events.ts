@@ -75,6 +75,14 @@ export type StatefulAttribution = {
   run_update_calls: number;
   steering_write_calls: number;
   material_findings_reused: number;
+  packet_project_bytes: number;
+  packet_continuity_bytes: number;
+  memory_records_already_present: number;
+  memory_records_refused: number;
+  recipes_grounded: number;
+  index_operations: number;
+  index_operations_pending: number;
+  index_wait_ms: number;
   invocation_duration_ms: number;
   completed_model_responses: number;
   compactions: number;

@@ -135,6 +135,14 @@ impl StatefulAttributionAccumulator {
         attribution.run_update_calls += counters.run_update_calls;
         attribution.steering_write_calls += counters.steering_write_calls;
         attribution.material_findings_reused += counters.material_findings_reused;
+        attribution.packet_project_bytes += counters.packet_project_bytes;
+        attribution.packet_continuity_bytes += counters.packet_continuity_bytes;
+        attribution.memory_records_already_present += counters.memory_records_already_present;
+        attribution.memory_records_refused += counters.memory_records_refused;
+        attribution.recipes_grounded += counters.recipes_grounded;
+        attribution.index_operations += counters.index_operations;
+        attribution.index_operations_pending += counters.index_operations_pending;
+        attribution.index_wait_ms += counters.index_wait_ms;
     }
 
     pub(crate) fn snapshot(&self) -> Option<StatefulAttribution> {

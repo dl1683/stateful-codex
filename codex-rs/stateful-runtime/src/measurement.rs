@@ -38,6 +38,14 @@ pub struct StatefulAttributionCounters {
     pub run_update_calls: u64,
     pub steering_write_calls: u64,
     pub material_findings_reused: u64,
+    pub packet_project_bytes: u64,
+    pub packet_continuity_bytes: u64,
+    pub memory_records_already_present: u64,
+    pub memory_records_refused: u64,
+    pub recipes_grounded: u64,
+    pub index_operations: u64,
+    pub index_operations_pending: u64,
+    pub index_wait_ms: u64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -240,6 +248,28 @@ impl StatefulMeasurementSummary {
             total.material_findings_reused = total
                 .material_findings_reused
                 .saturating_add(counters.material_findings_reused);
+            total.packet_project_bytes = total
+                .packet_project_bytes
+                .saturating_add(counters.packet_project_bytes);
+            total.packet_continuity_bytes = total
+                .packet_continuity_bytes
+                .saturating_add(counters.packet_continuity_bytes);
+            total.memory_records_already_present = total
+                .memory_records_already_present
+                .saturating_add(counters.memory_records_already_present);
+            total.memory_records_refused = total
+                .memory_records_refused
+                .saturating_add(counters.memory_records_refused);
+            total.recipes_grounded = total
+                .recipes_grounded
+                .saturating_add(counters.recipes_grounded);
+            total.index_operations = total
+                .index_operations
+                .saturating_add(counters.index_operations);
+            total.index_operations_pending = total
+                .index_operations_pending
+                .saturating_add(counters.index_operations_pending);
+            total.index_wait_ms = total.index_wait_ms.saturating_add(counters.index_wait_ms);
 
             if let Some(trajectory) = measurement.trajectory {
                 summary.terminal_measurement_count =

@@ -16,6 +16,7 @@ use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
 use tokio::sync::OnceCell;
 
+use crate::cost_attribution::CostLedger;
 use crate::index_gate::IndexGates;
 use crate::read_receipts::EvidenceReadReceipts;
 use crate::recipe_capture::ObservedCommands;
@@ -39,6 +40,8 @@ pub(super) struct ProjectIntelligenceServices {
     index_gates: IndexGates,
     /// Commands each thread ran successfully, which ground recorded recipes.
     observed_commands: ObservedCommands,
+    /// Per-turn cost counters reported with the turn's attribution summary.
+    cost_ledger: CostLedger,
 }
 
 impl ProjectIntelligenceServices {
@@ -55,6 +58,7 @@ impl ProjectIntelligenceServices {
             checkout_locks: Arc::default(),
             index_gates: IndexGates::default(),
             observed_commands: ObservedCommands::default(),
+            cost_ledger: CostLedger::default(),
         }
     }
 
@@ -86,6 +90,10 @@ impl ProjectIntelligenceServices {
 
     pub(super) fn observed_commands(&self) -> &ObservedCommands {
         &self.observed_commands
+    }
+
+    pub(super) fn cost_ledger(&self) -> &CostLedger {
+        &self.cost_ledger
     }
 
     /// The project's hierarchy node, created without a source scan when the project was

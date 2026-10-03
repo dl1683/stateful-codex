@@ -161,6 +161,14 @@ fn api_attribution_counters(
         run_update_calls: counters.run_update_calls,
         steering_write_calls: counters.steering_write_calls,
         material_findings_reused: counters.material_findings_reused,
+        packet_project_bytes: counters.packet_project_bytes,
+        packet_continuity_bytes: counters.packet_continuity_bytes,
+        memory_records_already_present: counters.memory_records_already_present,
+        memory_records_refused: counters.memory_records_refused,
+        recipes_grounded: counters.recipes_grounded,
+        index_operations: counters.index_operations,
+        index_operations_pending: counters.index_operations_pending,
+        index_wait_ms: counters.index_wait_ms,
     }
 }
 

@@ -82,10 +82,12 @@ fn summary(output: &dyn codex_extension_api::ToolOutput) -> serde_json::Value {
 #[tokio::test]
 async fn exact_duplicates_and_status_summaries_add_nothing_while_new_outcomes_are_saved() {
     let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
     let tool = BlackboardBatchRecordTool::new(
         "project-1".to_string(),
         "thread-1".to_string(),
-        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs())),
+        services.clone(),
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         UserMessageRegistry::default(),
@@ -131,6 +133,14 @@ async fn exact_duplicates_and_status_summaries_add_nothing_while_new_outcomes_ar
                 "errors": [null, "routineSummary", null],
             }),
         ]
+    );
+    assert_eq!(
+        services.cost_ledger().take("turn-1"),
+        crate::cost_attribution::CostCounters {
+            memory_records_already_present: 1,
+            memory_records_refused: 1,
+            ..Default::default()
+        }
     );
 }
 

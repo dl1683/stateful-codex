@@ -785,9 +785,12 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             run_update_calls: 1,
             steering_write_calls: 2,
             material_findings_reused: 1,
+            packet_project_bytes: attribution.counters.packet_project_bytes,
+            packet_continuity_bytes: attribution.counters.packet_continuity_bytes,
             ..Default::default()
         }
     );
+    assert!(attribution.counters.packet_project_bytes > 0);
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 5);

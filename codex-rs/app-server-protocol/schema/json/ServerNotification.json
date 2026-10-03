@@ -4112,6 +4112,21 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "indexOperations": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "indexOperationsPending": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "indexWaitMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "knowledgeQueryCalls": {
           "format": "uint64",
           "minimum": 0.0,
@@ -4122,7 +4137,32 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "memoryRecordsAlreadyPresent": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "memoryRecordsRefused": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "obligationWriteCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "packetContinuityBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "packetProjectBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "recipesGrounded": {
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
@@ -4204,9 +4244,17 @@
         "conversationReadCalls",
         "evidenceReadCalls",
         "failedStatefulToolCalls",
+        "indexOperations",
+        "indexOperationsPending",
+        "indexWaitMs",
         "knowledgeQueryCalls",
         "materialFindingsReused",
+        "memoryRecordsAlreadyPresent",
+        "memoryRecordsRefused",
         "obligationWriteCalls",
+        "packetContinuityBytes",
+        "packetProjectBytes",
+        "recipesGrounded",
         "rootEntriesLoaded",
         "rootEvidenceRoutesChecked",
         "rootEvidenceRoutesCurrent",

@@ -130,6 +130,30 @@ pub struct StatefulAttribution {
     pub run_update_calls: u64,
     pub steering_write_calls: u64,
     pub material_findings_reused: u64,
+    /// Bytes of the largest project packet section rendered, summed over turns.
+    #[serde(default)]
+    pub packet_project_bytes: u64,
+    /// Bytes of the largest continuity record rendered, summed over turns.
+    #[serde(default)]
+    pub packet_continuity_bytes: u64,
+    /// Memory records that were exact copies of current knowledge and saved nothing.
+    #[serde(default)]
+    pub memory_records_already_present: u64,
+    /// Memory records refused as status summaries or credential-bearing recipes.
+    #[serde(default)]
+    pub memory_records_refused: u64,
+    /// Recorded recipes grounded in a command the host observed.
+    #[serde(default)]
+    pub recipes_grounded: u64,
+    /// Index operations a read or query waited for.
+    #[serde(default)]
+    pub index_operations: u64,
+    /// Index operations still running when their caller's deadline passed.
+    #[serde(default)]
+    pub index_operations_pending: u64,
+    /// Time callers waited for index operations, in milliseconds.
+    #[serde(default)]
+    pub index_wait_ms: u64,
     /// Deprecated compatibility alias for the neutral run trajectory.
     pub invocation_duration_ms: u64,
     /// Deprecated compatibility alias for the neutral run trajectory.

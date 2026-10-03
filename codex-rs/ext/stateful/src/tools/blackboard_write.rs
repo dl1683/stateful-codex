@@ -573,6 +573,14 @@ impl BlackboardBatchRecordTool {
                         call.conversation_history.items(),
                     )
                     .await;
+                    if recipe.as_deref().is_some_and(|label| {
+                        label.starts_with("current") || label.starts_with("ran")
+                    }) {
+                        self.recorder
+                            .services
+                            .cost_ledger()
+                            .record(&call.turn_id, |counters| counters.recipes_grounded += 1);
+                    }
                     results.push(json!({
                         "index": index,
                         "entryId": entry.id.to_string(),
@@ -585,6 +593,12 @@ impl BlackboardBatchRecordTool {
                 // nothing new was saved.
                 Ok(RecordOutcome::AlreadyPresent(entry)) => {
                     already_present += 1;
+                    self.recorder
+                        .services
+                        .cost_ledger()
+                        .record(&call.turn_id, |counters| {
+                            counters.memory_records_already_present += 1;
+                        });
                     entry_ids.insert(record_key, entry.id.clone());
                     results.push(json!({
                         "index": index,
@@ -594,11 +608,24 @@ impl BlackboardBatchRecordTool {
                         "alreadyPresent": true,
                     }));
                 }
-                Err(error) => results.push(json!({
-                    "index": index,
-                    "recorded": false,
-                    "error": receipt_error(error),
-                })),
+                Err(error) => {
+                    if let FunctionCallError::RespondToModel(message) = &error
+                        && (message.starts_with("routineSummary:")
+                            || message.starts_with("credentials:"))
+                    {
+                        self.recorder
+                            .services
+                            .cost_ledger()
+                            .record(&call.turn_id, |counters| {
+                                counters.memory_records_refused += 1;
+                            });
+                    }
+                    results.push(json!({
+                        "index": index,
+                        "recorded": false,
+                        "error": receipt_error(error),
+                    }));
+                }
             }
         }
         let failed = results

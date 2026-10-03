@@ -390,6 +390,22 @@ pub struct StatefulAttributionCounters {
     pub steering_write_calls: u64,
     #[ts(type = "number")]
     pub material_findings_reused: u64,
+    #[ts(type = "number")]
+    pub packet_project_bytes: u64,
+    #[ts(type = "number")]
+    pub packet_continuity_bytes: u64,
+    #[ts(type = "number")]
+    pub memory_records_already_present: u64,
+    #[ts(type = "number")]
+    pub memory_records_refused: u64,
+    #[ts(type = "number")]
+    pub recipes_grounded: u64,
+    #[ts(type = "number")]
+    pub index_operations: u64,
+    #[ts(type = "number")]
+    pub index_operations_pending: u64,
+    #[ts(type = "number")]
+    pub index_wait_ms: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]

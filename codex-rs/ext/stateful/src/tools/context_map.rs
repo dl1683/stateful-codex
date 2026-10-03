@@ -25,6 +25,7 @@ use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::cost_attribution::record_index_operation;
 use crate::index_gate::IndexOperation;
 use crate::index_gate::PROJECT_INDEX_DEADLINE;
 use crate::services::ProjectIntelligenceServices;
@@ -120,6 +121,7 @@ impl ContextMapQueryTool {
                     .map(|root| PathBuf::from(&root.path))
                     .collect(),
             };
+            let started = std::time::Instant::now();
             let outcome = self
                 .services
                 .index_gates()
@@ -145,6 +147,12 @@ impl ContextMapQueryTool {
                     },
                 )
                 .await;
+            record_index_operation(
+                self.services.cost_ledger(),
+                &call.turn_id,
+                started.elapsed(),
+                matches!(outcome, IndexOperation::Pending),
+            );
             match outcome {
                 IndexOperation::Finished(Ok(indexed)) => indexed_on_demand = indexed,
                 IndexOperation::Finished(Err(error)) => return Err(respond(error)),
@@ -306,7 +314,8 @@ impl ContextMapRefreshTool {
                 .map(|root| PathBuf::from(&root.path))
                 .collect(),
         };
-        let report = match self
+        let started = std::time::Instant::now();
+        let outcome = self
             .services
             .index_gates()
             .run(
@@ -316,8 +325,14 @@ impl ContextMapRefreshTool {
                     indexer.refresh_cancellable(request, cancellation).await
                 },
             )
-            .await
-        {
+            .await;
+        record_index_operation(
+            self.services.cost_ledger(),
+            &call.turn_id,
+            started.elapsed(),
+            matches!(outcome, IndexOperation::Pending),
+        );
+        let report = match outcome {
             IndexOperation::Finished(report) => report.map_err(respond)?,
             IndexOperation::Pending => {
                 return Err(respond(

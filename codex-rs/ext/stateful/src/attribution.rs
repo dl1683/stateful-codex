@@ -67,6 +67,14 @@ pub struct StatefulAttributionCounters {
     pub run_update_calls: u64,
     pub steering_write_calls: u64,
     pub material_findings_reused: u64,
+    pub packet_project_bytes: u64,
+    pub packet_continuity_bytes: u64,
+    pub memory_records_already_present: u64,
+    pub memory_records_refused: u64,
+    pub recipes_grounded: u64,
+    pub index_operations: u64,
+    pub index_operations_pending: u64,
+    pub index_wait_ms: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -358,9 +366,21 @@ pub(super) fn finish_turn_attribution(
     status: StatefulAttributionStatus,
 ) {
     let turn_id = turn_store.level_id();
-    let Some(summary) = extension.attribution.finish(turn_id, status) else {
+    let Some(mut summary) = extension.attribution.finish(turn_id, status) else {
         return;
     };
+    if let Some(services) = extension.services.as_ref() {
+        let cost = services.cost_ledger().take(turn_id);
+        let counters = &mut summary.counters;
+        counters.packet_project_bytes = cost.packet_project_bytes;
+        counters.packet_continuity_bytes = cost.packet_continuity_bytes;
+        counters.memory_records_already_present = cost.memory_records_already_present;
+        counters.memory_records_refused = cost.memory_records_refused;
+        counters.recipes_grounded = cost.recipes_grounded;
+        counters.index_operations = cost.index_operations;
+        counters.index_operations_pending = cost.index_operations_pending;
+        counters.index_wait_ms = cost.index_wait_ms;
+    }
     if let Some(event_sink) = &extension.event_sink {
         event_sink.emit(StatefulEvent::AttributionCompleted { summary });
     }
