@@ -206,7 +206,7 @@ async fn user_rules_are_kept_in_the_users_words_and_nothing_else_becomes_a_rule(
         ]
     );
     assert!(fresh_request.contains(
-        "User rules (the user's exact words; they apply to all work in this project until the user changes them):"
+        "User rules (the user's exact words; each applies within the scope it states until the user changes it):"
     ));
     Ok(())
 }
@@ -290,6 +290,93 @@ async fn a_quoted_colleagues_preference_is_never_the_users_rule() -> Result<()> 
             packet.contains("I always want tests written first"),
         ),
         (json!(false), true, false)
+    );
+    Ok(())
+}
+
+/// tui8's natural opening: both rules of a message that also relays a colleague's habit are
+/// captured, each with its own receipt, and a fresh thread applies them in the order written.
+#[tokio::test]
+async fn every_rule_of_a_natural_opening_is_captured_in_order() -> Result<()> {
+    const OPENING: &str = "Hi! Quick intro since this is our first session together: I'm a backend developer, mostly Go for the last six years, so my Python is a bit rusty, and I maintain this humanize fork for our internal ops dashboards. Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself. And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step. Also FYI, Priya (she co-maintains the fork with me) wrote in our team chat: \"Always run the full test suite and mypy on the whole repo after every single change.\" Today I'd like a small helper, naturalrate, for transfer speeds. First get oriented and propose a short plan. No code yet.";
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Opening".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "opening-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            assistant("Plan ready.\nNext: read naturalsize."),
+            assistant("Renamed.\nNext: run the relevant tests."),
+        ],
+    )
+    .await;
+    run_turn(&mut server, &thread, OPENING).await?;
+    let mut rule_receipts = Vec::new();
+    while rule_receipts.len() < 2 {
+        let receipt: StatefulKnowledgeCapturedNotification = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            server.read_notification("statefulKnowledge/captured"),
+        )
+        .await??;
+        if receipt.category == StatefulKnowledgeCategory::Rule {
+            rule_receipts.push((receipt.outcome, receipt.text));
+        }
+    }
+    let commit_rule = "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself.";
+    let next_rule = "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.";
+    assert_eq!(
+        rule_receipts,
+        vec![
+            (StatefulCaptureOutcome::Stored, commit_rule.to_string()),
+            (StatefulCaptureOutcome::Stored, next_rule.to_string()),
+        ]
+    );
+    let fresh = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut server, &fresh, "Rename the helper in utils.py").await?;
+    let packet = log.requests()[1].body_json().to_string();
+    // Neither rule holds a character JSON escapes, so each appears verbatim in the body.
+    let commit_at = packet.find(commit_rule);
+    let next_at = packet.find(next_rule);
+    assert_eq!(
+        (
+            commit_at.is_some(),
+            next_at.is_some(),
+            commit_at < next_at,
+            packet.contains("mypy on the whole repo"),
+        ),
+        (true, true, true, false)
     );
     Ok(())
 }

@@ -2,6 +2,7 @@
 
 mod attribution;
 mod autonomy;
+mod background;
 mod checkout;
 mod checkpoint;
 mod completion;
@@ -16,6 +17,7 @@ mod read_receipts;
 mod request_scope;
 mod root_blackboard;
 mod rule_capture;
+mod rule_units;
 mod run_world_state;
 mod services;
 mod socratic;

@@ -6,6 +6,9 @@
 //! ("yet", "for now", "during this pass") is pending: it is kept for inspection but never
 //! applied. Rules phrased without markers are left to the model's verified-quote path.
 
+pub(crate) use crate::background::background_statements;
+pub(crate) use crate::rule_units::marked_rules;
+
 /// Longest clause stored as a rule; longer clauses are never captured automatically.
 pub(crate) const MAX_RULE_BYTES: usize = 1024;
 
@@ -83,6 +86,20 @@ const STANDING_PHRASES: &[&str] = &[
     "later sessions",
     "all our work",
     "all of our work",
+    "ground rules",
+    "rules for this",
+];
+
+/// Phrases that scope a rule to a whole investigation, which may span sessions.
+const INVESTIGATION_PHRASES: &[&str] = &[
+    "for this investigation",
+    "for this whole investigation",
+    "for the whole investigation",
+    "during this investigation",
+    "throughout this investigation",
+    "for the rest of this investigation",
+    "this whole investigation",
+    "the whole investigation",
 ];
 
 /// Markers that make a rule's standing unambiguous even next to a task word.
@@ -135,7 +152,7 @@ const REPORTED_SPEECH_PHRASES: &[&str] = &[
 ];
 
 /// Explicit limits to the current task; no standing marker overrides them.
-const EXPLICIT_TASK_PHRASES: &[&str] = &[
+pub(crate) const EXPLICIT_TASK_PHRASES: &[&str] = &[
     "for now",
     "just for now",
     "right now",
@@ -167,67 +184,10 @@ const WEAK_TASK_PHRASES: &[&str] = &[
     "before you start",
 ];
 
-/// Clauses of `text` that the user explicitly marked as standing (or pending) rules.
-pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
-    let mut rules = Vec::new();
-    let quotations = crate::quotation::Quotations::new(text);
-    // The scope of the list the current line belongs to, from its header. Blank lines keep
-    // it (Markdown lists often follow a blank line); any other prose line replaces it.
-    let mut list_header: Option<HeaderScope> = None;
-    let mut in_list = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let was_in_list = in_list;
-        let is_list_item = in_list_item(line, trimmed, &mut in_list);
-        if !is_list_item {
-            list_header = next_header(line, trimmed, was_in_list, list_header);
-        }
-        let inherited = if is_list_item { list_header } else { None };
-        for clause in clauses(trimmed) {
-            if clause.ends_with('?') || clause.ends_with(':') || clause.len() > MAX_RULE_BYTES {
-                continue;
-            }
-            let normalized = normalize(clause);
-            // Clauses are slices of `text`, so their offsets locate them in its quotations.
-            let start = clause.as_ptr() as usize - text.as_ptr() as usize;
-            if is_reported_speech(&normalized)
-                || quotations.relays(start, start + clause.len())
-                || asks_about_rules(clause)
-            {
-                continue;
-            }
-            let standing = match inherited {
-                // Items relayed from someone else are never the user's rules.
-                Some(HeaderScope::Reported) => continue,
-                // A task-limited list header limits every item under it.
-                Some(HeaderScope::Pending) => RuleStanding::Pending,
-                Some(HeaderScope::Standing) => standing_of(&normalized),
-                None if has_standing_marker(&normalized) => standing_of(&normalized),
-                None => continue,
-            };
-            rules.push(RuleClause {
-                text: clause.to_string(),
-                standing,
-            });
-        }
-    }
-    rules
-}
-
-/// Whether the user limited `clause` to the current task, phase or pass. An explicit limit
-/// ("for this task only") always counts; a weak task word ("today") yields to a strong
-/// standing marker ("in later sessions").
-pub(crate) fn is_task_limited(clause: &str) -> bool {
-    standing_of(&normalize(clause)) == RuleStanding::Pending
-}
-
 /// The scope a list header gives the items below it: a header such as "My working
 /// preferences for the whole week:" makes them standing, "For this task:" makes them
 /// pending; any other line ends a list.
-fn header_scope(line: &str) -> Option<HeaderScope> {
+pub(crate) fn header_scope(line: &str) -> Option<HeaderScope> {
     if !line.ends_with(':') {
         return None;
     }
@@ -241,31 +201,10 @@ fn header_scope(line: &str) -> Option<HeaderScope> {
     }
 }
 
-/// The scope inherited by the list item of `text` that contains `clause`, if any.
-pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<HeaderScope> {
-    let mut list_header = None;
-    let mut in_list = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let was_in_list = in_list;
-        let is_list_item = in_list_item(line, trimmed, &mut in_list);
-        if !is_list_item {
-            list_header = next_header(line, trimmed, was_in_list, list_header);
-        }
-        if clauses(trimmed).contains(&clause) {
-            return if is_list_item { list_header } else { None };
-        }
-    }
-    None
-}
-
 /// Whether `line` belongs to a list item: an item itself, or an indented continuation of
 /// one (a Markdown lazy continuation keeps the item, and so the header, it continues).
 /// Tracks across lines whether a list is open.
-fn in_list_item(line: &str, trimmed: &str, in_list: &mut bool) -> bool {
+pub(crate) fn in_list_item(line: &str, trimmed: &str, in_list: &mut bool) -> bool {
     let indented = *in_list && line.starts_with([' ', '\t']);
     // An indented header ("  For this task:") opens its own nested scope instead, and the
     // list stays open around it so a further nested header still narrows the same list.
@@ -275,133 +214,10 @@ fn in_list_item(line: &str, trimmed: &str, in_list: &mut bool) -> bool {
     is_item
 }
 
-/// First-person openings of what the user says about themselves or about the work as a whole
-/// ("I know Python well but only a little Rust", "I'm not changing any code"): background a
-/// later session needs, kept apart from rules.
-const BACKGROUND_OPENINGS: &[&str] = &[
-    "i know",
-    "i only know",
-    "i don't know",
-    "i'm new to",
-    "i am new to",
-    "i'm familiar with",
-    "i am familiar with",
-    "i'm not familiar with",
-    "i'm comfortable with",
-    "i'm coming from",
-    "i come from",
-    "i've used",
-    "i have used",
-    "i've never",
-    "i have never",
-    "i'm learning",
-    "i am learning",
-    "i'm a",
-    "i am a",
-    "i work as",
-    "my background",
-    "i'm not changing",
-    "i am not changing",
-    "i won't be changing",
-    "i will not be changing",
-    "i'm only reading",
-    "i'm just reading",
-];
-
-/// Clauses of `text` in which the user describes themselves or the whole work, in their
-/// words. Questions, rules and relayed speech are not background.
-pub(crate) fn background_statements(text: &str) -> Vec<String> {
-    // A message that quotes or shows code anywhere may carry someone else's words on any
-    // line, so it contributes no background at all; missing a statement costs less than
-    // attributing a stranger's self-description to the user.
-    if quotes_or_shows_code(text) {
-        return Vec::new();
-    }
-    let rules = marked_rules(text)
-        .into_iter()
-        .map(|rule| rule.text)
-        .collect::<Vec<_>>();
-    // Only the user's own plain prose counts: fenced blocks, quoted lines, indented or list
-    // lines and the block a colon-terminated line introduces ("She wrote:", until a blank
-    // line) may be someone else's words.
-    let mut fenced = false;
-    let mut introduced = false;
-    let mut own_lines = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fenced = !fenced;
-            continue;
-        }
-        if trimmed.is_empty() {
-            // An introduced block ends at a blank line.
-            introduced = false;
-            continue;
-        }
-        let plain = !fenced
-            && !introduced
-            && !trimmed.starts_with('>')
-            && !line.starts_with([' ', '\t'])
-            && list_item_body(trimmed).is_none();
-        introduced = introduced || trimmed.ends_with(':');
-        // A line that quotes, shows code or introduces words after a colon ("She wrote: ...")
-        // is left out whole: splitting it into sentences would lose that context.
-        if plain && !trimmed.contains(['"', '\u{201c}', '\u{201d}', '`', ':']) {
-            own_lines.push(trimmed);
-        }
-    }
-    own_lines
-        .into_iter()
-        .flat_map(clauses)
-        .filter(|clause| {
-            !clause.contains(['"', '\u{201c}', '\u{201d}'])
-                && !clause.ends_with('?')
-                && !clause.ends_with(':')
-                && clause.len() <= MAX_RULE_BYTES
-                && !rules.iter().any(|rule| rule == clause)
-                && !is_reported_speech(&normalize(clause))
-                && clause
-                    .split([':', ',', ';', '-'])
-                    .map(normalize)
-                    .any(|phrase| {
-                        let body = strip_list_marker(&phrase);
-                        let body = ["and ", "also ", "oh and ", "but ", "so ", "well "]
-                            .iter()
-                            .find_map(|lead| body.strip_prefix(lead))
-                            .unwrap_or(body);
-                        BACKGROUND_OPENINGS.iter().any(|opening| {
-                            body == *opening || body.starts_with(&format!("{opening} "))
-                        })
-                    })
-        })
-        .map(str::to_string)
-        .collect()
-}
-
-/// Whether `text` holds a quotation (double or curly quotes, or a single quote opening a
-/// word) or code (backticks or a fence).
-fn quotes_or_shows_code(text: &str) -> bool {
-    if text.contains([
-        '"', '\u{201c}', '\u{201d}', '\u{2018}', '`', '\u{ab}', '\u{bb}',
-    ]) || text.contains("~~~")
-    {
-        return true;
-    }
-    // An apostrophe inside a word ("I'm") is not a quotation; one opening a word is.
-    let mut previous = ' ';
-    for character in text.chars() {
-        if matches!(character, '\'' | '\u{2019}') && !previous.is_alphanumeric() {
-            return true;
-        }
-        previous = character;
-    }
-    false
-}
-
 /// The scope a non-item line gives the list items after it. A header nested inside a list
 /// narrows the enclosing scope and never widens it, so a neutral "Details:" under "For this
 /// task:" keeps its items task-limited.
-fn next_header(
+pub(crate) fn next_header(
     line: &str,
     trimmed: &str,
     was_in_list: bool,
@@ -488,10 +304,18 @@ pub(crate) fn reports_speech(clause: &str) -> bool {
         || crate::quotation::Quotations::new(clause).relays_clause(clause)
 }
 
-fn standing_of(normalized: &str) -> RuleStanding {
-    if has_phrase(normalized, EXPLICIT_TASK_PHRASES)
+pub(crate) fn standing_of(normalized: &str) -> RuleStanding {
+    // A rule for a whole investigation outlives the current turn: "during this
+    // investigation" is its scope, not a task limit, and its other words are end conditions.
+    let investigation = has_phrase(normalized, INVESTIGATION_PHRASES);
+    let explicit = EXPLICIT_TASK_PHRASES
+        .iter()
+        .filter(|phrase| !(investigation && **phrase == "during this"))
+        .any(|phrase| has_phrase(normalized, &[phrase]));
+    if explicit
         || (has_phrase(normalized, WEAK_TASK_PHRASES)
-            && !has_phrase(normalized, STRONG_STANDING_PHRASES))
+            && !has_phrase(normalized, STRONG_STANDING_PHRASES)
+            && !investigation)
     {
         RuleStanding::Pending
     } else {
@@ -499,7 +323,7 @@ fn standing_of(normalized: &str) -> RuleStanding {
     }
 }
 
-fn is_reported_speech(normalized: &str) -> bool {
+pub(crate) fn is_reported_speech(normalized: &str) -> bool {
     has_phrase(normalized, REPORTED_SPEECH_PHRASES)
 }
 
@@ -520,7 +344,7 @@ pub(crate) fn clause_containing(text: &str, quote: &str) -> Option<String> {
 
 /// Splits one line into sentence clauses, keeping their punctuation; a list marker is
 /// part of its item's first clause.
-fn clauses(line: &str) -> Vec<&str> {
+pub(crate) fn clauses(line: &str) -> Vec<&str> {
     let mut clauses = Vec::new();
     let mut start = 0;
     let bytes = line.as_bytes();
@@ -580,7 +404,7 @@ fn is_list_marker_only(clause: &str) -> bool {
 }
 
 /// The text after a list marker ("1.", "2)", "-", "*", "P1:"), when the line is a list item.
-fn list_item_body(line: &str) -> Option<&str> {
+pub(crate) fn list_item_body(line: &str) -> Option<&str> {
     if let Some(rest) = line.strip_prefix(['-', '*', '\u{2022}']) {
         return rest.starts_with(' ').then_some(rest);
     }
@@ -598,7 +422,7 @@ fn list_item_body(line: &str) -> Option<&str> {
     numbered.then(|| &line[marker_end..])
 }
 
-fn has_standing_marker(normalized: &str) -> bool {
+pub(crate) fn has_standing_marker(normalized: &str) -> bool {
     let body = strip_list_marker(normalized);
     if body.starts_with("never mind") {
         return false;
@@ -615,9 +439,10 @@ fn has_standing_marker(normalized: &str) -> bool {
         .iter()
         .any(|phrase| format!(" {body} ").contains(phrase))
         || has_phrase(normalized, STANDING_PHRASES)
+        || has_phrase(normalized, INVESTIGATION_PHRASES)
 }
 
-fn strip_list_marker(normalized: &str) -> &str {
+pub(crate) fn strip_list_marker(normalized: &str) -> &str {
     match normalized.split_once(' ') {
         Some((first, rest))
             if first.len() <= 3
@@ -632,7 +457,7 @@ fn strip_list_marker(normalized: &str) -> &str {
     }
 }
 
-fn has_phrase(normalized: &str, phrases: &[&str]) -> bool {
+pub(crate) fn has_phrase(normalized: &str, phrases: &[&str]) -> bool {
     let padded = format!(" {normalized} ");
     phrases
         .iter()
@@ -640,7 +465,7 @@ fn has_phrase(normalized: &str, phrases: &[&str]) -> bool {
 }
 
 /// Lowercase words separated by single spaces; punctuation becomes a separator.
-fn normalize(text: &str) -> String {
+pub(crate) fn normalize(text: &str) -> String {
     text.chars()
         .map(|character| {
             if character.is_alphanumeric() || character == '\'' {

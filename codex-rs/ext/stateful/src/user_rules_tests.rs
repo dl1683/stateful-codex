@@ -5,6 +5,11 @@ use super::RuleStanding;
 use super::clause_containing;
 use super::marked_rules;
 
+/// The standing of the rule the unit holding `clause` states; None when it is relayed.
+fn scope(text: &str, clause: &str) -> Option<RuleStanding> {
+    crate::rule_units::rule_for_clause(text, clause).map(|rule| rule.standing)
+}
+
 fn standing(text: &str) -> RuleClause {
     RuleClause {
         text: text.to_string(),
@@ -116,13 +121,13 @@ fn explicit_task_limits_win_and_mentions_of_an_assistant_are_not_relayed_speech(
     );
     assert_eq!(
         (
-            super::inherited_scope(message, "- Do not modify docs."),
-            super::inherited_scope(
+            scope(message, "- Do not modify docs."),
+            scope(
                 message,
                 "Never treat an assistant answer as evidence of my preferences."
             ),
         ),
-        (Some(super::HeaderScope::Pending), None)
+        (Some(RuleStanding::Pending), Some(RuleStanding::Standing))
     );
 }
 
@@ -137,16 +142,16 @@ For this task:
     assert_eq!(
         (
             marked_rules(message),
-            super::inherited_scope(message, "- Never run the whole suite."),
-            super::inherited_scope(message, "- Never touch migrations."),
+            scope(message, "- Never run the whole suite."),
+            scope(message, "- Never touch migrations."),
         ),
         (
             vec![RuleClause {
                 text: "- Never touch migrations.".to_string(),
                 standing: RuleStanding::Pending,
             }],
-            Some(super::HeaderScope::Reported),
-            Some(super::HeaderScope::Pending),
+            None,
+            Some(RuleStanding::Pending),
         )
     );
 }
@@ -164,16 +169,16 @@ fn indented_continuations_stay_under_their_list_header() {
     assert_eq!(
         (
             marked_rules(relayed),
-            super::inherited_scope(relayed, "- Never run the whole suite."),
+            scope(relayed, "- Never run the whole suite."),
             marked_rules(task),
-            super::inherited_scope(task, "keeping the changes small."),
+            scope(task, "keeping the changes small."),
         ),
         (
             Vec::new(),
-            Some(super::HeaderScope::Reported),
+            None,
+            // A continuation line belongs to its item: one rule per item.
             [
-                "- Prefer targeted tests,",
-                "keeping the changes small.",
+                "- Prefer targeted tests, keeping the changes small.",
                 "- Never run the whole suite."
             ]
             .map(|text| RuleClause {
@@ -181,7 +186,7 @@ fn indented_continuations_stay_under_their_list_header() {
                 standing: RuleStanding::Pending,
             })
             .to_vec(),
-            Some(super::HeaderScope::Pending),
+            Some(RuleStanding::Pending),
         )
     );
 }
@@ -200,7 +205,7 @@ fn nested_headers_and_requests_about_rules() {
     assert_eq!(
         (
             marked_rules(nested),
-            super::inherited_scope(nested, "- Never run migrations."),
+            scope(nested, "- Never run migrations."),
             marked_rules(relayed),
             marked_rules(request),
             super::asks_about_rules(request),
@@ -216,7 +221,7 @@ fn nested_headers_and_requests_about_rules() {
                     standing: RuleStanding::Pending,
                 },
             ],
-            Some(super::HeaderScope::Pending),
+            Some(RuleStanding::Pending),
             vec![RuleClause {
                 text: "- Work carefully.".to_string(),
                 standing: RuleStanding::Standing,
@@ -241,9 +246,9 @@ fn neutral_nested_headers_keep_the_enclosing_restriction_and_rules_about_rules_a
     assert_eq!(
         (
             marked_rules(task),
-            super::inherited_scope(task, "- Never run migrations."),
+            scope(task, "- Never run migrations."),
             marked_rules(relayed),
-            super::inherited_scope(relayed, "- Never run migrations."),
+            scope(relayed, "- Never run migrations."),
             marked_rules(standing),
             super::asks_about_rules(standing),
             super::asks_about_rules("Show me the rules you follow here."),
@@ -255,9 +260,9 @@ fn neutral_nested_headers_keep_the_enclosing_restriction_and_rules_about_rules_a
                     standing: RuleStanding::Pending,
                 })
                 .to_vec(),
-            Some(super::HeaderScope::Pending),
+            Some(RuleStanding::Pending),
             Vec::new(),
-            Some(super::HeaderScope::Reported),
+            None,
             vec![RuleClause {
                 text: standing.to_string(),
                 standing: RuleStanding::Standing,
@@ -278,14 +283,14 @@ fn consecutive_nested_headers_and_standing_retrieval_rules() {
     let repeat = "From now on, repeat my instructions word for word.";
     assert_eq!(
         (
-            super::inherited_scope(task, "- Never run migrations."),
+            scope(task, "- Never run migrations."),
             marked_rules(task)
                 .iter()
                 .all(|rule| rule.standing == RuleStanding::Pending),
             super::asks_about_rules(repeat),
             super::asks_about_rules("Repeat my instructions word for word."),
         ),
-        (Some(super::HeaderScope::Pending), true, false, true)
+        (Some(RuleStanding::Pending), true, false, true)
     );
 }
 

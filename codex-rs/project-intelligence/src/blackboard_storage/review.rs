@@ -18,8 +18,9 @@ pub struct ReviewPage {
 
 impl BlackboardStore {
     /// Active entries of the project starting at `offset` in review order, at most `limit`,
-    /// whether more follow, and the revision they reflect, all from one snapshot. Within a
-    /// group, the most recently changed come first. With `expected_revision`, a page of a
+    /// whether more follow, and the revision they reflect, all from one snapshot. The user's
+    /// rules keep the order they were stored in (the order the user stated them); within the
+    /// other groups, the most recently changed come first. With `expected_revision`, a page of a
     /// later revision is not read and `None` is returned.
     pub async fn active_review_page(
         &self,
@@ -52,6 +53,10 @@ impl BlackboardStore {
                  WHEN revision.kind = 'instruction' THEN 1
                  WHEN revision.kind = 'decision' THEN 2
                  ELSE 3 END,
+               CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                   THEN entry.created_at_ms END,
+               CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                   THEN entry.rowid END,
                entry.updated_at_ms DESC, entry.id
              LIMIT ? OFFSET ?",
         )

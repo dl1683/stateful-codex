@@ -73,8 +73,8 @@ pub struct StatefulMemoryReadParams {
 #[ts(export_to = "v2/")]
 pub struct StatefulMemoryReadResponse {
     pub project_id: String,
-    /// User rules first, then other rules, decisions and other knowledge; most recently
-    /// changed first within each.
+    /// User rules first, in the order the user stated them, then other rules, decisions and
+    /// other knowledge, most recently changed first within each.
     pub data: Vec<StatefulMemoryItem>,
     pub next_cursor: Option<String>,
 }

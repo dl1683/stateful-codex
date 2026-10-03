@@ -77,3 +77,20 @@ fn the_users_own_rules_may_quote_terms() {
     let text = "From now on, start with 'Next:' then add a summary. Never change docs.";
     assert_eq!(relayed(text, "Never change docs."), false);
 }
+
+/// tui8: the user's own rule quotes 'Next:' in one sentence while a later sentence relays a
+/// colleague; only the colleague's quotation is someone else's words.
+#[test]
+fn attribution_is_local_to_the_quoting_sentence() {
+    let text = "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself. And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step. Also FYI, Priya (she co-maintains the fork with me) wrote in our team chat: \"Always run the full test suite and mypy on the whole repo after every single change.\" Today I'd like a small helper.";
+    assert_eq!(
+        [
+            "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.",
+            "Also FYI, Priya (she co-maintains the fork with me) wrote in our team chat: \"Always run the full test suite and mypy on the whole repo after every single change.\"",
+            "Always run the full test suite and mypy on the whole repo after every single change.\"",
+            "Today I'd like a small helper.",
+        ]
+        .map(|clause| relayed(text, clause)),
+        [false, true, true, false]
+    );
+}

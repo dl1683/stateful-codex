@@ -43,7 +43,7 @@ fn is_user_background(hit: &BlackboardHit) -> bool {
             .starts_with("stateful-user-background-")
 }
 
-pub(super) const USER_RULES_HEADER: &str = "User rules (the user's exact words; they apply to all work in this project until the user changes them):";
+pub(super) const USER_RULES_HEADER: &str = "User rules (the user's exact words; each applies within the scope it states until the user changes it):";
 const KNOWLEDGE_HEADER: &str = "Other promoted knowledge:";
 
 /// Longest excerpt of a replaced value shown on its successor's line.

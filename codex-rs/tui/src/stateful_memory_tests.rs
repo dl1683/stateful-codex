@@ -13,9 +13,9 @@ use codex_app_server_protocol::StatefulWorkflowMode;
 use pretty_assertions::assert_eq;
 
 use super::MemoryCommand;
+use super::ReceiptTally;
 use super::memory_lines;
 use super::parse;
-use super::receipt_cell;
 use crate::history_cell::HistoryCell;
 
 fn render(lines: Vec<ratatui::text::Line<'static>>) -> String {
@@ -142,21 +142,24 @@ fn receipts_name_what_was_saved_and_repeats_say_nothing() {
         outcome,
         text: "From now on, never run the whole test suite.".to_string(),
     };
-    let saved = receipt_cell(&notification(
-        StatefulKnowledgeCategory::Rule,
-        StatefulCaptureOutcome::Stored,
-    ))
-    .map(|cell| render(cell.display_lines(/*width*/ 100)));
-    let pending = receipt_cell(&notification(
-        StatefulKnowledgeCategory::PendingRule,
-        StatefulCaptureOutcome::Stored,
-    ))
-    .map(|cell| render(cell.display_lines(/*width*/ 100)));
-    let repeated = receipt_cell(&notification(
-        StatefulKnowledgeCategory::Rule,
-        StatefulCaptureOutcome::AlreadyStored,
-    ))
-    .is_none();
+    let saved = ReceiptTally::default()
+        .receipt_cell(&notification(
+            StatefulKnowledgeCategory::Rule,
+            StatefulCaptureOutcome::Stored,
+        ))
+        .map(|cell| render(cell.display_lines(/*width*/ 100)));
+    let pending = ReceiptTally::default()
+        .receipt_cell(&notification(
+            StatefulKnowledgeCategory::PendingRule,
+            StatefulCaptureOutcome::Stored,
+        ))
+        .map(|cell| render(cell.display_lines(/*width*/ 100)));
+    let repeated = ReceiptTally::default()
+        .receipt_cell(&notification(
+            StatefulKnowledgeCategory::Rule,
+            StatefulCaptureOutcome::AlreadyStored,
+        ))
+        .is_none();
     insta::assert_snapshot!(
         "memory_receipts",
         format!(
@@ -166,4 +169,47 @@ fn receipts_name_what_was_saved_and_repeats_say_nothing() {
         )
     );
     assert!(repeated);
+}
+
+/// tui8: two rules from one message give two receipts, numbered, each showing its own rule
+/// rather than the framing both share; a rule that merely contains a colon keeps its words.
+#[test]
+fn rule_receipts_are_numbered_and_show_the_rule_after_its_framing() {
+    let mut tally = ReceiptTally::default();
+    let mut receipt = |turn_id: &str, text: &str| {
+        tally
+            .receipt_cell(&StatefulKnowledgeCapturedNotification {
+                project_id: "project-1".to_string(),
+                thread_id: "thread-1".to_string(),
+                turn_id: turn_id.to_string(),
+                entry_id: "entry-1".to_string(),
+                revision: 1,
+                category: StatefulKnowledgeCategory::Rule,
+                outcome: StatefulCaptureOutcome::Stored,
+                text: text.to_string(),
+            })
+            .map(|cell| render(cell.display_lines(/*width*/ 200)))
+            .unwrap_or_default()
+    };
+    let lines = [
+        receipt(
+            "turn-1",
+            "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself.",
+        ),
+        receipt(
+            "turn-1",
+            "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.",
+        ),
+        receipt(
+            "turn-2",
+            "Never run git commit: I review and commit everything myself, every time.",
+        ),
+    ];
+    insta::assert_snapshot!(
+        "memory_rule_receipts_skip_framing",
+        lines.join(
+            "
+"
+        )
+    );
 }

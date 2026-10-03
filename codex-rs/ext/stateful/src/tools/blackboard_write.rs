@@ -39,12 +39,10 @@ use crate::services::ProjectIntelligenceServices;
 
 use crate::rule_capture::RuleSource;
 use crate::rule_capture::store_user_rule;
+use crate::rule_units::rule_for_clause;
 use crate::user_messages::UserMessageRegistry;
-use crate::user_rules::HeaderScope;
 use crate::user_rules::MAX_RULE_BYTES;
 use crate::user_rules::RuleStanding;
-use crate::user_rules::inherited_scope;
-use crate::user_rules::is_task_limited;
 use crate::user_rules::reports_speech;
 
 use crate::visible_root::VisibleRootRegistry;
@@ -183,23 +181,25 @@ impl BlackboardRecorder {
                     "userQuote is not inside exactly one complete sentence of a user message recorded in this thread",
                 )
             })?;
-        let header = inherited_scope(&message.text, &clause);
-        if is_task_limited(&clause) || header == Some(HeaderScope::Pending) {
-            return Err(respond(
-                "nothing written: the user limited that sentence to the current task",
-            ));
-        }
         if crate::user_rules::asks_about_rules(&clause) {
             return Err(respond(
                 "nothing written: that sentence asks about rules; it does not state one",
             ));
         }
+        let relayed = respond(
+            "nothing written: that sentence relays someone else's words, not the user's rule",
+        );
         if reports_speech(&clause)
             || crate::quotation::Quotations::new(&message.text).relays_clause(&clause)
-            || header == Some(HeaderScope::Reported)
         {
+            return Err(relayed);
+        }
+        // The rule is the whole unit holding the quote (a list item with its header's scope),
+        // exactly as host capture stores it, so both paths share one wording and identity.
+        let rule = rule_for_clause(&message.text, &clause).ok_or(relayed)?;
+        if rule.standing == RuleStanding::Pending {
             return Err(respond(
-                "nothing written: that sentence relays someone else's words, not the user's rule",
+                "nothing written: the user limited that sentence to the current task",
             ));
         }
         let (thread_id, turn_id, stated_at_ms) = (
@@ -207,9 +207,9 @@ impl BlackboardRecorder {
             message.turn_id,
             message.received_at_ms,
         );
-        if clause.len() > MAX_RULE_BYTES {
+        if rule.text.len() > MAX_RULE_BYTES {
             return Err(respond(format!(
-                "the sentence holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
+                "the rule holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
             )));
         }
         store_user_rule(
@@ -222,7 +222,7 @@ impl BlackboardRecorder {
                 receipt_turn_id,
                 stated_at_ms,
             },
-            &clause,
+            &rule.text,
             RuleStanding::Standing,
         )
         .await

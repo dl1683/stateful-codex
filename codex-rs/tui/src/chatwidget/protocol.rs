@@ -402,7 +402,7 @@ impl ChatWidget {
             | ServerNotification::TurnTrajectoryUpdated(_) => {}
             ServerNotification::StatefulKnowledgeCaptured(notification) => {
                 if replay_kind.is_none()
-                    && let Some(cell) = crate::stateful_memory::receipt_cell(&notification)
+                    && let Some(cell) = self.memory_receipts.receipt_cell(&notification)
                 {
                     self.add_to_history(cell);
                 }

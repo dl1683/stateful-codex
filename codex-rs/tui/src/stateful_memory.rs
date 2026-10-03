@@ -382,30 +382,110 @@ fn preview(text: &str) -> String {
     format!("\"{cut}…\"")
 }
 
-/// One quiet line for something a turn newly saved; repeats of what was already saved say
-/// nothing.
-pub(crate) fn receipt_cell(
-    notification: &StatefulKnowledgeCapturedNotification,
-) -> Option<PlainHistoryCell> {
-    if notification.outcome == StatefulCaptureOutcome::AlreadyStored {
-        return None;
-    }
-    let what = match notification.category {
-        StatefulKnowledgeCategory::Rule => "Saved your rule",
-        StatefulKnowledgeCategory::PendingRule => "Saved a task-limited rule (not applied)",
-        StatefulKnowledgeCategory::Decision => "Saved a decision",
-        StatefulKnowledgeCategory::Recipe => "Saved a project recipe",
-        StatefulKnowledgeCategory::Finding => "Saved a finding",
-        StatefulKnowledgeCategory::Background => "Saved what you said about yourself",
+/// Framing that introduces a message's rules ("Two standing rules for all our work here:"):
+/// it names rules or preferences and is not itself an instruction.
+fn rule_body(text: &str) -> &str {
+    const MAX_FRAMING_CHARS: usize = 100;
+    const MIN_BODY_CHARS: usize = 20;
+    const FRAMING_NOUNS: &[&str] = &["rule", "rules", "preference", "preferences"];
+    const INSTRUCTION_WORDS: &[&str] = &["never", "always", "don't", "do", "must", "should"];
+    let Some((framing, body)) = text.split_once(": ") else {
+        return text;
     };
-    Some(PlainHistoryCell::new(vec![
+    let words = framing
+        .split(|character: char| !(character.is_alphanumeric() || character == '\''))
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>();
+    let recognised = framing.chars().count() <= MAX_FRAMING_CHARS
+        && !framing.contains(['"', '\'', '`', '\u{201c}', '\u{2018}'])
+        && words
+            .iter()
+            .any(|word| FRAMING_NOUNS.contains(&word.as_str()))
+        && !words
+            .iter()
+            .any(|word| INSTRUCTION_WORDS.contains(&word.as_str()))
+        && body.trim().chars().count() >= MIN_BODY_CHARS;
+    if recognised { body.trim() } else { text }
+}
+
+/// What a session saved to project memory, so each rule receipt of a turn carries its number
+/// ("Saved your rule 2 of this message").
+#[derive(Debug, Default)]
+pub(crate) struct ReceiptTally {
+    /// The turn the last rule receipt belonged to, and how many rules it saved so far.
+    rules_in_turn: Option<(String, usize)>,
+}
+
+impl ReceiptTally {
+    /// One quiet line for something a turn newly saved; repeats of what was already saved
+    /// say nothing.
+    pub(crate) fn receipt_cell(
+        &mut self,
+        notification: &StatefulKnowledgeCapturedNotification,
+    ) -> Option<PlainHistoryCell> {
+        if notification.outcome == StatefulCaptureOutcome::AlreadyStored {
+            return None;
+        }
+        let rule_number = match notification.category {
+            StatefulKnowledgeCategory::Rule | StatefulKnowledgeCategory::PendingRule => {
+                let number = match &mut self.rules_in_turn {
+                    Some((turn_id, count)) if *turn_id == notification.turn_id => {
+                        *count += 1;
+                        *count
+                    }
+                    _ => {
+                        self.rules_in_turn = Some((notification.turn_id.clone(), 1));
+                        1
+                    }
+                };
+                Some(number)
+            }
+            StatefulKnowledgeCategory::Decision
+            | StatefulKnowledgeCategory::Recipe
+            | StatefulKnowledgeCategory::Finding
+            | StatefulKnowledgeCategory::Background => None,
+        };
+        Some(receipt_cell(notification, rule_number))
+    }
+}
+
+/// The receipt line; `rule_number` counts the rules saved from the same message.
+fn receipt_cell(
+    notification: &StatefulKnowledgeCapturedNotification,
+    rule_number: Option<usize>,
+) -> PlainHistoryCell {
+    let what = match (notification.category, rule_number) {
+        (StatefulKnowledgeCategory::Rule, Some(number)) if number > 1 => {
+            format!("Saved your rule {number} from this message")
+        }
+        (StatefulKnowledgeCategory::Rule, _) => "Saved your rule".to_string(),
+        (StatefulKnowledgeCategory::PendingRule, _) => {
+            "Saved a task-limited rule (not applied)".to_string()
+        }
+        (StatefulKnowledgeCategory::Decision, _) => "Saved a decision".to_string(),
+        (StatefulKnowledgeCategory::Recipe, _) => "Saved a project recipe".to_string(),
+        (StatefulKnowledgeCategory::Finding, _) => "Saved a finding".to_string(),
+        (StatefulKnowledgeCategory::Background, _) => {
+            "Saved what you said about yourself".to_string()
+        }
+    };
+    let text = match notification.category {
+        StatefulKnowledgeCategory::Rule | StatefulKnowledgeCategory::PendingRule => {
+            rule_body(&notification.text)
+        }
+        StatefulKnowledgeCategory::Decision
+        | StatefulKnowledgeCategory::Recipe
+        | StatefulKnowledgeCategory::Finding
+        | StatefulKnowledgeCategory::Background => &notification.text,
+    };
+    PlainHistoryCell::new(vec![
         vec![
             "• ".dim(),
-            format!("{what}: {}", preview(&notification.text)).dim(),
+            format!("{what}: {}", preview(text)).dim(),
             " · /memory to review".dark_gray(),
         ]
         .into(),
-    ]))
+    ])
 }
 
 #[cfg(test)]

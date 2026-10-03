@@ -450,3 +450,58 @@ async fn background_is_stored_once_in_the_users_words() {
         )]
     );
 }
+
+/// horizon3: rules are applied and listed in the order the user wrote them, not in the order
+/// of their identities.
+#[tokio::test]
+async fn rules_keep_the_order_the_user_wrote_them_in() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let message = "Standing rules for this project, please follow them in every session:\n1. Only run the tests relevant to what you changed, never the whole suite.\n2. Never install anything into my global Python. If you need an environment, make a local venv inside the repo.\n3. Don't touch docs/ or any changelog.\n4. End every reply with one line starting with `Next:` that suggests the next step.";
+    capture_marked_rules(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        message,
+    )
+    .await;
+    let store = services.blackboard().await.expect("blackboard");
+    let root = store
+        .root_projection(RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 16,
+        })
+        .await
+        .expect("root");
+    let review = store
+        .active_review_page(
+            "project-1",
+            /*offset*/ 0,
+            /*limit*/ 16,
+            /*expected_revision*/ None,
+        )
+        .await
+        .expect("review")
+        .expect("page");
+    let first_words = |content: &str| content.split(' ').take(2).collect::<Vec<_>>().join(" ");
+    let expected = ["1. Only", "2. Never", "3. Don't", "4. End"]
+        .map(str::to_string)
+        .to_vec();
+    assert_eq!(
+        (
+            root.data
+                .iter()
+                .map(|hit| first_words(&hit.entry.value.content))
+                .collect::<Vec<_>>(),
+            review
+                .entries
+                .iter()
+                .map(|entry| first_words(&entry.value.content))
+                .collect::<Vec<_>>(),
+        ),
+        (expected.clone(), expected)
+    );
+}
