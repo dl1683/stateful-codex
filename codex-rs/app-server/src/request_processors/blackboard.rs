@@ -200,6 +200,27 @@ impl BlackboardRequestProcessor {
                         "blackboard/upsert cannot change the meaning of user-authored knowledge; only a user action can, or downgrade it first without changing kind, content, or structuredValue",
                     ));
                 }
+                // An open check captured from an answer stays open until evidence settles it;
+                // only the user's own memory controls close or reword it.
+                let open_check = store
+                    .knowledge_context(&params.project_id, &entry_id)
+                    .await
+                    .map_err(blackboard_error)?
+                    .is_some_and(|context| {
+                        context.category == codex_project_intelligence::KnowledgeCategory::OpenCheck
+                    });
+                let closes = params
+                    .state
+                    .is_some_and(|state| internal_state(state) != BlackboardEntryState::Active);
+                if open_check
+                    && (closes
+                        || kind != current.value.kind
+                        || params.content != current.value.content)
+                {
+                    return Err(invalid_params(
+                        "blackboard/upsert cannot close or reword an open check; the user can, with statefulMemory/correct or statefulMemory/forget",
+                    ));
+                }
                 let premises = premises.unwrap_or(current.value.premises);
                 store
                     .update_entry(

@@ -212,6 +212,8 @@ pub enum CaptureUnit {
     /// `context` if it has none and is listed as already present.
     Existing {
         id: crate::BlackboardEntryId,
+        /// The revision whose words matched; a changed entry is not counted as the unit.
+        revision: u64,
         context: KnowledgeContext,
     },
     /// Recognized but not kept; `note` says what it was and why.

@@ -360,7 +360,11 @@ impl BlackboardRecorder {
                 supersedes,
             )
             .await?;
-            if value.evidence.is_empty() {
+            // Evidence links resolved for this write are current; a check needs them
+            // source-verified to be settled.
+            if value.evidence.is_empty()
+                || value.verification != BlackboardVerification::SourceVerified
+            {
                 let replaced_ids = replaced
                     .iter()
                     .map(|entry| entry.id.clone())

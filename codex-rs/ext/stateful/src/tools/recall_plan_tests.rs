@@ -56,6 +56,7 @@ fn questions_name_the_kind_they_ask_for() {
             "Which hypotheses did we reject?",
             "What is still open before we can close the bug?",
             "Why did we pick SQLite?",
+            "Why does the config error occur?",
             "List the rules I gave you.",
             "What changed in the formatter?",
         ]
@@ -65,6 +66,7 @@ fn questions_name_the_kind_they_ask_for() {
             Some(RecallKind::RuledOut),
             Some(RecallKind::OpenCheck),
             Some(RecallKind::Decision),
+            None,
             Some(RecallKind::Rule),
             None,
         ]
@@ -96,13 +98,17 @@ fn agent_entry(
 }
 
 fn call(arguments: Value) -> ToolCall<'static> {
+    call_with_budget(arguments, 20_000)
+}
+
+fn call_with_budget(arguments: Value, response_bytes: usize) -> ToolCall<'static> {
     ToolCall {
         turn_id: "turn-9".to_string(),
         call_id: "recall-call".to_string(),
         tool_name: ToolName::plain("memory_read"),
         model: "test-model".to_string(),
         codex_turn_metadata: None,
-        truncation_policy: TruncationPolicy::Bytes(20_000),
+        truncation_policy: TruncationPolicy::Bytes(response_bytes),
         source: ToolCallSource::Direct,
         conversation_history: ConversationHistory::default(),
         turn_item_emitter: Arc::new(NoopTurnItemEmitter),
@@ -331,5 +337,68 @@ async fn a_long_list_pages_whole_items_with_a_cursor() {
             result["requested"]["coverage"]["cursorNote"].is_string()
         ),
         (json!(0), true)
+    );
+}
+
+/// An item no page can hold whole is cut, marked incomplete, and the cursor moves past it.
+#[tokio::test]
+async fn an_item_too_large_for_any_page_is_cut_and_passed() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let turn = ExtensionData::new("turn");
+    turn.insert(CaptureTurn {
+        turn_id: "turn-1".to_string(),
+    });
+    observe_agent_message(
+        &turn,
+        &AgentMessageItem {
+            id: "item-1".to_string(),
+            content: vec![AgentMessageContent::Text {
+                text: format!(
+                    "Ruled out:\n- Proxy: {}\n- DNS: same failure offline.\n",
+                    "long evidence ".repeat(150).trim_end()
+                ),
+            }],
+            phase: None,
+            memory_citation: None,
+            delivery: None,
+            questions: None,
+        },
+    );
+    capture_completed_answer(&services, None, PROJECT_ID, "thread-1", &turn).await;
+    let tool = super::super::memory_read::MemoryReadTool::new(
+        PROJECT_ID.to_string(),
+        "thread-1".to_string(),
+        services.clone(),
+        Arc::new(InMemoryThreadStore::default()),
+    );
+    let page = |arguments: Value| {
+        let tool = &tool;
+        async move {
+            let output = tool
+                .handle(call_with_budget(arguments, 1_800))
+                .await
+                .expect("page");
+            serde_json::from_str::<Value>(&output.log_output()).expect("JSON")
+        }
+    };
+    let first = page(json!({"kind": "ruledOut"})).await;
+    let second = page(json!({
+        "kind": "ruledOut",
+        "cursor": first["requested"]["coverage"]["nextCursor"].clone()
+    }))
+    .await;
+    assert_eq!(
+        (
+            first["requested"]["items"][0]["contentComplete"].clone(),
+            second["requested"]["items"][0]["content"].clone(),
+            second["requested"]["coverage"]["nextCursor"].clone(),
+        ),
+        (
+            json!(false),
+            json!("DNS: same failure offline."),
+            Value::Null
+        )
     );
 }

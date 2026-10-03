@@ -37,6 +37,7 @@ mod review;
 mod succession;
 mod update;
 
+pub use capture::CandidateLifecycle;
 pub use capture::CategorizedEntry;
 pub use capture::MAX_CATEGORIZED_ENTRIES;
 pub use fence::CompletionFence;

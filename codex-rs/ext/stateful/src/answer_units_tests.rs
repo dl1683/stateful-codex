@@ -86,9 +86,39 @@ fn tentative_lists_and_items_are_not_rejections() {
     let answer = "Not ruled out yet:\n- the cache\n\nPossible causes we rejected too early:\n- the proxy\n\n**Ruled out:**\n- the network: same failure offline\n- the disk: still possible, not checked\n- Possibly SHIPIT_CONFIG; not checked yet\n";
     let units = answer_units(answer);
     assert_eq!(
-        texts(answer, &units.ruled_out),
-        vec!["the network: same failure offline"]
+        (
+            texts(answer, &units.ruled_out),
+            units
+                .omitted
+                .iter()
+                .map(|(_, note)| note.as_str())
+                .collect::<Vec<_>>()
+        ),
+        (
+            vec!["the network: same failure offline"],
+            vec![
+                "tentative, not saved as ruled out: the disk: still possible, not checked",
+                "tentative, not saved as ruled out: Possibly SHIPIT_CONFIG; not checked yet",
+            ]
+        )
     );
+}
+
+#[test]
+fn a_later_clause_about_another_cause_does_not_unsettle_the_rejection() {
+    let answer =
+        "Ruled out:\n- DNS: eliminated by the offline reproduction; likely a parser bug instead.\n";
+    let units = answer_units(answer);
+    assert_eq!(
+        texts(answer, &units.ruled_out),
+        vec!["DNS: eliminated by the offline reproduction; likely a parser bug instead."]
+    );
+}
+
+#[test]
+fn negated_headings_indented_examples_and_unmade_choices_state_nothing() {
+    let answer = "Not dismissed:\n- the proxy\n\nExample format:\n\n    Ruled out:\n    - DNS\n\n    Decision: use Redis\n    Reason: latency\n\nDecision: we have not decided yet.\nReason: waiting for the benchmark.\n";
+    assert_eq!(answer_units(answer), AnswerUnits::default());
 }
 
 #[test]
@@ -211,7 +241,10 @@ fn an_overlength_unit_is_omitted_not_cut() {
     assert_eq!(texts(&answer, &units.ruled_out), vec!["short"]);
     assert_eq!(
         units.omitted,
-        vec![(AnswerUnitKind::RuledOut, "x".repeat(80))]
+        vec![(
+            AnswerUnitKind::RuledOut,
+            format!("too long to keep whole: {}", "x".repeat(80))
+        )]
     );
 }
 

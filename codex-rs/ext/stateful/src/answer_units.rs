@@ -3,129 +3,26 @@
 //! the reason, alternatives and reconsideration condition written beside it. Every unit keeps
 //! the byte range of the answer it was read from.
 //!
-//! Only explicit structure counts. A tentative heading ("Not ruled out", "Possible causes"),
-//! a tentative item ("possibly the proxy; not checked"), an inline list after a colon, quoted
-//! (`>` or a line opening with a quotation mark) or fenced text, and prose without a label are
-//! left to the retained conversation; nothing is guessed. Units are never cut: one longer
-//! than an entry can hold is reported as omitted.
+//! Only explicit structure counts. A tentative or negated heading ("Not ruled out", "Possible
+//! causes"), an inline list after a colon, quoted (`>` or a line opening with a quotation
+//! mark), fenced or indented-code text, and prose without a label are left to the retained
+//! conversation; nothing is guessed. Units are never cut: one longer than an entry can hold,
+//! or a ruled-out item that is itself tentative, is reported as not kept.
 
 use std::ops::Range;
 
+use crate::answer_phrases::Label;
+use crate::answer_phrases::heading_kind;
+use crate::answer_phrases::is_tentative_rejection;
+use crate::answer_phrases::is_unmade_choice;
+use crate::answer_phrases::label_of;
 use crate::user_rules::Fence;
-use crate::user_rules::has_phrase;
 use crate::user_rules::list_item_body;
-use crate::user_rules::normalize;
 
 /// Longest unit kept; the store's entry limit leaves room for a decision's labels.
 pub(crate) const MAX_UNIT_BYTES: usize = 3_800;
-/// Longest line read as a heading.
-const MAX_HEADING_BYTES: usize = 120;
 
-const RULED_OUT_PHRASES: &[&str] = &[
-    "ruled out",
-    "ruled it out",
-    "rejected",
-    "eliminated",
-    "excluded",
-    "dismissed",
-];
-/// An item with these is not a settled rejection, even under a ruled-out heading.
-const NOT_REJECTED_PHRASES: &[&str] = &[
-    "not ruled out",
-    "not yet ruled out",
-    "not been ruled out",
-    "not rejected",
-    "not excluded",
-    "not eliminated",
-    "cannot rule out",
-    "cannot be ruled out",
-    "can't rule out",
-    "can't be ruled out",
-    "could not rule out",
-    "couldn't rule out",
-    "yet to rule out",
-    "be ruled out",
-    "still possible",
-    "possibly",
-    "probably",
-    "likely",
-    "might",
-    "may be",
-    "suspect",
-    "not checked",
-    "not yet checked",
-    "unverified",
-    "unclear",
-];
-/// A heading with these does not introduce rejections, even beside a ruled-out phrase.
-const TENTATIVE_PHRASES: &[&str] = &[
-    "not ruled out",
-    "not yet ruled out",
-    "not been ruled out",
-    "not rejected",
-    "not excluded",
-    "not eliminated",
-    "cannot rule out",
-    "cannot be ruled out",
-    "can't rule out",
-    "can't be ruled out",
-    "could not rule out",
-    "couldn't rule out",
-    "yet to rule out",
-    "to rule out",
-    "be ruled out",
-    "still possible",
-    "possible",
-    "possibly",
-    "candidates",
-    "might",
-    "may",
-    "unclear",
-];
-const OPEN_CHECK_PHRASES: &[&str] = &[
-    "open checks",
-    "open check",
-    "still open",
-    "open questions",
-    "open question",
-    "not yet verified",
-    "not verified",
-    "unverified",
-    "still to verify",
-    "still to check",
-    "to be verified",
-    "needs verification",
-    "remaining checks",
-    "outstanding checks",
-    "unresolved",
-];
-const CHOICE_LABELS: &[&str] = &["decision", "decided", "final decision", "chosen approach"];
-/// A choice that opens with these has not been made.
-const UNMADE_CHOICES: &[&str] = &[
-    "pending",
-    "none",
-    "none yet",
-    "not yet",
-    "not made",
-    "tbd",
-    "to be decided",
-    "undecided",
-    "your call",
-];
-const REASON_LABELS: &[&str] = &["reason", "why", "rationale", "because"];
-const ALTERNATIVE_LABELS: &[&str] = &[
-    "alternatives",
-    "alternatives considered",
-    "rejected alternatives",
-    "options considered",
-];
-const RECONSIDER_LABELS: &[&str] = &[
-    "reconsider if",
-    "reconsider when",
-    "revisit if",
-    "revisit when",
-];
-const QUOTATION_OPENINGS: &[char] = &['"', '\'', '\u{201c}', '\u{2018}', '\u{ab}', '`'];
+pub(crate) const QUOTATION_OPENINGS: &[char] = &['"', '\'', '\u{201c}', '\u{2018}', '\u{ab}', '`'];
 
 /// Words of the answer and where they are in it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -205,16 +102,8 @@ pub(crate) struct AnswerUnits {
     pub(crate) ruled_out: Vec<SourceText>,
     pub(crate) open_checks: Vec<SourceText>,
     pub(crate) decisions: Vec<DecisionUnit>,
-    /// Units too long to keep whole, by kind and opening words.
+    /// Units not kept (too long to keep whole, or tentative), by kind, each with why.
     pub(crate) omitted: Vec<(AnswerUnitKind, String)>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Label {
-    Choice,
-    Reason,
-    Alternatives,
-    Reconsider,
 }
 
 /// One line of the answer, trimmed, with the byte range of its trimmed text.
@@ -271,11 +160,15 @@ pub(crate) fn answer_units(answer: &str) -> AnswerUnits {
         let start = offset;
         offset += raw.len();
         let text = raw.trim_end_matches(['\n', '\r']);
-        let indent = text.len() - text.trim_start().len();
+        let leading = &text[..text.len() - text.trim_start().len()];
+        let indent = leading
+            .chars()
+            .map(|character| if character == '\t' { 4 } else { 1 })
+            .sum();
         let line = Line {
             trimmed: text.trim(),
             indent,
-            span: start + indent..start + text.trim_end().len(),
+            span: start + leading.len()..start + text.trim_end().len(),
         };
         let item_indent = match &block {
             Block::List {
@@ -298,6 +191,12 @@ pub(crate) fn answer_units(answer: &str) -> AnswerUnits {
         }
         if fence.skips(line.trimmed) {
             finish(&mut block, &mut units);
+            continue;
+        }
+        // An indented code block (an example of a format) is not this answer's structure.
+        if line.indent >= 4 && !line.trimmed.is_empty() {
+            finish(&mut block, &mut units);
+            blank_before = false;
             continue;
         }
         if line.trimmed.is_empty() {
@@ -376,13 +275,21 @@ fn finish(block: &mut Block, units: &mut AnswerUnits) {
         Block::None => {}
         Block::List { kind, items, .. } => {
             for item in items {
-                let tentative = kind == AnswerUnitKind::RuledOut
-                    && has_phrase(&normalized(&item.text), NOT_REJECTED_PHRASES);
-                if item.text.is_empty() || tentative {
+                if item.text.is_empty() {
+                    continue;
+                }
+                if kind == AnswerUnitKind::RuledOut && is_tentative_rejection(&item.text) {
+                    units.omitted.push((
+                        kind,
+                        format!("tentative, not saved as ruled out: {}", opening(&item.text)),
+                    ));
                     continue;
                 }
                 if item.text.len() > MAX_UNIT_BYTES {
-                    units.omitted.push((kind, opening(&item.text)));
+                    units.omitted.push((
+                        kind,
+                        format!("too long to keep whole: {}", opening(&item.text)),
+                    ));
                     continue;
                 }
                 match kind {
@@ -393,11 +300,7 @@ fn finish(block: &mut Block, units: &mut AnswerUnits) {
             }
         }
         Block::Decision { mut unit, .. } => {
-            let choice = normalized(&unit.choice.text);
-            let unmade = UNMADE_CHOICES
-                .iter()
-                .any(|unmade| choice == *unmade || choice.starts_with(&format!("{unmade} ")));
-            if choice.is_empty() || unmade {
+            if unit.choice.text.trim().is_empty() || is_unmade_choice(&unit.choice.text) {
                 return;
             }
             if unit.reason.is_none()
@@ -419,9 +322,10 @@ fn finish(block: &mut Block, units: &mut AnswerUnits) {
                 unit.reason = Some(reason);
             }
             if unit.content().len() > MAX_UNIT_BYTES {
-                units
-                    .omitted
-                    .push((AnswerUnitKind::Decision, opening(&unit.choice.text)));
+                units.omitted.push((
+                    AnswerUnitKind::Decision,
+                    format!("too long to keep whole: {}", opening(&unit.choice.text)),
+                ));
             } else {
                 units.decisions.push(unit);
             }
@@ -479,61 +383,13 @@ fn labelled<'a>(line: &Line<'a>) -> Option<(Label, Line<'a>)> {
     }
     let body = body.trim_start_matches(['*', '_']);
     let (label, rest) = body.split_once(':')?;
-    let label = normalize(label.trim_end_matches(['*', '_']));
+    let kind = label_of(label.trim_end_matches(['*', '_']))?;
     let rest = rest.trim_start_matches(['*', '_']);
-    let kind = if CHOICE_LABELS.contains(&label.as_str()) {
-        Label::Choice
-    } else if REASON_LABELS.contains(&label.as_str()) {
-        Label::Reason
-    } else if ALTERNATIVE_LABELS.contains(&label.as_str()) {
-        Label::Alternatives
-    } else if RECONSIDER_LABELS.contains(&label.as_str()) {
-        Label::Reconsider
-    } else {
-        return None;
-    };
     // A choice needs its words on the same line; the other parts may follow on later lines.
     if kind == Label::Choice && rest.trim().is_empty() {
         return None;
     }
     Some((kind, line.tail(rest)))
-}
-
-/// The list a heading line introduces: a Markdown heading, a bold line, or a short line
-/// ending with a colon, with nothing after the colon.
-fn heading_kind(trimmed: &str) -> Option<AnswerUnitKind> {
-    if trimmed.len() > MAX_HEADING_BYTES
-        || list_item_body(trimmed).is_some()
-        || trimmed.starts_with(QUOTATION_OPENINGS)
-    {
-        return None;
-    }
-    let markdown = trimmed.starts_with('#');
-    let bold = trimmed.starts_with("**") || trimmed.starts_with("__");
-    let text = trimmed
-        .trim_start_matches('#')
-        .trim()
-        .trim_matches(['*', '_'])
-        .trim();
-    if !(markdown || bold || text.ends_with(':')) {
-        return None;
-    }
-    let words = normalized(text.trim_end_matches(':'));
-    if words.is_empty() || (text.contains(':') && !text.ends_with(':')) {
-        return None;
-    }
-    let ruled_out = has_phrase(&words, RULED_OUT_PHRASES) && !has_phrase(&words, TENTATIVE_PHRASES);
-    let open_check = has_phrase(&words, OPEN_CHECK_PHRASES);
-    match (ruled_out, open_check) {
-        (true, false) => Some(AnswerUnitKind::RuledOut),
-        (false, true) => Some(AnswerUnitKind::OpenCheck),
-        _ => None,
-    }
-}
-
-/// Normalized words, with typographic apostrophes read as plain ones.
-fn normalized(text: &str) -> String {
-    normalize(&text.replace('\u{2019}', "'"))
 }
 
 fn opening(text: &str) -> String {

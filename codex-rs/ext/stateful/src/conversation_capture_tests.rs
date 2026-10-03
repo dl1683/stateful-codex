@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use codex_extension_api::ExtensionData;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardKind;
+use codex_project_intelligence::CandidateLifecycle;
 use codex_project_intelligence::KnowledgeCategory as Category;
 use codex_project_intelligence::KnowledgeScope;
 use codex_project_intelligence::ScopeKind;
@@ -122,6 +123,7 @@ async fn stored(
             PROJECT_ID,
             categories,
             &[BlackboardKind::RejectedApproach],
+            CandidateLifecycle::Current,
             /*limit*/ 50,
         )
         .await
@@ -137,7 +139,7 @@ async fn stored(
                 .map(|payload| payload["details"].clone())
                 .unwrap_or(Value::Null);
             (
-                entry.entry.value.content,
+                entry.content,
                 context.as_ref().map(|context| context.category),
                 context.and_then(|context| context.scope_id),
                 details,
@@ -245,9 +247,9 @@ async fn a_completed_answer_saves_each_unit_once() {
     );
 }
 
-/// A model entry holding exactly one item's words becomes that member (no duplicate), a
-/// later answer listing the same items reports them as already saved, an item the user
-/// forgot is not restored, and a thread bound to an open investigation scopes its units.
+/// A model entry holding exactly one item's words becomes that member (no duplicate); once
+/// the user forgets both items (the host's and the model's), a later answer repeating them
+/// in an investigation restores neither, and its new item is saved in that investigation.
 #[tokio::test]
 async fn answers_reconcile_with_existing_memory() {
     let state_home = TempDir::new().expect("state home");
@@ -288,22 +290,22 @@ async fn answers_reconcile_with_existing_memory() {
     )
     .await;
     let saved = stored(&services, &[Category::RuledOut]).await;
-    let forgotten = store
-        .categorized_entries(PROJECT_ID, &[Category::RuledOut], &[], /*limit*/ 10)
+    // The user forgets both items: the host-saved one and the model's own matched entry.
+    let (current, _) = store
+        .categorized_entries(
+            PROJECT_ID,
+            &[Category::RuledOut],
+            &[],
+            CandidateLifecycle::Current,
+            /*limit*/ 10,
+        )
         .await
-        .expect("entries")
-        .0
-        .into_iter()
-        .find(|entry| entry.entry.value.content.contains("SHIPIT_CONFIG"))
-        .expect("saved item");
-    crate::memory_controls::forget_entry(
-        store,
-        PROJECT_ID,
-        &forgotten.entry.id,
-        forgotten.entry.revision,
-    )
-    .await
-    .expect("forget");
+        .expect("entries");
+    for forgotten in current {
+        crate::memory_controls::forget_entry(store, PROJECT_ID, &forgotten.id, forgotten.revision)
+            .await
+            .expect("forget");
+    }
     store
         .open_scope(&KnowledgeScope {
             project_id: PROJECT_ID.to_string(),
@@ -358,16 +360,14 @@ async fn answers_reconcile_with_existing_memory() {
             ],
             vec![
                 (KnowledgeCategory::RuledOut, [1, 1, 0, 0]),
-                // The forgotten item stays forgotten inside the investigation, the model
-                // write is already present, and the new item is saved there.
-                (KnowledgeCategory::RuledOut, [1, 1, 1, 0]),
+                (KnowledgeCategory::RuledOut, [1, 0, 2, 0]),
             ]
         )
     );
 }
 
-/// An interrupted turn (no completion) or a turn whose only message is commentary saves
-/// nothing.
+/// A turn whose only message is mid-turn commentary has no final answer to read. (Aborted
+/// and failed turns never reach this capture: only the completed-turn hook calls it.)
 #[tokio::test]
 async fn nothing_is_read_without_a_completed_answer() {
     let state_home = TempDir::new().expect("state home");

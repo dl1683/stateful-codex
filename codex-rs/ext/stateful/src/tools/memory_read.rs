@@ -147,9 +147,16 @@ impl MemoryReadTool {
         let store = self.services.blackboard().await.map_err(respond)?;
         let recall = match kind {
             Some(kind) => Some(
-                kind_recall(store, &self.project_id, &self.thread_id, kind, &terms)
-                    .await
-                    .map_err(respond)?,
+                kind_recall(
+                    store,
+                    &self.project_id,
+                    &self.thread_id,
+                    kind,
+                    &terms,
+                    since_ms,
+                )
+                .await
+                .map_err(respond)?,
             ),
             None => None,
         };
@@ -205,6 +212,8 @@ impl MemoryReadTool {
             };
             let mut next = start;
             for item in &recall.items[start..] {
+                let mut item = item.clone();
+                let page_empty = next == start;
                 if let Some(items) = result["requested"]["items"].as_array_mut() {
                     items.push(item.clone());
                 }
@@ -212,7 +221,24 @@ impl MemoryReadTool {
                     if let Some(items) = result["requested"]["items"].as_array_mut() {
                         items.pop();
                     }
-                    break;
+                    if !page_empty {
+                        break;
+                    }
+                    // No page can hold this item whole: cut it to what fits and say so, so
+                    // the cursor still moves on.
+                    let room = limit.saturating_sub(result.to_string().len() + 200);
+                    let content = item["content"].as_str().unwrap_or_default().to_string();
+                    item["content"] = json!(excerpt(&content, &[], room / 2));
+                    item["contentComplete"] = json!(false);
+                    if let Some(items) = result["requested"]["items"].as_array_mut() {
+                        items.push(item.clone());
+                    }
+                    if result.to_string().len() > limit {
+                        if let Some(items) = result["requested"]["items"].as_array_mut() {
+                            items.pop();
+                        }
+                        break;
+                    }
                 }
                 requested_ids.insert(item["entryId"].as_str().unwrap_or_default().to_string());
                 next += 1;
@@ -224,7 +250,12 @@ impl MemoryReadTool {
             coverage["startAt"] = json!(start);
             coverage["returned"] = json!(next - start);
             coverage["notReturnedBySize"] = json!(recall.items.len() - next);
-            coverage["complete"] = json!(start == 0 && next == recall.items.len() && !more);
+            let all_returned = start == 0 && next == recall.items.len() && !more;
+            let captures_whole = recall.coverage["capturesWithUnitsNotKept"]
+                .as_u64()
+                .is_some_and(|count| count == 0);
+            coverage["allItemsReturned"] = json!(all_returned);
+            coverage["complete"] = json!(all_returned && captures_whole);
             coverage["nextCursor"] = if next < recall.items.len() {
                 json!(format!("{}:{next}", recall.snapshot))
             } else {
@@ -236,7 +267,7 @@ impl MemoryReadTool {
                 );
             }
             result["requested"]["meaning"] = json!(
-                "every current item of the requested kind on the question's topic, whole groups in the order written; complete=false means more remain (pass nextCursor) or more existed than were read"
+                "every current item of the requested kind, items on the question's topic first and whole groups in the order written; allItemsReturned=false means more remain (pass nextCursor) or more existed than were read; complete also requires that no capture of this kind left units unsaved (see latestCapturesWithUnitsNotKept)"
             );
             requested_bytes = result.to_string().len().saturating_sub(before);
         }
@@ -317,7 +348,7 @@ impl MemoryReadTool {
                 .filter(|(count, _)| terms.is_empty() || *count > 0)
                 .collect::<Vec<_>>();
             // Stable: equal counts keep the newest-first order.
-            ranked.sort_by(|left, right| right.0.cmp(&left.0));
+            ranked.sort_by_key(|entry| std::cmp::Reverse(entry.0));
             // Matches beyond the hit cap are omitted too, not only unconsidered candidates.
             truncated = more || ranked.len() > MAX_SEARCH_HITS as usize;
             for (_, entry) in ranked.into_iter().take(MAX_SEARCH_HITS as usize) {
@@ -515,7 +546,7 @@ impl MemoryReadTool {
                 threads_with_more_turns += 1;
             }
         }
-        turns.sort_by(|left, right| right.0.cmp(&left.0));
+        turns.sort_by_key(|turn| std::cmp::Reverse(turn.0));
         let matched = turns.len();
         let turns = turns
             .into_iter()

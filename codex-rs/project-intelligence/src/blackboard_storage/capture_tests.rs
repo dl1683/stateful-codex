@@ -13,6 +13,7 @@ use crate::BlackboardProvenance;
 use crate::BlackboardProvenanceKind;
 use crate::BlackboardStore;
 use crate::BlackboardVerification;
+use crate::CandidateLifecycle;
 use crate::CaptureGroup;
 use crate::CaptureMember;
 use crate::CaptureSource;
@@ -208,6 +209,7 @@ async fn a_capture_commits_whole_and_replays_unchanged() {
         unit(2, "c"),
         CaptureUnit::Existing {
             id: model_write.id.clone(),
+            revision: model_write.revision,
             context: context(3),
         },
         CaptureUnit::Omitted {
@@ -349,6 +351,7 @@ async fn categorized_entries_are_read_before_any_ranking() {
             PROJECT_ID,
             &[KnowledgeCategory::RuledOut],
             &[BlackboardKind::RejectedApproach],
+            CandidateLifecycle::Current,
             /*limit*/ 10,
         )
         .await
@@ -357,7 +360,7 @@ async fn categorized_entries_are_read_before_any_ranking() {
         (
             entries
                 .iter()
-                .map(|entry| (entry.entry.id.to_string(), entry.context.is_some()))
+                .map(|entry| (entry.id.to_string(), entry.context.is_some()))
                 .collect::<Vec<_>>(),
             more
         ),
@@ -375,9 +378,91 @@ async fn categorized_entries_are_read_before_any_ranking() {
             PROJECT_ID,
             &[KnowledgeCategory::RuledOut],
             &[BlackboardKind::RejectedApproach],
+            CandidateLifecycle::Current,
             /*limit*/ 2,
         )
         .await
         .expect("read");
     assert_eq!((limited.len(), more), (2, true));
+    let (retired_entries, _) = store
+        .categorized_entries(
+            PROJECT_ID,
+            &[KnowledgeCategory::RuledOut],
+            &[BlackboardKind::RejectedApproach],
+            CandidateLifecycle::Retired,
+            /*limit*/ 10,
+        )
+        .await
+        .expect("read");
+    assert_eq!(
+        retired_entries
+            .iter()
+            .map(|entry| entry.id.to_string())
+            .collect::<Vec<_>>(),
+        vec![retired.id.to_string()]
+    );
+}
+
+/// Another source under a committed group's ID is refused; an entry that changed after its
+/// words were matched, or an identity now holding other words, is not counted as the unit.
+#[tokio::test]
+async fn changed_sources_and_entries_are_not_counted() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let store = store(&temp_dir).await;
+    store
+        .commit_capture(&group(), &source("digest-1"), vec![unit(0, "a")])
+        .await
+        .expect("commit");
+    let conflict = store
+        .commit_capture(&group(), &source("digest-2"), vec![unit(0, "a")])
+        .await
+        .map(|(committed, _)| committed.group.saved);
+    let model_write = store
+        .create_entry(
+            BlackboardEntryId::parse("model-write").expect("ID"),
+            value(BlackboardKind::RejectedApproach, "d"),
+        )
+        .await
+        .expect("model write");
+    store
+        .create_entry(
+            BlackboardEntryId::parse("ruled-out-b").expect("ID"),
+            value(BlackboardKind::Note, "b"),
+        )
+        .await
+        .expect("other kind under the identity");
+    let mut other = group();
+    other.group_id = "ruled-out-2".to_string();
+    let (committed, _) = store
+        .commit_capture(
+            &other,
+            &source("digest-3"),
+            vec![
+                CaptureUnit::Existing {
+                    id: model_write.id.clone(),
+                    revision: model_write.revision + 1,
+                    context: context(0),
+                },
+                unit(1, "b"),
+            ],
+        )
+        .await
+        .expect("commit");
+    assert_eq!(
+        (
+            conflict.map_err(|error| error.to_string()),
+            committed
+                .members
+                .iter()
+                .map(|member| member.outcome)
+                .collect::<Vec<_>>()
+        ),
+        (
+            Err(
+                crate::BlackboardStoreError::EntryIdentityConflict(GROUP_ID.to_string())
+                    .to_string()
+            ),
+            vec![MemberOutcome::Omitted, MemberOutcome::Omitted]
+        )
+    );
 }

@@ -125,7 +125,7 @@ pub(super) async fn committed_succession(
 /// Resolves references to the exact revisions to replace, refusing anything that is not
 /// current, not shown, or a user rule replaced by a non-rule.
 /// Why the model cannot close an open check without evidence.
-pub(super) const OPEN_CHECK_STAYS_OPEN: &str = "this open check stays open until evidence settles it: record what settles it with evidence (evidence_read receipts) and supersede the check with that entry; a passing run or a finished task does not close it";
+pub(super) const OPEN_CHECK_STAYS_OPEN: &str = "this open check stays open until evidence settles it: record what settles it as a sourceVerified entry with evidence_read receipts and supersede the check with that entry; a passing run or a finished task does not close it";
 
 pub(super) async fn resolve_superseded(
     store: &BlackboardStore,

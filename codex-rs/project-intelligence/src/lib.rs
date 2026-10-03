@@ -49,6 +49,7 @@ pub use blackboard::RootBlackboardQuery;
 pub use blackboard::RootPromotion;
 pub use blackboard_storage::BlackboardStore;
 pub use blackboard_storage::BlackboardStoreError;
+pub use blackboard_storage::CandidateLifecycle;
 pub use blackboard_storage::CategorizedEntry;
 pub use blackboard_storage::CompletionFence;
 pub use blackboard_storage::CreateOutcome;

@@ -2,7 +2,7 @@
 //! checks and decisions are saved by the host with no model memory call, and after more
 //! unrelated turns than the continuity window holds, one memory_read in a new thread returns
 //! every ruled-out item whole, in order, with complete coverage; the open check is still open
-//! and the decision keeps its recorded reason.
+//! and the decision keeps its recorded reason. A generic client cannot close the check.
 
 use std::collections::BTreeMap;
 
@@ -12,6 +12,7 @@ use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
@@ -147,6 +148,34 @@ async fn a_completed_answer_is_recalled_whole_after_unrelated_work() -> Result<(
             vec![json!("open")],
             vec![json!("recorded")],
         )
+    );
+    // A generic client cannot close the open check either.
+    let check = &checks["requested"]["items"][0];
+    let close_request_id = server
+        .send_request(
+            "blackboard/upsert",
+            Some(json!({
+                "projectId": project.project.id,
+                "entryId": check["entryId"],
+                "expectedRevision": check["revision"],
+                "kind": "question",
+                "content": check["content"],
+                "confidenceBasisPoints": 6_000,
+                "verification": "unverified",
+                "importance": "normal",
+                "rootPromotion": "notPromoted",
+                "evidence": [],
+                "provenance": {"kind": "agent", "sourceId": "client-close"},
+                "state": "tombstoned"
+            })),
+        )
+        .await?;
+    let refused = server
+        .read_stream_until_error_message(RequestId::Integer(close_request_id))
+        .await?;
+    assert_eq!(
+        refused.error.message,
+        "blackboard/upsert cannot close or reword an open check; the user can, with statefulMemory/correct or statefulMemory/forget"
     );
     assert!(
         field(&decisions, "content")[0]

@@ -289,8 +289,10 @@ impl BlackboardUpdateTool {
             }));
         }
         // An open check stays open until evidence settles it: the model cannot retire or
-        // reword it, and can replace it only with an entry that carries evidence. A passing
-        // run or a finished task does not close it; the user can, with /memory.
+        // reword it, and can replace it only with an entry whose evidence is current and
+        // source-verified. The host checks that the evidence is current, not that it answers
+        // the check. A passing run or a finished task does not close it; the user can, with
+        // /memory.
         let open_check = store
             .knowledge_context(&self.project_id, &id)
             .await
@@ -308,11 +310,16 @@ impl BlackboardUpdateTool {
                 } => {
                     let successor =
                         BlackboardEntryId::parse(successor_entry_id.as_str()).map_err(respond)?;
+                    // Settling evidence is current source-verified evidence, not any link.
                     store
-                        .get_entry(&self.project_id, &successor)
+                        .get_hit(&self.project_id, &successor)
                         .await
                         .map_err(respond)?
-                        .is_some_and(|successor| !successor.value.evidence.is_empty())
+                        .is_some_and(|successor| {
+                            !successor.entry.value.evidence.is_empty()
+                                && successor.effective_verification
+                                    == BlackboardVerification::SourceVerified
+                        })
                 }
             };
             if !settled {

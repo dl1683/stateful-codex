@@ -1,19 +1,23 @@
 //! Topic-first recall of one kind of knowledge (ruled-out items, decisions, open checks,
 //! rules, background) for `memory_read`, decided before any hit cap or byte budget.
 //!
-//! Every current entry of the kind is read first (bounded), whole capture groups are kept
-//! together in the order they were written, groups that mention the question's topic come
-//! first and the rest are left out, and the thread's own investigation leads. The result is
-//! an ordered list the caller pages through under its byte budget, with an honest count.
+//! Every current entry of the kind is read first (one bounded query), whole capture groups
+//! are kept together in the order they were written, groups that mention the question's
+//! topic come first and the rest follow them, the thread's own investigation leads, and
+//! items of ended investigations come last, marked historical. The result is an ordered list
+//! the caller pages through under its byte budget, with honest counts and the captures that
+//! could not keep every unit.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardStore;
+use codex_project_intelligence::CandidateLifecycle;
 use codex_project_intelligence::CategorizedEntry;
 use codex_project_intelligence::KnowledgeAuthority;
 use codex_project_intelligence::KnowledgeCategory;
+use codex_project_intelligence::KnowledgeScope;
 use codex_project_intelligence::KnowledgeValidity;
 use codex_project_intelligence::MAX_CATEGORIZED_ENTRIES;
 use codex_project_intelligence::MemberOutcome;
@@ -71,7 +75,9 @@ impl RecallKind {
             " chose ",
             " chosen ",
             " choice ",
-            " why ",
+            " why did we ",
+            " why do we ",
+            " why we ",
         ]) {
             Some(Self::Decision)
         } else if has(&[" rule ", " rules ", " instruction"]) {
@@ -93,6 +99,17 @@ impl RecallKind {
         }
     }
 
+    /// The capture-group kind answers record for this kind, when answers record it.
+    fn group_kind(self) -> Option<&'static str> {
+        match self {
+            Self::RuledOut => Some("ruledOut"),
+            Self::Decision => Some("decisions"),
+            Self::OpenCheck => Some("openChecks"),
+            Self::Rule => Some("rules"),
+            Self::Background => None,
+        }
+    }
+
     fn categories(self) -> (&'static [KnowledgeCategory], &'static [BlackboardKind]) {
         match self {
             Self::RuledOut => (
@@ -106,6 +123,9 @@ impl RecallKind {
         }
     }
 }
+
+/// Most captures with units not kept that a recall lists by name (the count covers all).
+const MAX_INCOMPLETE_CAPTURES: u32 = 5;
 
 /// Words that ask for a kind rather than name a topic.
 const INTENT_WORDS: &[&str] = &[
@@ -164,48 +184,54 @@ pub(super) struct KindRecall {
     pub(super) coverage: Value,
 }
 
-/// Every current item of `kind`, topic and investigation first, whole groups together.
+/// Every current item of `kind` (recorded since `since_ms` when given), topic and
+/// investigation first, whole groups together.
 pub(super) async fn kind_recall(
     store: &BlackboardStore,
     project_id: &str,
     thread_id: &str,
     kind: RecallKind,
     terms: &[String],
+    since_ms: Option<i64>,
 ) -> Result<KindRecall, String> {
     let (categories, legacy_kinds) = kind.categories();
-    let (entries, more) = store
+    let (mut entries, more) = store
         .categorized_entries(
             project_id,
             categories,
             legacy_kinds,
+            CandidateLifecycle::Current,
             MAX_CATEGORIZED_ENTRIES,
         )
         .await
         .map_err(|error| error.to_string())?;
+    if let Some(since) = since_ms {
+        entries.retain(|entry| entry.created_at_ms >= since);
+    }
     let scope = store
         .thread_scope(project_id, thread_id)
         .await
         .map_err(|error| error.to_string())?
         .filter(|scope| scope.state == ScopeState::Open);
-    let mut titles = HashMap::new();
+    let mut scopes = HashMap::new();
     for scope in store
         .scopes(project_id, /*state*/ None)
         .await
         .map_err(|error| error.to_string())?
     {
-        titles.insert(scope.scope_id, scope.title);
+        scopes.insert(scope.scope_id.clone(), scope);
     }
 
     // Groups in the order their newest member was written; a member listed by its capture
     // group follows that group's order even when an earlier group saved it first.
     let by_id = entries
         .iter()
-        .map(|candidate| (candidate.entry.id.to_string(), candidate))
+        .map(|candidate| (candidate.id.to_string(), candidate))
         .collect::<HashMap<_, _>>();
-    let mut groups: Vec<(Option<String>, Vec<&CategorizedEntry>)> = Vec::new();
+    let mut groups: Vec<Group<'_>> = Vec::new();
     let mut placed = HashSet::new();
     for candidate in &entries {
-        if placed.contains(&candidate.entry.id.to_string()) {
+        if placed.contains(&candidate.id.to_string()) {
             continue;
         }
         let group_id = candidate
@@ -213,9 +239,14 @@ pub(super) async fn kind_recall(
             .as_ref()
             .and_then(|context| context.group_id.clone());
         let mut members = Vec::new();
+        let mut not_kept = 0;
         if let Some(group_id) = &group_id
-            && let Ok(Some(capture)) = store.capture(project_id, group_id).await
+            && let Some(capture) = store
+                .capture(project_id, group_id)
+                .await
+                .map_err(|error| error.to_string())?
         {
+            not_kept = capture.group.omitted + capture.group.failed;
             for member in capture.members {
                 let listed = matches!(
                     member.outcome,
@@ -225,7 +256,7 @@ pub(super) async fn kind_recall(
                     .entry_id
                     .filter(|_| listed)
                     .and_then(|id| by_id.get(&id).copied())
-                    && placed.insert(entry.entry.id.to_string())
+                    && placed.insert(entry.id.to_string())
                 {
                     members.push(entry);
                 }
@@ -240,7 +271,7 @@ pub(super) async fn kind_recall(
                         .as_ref()
                         .is_some_and(|context| context.group_id.as_ref() == Some(group_id))
                 })
-                .filter(|other| placed.insert(other.entry.id.to_string()))
+                .filter(|other| placed.insert(other.id.to_string()))
                 .collect::<Vec<_>>();
             rest.sort_by_key(|other| {
                 other
@@ -250,10 +281,14 @@ pub(super) async fn kind_recall(
             });
             members.extend(rest);
         }
-        if placed.insert(candidate.entry.id.to_string()) {
+        if placed.insert(candidate.id.to_string()) {
             members.push(candidate);
         }
-        groups.push((group_id, members));
+        groups.push(Group {
+            id: group_id,
+            members,
+            not_kept,
+        });
     }
 
     let topic = terms
@@ -262,57 +297,64 @@ pub(super) async fn kind_recall(
         .cloned()
         .collect::<Vec<_>>();
     // A group is on the topic when any member, or the answer it came from, mentions it.
-    let on_topic = |members: &[&CategorizedEntry]| {
+    let on_topic = |group: &Group<'_>| {
         topic.is_empty()
-            || members.iter().any(|member| {
-                mentions_any(&member.entry.value.content, &topic)
+            || group.members.iter().any(|member| {
+                mentions_any(&member.content, &topic)
                     || mentions_any(&answer_opening(member), &topic)
             })
     };
-    let topic_matched = groups.iter().any(|(_, members)| on_topic(members));
-    // On-topic groups first (other groups only after them), then the thread's own
-    // investigation, then project-wide items, then other investigations.
-    let rank = |members: &[&CategorizedEntry]| {
-        let item_scope = members
-            .first()
-            .and_then(|member| member.context.as_ref())
-            .and_then(|context| context.scope_id.as_deref());
-        let scope_rank = match (item_scope, scope.as_ref()) {
+    let ended = |group: &Group<'_>| {
+        group_scope(group)
+            .and_then(|scope_id| scopes.get(scope_id))
+            .is_some_and(|scope| scope.state == ScopeState::Ended)
+    };
+    let topic_matched = groups.iter().any(on_topic);
+    // On-topic groups first (other groups only after them); then the thread's own
+    // investigation, project-wide items, other open investigations, and last items of
+    // investigations that ended.
+    let rank = |group: &Group<'_>| {
+        let scope_rank = match (group_scope(group), scope.as_ref()) {
+            _ if ended(group) => 3,
             (Some(item), Some(own)) if item == own.scope_id => 0,
             (None, _) => 1,
             (Some(_), _) => 2,
         };
-        (!on_topic(members), scope_rank)
+        (!on_topic(group), scope_rank)
     };
-    groups.sort_by_key(|(_, members)| rank(members));
+    groups.sort_by_key(|group| rank(group));
     let on_topic_items = groups
         .iter()
-        .filter(|(_, members)| on_topic(members))
-        .map(|(_, members)| members.len())
+        .filter(|group| on_topic(group))
+        .map(|group| group.members.len())
         .sum::<usize>();
 
     let mut items = Vec::new();
     let mut digest = Sha256::new();
-    let mut groups_shown = Vec::new();
-    for (group_id, members) in &groups {
-        if let Some(group_id) = group_id
-            && let Ok(Some(capture)) = store.capture(project_id, group_id).await
-        {
-            groups_shown.push(json!({
-                "groupId": group_id,
-                "source": capture.source.map(|source| source.locator),
-                "recognized": capture.group.recognized,
-                "saved": capture.group.saved,
-                "alreadyPresent": capture.group.already_present,
-                "notKept": capture.group.omitted + capture.group.failed,
-            }));
-        }
-        for member in members {
-            digest.update(member.entry.id.as_str());
-            digest.update(member.entry.revision.to_le_bytes());
-            items.push(item(member, group_id.as_deref(), &titles));
+    for group in &groups {
+        let ended = ended(group);
+        for member in &group.members {
+            digest.update(member.id.as_str());
+            digest.update(member.revision.to_le_bytes());
+            let mut item = item(member, group.id.as_deref(), &scopes);
+            if ended {
+                item["status"] = json!("historical: its investigation has ended");
+            }
+            if group.not_kept > 0 {
+                item["groupNotKept"] = json!(group.not_kept);
+            }
+            items.push(item);
         }
     }
+    // Captures of this kind that recognized units they could not keep, even when nothing
+    // of them was saved, so a complete page is never mistaken for a complete capture.
+    let (incomplete, incomplete_total) = match kind.group_kind() {
+        Some(group_kind) => store
+            .incomplete_captures(project_id, group_kind, MAX_INCOMPLETE_CAPTURES)
+            .await
+            .map_err(|error| error.to_string())?,
+        None => (Vec::new(), 0),
+    };
     let coverage = json!({
         "requestedKind": kind.name(),
         "topicTerms": topic,
@@ -322,16 +364,41 @@ pub(super) async fn kind_recall(
         } else {
             json!("no item of this kind mentions the topic; every current item of the kind is listed")
         },
+        "since": since_ms.map(crate::continuity::format_time),
         "threadInvestigation": scope.map(|scope| scope.title),
         "matching": items.len(),
         "moreOfThisKindThanRead": more,
-        "captureGroups": groups_shown,
+        "capturesWithUnitsNotKept": incomplete_total,
+        "latestCapturesWithUnitsNotKept": incomplete
+            .into_iter()
+            .map(|capture| json!({
+                "groupId": capture.group.group_id,
+                "source": capture.source.map(|source| source.locator),
+                "notKept": capture.group.omitted + capture.group.failed,
+            }))
+            .collect::<Vec<_>>(),
     });
     Ok(KindRecall {
         items,
         snapshot: format!("{:x}", digest.finalize())[..16].to_string(),
         coverage,
     })
+}
+
+/// Members of one capture group (or one entry outside any group), in source order.
+struct Group<'a> {
+    id: Option<String>,
+    members: Vec<&'a CategorizedEntry>,
+    /// Units the group's capture recognized but did not keep.
+    not_kept: u32,
+}
+
+fn group_scope<'a>(group: &Group<'a>) -> Option<&'a str> {
+    group
+        .members
+        .first()
+        .and_then(|member| member.context.as_ref())
+        .and_then(|context| context.scope_id.as_deref())
 }
 
 /// The opening of the answer a captured unit came from.
@@ -348,9 +415,8 @@ fn answer_opening(member: &CategorizedEntry) -> String {
 fn item(
     member: &CategorizedEntry,
     group_id: Option<&str>,
-    titles: &HashMap<String, String>,
+    scopes: &HashMap<String, KnowledgeScope>,
 ) -> Value {
-    let value = &member.entry.value;
     let context = member.context.as_ref();
     let said_by = match context.map(|context| context.authority) {
         Some(KnowledgeAuthority::HumanDirect) => "the user's own words",
@@ -372,17 +438,21 @@ fn item(
         .map(|payload| payload["details"].clone())
         .unwrap_or(Value::Null);
     let mut item = json!({
-        "entryId": member.entry.id.to_string(),
-        "revision": member.entry.revision,
-        // Whole: an entry is at most 4 KiB, and a page moves an item that does not fit to
-        // the next page rather than cutting it.
-        "content": value.content,
+        "entryId": member.id.to_string(),
+        "revision": member.revision,
+        // Whole: an entry is at most 4 KiB; a page moves an item that does not fit to the
+        // next page, and cuts (and says so) only an item no page could hold.
+        "content": member.content,
         "status": status,
         "saidBy": said_by,
-        "recorded": crate::continuity::format_time(member.entry.created_at_ms),
+        "recorded": crate::continuity::format_time(member.created_at_ms),
         "scope": context
             .and_then(|context| context.scope_id.as_ref())
-            .map(|scope_id| titles.get(scope_id).cloned().unwrap_or_else(|| scope_id.clone()))
+            .map(|scope_id| {
+                scopes
+                    .get(scope_id)
+                    .map_or_else(|| scope_id.clone(), |scope| scope.title.clone())
+            })
             .unwrap_or_else(|| "project-wide".to_string()),
     });
     if let Some(group_id) = group_id {
