@@ -77,8 +77,8 @@ fn summary(output: &dyn codex_extension_api::ToolOutput) -> serde_json::Value {
     })
 }
 
-/// A repeated record and a same-key replay save nothing new; the same wording with a
-/// different promotion, and new outcomes of any wording, are saved.
+/// A same-key replay saves nothing new; the same wording under a new key, the same
+/// wording with a different promotion, and new outcomes of any wording are saved.
 #[tokio::test]
 async fn identical_records_and_replays_are_no_ops_while_distinct_records_are_saved() {
     let state_home = TempDir::new().expect("state home");
@@ -126,8 +126,8 @@ async fn identical_records_and_replays_are_no_ops_while_distinct_records_are_sav
         [
             json!({"recorded": 1, "alreadyPresent": 0, "failed": 0, "errors": [null]}),
             json!({
-                "recorded": 2,
-                "alreadyPresent": 2,
+                "recorded": 3,
+                "alreadyPresent": 1,
                 "failed": 0,
                 "errors": [null, null, null, null],
             }),
@@ -136,7 +136,7 @@ async fn identical_records_and_replays_are_no_ops_while_distinct_records_are_sav
     assert_eq!(
         services.cost_ledger().take("turn-1"),
         crate::cost_attribution::CostCounters {
-            memory_records_already_present: 2,
+            memory_records_already_present: 1,
             ..Default::default()
         }
     );
@@ -256,7 +256,7 @@ async fn recipes_are_grounded_only_in_commands_the_host_saw_succeed() {
         ),
         (
             vec![
-                Some("current".to_string()),
+                Some("observed".to_string()),
                 Some("notObserved".to_string()),
                 Some("credentials".to_string()),
             ],
@@ -270,10 +270,10 @@ async fn recipes_are_grounded_only_in_commands_the_host_saw_succeed() {
     );
 }
 
-/// Identical recipe wording recorded after its command was seen succeeding gains that
-/// observation; a recipe that replaces an observed one never inherits its observation.
+/// A recipe that replaces an observed one is not reported as observed, and the packet does
+/// not let the replaced recipe's observation ground the new command.
 #[tokio::test]
-async fn recipe_grounding_follows_new_observations_and_never_passes_to_a_successor() {
+async fn a_successor_recipe_is_never_grounded_by_its_predecessors_observation() {
     let state_home = TempDir::new().expect("state home");
     let repo = TempDir::new().expect("repo");
     std::fs::create_dir_all(repo.path().join(".venv")).expect("venv");
@@ -289,7 +289,17 @@ async fn recipe_grounding_follows_new_observations_and_never_passes_to_a_success
         UserMessageRegistry::default(),
         VisibleRootRegistry::default(),
     );
-    let recipe = "Recipe: `.venv/python -m pytest tests/test_cli.py -q` runs the CLI tests.";
+    let mut command = crate::recipe_capture::ObservedCommand {
+        turn_id: "turn-1".to_string(),
+        call_id: "exec-1".to_string(),
+        script: ".venv/python -m pytest tests/test_cli.py -q".to_string(),
+        cwd: repo.path().to_path_buf(),
+        completed: None,
+    };
+    command.completed = crate::recipe_capture::capture_conditions(&command, /*at_ms*/ 1);
+    services
+        .observed_commands()
+        .keep("thread-1".to_string(), command);
     let history = || {
         ConversationHistory::new(vec![ResponseItem::FunctionCallOutput {
             id: None,
@@ -306,62 +316,28 @@ async fn recipe_grounding_follows_new_observations_and_never_passes_to_a_success
     let output_of = |output: Box<dyn codex_extension_api::ToolOutput>| {
         serde_json::from_str::<serde_json::Value>(&output.log_output()).expect("JSON output")
     };
-    let authority = |entry_id: &str| {
-        let services = services.clone();
-        let entry_id = entry_id.to_string();
-        async move {
-            services
-                .blackboard()
-                .await
-                .expect("blackboard")
-                .knowledge_context(
-                    "project-1",
-                    &codex_project_intelligence::BlackboardEntryId::parse(entry_id)
-                        .expect("entry id"),
-                )
-                .await
-                .expect("context loads")
-                .map(|context| context.authority)
-        }
-    };
-
-    let unseen = output_of(
+    let mut observed = record(
+        "recipe-1",
+        "fact",
+        "Recipe: `.venv/python -m pytest tests/test_cli.py -q` runs the CLI tests.",
+    );
+    observed["rootPromotion"] = json!("promoted");
+    let first = output_of(
         tool.handle_call(batch_call_with_history(
-            "unseen",
-            vec![record("recipe-1", "fact", recipe)],
+            "observed",
+            vec![observed],
             history(),
         ))
         .await
-        .expect("unseen recipe"),
+        .expect("observed recipe"),
     );
-    let entry_id = unseen["results"][0]["entryId"]
+    let entry_id = first["results"][0]["entryId"]
         .as_str()
         .expect("entry id")
         .to_string();
-    let before = authority(&entry_id).await;
-    let mut command = crate::recipe_capture::ObservedCommand {
-        turn_id: "turn-1".to_string(),
-        call_id: "exec-1".to_string(),
-        script: ".venv/python -m pytest tests/test_cli.py -q".to_string(),
-        cwd: repo.path().to_path_buf(),
-        completed: None,
-    };
-    command.completed = crate::recipe_capture::capture_conditions(&command, /*at_ms*/ 1);
-    services
-        .observed_commands()
-        .keep("thread-1".to_string(), command);
-    let again = output_of(
-        tool.handle_call(batch_call_with_history(
-            "again",
-            vec![record("recipe-2", "fact", recipe)],
-            history(),
-        ))
-        .await
-        .expect("same wording again"),
-    );
-    let after = authority(&entry_id).await;
-    let mut successor = record("recipe-3", "fact", "Recipe: `make test` runs every test.");
-    successor["supersedes"] = serde_json::json!([{"entryId": entry_id, "revision": 1}]);
+    let mut successor = record("recipe-2", "fact", "Recipe: `make test` runs every test.");
+    successor["rootPromotion"] = json!("promoted");
+    successor["supersedes"] = json!([{"entryId": entry_id, "revision": 1}]);
     let replaced = output_of(
         tool.handle_call(batch_call_with_history(
             "replace",
@@ -371,31 +347,29 @@ async fn recipe_grounding_follows_new_observations_and_never_passes_to_a_success
         .await
         .expect("successor recipe"),
     );
-    let successor_id = replaced["results"][0]["entryId"]
-        .as_str()
-        .expect("successor id")
-        .to_string();
+    let store = services.blackboard().await.expect("blackboard");
+    let projection = store
+        .root_projection(codex_project_intelligence::RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 16,
+        })
+        .await
+        .expect("root projection");
+    let checks =
+        crate::recipe_applicability::check_root_recipes(store, "project-1", &projection).await;
 
     assert_eq!(
         (
-            unseen["results"][0]["recipe"]
+            first["results"][0]["recipe"]
                 .as_str()
                 .and_then(|label| label.split(' ').next()),
-            before,
-            again["alreadyPresent"].clone(),
-            after,
-            replaced["results"][0]["recipe"]
-                .as_str()
-                .and_then(|label| label.split(' ').next()),
-            authority(&successor_id).await,
+            replaced["results"][0]["recipe"].clone(),
+            checks.into_values().collect::<Vec<_>>(),
         ),
         (
-            Some("notObserved"),
-            None,
-            json!(1),
-            Some(codex_project_intelligence::KnowledgeAuthority::HostObserved),
-            Some("notObserved"),
-            Some(codex_project_intelligence::KnowledgeAuthority::AssistantReported),
+            Some("observed"),
+            serde_json::Value::Null,
+            vec![crate::recipe_applicability::RecipeCheck::NotObserved],
         )
     );
 }

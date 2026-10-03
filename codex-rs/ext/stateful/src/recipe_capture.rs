@@ -265,6 +265,12 @@ pub(crate) fn carries_credentials(command: &str) -> bool {
         || words
             .windows(2)
             .any(|pair| matches!(pair, ["-u" | "--user", value] if value.contains(':')))
+        || words.iter().any(|word| {
+            (word.starts_with("-u") || word.starts_with("--user="))
+                && word.len() > 2
+                && word.contains(':')
+                && !word.contains("://")
+        })
 }
 
 /// The backticked commands a recipe names, each trimmed.

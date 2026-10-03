@@ -315,7 +315,7 @@ fn recipes_are_labelled_with_whether_they_still_apply() {
     assert_eq!(
         labels,
         vec![
-            "current (seen succeeding with this executable and manifests; reuse it, do not set up another environment)",
+            "observed (seen exiting 0 with this launcher and these manifests; the interpreter, environment and import target are not verified)",
             "needsCheck (uv.lock changed since; check once, then reuse what works)",
             "unchecked (check once)",
         ]

@@ -136,9 +136,10 @@ async fn parallel_first_reads_in_an_unindexed_project_return_every_file() -> Res
     Ok(())
 }
 
-/// Recording the same decision again, in a later call or as a replay, saves nothing new.
+/// Replaying a recorded decision's key saves nothing new; the same wording under a new key
+/// is recorded, because only an already-bound key is acknowledged as present.
 #[tokio::test]
-async fn a_repeated_decision_is_already_present() -> Result<()> {
+async fn a_replayed_decision_key_is_already_present() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let root = TempDir::new()?;
@@ -199,7 +200,7 @@ async fn a_repeated_decision_is_already_present() -> Result<()> {
         [first?, again?, replay?],
         [
             (json!(1), json!(0)),
-            (json!(0), json!(1)),
+            (json!(1), json!(0)),
             (json!(0), json!(1)),
         ]
     );

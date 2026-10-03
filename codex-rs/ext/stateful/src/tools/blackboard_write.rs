@@ -305,7 +305,9 @@ impl BlackboardRecorder {
                 "userQuote and ruleScope apply to kind instruction only",
             ));
         }
-        if is_recipe(kind, &content) && recipe_commands(&content).any(carries_credentials) {
+        if is_recipe(kind, &content)
+            && (carries_credentials(&content) || recipe_commands(&content).any(carries_credentials))
+        {
             return Err(respond(
                 "credentials: a recipe must not store passwords, tokens or keys; record it with a placeholder such as $TOKEN",
             ));
@@ -407,13 +409,9 @@ impl BlackboardRecorder {
                     });
                 }
             }
-            let recipe = agent_record::ground_successor(
-                &self.services,
-                store,
-                &source,
-                &succession.successor,
-            )
-            .await;
+            // A replacing recipe keeps the compatible context its succession carried; it
+            // gains no new grounding, so it is never reported as observed here.
+            let recipe = None;
             (succession.successor, recipe)
         };
         if let Some(event_sink) = &self.event_sink {

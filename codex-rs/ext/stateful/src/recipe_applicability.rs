@@ -47,10 +47,10 @@ impl RecipeCheck {
     pub(crate) fn label(&self) -> String {
         match self {
             Self::Current => {
-                "current (seen succeeding with this executable and manifests; reuse it, do not set up another environment)".to_string()
+                "observed (seen exiting 0 with this launcher and these manifests; the interpreter, environment and import target are not verified)".to_string()
             }
             Self::CurrentExitUnconfirmed => {
-                "ran (exit status unseen; check once, then reuse it)".to_string()
+                "ran (exit status unseen; the interpreter, environment and import target are not verified)".to_string()
             }
             Self::NeedsCheck(reason) => {
                 format!("needsCheck ({reason}; check once, then reuse what works)")

@@ -60,14 +60,14 @@ enum FirstRead {
 /// whether the file was (re)indexed.
 ///
 /// A file with a current entry is read without the project's index permit, so a running
-/// project refresh never delays it. Only when the file needs indexing does the read take
-/// the permit. Both steps share one foreground deadline; work still running past it stays
-/// owned by its task, and the caller is told it is pending.
+/// project refresh never delays it; that read is awaited directly, never detached. Only
+/// when the file needs indexing does the read take the permit, within the foreground
+/// deadline; indexing still running past it stays owned by its task, and the caller is
+/// told it is pending.
 pub(super) async fn read_explicit(
     services: &ProjectIntelligenceServices,
     read: ExplicitRead,
 ) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
-    let started = Instant::now();
     let unavailable = |error: String| status("indexUnavailable", error);
     let reader = EvidenceReader::new(
         services
@@ -85,18 +85,9 @@ pub(super) async fn read_explicit(
             ),
         )
     };
-    let first = tokio::spawn(first_read(reader.clone(), read.clone()));
-    let (project_root, request) = match tokio::time::timeout(EXPLICIT_FILE_DEADLINE, first).await {
-        Err(_) => return Err(pending("reading")),
-        Ok(Err(error)) => {
-            return Err(unavailable(format!(
-                "reading {relative_path} stopped unexpectedly ({error}). {READ_DIRECTLY}"
-            )));
-        }
-        Ok(Ok(result)) => match result? {
-            FirstRead::Current(result) => return Ok((*result, false)),
-            FirstRead::NeedsIndex(project_root, request) => (project_root, request),
-        },
+    let (project_root, request) = match first_read(reader.clone(), read.clone()).await? {
+        FirstRead::Current(result) => return Ok((*result, false)),
+        FirstRead::NeedsIndex(project_root, request) => (project_root, request),
     };
     let indexer = ProjectIndexer::new(
         services
@@ -120,7 +111,7 @@ pub(super) async fn read_explicit(
         .index_gates()
         .run(
             &read.project_id,
-            EXPLICIT_FILE_DEADLINE.saturating_sub(started.elapsed()),
+            EXPLICIT_FILE_DEADLINE,
             move |cancellation| index_and_reread(reader, indexer, file, request, cancellation),
         )
         .await;
@@ -185,6 +176,10 @@ async fn index_and_reread(
     cancellation: IndexCancellation,
 ) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
     let relative_path = file.relative_path.clone();
+    // A read queued behind another may find the file indexed by it already.
+    if let Ok(result) = reader.read(request.clone()).await {
+        return Ok((result, false));
+    }
     match indexer.refresh_file_cancellable(file, cancellation).await {
         Ok(_) => {}
         Err(ProjectIndexerError::SourceNotIndexed(_)) => {

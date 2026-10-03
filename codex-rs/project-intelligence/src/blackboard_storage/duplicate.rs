@@ -3,7 +3,6 @@
 use crate::BlackboardEntry;
 use crate::BlackboardEntryId;
 use crate::BlackboardEntryState;
-use crate::BlackboardProvenanceKind;
 use crate::ChangeRecord;
 use crate::KnowledgeContext;
 use crate::NewBlackboardEntry;
@@ -13,7 +12,6 @@ use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::CreateOutcome;
 use super::insert_new_entry;
-use super::kind_name;
 use super::knowledge::append_change;
 use super::knowledge::write_context;
 use super::load_entry;
@@ -21,12 +19,11 @@ use super::load_entry_by_id;
 
 impl BlackboardStore {
     /// Creates an agent-recorded entry with its optional context and its journal row in one
-    /// writer transaction, unless the same record is already current knowledge: a replay of
-    /// `id`, or an active agent entry of the same project with the same kind, wording, node,
-    /// structured value, verification, promotion, evidence and premises. Confidence,
-    /// importance and the recording call do not make a record new. A new host observation
-    /// supplied with an already-present record replaces that entry's context, so identical
-    /// wording can still acquire fresh grounding; nothing else is written for it.
+    /// writer transaction. A replay of `id` (same project, kind, wording, node, structured
+    /// value, verification, promotion, evidence and premises, from any call) is already
+    /// present and writes nothing. Only an already-bound key is acknowledged this way: the
+    /// same wording under a new key is a new record, because acknowledging it without a
+    /// durable key binding would let that key later insert a different body.
     pub async fn create_agent_entry(
         &self,
         id: BlackboardEntryId,
@@ -44,38 +41,8 @@ impl BlackboardStore {
             {
                 return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
             }
-            refresh_context(&mut transaction, &existing, context.as_ref()).await?;
             transaction.commit().await?;
             return Ok((existing, CreateOutcome::AlreadyPresent));
-        }
-        if value.provenance.kind == BlackboardProvenanceKind::Agent {
-            let candidates = sqlx::query_scalar::<_, String>(
-                "SELECT entry.id
-                 FROM blackboard_entries AS entry
-                 JOIN blackboard_entry_revisions AS revision
-                   ON revision.entry_id = entry.id AND revision.revision = entry.revision
-                 WHERE entry.project_id = ? AND revision.state = 'active'
-                   AND revision.provenance_kind = 'agent'
-                   AND revision.kind = ? AND revision.content = ?
-                 ORDER BY entry.created_at_ms, entry.id",
-            )
-            .bind(&value.project_id)
-            .bind(kind_name(value.kind))
-            .bind(&value.content)
-            .fetch_all(&mut *transaction)
-            .await?;
-            for candidate in candidates {
-                let candidate = BlackboardEntryId::parse(candidate)
-                    .map_err(BlackboardStoreError::InvalidEntry)?;
-                if let Some(existing) =
-                    load_entry(&mut transaction, &value.project_id, &candidate).await?
-                    && same_record(&existing.value, &value)
-                {
-                    refresh_context(&mut transaction, &existing, context.as_ref()).await?;
-                    transaction.commit().await?;
-                    return Ok((existing, CreateOutcome::AlreadyPresent));
-                }
-            }
         }
         let now = unix_timestamp_millis()?;
         insert_new_entry(&mut transaction, &id, &value, now).await?;
@@ -96,26 +63,6 @@ impl BlackboardStore {
         transaction.commit().await?;
         Ok((entry, CreateOutcome::Created))
     }
-}
-
-async fn refresh_context(
-    connection: &mut sqlx::SqliteConnection,
-    existing: &BlackboardEntry,
-    context: Option<&KnowledgeContext>,
-) -> Result<(), BlackboardStoreError> {
-    let Some(context) = context else {
-        return Ok(());
-    };
-    let revision =
-        i64::try_from(existing.revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
-    write_context(
-        connection,
-        &existing.value.project_id,
-        &existing.id,
-        revision,
-        context,
-    )
-    .await
 }
 
 fn same_record(existing: &NewBlackboardEntry, new: &NewBlackboardEntry) -> bool {
