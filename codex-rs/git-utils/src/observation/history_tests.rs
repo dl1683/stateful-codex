@@ -12,6 +12,7 @@ use super::GitCommitRange;
 use super::GitWorktreePaths;
 use super::changed_paths;
 use super::commits_between;
+use super::paths_changed_between;
 use super::staged_changes;
 use crate::observation::GitObservationBudget;
 use crate::observation::probe::REPOSITORY_SELECTOR_VARIABLES;
@@ -218,5 +219,33 @@ async fn staged_changes_name_the_staged_blob() {
             first == second
         ),
         (true, true, false)
+    );
+}
+
+#[tokio::test]
+async fn changed_paths_keep_git_spelling_and_list_both_sides_of_a_rename() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let path = temp_dir.path();
+    git(path, &["init", "-q", "-b", "main"]);
+    let base = commit(path, "Old Name.txt", "one");
+    std::fs::write(path.join("keep.txt"), "keep").expect("write");
+    git(path, &["add", "keep.txt"]);
+    git(path, &["mv", "Old Name.txt", "New Name.txt"]);
+    git(path, &["commit", "-q", "-m", "rename"]);
+    let head = GitSha::new(&git(path, &["rev-parse", "HEAD"]));
+    let root = AbsolutePathBuf::from_absolute_path(path).expect("absolute");
+
+    let mut paths = paths_changed_between(&root, &base, &head, &budget())
+        .await
+        .expect("paths");
+    paths.sort();
+
+    assert_eq!(
+        paths,
+        vec![
+            "New Name.txt".to_string(),
+            "Old Name.txt".to_string(),
+            "keep.txt".to_string(),
+        ]
     );
 }

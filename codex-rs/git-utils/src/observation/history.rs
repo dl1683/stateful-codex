@@ -226,6 +226,46 @@ pub async fn staged_changes(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// The repository-relative paths that differ between commits `earlier` and `later`, in Git's
+/// spelling, NUL-framed so tabs and newlines in names survive. Renames are listed as their old
+/// and new paths. External diff drivers and text conversion are not run. The output is capped
+/// at 64 KiB (an overflow is `OutputLimit`), and a non-UTF-8 name is `InvalidOutput`.
+pub async fn paths_changed_between(
+    root: &AbsolutePathBuf,
+    earlier: &GitSha,
+    later: &GitSha,
+    budget: &GitObservationBudget,
+) -> Result<Vec<String>, GitObservationFailure> {
+    let output = run(
+        root.as_path(),
+        &[
+            "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "-z",
+            "--end-of-options",
+            &earlier.0,
+            &later.0,
+            "--",
+        ],
+        budget,
+        GitCommandOutputCap::Metadata,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(command_failed(&output));
+    }
+    let text =
+        String::from_utf8(output.stdout).map_err(|_| GitObservationFailure::InvalidOutput)?;
+    Ok(text
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 async fn run(
     cwd: &Path,
     args: &[&str],
