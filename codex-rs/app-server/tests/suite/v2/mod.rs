@@ -137,6 +137,7 @@ mod stateful_checkpoint;
 mod stateful_code_mode;
 mod stateful_compaction;
 mod stateful_completion;
+mod stateful_conversation_capture;
 mod stateful_decisions;
 mod stateful_evidence_routes;
 mod stateful_memory;

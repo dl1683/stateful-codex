@@ -9,6 +9,7 @@ mod conversation_read;
 mod evidence;
 mod memory_read;
 mod obligation;
+mod recall_plan;
 mod run;
 mod run_read;
 mod steering;
@@ -78,6 +79,7 @@ pub(super) fn project_intelligence_tools(
         )),
         Arc::new(memory_read::MemoryReadTool::new(
             project_id.clone(),
+            thread_id.clone(),
             services.clone(),
             projects.clone(),
         )),

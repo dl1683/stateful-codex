@@ -44,6 +44,8 @@ use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
+use super::recall_plan::RecallKind;
+use super::recall_plan::kind_recall;
 use super::respond;
 
 const TOOL_NAME: &str = "memory_read";
@@ -67,6 +69,8 @@ const MAX_ANSWER_BYTES: usize = 480;
 const RESERVED_BYTES: usize = 900;
 /// Serialized bytes entries may use before turns are added.
 const ENTRY_BUDGET_BYTES: usize = 5_000;
+/// Serialized bytes a first page of one requested kind leaves for matching turns.
+const TURN_RESERVE_BYTES: usize = 1_500;
 const ANSWER_LABEL: &str =
     "assistant's final answer (reported history, not evidence of the user's preferences)";
 
@@ -86,10 +90,13 @@ struct MemoryReadArguments {
     question: Option<String>,
     since: Option<String>,
     include_history: Option<bool>,
+    kind: Option<RecallKind>,
+    cursor: Option<String>,
 }
 
 pub(super) struct MemoryReadTool {
     project_id: String,
+    thread_id: String,
     services: ProjectIntelligenceServices,
     threads: Arc<dyn ThreadStore>,
 }
@@ -97,11 +104,13 @@ pub(super) struct MemoryReadTool {
 impl MemoryReadTool {
     pub(super) fn new(
         project_id: String,
+        thread_id: String,
         services: ProjectIntelligenceServices,
         threads: Arc<dyn ThreadStore>,
     ) -> Self {
         Self {
             project_id,
+            thread_id,
             services,
             threads,
         }
@@ -123,17 +132,47 @@ impl MemoryReadTool {
             .map(parse_utc_day)
             .transpose()
             .map_err(respond)?;
-        if terms.is_empty() && since_ms.is_none() {
+        let kind = arguments.kind.or_else(|| {
+            arguments
+                .question
+                .as_deref()
+                .and_then(RecallKind::of_question)
+        });
+        if terms.is_empty() && since_ms.is_none() && kind.is_none() {
             return Err(respond(
-                "pass a question with content words, or since (YYYY-MM-DD, UTC), or both",
+                "pass a question with content words, or since (YYYY-MM-DD, UTC), or a kind",
             ));
         }
         let include_history = arguments.include_history.unwrap_or(true);
         let store = self.services.blackboard().await.map_err(respond)?;
-        let (groups, knowledge_truncated) = self
-            .knowledge(store, &terms, since_ms, include_history)
-            .await?;
-        let (turns, coverage) = self.conversation(&terms, since_ms).await;
+        let recall = match kind {
+            Some(kind) => Some(
+                kind_recall(store, &self.project_id, &self.thread_id, kind, &terms)
+                    .await
+                    .map_err(respond)?,
+            ),
+            None => None,
+        };
+        // A cursor continues the requested kind only; the rest was in the first page. A
+        // bare kind has nothing else to search for.
+        let continuing = arguments.cursor.is_some();
+        let kind_only = continuing || (terms.is_empty() && since_ms.is_none());
+        if continuing && recall.is_none() {
+            return Err(respond(
+                "a cursor continues a recall of one kind; pass the same kind or question with it",
+            ));
+        }
+        let (groups, knowledge_truncated) = if kind_only {
+            (Vec::new(), false)
+        } else {
+            self.knowledge(store, &terms, since_ms, include_history)
+                .await?
+        };
+        let (turns, coverage) = if kind_only {
+            (Vec::new(), json!({}))
+        } else {
+            self.conversation(&terms, since_ms).await
+        };
 
         let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let mut result = json!({
@@ -143,11 +182,78 @@ impl MemoryReadTool {
             "coverage": coverage,
             "use": "This evidence needs no confirmation read. Read more only when an omitted part is critical to the answer: conversation_read with a threadId and turnId for a full turn, evidence_read for an entry's source, git show for a commit.",
         });
+        let mut requested_ids = HashSet::new();
+        let mut requested_bytes = 0usize;
+        if let Some(recall) = &recall {
+            result["requested"] = json!({"items": [], "coverage": recall.coverage});
+            let before = result.to_string().len();
+            let reserve = if kind_only { 0 } else { TURN_RESERVE_BYTES };
+            let limit = budget
+                .saturating_sub(RESERVED_BYTES)
+                .saturating_sub(reserve);
+            let (start, restarted) = match arguments
+                .cursor
+                .as_deref()
+                .map(|cursor| cursor.split_once(':'))
+            {
+                Some(Some((snapshot, offset))) if snapshot == recall.snapshot => (
+                    offset.parse::<usize>().unwrap_or(0).min(recall.items.len()),
+                    false,
+                ),
+                Some(_) => (0, true),
+                None => (0, false),
+            };
+            let mut next = start;
+            for item in &recall.items[start..] {
+                if let Some(items) = result["requested"]["items"].as_array_mut() {
+                    items.push(item.clone());
+                }
+                if result.to_string().len() > limit {
+                    if let Some(items) = result["requested"]["items"].as_array_mut() {
+                        items.pop();
+                    }
+                    break;
+                }
+                requested_ids.insert(item["entryId"].as_str().unwrap_or_default().to_string());
+                next += 1;
+            }
+            let more = recall.coverage["moreOfThisKindThanRead"]
+                .as_bool()
+                .unwrap_or(false);
+            let coverage = &mut result["requested"]["coverage"];
+            coverage["startAt"] = json!(start);
+            coverage["returned"] = json!(next - start);
+            coverage["notReturnedBySize"] = json!(recall.items.len() - next);
+            coverage["complete"] = json!(start == 0 && next == recall.items.len() && !more);
+            coverage["nextCursor"] = if next < recall.items.len() {
+                json!(format!("{}:{next}", recall.snapshot))
+            } else {
+                Value::Null
+            };
+            if restarted {
+                coverage["cursorNote"] = json!(
+                    "memory of this kind changed since that page; listed again from the first item"
+                );
+            }
+            result["requested"]["meaning"] = json!(
+                "every current item of the requested kind on the question's topic, whole groups in the order written; complete=false means more remain (pass nextCursor) or more existed than were read"
+            );
+            requested_bytes = result.to_string().len().saturating_sub(before);
+        }
+        // The requested kind spends the entry budget first; other matches get what is left.
         let entry_limit = budget
             .saturating_sub(RESERVED_BYTES)
-            .min(ENTRY_BUDGET_BYTES + result.to_string().len());
+            .min(ENTRY_BUDGET_BYTES.saturating_sub(requested_bytes) + result.to_string().len());
         let mut omitted_entries = 0usize;
         for group in &groups {
+            // A group the requested kind already shows whole is not repeated; a group with
+            // history beside it stays whole so its "replaced by" reads in context.
+            if group
+                .iter()
+                .all(|item| requested_ids.contains(item["entryId"].as_str().unwrap_or_default()))
+            {
+                continue;
+            }
             for item in group {
                 if let Some(entries) = result["entries"].as_array_mut() {
                     entries.push(item.clone());
@@ -179,6 +285,10 @@ impl MemoryReadTool {
         if !fits_response(&result, budget) {
             result["entries"] = json!([]);
             result["turns"] = json!([]);
+            if result.get("requested").is_some() {
+                result["requested"]["items"] = json!([]);
+                result["requested"]["coverage"]["complete"] = json!(false);
+            }
             result["coverage"]["note"] = json!("the result budget was too small for any item");
         }
         bounded_json_output(&call, result)
@@ -628,7 +738,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "One recall of earlier work when the packet and conversation lack the answer: what was decided and why, what changed, a summary since a date. Returns matching knowledge with status (current, replaced, retired), what it replaced, source and dates, plus matching earlier turns, in one result; its evidence needs no confirmation read. Do not chain reads; skip it when the packet already answers.".to_string(),
+            description: "One recall of earlier work when the packet and conversation lack the answer: what was decided and why, what was ruled out, what is still open, what changed, a summary since a date. Asking about one kind (or passing kind) lists every current item of it, topic first, whole, with a cursor when more remain. Returns matching knowledge with status (current, replaced, retired), what it replaced, source and dates, plus matching earlier turns, in one result; its evidence needs no confirmation read. Do not chain reads; skip it when the packet already answers.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -636,7 +746,9 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
                 "properties": {
                     "question": {"type": "string"},
                     "since": {"type": "string", "description": "YYYY-MM-DD (UTC)"},
-                    "includeHistory": {"type": "boolean"}
+                    "includeHistory": {"type": "boolean"},
+                    "kind": {"type": "string", "enum": ["ruledOut", "decision", "openCheck", "rule", "background"]},
+                    "cursor": {"type": "string", "description": "nextCursor of the previous page"}
                 },
                 "additionalProperties": false
             }))

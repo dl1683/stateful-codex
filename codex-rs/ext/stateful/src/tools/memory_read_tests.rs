@@ -165,6 +165,7 @@ async fn matches_of_one_chain_share_a_group_and_since_filters_first() {
         .expect("C");
     let tool = super::MemoryReadTool::new(
         "project-1".to_string(),
+        "thread-1".to_string(),
         services.clone(),
         std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
     );
@@ -243,6 +244,7 @@ async fn a_long_chain_joins_the_group_that_already_shows_it() {
     }
     let tool = super::MemoryReadTool::new(
         "project-1".to_string(),
+        "thread-1".to_string(),
         services.clone(),
         std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
     );
@@ -296,6 +298,7 @@ async fn since_matches_beyond_the_hit_cap_are_reported() {
     }
     let tool = super::MemoryReadTool::new(
         "project-1".to_string(),
+        "thread-1".to_string(),
         services.clone(),
         std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
     );
@@ -355,6 +358,7 @@ async fn older_matches_first_still_reach_the_current_entry() {
     }
     let tool = super::MemoryReadTool::new(
         "project-1".to_string(),
+        "thread-1".to_string(),
         services.clone(),
         std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
     );
@@ -403,6 +407,7 @@ async fn replaced_entries_keep_their_own_authorship() {
         .expect("B");
     let tool = super::MemoryReadTool::new(
         "project-1".to_string(),
+        "thread-1".to_string(),
         services.clone(),
         std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
     );
