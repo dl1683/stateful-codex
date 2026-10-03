@@ -1,5 +1,6 @@
 use sqlx::SqliteConnection;
 
+use super::IndexCancellation;
 use super::ProjectIndexer;
 use super::ProjectIndexerError;
 
@@ -41,4 +42,23 @@ pub(super) async fn require_current(
         return Ok(());
     }
     Err(ProjectIndexerError::SupersededRefresh)
+}
+
+/// What every publication transaction of one index operation checks under the writer
+/// lock before it commits: the operation was not cancelled and is still the newest one.
+#[derive(Clone, Copy)]
+pub(super) struct PublicationFence<'a> {
+    pub(super) generation: RefreshGeneration,
+    pub(super) cancellation: &'a IndexCancellation,
+}
+
+impl PublicationFence<'_> {
+    pub(super) async fn check(
+        &self,
+        connection: &mut SqliteConnection,
+        project_id: &str,
+    ) -> Result<(), ProjectIndexerError> {
+        self.cancellation.check()?;
+        require_current(connection, project_id, self.generation).await
+    }
 }

@@ -16,7 +16,7 @@ mod regions;
 mod scan;
 
 pub use cancellation::IndexCancellation;
-use generation::RefreshGeneration;
+use generation::PublicationFence;
 use publish::mark_file_missing;
 use publish::publish_file;
 use scan::normalized_relative_path;
@@ -35,12 +35,6 @@ use crate::NodeLifecycle;
 use crate::ProjectRelativePath;
 use crate::storage::create_node_in_transaction;
 use crate::storage::unix_timestamp_millis;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PublicationFence {
-    Targeted,
-    FullRefresh(RefreshGeneration),
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectIndexRequest {
@@ -140,14 +134,15 @@ impl ProjectIndexer {
                 .ok_or(ProjectIndexerError::CountOverflow)
         })?;
         let publication_started = Instant::now();
-        let mut report = self
-            .publish_refresh(request, scan, generation, &cancellation)
-            .await?;
+        let fence = PublicationFence {
+            generation,
+            cancellation: &cancellation,
+        };
+        let mut report = self.publish_refresh(request, scan, fence).await?;
         report.regions_indexed = regions_indexed;
         report.scan_duration_ms = scan_duration_ms;
         report.publication_duration_ms = elapsed_millis(publication_started);
-        cancellation.check()?;
-        self.record_refresh_status(&project_id, &report, generation)
+        self.record_refresh_status(&project_id, &report, fence)
             .await?;
         Ok(report)
     }
@@ -156,13 +151,11 @@ impl ProjectIndexer {
         &self,
         request: ProjectIndexRequest,
         scan: scan::ScanResult,
-        generation: RefreshGeneration,
-        cancellation: &IndexCancellation,
+        fence: PublicationFence<'_>,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         let project_id = request.project_id.clone();
-        cancellation.check()?;
         let mut generation_check = self.context_map.begin_immediate().await?;
-        generation::require_current(&mut generation_check, &project_id, generation).await?;
+        fence.check(&mut generation_check, &project_id).await?;
         generation_check.commit().await?;
         let inventory_complete = scan.inventory_complete;
         let region_coverage_complete = scan
@@ -171,7 +164,7 @@ impl ProjectIndexer {
             .all(|file| file.coverage == crate::ContextMapCoverage::Complete);
         let project_node_id = stable_id("project", &[&project_id])?;
         self.create_node(
-            PublicationFence::FullRefresh(generation),
+            fence,
             project_node_id.clone(),
             NewHierarchyNode {
                 project_id: project_id.clone(),
@@ -190,7 +183,7 @@ impl ProjectIndexer {
             let root_text = root.display().to_string();
             let root_id = stable_id("root", &[&project_id, &root_text])?;
             self.create_node(
-                PublicationFence::FullRefresh(generation),
+                fence,
                 root_id.clone(),
                 NewHierarchyNode {
                     project_id: project_id.clone(),
@@ -209,7 +202,6 @@ impl ProjectIndexer {
         let mut directory_nodes = HashMap::new();
         let mut seen_files = HashSet::new();
         for file in scan.files {
-            cancellation.check()?;
             let root_id = root_nodes
                 .get(&file.project_root)
                 .ok_or(ProjectIndexerError::UnrecognizedRoot)?;
@@ -220,22 +212,14 @@ impl ProjectIndexer {
                     root_id,
                     &file.relative_path,
                     &mut directory_nodes,
-                    PublicationFence::FullRefresh(generation),
+                    fence,
                 )
                 .await?;
             let file_id = stable_id(
                 "file",
                 &[&project_id, &file.project_root, &file.relative_path],
             )?;
-            publish_file(
-                self,
-                &project_id,
-                &file_id,
-                parent_id,
-                &file,
-                PublicationFence::FullRefresh(generation),
-            )
-            .await?;
+            publish_file(self, &project_id, &file_id, parent_id, &file, fence).await?;
             seen_files.insert(file_id);
         }
 
@@ -252,10 +236,9 @@ impl ProjectIndexer {
             publication_duration_ms: 0,
         };
         if scan.inventory_complete {
-            cancellation.check()?;
             for root_id in root_nodes.values() {
                 report.missing_files += self
-                    .mark_missing_files(&project_id, root_id, &seen_files, generation)
+                    .mark_missing_files(&project_id, root_id, &seen_files, fence)
                     .await?;
             }
         }
@@ -266,7 +249,25 @@ impl ProjectIndexer {
         &self,
         request: ProjectIndexFileRequest,
     ) -> Result<ProjectIndexReport, ProjectIndexerError> {
+        self.refresh_file_cancellable(request, IndexCancellation::default())
+            .await
+    }
+
+    /// Indexes one file. It claims a refresh generation like a full refresh, so an older
+    /// operation of either kind can no longer publish over it, and every publication
+    /// transaction checks `cancellation` and that generation under the writer lock.
+    pub async fn refresh_file_cancellable(
+        &self,
+        request: ProjectIndexFileRequest,
+        cancellation: IndexCancellation,
+    ) -> Result<ProjectIndexReport, ProjectIndexerError> {
         validate_file_request(&request)?;
+        cancellation.check()?;
+        let generation = generation::claim(self, &request.project_id).await?;
+        let fence = PublicationFence {
+            generation,
+            cancellation: &cancellation,
+        };
         let project_id = request.project_id;
         let project_root = request.project_root;
         let relative_path = request.relative_path;
@@ -296,8 +297,7 @@ impl ProjectIndexer {
                 return Err(ProjectIndexerError::IdentityConflict(file_id.to_string()));
             }
             let missing_files = if existing.lifecycle == NodeLifecycle::Active {
-                self.mark_missing(&project_id, existing, PublicationFence::Targeted)
-                    .await?;
+                self.mark_missing(&project_id, existing, fence).await?;
                 1
             } else {
                 0
@@ -317,36 +317,36 @@ impl ProjectIndexer {
         let regions_indexed =
             u64::try_from(file.regions.len()).map_err(|_| ProjectIndexerError::CountOverflow)?;
         let project_node_id = stable_id("project", &[&project_id])?;
-        self.hierarchy
-            .create_node(
-                project_node_id.clone(),
-                NewHierarchyNode {
-                    project_id: project_id.clone(),
-                    parent_id: None,
-                    kind: NodeKind::Project,
-                    project_root: None,
-                    relative_path: ProjectRelativePath::root(),
-                    region_anchor: None,
-                    source_fingerprint: None,
-                },
-            )
-            .await?;
+        self.create_node(
+            fence,
+            project_node_id.clone(),
+            NewHierarchyNode {
+                project_id: project_id.clone(),
+                parent_id: None,
+                kind: NodeKind::Project,
+                project_root: None,
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
         let project_root = project_root_text;
         let root_id = stable_id("root", &[&project_id, &project_root])?;
-        self.hierarchy
-            .create_node(
-                root_id.clone(),
-                NewHierarchyNode {
-                    project_id: project_id.clone(),
-                    parent_id: Some(project_node_id),
-                    kind: NodeKind::Directory,
-                    project_root: Some(project_root.clone()),
-                    relative_path: ProjectRelativePath::root(),
-                    region_anchor: None,
-                    source_fingerprint: None,
-                },
-            )
-            .await?;
+        self.create_node(
+            fence,
+            root_id.clone(),
+            NewHierarchyNode {
+                project_id: project_id.clone(),
+                parent_id: Some(project_node_id),
+                kind: NodeKind::Directory,
+                project_root: Some(project_root.clone()),
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await?;
         let mut directory_nodes = HashMap::new();
         let parent_id = self
             .ensure_parent_directories(
@@ -355,18 +355,10 @@ impl ProjectIndexer {
                 &root_id,
                 relative_path.as_str(),
                 &mut directory_nodes,
-                PublicationFence::Targeted,
+                fence,
             )
             .await?;
-        publish_file(
-            self,
-            &project_id,
-            &file_id,
-            parent_id,
-            &file,
-            PublicationFence::Targeted,
-        )
-        .await?;
+        publish_file(self, &project_id, &file_id, parent_id, &file, fence).await?;
         Ok(ProjectIndexReport {
             inventory_complete: true,
             region_coverage_complete: file.coverage == crate::ContextMapCoverage::Complete,
@@ -384,12 +376,12 @@ impl ProjectIndexer {
         &self,
         project_id: &str,
         report: &ProjectIndexReport,
-        generation: RefreshGeneration,
+        fence: PublicationFence<'_>,
     ) -> Result<(), ProjectIndexerError> {
         let count =
             |value: u64| i64::try_from(value).map_err(|_| ProjectIndexerError::CountOverflow);
         let mut transaction = self.context_map.begin_immediate().await?;
-        generation::require_current(&mut transaction, project_id, generation).await?;
+        fence.check(&mut transaction, project_id).await?;
         sqlx::query(
             "INSERT INTO project_index_refresh_status (
                 project_id, inventory_complete, region_coverage_complete,
@@ -427,21 +419,16 @@ impl ProjectIndexer {
 
     async fn create_node(
         &self,
-        fence: PublicationFence,
+        fence: PublicationFence<'_>,
         id: HierarchyNodeId,
         value: NewHierarchyNode,
     ) -> Result<HierarchyNode, ProjectIndexerError> {
-        match fence {
-            PublicationFence::Targeted => Ok(self.hierarchy.create_node(id, value).await?),
-            PublicationFence::FullRefresh(generation) => {
-                let project_id = value.project_id.clone();
-                let mut transaction = self.context_map.begin_immediate().await?;
-                generation::require_current(&mut transaction, &project_id, generation).await?;
-                let node = create_node_in_transaction(&mut transaction, &id, value).await?;
-                transaction.commit().await?;
-                Ok(node)
-            }
-        }
+        let project_id = value.project_id.clone();
+        let mut transaction = self.context_map.begin_immediate().await?;
+        fence.check(&mut transaction, &project_id).await?;
+        let node = create_node_in_transaction(&mut transaction, &id, value).await?;
+        transaction.commit().await?;
+        Ok(node)
     }
 
     async fn ensure_parent_directories(
@@ -451,7 +438,7 @@ impl ProjectIndexer {
         root_id: &HierarchyNodeId,
         relative_file: &str,
         cache: &mut HashMap<(String, String), HierarchyNodeId>,
-        fence: PublicationFence,
+        fence: PublicationFence<'_>,
     ) -> Result<HierarchyNodeId, ProjectIndexerError> {
         let path = Path::new(relative_file);
         let Some(parent) = path.parent() else {
@@ -493,7 +480,7 @@ impl ProjectIndexer {
         project_id: &str,
         root_id: &HierarchyNodeId,
         seen_files: &HashSet<HierarchyNodeId>,
-        generation: RefreshGeneration,
+        fence: PublicationFence<'_>,
     ) -> Result<u64, ProjectIndexerError> {
         let mut missing = 0_u64;
         let mut pending = vec![root_id.clone()];
@@ -506,12 +493,7 @@ impl ProjectIndexer {
                         if child.lifecycle == NodeLifecycle::Active
                             && !seen_files.contains(&child.id)
                         {
-                            self.mark_missing(
-                                project_id,
-                                child,
-                                PublicationFence::FullRefresh(generation),
-                            )
-                            .await?;
+                            self.mark_missing(project_id, child, fence).await?;
                             missing = missing
                                 .checked_add(1)
                                 .ok_or(ProjectIndexerError::CountOverflow)?;
@@ -527,7 +509,7 @@ impl ProjectIndexer {
         &self,
         project_id: &str,
         file: HierarchyNode,
-        fence: PublicationFence,
+        fence: PublicationFence<'_>,
     ) -> Result<(), ProjectIndexerError> {
         mark_file_missing(self, project_id, &file.id, fence).await
     }
@@ -597,6 +579,8 @@ pub enum ProjectIndexerError {
     SupersededRefresh,
     #[error("project index operation was cancelled before it finished")]
     Cancelled,
+    #[error("source is too large to index on demand: {0}")]
+    FileTooLarge(String),
     #[error(transparent)]
     Hierarchy(#[from] HierarchyStoreError),
     #[error(transparent)]

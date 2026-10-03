@@ -20,6 +20,8 @@ use super::regions::ScannedRegion;
 use super::regions::scan_regions;
 
 const MAX_FILES: usize = 20_000;
+/// Largest file one targeted refresh fingerprints; larger files are reported, not read.
+pub(super) const MAX_TARGETED_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const EXCERPT_BYTES: usize = 64 * 1024;
 const MAX_DESCRIPTION_BYTES: usize = 2_048;
 const MAX_ROUTING_TERMS: usize = 32;
@@ -152,10 +154,12 @@ pub(super) fn scan_project_file(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    if !canonical_path.starts_with(&canonical_root)
-        || !std::fs::metadata(&canonical_path)?.is_file()
-    {
+    let metadata = std::fs::metadata(&canonical_path)?;
+    if !canonical_path.starts_with(&canonical_root) || !metadata.is_file() {
         return Err(ProjectIndexerError::InvalidRoot);
+    }
+    if metadata.len() > MAX_TARGETED_FILE_BYTES {
+        return Err(ProjectIndexerError::FileTooLarge(relative_path.to_string()));
     }
     scan_file(root, &path).map(Some)
 }

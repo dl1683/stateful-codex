@@ -153,7 +153,7 @@ Threshold: 60
     assert_eq!(
         (guarded, path_read.content, source_refreshed),
         (
-            Err("source bytes read do not match the indexed fingerprint; the source changed after indexing. Refresh the affected file; query again if you need the corresponding region.".to_string()),
+            Err("sourceChanged: source bytes read do not match the indexed fingerprint; the source changed after indexing. Read it again by relativePath; query again if you need the corresponding region.".to_string()),
             "Threshold: 60
 ".to_string(),
             true,
@@ -806,4 +806,50 @@ async fn a_deleted_indexed_file_is_reported_not_found() {
         .expect_err("deleted file");
 
     assert_eq!(error.split(':').next(), Some("notFound"));
+}
+
+/// The root is chosen from the filesystem before the index is consulted: a path present
+/// under two roots is ambiguous even when only one of them is indexed, and a path indexed
+/// under both but now present under one resolves to that root.
+#[tokio::test]
+async fn root_choice_uses_the_filesystem_not_partial_or_stale_index_rows() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let first = TempDir::new().expect("first root");
+    let second = TempDir::new().expect("second root");
+    std::fs::write(first.path().join("x.py"), "FIRST = 1\n").expect("first copy");
+    std::fs::write(second.path().join("x.py"), "SECOND = 2\n").expect("second copy");
+    let tool = source_tool(&state_home);
+    ProjectIndexer::new(
+        tool.services.hierarchy().await.expect("hierarchy").clone(),
+        tool.services
+            .context_map()
+            .await
+            .expect("context map")
+            .clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![first.path().to_path_buf()],
+    })
+    .await
+    .expect("index only the first root");
+    let roots = vec![first.path().to_path_buf(), second.path().to_path_buf()];
+
+    let partially_indexed = tool
+        .read_with_refresh(roots.clone(), whole_file("x.py"), 1024)
+        .await
+        .map(|_| ())
+        .map_err(model_error)
+        .expect_err("present under both roots");
+    std::fs::remove_file(first.path().join("x.py")).expect("remove first copy");
+    let now_unique = tool
+        .read_with_refresh(roots, whole_file("x.py"), 1024)
+        .await
+        .map(|(read, _)| read.content)
+        .map_err(model_error);
+
+    assert_eq!(
+        (partially_indexed.split(':').next(), now_unique),
+        (Some("ambiguousRoot"), Ok("SECOND = 2\n".to_string()))
+    );
 }

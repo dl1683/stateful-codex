@@ -229,6 +229,10 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
         description: description.to_string(),
         coverage: ContextMapCoverage::Complete,
     };
+    let generation = super::generation::claim(&indexer, "project-1")
+        .await
+        .expect("targeted publication claims a generation");
+    let cancellation = IndexCancellation::default();
     let failed = super::publish::publish_file(
         &indexer,
         "project-1",
@@ -247,7 +251,10 @@ async fn failed_file_publication_preserves_the_complete_previous_generation() {
                 conflicting_region("facts.md:1-1 | duplicate_anchor"),
             ],
         },
-        PublicationFence::Targeted,
+        PublicationFence {
+            generation,
+            cancellation: &cancellation,
+        },
     )
     .await;
     assert!(failed.is_err());
@@ -339,8 +346,10 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
         .publish_refresh(
             request.clone(),
             failed_scan,
-            failed_generation,
-            &super::IndexCancellation::default(),
+            PublicationFence {
+                generation: failed_generation,
+                cancellation: &IndexCancellation::default(),
+            },
         )
         .await
         .expect("incomplete inventory should publish without deletion reconciliation");
@@ -359,7 +368,14 @@ async fn transient_read_failure_does_not_reconcile_the_unread_file_as_missing() 
         }
     );
     indexer
-        .record_refresh_status("project-1", &report, failed_generation)
+        .record_refresh_status(
+            "project-1",
+            &report,
+            PublicationFence {
+                generation: failed_generation,
+                cancellation: &IndexCancellation::default(),
+            },
+        )
         .await
         .expect("incomplete refresh health should persist");
     let refresh = HierarchyStore::open(&sqlite)
@@ -478,8 +494,10 @@ async fn older_paused_refresh_cannot_publish_after_newer_refresh_completes() {
         .publish_refresh(
             request,
             older_scan,
-            older_generation,
-            &super::IndexCancellation::default(),
+            PublicationFence {
+                generation: older_generation,
+                cancellation: &IndexCancellation::default(),
+            },
         )
         .await
         .expect_err("older publisher should be rejected");
@@ -597,4 +615,136 @@ async fn cancelled_refresh_publishes_nothing_and_a_later_refresh_succeeds() {
     );
     let report = indexer.refresh(request).await.expect("later refresh");
     assert_eq!(report.files_indexed, 1);
+}
+
+fn fixture_request(root: &TempDir) -> ProjectIndexRequest {
+    ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    }
+}
+
+/// Cancellation is checked inside every publication transaction: a scan finished before
+/// the cancel cannot publish afterwards, and a cancelled targeted refresh indexes nothing.
+#[tokio::test]
+async fn cancelled_operations_publish_nothing_after_the_cancel() {
+    let state_home = TempDir::new().expect("state home");
+    let root = TempDir::new().expect("project root");
+    fs::write(root.path().join("notes.md"), "# Notes\nkept\n").expect("write source");
+    let sqlite = SqliteConfig::new_for_testing(state_home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let request = fixture_request(&root);
+    let scan = super::scan::scan_roots(&request.roots, &IndexCancellation::default())
+        .expect("scan completes before the cancel");
+    let generation = super::generation::claim(&indexer, "project-1")
+        .await
+        .expect("generation");
+    let cancellation = IndexCancellation::default();
+    cancellation.cancel();
+
+    let full = indexer
+        .publish_refresh(
+            request,
+            scan,
+            PublicationFence {
+                generation,
+                cancellation: &cancellation,
+            },
+        )
+        .await;
+    let targeted = indexer
+        .refresh_file_cancellable(
+            ProjectIndexFileRequest {
+                project_id: "project-1".to_string(),
+                project_root: root.path().to_path_buf(),
+                relative_path: ProjectRelativePath::parse("notes.md").expect("path"),
+            },
+            cancellation.clone(),
+        )
+        .await;
+
+    assert!(matches!(full, Err(ProjectIndexerError::Cancelled)));
+    assert!(matches!(targeted, Err(ProjectIndexerError::Cancelled)));
+    assert!(
+        !context_map
+            .has_entries("project-1")
+            .await
+            .expect("entries load")
+    );
+}
+
+/// Targeted and full refreshes share one generation sequence: whichever started later
+/// wins, and the older one cannot publish over it.
+#[tokio::test]
+async fn targeted_and_full_refreshes_fence_each_other() {
+    let state_home = TempDir::new().expect("state home");
+    let root = TempDir::new().expect("project root");
+    fs::write(root.path().join("notes.md"), "# Notes\nfirst\n").expect("write source");
+    let sqlite = SqliteConfig::new_for_testing(state_home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy, context_map);
+    let request = fixture_request(&root);
+    let file_request = ProjectIndexFileRequest {
+        project_id: "project-1".to_string(),
+        project_root: root.path().to_path_buf(),
+        relative_path: ProjectRelativePath::parse("notes.md").expect("path"),
+    };
+    let cancellation = IndexCancellation::default();
+
+    // An older full refresh scanned, then a newer targeted refresh published.
+    let old_scan = super::scan::scan_roots(&request.roots, &cancellation).expect("old scan");
+    let old_full = super::generation::claim(&indexer, "project-1")
+        .await
+        .expect("old generation");
+    indexer
+        .refresh_file(file_request.clone())
+        .await
+        .expect("newer targeted refresh");
+    let stale_full = indexer
+        .publish_refresh(
+            request.clone(),
+            old_scan,
+            PublicationFence {
+                generation: old_full,
+                cancellation: &cancellation,
+            },
+        )
+        .await;
+
+    // An older targeted operation cannot publish after a newer full refresh.
+    let old_targeted = super::generation::claim(&indexer, "project-1")
+        .await
+        .expect("old targeted generation");
+    indexer.refresh(request).await.expect("newer full refresh");
+    let project_node = stable_id("project", &["project-1"]).expect("project node");
+    let stale_targeted = indexer
+        .create_node(
+            PublicationFence {
+                generation: old_targeted,
+                cancellation: &cancellation,
+            },
+            project_node,
+            NewHierarchyNode {
+                project_id: "project-1".to_string(),
+                parent_id: None,
+                kind: NodeKind::Project,
+                project_root: None,
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await;
+
+    assert!(matches!(
+        stale_full,
+        Err(ProjectIndexerError::SupersededRefresh)
+    ));
+    assert!(matches!(
+        stale_targeted,
+        Err(ProjectIndexerError::SupersededRefresh)
+    ));
 }

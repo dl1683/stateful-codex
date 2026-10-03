@@ -234,56 +234,39 @@ impl EvidenceReadTool {
         locator: EvidenceReadLocator,
         max_bytes: u32,
     ) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
-        let reader =
-            EvidenceReader::new(self.services.context_map().await.map_err(respond)?.clone());
-        let refresh_source = match &locator {
+        match locator {
+            // Only an explicit path is (re)indexed: a guarded route fails closed so an old
+            // evidence claim never silently receives new bytes.
             EvidenceReadLocator::Source {
                 project_root,
                 relative_path,
-                ..
-            } => Some((project_root.clone(), relative_path.clone())),
-            EvidenceReadLocator::ContextMapRoute(_) => None,
-        };
-        let request = EvidenceReadRequest {
-            project_id: self.project_id.clone(),
-            project_roots: project_roots.clone(),
-            locator,
-            max_bytes,
-        };
-        match reader.read(request.clone()).await {
-            Ok(result) => Ok((result, false)),
-            Err(
-                error @ (EvidenceReadError::SourceChanged
-                | EvidenceReadError::SourceNotCurrent(
-                    ContextMapFreshness::Stale | ContextMapFreshness::SourceUnavailable,
-                )
-                | EvidenceReadError::SourceNotIndexed(_)),
-            ) => {
-                // Only an explicit path is refreshed: a guarded route fails closed so an old
-                // evidence claim never silently receives new bytes.
-                let Some((requested_root, relative_path)) = refresh_source else {
-                    return Err(read_error(error));
-                };
-                let project_root = evidence_refresh::source_root(
-                    &project_roots,
-                    requested_root.as_ref(),
-                    &relative_path,
-                )
-                .await?;
-                evidence_refresh::refresh_explicit_file(
+                line_range,
+            } => {
+                evidence_refresh::read_explicit(
                     &self.services,
-                    &self.project_id,
-                    project_root,
-                    relative_path,
+                    evidence_refresh::ExplicitRead {
+                        project_id: self.project_id.clone(),
+                        project_roots,
+                        requested_root: project_root,
+                        relative_path,
+                        line_range,
+                        max_bytes,
+                    },
                 )
-                .await?;
-                reader
-                    .read(request)
+                .await
+            }
+            locator @ EvidenceReadLocator::ContextMapRoute(_) => {
+                EvidenceReader::new(self.services.context_map().await.map_err(respond)?.clone())
+                    .read(EvidenceReadRequest {
+                        project_id: self.project_id.clone(),
+                        project_roots,
+                        locator,
+                        max_bytes,
+                    })
                     .await
-                    .map(|result| (result, true))
+                    .map(|result| (result, false))
                     .map_err(read_error)
             }
-            Err(error) => Err(read_error(error)),
         }
     }
 }
@@ -397,7 +380,7 @@ fn is_route_item_wrapper(arguments: &str) -> bool {
 }
 
 /// Model-facing failure text: the reader's diagnosis plus this tool's next action.
-fn read_error(error: EvidenceReadError) -> FunctionCallError {
+pub(super) fn read_error(error: EvidenceReadError) -> FunctionCallError {
     let next = match &error {
         EvidenceReadError::RouteNotFound(_) => {
             "Obtain a route from context_map_query or context_map_refresh and pass item.evidenceRoute unchanged, or read a known relativePath."
@@ -412,7 +395,12 @@ fn read_error(error: EvidenceReadError) -> FunctionCallError {
             "Refresh the affected source, then query again for the current region before using a guarded route."
         }
         EvidenceReadError::SourceChanged => {
-            "Refresh the affected file; query again if you need the corresponding region."
+            return evidence_refresh::status(
+                "sourceChanged",
+                format!(
+                    "{error}. Read it again by relativePath; query again if you need the corresponding region."
+                ),
+            );
         }
         EvidenceReadError::SourceNotIndexed(_) => {
             "The index has no current entry for it. Read it directly instead; an evidence receipt is optional."
@@ -429,15 +417,17 @@ fn read_error(error: EvidenceReadError) -> FunctionCallError {
         | EvidenceReadError::RootOutsideProject
         | EvidenceReadError::InvalidRegionAnchor
         | EvidenceReadError::UnsupportedRegionAnchor(_)
-        | EvidenceReadError::AmbiguousSource(_)
         | EvidenceReadError::SourceOutsideRoot
         | EvidenceReadError::CountOverflow
         | EvidenceReadError::ContextMap(_)
         | EvidenceReadError::Io(_)
         | EvidenceReadError::ReadTask(_) => return respond(error),
+        EvidenceReadError::AmbiguousSource(_) => {
+            return evidence_refresh::status("ambiguousRoot", error);
+        }
         EvidenceReadError::NonUtf8Source => {
             return evidence_refresh::status(
-                "nonText",
+                "nonTextOrTooLarge",
                 format!("{error}. Inspect it with a binary-aware command if needed."),
             );
         }
