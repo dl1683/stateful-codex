@@ -297,6 +297,12 @@ const BACKGROUND_OPENINGS: &[&str] = &[
 /// Clauses of `text` in which the user describes themselves or the whole work, in their
 /// words. Questions, rules and relayed speech are not background.
 pub(crate) fn background_statements(text: &str) -> Vec<String> {
+    // A message that quotes or shows code anywhere may carry someone else's words on any
+    // line, so it contributes no background at all; missing a statement costs less than
+    // attributing a stranger's self-description to the user.
+    if quotes_or_shows_code(text) {
+        return Vec::new();
+    }
     let rules = marked_rules(text)
         .into_iter()
         .map(|rule| rule.text)
@@ -356,6 +362,26 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
         })
         .map(str::to_string)
         .collect()
+}
+
+/// Whether `text` holds a quotation (double or curly quotes, or a single quote opening a
+/// word) or code (backticks or a fence).
+fn quotes_or_shows_code(text: &str) -> bool {
+    if text.contains([
+        '"', '\u{201c}', '\u{201d}', '\u{2018}', '`', '\u{ab}', '\u{bb}',
+    ]) || text.contains("~~~")
+    {
+        return true;
+    }
+    // An apostrophe inside a word ("I'm") is not a quotation; one opening a word is.
+    let mut previous = ' ';
+    for character in text.chars() {
+        if matches!(character, '\'' | '\u{2019}') && !previous.is_alphanumeric() {
+            return true;
+        }
+        previous = character;
+    }
+    false
 }
 
 /// The scope a non-item line gives the list items after it. A header nested inside a list

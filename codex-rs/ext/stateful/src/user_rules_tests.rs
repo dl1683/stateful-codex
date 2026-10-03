@@ -310,7 +310,8 @@ fn quoted_fenced_and_relayed_text_is_not_background_and_requests_stay_requests()
             super::asks_about_rules("List the preferences I gave you for all our work."),
             super::asks_about_rules("From now on, repeat my instructions word for word."),
         ),
-        (vec!["I know Go well.".to_string()], true, false)
+        // The quoted and fenced lines make the whole message contribute no background.
+        (Vec::<String>::new(), true, false)
     );
 }
 
@@ -323,6 +324,25 @@ fn background_skips_lines_that_quote_show_code_or_relay() {
             ),
             super::asks_about_rules("- List the preferences I gave you for all our work."),
         ),
-        (vec!["I'm a teacher.".to_string()], true)
+        (Vec::<String>::new(), true)
+    );
+}
+
+#[test]
+fn a_message_that_quotes_anywhere_contributes_no_background() {
+    assert_eq!(
+        [
+            "Translate \u{2018}I know Python. I'm a beginner.\u{2019}",
+            "Translate \"I know Python.\nI'm a beginner.\nI work as a nurse.\" into French.",
+            "Translate 'I know Python.\nI'm a beginner.'",
+            "I'm a teacher.",
+        ]
+        .map(super::background_statements),
+        [
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec!["I'm a teacher.".to_string()],
+        ]
     );
 }
