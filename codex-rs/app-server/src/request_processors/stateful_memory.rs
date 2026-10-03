@@ -24,6 +24,7 @@ use codex_project_intelligence::ProjectIndexer;
 use codex_protocol::ThreadId;
 use codex_stateful_extension::AddOutcome;
 use codex_stateful_extension::BlackboardEntityKind;
+use codex_stateful_extension::ControlOrigin;
 use codex_stateful_extension::MemoryAddition;
 use codex_stateful_extension::MemoryControlError;
 use codex_stateful_extension::MemorySection;
@@ -114,6 +115,10 @@ impl BlackboardRequestProcessor {
             &project_id,
             &id,
             params.expected_revision,
+            &ControlOrigin {
+                thread_id: params.thread_id.clone(),
+                action_id: None,
+            },
         )
         .await
         .map_err(control_error)?;
@@ -140,6 +145,10 @@ impl BlackboardRequestProcessor {
             &id,
             params.expected_revision,
             &params.content,
+            &ControlOrigin {
+                thread_id: params.thread_id.clone(),
+                action_id: None,
+            },
         )
         .await
         .map_err(control_error)?;
@@ -187,6 +196,7 @@ impl BlackboardRequestProcessor {
             addition,
             &params.content,
             &params.client_action_id,
+            &params.thread_id,
         )
         .await
         .map_err(control_error)?;
@@ -235,7 +245,10 @@ impl BlackboardRequestProcessor {
     }
 
     /// The project of a thread, including one whose project is still pending persistence.
-    async fn thread_project(&self, raw_thread_id: &str) -> Result<String, JSONRPCErrorError> {
+    pub(super) async fn thread_project(
+        &self,
+        raw_thread_id: &str,
+    ) -> Result<String, JSONRPCErrorError> {
         let thread_id = ThreadId::from_string(raw_thread_id)
             .map_err(|_| invalid_params("threadId must be a valid thread ID"))?;
         if let Some(project_id) = self

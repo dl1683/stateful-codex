@@ -100,6 +100,8 @@ pub enum KnowledgeCategory {
     Finding,
     /// What the user said about themselves or the whole work, in their words.
     Background,
+    /// A commit remembered from the workspace history; who made it is not known.
+    Commit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

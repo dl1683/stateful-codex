@@ -12,13 +12,18 @@ use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::KnowledgeAuthority;
+use codex_project_intelligence::KnowledgeCategory as PiCategory;
+use codex_project_intelligence::KnowledgeContext;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RootPromotion;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::memory_controls::ControlOrigin;
 use crate::memory_controls::MAX_CORRECTION_BYTES;
 use crate::memory_controls::MemoryControlError;
 use crate::memory_controls::USER_BACKGROUND_ID_PREFIX;
@@ -63,6 +68,7 @@ pub async fn add_entry(
     addition: MemoryAddition,
     content: &str,
     action_id: &str,
+    thread_id: &str,
 ) -> Result<(BlackboardEntry, AddOutcome), MemoryControlError> {
     let content = content.trim();
     let non_empty = |value: &Option<String>| {
@@ -89,6 +95,16 @@ pub async fn add_entry(
         )));
     }
     let source_id = format!("memory-add:{action_id}");
+    let origin = ControlOrigin {
+        thread_id: thread_id.to_string(),
+        action_id: Some(action_id.to_string()),
+    };
+    let category = match addition {
+        MemoryAddition::Rule { .. } => PiCategory::Rule,
+        MemoryAddition::Decision { .. } => PiCategory::Decision,
+        MemoryAddition::Background => PiCategory::Background,
+        MemoryAddition::Note => PiCategory::Note,
+    };
     let kind = match addition {
         MemoryAddition::Rule { .. } => BlackboardKind::Instruction,
         MemoryAddition::Decision { .. } => BlackboardKind::Decision,
@@ -139,7 +155,15 @@ pub async fn add_entry(
     };
     for id in candidates {
         let Some(existing) = store.get_entry(project_id, &id).await? else {
-            return Ok((store.create_entry(id, value).await?, AddOutcome::Added));
+            let (entry, _) = store
+                .create_entry_with_context(
+                    id,
+                    value,
+                    KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect),
+                    origin.change(ChangeOperation::Saved, category, &text),
+                )
+                .await?;
+            return Ok((entry, AddOutcome::Added));
         };
         // A retried action finds what it made, whatever happened to it since; it never
         // restores words forgotten after it.
@@ -155,7 +179,7 @@ pub async fn add_entry(
             && existing.value.root_promotion != RootPromotion::Promoted
         {
             let promoted = store
-                .update_entry(
+                .update_entry_recorded(
                     project_id,
                     &existing.id,
                     BlackboardEntryUpdate {
@@ -176,6 +200,11 @@ pub async fn add_entry(
                             source_id,
                         },
                     },
+                    Some(&origin.change(
+                        ChangeOperation::Promoted,
+                        category,
+                        &existing.value.content,
+                    )),
                 )
                 .await?;
             return Ok((promoted, AddOutcome::Added));

@@ -12,7 +12,11 @@ use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
+use codex_project_intelligence::ChangeOrigin;
+use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::KnowledgeCategory as PiCategory;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RootPromotion;
 use codex_project_intelligence::Succession;
@@ -49,9 +53,24 @@ pub enum MemorySection {
 
 /// The section of an active entry.
 pub fn memory_section(entry: &BlackboardEntry) -> MemorySection {
-    match (entry.value.kind, entry.value.provenance.kind) {
+    section_of(
+        entry.value.kind,
+        entry.value.provenance.kind,
+        entry.value.root_promotion,
+        entry.id.as_str(),
+    )
+}
+
+/// The section of an active entry from what classifies it.
+pub(crate) fn section_of(
+    kind: BlackboardKind,
+    provenance: BlackboardProvenanceKind,
+    root_promotion: RootPromotion,
+    id: &str,
+) -> MemorySection {
+    match (kind, provenance) {
         (BlackboardKind::Instruction, BlackboardProvenanceKind::User) => {
-            if entry.value.root_promotion == RootPromotion::Promoted {
+            if root_promotion == RootPromotion::Promoted {
                 MemorySection::UserRule
             } else {
                 MemorySection::PendingRule
@@ -60,7 +79,7 @@ pub fn memory_section(entry: &BlackboardEntry) -> MemorySection {
         (BlackboardKind::Instruction, _) => MemorySection::UnverifiedRule,
         (BlackboardKind::Decision, _) => MemorySection::Decision,
         (BlackboardKind::Fact, BlackboardProvenanceKind::User)
-            if entry.id.as_str().starts_with(USER_BACKGROUND_ID_PREFIX) =>
+            if id.starts_with(USER_BACKGROUND_ID_PREFIX) =>
         {
             MemorySection::Background
         }
@@ -82,6 +101,56 @@ impl From<BlackboardStoreError> for MemoryControlError {
     }
 }
 
+/// Who asked for a direct memory change; recorded with the change in the journal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControlOrigin {
+    /// The thread the user acted from.
+    pub thread_id: String,
+    /// The client's identifier of the action, when it gave one.
+    pub action_id: Option<String>,
+}
+
+impl ControlOrigin {
+    pub(crate) fn change(
+        &self,
+        operation: ChangeOperation,
+        category: PiCategory,
+        preview: &str,
+    ) -> ChangeRecord {
+        ChangeRecord {
+            operation,
+            origin: ChangeOrigin::DirectControl,
+            category,
+            action_id: self.action_id.clone(),
+            thread_id: Some(self.thread_id.clone()),
+            turn_id: None,
+            group_id: None,
+            preview: preview.to_string(),
+        }
+    }
+}
+
+/// The journal category of an entry: the one recorded with it, else what its section says.
+pub(crate) async fn change_category(
+    store: &BlackboardStore,
+    entry: &BlackboardEntry,
+) -> PiCategory {
+    if let Ok(Some(context)) = store
+        .knowledge_context(&entry.value.project_id, &entry.id)
+        .await
+    {
+        return context.category;
+    }
+    match memory_section(entry) {
+        MemorySection::UserRule | MemorySection::PendingRule | MemorySection::UnverifiedRule => {
+            PiCategory::Rule
+        }
+        MemorySection::Decision => PiCategory::Decision,
+        MemorySection::Background => PiCategory::Background,
+        MemorySection::Knowledge => PiCategory::Legacy,
+    }
+}
+
 /// Retires the entry at the revision the user saw. Its text stays in history, and quoting
 /// the message that first stated a retired rule cannot bring it back.
 pub async fn forget_entry(
@@ -89,6 +158,7 @@ pub async fn forget_entry(
     project_id: &str,
     id: &BlackboardEntryId,
     expected_revision: u64,
+    origin: &ControlOrigin,
 ) -> Result<BlackboardEntry, MemoryControlError> {
     let current = current_entry(store, project_id, id).await?;
     if current.revision != expected_revision {
@@ -99,9 +169,14 @@ pub async fn forget_entry(
             "entry {id} is already retired or replaced"
         )));
     }
+    let change = origin.change(
+        ChangeOperation::Forgotten,
+        change_category(store, &current).await,
+        &current.value.content,
+    );
     // Authorship is unchanged: the retired text is still attributed to whoever wrote it.
     Ok(store
-        .update_entry(
+        .update_entry_recorded(
             project_id,
             id,
             BlackboardEntryUpdate {
@@ -119,6 +194,7 @@ pub async fn forget_entry(
                 superseded_by: None,
                 provenance: current.value.provenance,
             },
+            Some(&change),
         )
         .await?)
 }
@@ -133,6 +209,7 @@ pub async fn correct_entry(
     id: &BlackboardEntryId,
     expected_revision: u64,
     content: &str,
+    origin: &ControlOrigin,
 ) -> Result<Succession, MemoryControlError> {
     let content = content.trim();
     if content.is_empty() || content.len() > MAX_CORRECTION_BYTES {
@@ -190,6 +267,11 @@ pub async fn correct_entry(
         id: id.clone(),
         expected_revision,
     }];
+    let change = origin.change(
+        ChangeOperation::Corrected,
+        change_category(store, &current).await,
+        content,
+    );
     if current.value.kind != BlackboardKind::Instruction {
         let mut hasher = Sha256::new();
         for part in [
@@ -209,7 +291,9 @@ pub async fn correct_entry(
         };
         let successor = BlackboardEntryId::parse(format!("{prefix}-{:x}", hasher.finalize()))
             .map_err(|error| MemoryControlError::Refused(error.to_string()))?;
-        return Ok(store.create_successor(successor, value, replaced).await?);
+        return Ok(store
+            .create_successor_recorded(successor, value, replaced, Some(&change))
+            .await?);
     }
     // A corrected rule takes the identity of its new wording, so the user stating the same
     // words later finds it instead of storing it twice.
@@ -222,7 +306,7 @@ pub async fn correct_entry(
             Some(existing) if existing.state != BlackboardEntryState::Active => continue,
             Some(_) => {
                 return store
-                    .create_successor(candidate, value, replaced)
+                    .create_successor_recorded(candidate, value, replaced, Some(&change))
                     .await
                     .map_err(|error| match error {
                         BlackboardStoreError::EntryIdentityConflict(_) => {
@@ -234,7 +318,11 @@ pub async fn correct_entry(
                         error => MemoryControlError::Store(error),
                     });
             }
-            None => return Ok(store.create_successor(candidate, value, replaced).await?),
+            None => {
+                return Ok(store
+                    .create_successor_recorded(candidate, value, replaced, Some(&change))
+                    .await?);
+            }
         }
     }
     Err(MemoryControlError::Refused(

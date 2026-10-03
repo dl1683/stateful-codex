@@ -20,8 +20,15 @@ use codex_project_intelligence::BlackboardRelationId;
 use codex_project_intelligence::BlackboardRelationKind;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
+use codex_project_intelligence::ChangeOrigin;
+use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::HierarchyNodeId;
+use codex_project_intelligence::KnowledgeAuthority;
+use codex_project_intelligence::KnowledgeCategory as PiCategory;
+use codex_project_intelligence::KnowledgeContext;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::NewBlackboardRelation;
 use codex_project_intelligence::RootPromotion;
@@ -329,6 +336,18 @@ impl BlackboardRecorder {
             },
         };
         let store = self.services.blackboard().await.map_err(respond)?;
+        let category = journal_category(&value);
+        let change = ChangeRecord {
+            operation: ChangeOperation::Saved,
+            origin: ChangeOrigin::ModelTool,
+            category,
+            action_id: None,
+            thread_id: Some(self.thread_id.clone()),
+            turn_id: Some(turn_id.to_string()),
+            group_id: None,
+            preview: value.content.clone(),
+        };
+        let mut outcome = CaptureOutcome::Stored;
         let retried = if supersedes.is_empty() {
             None
         } else {
@@ -346,9 +365,22 @@ impl BlackboardRecorder {
             .await?
         };
         let entry = if let Some(existing) = retried {
+            outcome = CaptureOutcome::AlreadyStored;
             existing
         } else if supersedes.is_empty() {
-            store.create_entry(id, value).await.map_err(respond)?
+            let (entry, created) = store
+                .create_entry_with_context(
+                    id,
+                    value,
+                    KnowledgeContext::new(category, KnowledgeAuthority::AssistantReported),
+                    change,
+                )
+                .await
+                .map_err(respond)?;
+            if created == CreateOutcome::AlreadyPresent {
+                outcome = CaptureOutcome::AlreadyStored;
+            }
+            entry
         } else {
             // The new entry and the end of the entries it replaces commit together.
             let replaced = resolve_superseded(
@@ -361,7 +393,7 @@ impl BlackboardRecorder {
             )
             .await?;
             let succession = store
-                .create_successor(id, value, replaced)
+                .create_successor_recorded(id, value, replaced, Some(&change))
                 .await
                 .map_err(respond)?;
             if let Some(event_sink) = &self.event_sink {
@@ -406,7 +438,7 @@ impl BlackboardRecorder {
                     | BlackboardKind::Signal
                     | BlackboardKind::Note => KnowledgeCategory::Finding,
                 },
-                outcome: CaptureOutcome::Stored,
+                outcome,
                 text: receipt_text(&entry.value.content),
             });
         }
@@ -870,3 +902,22 @@ fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
 }
 use std::sync::Arc;
+
+/// The journal category of a model-written entry.
+fn journal_category(value: &NewBlackboardEntry) -> PiCategory {
+    match value.kind {
+        BlackboardKind::Decision => PiCategory::Decision,
+        BlackboardKind::Instruction => PiCategory::Rule,
+        BlackboardKind::Fact if value.content.starts_with("Recipe:") => PiCategory::Recipe,
+        BlackboardKind::Question => PiCategory::OpenCheck,
+        BlackboardKind::RejectedApproach => PiCategory::RuledOut,
+        BlackboardKind::Fact
+        | BlackboardKind::Claim
+        | BlackboardKind::Number
+        | BlackboardKind::Strategy
+        | BlackboardKind::Contradiction
+        | BlackboardKind::Failure
+        | BlackboardKind::Signal
+        | BlackboardKind::Note => PiCategory::Note,
+    }
+}

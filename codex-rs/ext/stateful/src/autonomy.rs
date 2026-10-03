@@ -278,9 +278,13 @@ impl TurnLifecycleContributor for StatefulExtension {
                     let roots = self.project_roots(selected.project_id()).await;
                     if let Some(report) = crate::checkout::observe_turn_start(
                         services,
+                        self.event_sink.as_deref(),
                         selected.project_id(),
                         &roots,
-                        input.turn_id,
+                        crate::checkout::TurnRef {
+                            thread_id: &thread.thread_id,
+                            turn_id: input.turn_id,
+                        },
                     )
                     .await
                     {

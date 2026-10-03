@@ -27,9 +27,17 @@ async fn the_user_adds_each_kind_directly() {
     let add = |addition: MemoryAddition, content: &'static str, action: &'static str| {
         let node_id = node_id.clone();
         async move {
-            add_entry(store, "project-1", node_id, addition, content, action)
-                .await
-                .expect("added")
+            add_entry(
+                store,
+                "project-1",
+                node_id,
+                addition,
+                content,
+                action,
+                "thread-1",
+            )
+            .await
+            .expect("added")
         }
     };
     let rule = add(
@@ -60,9 +68,18 @@ async fn the_user_adds_each_kind_directly() {
     )
     .await;
     let note = add(MemoryAddition::Note, "The CI runs on Windows.", "a5").await;
-    forget_entry(store, "project-1", &rule.0.id, rule.0.revision)
-        .await
-        .expect("forget");
+    forget_entry(
+        store,
+        "project-1",
+        &rule.0.id,
+        rule.0.revision,
+        &crate::memory_controls::ControlOrigin {
+            thread_id: "thread-1".to_string(),
+            action_id: None,
+        },
+    )
+    .await
+    .expect("forget");
     // A retry of the first action after the forget returns what it made, without restoring
     // it; a new action restores the words.
     let retry = add(
@@ -210,6 +227,7 @@ async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
         MemoryAddition::Rule { scope: None },
         "Never run migrations during this pass.",
         "action-1",
+        "thread-1",
     )
     .await
     .expect("added");

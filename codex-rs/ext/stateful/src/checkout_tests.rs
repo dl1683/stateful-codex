@@ -86,9 +86,13 @@ async fn an_unknown_head_holds_the_baseline_for_every_thread() {
     let missing = state_home.path().join("missing-root").display().to_string();
     let report = super::observe_turn_start(
         &services,
+        /*event_sink*/ None,
         "project-1",
         std::slice::from_ref(&missing),
-        "turn-1",
+        super::TurnRef {
+            thread_id: "thread-1",
+            turn_id: "turn-1",
+        },
     )
     .await;
     super::observe_turn_end(&services, "project-1", std::slice::from_ref(&missing)).await;
@@ -148,7 +152,16 @@ async fn an_interrupted_start_leaves_the_baseline_held() {
     let roots = [root];
     let interrupted = tokio::time::timeout(
         std::time::Duration::ZERO,
-        super::observe_turn_start_unbounded(&services, "project-1", &roots, "turn-1"),
+        super::observe_turn_start_unbounded(
+            &services,
+            /*event_sink*/ None,
+            "project-1",
+            &roots,
+            super::TurnRef {
+                thread_id: "thread-1",
+                turn_id: "turn-1",
+            },
+        ),
     )
     .await;
     assert_eq!(

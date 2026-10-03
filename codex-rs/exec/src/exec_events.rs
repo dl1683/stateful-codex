@@ -171,6 +171,8 @@ pub enum StatefulKnowledgeCategory {
     Recipe,
     Finding,
     Background,
+    /// A commit remembered from the workspace history; who made it is not known.
+    Commit,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -199,6 +201,7 @@ impl StatefulKnowledgeCategory {
             Self::Recipe => "recipe",
             Self::Finding => "finding",
             Self::Background => "background about you",
+            Self::Commit => "commit from workspace history",
         }
     }
 }
@@ -231,6 +234,7 @@ impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
                 Category::Recipe => StatefulKnowledgeCategory::Recipe,
                 Category::Finding => StatefulKnowledgeCategory::Finding,
                 Category::Background => StatefulKnowledgeCategory::Background,
+                Category::Commit => StatefulKnowledgeCategory::Commit,
             },
             outcome: match notification.outcome {
                 Outcome::Stored => StatefulCaptureOutcome::Stored,
@@ -255,7 +259,7 @@ impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
 pub(crate) fn group_receipts(
     notification: &codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification,
 ) -> (Vec<StatefulKnowledgeEvent>, Option<String>) {
-    let receipts = notification
+    let receipts: Vec<StatefulKnowledgeEvent> = notification
         .items
         .iter()
         .map(|item| {
@@ -273,6 +277,36 @@ pub(crate) fn group_receipts(
             )
         })
         .collect();
+    if notification.category == codex_app_server_protocol::StatefulKnowledgeCategory::Commit {
+        let commits = |count: u32| {
+            if count == 1 {
+                "1 commit".to_string()
+            } else {
+                format!("{count} commits")
+            }
+        };
+        let mut parts = Vec::new();
+        if notification.saved > 0 {
+            parts.push(format!(
+                "remembered {} from workspace history",
+                commits(notification.saved)
+            ));
+        }
+        if notification.failed > 0 {
+            parts.push(format!(
+                "{} could not be remembered",
+                commits(notification.failed)
+            ));
+        }
+        // Commits already remembered are not news.
+        let receipts = receipts
+            .into_iter()
+            .filter(|receipt: &StatefulKnowledgeEvent| {
+                receipt.outcome == StatefulCaptureOutcome::Stored
+            })
+            .collect();
+        return (receipts, (!parts.is_empty()).then(|| parts.join("; ")));
+    }
     let rules = |count: u32| {
         if count == 1 {
             "1 rule".to_string()

@@ -19,13 +19,21 @@ use codex_git_utils::changed_paths;
 use codex_git_utils::commits_between;
 use codex_git_utils::observe_repository;
 use codex_git_utils::staged_changes;
+use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
+use codex_project_intelligence::ChangeOrigin;
+use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::CreateOutcome;
+use codex_project_intelligence::KnowledgeAuthority;
+use codex_project_intelligence::KnowledgeCategory as PiCategory;
+use codex_project_intelligence::KnowledgeContext;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RepositoryDirtyCoverage;
 use codex_project_intelligence::RepositoryHead;
@@ -41,6 +49,9 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::StatefulEventSink;
+use crate::checkout_receipt::CommitReceipt;
+pub(crate) use crate::checkout_receipt::TurnRef;
 use crate::services::ProjectIntelligenceServices;
 
 /// Roots sampled per observation.
@@ -65,13 +76,14 @@ const LIFECYCLE_BUDGET: Duration = Duration::from_secs(4);
 /// it. Bounded in time; failures only lose the report.
 pub(crate) async fn observe_turn_start(
     services: &ProjectIntelligenceServices,
+    event_sink: Option<&dyn StatefulEventSink>,
     project_id: &str,
     roots: &[String],
-    turn_id: &str,
+    turn: TurnRef<'_>,
 ) -> Option<CheckoutReport> {
     match tokio::time::timeout(
         LIFECYCLE_BUDGET,
-        observe_turn_start_unbounded(services, project_id, roots, turn_id),
+        observe_turn_start_unbounded(services, event_sink, project_id, roots, turn),
     )
     .await
     {
@@ -86,9 +98,10 @@ pub(crate) async fn observe_turn_start(
 
 async fn observe_turn_start_unbounded(
     services: &ProjectIntelligenceServices,
+    event_sink: Option<&dyn StatefulEventSink>,
     project_id: &str,
     roots: &[String],
-    turn_id: &str,
+    turn: TurnRef<'_>,
 ) -> Option<CheckoutReport> {
     // Serialized with every other start and end of the project, so a hold set by one
     // thread is seen before another publishes a baseline.
@@ -117,7 +130,18 @@ async fn observe_turn_start_unbounded(
     };
     let (report, compared) = match previous {
         Some(previous) => {
-            compare(services, project_id, turn_id, &previous, &samples, &budget).await
+            let mut commits = CommitReceipt::new(project_id, turn);
+            let compared = compare(
+                services,
+                project_id,
+                &mut commits,
+                &previous,
+                &samples,
+                &budget,
+            )
+            .await;
+            commits.emit(event_sink);
+            compared
         }
         None => (None, true),
     };
@@ -330,7 +354,7 @@ async fn sample(
 async fn compare(
     services: &ProjectIntelligenceServices,
     project_id: &str,
-    turn_id: &str,
+    commits_seen: &mut CommitReceipt,
     previous: &RepositoryObservation,
     samples: &[RootSample],
     budget: &GitObservationBudget,
@@ -372,23 +396,25 @@ async fn compare(
                                 "- {short} ({date}) {}{body}",
                                 single_line(&commit.subject)
                             ));
-                            complete &= store_commit_fact(
+                            let subject = single_line(&commit.subject);
+                            let outcome = store_commit_fact(
                                 services,
                                 project_id,
-                                turn_id,
+                                commits_seen,
                                 previous,
                                 &sample.project_root,
                                 &commit.oid,
+                                &format!("{short}: {subject}"),
                                 &format!(
-                                    "Commit {} (committed {date}) in {}, observed after {} between Stateful turns (origin unknown; full message: git show {}): {}{body}",
+                                    "Commit {} (committed {date}) in {}, found in the workspace history after {}; who made it is not recorded (full message: git show {}): {subject}{body}",
                                     commit.oid,
                                     sample.project_root,
                                     crate::continuity::format_time(previous.completed_at_ms),
                                     commit.oid,
-                                    single_line(&commit.subject)
                                 ),
                             )
                             .await;
+                            complete &= commits_seen.record(outcome, short, &subject);
                         }
                         if omitted {
                             root_lines.push(format!(
@@ -527,35 +553,36 @@ fn date_only(ms: i64) -> String {
     time.split(' ').next().unwrap_or(&time).to_string()
 }
 
-/// Stores one observed commit as a dated maintenance fact; returns whether it is stored.
+/// Stores one observed commit as a dated maintenance fact with its context, journaling the
+/// save in the same transaction. A commit already remembered is not saved again.
+#[allow(clippy::too_many_arguments)]
 async fn store_commit_fact(
     services: &ProjectIntelligenceServices,
     project_id: &str,
-    turn_id: &str,
+    commits_seen: &CommitReceipt,
     previous: &RepositoryObservation,
     project_root: &str,
     oid: &str,
+    headline: &str,
     content: &str,
-) -> bool {
+) -> Option<(BlackboardEntry, CreateOutcome)> {
     let observation_id = &previous.id;
-    let Ok(id) = BlackboardEntryId::parse(format!(
+    let id = BlackboardEntryId::parse(format!(
         "stateful-commit-{}",
         digest(&[project_id, project_root, oid])
-    )) else {
-        return false;
-    };
+    ))
+    .ok()?;
     let result = async {
         let store = services
             .blackboard()
             .await
             .map_err(|error| error.to_string())?;
-        if store
+        if let Some(existing) = store
             .get_entry(project_id, &id)
             .await
             .map_err(|error| error.to_string())?
-            .is_some()
         {
-            return Ok(());
+            return Ok((existing, CreateOutcome::AlreadyPresent));
         }
         let node_id = services.project_node_id(project_id).await?;
         let mut content = content.to_string();
@@ -568,7 +595,7 @@ async fn store_commit_fact(
             content.push_str("...");
         }
         store
-            .create_entry(
+            .create_entry_with_context(
                 id,
                 NewBlackboardEntry {
                     project_id: project_id.to_string(),
@@ -587,20 +614,36 @@ async fn store_commit_fact(
                     premises: Vec::new(),
                     provenance: BlackboardProvenance {
                         kind: BlackboardProvenanceKind::Maintenance,
-                        source_id: format!("checkout-observation:{observation_id}/{turn_id}"),
+                        source_id: format!(
+                            "checkout-observation:{observation_id}/{}",
+                            commits_seen.turn_id
+                        ),
                     },
+                },
+                KnowledgeContext::new(
+                    PiCategory::CommitObservation,
+                    KnowledgeAuthority::HostObserved,
+                ),
+                ChangeRecord {
+                    operation: ChangeOperation::Saved,
+                    origin: ChangeOrigin::HostObserved,
+                    category: PiCategory::CommitObservation,
+                    action_id: None,
+                    thread_id: Some(commits_seen.thread_id.clone()),
+                    turn_id: Some(commits_seen.turn_id.clone()),
+                    group_id: Some(commits_seen.group_id.clone()),
+                    preview: format!("Remembered commit {headline}"),
                 },
             )
             .await
-            .map(|_| ())
             .map_err(|error| error.to_string())
     }
     .await;
     match result {
-        Ok(()) => true,
+        Ok(stored) => Some(stored),
         Err(error) => {
             tracing::warn!(%project_id, %error, "failed to store an observed commit");
-            false
+            None
         }
     }
 }

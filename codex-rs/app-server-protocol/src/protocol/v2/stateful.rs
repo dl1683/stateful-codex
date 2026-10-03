@@ -513,6 +513,8 @@ pub enum StatefulKnowledgeCategory {
     Finding,
     /// What the user said about themselves or the whole work, in their words.
     Background,
+    /// A commit remembered from the workspace history. Who made it is not known.
+    Commit,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]

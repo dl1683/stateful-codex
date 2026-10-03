@@ -376,9 +376,18 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
     .remove(0)
     .entry;
     let store = services.blackboard().await.expect("blackboard");
-    crate::memory_controls::forget_entry(store, "project-1", &rule.id, rule.revision)
-        .await
-        .expect("retire");
+    crate::memory_controls::forget_entry(
+        store,
+        "project-1",
+        &rule.id,
+        rule.revision,
+        &crate::memory_controls::ControlOrigin {
+            thread_id: "thread-1".to_string(),
+            action_id: None,
+        },
+    )
+    .await
+    .expect("retire");
     let pending = capture_marked_rules(
         &services,
         /*event_sink*/ None,

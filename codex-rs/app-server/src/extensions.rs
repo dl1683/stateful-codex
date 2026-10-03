@@ -705,6 +705,7 @@ fn api_category(
         KnowledgeCategory::Recipe => Api::Recipe,
         KnowledgeCategory::Finding => Api::Finding,
         KnowledgeCategory::Background => Api::Background,
+        KnowledgeCategory::Commit => Api::Commit,
     }
 }
 

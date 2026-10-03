@@ -221,7 +221,8 @@ impl ReceiptTally {
             StatefulKnowledgeCategory::Decision
             | StatefulKnowledgeCategory::Recipe
             | StatefulKnowledgeCategory::Finding
-            | StatefulKnowledgeCategory::Background => None,
+            | StatefulKnowledgeCategory::Background
+            | StatefulKnowledgeCategory::Commit => None,
         };
         Some(receipt_cell(notification, rule_number))
     }
@@ -246,6 +247,9 @@ fn receipt_cell(
         (StatefulKnowledgeCategory::Background, _) => {
             "Saved what you said about yourself".to_string()
         }
+        (StatefulKnowledgeCategory::Commit, _) => {
+            "Remembered a commit from workspace history".to_string()
+        }
     };
     let text = match notification.category {
         StatefulKnowledgeCategory::Rule | StatefulKnowledgeCategory::PendingRule => {
@@ -254,7 +258,8 @@ fn receipt_cell(
         StatefulKnowledgeCategory::Decision
         | StatefulKnowledgeCategory::Recipe
         | StatefulKnowledgeCategory::Finding
-        | StatefulKnowledgeCategory::Background => &notification.text,
+        | StatefulKnowledgeCategory::Background
+        | StatefulKnowledgeCategory::Commit => &notification.text,
     };
     PlainHistoryCell::new(vec![
         vec![
@@ -272,6 +277,9 @@ fn receipt_cell(
 pub(crate) fn group_receipt_cell(
     notification: &StatefulKnowledgeGroupCapturedNotification,
 ) -> Option<PlainHistoryCell> {
+    if notification.category == StatefulKnowledgeCategory::Commit {
+        return commit_receipt_cell(notification);
+    }
     let changed = notification.saved + notification.pending;
     let lost = notification.omitted + notification.failed;
     if changed == 0 && lost == 0 {
@@ -317,7 +325,8 @@ pub(crate) fn group_receipt_cell(
             | StatefulKnowledgeCategory::Decision
             | StatefulKnowledgeCategory::Recipe
             | StatefulKnowledgeCategory::Finding
-            | StatefulKnowledgeCategory::Background => "",
+            | StatefulKnowledgeCategory::Background
+            | StatefulKnowledgeCategory::Commit => "",
         };
         lines.push(
             format!("    {number}. {}{note}", preview(rule_body(&item.text)))
@@ -369,6 +378,70 @@ pub(crate) fn group_receipt_cell(
         lines.push(
             format!(
                 "    You mentioned {declared}; {recognized} were recognized. /memory add rule <text> adds a missing one."
+            )
+            .dim()
+            .into(),
+        );
+    }
+    Some(PlainHistoryCell::new(lines))
+}
+
+/// The receipt for commits a turn found in the workspace history. Who made them is not
+/// known, so it says where they were found; commits already remembered say nothing.
+fn commit_receipt_cell(
+    notification: &StatefulKnowledgeGroupCapturedNotification,
+) -> Option<PlainHistoryCell> {
+    if notification.saved == 0 && notification.failed == 0 {
+        return None;
+    }
+    let new_items = notification
+        .items
+        .iter()
+        .filter(|item| item.outcome == StatefulCaptureOutcome::Stored)
+        .collect::<Vec<_>>();
+    let as_commit = |text: &str| match text.split_once(' ') {
+        Some((sha, subject)) => format!("{sha}: {subject}"),
+        None => text.to_string(),
+    };
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    match (notification.saved, new_items.as_slice()) {
+        (1, [item]) => lines.push(
+            vec![
+                "• ".dim(),
+                format!("Remembered commit {}", as_commit(&item.text)).dim(),
+                " · from workspace history".dark_gray(),
+            ]
+            .into(),
+        ),
+        (saved, items) => {
+            if saved > 0 {
+                lines.push(
+                    vec![
+                        "• ".dim(),
+                        format!("Remembered {saved} commits").dim(),
+                        " · from workspace history".dark_gray(),
+                    ]
+                    .into(),
+                );
+            }
+            for item in items {
+                lines.push(format!("    {}", as_commit(&item.text)).dim().into());
+            }
+            let unlisted = saved.saturating_sub(u32::try_from(items.len()).unwrap_or(u32::MAX));
+            if unlisted > 0 {
+                lines.push(format!("    and {unlisted} more · /memory").dim().into());
+            }
+        }
+    }
+    if notification.failed > 0 {
+        lines.push(
+            format!(
+                "    {} could not be remembered",
+                if notification.failed == 1 {
+                    "1 commit".to_string()
+                } else {
+                    format!("{} commits", notification.failed)
+                }
             )
             .dim()
             .into(),

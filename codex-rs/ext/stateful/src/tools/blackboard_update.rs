@@ -20,6 +20,9 @@ use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
+use codex_project_intelligence::ChangeOperation;
+use codex_project_intelligence::ChangeOrigin;
+use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
 use codex_project_intelligence::RootPromotion;
 use codex_thread_store::ThreadStore;
@@ -280,6 +283,7 @@ impl BlackboardUpdateTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel(format!("blackboard entry not found: {id}"))
             })?;
+        let category = crate::memory_controls::change_category(store, &current).await;
         // Policy checks below must judge the revision this mutation replaces.
         if current.revision != mutation.expected_revision() {
             return Err(respond(BlackboardStoreError::RevisionConflict {
@@ -473,13 +477,39 @@ impl BlackboardUpdateTool {
                 "a pending user rule applies only after the user states it as standing; it cannot be promoted",
             ));
         }
+        let operation = match update.state {
+            BlackboardEntryState::Tombstoned => Some(ChangeOperation::Forgotten),
+            BlackboardEntryState::Superseded => Some(ChangeOperation::Invalidated),
+            BlackboardEntryState::Active
+                if update.kind != original.0 || update.content != original.1 =>
+            {
+                Some(ChangeOperation::Corrected)
+            }
+            BlackboardEntryState::Active
+                if update.root_promotion == RootPromotion::Promoted
+                    && current_promotion != RootPromotion::Promoted =>
+            {
+                Some(ChangeOperation::Promoted)
+            }
+            BlackboardEntryState::Active => None,
+        };
+        let change = operation.map(|operation| ChangeRecord {
+            operation,
+            origin: ChangeOrigin::ModelTool,
+            category,
+            action_id: None,
+            thread_id: Some(self.thread_id.clone()),
+            turn_id: None,
+            group_id: None,
+            preview: update.content.clone(),
+        });
         // Promotion, supersession and retirement do not change who wrote the text; only a
         // revision of the text itself is the agent's.
         if update.kind == original.0 && update.content == original.1 {
             update.provenance = original.2;
         }
         let entry = store
-            .update_entry(&self.project_id, &id, update)
+            .update_entry_recorded(&self.project_id, &id, update, change.as_ref())
             .await
             .map_err(respond)?;
         if let Some(event_sink) = &self.event_sink {

@@ -8,6 +8,7 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
+use super::ControlOrigin;
 use super::MemoryControlError;
 use super::MemorySection;
 use super::correct_entry;
@@ -21,6 +22,13 @@ use crate::services::ProjectIntelligenceServices;
 use crate::user_rules::RuleStanding;
 
 const RULE: &str = "From now on, never run the whole test suite.";
+
+fn origin() -> ControlOrigin {
+    ControlOrigin {
+        thread_id: "thread-1".to_string(),
+        action_id: None,
+    }
+}
 
 fn services(state_home: &TempDir) -> ProjectIntelligenceServices {
     ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()))
@@ -44,7 +52,7 @@ async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
     .remove(0)
     .entry;
     let store = services.blackboard().await.expect("store");
-    let forgotten = forget_entry(store, "project-1", &rule.id, rule.revision)
+    let forgotten = forget_entry(store, "project-1", &rule.id, rule.revision, &origin())
         .await
         .expect("forget");
     let replayed = store_user_rule(
@@ -97,13 +105,27 @@ async fn correcting_a_rule_replaces_it_and_a_retry_is_idempotent() {
     .entry;
     let store = services.blackboard().await.expect("store");
     let corrected = "Never run the whole test suite; run the affected tests.";
-    let first = correct_entry(store, "project-1", &rule.id, rule.revision, corrected)
-        .await
-        .expect("correct");
-    let retry = correct_entry(store, "project-1", &rule.id, rule.revision, corrected)
-        .await
-        .expect("retry");
-    let stale = forget_entry(store, "project-1", &rule.id, rule.revision).await;
+    let first = correct_entry(
+        store,
+        "project-1",
+        &rule.id,
+        rule.revision,
+        corrected,
+        &origin(),
+    )
+    .await
+    .expect("correct");
+    let retry = correct_entry(
+        store,
+        "project-1",
+        &rule.id,
+        rule.revision,
+        corrected,
+        &origin(),
+    )
+    .await
+    .expect("retry");
+    let stale = forget_entry(store, "project-1", &rule.id, rule.revision, &origin()).await;
     assert_eq!(
         (
             first.successor.id.clone(),
@@ -171,6 +193,7 @@ async fn corrections_of_agent_rules_and_decisions() {
         &agent_rule.id,
         1,
         "Indent with four spaces.",
+        &origin(),
     )
     .await
     .expect("rule");
@@ -180,6 +203,7 @@ async fn corrections_of_agent_rules_and_decisions() {
         &decision.id,
         1,
         "Use two decimal places.",
+        &origin(),
     )
     .await
     .expect("decision");
@@ -234,6 +258,7 @@ async fn background_is_its_own_section_before_and_after_correction() {
         &background.id,
         background.revision,
         "I'm a backend developer, mostly Go, and I'm new to Python packaging.",
+        &origin(),
     )
     .await
     .expect("correct");
