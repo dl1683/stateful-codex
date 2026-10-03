@@ -1,5 +1,6 @@
 //! Durable run, obligation, steering, and autonomous-recovery state for Stateful Codex.
 
+mod context_window;
 mod measurement;
 mod measurement_storage;
 mod run;
@@ -8,6 +9,9 @@ mod steering;
 mod steering_storage;
 mod storage;
 
+pub use context_window::ContextWindowDecision;
+pub use context_window::ContextWindowMode;
+pub use context_window::ContextWindowReason;
 pub use measurement::NewStatefulTurnMeasurement;
 pub use measurement::StatefulAttributionCounters;
 pub use measurement::StatefulMeasurementSummary;
