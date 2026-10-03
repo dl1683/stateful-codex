@@ -11,6 +11,7 @@ mod conversation_summaries;
 mod events;
 mod limits;
 mod memory_controls;
+mod quotation;
 mod read_receipts;
 mod request_scope;
 mod root_blackboard;

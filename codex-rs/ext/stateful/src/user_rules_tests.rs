@@ -360,6 +360,7 @@ fn quoted_or_attributed_preferences_are_not_the_users_rules() {
                 "My colleague wrote in our chat: \"I always want tests written first\"."
             ),
             super::reports_speech("Always run the linter; that is his preference, not mine."),
+            marked_rules("From now on, never change files that are not mine."),
         ),
         (
             vec![RuleClause {
@@ -373,6 +374,23 @@ fn quoted_or_attributed_preferences_are_not_the_users_rules() {
             }],
             true,
             true,
+            vec![RuleClause {
+                text: "From now on, never change files that are not mine.".to_string(),
+                standing: RuleStanding::Standing,
+            }],
         )
+    );
+}
+
+#[test]
+fn quoted_statements_across_sentences_never_become_rules() {
+    assert_eq!(
+        marked_rules(
+            "My colleague wrote: \"I like Rust. Always write tests first.\" From now on, never push to main."
+        ),
+        vec![RuleClause {
+            text: "From now on, never push to main.".to_string(),
+            standing: RuleStanding::Standing,
+        }]
     );
 }

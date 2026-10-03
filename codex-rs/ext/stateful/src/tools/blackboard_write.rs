@@ -194,7 +194,10 @@ impl BlackboardRecorder {
                 "nothing written: that sentence asks about rules; it does not state one",
             ));
         }
-        if reports_speech(&clause) || header == Some(HeaderScope::Reported) {
+        if reports_speech(&clause)
+            || crate::quotation::is_relayed_in(&message.text, &clause)
+            || header == Some(HeaderScope::Reported)
+        {
             return Err(respond(
                 "nothing written: that sentence relays someone else's words, not the user's rule",
             ));

@@ -124,13 +124,14 @@ const REPORTED_SPEECH_PHRASES: &[&str] = &[
     "the assistant told",
     "the assistant suggested",
     "the assistant recommended",
-    "her preference",
-    "his preference",
-    "their preference",
-    "her rule",
-    "his rule",
-    "their rule",
-    "not mine",
+    "that's her preference",
+    "that's his preference",
+    "that's their preference",
+    "that is her preference",
+    "that is his preference",
+    "that is their preference",
+    "preference not mine",
+    "rule not mine",
 ];
 
 /// Explicit limits to the current task; no standing marker overrides them.
@@ -189,8 +190,10 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
                 continue;
             }
             let normalized = normalize(clause);
+            // Clauses are slices of `text`, so their offsets locate them in its quotations.
+            let start = clause.as_ptr() as usize - text.as_ptr() as usize;
             if is_reported_speech(&normalized)
-                || relays_quotation(clause)
+                || crate::quotation::is_relayed(text, start, start + clause.len())
                 || asks_about_rules(clause)
             {
                 continue;
@@ -480,35 +483,7 @@ pub(crate) fn asks_about_rules(clause: &str) -> bool {
 /// Whether `clause` reports what someone else said or advised rather than stating the
 /// user's own rule; an assistant's advice must never become the user's rule.
 pub(crate) fn reports_speech(clause: &str) -> bool {
-    is_reported_speech(&normalize(clause)) || relays_quotation(clause)
-}
-
-/// Words that introduce what someone said or wrote.
-const SPEECH_VERBS: &[&str] = &[
-    "wrote",
-    "writes",
-    "said",
-    "says",
-    "asked",
-    "asks",
-    "told",
-    "tells",
-    "mentioned",
-    "posted",
-    "replied",
-    "commented",
-    "suggested",
-    "noted",
-];
-
-/// Whether `clause` quotes someone's words after a speech verb ("My colleague wrote: \"I
-/// always want tests first\""). A quoted word in the user's own rule ("never use the word
-/// \"simply\"") has no speech verb before it.
-fn relays_quotation(clause: &str) -> bool {
-    let Some(open) = clause.find(['"', '\u{201c}']) else {
-        return false;
-    };
-    has_phrase(&normalize(&clause[..open]), SPEECH_VERBS)
+    is_reported_speech(&normalize(clause)) || crate::quotation::is_relayed_in(clause, clause)
 }
 
 fn standing_of(normalized: &str) -> RuleStanding {
@@ -549,12 +524,16 @@ fn clauses(line: &str) -> Vec<&str> {
     let bytes = line.as_bytes();
     for (index, byte) in bytes.iter().enumerate() {
         let terminal = matches!(byte, b'.' | b'!' | b'?');
-        let at_boundary = bytes.get(index + 1).is_none_or(u8::is_ascii_whitespace);
+        // A sentence may end inside a closing quote ("... first." Next sentence).
+        let quote_closes = matches!(bytes.get(index + 1), Some(b'"' | b'\''))
+            && bytes.get(index + 2).is_none_or(u8::is_ascii_whitespace);
+        let at_boundary = bytes.get(index + 1).is_none_or(u8::is_ascii_whitespace) || quote_closes;
         if terminal && at_boundary && !ends_with_abbreviation(&line[start..=index]) {
-            let clause = line[start..=index].trim();
+            let end = if quote_closes { index + 1 } else { index };
+            let clause = line[start..=end].trim();
             if !clause.is_empty() && !is_list_marker_only(clause) {
                 clauses.push(clause);
-                start = index + 1;
+                start = end + 1;
             }
         }
     }
