@@ -21,7 +21,10 @@ export function memoryStatusLine(summary) {
   ].filter(Boolean);
   const held = parts.length ? parts.join(" · ") : "nothing saved yet";
   const session = sessionChanges(summary.since);
-  return `Memory: ${held}${session ? ` · this session: ${session}` : ""}`;
+  const late = summary.sessionStartedLate
+    ? " · changes before memory status was available are not counted for this session"
+    : "";
+  return `Memory: ${held}${session ? ` · this session: ${session}` : ""}${late}`;
 }
 
 // What changed since the session's start, in plain words; empty when nothing did.

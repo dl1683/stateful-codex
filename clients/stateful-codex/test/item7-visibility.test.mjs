@@ -12,7 +12,7 @@ import { admitRpcMethod } from "../gateway-policy.mjs";
 import { runStateLabel } from "../public/memory-view.mjs";
 import { clipText, groupReceipt, knowledgeReceipt } from "../public/memory-receipts.mjs";
 import { memoryStatusLine, renderRecap } from "../public/memory-status.mjs";
-import { createSummaryReader } from "../public/status-reads.mjs";
+import { createSummaryReader, newerSummary } from "../public/status-reads.mjs";
 import { createWorkspaceDom } from "../public/workspace-dom.mjs";
 import { applyWorkspaceEvent } from "../public/workspace-events.mjs";
 import { renderWorkspace } from "../public/workspace-view.mjs";
@@ -381,4 +381,38 @@ test("an approval arriving or resolving updates the header badge", () => {
     applyWorkspaceEvent(state, { method: "serverRequest/resolved", params: { threadId: "thread-a", requestId: 9 } })
       .sections.includes("header"),
   );
+});
+
+test("a failed first summary marks the session totals as starting late", async () => {
+  let fail = true;
+  const read = createSummaryReader(async () => {
+    if (fail) throw new Error("temporarily unavailable");
+    return { counts: { rules: 1 }, latestSequence: 11, since: null };
+  }, { threadId: "thread-a" });
+  assert.deepEqual(await read(), { error: "temporarily unavailable" });
+  fail = false;
+  const recovered = await read();
+  assert.equal(recovered.sessionStartedLate, true);
+  assert.match(memoryStatusLine(recovered), /changes before memory status was available are not counted for this session$/);
+  assert.equal((await read()).sessionStartedLate, true);
+});
+
+test("concurrent summary reads complete in order and an older one never replaces a newer one", async () => {
+  const pending = [];
+  const read = createSummaryReader((method, params) => new Promise((resolve) => pending.push({ params, resolve })), {
+    threadId: "thread-a",
+  });
+  const boot = read();
+  const background = read();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pending.length, 1, "the second read waits for the first");
+  pending[0].resolve({ counts: {}, latestSequence: 10, since: null });
+  const first = await boot;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pending[1].params.sinceSequence, 10, "the second read uses the baseline the first set");
+  pending[1].resolve({ counts: { rules: 1 }, latestSequence: 11, since: { saved: 1 } });
+  const second = await background;
+  assert.equal(newerSummary(second, first), second);
+  assert.equal(newerSummary(first, second), second);
+  assert.equal(newerSummary(second, { error: "x" }).error, "x");
 });

@@ -4,7 +4,7 @@ import { findTurnMeasurement, latestAnswerTurn } from "./answer-provenance.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { applySnapshot, beginSnapshot, createExecution } from "./execution-state.mjs";
-import { createSummaryReader, readExecutionSnapshot, readRecap } from "./status-reads.mjs";
+import { createSummaryReader, newerSummary, readExecutionSnapshot, readRecap } from "./status-reads.mjs";
 import { createSourceSearch } from "./source-search.mjs";
 import { submitSteering } from "./steering-submit.mjs";
 import {
@@ -98,7 +98,7 @@ async function boot() {
   subscribe(handleEvent, { threadId, projectId });
   try {
     // The session's memory watermark is set before the opening turn can save anything.
-    state.memorySummary = await readMemorySummary();
+    state.memorySummary = newerSummary(state.memorySummary, await readMemorySummary());
     render(["memory-status"]);
     await ensureRun();
     await refresh();
@@ -207,7 +207,7 @@ async function refreshWorkspace() {
     // A run that changed meanwhile makes these reads obsolete; a newer live event wins.
     if (generation !== state.runGeneration) return;
     applySnapshot(state.execution, executionToken, snapshot);
-    state.memorySummary = memorySummary;
+    state.memorySummary = newerSummary(state.memorySummary, memorySummary);
     render(["header", "memory-status"]);
   };
   let reads;

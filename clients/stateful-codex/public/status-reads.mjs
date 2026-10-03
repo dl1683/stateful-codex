@@ -21,9 +21,14 @@ const watermarkKey = (threadId) => `stateful-memory-since:${threadId}`;
 // session starts at the journal sequence of the first successful read, kept in memory for this
 // page and in storage (when available) across reloads of the tab. Read it once before the
 // opening turn is sent, so that turn's saves count as this session's.
+// Reads run one at a time, so a later read always answers from a newer journal position than
+// an earlier one. If the session could not establish its start before work began, its totals
+// are marked as starting late instead of silently omitting what was saved meanwhile.
 export function createSummaryReader(rpc, { threadId, storage }) {
   let watermark = readWatermark(storage, threadId);
-  return async function readMemorySummary() {
+  let startedLate = false;
+  let queue = Promise.resolve();
+  const read = async () => {
     try {
       const summary = await rpc("statefulMemory/summary", {
         threadId,
@@ -38,13 +43,26 @@ export function createSummaryReader(rpc, { threadId, storage }) {
           // Without storage the session totals restart on reload; this page keeps them.
         }
         // The first read only sets where the session starts: nothing changed in it yet.
-        return { ...summary, since: summary.since ?? emptyTotals() };
+        return { ...summary, since: summary.since ?? emptyTotals(), sessionStartedLate: startedLate };
       }
-      return summary;
+      return { ...summary, sessionStartedLate: startedLate };
     } catch (error) {
+      if (watermark === null) startedLate = true;
       return { error: error.message };
     }
   };
+  return function readMemorySummary() {
+    const result = queue.then(read);
+    queue = result;
+    return result;
+  };
+}
+
+// The summary to show: the newest by journal position; an error replaces nothing it outdates.
+export function newerSummary(current, next) {
+  if (!current || current.error) return next;
+  if (next.error) return next;
+  return (next.latestSequence ?? 0) >= (current.latestSequence ?? 0) ? next : current;
 }
 
 function emptyTotals() {
