@@ -11,6 +11,7 @@ use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
+use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ConfidenceScore;
@@ -156,14 +157,29 @@ pub async fn add_entry(
     };
     for id in candidates {
         let Some(existing) = store.get_entry(project_id, &id).await? else {
-            let (entry, created) = store
+            let stored = store
                 .create_entry_with_context(
-                    id,
+                    id.clone(),
                     value,
                     KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect),
                     origin.change(ChangeOperation::Saved, category, &text),
                 )
-                .await?;
+                .await;
+            let (entry, created) = match stored {
+                Ok(stored) => stored,
+                // Another action stored the same words first; they are current.
+                Err(BlackboardStoreError::EntryIdentityConflict(_)) => {
+                    if let Some(existing) = store.get_entry(project_id, &id).await?
+                        && existing.state == BlackboardEntryState::Active
+                    {
+                        return Ok((existing, AddOutcome::AlreadyPresent));
+                    }
+                    return Err(MemoryControlError::Refused(
+                        "these words changed while they were being added; try again".to_string(),
+                    ));
+                }
+                Err(error) => return Err(error.into()),
+            };
             // A concurrent request of the same action may have stored it first.
             let outcome = match created {
                 CreateOutcome::Created => AddOutcome::Added,

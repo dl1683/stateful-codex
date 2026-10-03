@@ -40,6 +40,7 @@ mod update;
 pub use activity::CensusEntry;
 pub use activity::ChangeCount;
 pub use activity::JournalHead;
+pub use activity::SummarySnapshot;
 pub use fence::CompletionFence;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;

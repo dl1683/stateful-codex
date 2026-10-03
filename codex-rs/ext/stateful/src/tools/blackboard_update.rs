@@ -284,6 +284,7 @@ impl BlackboardUpdateTool {
             })?;
         let category = crate::memory_controls::change_category(store, &current).await;
         let before = current.value.clone();
+        let unchanged = current.clone();
         // Policy checks below must judge the revision this mutation replaces.
         if current.revision != mutation.expected_revision() {
             return Err(respond(BlackboardStoreError::RevisionConflict {
@@ -477,8 +478,11 @@ impl BlackboardUpdateTool {
                 "a pending user rule applies only after the user states it as standing; it cannot be promoted",
             ));
         }
-        let operation = super::journal_policy::update_operation(&before, &update);
-        let change = operation.map(|operation| ChangeRecord {
+        let Some(operation) = super::journal_policy::update_operation(&before, &update) else {
+            // Nothing changes: no revision, no broadcast.
+            return Ok(unchanged);
+        };
+        let change = Some(operation).map(|operation| ChangeRecord {
             operation,
             origin: ChangeOrigin::ModelTool,
             category,

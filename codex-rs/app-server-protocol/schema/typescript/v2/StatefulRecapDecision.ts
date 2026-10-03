@@ -10,4 +10,8 @@ text: string,
 /**
  * The recorded reason, when one was recorded; at most 240 bytes.
  */
-reason: string | null, };
+reason: string | null,
+/**
+ * The assistant's conclusion rather than the user's word.
+ */
+reported: boolean, };

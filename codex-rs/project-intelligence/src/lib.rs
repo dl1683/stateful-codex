@@ -58,6 +58,7 @@ pub use blackboard_storage::MAX_CHANGES_PAGE;
 pub use blackboard_storage::MAX_SUPERSEDED_ENTRIES;
 pub use blackboard_storage::ReviewPage;
 pub use blackboard_storage::Succession;
+pub use blackboard_storage::SummarySnapshot;
 pub use blackboard_storage::SupersededEntry;
 pub use context_map::ContextMapCoverage;
 pub use context_map::ContextMapEntry;

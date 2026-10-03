@@ -392,7 +392,17 @@ impl BlackboardRecorder {
             )
             .await?;
             let succession = store
-                .create_successor_recorded(id, value, replaced, Some(&change))
+                .create_successor_accounted(
+                    id,
+                    value,
+                    replaced,
+                    Some(&change),
+                    // The entries it replaces are no longer current.
+                    Some(&ChangeRecord {
+                        operation: ChangeOperation::Invalidated,
+                        ..change.clone()
+                    }),
+                )
                 .await
                 .map_err(respond)?;
             if let Some(event_sink) = &self.event_sink {

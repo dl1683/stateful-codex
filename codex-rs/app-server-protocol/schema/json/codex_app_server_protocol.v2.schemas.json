@@ -20236,12 +20236,17 @@
             "null"
           ]
         },
+        "reported": {
+          "description": "The assistant's conclusion rather than the user's word.",
+          "type": "boolean"
+        },
         "text": {
           "description": "At most 240 bytes.",
           "type": "string"
         }
       },
       "required": [
+        "reported",
         "text"
       ],
       "type": "object"

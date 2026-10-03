@@ -181,6 +181,7 @@ async fn census_totals_and_pages_follow_the_journal() {
                 validity: None,
                 verification: BlackboardVerification::Unverified,
                 scope_id: None,
+                authority: None,
                 updated_at_ms: 0,
             },
             CensusEntry {
@@ -192,6 +193,7 @@ async fn census_totals_and_pages_follow_the_journal() {
                 validity: Some(KnowledgeValidity::Current),
                 verification: BlackboardVerification::Unverified,
                 scope_id: None,
+                authority: Some(KnowledgeAuthority::HumanDirect),
                 updated_at_ms: 0,
             },
             CensusEntry {
@@ -203,6 +205,7 @@ async fn census_totals_and_pages_follow_the_journal() {
                 validity: Some(KnowledgeValidity::Current),
                 verification: BlackboardVerification::Unverified,
                 scope_id: None,
+                authority: Some(KnowledgeAuthority::HostObserved),
                 updated_at_ms: 0,
             },
         ]
@@ -326,5 +329,91 @@ async fn a_full_page_reports_that_more_follow() {
     assert_eq!(
         page.len(),
         usize::try_from(super::MAX_CHANGES_PAGE).expect("fits") + 1
+    );
+}
+
+/// A succession journals the successor and each replaced entry in one transaction; a retry
+/// of the committed succession journals nothing more.
+#[tokio::test]
+async fn a_succession_accounts_for_what_it_replaced() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let store = store(&temp_dir).await;
+    let mut replaced = Vec::new();
+    for name in ["old-1", "old-2"] {
+        let created = store
+            .create_entry(
+                BlackboardEntryId::parse(name).expect("id"),
+                entry(
+                    BlackboardKind::Decision,
+                    BlackboardProvenanceKind::Agent,
+                    &format!("{name} \u{2014} decision"),
+                ),
+            )
+            .await
+            .expect("entry");
+        replaced.push(crate::SupersededEntry {
+            id: created.id,
+            expected_revision: created.revision,
+        });
+    }
+    let saved = change(
+        ChangeOrigin::ModelTool,
+        KnowledgeCategory::Decision,
+        "thread-1",
+        "new decision",
+    );
+    let ended = ChangeRecord {
+        operation: ChangeOperation::Invalidated,
+        ..saved.clone()
+    };
+    let value = entry(
+        BlackboardKind::Decision,
+        BlackboardProvenanceKind::Agent,
+        "new decision",
+    );
+    for _ in 0..2 {
+        store
+            .create_successor_accounted(
+                BlackboardEntryId::parse("new").expect("id"),
+                value.clone(),
+                replaced.clone(),
+                Some(&saved),
+                Some(&ended),
+            )
+            .await
+            .expect("succession");
+    }
+    let journal = store
+        .memory_changes_for_threads(PROJECT_ID, 0, None, 10)
+        .await
+        .expect("journal")
+        .into_iter()
+        .map(|change| {
+            (
+                change.entry_id.unwrap_or_default(),
+                change.record.operation,
+                change.record.preview,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        journal,
+        vec![
+            (
+                "new".to_string(),
+                ChangeOperation::Saved,
+                "new decision".to_string()
+            ),
+            (
+                "old-1".to_string(),
+                ChangeOperation::Invalidated,
+                "old-1 \u{2014} decision".to_string()
+            ),
+            (
+                "old-2".to_string(),
+                ChangeOperation::Invalidated,
+                "old-2 \u{2014} decision".to_string()
+            ),
+        ]
     );
 }

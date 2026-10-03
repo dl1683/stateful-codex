@@ -17,10 +17,7 @@ use tempfile::TempDir;
 
 use super::ChangeTotals;
 use super::MemoryCounts;
-use super::RecapDecision;
-use super::bounded;
 use super::change_totals;
-use super::decision;
 use super::memory_counts;
 use crate::memory_add::MemoryAddition;
 use crate::memory_add::add_entry;
@@ -194,26 +191,5 @@ fn commits_are_counted_apart_from_saves() {
             capture_incomplete: 1,
             ..ChangeTotals::default()
         }
-    );
-}
-
-#[test]
-fn recap_text_keeps_reasons_and_cuts_on_characters() {
-    assert_eq!(
-        decision("Months use mth. Reason: dashboards read \u{a7} 3 as minutes"),
-        RecapDecision {
-            text: "Months use mth.".to_string(),
-            reason: Some("dashboards read \u{a7} 3 as minutes".to_string()),
-        }
-    );
-    let long = "\u{2014}".repeat(100);
-    let cut = bounded(&long);
-    assert_eq!(
-        (
-            cut.len() <= 240,
-            cut.ends_with('\u{2026}'),
-            cut.chars().count()
-        ),
-        (true, true, 80)
     );
 }

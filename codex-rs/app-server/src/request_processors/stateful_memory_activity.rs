@@ -49,15 +49,12 @@ impl BlackboardRequestProcessor {
         };
         let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
         let store = self.store().await?;
-        let latest_sequence = store
-            .journal_head(&project_id)
-            .await
-            .map_err(blackboard_error)?
-            .map_or(0, |head| head.sequence);
-        let mut changes = store
-            .memory_changes_for_threads(&project_id, after, threads.as_deref(), limit + 1)
+        // The page and the head come from one snapshot: no row is newer than the head.
+        let (mut changes, head) = store
+            .memory_changes_snapshot(&project_id, after, threads.as_deref(), limit + 1)
             .await
             .map_err(blackboard_error)?;
+        let latest_sequence = head.map_or(0, |head| head.sequence);
         let more = changes.len() > limit as usize;
         changes.truncate(limit as usize);
         let next_cursor = more
@@ -85,19 +82,15 @@ impl BlackboardRequestProcessor {
         let project_id = self.thread_project(&params.thread_id).await?;
         let threads = bounded_threads(params.thread_ids)?;
         let store = self.store().await?;
-        let head = store
-            .journal_head(&project_id)
+        // Counts, totals and head come from one snapshot, so totals never run past the head.
+        let snapshot = store
+            .memory_summary_snapshot(&project_id, params.since_sequence, threads.as_deref())
             .await
             .map_err(blackboard_error)?;
-        let counts = codex_stateful_extension::memory_counts(store, &project_id)
-            .await
-            .map_err(blackboard_error)?;
-        let since = match params.since_sequence {
-            Some(since) => {
-                let counts = store
-                    .change_totals(&project_id, since, threads.as_deref())
-                    .await
-                    .map_err(blackboard_error)?;
+        let head = snapshot.head;
+        let counts = codex_stateful_extension::count_census(&snapshot.census);
+        let since = match snapshot.totals {
+            Some(counts) => {
                 let totals = codex_stateful_extension::change_totals(&counts);
                 Some(StatefulMemoryChangeTotals {
                     saved: totals.saved,
@@ -163,6 +156,7 @@ impl BlackboardRequestProcessor {
                     .map(|decision| StatefulRecapDecision {
                         text: decision.text,
                         reason: decision.reason,
+                        reported: decision.reported,
                     })
                     .collect(),
                 more_decisions: recap.more_decisions,
@@ -171,6 +165,7 @@ impl BlackboardRequestProcessor {
                 commits: recap.commits,
                 more_commits: recap.more_commits,
                 capture_incomplete: recap.capture_incomplete,
+                history_complete: recap.history_complete,
             }
             .into(),
         ))

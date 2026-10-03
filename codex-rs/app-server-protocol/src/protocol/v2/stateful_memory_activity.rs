@@ -212,6 +212,8 @@ pub struct StatefulRecapDecision {
     pub text: String,
     /// The recorded reason, when one was recorded; at most 240 bytes.
     pub reason: Option<String>,
+    /// The assistant's conclusion rather than the user's word.
+    pub reported: bool,
 }
 
 /// A dated return card assembled from stored memory, with no model call. Every list is
@@ -236,6 +238,9 @@ pub struct StatefulMemoryRecapResponse {
     /// Commits from the workspace history still remembered, most recently remembered first.
     pub commits: Vec<String>,
     pub more_commits: u32,
-    /// Captures that could not finish since the last finished work.
+    /// Captures that could not finish since the last finished work. Gaps from before it,
+    /// and whether later work repaired them, are not assessed.
     pub capture_incomplete: u32,
+    /// Whether every recent thread's history could be read to find the last finished work.
+    pub history_complete: bool,
 }

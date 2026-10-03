@@ -54,9 +54,24 @@ impl BlackboardStore {
     pub async fn create_successor_recorded(
         &self,
         id: BlackboardEntryId,
+        value: NewBlackboardEntry,
+        replaced: Vec<SupersededEntry>,
+        change: Option<&crate::ChangeRecord>,
+    ) -> Result<Succession, BlackboardStoreError> {
+        self.create_successor_accounted(id, value, replaced, change, /*replaced_change*/ None)
+            .await
+    }
+
+    /// Like `create_successor_recorded`, also journaling `replaced_change` (with each replaced
+    /// entry's own text as its preview) for every entry the successor replaces, all in the
+    /// same transaction. A retry of a committed succession journals nothing.
+    pub async fn create_successor_accounted(
+        &self,
+        id: BlackboardEntryId,
         mut value: NewBlackboardEntry,
         replaced: Vec<SupersededEntry>,
         change: Option<&crate::ChangeRecord>,
+        replaced_change: Option<&crate::ChangeRecord>,
     ) -> Result<Succession, BlackboardStoreError> {
         value.validate()?;
         let unique = replaced
@@ -181,6 +196,18 @@ impl BlackboardStore {
                 now,
             )
             .await?;
+            if let Some(replaced_change) = replaced_change {
+                let mut record = replaced_change.clone();
+                record.preview = current.value.content.clone();
+                super::knowledge::append_change(
+                    &mut transaction,
+                    &value.project_id,
+                    Some((&current.id, next_revision)),
+                    &record,
+                    now,
+                )
+                .await?;
+            }
             superseded.push(
                 load_entry(&mut transaction, &value.project_id, &current.id)
                     .await?

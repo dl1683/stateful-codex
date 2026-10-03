@@ -5446,6 +5446,9 @@ class StatefulRecapDecision(BaseModel):
         str | None,
         Field(description="The recorded reason, when one was recorded; at most 240 bytes."),
     ] = None
+    reported: Annotated[
+        bool, Field(description="The assistant's conclusion rather than the user's word.")
+    ]
     text: Annotated[str, Field(description="At most 240 bytes.")]
 
 
