@@ -40,9 +40,9 @@ pub struct CategoryQuery<'a> {
     pub categories: &'a [KnowledgeCategory],
     pub legacy_kinds: &'a [BlackboardKind],
     pub lifecycle: CandidateLifecycle,
-    /// Lowercase topic words; when any is given, only entries whose text or recorded
-    /// context mentions one are read, so older entries on the topic are never cut off by
-    /// newer unrelated ones.
+    /// Topic words; when any is given, only entries whose text or recorded answer opening
+    /// contains one are read, so older entries on the topic are never cut off by newer
+    /// unrelated ones. Matching here is a superset; callers judge relevance.
     pub topic: &'a [String],
     /// Only entries changed at or after this time (Unix milliseconds).
     pub changed_since_ms: Option<i64>,
@@ -100,12 +100,32 @@ impl BlackboardStore {
                AND (json_array_length(?) = 0 OR EXISTS (
                     SELECT 1 FROM json_each(?) AS term
                     WHERE instr(lower(revision.content), term.value) > 0
-                       OR instr(lower(COALESCE(context.payload, '')), term.value) > 0))
+                       OR instr(revision.content, term.value) > 0
+                       OR instr(lower(COALESCE(
+                              json_extract(context.payload, '$.answerOpening'), '')),
+                              term.value) > 0
+                       OR instr(COALESCE(
+                              json_extract(context.payload, '$.answerOpening'), ''),
+                              term.value) > 0))
              ORDER BY entry.created_at_ms DESC, context.group_id,
                  COALESCE(context.unit_ordinal, 0), entry.id
              LIMIT ?"
         );
-        let topic = json_array(query.topic.iter().map(String::as_str));
+        // SQLite lowercases ASCII only, so each word is also matched as written in lower,
+        // upper and title case; the caller's matching decides relevance afterwards.
+        let variants = query
+            .topic
+            .iter()
+            .flat_map(|term| {
+                let mut title = term.chars();
+                let title = title
+                    .next()
+                    .map(|first| first.to_uppercase().chain(title).collect::<String>())
+                    .unwrap_or_default();
+                [term.to_lowercase(), term.to_uppercase(), title]
+            })
+            .collect::<Vec<_>>();
+        let topic = json_array(variants.iter().map(String::as_str));
         let rows = sqlx::query_as::<_, StoredCandidate>(sqlx::AssertSqlSafe(sql))
             .bind(query.project_id)
             .bind(current)
@@ -133,17 +153,19 @@ impl BlackboardStore {
         Ok((entries, more))
     }
 
-    /// Every entry, current or retired, already holding a unit's words: entries of
-    /// `category` whose context records `words_digest`, and entries without context of
-    /// `legacy_kind` whose content, with runs of whitespace collapsed, is `spaced_content`
-    /// (the unit's words separated by single spaces; callers compare words exactly). Unbounded by age, so a word-for-word
+    /// Every entry, current or retired, that may hold a unit's words where the unit applies:
+    /// assistant-reported entries of `category` (project-wide or in `scope_id`) whose context
+    /// records `words_digest`, and agent entries without context of `legacy_kind` whose
+    /// lowercased content without ASCII whitespace is `compact_content`. Eligibility is
+    /// decided before the bound; callers compare normalized words exactly. Unbounded by age, so a word-for-word
     /// match is found however much was written since.
     pub async fn entries_with_words(
         &self,
         project_id: &str,
         category: KnowledgeCategory,
         legacy_kind: BlackboardKind,
-        spaced_content: &str,
+        scope_id: Option<&str>,
+        compact_content: &str,
         words_digest: &str,
     ) -> Result<Vec<CategorizedEntry>, BlackboardStoreError> {
         let sql = format!(
@@ -157,20 +179,58 @@ impl BlackboardStore {
                    WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
              WHERE entry.project_id = ?
                AND ((context.category = ?
+                     AND context.authority = 'assistant_reported'
+                     AND (context.scope_id IS NULL OR context.scope_id = ?)
                      AND json_extract(context.payload, '$.wordsDigest') = ?)
                     OR (context.entry_id IS NULL AND revision.kind = ?
-                        AND trim(replace(replace(replace(replace(replace(replace(
-                            revision.content, char(13), ' '), char(10), ' '), char(9), ' '),
-                            '  ', ' '), '  ', ' '), '  ', ' ')) = ?))
+                        AND revision.provenance_kind = 'agent'
+                        AND lower(replace(replace(replace(replace(
+                            revision.content, ' ', ''), char(9), ''), char(10), ''),
+                            char(13), '')) = ?))
              ORDER BY entry.created_at_ms, entry.id
-             LIMIT 64"
+             LIMIT 256"
         );
         sqlx::query_as::<_, StoredCandidate>(sqlx::AssertSqlSafe(sql))
             .bind(project_id)
             .bind(category.as_str())
+            .bind(scope_id)
             .bind(words_digest)
             .bind(kind_name(legacy_kind))
-            .bind(spaced_content)
+            .bind(compact_content)
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(StoredCandidate::into_entry)
+            .collect()
+    }
+
+    /// The current entries among `ids` (active, and current or in need of a check when they
+    /// carry a context): the members of a selected group that a bounded read left out.
+    pub async fn current_entries(
+        &self,
+        project_id: &str,
+        ids: &[String],
+    ) -> Result<Vec<CategorizedEntry>, BlackboardStoreError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {CANDIDATE_COLUMNS}
+             FROM blackboard_entries AS entry
+             JOIN blackboard_entry_revisions AS revision
+               ON revision.entry_id = entry.id AND revision.revision = entry.revision
+             LEFT JOIN knowledge_context AS context
+               ON context.entry_id = entry.id AND context.revision = (
+                   SELECT MAX(latest.revision) FROM knowledge_context AS latest
+                   WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
+             WHERE entry.project_id = ? AND revision.state = 'active'
+               AND entry.id IN (SELECT value FROM json_each(?))
+               AND (context.entry_id IS NULL
+                    OR context.validity IN ('current', 'needs_check'))"
+        );
+        sqlx::query_as::<_, StoredCandidate>(sqlx::AssertSqlSafe(sql))
+            .bind(project_id)
+            .bind(json_array(ids.iter().map(String::as_str)))
             .fetch_all(&self.pool)
             .await?
             .into_iter()

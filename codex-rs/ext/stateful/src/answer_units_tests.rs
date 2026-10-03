@@ -288,3 +288,15 @@ fn a_made_choice_with_an_undecided_alternative_is_a_decision() {
         ]
     );
 }
+
+#[test]
+fn uncertainty_about_the_item_on_another_host_is_still_uncertainty() {
+    let answer = "Ruled out:\n- DNS; still possible on the other host.\n- Proxy; not dismissed on the other host.\n";
+    assert_eq!(answer_units(answer).ruled_out, Vec::new());
+}
+
+#[test]
+fn a_decision_whose_later_clause_says_none_was_made_is_not_a_decision() {
+    let answer = "Decision: SQLite; we have not decided yet.\n\nDecision: use SQLite. No decision has been made yet.\n";
+    assert_eq!(answer_units(answer).decisions, Vec::new());
+}

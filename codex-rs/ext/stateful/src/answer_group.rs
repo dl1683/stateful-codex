@@ -162,7 +162,12 @@ pub(crate) async fn commit_group(
                 source.project_id,
                 category,
                 entry_kind,
-                &content.split_whitespace().collect::<Vec<_>>().join(" "),
+                placement.scope_id.as_deref(),
+                &content
+                    .chars()
+                    .filter(|character| !matches!(character, ' ' | '\t' | '\n' | '\r'))
+                    .collect::<String>()
+                    .to_ascii_lowercase(),
                 &words_digest,
             )
             .await

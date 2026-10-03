@@ -96,6 +96,7 @@ struct MemoryReadArguments {
     kind: Option<RecallKind>,
     cursor: Option<String>,
     entry_id: Option<String>,
+    content_offset: Option<usize>,
 }
 
 pub(super) struct MemoryReadTool {
@@ -126,7 +127,9 @@ impl MemoryReadTool {
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: MemoryReadArguments = parse_arguments(&call)?;
         if let Some(entry_id) = &arguments.entry_id {
-            return self.whole_entry(&call, entry_id).await;
+            return self
+                .whole_entry(&call, entry_id, arguments.content_offset.unwrap_or(0))
+                .await;
         }
         let terms = arguments
             .question
@@ -313,6 +316,7 @@ impl MemoryReadTool {
         &self,
         call: &ToolCall<'_>,
         entry_id: &str,
+        offset: usize,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let id = BlackboardEntryId::parse(entry_id).map_err(respond)?;
         let store = self.services.blackboard().await.map_err(respond)?;
@@ -322,7 +326,7 @@ impl MemoryReadTool {
             .map_err(respond)?
             .ok_or_else(|| respond(format!("no entry {entry_id} in this project")))?;
         let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
-        let result = whole_entry_result(&entry, |result| fits_response(result, budget));
+        let result = whole_entry_result(&entry, offset, |result| fits_response(result, budget));
         bounded_json_output(call, result)
     }
 
@@ -770,7 +774,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "One recall of earlier work when the packet and conversation lack the answer: what was decided and why, ruled out or left open, what changed, a summary since a date. One kind (asked about, or passed as kind) lists all its current items, topic first, paged by cursor; entryId reads one whole. Returns matching knowledge with status (current, replaced, retired), what it replaced, source and dates, plus matching earlier turns, in one result; its evidence needs no confirmation read. Do not chain reads; skip it when the packet already answers.".to_string(),
+            description: "One recall of earlier work when the packet and conversation lack the answer: what was decided and why, ruled out or left open, what changed, a summary since a date. A kind (asked or passed) lists all its current items, topic first, by cursor; entryId reads one. Returns matching knowledge with status (current, replaced, retired), what it replaced, source and dates, plus matching earlier turns; its evidence needs no confirmation read. Do not chain reads; skip it when the packet already answers.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -781,7 +785,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
                     "includeHistory": {"type": "boolean"},
                     "kind": {"type": "string", "enum": ["ruledOut", "decision", "openCheck", "rule", "background"]},
                     "cursor": {"type": "string", "description": "nextCursor of the previous page"},
-                    "entryId": {"type": "string"}
+                    "entryId": {"type": "string"},
+                    "contentOffset": {"type": "integer"}
                 },
                 "additionalProperties": false
             }))

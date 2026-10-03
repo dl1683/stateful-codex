@@ -230,6 +230,40 @@ pub(super) async fn kind_recall(
         .map(|entry| entry.id.clone())
         .collect::<HashSet<_>>();
     entries.extend(newest.into_iter().filter(|entry| !read.contains(&entry.id)));
+    // A selected group is shown whole: members the bounded reads left out are read by ID.
+    let mut captures = HashMap::new();
+    for entry in &entries {
+        if let Some(group_id) = entry
+            .context
+            .as_ref()
+            .and_then(|context| context.group_id.as_ref())
+            && !captures.contains_key(group_id)
+            && let Some(capture) = store
+                .capture(project_id, group_id)
+                .await
+                .map_err(|error| error.to_string())?
+        {
+            captures.insert(group_id.clone(), capture);
+        }
+    }
+    let read = entries
+        .iter()
+        .map(|entry| entry.id.to_string())
+        .collect::<HashSet<_>>();
+    let missing = captures
+        .values()
+        .flat_map(|capture| &capture.members)
+        .filter_map(|member| member.entry_id.clone())
+        .filter(|id| !read.contains(id))
+        .collect::<Vec<_>>();
+    entries.extend(
+        store
+            .current_entries(project_id, &missing)
+            .await
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|entry| since_ms.is_none_or(|since| entry.updated_at_ms >= since)),
+    );
     entries.sort_by_key(|entry| std::cmp::Reverse(entry.created_at_ms));
     let scope = store
         .thread_scope(project_id, thread_id)
@@ -264,13 +298,10 @@ pub(super) async fn kind_recall(
         let mut members = Vec::new();
         let mut not_kept = 0;
         if let Some(group_id) = &group_id
-            && let Some(capture) = store
-                .capture(project_id, group_id)
-                .await
-                .map_err(|error| error.to_string())?
+            && let Some(capture) = captures.get(group_id)
         {
             not_kept = capture.group.omitted + capture.group.failed;
-            for member in capture.members {
+            for member in capture.members.iter().cloned() {
                 let listed = matches!(
                     member.outcome,
                     MemberOutcome::Saved | MemberOutcome::AlreadyPresent

@@ -437,21 +437,94 @@ async fn escaping_heavy_items_still_make_progress() {
         }
     };
     let page = read(json!({"kind": "ruledOut"})).await;
-    let whole = read(json!({"entryId": "dense"})).await;
+    // entryId with contentOffset reads the rest, part by part, until it is whole.
+    let mut whole = String::new();
+    let mut offset = 0;
+    let mut reads = 0;
+    loop {
+        let part = read(json!({"entryId": "dense", "contentOffset": offset})).await;
+        let text = part["content"].as_str().unwrap_or_default();
+        reads += 1;
+        if part["contentComplete"] == json!(true) {
+            whole.push_str(text);
+            break;
+        }
+        let next = usize::try_from(part["nextContentOffset"].as_u64().unwrap_or_default())
+            .expect("offset");
+        whole.push_str(&text[..next - offset]);
+        offset = next;
+    }
     assert_eq!(
         (
             page["requested"]["items"][0]["contentComplete"].clone(),
             page["requested"]["coverage"]["complete"].clone(),
             page["requested"]["coverage"]["nextCursor"].clone(),
-            whole["entryId"].clone(),
-            whole["contentComplete"].clone(),
+            whole == format!("Dense{}end", "\u{1}".repeat(4_000)),
+            reads > 1,
         ),
-        (
-            json!(false),
-            json!(false),
-            Value::Null,
-            json!("dense"),
-            json!(false),
-        )
+        (json!(false), json!(false), Value::Null, true, true)
+    );
+}
+
+/// An old answer whose ruled-out list mentions the topic in only one item is shown whole
+/// even when more newer unrelated items exist than one read returns.
+#[tokio::test]
+async fn a_selected_group_is_shown_whole_behind_many_newer_items() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let answer = |turn_id: &str, text: String| {
+        let turn = ExtensionData::new("turn");
+        turn.insert(CaptureTurn {
+            turn_id: turn_id.to_string(),
+        });
+        observe_agent_message(
+            &turn,
+            &AgentMessageItem {
+                id: "item-1".to_string(),
+                content: vec![AgentMessageContent::Text { text }],
+                phase: None,
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            },
+        );
+        turn
+    };
+    let old = answer(
+        "turn-1",
+        "Done.\n\nRuled out:\n- The tokenizer: same output on both trees.\n- Locale settings: identical on both machines.\n".to_string(),
+    );
+    capture_completed_answer(&services, None, PROJECT_ID, "thread-1", &old).await;
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let many = (0..codex_project_intelligence::MAX_CATEGORIZED_ENTRIES + 10)
+        .map(|index| format!("- Unrelated hypothesis {index}: excluded.\n"))
+        .collect::<String>();
+    let newer = answer("turn-2", format!("Other work.\n\nRuled out:\n{many}"));
+    capture_completed_answer(&services, None, PROJECT_ID, "thread-2", &newer).await;
+    let tool = super::super::memory_read::MemoryReadTool::new(
+        PROJECT_ID.to_string(),
+        "thread-1".to_string(),
+        services.clone(),
+        Arc::new(InMemoryThreadStore::default()),
+    );
+    let output = tool
+        .handle(call(
+            json!({"question": "What did we rule out about the tokenizer?"}),
+        ))
+        .await
+        .expect("recall");
+    let result = serde_json::from_str::<Value>(&output.log_output()).expect("JSON");
+    let items = result["requested"]["items"].as_array().expect("items");
+    assert_eq!(
+        items
+            .iter()
+            .take(2)
+            .map(|item| item["content"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![
+            "The tokenizer: same output on both trees.",
+            "Locale settings: identical on both machines.",
+        ]
     );
 }

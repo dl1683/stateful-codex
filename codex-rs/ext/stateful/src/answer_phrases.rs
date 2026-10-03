@@ -159,9 +159,10 @@ pub(crate) fn label_of(label: &str) -> Option<Label> {
     }
 }
 
-/// Clause words that turn a later clause to another candidate ("likely a parser bug
-/// instead"), so its uncertainty is not about the rejected item.
-const CONTRAST_WORDS: &[&str] = &["instead", "rather", "another", "other", "elsewhere"];
+/// A later clause with these turns to another candidate ("likely a parser bug instead"),
+/// so its uncertainty is not about the rejected item. Words such as "other" do not: "still
+/// possible on the other host" is still about the item.
+const CONTRAST_WORDS: &[&str] = &["instead"];
 
 /// Whether a ruled-out item does not settle its rejection: a clause says the item is still
 /// possible, unchecked or not ruled out, or negates the rejection ("not dismissed"). A later
@@ -196,24 +197,35 @@ fn negates_rejection(words: &str) -> bool {
     })
 }
 
-/// Whether a stated choice says that nothing was chosen. Only the choice itself is judged
-/// (before a semicolon, "because" or sentence end), not what it says about alternatives.
+/// A later clause with these says the decision itself was not made ("we have not decided
+/// yet"), unlike a clause about an undecided alternative ("Redis is still undecided").
+const UNMADE_DECISION_PHRASES: &[&str] = &[
+    "we have not decided",
+    "we haven't decided",
+    "i have not decided",
+    "i haven't decided",
+    "not decided yet",
+    "not yet decided",
+    "no decision",
+    "nothing is decided",
+    "nothing decided",
+    "decision is pending",
+    "decision pending",
+];
+
+/// Whether a stated choice says that nothing was chosen: its choice clause is unmade, or a
+/// later clause (not the reason after "because") says the decision was not made.
 pub(crate) fn is_unmade_choice(choice: &str) -> bool {
-    let choice = choice
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .split(" because ")
-        .next()
-        .unwrap_or_default()
-        .split(". ")
-        .next()
-        .unwrap_or_default();
-    let words = normalized(choice);
-    has_phrase(&words, UNMADE_PHRASES)
+    let without_reason = choice.split(" because ").next().unwrap_or_default();
+    let mut clauses = without_reason
+        .split([';', '\n'])
+        .flat_map(|part| part.split(". "));
+    let first = normalized(clauses.next().unwrap_or_default());
+    has_phrase(&first, UNMADE_PHRASES)
         || UNMADE_CHOICES
             .iter()
-            .any(|unmade| words == *unmade || words.starts_with(&format!("{unmade} ")))
+            .any(|unmade| first == *unmade || first.starts_with(&format!("{unmade} ")))
+        || clauses.any(|clause| has_phrase(&normalized(clause), UNMADE_DECISION_PHRASES))
 }
 
 /// The list a heading line introduces: a Markdown heading, a bold line, or a short line

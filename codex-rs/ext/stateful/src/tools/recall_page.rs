@@ -46,7 +46,9 @@ pub(super) fn fill_page(result: &mut Value, items: &[Value], start: usize, limit
             let mut cut = item.clone();
             cut["content"] = json!(prefix(content, bytes));
             cut["contentComplete"] = json!(false);
-            cut["wholeContent"] = json!(format!("memory_read with entryId {id}"));
+            cut["wholeContent"] = json!(format!(
+                "memory_read with entryId {id} (and contentOffset to continue)"
+            ));
             cut
         };
         let (mut low, mut high) = (0usize, content.len());
@@ -93,21 +95,34 @@ fn serialized_with(result: &mut Value, item: Value) -> usize {
     length
 }
 
-/// One entry as `memory_read` with `entryId` returns it: whole when `fits` accepts it,
-/// otherwise its longest prefix that fits, marked incomplete.
-pub(super) fn whole_entry_result(entry: &BlackboardEntry, fits: impl Fn(&Value) -> bool) -> Value {
-    let content = &entry.value.content;
+/// One entry as `memory_read` with `entryId` returns it, from byte `offset` of its content:
+/// whole when `fits` accepts it, otherwise the longest part that fits, marked incomplete,
+/// with the offset where the next read continues.
+pub(super) fn whole_entry_result(
+    entry: &BlackboardEntry,
+    offset: usize,
+    fits: impl Fn(&Value) -> bool,
+) -> Value {
+    let mut offset = offset.min(entry.value.content.len());
+    while !entry.value.content.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let content = &entry.value.content[offset..];
     let mut result = json!({
         "entryId": entry.id.to_string(),
         "revision": entry.revision,
         "kind": entry.value.kind,
         "state": entry.state,
+        "contentOffset": offset,
         "content": content,
         "contentComplete": true,
     });
     if fits(&result) {
         return result;
     }
+    // Searched in the final shape, so setting the flags cannot push the result over.
+    result["contentComplete"] = json!(false);
+    result["nextContentOffset"] = json!(entry.value.content.len());
     let (mut low, mut high) = (0usize, content.len());
     while low < high {
         let middle = (low + high).div_ceil(2);
@@ -119,7 +134,11 @@ pub(super) fn whole_entry_result(entry: &BlackboardEntry, fits: impl Fn(&Value) 
         }
     }
     result["content"] = json!(prefix(content, low));
-    result["contentComplete"] = json!(false);
+    let mut shown = low.min(content.len());
+    while !content.is_char_boundary(shown) {
+        shown -= 1;
+    }
+    result["nextContentOffset"] = json!(offset + shown);
     result
 }
 

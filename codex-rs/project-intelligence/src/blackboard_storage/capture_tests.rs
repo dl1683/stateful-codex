@@ -404,6 +404,7 @@ async fn categorized_entries_are_read_before_any_ranking() {
             PROJECT_ID,
             KnowledgeCategory::RuledOut,
             BlackboardKind::RejectedApproach,
+            /*scope_id*/ None,
             "retired",
             "no-digest",
         )
@@ -491,6 +492,84 @@ async fn changed_sources_and_entries_are_not_counted() {
                     .to_string()
             ),
             vec![MemberOutcome::Omitted, MemberOutcome::Omitted]
+        )
+    );
+}
+
+/// Word lookup ignores spacing and ASCII case and is bounded only after eligibility; topic
+/// reads search content and recorded answer openings (not other metadata), in any case.
+#[tokio::test]
+async fn word_and_topic_reads_match_what_recall_and_capture_mean() {
+    let temp_dir = TempDir::new().expect("tempdir");
+    let store = store(&temp_dir).await;
+    store
+        .create_entry(
+            BlackboardEntryId::parse("spaced").expect("ID"),
+            value(
+                BlackboardKind::RejectedApproach,
+                "DNS:	  Absent
+   here.",
+            ),
+        )
+        .await
+        .expect("spaced");
+    store
+        .create_entry(
+            BlackboardEntryId::parse("unicode").expect("ID"),
+            value(BlackboardKind::RejectedApproach, "ÜBER cache: same result."),
+        )
+        .await
+        .expect("unicode");
+    let mut with_opening = unit(0, "plain");
+    if let CaptureUnit::Entry { context, .. } = &mut with_opening {
+        context.payload = Some(
+            r#"{"sourceLocator":"assistant-answer:source","answerOpening":"Tokenizer bug."}"#
+                .to_string(),
+        );
+    }
+    store
+        .commit_capture(&group(), &source("digest-1"), vec![with_opening])
+        .await
+        .expect("commit");
+    let same = store
+        .entries_with_words(
+            PROJECT_ID,
+            KnowledgeCategory::RuledOut,
+            BlackboardKind::RejectedApproach,
+            /*scope_id*/ None,
+            "dns:absenthere.",
+            "no-digest",
+        )
+        .await
+        .expect("words");
+    let topic = |words: &[&str]| words.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let mut read = Vec::new();
+    for words in [topic(&["source"]), topic(&["tokenizer"]), topic(&["über"])] {
+        let (entries, _) = store
+            .categorized_entries(query(CandidateLifecycle::Current, &words, 10))
+            .await
+            .expect("read");
+        read.push(
+            entries
+                .iter()
+                .map(|entry| entry.id.to_string())
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(
+        (
+            same.iter()
+                .map(|entry| entry.id.to_string())
+                .collect::<Vec<_>>(),
+            read
+        ),
+        (
+            vec!["spaced".to_string()],
+            vec![
+                Vec::new(),
+                vec!["ruled-out-plain".to_string()],
+                vec!["unicode".to_string()]
+            ]
         )
     );
 }
