@@ -147,6 +147,7 @@ mod stateful_project_context;
 mod stateful_request_scope;
 mod stateful_rule_scope;
 mod stateful_run;
+mod stateful_stale_conclusions;
 mod stateful_tool_search;
 mod stateful_user_rules;
 mod thread_archive;

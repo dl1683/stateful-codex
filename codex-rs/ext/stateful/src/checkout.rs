@@ -50,6 +50,8 @@ const MAX_LISTED: usize = 10;
 /// Longest report rendered for one turn.
 pub(crate) const MAX_REPORT_BYTES: usize = 1_536;
 const OBSERVATION_BUDGET: Duration = Duration::from_secs(2);
+/// Longest a turn's start spends qualifying remembered conclusions against new commits.
+const INVALIDATION_BUDGET: Duration = Duration::from_millis(1_500);
 const COMMIT_FACT_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
 
 /// What the turn's start found changed since the last observation, for this turn's packet.
@@ -351,7 +353,14 @@ async fn compare(
                 RepositoryHead::Commit { oid: old, .. },
                 GitHeadObservation::Commit { oid: new, .. },
             ) => {
-                match commits_between(&sample.path, &GitSha::new(old), new, MAX_LISTED, budget).await
+                match commits_between(
+                    &sample.path,
+                    &GitSha::new(old),
+                    new,
+                    crate::checkout_invalidation::MAX_EXAMINED_COMMITS,
+                    budget,
+                )
+                .await
                 {
                     GitCommitRange::Unchanged => {}
                     GitCommitRange::Advanced { commits, omitted } => {
@@ -360,7 +369,7 @@ async fn compare(
                             commits.len(),
                             if omitted { " or more" } else { "" }
                         ));
-                        for commit in &commits {
+                        for (position, commit) in commits.iter().enumerate() {
                             let short = &commit.oid[..commit.oid.len().min(8)];
                             let date = date_only(commit.committed_at.saturating_mul(1000));
                             let body = if commit.body.is_empty() {
@@ -368,10 +377,12 @@ async fn compare(
                             } else {
                                 format!(" {}", single_line(&commit.body))
                             };
-                            root_lines.push(format!(
-                                "- {short} ({date}) {}{body}",
-                                single_line(&commit.subject)
-                            ));
+                            if position < MAX_LISTED {
+                                root_lines.push(format!(
+                                    "- {short} ({date}) {}{body}",
+                                    single_line(&commit.subject)
+                                ));
+                            }
                             complete &= store_commit_fact(
                                 services,
                                 project_id,
@@ -390,7 +401,22 @@ async fn compare(
                             )
                             .await;
                         }
-                        if omitted {
+                        if let Some(worktree_root) = &sample.observation.worktree_root {
+                            let advanced = crate::checkout_invalidation::AdvancedRoot {
+                                worktree_root,
+                                commits: &commits,
+                                omitted,
+                            };
+                            let deadline = tokio::time::Instant::now() + INVALIDATION_BUDGET;
+                            let pass = crate::checkout_invalidation::qualify_changed_conclusions(
+                                services, project_id, &advanced, budget, deadline,
+                            )
+                            .await;
+                            // Unfinished work keeps the baseline, so the next turn resumes it.
+                            complete &= !pass.retry;
+                            root_lines.extend(pass.lines.into_iter().map(|line| format!("- {line}")));
+                        }
+                        if omitted || commits.len() > MAX_LISTED {
                             root_lines.push(format!(
                                 "- more: git log {}..{}",
                                 &old[..old.len().min(8)],

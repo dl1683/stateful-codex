@@ -4,12 +4,15 @@ mod attribution;
 mod autonomy;
 mod background;
 mod checkout;
+mod checkout_invalidation;
 mod checkpoint;
+mod code_anchors;
 mod completion;
 mod continuity;
 mod continuity_source;
 mod conversation_summaries;
 mod events;
+mod knowledge_validity;
 mod limits;
 mod memory_add;
 mod memory_controls;
@@ -357,6 +360,7 @@ impl StatefulExtension {
                         );
                         let scope_view =
                             rule_scope::ScopeView::load(store, &projection, thread_id).await;
+                        let validity = knowledge_validity::root_validity(store, &projection).await;
                         return RootBlackboardStatus::Available(
                             ResolvedRootBlackboard::new(
                                 projection,
@@ -369,7 +373,8 @@ impl StatefulExtension {
                                     observed_sources: 0,
                                 }),
                             )
-                            .with_scope_view(&scope_view),
+                            .with_scope_view(&scope_view)
+                            .with_validity(validity),
                         );
                     }
                 };
@@ -479,6 +484,7 @@ impl StatefulExtension {
                 );
                 let predecessors = root_predecessors(store, project_id, &projection).await;
                 let scope_view = rule_scope::ScopeView::load(store, &projection, thread_id).await;
+                let validity = knowledge_validity::root_validity(store, &projection).await;
                 RootBlackboardStatus::Available(
                     ResolvedRootBlackboard::new(
                         projection,
@@ -486,7 +492,8 @@ impl StatefulExtension {
                         Some((*evidence_audit).clone()),
                     )
                     .with_scope_view(&scope_view)
-                    .with_predecessors(predecessors),
+                    .with_predecessors(predecessors)
+                    .with_validity(validity),
                 )
             }
             Err(error) => {

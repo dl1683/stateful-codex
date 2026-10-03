@@ -25,6 +25,7 @@ use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::BlackboardStore;
+use codex_project_intelligence::KnowledgeValidity;
 use codex_thread_store::ListTurnsParams;
 use codex_thread_store::SortDirection;
 use codex_thread_store::StoredTurnItemsView;
@@ -38,6 +39,7 @@ use crate::conversation_summaries::project_threads_params;
 use crate::conversation_summaries::turn_status;
 use crate::conversation_summaries::turn_texts;
 use crate::conversation_summaries::turn_time_ms;
+use crate::knowledge_validity::ShownValidity;
 use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
@@ -141,7 +143,7 @@ impl MemoryReadTool {
             "entries": [],
             "turns": [],
             "coverage": coverage,
-            "use": "This evidence needs no confirmation read. Read more only when an omitted part is critical to the answer: conversation_read with a threadId and turnId for a full turn, evidence_read for an entry's source, git show for a commit.",
+            "use": "This evidence needs no confirmation read, except entries whose status says to check them. Read more only when an omitted part is critical to the answer: conversation_read with a threadId and turnId for a full turn, evidence_read for an entry's source, git show for a commit.",
         });
         let entry_limit = budget
             .saturating_sub(RESERVED_BYTES)
@@ -489,10 +491,30 @@ async fn entry_item(
             })
         })
         .collect::<Vec<_>>();
+    let (validity, reason) = crate::knowledge_validity::validity_of(store, &hit.entry).await;
+    let reason = reason.unwrap_or_default();
+    let status = match (hit.entry.state, validity) {
+        (BlackboardEntryState::Active, ShownValidity::Known(KnowledgeValidity::NeedsCheck)) => {
+            format!("may be outdated; check before relying on it: {reason}")
+        }
+        (
+            BlackboardEntryState::Active,
+            ShownValidity::Known(
+                validity @ (KnowledgeValidity::Obsolete | KnowledgeValidity::Historical),
+            ),
+        ) => format!("no longer current ({}): {reason}", validity.as_str()),
+        (BlackboardEntryState::Active, ShownValidity::Unavailable) => {
+            "validity unknown (could not be read); check before relying on it".to_string()
+        }
+        (BlackboardEntryState::Active, ShownValidity::Known(KnowledgeValidity::Current))
+        | (BlackboardEntryState::Superseded | BlackboardEntryState::Tombstoned, _) => {
+            current_status(hit)
+        }
+    };
     json!({
         "entryId": hit.entry.id.to_string(),
         "kind": value.kind,
-        "status": current_status(hit),
+        "status": status,
         "source": source,
         "verification": value.verification,
         "storedEvidenceFreshness": hit.evidence_freshness,

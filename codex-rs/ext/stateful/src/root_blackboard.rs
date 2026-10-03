@@ -77,6 +77,8 @@ struct EntryLayout<'a> {
     evidence_audit: Option<&'a EvidenceAudit>,
     /// The newest entry each shown entry replaced, by entry ID.
     predecessors: &'a HashMap<String, BlackboardEntry>,
+    /// Why entries that need a check may be outdated, by entry ID.
+    needs_check: &'a HashMap<String, String>,
     entries: Vec<LaidOutLine>,
     shown: Vec<(usize, String)>,
     omitted: u64,
@@ -91,12 +93,24 @@ impl EntryLayout<'_> {
         evidence_aliases: &HashMap<ContextMapEntryId, String>,
     ) {
         let alias = format!("E{}", index + 1);
+        let qualification = self
+            .needs_check
+            .get(hit.entry.id.as_str())
+            .map_or_else(String::new, |reason| {
+                crate::knowledge_validity::needs_check_prefix(reason)
+            });
+        // The qualification follows the alias, so truncating a long line keeps it.
         let plain = render_hit(
             &alias,
             hit,
             self.entry_aliases,
             evidence_aliases,
             self.evidence_audit,
+        )
+        .replacen(
+            &format!("- {alias} "),
+            &format!("- {alias}{qualification} "),
+            1,
         );
         // What the current value replaced is decoration: it is dropped before the entry
         // itself is.
@@ -120,7 +134,7 @@ impl EntryLayout<'_> {
                 self.shown.push((index, alias));
             }
             let canonical = format!(
-                "{}{}",
+                "{}{qualification}{}",
                 render_hit(
                     hit.entry.id.as_str(),
                     hit,
@@ -178,6 +192,8 @@ pub(super) struct ResolvedRootBlackboard {
     predecessors: HashMap<String, BlackboardEntry>,
     /// What the packet says about investigation-scoped rules.
     scope_note: Option<String>,
+    /// Which entries need a check and whether any validity was unreadable.
+    validity: crate::knowledge_validity::RootValidity,
 }
 
 /// Removes rules that are not in the user's own words from a root projection, before any
@@ -209,6 +225,7 @@ impl ResolvedRootBlackboard {
             quarantined_rules,
             predecessors: HashMap::new(),
             scope_note: None,
+            validity: Default::default(),
         }
     }
 
@@ -217,6 +234,15 @@ impl ResolvedRootBlackboard {
     pub(super) fn with_scope_view(mut self, view: &crate::rule_scope::ScopeView) -> Self {
         let not_applied = view.retain_applicable(&mut self.projection);
         self.scope_note = view.note(not_applied);
+        self
+    }
+
+    /// Attaches the entries' validity, so lines of entries that need a check say why.
+    pub(super) fn with_validity(
+        mut self,
+        validity: crate::knowledge_validity::RootValidity,
+    ) -> Self {
+        self.validity = validity;
         self
     }
 
@@ -304,6 +330,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
             .collect(),
         evidence_audit: root.evidence_audit.as_ref(),
         predecessors: &root.predecessors,
+        needs_check: &root.validity.needs_check,
         entries: Vec::with_capacity(projection.data.len()),
         shown: Vec::with_capacity(projection.data.len()),
         omitted: projection.omitted_entries,

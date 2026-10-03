@@ -256,3 +256,56 @@ fn history_is_shown_only_when_it_fits_and_its_presence_is_part_of_the_digest() {
         (true, true, false, true, false, false)
     );
 }
+
+/// An entry that needs a check says so, with the reason, and the qualification is part of
+/// its digest so marking it is a change the packet reports.
+#[test]
+fn entries_that_need_a_check_are_qualified() {
+    let render = |content: &str, needs_check: bool| {
+        let root = ResolvedRootBlackboard::new(
+            RootBlackboardProjection {
+                project_id: "project-1".to_string(),
+                revision: 1,
+                data: vec![hit(
+                    "plan",
+                    BlackboardKind::Strategy,
+                    BlackboardProvenanceKind::Agent,
+                    content,
+                )],
+                omitted_entries: 0,
+                candidate_entries: 0,
+            },
+            Default::default(),
+            None,
+        );
+        let root = if needs_check {
+            root.with_validity(crate::knowledge_validity::RootValidity {
+                needs_check: [(
+                    "plan".to_string(),
+                    "a newer record says to remove the history section".to_string(),
+                )]
+                .into(),
+            })
+        } else {
+            root
+        };
+        let mut output = String::new();
+        let layout = render_root_blackboard(&mut output, &RootBlackboardStatus::Available(root));
+        (output, layout.entries[0].digest.clone())
+    };
+    let (plain, plain_digest) = render("Include a concise history section.", false);
+    let (qualified, qualified_digest) = render("Include a concise history section.", true);
+    let (long, _) = render(&"Include a concise history section. ".repeat(120), true);
+    assert_eq!(
+        (
+            plain.contains("may be outdated"),
+            qualified.contains(
+                "- E1 [may be outdated; check before relying on it: a newer record says to remove the history section] [high strategy;"
+            ),
+            plain_digest == qualified_digest,
+            long.contains("[may be outdated; check before relying on it:")
+                && long.contains("truncated; query blackboard"),
+        ),
+        (false, true, false, true)
+    );
+}
