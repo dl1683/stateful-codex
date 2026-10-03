@@ -21767,6 +21767,120 @@
         ],
         "type": "object"
       },
+      "StatefulMemoryItem": {
+        "description": "One current entry of project memory.",
+        "properties": {
+          "content": {
+            "description": "At most 2,000 bytes; `contentTruncated` says whether more exists.",
+            "type": "string"
+          },
+          "contentTruncated": {
+            "type": "boolean"
+          },
+          "entryId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/definitions/v2/BlackboardKind"
+          },
+          "replaces": {
+            "description": "What this entry replaced, newest first, at most three.",
+            "items": {
+              "$ref": "#/definitions/v2/StatefulMemoryReplaced"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "section": {
+            "$ref": "#/definitions/v2/StatefulMemorySection"
+          },
+          "source": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/v2/BlackboardProvenanceKind"
+              }
+            ],
+            "description": "Who wrote this text."
+          },
+          "updatedAt": {
+            "description": "Unix seconds.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content",
+          "contentTruncated",
+          "entryId",
+          "kind",
+          "replaces",
+          "revision",
+          "section",
+          "source",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "StatefulMemoryReplaced": {
+        "description": "An earlier entry that a memory item replaced.",
+        "properties": {
+          "content": {
+            "description": "At most 240 bytes.",
+            "type": "string"
+          },
+          "entryId": {
+            "type": "string"
+          },
+          "replacedAt": {
+            "description": "Unix seconds.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content",
+          "entryId",
+          "replacedAt"
+        ],
+        "type": "object"
+      },
+      "StatefulMemorySection": {
+        "description": "Where a memory item belongs, matching what new work applies.",
+        "oneOf": [
+          {
+            "enum": [
+              "decision",
+              "knowledge"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "The user's standing rule in their own words; applied to new work.",
+            "enum": [
+              "userRule"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "The user's rule limited to a task; kept, never applied.",
+            "enum": [
+              "pendingRule"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "A rule not in the user's own words; never applied.",
+            "enum": [
+              "unverifiedRule"
+            ],
+            "type": "string"
+          }
+        ]
+      },
       "StatefulObligation": {
         "properties": {
           "createdAt": {

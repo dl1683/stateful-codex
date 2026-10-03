@@ -31,6 +31,7 @@ use crate::storage::unix_timestamp_millis;
 mod fence;
 mod query;
 mod relation;
+mod review;
 mod succession;
 mod update;
 

@@ -68,6 +68,25 @@ fn user_authority_requests() -> Vec<(&'static str, ClientRequest)> {
                 json!({"runId": "run-1", "expectedRevision": 1, "mode": "socratic"}),
             ),
         ),
+        (
+            "statefulMemory/forget",
+            request(
+                "statefulMemory/forget",
+                json!({"threadId": "thread-1", "entryId": "entry-1", "expectedRevision": 1}),
+            ),
+        ),
+        (
+            "statefulMemory/correct",
+            request(
+                "statefulMemory/correct",
+                json!({
+                    "threadId": "thread-1",
+                    "entryId": "entry-1",
+                    "expectedRevision": 1,
+                    "content": "Run only the affected tests."
+                }),
+            ),
+        ),
     ]
 }
 

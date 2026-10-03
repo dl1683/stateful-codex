@@ -55,6 +55,9 @@ use crate::error_code::internal_error;
 use crate::error_code::invalid_params;
 use crate::error_code::method_not_found;
 
+#[path = "stateful_memory.rs"]
+mod stateful_memory;
+
 const DEFAULT_QUERY_LIMIT: u32 = 20;
 
 #[derive(Clone)]

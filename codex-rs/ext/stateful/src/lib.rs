@@ -10,6 +10,7 @@ mod continuity_source;
 mod conversation_summaries;
 mod events;
 mod limits;
+mod memory_controls;
 mod read_receipts;
 mod request_scope;
 mod root_blackboard;
@@ -71,6 +72,12 @@ pub use events::KnowledgeCategory;
 pub use events::MAX_RECEIPT_TEXT_BYTES;
 pub use events::StatefulEvent;
 pub use events::StatefulEventSink;
+pub use memory_controls::MAX_CORRECTION_BYTES;
+pub use memory_controls::MemoryControlError;
+pub use memory_controls::MemorySection;
+pub use memory_controls::correct_entry;
+pub use memory_controls::forget_entry;
+pub use memory_controls::memory_section;
 
 /// Bytes of Stateful developer content a fresh context window carries across the project
 /// packet, the run packet and the conversation record (about 3k tokens).

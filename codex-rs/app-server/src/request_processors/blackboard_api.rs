@@ -117,7 +117,7 @@ pub(super) fn api_relation(relation: BlackboardRelation) -> ApiRelation {
     }
 }
 
-fn api_kind(value: BlackboardKind) -> ApiKind {
+pub(super) fn api_kind(value: BlackboardKind) -> ApiKind {
     match value {
         BlackboardKind::Instruction => ApiKind::Instruction,
         BlackboardKind::Fact => ApiKind::Fact,
@@ -171,13 +171,17 @@ fn api_entry_state(value: BlackboardEntryState) -> ApiEntryState {
 
 fn api_provenance(value: BlackboardProvenance) -> ApiProvenance {
     ApiProvenance {
-        kind: match value.kind {
-            BlackboardProvenanceKind::User => ApiProvenanceKind::User,
-            BlackboardProvenanceKind::Agent => ApiProvenanceKind::Agent,
-            BlackboardProvenanceKind::Maintenance => ApiProvenanceKind::Maintenance,
-            BlackboardProvenanceKind::Import => ApiProvenanceKind::Import,
-        },
+        kind: api_provenance_kind(value.kind),
         source_id: value.source_id,
+    }
+}
+
+pub(super) fn api_provenance_kind(value: BlackboardProvenanceKind) -> ApiProvenanceKind {
+    match value {
+        BlackboardProvenanceKind::User => ApiProvenanceKind::User,
+        BlackboardProvenanceKind::Agent => ApiProvenanceKind::Agent,
+        BlackboardProvenanceKind::Maintenance => ApiProvenanceKind::Maintenance,
+        BlackboardProvenanceKind::Import => ApiProvenanceKind::Import,
     }
 }
 

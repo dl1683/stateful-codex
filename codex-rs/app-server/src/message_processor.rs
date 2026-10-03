@@ -389,9 +389,8 @@ impl MessageProcessor {
                     thread_state_manager.clone(),
                 )),
                 Some({
-                    let time_provider =
-                        app_server_time_provider(outgoing.clone(), thread_state_manager.clone());
-                    time_provider
+                    
+                    (app_server_time_provider(outgoing.clone(), thread_state_manager.clone())) as _
                 }),
             );
             match code_mode_session_provider {
@@ -1583,6 +1582,15 @@ impl MessageProcessor {
             }
             ClientRequest::BlackboardRelate { params, .. } => {
                 self.blackboard_processor.relate(params).await
+            }
+            ClientRequest::StatefulMemoryRead { params, .. } => {
+                self.blackboard_processor.memory_read(params).await
+            }
+            ClientRequest::StatefulMemoryForget { params, .. } => {
+                self.blackboard_processor.memory_forget(params).await
+            }
+            ClientRequest::StatefulMemoryCorrect { params, .. } => {
+                self.blackboard_processor.memory_correct(params).await
             }
             ClientRequest::StatefulRunStart { params, .. } => {
                 self.stateful_processor.run_start(params).await

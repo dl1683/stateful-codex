@@ -5253,6 +5253,40 @@ class StatefulKnowledgeCategory(
     ]
 
 
+class StatefulMemoryReplaced(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    content: Annotated[str, Field(description="At most 240 bytes.")]
+    entry_id: Annotated[str, Field(alias="entryId")]
+    replaced_at: Annotated[int, Field(alias="replacedAt", description="Unix seconds.")]
+
+
+class StatefulMemorySectionValue(Enum):
+    decision = "decision"
+    knowledge = "knowledge"
+
+
+class StatefulMemorySection(
+    RootModel[
+        StatefulMemorySectionValue
+        | Literal["userRule"]
+        | Literal["pendingRule"]
+        | Literal["unverifiedRule"]
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        StatefulMemorySectionValue
+        | Literal["userRule"]
+        | Literal["pendingRule"]
+        | Literal["unverifiedRule"],
+        Field(description="Where a memory item belongs, matching what new work applies."),
+    ]
+
+
 class StatefulObligationPacket(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10289,6 +10323,26 @@ class StatefulMeasurementSummary(BaseModel):
     token_usage: Annotated[TokenUsageBreakdown | None, Field(alias="tokenUsage")] = None
     trajectory: TurnTrajectory | None = None
     turns_with_token_usage: Annotated[int, Field(alias="turnsWithTokenUsage", ge=0)]
+
+
+class StatefulMemoryItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    content: Annotated[
+        str, Field(description="At most 2,000 bytes; `contentTruncated` says whether more exists.")
+    ]
+    content_truncated: Annotated[bool, Field(alias="contentTruncated")]
+    entry_id: Annotated[str, Field(alias="entryId")]
+    kind: BlackboardKind
+    replaces: Annotated[
+        list[StatefulMemoryReplaced],
+        Field(description="What this entry replaced, newest first, at most three."),
+    ]
+    revision: Annotated[int, Field(ge=0)]
+    section: StatefulMemorySection
+    source: Annotated[BlackboardProvenanceKind, Field(description="Who wrote this text.")]
+    updated_at: Annotated[int, Field(alias="updatedAt", description="Unix seconds.")]
 
 
 class StatefulObligation(BaseModel):

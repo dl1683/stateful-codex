@@ -40,6 +40,8 @@ fn user_authority_method(request: &ClientRequest) -> Option<&'static str> {
         ClientRequest::StatefulRunResume { .. } => Some("statefulRun/resume"),
         ClientRequest::StatefulRunCancel { .. } => Some("statefulRun/cancel"),
         ClientRequest::StatefulRunSetMode { .. } => Some("statefulRun/setMode"),
+        ClientRequest::StatefulMemoryForget { .. } => Some("statefulMemory/forget"),
+        ClientRequest::StatefulMemoryCorrect { .. } => Some("statefulMemory/correct"),
         _ => None,
     }
 }

@@ -901,6 +901,24 @@ client_request_definitions! {
         serialization: global("stateful-runtime"),
         response: v2::StatefulRunSetModeResponse,
     },
+    #[experimental("statefulMemory/read")]
+    StatefulMemoryRead => "statefulMemory/read" {
+        params: v2::StatefulMemoryReadParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::StatefulMemoryReadResponse,
+    },
+    #[experimental("statefulMemory/forget")]
+    StatefulMemoryForget => "statefulMemory/forget" {
+        params: v2::StatefulMemoryForgetParams,
+        serialization: global("project-intelligence"),
+        response: v2::StatefulMemoryForgetResponse,
+    },
+    #[experimental("statefulMemory/correct")]
+    StatefulMemoryCorrect => "statefulMemory/correct" {
+        params: v2::StatefulMemoryCorrectParams,
+        serialization: global("project-intelligence"),
+        response: v2::StatefulMemoryCorrectResponse,
+    },
     #[experimental("statefulMeasurement/list")]
     StatefulMeasurementList => "statefulMeasurement/list" {
         params: v2::StatefulMeasurementListParams,
