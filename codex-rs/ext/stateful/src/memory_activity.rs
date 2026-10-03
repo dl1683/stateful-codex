@@ -44,13 +44,13 @@ pub struct ChangeTotals {
 
 /// What one active entry counts as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Tally {
+enum Tally {
     Section(MemorySection),
     OpenCheck,
     Commit,
 }
 
-pub(crate) fn tally(entry: &CensusEntry) -> Option<Tally> {
+fn tally(entry: &CensusEntry) -> Option<Tally> {
     // Knowledge no longer current is history, not something memory holds now.
     if matches!(
         entry.validity,

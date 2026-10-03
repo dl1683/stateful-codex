@@ -287,6 +287,13 @@ impl App {
         self.rate_limit_refresh_state.invalidate_recovery();
         session.inherit_task_tool_capabilities(app_server);
         *app_server = session;
+        // Memory read through the old connection is obsolete, and a binding may have changed
+        // while disconnected: read the displayed thread's binding again.
+        self.memory_status.connection_changed();
+        if let Some(thread_id) = displayed {
+            self.app_event_tx
+                .send(AppEvent::StatefulMemoryAttach { thread_id });
+        }
         #[cfg(any(target_os = "windows", test))]
         let interrupted_windows_setup = self.windows_sandbox.pending_setup.take().is_some();
         #[cfg(any(target_os = "windows", test))]

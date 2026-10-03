@@ -1,7 +1,7 @@
 //! Every committed memory change is journaled once and counted from the journal: a commit
-//! found in the workspace history is remembered visibly (and only once), direct saves,
-//! corrections and forgets are counted per session, the activity list pages, and the return
-//! recap is dated. `§` and dashes round-trip through capture, storage and the protocol.
+//! found in the workspace history is remembered visibly (and only once), corrections and
+//! forgets are counted per session, and the activity list pages. `§` and dashes
+//! round-trip through capture, storage and the protocol.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -31,8 +31,6 @@ use codex_app_server_protocol::StatefulMemoryForgetParams;
 use codex_app_server_protocol::StatefulMemoryForgetResponse;
 use codex_app_server_protocol::StatefulMemoryOperation;
 use codex_app_server_protocol::StatefulMemoryOrigin;
-use codex_app_server_protocol::StatefulMemoryRecapParams;
-use codex_app_server_protocol::StatefulMemoryRecapResponse;
 use codex_app_server_protocol::StatefulMemorySummaryParams;
 use codex_app_server_protocol::StatefulMemorySummaryResponse;
 use codex_app_server_protocol::ThreadStartParams;
@@ -203,8 +201,8 @@ async fn memory_changes_are_journaled_once_and_counted() -> Result<()> {
                 commits: 1,
                 ..StatefulMemoryCounts::default()
             },
+            // Direct additions are journaled by the direct-control foundation, not this slice.
             Some(StatefulMemoryChangeTotals {
-                saved: 3,
                 commits_remembered: 1,
                 corrected: 1,
                 forgotten: 1,
@@ -246,29 +244,14 @@ async fn memory_changes_are_journaled_once_and_counted() -> Result<()> {
                 StatefulMemoryChangeCategory::CommitObservation
             ),
             (
-                StatefulMemoryOperation::Saved,
-                StatefulMemoryOrigin::DirectControl,
-                StatefulMemoryChangeCategory::Rule
-            ),
-            (
-                StatefulMemoryOperation::Saved,
-                StatefulMemoryOrigin::DirectControl,
-                StatefulMemoryChangeCategory::Decision
-            ),
-            (
                 StatefulMemoryOperation::Corrected,
                 StatefulMemoryOrigin::DirectControl,
                 StatefulMemoryChangeCategory::Decision
             ),
             (
-                StatefulMemoryOperation::Saved,
-                StatefulMemoryOrigin::DirectControl,
-                StatefulMemoryChangeCategory::Note
-            ),
-            (
                 StatefulMemoryOperation::Forgotten,
                 StatefulMemoryOrigin::DirectControl,
-                StatefulMemoryChangeCategory::Note
+                StatefulMemoryChangeCategory::Legacy
             ),
         ]
     );
@@ -278,41 +261,9 @@ async fn memory_changes_are_journaled_once_and_counted() -> Result<()> {
             changes[0].preview.ends_with(SUBJECT),
             changes[1].preview.as_str(),
         ),
-        (true, true, RULE)
+        (true, true, "Use SQLite \u{2014} one file per project.")
     );
 
-    // The return card is dated and carries the rule and the corrected decision.
-    let recap: StatefulMemoryRecapResponse = server
-        .request({
-            let params = StatefulMemoryRecapParams {
-                thread_id: thread.clone(),
-            };
-            move |request_id| ClientRequest::StatefulMemoryRecap { request_id, params }
-        })
-        .await?;
-    assert_eq!(
-        (
-            recap.last_work.as_ref().map(|work| work.thread_id.as_str()),
-            recap
-                .last_work
-                .as_ref()
-                .is_some_and(|work| work.finished_at > 0 && work.finished_at <= recap.as_of),
-            recap.rules.clone(),
-            recap
-                .decisions
-                .iter()
-                .map(|decision| decision.text.clone())
-                .collect::<Vec<_>>(),
-            recap.commits.len(),
-        ),
-        (
-            Some(thread.as_str()),
-            true,
-            vec![RULE.to_string()],
-            vec!["Use SQLite \u{2014} one file per project.".to_string()],
-            1,
-        )
-    );
     Ok(())
 }
 

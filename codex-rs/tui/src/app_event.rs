@@ -1103,29 +1103,32 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
     },
 
-    /// The newest memory summary read for a thread.
+    /// The newest memory summary read for a thread, under its attachment `generation`;
+    /// applied only while that attachment is current.
     StatefulMemoryStatus {
         thread_id: ThreadId,
+        generation: u64,
         counts: codex_app_server_protocol::StatefulMemoryCounts,
         session: Option<codex_app_server_protocol::StatefulMemoryChangeTotals>,
         /// Some memory could not be read when needed, so `session` may miss changes.
         partial: bool,
     },
 
-    /// A thread's project was assigned or changed.
+    /// A thread's project was assigned, changed or removed.
     StatefulMemoryProjectChanged {
         thread_id: ThreadId,
     },
 
-    /// A thread's project memory could not be read when it became active.
+    /// A thread's project memory could not be read under attachment `generation`.
     StatefulMemoryUnavailable {
         thread_id: ThreadId,
+        generation: u64,
     },
 
-    /// The dated return recap, shown once per session.
-    StatefulMemoryRecap {
+    /// A thread has no project memory under attachment `generation`: show none.
+    StatefulMemoryCleared {
         thread_id: ThreadId,
-        recap: Box<codex_app_server_protocol::StatefulMemoryRecapResponse>,
+        generation: u64,
     },
 
     McpLoginStarted {

@@ -1602,9 +1602,6 @@ impl MessageProcessor {
             ClientRequest::StatefulMemorySummary { params, .. } => {
                 self.blackboard_processor.memory_summary(params).await
             }
-            ClientRequest::StatefulMemoryRecap { params, .. } => {
-                self.blackboard_processor.memory_recap(params).await
-            }
             ClientRequest::StatefulRunStart { params, .. } => {
                 self.stateful_processor.run_start(params).await
             }

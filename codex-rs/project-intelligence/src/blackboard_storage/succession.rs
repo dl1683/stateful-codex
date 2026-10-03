@@ -152,11 +152,20 @@ impl BlackboardStore {
             .await?;
         }
         if let Some(change) = change {
+            // The successor's outcome is counted under the category it actually carries
+            // (its predecessor's), so the journal and the stored context never disagree.
+            let mut change = change.clone();
+            if let Some(context) =
+                super::knowledge::context_of(&mut transaction, &value.project_id, id.as_str())
+                    .await?
+            {
+                change.category = context.category;
+            }
             super::knowledge::append_change(
                 &mut transaction,
                 &value.project_id,
                 Some((&id, 1)),
-                change,
+                &change,
                 now,
             )
             .await?;

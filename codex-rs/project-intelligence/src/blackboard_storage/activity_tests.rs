@@ -330,30 +330,54 @@ async fn a_full_page_reports_that_more_follow() {
     );
 }
 
-/// A succession journals the successor and each replaced entry in one transaction; a retry
-/// of the committed succession journals nothing more.
+/// A succession journals the successor and each replaced entry in one transaction, each under
+/// the category its stored context carries (a typed open check replaced by a decision keeps
+/// the carried category for the successor; a legacy entry is counted as legacy); a retry of
+/// the committed succession journals nothing more.
 #[tokio::test]
 async fn a_succession_accounts_for_what_it_replaced() {
     let temp_dir = TempDir::new().expect("tempdir");
     let store = store(&temp_dir).await;
-    let mut replaced = Vec::new();
-    for name in ["old-1", "old-2"] {
-        let created = store
-            .create_entry(
-                BlackboardEntryId::parse(name).expect("id"),
-                entry(
-                    BlackboardKind::Decision,
-                    BlackboardProvenanceKind::Agent,
-                    &format!("{name} \u{2014} decision"),
-                ),
-            )
-            .await
-            .expect("entry");
-        replaced.push(crate::SupersededEntry {
+    let typed = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("old-1").expect("id"),
+            entry(
+                BlackboardKind::Question,
+                BlackboardProvenanceKind::Agent,
+                "old-1 \u{2014} open check",
+            ),
+            KnowledgeContext::new(
+                KnowledgeCategory::OpenCheck,
+                KnowledgeAuthority::AssistantReported,
+            ),
+            change(
+                ChangeOrigin::ModelTool,
+                KnowledgeCategory::OpenCheck,
+                "thread-1",
+                "old-1 \u{2014} open check",
+            ),
+        )
+        .await
+        .expect("typed")
+        .0;
+    let legacy = store
+        .create_entry(
+            BlackboardEntryId::parse("old-2").expect("id"),
+            entry(
+                BlackboardKind::Decision,
+                BlackboardProvenanceKind::Agent,
+                "old-2 \u{2014} decision",
+            ),
+        )
+        .await
+        .expect("legacy");
+    let replaced = [typed, legacy]
+        .into_iter()
+        .map(|created| crate::SupersededEntry {
             id: created.id,
             expected_revision: created.revision,
-        });
-    }
+        })
+        .collect::<Vec<_>>();
     let saved = change(
         ChangeOrigin::ModelTool,
         KnowledgeCategory::Decision,
@@ -396,27 +420,41 @@ async fn a_succession_accounts_for_what_it_replaced() {
             )
         })
         .collect::<Vec<_>>();
+    let carried = store
+        .knowledge_context(PROJECT_ID, &BlackboardEntryId::parse("new").expect("id"))
+        .await
+        .expect("context")
+        .map(|context| context.category);
     assert_eq!(
-        journal,
-        vec![
-            (
-                "new".to_string(),
-                ChangeOperation::Saved,
-                KnowledgeCategory::Decision,
-                "new decision".to_string()
-            ),
-            (
-                "old-1".to_string(),
-                ChangeOperation::Invalidated,
-                KnowledgeCategory::Legacy,
-                "old-1 \u{2014} decision".to_string()
-            ),
-            (
-                "old-2".to_string(),
-                ChangeOperation::Invalidated,
-                KnowledgeCategory::Legacy,
-                "old-2 \u{2014} decision".to_string()
-            ),
-        ]
+        (journal, carried),
+        (
+            vec![
+                (
+                    "old-1".to_string(),
+                    ChangeOperation::Saved,
+                    KnowledgeCategory::OpenCheck,
+                    "old-1 \u{2014} open check".to_string()
+                ),
+                (
+                    "new".to_string(),
+                    ChangeOperation::Saved,
+                    KnowledgeCategory::OpenCheck,
+                    "new decision".to_string()
+                ),
+                (
+                    "old-1".to_string(),
+                    ChangeOperation::Invalidated,
+                    KnowledgeCategory::OpenCheck,
+                    "old-1 \u{2014} open check".to_string()
+                ),
+                (
+                    "old-2".to_string(),
+                    ChangeOperation::Invalidated,
+                    KnowledgeCategory::Legacy,
+                    "old-2 \u{2014} decision".to_string()
+                ),
+            ],
+            Some(KnowledgeCategory::OpenCheck)
+        )
     );
 }

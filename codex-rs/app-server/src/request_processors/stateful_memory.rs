@@ -196,7 +196,6 @@ impl BlackboardRequestProcessor {
             addition,
             &params.content,
             &params.client_action_id,
-            &params.thread_id,
         )
         .await
         .map_err(control_error)?;

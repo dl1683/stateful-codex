@@ -20227,55 +20227,6 @@
       },
       "type": "object"
     },
-    "StatefulRecapDecision": {
-      "properties": {
-        "reason": {
-          "description": "The recorded reason, when one was recorded; at most 240 bytes.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reported": {
-          "description": "The assistant's conclusion rather than the user's word.",
-          "type": "boolean"
-        },
-        "text": {
-          "description": "At most 240 bytes.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "reported",
-        "text"
-      ],
-      "type": "object"
-    },
-    "StatefulRecapWork": {
-      "description": "The last finished piece of work in the project.",
-      "properties": {
-        "finishedAt": {
-          "description": "Unix seconds when it finished.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "request": {
-          "description": "The opening of what was asked, at most 240 bytes.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "threadId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "finishedAt",
-        "threadId"
-      ],
-      "type": "object"
-    },
     "StatefulRun": {
       "properties": {
         "budget": {

@@ -1,8 +1,14 @@
 //! The session's view of project memory: a cached summary for the passive footer and
 //! `/status`, the journal watermark each visited project had when this TUI session first read
-//! it (so the exit receipt counts the changes in this session's threads after it), and the
-//! dated recap shown once on return. Every number comes from `statefulMemory/summary`;
-//! notifications only say when to read it again.
+//! it (so the exit receipt counts the changes in this session's threads after it).
+//! Every number comes from `statefulMemory/summary`; notifications only say when to read it
+//! again.
+//!
+//! Every attachment of a thread (activation, reconnect, project change) gets a new generation.
+//! Results carry the generation they were requested under and are applied only while it is
+//! still current, so an answer about a former project or connection never reaches the view.
+//! A binding is recorded only by the reading its attachment started, under the same lock
+//! that application checks, so an obsolete reading can neither bind nor be shown.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -15,8 +21,6 @@ use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::StatefulMemoryChangeTotals;
-use codex_app_server_protocol::StatefulMemoryRecapParams;
-use codex_app_server_protocol::StatefulMemoryRecapResponse;
 use codex_app_server_protocol::StatefulMemorySummaryParams;
 use codex_app_server_protocol::StatefulMemorySummaryResponse;
 use codex_app_server_protocol::StatefulRun;
@@ -40,14 +44,13 @@ pub(crate) struct MemoryStatus(Arc<Mutex<State>>);
 
 #[derive(Default)]
 struct State {
-    /// What each thread this session attached to currently belongs to.
-    threads: HashMap<ThreadId, ThreadMemory>,
+    /// What each thread this session attached to belongs to now, and under which attachment.
+    threads: HashMap<ThreadId, Binding>,
     /// Per project: the journal sequence when this session first read it (sequences are
     /// counted per project) and every thread of this session that belonged to it.
     projects: BTreeMap<String, Visited>,
-    recap_shown: bool,
-    /// Per thread, bumped whenever its binding changes; a read started before is obsolete.
-    generations: HashMap<ThreadId, u64>,
+    /// Source of attachment generations; never reused.
+    next_generation: u64,
     /// Some project's memory could not be read when needed, so counts may be incomplete.
     incomplete: bool,
     /// The newest refresh request; a running refresh takes it before finishing.
@@ -56,10 +59,18 @@ struct State {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct Binding {
+    generation: u64,
+    memory: ThreadMemory,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ThreadMemory {
+    /// Being read for this attachment.
+    Checking,
     /// The thread has no Stateful project.
     NotStateful,
-    /// Its project memory could not be read; tried again on the next activation.
+    /// Its project memory could not be read for this attachment.
     Unavailable,
     /// The thread's current project.
     Project(String),
@@ -78,37 +89,89 @@ struct Target {
     app_event_tx: AppEventSender,
 }
 
+/// What reading a thread's binding found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AttachResult {
+    Project { project_id: String, head: u64 },
+    NotStateful,
+    Failed,
+}
+
+/// What the app shows after an attachment, when it is still current.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AttachOutcome {
+    /// Read the summary for the view.
+    Refresh,
+    /// The thread has no project memory: show none.
+    Clear,
+    /// Its memory could not be read.
+    Unavailable,
+    /// A newer attachment replaced this one; show nothing from it.
+    Obsolete,
+}
+
 impl State {
-    /// Records that `thread_id` now belongs to `project_id`, whose journal head is `head`.
-    fn bind(&mut self, thread_id: ThreadId, project_id: String, head: u64) {
-        self.bump(thread_id);
-        let visited = self.projects.entry(project_id.clone()).or_insert(Visited {
-            watermark: head,
-            threads: BTreeSet::new(),
-        });
-        visited.threads.insert(thread_id.to_string());
+    /// Starts a new attachment of `thread_id`; anything requested before is now obsolete.
+    fn begin_attach(&mut self, thread_id: ThreadId) -> u64 {
+        self.next_generation += 1;
+        let generation = self.next_generation;
+        self.threads.insert(
+            thread_id,
+            Binding {
+                generation,
+                memory: ThreadMemory::Checking,
+            },
+        );
+        generation
+    }
+
+    /// Records what an attachment found, if it is still the thread's current attachment.
+    fn finish_attach(
+        &mut self,
+        thread_id: ThreadId,
+        generation: u64,
+        result: AttachResult,
+    ) -> AttachOutcome {
+        if !self.is_current(thread_id, generation) {
+            return AttachOutcome::Obsolete;
+        }
+        let (memory, outcome) = match result {
+            AttachResult::Project { project_id, head } => {
+                let visited = self.projects.entry(project_id.clone()).or_insert(Visited {
+                    watermark: head,
+                    threads: BTreeSet::new(),
+                });
+                visited.threads.insert(thread_id.to_string());
+                (ThreadMemory::Project(project_id), AttachOutcome::Refresh)
+            }
+            // Earlier participation in a project stays in `projects` as history.
+            AttachResult::NotStateful => (ThreadMemory::NotStateful, AttachOutcome::Clear),
+            AttachResult::Failed => {
+                self.incomplete = true;
+                (ThreadMemory::Unavailable, AttachOutcome::Unavailable)
+            }
+        };
         self.threads
-            .insert(thread_id, ThreadMemory::Project(project_id));
+            .insert(thread_id, Binding { generation, memory });
+        outcome
     }
 
-    fn bump(&mut self, thread_id: ThreadId) {
-        *self.generations.entry(thread_id).or_default() += 1;
-    }
-
-    fn generation(&self, thread_id: ThreadId) -> u64 {
-        self.generations
+    /// Whether `generation` is still the thread's current attachment.
+    fn is_current(&self, thread_id: ThreadId, generation: u64) -> bool {
+        self.threads
             .get(&thread_id)
-            .copied()
-            .unwrap_or_default()
+            .is_some_and(|binding| binding.generation == generation)
     }
 
-    /// The project, watermark and participating threads `thread_id` is counted with.
-    fn scope_of(&self, thread_id: ThreadId) -> Option<(String, u64, Vec<String>)> {
-        let Some(ThreadMemory::Project(project)) = self.threads.get(&thread_id) else {
+    /// The current attachment and its project's watermark and participating threads.
+    fn scope_of(&self, thread_id: ThreadId) -> Option<(u64, String, u64, Vec<String>)> {
+        let binding = self.threads.get(&thread_id)?;
+        let ThreadMemory::Project(project) = &binding.memory else {
             return None;
         };
         let visited = self.projects.get(project)?;
         Some((
+            binding.generation,
             project.clone(),
             visited.watermark,
             visited.threads.iter().cloned().collect(),
@@ -123,81 +186,86 @@ impl MemoryStatus {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// A thread became active (or its project changed). Its project's watermark is taken on
-    /// first use (before any turn of this session in it can save), then the status is shown
-    /// and, once per session, the return recap.
+    /// A thread became active, reconnected or changed project: read its binding again (a
+    /// cached project may have been unlinked meanwhile), then show its memory or clear it.
+    /// The session's first attachment is read before returning, so its project's watermark
+    /// is taken before any turn of this session can save; later ones are read in the
+    /// background so a slow or stalled server never holds the app's event loop.
     pub(crate) async fn attach(
         &self,
         handle: AppServerRequestHandle,
         thread_id: ThreadId,
         app_event_tx: AppEventSender,
     ) {
-        // A thread without a project is read again each time: it may have been given one
-        // while this client was not listening.
-        let (known, generation) = {
-            let state = self.lock();
-            (
-                matches!(
-                    state.threads.get(&thread_id),
-                    Some(ThreadMemory::Project(_))
-                ),
-                state.generation(thread_id),
-            )
-        };
-        if !known {
-            let read = summary(
-                &handle, thread_id, /*since*/ None, /*threads*/ None,
-            )
-            .await;
+        let (first, generation) = {
             let mut state = self.lock();
-            if state.generation(thread_id) != generation {
-                // The binding changed while reading; the newer activation decides.
-                return;
-            }
-            match read {
-                Ok(response) => {
-                    state.bind(thread_id, response.project_id, response.latest_sequence);
-                }
-                Err(SummaryError::NotStateful) => {
-                    state.threads.insert(thread_id, ThreadMemory::NotStateful);
-                }
-                Err(SummaryError::Failed) => {
-                    state.incomplete = true;
-                    state.threads.insert(thread_id, ThreadMemory::Unavailable);
-                }
-            }
-        }
-        let memory = self.lock().threads.get(&thread_id).cloned();
-        match memory {
-            Some(ThreadMemory::NotStateful) | None => return,
-            Some(ThreadMemory::Unavailable) => {
-                app_event_tx.send(AppEvent::StatefulMemoryUnavailable { thread_id });
-                return;
-            }
-            Some(ThreadMemory::Project(_)) => {}
-        }
-        let show_recap = !std::mem::replace(&mut self.lock().recap_shown, true);
-        self.refresh(handle.clone(), thread_id, app_event_tx.clone());
-        if show_recap {
-            tokio::spawn(async move {
-                if let Ok(Ok(recap)) =
-                    tokio::time::timeout(READ_TIMEOUT, recap(&handle, thread_id)).await
-                {
-                    app_event_tx.send(AppEvent::StatefulMemoryRecap {
-                        thread_id,
-                        recap: Box::new(recap),
-                    });
-                }
-            });
+            let first = state.threads.is_empty();
+            (first, state.begin_attach(thread_id))
+        };
+        let read = self
+            .clone()
+            .read_binding(handle, thread_id, generation, app_event_tx);
+        if first {
+            read.await;
+        } else {
+            tokio::spawn(read);
         }
     }
 
-    /// The thread's project was assigned or changed: forget its binding, keeping what it did
-    /// in its earlier project, so the next activation reads its current project.
+    async fn read_binding(
+        self,
+        handle: AppServerRequestHandle,
+        thread_id: ThreadId,
+        generation: u64,
+        app_event_tx: AppEventSender,
+    ) {
+        let result = match summary(
+            &handle, thread_id, /*since*/ None, /*threads*/ None,
+        )
+        .await
+        {
+            Ok(response) => AttachResult::Project {
+                project_id: response.project_id,
+                head: response.latest_sequence,
+            },
+            Err(SummaryError::NotStateful) => AttachResult::NotStateful,
+            Err(SummaryError::Failed) => AttachResult::Failed,
+        };
+        // Recorded only if no newer attachment of the thread began meanwhile.
+        let outcome = self.lock().finish_attach(thread_id, generation, result);
+        match outcome {
+            AttachOutcome::Refresh => self.refresh(handle, thread_id, app_event_tx),
+            AttachOutcome::Clear => app_event_tx.send(AppEvent::StatefulMemoryCleared {
+                thread_id,
+                generation,
+            }),
+            AttachOutcome::Unavailable => app_event_tx.send(AppEvent::StatefulMemoryUnavailable {
+                thread_id,
+                generation,
+            }),
+            AttachOutcome::Obsolete => {}
+        }
+    }
+
+    /// The thread's project was assigned or changed: its current attachment is obsolete.
     pub(crate) fn project_changed(&self, thread_id: ThreadId) {
+        self.lock().begin_attach(thread_id);
+    }
+
+    /// The connection was replaced: every attachment made through the old one is obsolete.
+    pub(crate) fn connection_changed(&self) {
         let mut state = self.lock();
-        state.bump(thread_id);
-        state.threads.remove(&thread_id);
+        let threads = state.threads.keys().copied().collect::<Vec<_>>();
+        for thread_id in threads {
+            state.begin_attach(thread_id);
+        }
+        state.target = None;
+    }
+
+    /// Whether a result requested under `generation` may still be applied to `thread_id`.
+    /// Called on the app's event loop, where bindings change, right before applying it.
+    pub(crate) fn accepts(&self, thread_id: ThreadId, generation: u64) -> bool {
+        self.lock().is_current(thread_id, generation)
     }
 
     /// Reads the summary again in the background. Requests made while one runs collapse
@@ -226,7 +294,7 @@ impl MemoryStatus {
         let status = self.clone();
         tokio::spawn(async move {
             loop {
-                let (target, (project, since, threads), generation) = {
+                let (target, (generation, project, since, threads), partial) = {
                     let mut state = status.lock();
                     let Some(target) = state.target.take() else {
                         state.refreshing = false;
@@ -235,50 +303,32 @@ impl MemoryStatus {
                     let Some(scope) = state.scope_of(target.thread_id) else {
                         continue;
                     };
-                    let generation = state.generation(target.thread_id);
-                    (target, scope, generation)
+                    (target, scope, state.incomplete)
                 };
                 let read =
                     summary(&target.handle, target.thread_id, Some(since), Some(threads)).await;
-                {
-                    // The thread's binding changed while reading: this answer is obsolete.
-                    let mut state = status.lock();
-                    if state.generation(target.thread_id) != generation {
-                        if state.target.is_none() {
-                            state.target = Some(target);
-                        }
-                        continue;
-                    }
-                }
-                match read {
+                let thread_id = target.thread_id;
+                let event = match read {
                     Ok(response) if response.project_id == project => {
-                        let partial = status.lock().incomplete;
-                        target.app_event_tx.send(AppEvent::StatefulMemoryStatus {
-                            thread_id: target.thread_id,
+                        AppEvent::StatefulMemoryStatus {
+                            thread_id,
+                            generation,
                             counts: response.counts,
                             session: response.since,
                             partial,
-                        });
-                    }
-                    // The thread moved to another project: count it there from now on.
-                    Ok(response) => {
-                        let mut state = status.lock();
-                        state.incomplete = true;
-                        state.bind(
-                            target.thread_id,
-                            response.project_id,
-                            response.latest_sequence,
-                        );
-                        if state.target.is_none() {
-                            state.target = Some(target);
                         }
                     }
-                    Err(_) => target
-                        .app_event_tx
-                        .send(AppEvent::StatefulMemoryUnavailable {
-                            thread_id: target.thread_id,
-                        }),
-                }
+                    // The thread's project changed (perhaps unlinked) without a notification
+                    // reaching this client: attach again to read the binding.
+                    Ok(_) | Err(SummaryError::NotStateful) => {
+                        AppEvent::StatefulMemoryProjectChanged { thread_id }
+                    }
+                    Err(SummaryError::Failed) => AppEvent::StatefulMemoryUnavailable {
+                        thread_id,
+                        generation,
+                    },
+                };
+                target.app_event_tx.send(event);
             }
         });
     }
@@ -297,9 +347,10 @@ impl MemoryStatus {
             let mut incomplete = state.incomplete;
             let mut reads = Vec::new();
             for (project, visited) in &state.projects {
-                // A project is read through a thread that still belongs to it.
-                let current = state.threads.iter().find_map(|(thread, memory)| {
-                    matches!(memory, ThreadMemory::Project(other) if other == project)
+                // A project is read through a thread that still belongs to it; a project no
+                // thread belongs to any longer is history this receipt cannot count.
+                let current = state.threads.iter().find_map(|(thread, binding)| {
+                    matches!(&binding.memory, ThreadMemory::Project(other) if other == project)
                         .then_some(*thread)
                 });
                 match current {
@@ -313,7 +364,10 @@ impl MemoryStatus {
                 }
             }
             let active_is_stateful = active_thread.is_some_and(|thread| {
-                matches!(state.threads.get(&thread), Some(ThreadMemory::Project(_)))
+                state
+                    .threads
+                    .get(&thread)
+                    .is_some_and(|binding| matches!(binding.memory, ThreadMemory::Project(_)))
             });
             (incomplete, reads, active_is_stateful)
         };
@@ -403,21 +457,6 @@ async fn summary(
         }
         Ok(Err(_)) | Err(_) => Err(SummaryError::Failed),
     }
-}
-
-async fn recap(
-    handle: &AppServerRequestHandle,
-    thread_id: ThreadId,
-) -> Result<StatefulMemoryRecapResponse, String> {
-    handle
-        .request_typed(ClientRequest::StatefulMemoryRecap {
-            request_id: request_id("recap"),
-            params: StatefulMemoryRecapParams {
-                thread_id: thread_id.to_string(),
-            },
-        })
-        .await
-        .map_err(|error| error.to_string())
 }
 
 async fn run(handle: &AppServerRequestHandle, thread_id: ThreadId) -> Option<StatefulRun> {

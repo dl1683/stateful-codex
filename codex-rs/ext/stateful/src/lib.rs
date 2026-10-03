@@ -18,7 +18,6 @@ mod memory_controls;
 mod quotation;
 mod read_receipts;
 mod request_scope;
-mod return_recap;
 mod root_blackboard;
 mod rule_capture;
 mod rule_group;
@@ -97,10 +96,6 @@ pub use memory_controls::MemorySection;
 pub use memory_controls::correct_entry;
 pub use memory_controls::forget_entry;
 pub use memory_controls::memory_section;
-pub use return_recap::RecapDecision;
-pub use return_recap::RecapWork;
-pub use return_recap::ReturnRecap;
-pub use return_recap::return_recap;
 
 /// Bytes of Stateful developer content a fresh context window carries across the project
 /// packet, the run packet and the conversation record (about 3k tokens).

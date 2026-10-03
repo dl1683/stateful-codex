@@ -517,8 +517,6 @@ export type { StatefulMemoryReplaced } from "./StatefulMemoryReplaced";
 export type { StatefulMemorySection } from "./StatefulMemorySection";
 export type { StatefulObligation } from "./StatefulObligation";
 export type { StatefulObligationPacket } from "./StatefulObligationPacket";
-export type { StatefulRecapDecision } from "./StatefulRecapDecision";
-export type { StatefulRecapWork } from "./StatefulRecapWork";
 export type { StatefulRun } from "./StatefulRun";
 export type { StatefulRunBudget } from "./StatefulRunBudget";
 export type { StatefulRunRecovery } from "./StatefulRunRecovery";

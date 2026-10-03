@@ -26,8 +26,9 @@ use crate::memory_controls::correct_entry;
 use crate::memory_controls::forget_entry;
 use crate::services::ProjectIntelligenceServices;
 
-/// Counts follow what new work does with each entry; a direct save, correction and forget
-/// are each journaled once with the thread they came from, and a retried action adds nothing.
+/// Counts follow what new work does with each entry; a correction and a forget are each
+/// journaled once with the thread they came from. (Direct additions are journaled by the
+/// direct-control foundation, not here.)
 #[tokio::test]
 async fn counts_and_journal_follow_direct_controls() {
     let state_home = TempDir::new().expect("state home");
@@ -38,18 +39,10 @@ async fn counts_and_journal_follow_direct_controls() {
     let add = |addition: MemoryAddition, content: &'static str, action: &'static str| {
         let node_id = node_id.clone();
         async move {
-            add_entry(
-                store,
-                "project-1",
-                node_id,
-                addition,
-                content,
-                action,
-                "thread-1",
-            )
-            .await
-            .expect("added")
-            .0
+            add_entry(store, "project-1", node_id, addition, content, action)
+                .await
+                .expect("added")
+                .0
         }
     };
     let rule = add(
@@ -138,15 +131,11 @@ async fn counts_and_journal_follow_direct_controls() {
         ),
         (
             ChangeTotals {
-                saved: 3,
                 corrected: 1,
                 forgotten: 1,
                 ..ChangeTotals::default()
             },
-            ChangeTotals {
-                saved: 3,
-                ..ChangeTotals::default()
-            },
+            ChangeTotals::default(),
         )
     );
     let previews = store
@@ -158,11 +147,17 @@ async fn counts_and_journal_follow_direct_controls() {
         .map(|change| (change.record.operation, change.record.preview))
         .collect::<Vec<_>>();
     assert_eq!(
-        previews[0],
-        (
-            ChangeOperation::Saved,
-            "Cite \u{a7} 4.2 \u{2014} never the summary.".to_string()
-        )
+        previews,
+        vec![
+            (
+                ChangeOperation::Corrected,
+                "Months use mo. Reason: shorter".to_string()
+            ),
+            (
+                ChangeOperation::Forgotten,
+                "Cite \u{a7} 4.2 \u{2014} never the summary.".to_string()
+            ),
+        ]
     );
 }
 

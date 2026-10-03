@@ -27,17 +27,9 @@ async fn the_user_adds_each_kind_directly() {
     let add = |addition: MemoryAddition, content: &'static str, action: &'static str| {
         let node_id = node_id.clone();
         async move {
-            add_entry(
-                store,
-                "project-1",
-                node_id,
-                addition,
-                content,
-                action,
-                "thread-1",
-            )
-            .await
-            .expect("added")
+            add_entry(store, "project-1", node_id, addition, content, action)
+                .await
+                .expect("added")
         }
     };
     let rule = add(
@@ -227,7 +219,6 @@ async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
         MemoryAddition::Rule { scope: None },
         "Never run migrations during this pass.",
         "action-1",
-        "thread-1",
     )
     .await
     .expect("added");

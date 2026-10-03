@@ -1,6 +1,5 @@
-//! `statefulMemory/activity`, `statefulMemory/summary` and `statefulMemory/recap`: what project
-//! memory holds and what changed in it, counted from the journal of committed changes, and a
-//! dated return card assembled from stored memory with no model call.
+//! `statefulMemory/activity` and `statefulMemory/summary`: what project memory holds and what
+//! changed in it, counted from the journal of committed changes.
 
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -12,12 +11,8 @@ use codex_app_server_protocol::StatefulMemoryChangeTotals;
 use codex_app_server_protocol::StatefulMemoryCounts;
 use codex_app_server_protocol::StatefulMemoryOperation;
 use codex_app_server_protocol::StatefulMemoryOrigin;
-use codex_app_server_protocol::StatefulMemoryRecapParams;
-use codex_app_server_protocol::StatefulMemoryRecapResponse;
 use codex_app_server_protocol::StatefulMemorySummaryParams;
 use codex_app_server_protocol::StatefulMemorySummaryResponse;
-use codex_app_server_protocol::StatefulRecapDecision;
-use codex_app_server_protocol::StatefulRecapWork;
 use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ChangeOrigin;
 use codex_project_intelligence::KnowledgeCategory;
@@ -121,51 +116,6 @@ impl BlackboardRequestProcessor {
                 latest_sequence: head.map_or(0, |head| head.sequence),
                 since,
                 last_change_at: head.map(|head| head.created_at_ms.div_euclid(1_000)),
-            }
-            .into(),
-        ))
-    }
-
-    pub(crate) async fn memory_recap(
-        &self,
-        params: StatefulMemoryRecapParams,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let project_id = self.thread_project(&params.thread_id).await?;
-        let recap = codex_stateful_extension::return_recap(
-            self.store().await?,
-            self.thread_store.as_ref(),
-            &project_id,
-            &params.thread_id,
-        )
-        .await
-        .map_err(blackboard_error)?;
-        Ok(Some(
-            StatefulMemoryRecapResponse {
-                project_id,
-                as_of: recap.as_of_ms.div_euclid(1_000),
-                last_work: recap.last_work.map(|work| StatefulRecapWork {
-                    thread_id: work.thread_id,
-                    finished_at: work.finished_at_ms.div_euclid(1_000),
-                    request: work.request,
-                }),
-                rules: recap.rules,
-                more_rules: recap.more_rules,
-                decisions: recap
-                    .decisions
-                    .into_iter()
-                    .map(|decision| StatefulRecapDecision {
-                        text: decision.text,
-                        reason: decision.reason,
-                        reported: decision.reported,
-                    })
-                    .collect(),
-                more_decisions: recap.more_decisions,
-                open_checks: recap.open_checks,
-                more_open_checks: recap.more_open_checks,
-                commits: recap.commits,
-                more_commits: recap.more_commits,
-                capture_incomplete: recap.capture_incomplete,
-                history_complete: recap.history_complete,
             }
             .into(),
         ))

@@ -937,12 +937,6 @@ client_request_definitions! {
         serialization: global_shared_read("project-intelligence"),
         response: v2::StatefulMemorySummaryResponse,
     },
-    #[experimental("statefulMemory/recap")]
-    StatefulMemoryRecap => "statefulMemory/recap" {
-        params: v2::StatefulMemoryRecapParams,
-        serialization: global_shared_read("project-intelligence"),
-        response: v2::StatefulMemoryRecapResponse,
-    },
     #[experimental("statefulMeasurement/list")]
     StatefulMeasurementList => "statefulMeasurement/list" {
         params: v2::StatefulMeasurementListParams,

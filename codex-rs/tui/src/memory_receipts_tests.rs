@@ -4,9 +4,6 @@ use codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification;
 use codex_app_server_protocol::StatefulKnowledgeGroupItem;
 use codex_app_server_protocol::StatefulMemoryChangeTotals;
 use codex_app_server_protocol::StatefulMemoryCounts;
-use codex_app_server_protocol::StatefulMemoryRecapResponse;
-use codex_app_server_protocol::StatefulRecapDecision;
-use codex_app_server_protocol::StatefulRecapWork;
 use codex_app_server_protocol::StatefulRun;
 use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunStatus;
@@ -18,7 +15,6 @@ use super::MemoryView;
 use super::ServerLifetime;
 use super::exit_lines;
 use super::footer_text;
-use super::recap_cell;
 use super::status_cell;
 use crate::history_cell::HistoryCell;
 
@@ -152,67 +148,6 @@ fn status_and_exit_receipts() {
             exit_unknown,
         ]
         .join("\n---\n")
-    );
-}
-
-/// The return card is dated, keeps the recorded reason, says when no reason was recorded,
-/// and invents no next step; `§` and dashes survive.
-#[test]
-fn recap_is_dated_and_grounded() {
-    let recap = StatefulMemoryRecapResponse {
-        project_id: "project-1".to_string(),
-        as_of: 1_790_000_000,
-        last_work: Some(StatefulRecapWork {
-            thread_id: "thread-1".to_string(),
-            finished_at: 1_789_990_000,
-            request: Some(
-                "Draft sections 4\u{2013}7 and cite \u{a7} 2.3 \u{2014} not the summary"
-                    .to_string(),
-            ),
-        }),
-        rules: vec![
-            "British spelling throughout.".to_string(),
-            "Never call the product \u{201c}revolutionary\u{201d}.".to_string(),
-        ],
-        more_rules: 0,
-        decisions: vec![
-            StatefulRecapDecision {
-                text: "Cut the history section.".to_string(),
-                reason: Some("the editor said it reads as filler".to_string()),
-                reported: false,
-            },
-            StatefulRecapDecision {
-                text: "Use SQLite.".to_string(),
-                reason: None,
-                reported: true,
-            },
-        ],
-        more_decisions: 1,
-        open_checks: vec!["Does Ananya want US spelling?".to_string()],
-        more_open_checks: 0,
-        commits: vec!["abc12345: Draft conclusion".to_string()],
-        more_commits: 4,
-        capture_incomplete: 1,
-        history_complete: false,
-    };
-    let format_time = |seconds: i64| format!("T{seconds}");
-    let cell = recap_cell(&recap, &format_time).expect("recap");
-    insta::assert_snapshot!("memory_return_recap", render(&cell, /*width*/ 160));
-    // No finished work and a complete history: nothing to return to. Unreadable history
-    // still says so.
-    let unknown = StatefulMemoryRecapResponse {
-        last_work: None,
-        ..recap.clone()
-    };
-    let empty = StatefulMemoryRecapResponse {
-        history_complete: true,
-        ..unknown.clone()
-    };
-    assert_eq!(recap_cell(&empty, &format_time).is_none(), true);
-    let unknown = recap_cell(&unknown, &format_time).expect("partial recap");
-    assert_eq!(
-        render(&unknown, /*width*/ 160).contains("The last finished work could not be determined."),
-        true
     );
 }
 

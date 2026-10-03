@@ -1,10 +1,9 @@
 //! How project memory's state reads in the TUI: the passive footer text, the `/status` lines,
-//! the exit receipt and the dated return recap. Pure rendering of what the app server counted
+//! and the exit receipt. Pure rendering of what the app server counted
 //! from its journal of committed changes; no counts are kept or guessed here.
 
 use codex_app_server_protocol::StatefulMemoryChangeTotals;
 use codex_app_server_protocol::StatefulMemoryCounts;
-use codex_app_server_protocol::StatefulMemoryRecapResponse;
 use codex_app_server_protocol::StatefulRun;
 use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
@@ -249,127 +248,6 @@ pub(crate) fn exit_lines(
         });
     }
     lines
-}
-
-/// The dated return card, or `None` when there is no finished work to return to and the
-/// history was read completely.
-pub(crate) fn recap_cell(
-    recap: &StatefulMemoryRecapResponse,
-    format_time: &dyn Fn(i64) -> String,
-) -> Option<PlainHistoryCell> {
-    if recap.last_work.is_none() && recap.history_complete {
-        return None;
-    }
-    let mut lines: Vec<Line<'static>> = vec![
-        vec![
-            "Where things stand".bold(),
-            format!(" · as of {}", format_time(recap.as_of)).dim(),
-        ]
-        .into(),
-    ];
-    match &recap.last_work {
-        Some(work) => {
-            let request = work
-                .request
-                .as_deref()
-                .map(|request| format!(": {}", preview(request)))
-                .unwrap_or_default();
-            lines
-                .push(format!("  Last finished {}{request}", format_time(work.finished_at)).into());
-        }
-        None => lines.push(
-            "  The last finished work could not be determined."
-                .dim()
-                .into(),
-        ),
-    }
-    if !recap.rules.is_empty() || recap.more_rules > 0 {
-        lines.push(
-            format!(
-                "  Your rules ({}):",
-                recap.rules.len() + recap.more_rules as usize
-            )
-            .into(),
-        );
-        for (index, rule) in recap.rules.iter().enumerate() {
-            lines.push(format!("    {}. {}", index + 1, preview(rule)).dim().into());
-        }
-        if recap.more_rules > 0 {
-            lines.push(
-                format!("    and {} more · /memory", recap.more_rules)
-                    .dim()
-                    .into(),
-            );
-        }
-    }
-    for decision in &recap.decisions {
-        let reason = decision
-            .reason
-            .as_deref()
-            .map(|reason| format!(" because {}", preview(reason)))
-            .unwrap_or_else(|| " (no reason recorded)".to_string());
-        let whose = if decision.reported {
-            " (the assistant's conclusion)"
-        } else {
-            ""
-        };
-        lines.push(format!("  Decision: {}{reason}{whose}", preview(&decision.text)).into());
-    }
-    for check in &recap.open_checks {
-        lines.push(format!("  Open check: {}", preview(check)).into());
-    }
-    if !recap.commits.is_empty() || recap.more_commits > 0 {
-        let more = if recap.more_commits > 0 {
-            format!(" · and {} more", recap.more_commits)
-        } else {
-            String::new()
-        };
-        lines.push(
-            format!(
-                "  Remembered from workspace history: {}{more}",
-                recap.commits.join(" · ")
-            )
-            .dim()
-            .into(),
-        );
-    }
-    let more = recap.more_decisions + recap.more_open_checks;
-    if more > 0 {
-        let what = if more == 1 {
-            "decision or check"
-        } else {
-            "decisions or checks"
-        };
-        lines.push(format!("  {more} more {what} · /memory").dim().into());
-    }
-    if recap.capture_incomplete > 0 {
-        lines.push(
-            format!(
-                "  {} since the last finished work; something you said may be missing · /memory add",
-                plural(
-                    recap.capture_incomplete,
-                    "capture could not finish",
-                    "captures could not finish"
-                )
-            )
-            .dim()
-            .into(),
-        );
-    }
-    lines.push(
-        "  Capture gaps from before the last finished work are not tracked here."
-            .dim()
-            .into(),
-    );
-    if !recap.history_complete {
-        lines.push(
-            "  Some earlier work could not be read, so this may not be the latest."
-                .dim()
-                .into(),
-        );
-    }
-    lines.push("  Say where you want to pick up.".dim().into());
-    Some(PlainHistoryCell::new(lines))
 }
 
 #[cfg(test)]

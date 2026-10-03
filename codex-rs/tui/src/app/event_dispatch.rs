@@ -853,14 +853,35 @@ impl App {
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
             }
+            // Memory results apply only while the attachment they were read under is current:
+            // after a project change or reconnect, older answers are dropped here.
             AppEvent::StatefulMemoryStatus {
                 thread_id,
+                generation,
                 counts,
                 session,
                 partial,
             } => {
-                self.chat_widget
-                    .set_stateful_memory(thread_id, counts, session, partial);
+                if self.memory_status.accepts(thread_id, generation) {
+                    self.chat_widget
+                        .set_stateful_memory(thread_id, counts, session, partial);
+                }
+            }
+            AppEvent::StatefulMemoryUnavailable {
+                thread_id,
+                generation,
+            } => {
+                if self.memory_status.accepts(thread_id, generation) {
+                    self.chat_widget.set_stateful_memory_unavailable(thread_id);
+                }
+            }
+            AppEvent::StatefulMemoryCleared {
+                thread_id,
+                generation,
+            } => {
+                if self.memory_status.accepts(thread_id, generation) {
+                    self.chat_widget.clear_stateful_memory(thread_id);
+                }
             }
             AppEvent::StatefulMemoryProjectChanged { thread_id } => {
                 self.memory_status.project_changed(thread_id);
@@ -874,26 +895,6 @@ impl App {
                             self.app_event_tx.clone(),
                         )
                         .await;
-                }
-            }
-            AppEvent::StatefulMemoryUnavailable { thread_id } => {
-                self.chat_widget.set_stateful_memory_unavailable(thread_id);
-            }
-            AppEvent::StatefulMemoryRecap { thread_id, recap } => {
-                let format_time = |seconds: i64| {
-                    chrono::DateTime::from_timestamp(seconds, 0).map_or_else(
-                        || "an unknown time".to_string(),
-                        |time| {
-                            time.with_timezone(&chrono::Local)
-                                .format("%Y-%m-%d %H:%M")
-                                .to_string()
-                        },
-                    )
-                };
-                if self.chat_widget.thread_id() == Some(thread_id)
-                    && let Some(cell) = crate::memory_receipts::recap_cell(&recap, &format_time)
-                {
-                    self.insert_history_cell(tui, Box::new(cell));
                 }
             }
             AppEvent::StatefulMemoryResult { thread_id, cell } => {
