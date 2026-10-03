@@ -207,6 +207,7 @@ mod startup_orchestration;
 mod startup_preflight;
 mod startup_presentation;
 mod startup_recovery;
+mod stateful_memory;
 mod stateful_ui;
 mod status;
 mod status_indicator_widget;

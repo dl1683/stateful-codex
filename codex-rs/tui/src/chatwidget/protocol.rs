@@ -399,8 +399,14 @@ impl ChatWidget {
             | ServerNotification::SteeringUpdated(_)
             | ServerNotification::BlackboardUpdated(_)
             | ServerNotification::StatefulAttributionCompleted(_)
-            | ServerNotification::StatefulKnowledgeCaptured(_)
             | ServerNotification::TurnTrajectoryUpdated(_) => {}
+            ServerNotification::StatefulKnowledgeCaptured(notification) => {
+                if replay_kind.is_none()
+                    && let Some(cell) = crate::stateful_memory::receipt_cell(&notification)
+                {
+                    self.add_to_history(cell);
+                }
+            }
             ServerNotification::ContextCompacted(_) => {}
         }
         // Tool and hook activity can recreate a hidden row with its default

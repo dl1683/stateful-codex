@@ -1,0 +1,18 @@
+---
+source: tui/src/stateful_memory_tests.rs
+expression: "render(memory_lines(&items, false, Some(&run)))"
+---
+Project memory
+  Collaborative run open · it stays open between answers and after you quit
+
+Your rules (applied to all work)
+  1. From now on, never run the whole test suite.
+
+Task-limited rules (kept, not applied)
+  2. Don't modify any files today.
+
+Decisions
+  3. Months use the symbol mth.
+     replaces: "Months use the symbol mo."
+
+  /memory forget <number> · /memory correct <number> <new text> · no model turn is used

@@ -23,6 +23,7 @@ pub enum SlashCommand {
     #[strum(to_string = "approve")]
     AutoReview,
     Memories,
+    Memory,
     Skills,
     Import,
     Hooks,
@@ -147,6 +148,7 @@ impl SlashCommand {
             SlashCommand::Experimental => "toggle experimental features",
             SlashCommand::AutoReview => "approve one retry of a recent auto-review denial",
             SlashCommand::Memories => "configure memory use and generation",
+            SlashCommand::Memory => "review, forget or correct project memory (no model turn)",
             SlashCommand::Mcp => "list MCP tools; use /mcp verbose or /mcp login <name>",
             SlashCommand::Apps => "manage apps",
             SlashCommand::Plugins => "browse plugins",
@@ -186,6 +188,7 @@ impl SlashCommand {
                 | SlashCommand::Side
                 | SlashCommand::Btw
                 | SlashCommand::Resume
+                | SlashCommand::Memory
         )
     }
 
@@ -293,7 +296,8 @@ impl SlashCommand {
             | SlashCommand::Quit
             | SlashCommand::Exit
             | SlashCommand::Side
-            | SlashCommand::Btw => true,
+            | SlashCommand::Btw
+            | SlashCommand::Memory => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,

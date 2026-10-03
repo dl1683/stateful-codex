@@ -448,6 +448,12 @@ impl ChatWidget {
             SlashCommand::Memories => {
                 self.open_memories_popup();
             }
+            SlashCommand::Memory => {
+                self.app_event_tx.send(AppEvent::StatefulMemory {
+                    thread_id: self.thread_id(),
+                    args: String::new(),
+                });
+            }
             SlashCommand::Quit | SlashCommand::Exit => {
                 self.request_quit_without_confirmation();
             }
@@ -1068,6 +1074,12 @@ impl ChatWidget {
             SlashCommand::Pets if !trimmed.is_empty() => {
                 self.select_pet_by_id(args);
             }
+            SlashCommand::Memory => {
+                self.app_event_tx.send(AppEvent::StatefulMemory {
+                    thread_id: self.thread_id(),
+                    args: trimmed.to_string(),
+                });
+            }
             _ => self.dispatch_command_from_source(cmd, source),
         }
         if source == SlashCommandDispatchSource::Live && cmd != SlashCommand::Goal {
@@ -1247,6 +1259,7 @@ impl ChatWidget {
             | SlashCommand::Rename
             | SlashCommand::Voice
             | SlashCommand::Recap
+            | SlashCommand::Memory
             | SlashCommand::TestApproval => QueueDrain::Continue,
             SlashCommand::Cd => match self.thread_id {
                 Some(thread_id) if self.can_change_working_directory(thread_id) => QueueDrain::Stop,

@@ -1554,6 +1554,15 @@ impl App {
             AppEvent::FetchMcpInventory { detail, thread_id } => {
                 self.fetch_mcp_inventory(app_server, detail, thread_id);
             }
+            AppEvent::StatefulMemory { thread_id, args } => {
+                crate::stateful_memory::run(
+                    app_server.request_handle(),
+                    self.memory_listing.clone(),
+                    thread_id,
+                    args,
+                    self.app_event_tx.clone(),
+                );
+            }
             AppEvent::StartMcpLogin { name, thread_id } => {
                 if self.pending_mcp_login_start.is_some() {
                     self.chat_widget.add_info_message(

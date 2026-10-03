@@ -1081,6 +1081,12 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
     },
 
+    /// Run `/memory` (list, forget or correct project memory) for the thread.
+    StatefulMemory {
+        thread_id: Option<ThreadId>,
+        args: String,
+    },
+
     McpLoginStarted {
         request_id: String,
         result: Result<McpServerOauthLoginResponse, String>,
