@@ -591,7 +591,7 @@ impl BlackboardBatchRecordTool {
                     recorded += 1;
                     entry_ids.insert(record_key, entry.id.clone());
                     if recipe.as_deref().is_some_and(|label| {
-                        label.starts_with("current") || label.starts_with("ran")
+                        label.starts_with("observed") || label.starts_with("ran")
                     }) {
                         self.recorder
                             .services
