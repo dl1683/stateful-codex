@@ -196,10 +196,7 @@ impl ObservedCommands {
             .rev()
             .find_map(|command| {
                 let script = normalized(&command.script);
-                candidates
-                    .iter()
-                    .any(|candidate| *candidate == script)
-                    .then(|| command.clone())
+                candidates.contains(&script).then(|| command.clone())
             })
     }
 
