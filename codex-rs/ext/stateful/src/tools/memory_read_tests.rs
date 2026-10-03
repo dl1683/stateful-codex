@@ -188,3 +188,113 @@ async fn matches_of_one_chain_share_a_group_and_since_filters_first() {
         (1, Some("c".to_string()), 3, 0)
     );
 }
+
+/// A -> B -> C -> D -> E -> F with matches on F and A: the walk from A stops at the
+/// four-hop bound on E, which the group of F already shows, so A joins that group and no
+/// entry repeats.
+#[tokio::test]
+async fn a_long_chain_joins_the_group_that_already_shows_it() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let id = |value: &str| codex_project_intelligence::BlackboardEntryId::parse(value).expect("id");
+    store
+        .create_entry(id("a"), decision(&node_id, "Rounding starts at one place."))
+        .await
+        .expect("A");
+    for (previous, next, content) in [
+        ("a", "b", "Second value."),
+        ("b", "c", "Third value."),
+        ("c", "d", "Fourth value."),
+        ("d", "e", "Fifth value."),
+        ("e", "f", "Rounding ends at six places."),
+    ] {
+        store
+            .create_successor(
+                id(next),
+                decision(&node_id, content),
+                vec![codex_project_intelligence::SupersededEntry {
+                    id: id(previous),
+                    expected_revision: 1,
+                }],
+            )
+            .await
+            .expect("successor");
+    }
+    let tool = super::MemoryReadTool::new(
+        "project-1".to_string(),
+        services.clone(),
+        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+    );
+    let (groups, truncated) = tool
+        .knowledge(
+            store,
+            &question_terms("rounding"),
+            Some(0),
+            /*include_history*/ true,
+        )
+        .await
+        .expect("knowledge");
+    let mut ids = groups
+        .iter()
+        .flatten()
+        .map(|row| row["entryId"].as_str().unwrap_or_default().to_string())
+        .collect::<Vec<_>>();
+    let first = ids.first().cloned();
+    ids.sort();
+    assert_eq!(
+        (groups.len(), first, ids, truncated),
+        (
+            1,
+            Some("f".to_string()),
+            ["a", "b", "c", "d", "e", "f"].map(String::from).to_vec(),
+            false
+        )
+    );
+}
+
+/// More dated matches than the hit cap are reported as more matching knowledge.
+#[tokio::test]
+async fn since_matches_beyond_the_hit_cap_are_reported() {
+    let state_home = tempfile::TempDir::new().expect("state home");
+    let services = crate::services::ProjectIntelligenceServices::new(
+        codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::test_support::PathExt::abs(state_home.path()),
+        ),
+    );
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    for number in 0..=super::MAX_SEARCH_HITS {
+        store
+            .create_entry(
+                codex_project_intelligence::BlackboardEntryId::parse(format!("entry-{number}"))
+                    .expect("id"),
+                decision(&node_id, &format!("Rounding rule number {number}.")),
+            )
+            .await
+            .expect("entry");
+    }
+    let tool = super::MemoryReadTool::new(
+        "project-1".to_string(),
+        services.clone(),
+        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+    );
+    let (groups, truncated) = tool
+        .knowledge(
+            store,
+            &question_terms("rounding"),
+            Some(0),
+            /*include_history*/ false,
+        )
+        .await
+        .expect("knowledge");
+    assert_eq!(
+        (groups.len(), truncated),
+        (super::MAX_SEARCH_HITS as usize, true)
+    );
+}

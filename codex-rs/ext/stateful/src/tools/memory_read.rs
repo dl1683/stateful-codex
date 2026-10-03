@@ -6,6 +6,7 @@
 //! model; everything is read from the project's stores within fixed scan bounds, and the
 //! result says what it covered.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -196,7 +197,6 @@ impl MemoryReadTool {
                 .changed_since(&self.project_id, since, MAX_SINCE_CANDIDATES)
                 .await
                 .map_err(respond)?;
-            truncated = more;
             let mut ranked = entries
                 .into_iter()
                 .map(|entry| (match_count(&entry.value.content, terms), entry))
@@ -204,6 +204,8 @@ impl MemoryReadTool {
                 .collect::<Vec<_>>();
             // Stable: equal counts keep the newest-first order.
             ranked.sort_by(|left, right| right.0.cmp(&left.0));
+            // Matches beyond the hit cap are omitted too, not only unconsidered candidates.
+            truncated = more || ranked.len() > MAX_SEARCH_HITS as usize;
             for (_, entry) in ranked.into_iter().take(MAX_SEARCH_HITS as usize) {
                 if let Some(hit) = store
                     .get_hit(&self.project_id, &entry.id)
@@ -229,14 +231,19 @@ impl MemoryReadTool {
             hits = result.data;
         }
 
-        // Resolve every match to its current entry; matches that resolve to the same
-        // current entry share its group, so no matching history is dropped.
-        let mut seen = HashSet::new();
-        let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
+        // Resolve every match to its current entry; matches that reach an entry already
+        // shown join that entry's group, so every entry appears once and no matching
+        // history is dropped.
+        let mut owner: HashMap<String, usize> = HashMap::new();
+        let mut groups: Vec<Vec<Value>> = Vec::new();
         for hit in hits {
-            let mut current = hit.clone();
+            let mut current = hit;
             let mut chain = Vec::new();
+            let mut index = owner.get(&current.entry.id.to_string()).copied();
             for _ in 0..MAX_SUCCESSOR_HOPS {
+                if index.is_some() {
+                    break;
+                }
                 let Some(successor_id) = current.entry.superseded_by.clone() else {
                     break;
                 };
@@ -249,49 +256,48 @@ impl MemoryReadTool {
                 };
                 chain.push(current);
                 current = successor;
+                index = owner.get(&current.entry.id.to_string()).copied();
             }
-            let current_id = current.entry.id.to_string();
-            let index = match groups.iter().position(|(id, _)| *id == current_id) {
+            let index = match index {
                 Some(index) => index,
                 None => {
-                    seen.insert(current_id.clone());
+                    let index = groups.len();
+                    owner.insert(current.entry.id.to_string(), index);
                     let row = entry_item(store, &self.project_id, &current, terms).await;
-                    groups.push((current_id.clone(), vec![row]));
+                    groups.push(vec![row]);
                     if include_history {
                         let replaced = store
                             .superseded_by(&self.project_id, &current.entry.id)
                             .await
                             .map_err(respond)?;
                         for predecessor in replaced {
-                            if seen.insert(predecessor.id.to_string())
+                            if !owner.contains_key(&predecessor.id.to_string())
                                 && let Some(predecessor) = store
                                     .get_hit(&self.project_id, &predecessor.id)
                                     .await
                                     .map_err(respond)?
                             {
+                                owner.insert(predecessor.entry.id.to_string(), index);
                                 let row =
                                     entry_item(store, &self.project_id, &predecessor, terms).await;
-                                let last = groups.len() - 1;
-                                groups[last].1.push(row);
+                                groups[index].push(row);
                             }
                         }
                     }
-                    groups.len() - 1
+                    index
                 }
             };
             if include_history {
                 for older in chain {
-                    if seen.insert(older.entry.id.to_string()) {
+                    if let std::collections::hash_map::Entry::Vacant(e) = owner.entry(older.entry.id.to_string()) {
+                        e.insert(index);
                         let row = entry_item(store, &self.project_id, &older, terms).await;
-                        groups[index].1.push(row);
+                        groups[index].push(row);
                     }
                 }
             }
         }
-        Ok((
-            groups.into_iter().map(|(_, rows)| rows).collect(),
-            truncated,
-        ))
+        Ok((groups, truncated))
     }
 
     /// Earlier turns of the project that match, newest first, and what the scan covered.
