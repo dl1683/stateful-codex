@@ -291,7 +291,11 @@ impl BlackboardUpdateTool {
         // supersede it, but never rewrite it, and promotion keeps the user's provenance.
         let user_rule = current.value.kind == BlackboardKind::Instruction
             && current.value.provenance.kind == BlackboardProvenanceKind::User;
-        let user_provenance = current.value.provenance.clone();
+        let original = (
+            current.value.kind,
+            current.value.content.clone(),
+            current.value.provenance.clone(),
+        );
         let current_promotion = current.value.root_promotion;
         let mut update = BlackboardEntryUpdate {
             expected_revision: current.revision,
@@ -469,8 +473,10 @@ impl BlackboardUpdateTool {
                 "a pending user rule applies only after the user states it as standing; it cannot be promoted",
             ));
         }
-        if user_rule && update.state == BlackboardEntryState::Active {
-            update.provenance = user_provenance;
+        // Promotion, supersession and retirement do not change who wrote the text; only a
+        // revision of the text itself is the agent's.
+        if update.kind == original.0 && update.content == original.1 {
+            update.provenance = original.2;
         }
         let entry = store
             .update_entry(&self.project_id, &id, update)

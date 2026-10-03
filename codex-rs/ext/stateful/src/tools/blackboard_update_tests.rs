@@ -631,3 +631,64 @@ async fn a_user_rule_is_superseded_only_by_a_user_rule() {
         "a user rule can be replaced only by the user's new rule in their own words"
     );
 }
+
+/// Superseding a user rule with the user's new rule keeps the old text attributed to the
+/// user, and so does retiring one.
+#[tokio::test]
+async fn lifecycle_changes_keep_the_texts_authorship() {
+    let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
+    let capture = |turn: &'static str, text: &'static str| {
+        crate::rule_capture::capture_marked_rules(
+            &tool.services,
+            /*event_sink*/ None,
+            PROJECT_ID,
+            "thread-1",
+            turn,
+            text,
+        )
+    };
+    let old = capture("turn-1", "From now on, never run the whole test suite.")
+        .await
+        .remove(0)
+        .entry;
+    let new = capture("turn-2", "From now on, run only the affected tests.")
+        .await
+        .remove(0)
+        .entry;
+    let other = capture("turn-3", "From now on, never push.")
+        .await
+        .remove(0)
+        .entry;
+    let superseded = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "supersede",
+                "entryId": old.id.to_string(),
+                "expectedRevision": old.revision,
+                "successorEntryId": new.id.to_string()
+            })),
+            "turn-4",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect("supersede");
+    let retired = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "retire",
+                "entryId": other.id.to_string(),
+                "expectedRevision": other.revision
+            })),
+            "turn-4",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect("retire");
+    assert_eq!(
+        (
+            superseded.value.provenance.clone(),
+            retired.value.provenance
+        ),
+        (old.value.provenance, other.value.provenance)
+    );
+}
