@@ -56,9 +56,19 @@ export function createDrafts(storage, threadId) {
     // Changing what is to be added makes it a new action: a retry of the earlier words
     // (which may have been saved before a timeout) never carries the new ones.
     editAddition(field, value) {
+      const before = request(drafts.addition);
       drafts.addition = { ...drafts.addition, [field]: bounded(String(value)) };
-      if (field !== "actionId") delete drafts.addition.actionId;
+      if (field !== "actionId" && request(drafts.addition) !== before) {
+        delete drafts.addition.actionId;
+      }
       save();
+    },
+    // Clears the addition only if it is still the one submitted under `actionId`.
+    settleAddition(actionId) {
+      if (drafts.addition.actionId !== actionId) return false;
+      drafts.addition = emptyAddition();
+      save();
+      return true;
     },
     clearAddition() {
       drafts.addition = emptyAddition();
@@ -77,6 +87,15 @@ function load(storage, key) {
     // A damaged or missing record starts empty.
   }
   return { corrections: {}, addition: emptyAddition() };
+}
+
+// What an addition asks for, as the server compares it (trimmed words).
+function request(addition) {
+  return JSON.stringify([
+    addition.kind,
+    String(addition.content ?? "").trim(),
+    addition.kind === "decision" ? String(addition.reason ?? "").trim() : "",
+  ]);
 }
 
 function emptyAddition() {

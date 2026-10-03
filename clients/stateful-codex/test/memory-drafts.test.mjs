@@ -58,3 +58,22 @@ test("changing an addition after a failed save makes it a new action", () => {
   drafts.editAddition("content", "Months use mo.");
   assert.deepEqual([retried, drafts.addition().actionId], ["action-1", undefined]);
 });
+
+test("only the submission that completed is settled, and spacing alone keeps the action", () => {
+  const drafts = createDrafts(memoryStorage(), "thread-1");
+  drafts.editAddition("content", "Months use mth.");
+  drafts.editAddition("actionId", "action-1");
+  // Trailing spaces ask for the same thing: the action stays.
+  drafts.editAddition("content", "Months use mth.  ");
+  const kept = drafts.addition().actionId;
+  // New words become their own action before the first save completes.
+  drafts.editAddition("content", "Months use mo.");
+  drafts.editAddition("actionId", "action-2");
+  const settledFirst = drafts.settleAddition("action-1");
+  const afterFirst = drafts.addition().content;
+  const settledSecond = drafts.settleAddition("action-2");
+  assert.deepEqual(
+    [kept, settledFirst, afterFirst, settledSecond, drafts.addition().content],
+    ["action-1", false, "Months use mo.", true, ""],
+  );
+});

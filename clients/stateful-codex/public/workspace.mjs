@@ -540,13 +540,9 @@ app.addEventListener("submit", async (event) => {
           backgroundSection: true,
         }),
       );
-      // Words typed while the save ran stay as a new addition; only what was saved is cleared.
-      const now = memoryDrafts.addition();
-      if (now.content.trim() === content && now.kind === addition.kind && now.reason === addition.reason) {
-        memoryDrafts.clearAddition();
-      } else {
-        memoryDrafts.editAddition("actionId", "");
-      }
+      // Only the submission that completed is settled: words changed meanwhile already carry
+      // a new action of their own and stay as the draft.
+      memoryDrafts.settleAddition(addition.actionId);
       state.notice =
         response.outcome === "added"
           ? `Added: "${response.item.content}".`
