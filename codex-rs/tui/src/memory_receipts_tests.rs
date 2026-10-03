@@ -95,13 +95,18 @@ fn footer_names_the_main_parts_and_sums_the_rest() {
 #[test]
 fn status_and_exit_receipts() {
     let status = render(
-        &status_cell(&counts(), Some(&session())),
+        &status_cell(&counts(), Some(&session()), /*partial*/ false),
+        /*width*/ 120,
+    );
+    let partial = render(
+        &status_cell(&counts(), Some(&session()), /*partial*/ true),
         /*width*/ 120,
     );
     let quiet = render(
         &status_cell(
             &StatefulMemoryCounts::default(),
             Some(&StatefulMemoryChangeTotals::default()),
+            /*partial*/ false,
         ),
         /*width*/ 120,
     );
@@ -138,6 +143,7 @@ fn status_and_exit_receipts() {
         "memory_status_and_exit",
         [
             status,
+            partial,
             quiet,
             unavailable,
             exit,
@@ -173,10 +179,12 @@ fn recap_is_dated_and_grounded() {
             StatefulRecapDecision {
                 text: "Cut the history section.".to_string(),
                 reason: Some("the editor said it reads as filler".to_string()),
+                reported: false,
             },
             StatefulRecapDecision {
                 text: "Use SQLite.".to_string(),
                 reason: None,
+                reported: true,
             },
         ],
         more_decisions: 1,
@@ -185,6 +193,7 @@ fn recap_is_dated_and_grounded() {
         commits: vec!["abc12345: Draft conclusion".to_string()],
         more_commits: 4,
         capture_incomplete: 1,
+        history_complete: false,
     };
     let format_time = |seconds: i64| format!("T{seconds}");
     let cell = recap_cell(&recap, &format_time).expect("recap");

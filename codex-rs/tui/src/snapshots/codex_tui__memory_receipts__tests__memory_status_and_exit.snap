@@ -1,9 +1,13 @@
 ---
 source: tui/src/memory_receipts_tests.rs
-expression: "[status, quiet, unavailable, exit, exit_persistent, exit_quiet,\nexit_unknown,].join(\"\\n---\\n\")"
+expression: "[status, partial, quiet, unavailable, exit, exit_persistent, exit_quiet,\nexit_unknown,].join(\"\\n---\\n\")"
 ---
  Project memory: 2 rules · 1 decision · 1 open check · 1 note about you · 5 remembered commits
  In this session's threads: 2 saved · 1 corrected · 1 forgotten · 3 commits remembered from workspace history
+ /memory to review · counted from saved changes
+---
+ Project memory: 2 rules · 1 decision · 1 open check · 1 note about you · 5 remembered commits
+ In this session's threads: 2 saved · 1 corrected · 1 forgotten · 3 commits remembered from workspace history (incomplete: some project memory could not be read)
  /memory to review · counted from saved changes
 ---
  Project memory: nothing saved yet

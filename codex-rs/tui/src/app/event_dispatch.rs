@@ -857,9 +857,22 @@ impl App {
                 thread_id,
                 counts,
                 session,
+                partial,
             } => {
                 self.chat_widget
-                    .set_stateful_memory(thread_id, counts, session);
+                    .set_stateful_memory(thread_id, counts, session, partial);
+            }
+            AppEvent::StatefulMemoryProjectChanged { thread_id } => {
+                self.memory_status.project_changed(thread_id);
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.memory_status
+                        .attach(
+                            app_server.request_handle(),
+                            thread_id,
+                            self.app_event_tx.clone(),
+                        )
+                        .await;
+                }
             }
             AppEvent::StatefulMemoryUnavailable { thread_id } => {
                 self.chat_widget.set_stateful_memory_unavailable(thread_id);

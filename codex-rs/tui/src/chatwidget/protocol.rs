@@ -393,7 +393,6 @@ impl ChatWidget {
             | ServerNotification::WindowsSandboxSetupCompleted(_)
             | ServerNotification::AccountLoginCompleted(_)
             | ServerNotification::ProjectChanged(_)
-            | ServerNotification::ThreadProjectUpdated(_)
             | ServerNotification::StatefulRunUpdated(_)
             | ServerNotification::ObligationUpdated(_)
             | ServerNotification::SteeringUpdated(_)
@@ -414,6 +413,12 @@ impl ChatWidget {
                     if let Some(cell) = self.memory_receipts.receipt_cell(&notification) {
                         self.add_to_history(cell);
                     }
+                }
+            }
+            ServerNotification::ThreadProjectUpdated(notification) => {
+                if let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) {
+                    self.app_event_tx
+                        .send(AppEvent::StatefulMemoryProjectChanged { thread_id });
                 }
             }
             ServerNotification::ContextCompacted(_) => {}

@@ -1108,6 +1108,13 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         counts: codex_app_server_protocol::StatefulMemoryCounts,
         session: Option<codex_app_server_protocol::StatefulMemoryChangeTotals>,
+        /// Some memory could not be read when needed, so `session` may miss changes.
+        partial: bool,
+    },
+
+    /// A thread's project was assigned or changed.
+    StatefulMemoryProjectChanged {
+        thread_id: ThreadId,
     },
 
     /// A thread's project memory could not be read when it became active.

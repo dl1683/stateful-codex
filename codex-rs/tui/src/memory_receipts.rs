@@ -58,6 +58,8 @@ pub(crate) enum MemoryView {
         counts: StatefulMemoryCounts,
         /// Changes in this session's threads since the session first read the project.
         session: Option<StatefulMemoryChangeTotals>,
+        /// Some memory could not be read when needed, so `session` may miss changes.
+        partial: bool,
     },
     /// The project's memory could not be read.
     Unavailable,
@@ -73,7 +75,11 @@ impl MemoryView {
 
     pub(crate) fn status_cell(&self) -> PlainHistoryCell {
         match self {
-            Self::Known { counts, session } => status_cell(counts, session.as_ref()),
+            Self::Known {
+                counts,
+                session,
+                partial,
+            } => status_cell(counts, session.as_ref(), *partial),
             Self::Unavailable => PlainHistoryCell::new(vec![
                 vec![
                     " Project memory: ".bold(),
@@ -141,6 +147,7 @@ fn change_parts(totals: &StatefulMemoryChangeTotals) -> Vec<String> {
 pub(crate) fn status_cell(
     counts: &StatefulMemoryCounts,
     session: Option<&StatefulMemoryChangeTotals>,
+    partial: bool,
 ) -> PlainHistoryCell {
     let parts = count_parts(counts)
         .into_iter()
@@ -158,6 +165,11 @@ pub(crate) fn status_cell(
             "nothing saved or changed yet".to_string()
         } else {
             changes.join(" · ")
+        };
+        let changed = if partial {
+            format!("{changed} (incomplete: some project memory could not be read)")
+        } else {
+            changed
         };
         lines.push(vec![" In this session's threads: ".dim(), changed.dim()].into());
     }
@@ -258,7 +270,7 @@ pub(crate) fn recap_cell(
         .map(|request| format!(": {}", preview(request)))
         .unwrap_or_default();
     lines.push(format!("  Last finished {}{request}", format_time(work.finished_at)).into());
-    if !recap.rules.is_empty() {
+    if !recap.rules.is_empty() || recap.more_rules > 0 {
         lines.push(
             format!(
                 "  Your rules ({}):",
@@ -283,15 +295,25 @@ pub(crate) fn recap_cell(
             .as_deref()
             .map(|reason| format!(" because {}", preview(reason)))
             .unwrap_or_else(|| " (no reason recorded)".to_string());
-        lines.push(format!("  Decision: {}{reason}", preview(&decision.text)).into());
+        let whose = if decision.reported {
+            " (the assistant's conclusion)"
+        } else {
+            ""
+        };
+        lines.push(format!("  Decision: {}{reason}{whose}", preview(&decision.text)).into());
     }
     for check in &recap.open_checks {
         lines.push(format!("  Open check: {}", preview(check)).into());
     }
-    if !recap.commits.is_empty() {
+    if !recap.commits.is_empty() || recap.more_commits > 0 {
+        let more = if recap.more_commits > 0 {
+            format!(" · and {} more", recap.more_commits)
+        } else {
+            String::new()
+        };
         lines.push(
             format!(
-                "  Recently remembered from workspace history: {}",
+                "  Remembered from workspace history: {}{more}",
                 recap.commits.join(" · ")
             )
             .dim()
@@ -319,6 +341,13 @@ pub(crate) fn recap_cell(
             )
             .dim()
             .into(),
+        );
+    }
+    if !recap.history_complete {
+        lines.push(
+            "  Some earlier work could not be read, so this may not be the latest."
+                .dim()
+                .into(),
         );
     }
     lines.push("  Say where you want to pick up.".dim().into());

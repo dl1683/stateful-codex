@@ -17,8 +17,16 @@ impl ChatWidget {
         thread_id: ThreadId,
         counts: StatefulMemoryCounts,
         session: Option<StatefulMemoryChangeTotals>,
+        partial: bool,
     ) {
-        self.set_memory_view(thread_id, MemoryView::Known { counts, session });
+        self.set_memory_view(
+            thread_id,
+            MemoryView::Known {
+                counts,
+                session,
+                partial,
+            },
+        );
     }
 
     /// Records that `thread_id`'s project memory could not be read.
