@@ -37,7 +37,12 @@ async fn a_window_keeps_its_first_capsule_and_later_edits_are_detected() {
             .expect("capture again"),
         first
     );
-    assert!(!store.edited_after("thread-1", 0).await.expect("edited"));
+    assert!(
+        !store
+            .edited_after("thread-1", "project-1", 0)
+            .await
+            .expect("edited")
+    );
     store
         .append_window_event(&NewWindowEvent {
             thread_id: "thread-1".to_string(),
@@ -49,6 +54,16 @@ async fn a_window_keeps_its_first_capsule_and_later_edits_are_detected() {
         })
         .await
         .expect("append");
-    assert!(store.edited_after("thread-1", 0).await.expect("edited"));
-    assert!(!store.edited_after("thread-1", 1).await.expect("edited"));
+    assert!(
+        store
+            .edited_after("thread-1", "project-1", 0)
+            .await
+            .expect("edited")
+    );
+    assert!(
+        !store
+            .edited_after("thread-1", "project-1", 1)
+            .await
+            .expect("edited")
+    );
 }

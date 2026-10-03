@@ -74,13 +74,13 @@ async fn observations_survive_reopening_and_replays_are_idempotent() {
     let reopened = store(&home).await;
     assert_eq!(
         reopened
-            .window_event_watermark("thread-1")
+            .window_event_watermark("thread-1", "project-1")
             .await
             .expect("watermark"),
         2
     );
     let events = reopened
-        .window_events_newest_first("thread-1", 0, 2, 10)
+        .window_events_newest_first("thread-1", "project-1", 0, 2, 10)
         .await
         .expect("events");
     assert_eq!(
@@ -107,7 +107,7 @@ async fn publications_cover_disjoint_suffixes_and_retry_the_frozen_content() {
     }
     assert_eq!(
         store
-            .threads_with_unpublished_events("project-1", 10)
+            .threads_with_unpublished_events("project-1", i64::MAX, 10)
             .await
             .expect("threads"),
         vec!["thread-1".to_string()]
@@ -155,7 +155,7 @@ async fn publications_cover_disjoint_suffixes_and_retry_the_frozen_content() {
         vec![first.clone()]
     );
     store
-        .mark_window_publication_published("thread-1", 0)
+        .mark_window_publication_published("thread-1", "project-1", 0)
         .await
         .expect("published");
     assert_eq!(
@@ -167,16 +167,86 @@ async fn publications_cover_disjoint_suffixes_and_retry_the_frozen_content() {
     );
     assert_eq!(
         store
-            .threads_with_unpublished_events("project-1", 10)
+            .threads_with_unpublished_events("project-1", i64::MAX, 10)
             .await
             .expect("threads"),
         Vec::<String>::new()
     );
     assert_eq!(
         store
-            .window_publication_watermark("thread-1")
+            .window_publication_watermark("thread-1", "project-1")
             .await
             .expect("watermark"),
         2
     );
+}
+
+#[tokio::test]
+async fn a_thread_moved_between_projects_publishes_each_projects_work_to_it_alone() {
+    let home = TempDir::new().expect("home");
+    let store = store(&home).await;
+    store
+        .append_window_event(&command("thread-1", "a", 0))
+        .await
+        .expect("project 1");
+    store
+        .append_window_event(&NewWindowEvent {
+            project_id: "project-2".to_string(),
+            ..command("thread-1", "b", 1)
+        })
+        .await
+        .expect("project 2");
+    assert_eq!(
+        store
+            .window_event_watermark("thread-1", "project-2")
+            .await
+            .expect("watermark"),
+        2
+    );
+    let second = store
+        .window_events_newest_first("thread-1", "project-2", 0, 2, 10)
+        .await
+        .expect("events");
+    assert_eq!(
+        second.iter().map(|event| event.seq).collect::<Vec<_>>(),
+        vec![2]
+    );
+    let publication = WindowPublication {
+        thread_id: "thread-1".to_string(),
+        from_seq: 0,
+        through_seq: 2,
+        project_id: "project-2".to_string(),
+        entry_id: "entry-2".to_string(),
+        content: "project 2 receipts".to_string(),
+        state: WindowPublicationState::Pending,
+    };
+    store
+        .stage_window_publication(&publication)
+        .await
+        .expect("stage");
+    // Project 1's observation is still unpublished, and recent activity counts as live.
+    assert_eq!(
+        store
+            .threads_with_unpublished_events("project-1", i64::MAX, 10)
+            .await
+            .expect("threads"),
+        vec!["thread-1".to_string()]
+    );
+    assert_eq!(
+        store
+            .threads_with_unpublished_events("project-1", 0, 10)
+            .await
+            .expect("threads"),
+        Vec::<String>::new()
+    );
+    // A replay with the same key cannot move an observation to another project.
+    assert!(matches!(
+        store
+            .append_window_event(&NewWindowEvent {
+                project_id: "project-2".to_string(),
+                ..command("thread-1", "a", 0)
+            })
+            .await,
+        Err(StatefulRunStoreError::WindowEventConflict(_))
+    ));
 }

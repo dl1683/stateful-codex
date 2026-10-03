@@ -71,19 +71,21 @@ impl StatefulRunStore {
         .transpose()
     }
 
-    /// Whether the thread journaled an edit after `after_seq`.
+    /// Whether the thread journaled an edit for `project_id` after `after_seq`.
     pub async fn edited_after(
         &self,
         thread_id: &str,
+        project_id: &str,
         after_seq: u64,
     ) -> Result<bool, StatefulRunStoreError> {
         Ok(sqlx::query_scalar::<_, i64>(
             "SELECT EXISTS (
                 SELECT 1 FROM stateful_window_events
-                WHERE thread_id = ? AND seq > ? AND kind = 'edit'
+                WHERE thread_id = ? AND project_id = ? AND seq > ? AND kind = 'edit'
              )",
         )
         .bind(thread_id)
+        .bind(project_id)
         .bind(i64::try_from(after_seq).map_err(|_| StatefulRunStoreError::CountOverflow)?)
         .fetch_one(&self.pool)
         .await?

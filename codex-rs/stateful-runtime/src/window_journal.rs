@@ -107,17 +107,21 @@ impl StatefulRunStore {
             return Err(StatefulRunStoreError::InvalidRecordId);
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if let Some((seq, existing)) = sqlx::query_as::<_, (i64, String)>(
-            "SELECT seq, payload_json FROM stateful_window_events
-             WHERE thread_id = ? AND event_key = ?",
-        )
-        .bind(&event.thread_id)
-        .bind(&event.event_key)
-        .fetch_optional(&mut *transaction)
-        .await?
+        if let Some((seq, existing, project_id, kind)) =
+            sqlx::query_as::<_, (i64, String, String, String)>(
+                "SELECT seq, payload_json, project_id, kind FROM stateful_window_events
+                 WHERE thread_id = ? AND event_key = ?",
+            )
+            .bind(&event.thread_id)
+            .bind(&event.event_key)
+            .fetch_optional(&mut *transaction)
+            .await?
         {
             transaction.commit().await?;
-            if existing != payload {
+            if existing != payload
+                || project_id != event.project_id
+                || kind != kind_name(event.kind)
+            {
                 return Err(StatefulRunStoreError::WindowEventConflict(
                     event.event_key.clone(),
                 ));
@@ -149,24 +153,29 @@ impl StatefulRunStore {
         parse_seq(seq)
     }
 
-    /// The newest sequence number of a thread's journal (0 when empty).
+    /// The newest sequence number of a thread's observations for `project_id` (0 when none).
     pub async fn window_event_watermark(
         &self,
         thread_id: &str,
+        project_id: &str,
     ) -> Result<u64, StatefulRunStoreError> {
         let seq = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(MAX(seq), 0) FROM stateful_window_events WHERE thread_id = ?",
+            "SELECT COALESCE(MAX(seq), 0) FROM stateful_window_events
+             WHERE thread_id = ? AND project_id = ?",
         )
         .bind(thread_id)
+        .bind(project_id)
         .fetch_one(&self.pool)
         .await?;
         parse_seq(seq)
     }
 
-    /// One page of a thread's observations in `(after_seq, through_seq]`, newest first.
+    /// One page of a thread's observations for `project_id` in `(after_seq, through_seq]`,
+    /// newest first.
     pub async fn window_events_newest_first(
         &self,
         thread_id: &str,
+        project_id: &str,
         after_seq: u64,
         through_seq: u64,
         max_results: u32,
@@ -176,10 +185,11 @@ impl StatefulRunStore {
             "SELECT thread_id, seq, event_key, project_id, turn_id, kind, payload_json,
                     created_at_ms
              FROM stateful_window_events
-             WHERE thread_id = ? AND seq > ? AND seq <= ?
+             WHERE thread_id = ? AND project_id = ? AND seq > ? AND seq <= ?
              ORDER BY seq DESC LIMIT ?",
         )
         .bind(thread_id)
+        .bind(project_id)
         .bind(to_i64(after_seq)?)
         .bind(to_i64(through_seq)?)
         .bind(i64::from(max_results))
@@ -193,17 +203,19 @@ impl StatefulRunStore {
     pub async fn has_window_work(
         &self,
         thread_id: &str,
+        project_id: &str,
         after_seq: u64,
         through_seq: u64,
     ) -> Result<bool, StatefulRunStoreError> {
         Ok(sqlx::query_scalar::<_, i64>(
             "SELECT EXISTS (
                 SELECT 1 FROM stateful_window_events
-                WHERE thread_id = ? AND seq > ? AND seq <= ?
+                WHERE thread_id = ? AND project_id = ? AND seq > ? AND seq <= ?
                   AND kind IN ('edit', 'command', 'plan')
              )",
         )
         .bind(thread_id)
+        .bind(project_id)
         .bind(to_i64(after_seq)?)
         .bind(to_i64(through_seq)?)
         .fetch_one(&self.pool)
@@ -211,10 +223,12 @@ impl StatefulRunStore {
             != 0)
     }
 
-    /// Threads of `project_id` whose journal has observations no publication covers yet.
+    /// Threads of `project_id` with observations for it that no publication covers yet and
+    /// that recorded nothing for it since `idle_since_ms`, so their window is not live.
     pub async fn threads_with_unpublished_events(
         &self,
         project_id: &str,
+        idle_since_ms: i64,
         max_results: u32,
     ) -> Result<Vec<String>, StatefulRunStoreError> {
         validate_list_limit(max_results)?;
@@ -222,28 +236,34 @@ impl StatefulRunStore {
             "SELECT event.thread_id FROM stateful_window_events AS event
              WHERE event.project_id = ?
              GROUP BY event.thread_id
-             HAVING MAX(event.seq) > COALESCE((
+             HAVING MAX(event.created_at_ms) < ?
+                AND MAX(event.seq) > COALESCE((
                  SELECT MAX(publication.through_seq) FROM stateful_window_publications AS publication
                  WHERE publication.thread_id = event.thread_id
+                   AND publication.project_id = event.project_id
              ), 0)
              ORDER BY MAX(event.created_at_ms) DESC LIMIT ?",
         )
         .bind(project_id)
+        .bind(idle_since_ms)
         .bind(i64::from(max_results))
         .fetch_all(&self.pool)
         .await?)
     }
 
-    /// The first sequence number a new publication of `thread_id` would cover, minus one.
+    /// The first sequence number a new publication of `thread_id` for `project_id` would
+    /// cover, minus one.
     pub async fn window_publication_watermark(
         &self,
         thread_id: &str,
+        project_id: &str,
     ) -> Result<u64, StatefulRunStoreError> {
         let seq = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(MAX(through_seq), 0) FROM stateful_window_publications
-             WHERE thread_id = ?",
+             WHERE thread_id = ? AND project_id = ?",
         )
         .bind(thread_id)
+        .bind(project_id)
         .fetch_one(&self.pool)
         .await?;
         parse_seq(seq)
@@ -269,9 +289,11 @@ impl StatefulRunStore {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some(existing) = sqlx::query_as::<_, StoredPublication>(
             "SELECT thread_id, from_seq, through_seq, project_id, entry_id, content, state
-             FROM stateful_window_publications WHERE thread_id = ? AND from_seq = ?",
+             FROM stateful_window_publications
+             WHERE thread_id = ? AND project_id = ? AND from_seq = ?",
         )
         .bind(&publication.thread_id)
+        .bind(&publication.project_id)
         .bind(to_i64(publication.from_seq)?)
         .fetch_optional(&mut *transaction)
         .await?
@@ -281,9 +303,10 @@ impl StatefulRunStore {
         }
         let watermark = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(MAX(through_seq), 0) FROM stateful_window_publications
-             WHERE thread_id = ?",
+             WHERE thread_id = ? AND project_id = ?",
         )
         .bind(&publication.thread_id)
+        .bind(&publication.project_id)
         .fetch_one(&mut *transaction)
         .await?;
         if parse_seq(watermark)? != publication.from_seq {
@@ -335,15 +358,17 @@ impl StatefulRunStore {
     pub async fn mark_window_publication_published(
         &self,
         thread_id: &str,
+        project_id: &str,
         from_seq: u64,
     ) -> Result<(), StatefulRunStoreError> {
         sqlx::query(
             "UPDATE stateful_window_publications
              SET state = 'published', published_at_ms = ?
-             WHERE thread_id = ? AND from_seq = ? AND state = 'pending'",
+             WHERE thread_id = ? AND project_id = ? AND from_seq = ? AND state = 'pending'",
         )
         .bind(unix_timestamp_millis()?)
         .bind(thread_id)
+        .bind(project_id)
         .bind(to_i64(from_seq)?)
         .execute(&self.pool)
         .await?;
