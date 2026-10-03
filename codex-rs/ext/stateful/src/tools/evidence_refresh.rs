@@ -12,6 +12,7 @@
 
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use codex_extension_api::FunctionCallError;
 use codex_project_intelligence::ContextMapFreshness;
@@ -27,6 +28,7 @@ use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectIndexerError;
 use codex_project_intelligence::ProjectRelativePath;
 
+use crate::cost_attribution::record_index_operation;
 use crate::index_gate::EXPLICIT_FILE_DEADLINE;
 use crate::index_gate::IndexOperation;
 use crate::services::ProjectIntelligenceServices;
@@ -36,8 +38,11 @@ use super::evidence::read_error;
 const READ_DIRECTLY: &str = "Read the file directly instead; an evidence receipt is optional.";
 
 /// One explicit source read.
+#[derive(Clone)]
 pub(super) struct ExplicitRead {
     pub(super) project_id: String,
+    /// The turn whose cost attribution records any index operation.
+    pub(super) turn_id: Option<String>,
     pub(super) project_roots: Vec<PathBuf>,
     pub(super) requested_root: Option<PathBuf>,
     pub(super) relative_path: ProjectRelativePath,
@@ -45,12 +50,24 @@ pub(super) struct ExplicitRead {
     pub(super) max_bytes: u32,
 }
 
+/// What the first, permit-free read found.
+enum FirstRead {
+    Current(Box<EvidenceReadResult>),
+    NeedsIndex(PathBuf, EvidenceReadRequest),
+}
+
 /// Reads the file, indexing it first when it has no current entry. Returns the read and
 /// whether the file was (re)indexed.
+///
+/// A file with a current entry is read without the project's index permit, so a running
+/// project refresh never delays it. Only when the file needs indexing does the read take
+/// the permit. Both steps share one foreground deadline; work still running past it stays
+/// owned by its task, and the caller is told it is pending.
 pub(super) async fn read_explicit(
     services: &ProjectIntelligenceServices,
     read: ExplicitRead,
 ) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
+    let started = Instant::now();
     let unavailable = |error: String| status("indexUnavailable", error);
     let reader = EvidenceReader::new(
         services
@@ -59,6 +76,28 @@ pub(super) async fn read_explicit(
             .map_err(|error| unavailable(error.to_string()))?
             .clone(),
     );
+    let relative_path = read.relative_path.to_string();
+    let pending = |what: &str| {
+        status(
+            "timedOutWorkPending",
+            format!(
+                "{what} {relative_path} is still running and was not abandoned; retry shortly. {READ_DIRECTLY}"
+            ),
+        )
+    };
+    let first = tokio::spawn(first_read(reader.clone(), read.clone()));
+    let (project_root, request) = match tokio::time::timeout(EXPLICIT_FILE_DEADLINE, first).await {
+        Err(_) => return Err(pending("reading")),
+        Ok(Err(error)) => {
+            return Err(unavailable(format!(
+                "reading {relative_path} stopped unexpectedly ({error}). {READ_DIRECTLY}"
+            )));
+        }
+        Ok(Ok(result)) => match result? {
+            FirstRead::Current(result) => return Ok((*result, false)),
+            FirstRead::NeedsIndex(project_root, request) => (project_root, request),
+        },
+    };
     let indexer = ProjectIndexer::new(
         services
             .hierarchy()
@@ -71,34 +110,43 @@ pub(super) async fn read_explicit(
             .map_err(|error| unavailable(error.to_string()))?
             .clone(),
     );
-    let project_id = read.project_id.clone();
-    let relative_path = read.relative_path.to_string();
-    match services
+    let file = ProjectIndexFileRequest {
+        project_id: read.project_id.clone(),
+        project_root,
+        relative_path: read.relative_path.clone(),
+    };
+    let index_started = Instant::now();
+    let outcome = services
         .index_gates()
-        .run(&project_id, EXPLICIT_FILE_DEADLINE, move |cancellation| {
-            read_and_index(reader, indexer, read, cancellation)
-        })
-        .await
-    {
+        .run(
+            &read.project_id,
+            EXPLICIT_FILE_DEADLINE.saturating_sub(started.elapsed()),
+            move |cancellation| index_and_reread(reader, indexer, file, request, cancellation),
+        )
+        .await;
+    if let Some(turn_id) = &read.turn_id {
+        record_index_operation(
+            services.cost_ledger(),
+            turn_id,
+            index_started.elapsed(),
+            &outcome,
+        );
+    }
+    match outcome {
         IndexOperation::Finished(result) => result,
-        IndexOperation::Pending => Err(status(
-            "timedOutWorkPending",
-            format!(
-                "reading or indexing {relative_path} is still running and was not abandoned; retry shortly. {READ_DIRECTLY}"
-            ),
-        )),
+        IndexOperation::Pending => Err(pending("indexing")),
+        IndexOperation::Waiting => Err(pending("a project index operation ahead of")),
         IndexOperation::Failed(error) => Err(unavailable(format!(
-            "reading {relative_path} stopped unexpectedly ({error}). {READ_DIRECTLY}"
+            "indexing {relative_path} stopped unexpectedly ({error}). {READ_DIRECTLY}"
         ))),
     }
 }
 
-async fn read_and_index(
+/// Resolves the root and reads the file if its index entry is current.
+async fn first_read(
     reader: EvidenceReader,
-    indexer: ProjectIndexer,
     read: ExplicitRead,
-    cancellation: IndexCancellation,
-) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
+) -> Result<FirstRead, FunctionCallError> {
     let project_root = source_root(
         &read.project_roots,
         read.requested_root.as_ref(),
@@ -106,38 +154,38 @@ async fn read_and_index(
     )
     .await?;
     let request = EvidenceReadRequest {
-        project_id: read.project_id.clone(),
-        project_roots: read.project_roots.clone(),
+        project_id: read.project_id,
+        project_roots: read.project_roots,
         locator: EvidenceReadLocator::Source {
             project_root: Some(project_root.clone()),
-            relative_path: read.relative_path.clone(),
+            relative_path: read.relative_path,
             line_range: read.line_range,
         },
         max_bytes: read.max_bytes,
     };
     match reader.read(request.clone()).await {
-        Ok(result) => return Ok((result, false)),
+        Ok(result) => Ok(FirstRead::Current(Box::new(result))),
         Err(
             EvidenceReadError::SourceChanged
             | EvidenceReadError::SourceNotCurrent(
                 ContextMapFreshness::Stale | ContextMapFreshness::SourceUnavailable,
             )
             | EvidenceReadError::SourceNotIndexed(_),
-        ) => {}
-        Err(error) => return Err(read_error(error)),
+        ) => Ok(FirstRead::NeedsIndex(project_root, request)),
+        Err(error) => Err(read_error(error)),
     }
-    let relative_path = read.relative_path;
-    match indexer
-        .refresh_file_cancellable(
-            ProjectIndexFileRequest {
-                project_id: read.project_id,
-                project_root,
-                relative_path: relative_path.clone(),
-            },
-            cancellation,
-        )
-        .await
-    {
+}
+
+/// Indexes the file under the project's permit, then reads it again.
+async fn index_and_reread(
+    reader: EvidenceReader,
+    indexer: ProjectIndexer,
+    file: ProjectIndexFileRequest,
+    request: EvidenceReadRequest,
+    cancellation: IndexCancellation,
+) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
+    let relative_path = file.relative_path.clone();
+    match indexer.refresh_file_cancellable(file, cancellation).await {
         Ok(_) => {}
         Err(ProjectIndexerError::SourceNotIndexed(_)) => {
             return Err(status(
@@ -156,6 +204,14 @@ async fn read_and_index(
                 "nonTextOrTooLarge",
                 format!(
                     "{relative_path} is too large to index during a read. Inspect the needed part with a bounded command."
+                ),
+            ));
+        }
+        Err(error @ (ProjectIndexerError::Cancelled | ProjectIndexerError::SupersededRefresh)) => {
+            return Err(status(
+                "indexInterrupted",
+                format!(
+                    "indexing {relative_path} did not finish ({error}); retry. {READ_DIRECTLY}"
                 ),
             ));
         }

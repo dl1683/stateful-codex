@@ -853,3 +853,44 @@ async fn root_choice_uses_the_filesystem_not_partial_or_stale_index_rows() {
         (Some("ambiguousRoot"), Ok("SECOND = 2\n".to_string()))
     );
 }
+
+/// A file whose index entry is current is read without the project's index permit, so a
+/// long-running project index operation does not delay it.
+#[tokio::test]
+async fn a_current_file_is_read_while_another_index_operation_runs() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    std::fs::write(project_root.path().join("notes.md"), "kept\n").expect("write source");
+    let tool = source_tool(&state_home);
+    let roots = vec![project_root.path().to_path_buf()];
+    tool.read_with_refresh(roots.clone(), whole_file("notes.md"), 1024)
+        .await
+        .map_err(model_error)
+        .expect("first read indexes the file");
+    let (_hold, held) = tokio::sync::oneshot::channel::<()>();
+    let busy = tool
+        .services
+        .index_gates()
+        .run(
+            "project-1",
+            std::time::Duration::from_millis(20),
+            move |_| async move {
+                let _ = held.await;
+            },
+        )
+        .await;
+
+    let read = tool
+        .read_with_refresh(roots, whole_file("notes.md"), 1024)
+        .await
+        .map(|(read, refreshed)| (read.content, refreshed))
+        .map_err(model_error);
+
+    assert_eq!(
+        (busy, read),
+        (
+            crate::index_gate::IndexOperation::Pending,
+            Ok(("kept\n".to_string(), false))
+        )
+    );
+}

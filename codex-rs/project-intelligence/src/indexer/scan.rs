@@ -60,10 +60,7 @@ pub(super) fn scan_roots(
             max_files: MAX_FILES,
             max_project_regions: MAX_PROJECT_REGIONS,
         },
-        |root, path| {
-            cancellation.check()?;
-            scan_file(root, path)
-        },
+        |root, path| scan_file(root, path, cancellation, /*max_bytes*/ None),
     )
 }
 
@@ -146,6 +143,7 @@ pub(super) fn scan_roots_with_limits(
 pub(super) fn scan_project_file(
     root: &Path,
     relative_path: &ProjectRelativePath,
+    cancellation: &IndexCancellation,
 ) -> Result<Option<ScannedFile>, ProjectIndexerError> {
     let canonical_root = std::fs::canonicalize(root)?;
     let path = root.join(relative_path.as_str());
@@ -161,10 +159,25 @@ pub(super) fn scan_project_file(
     if metadata.len() > MAX_TARGETED_FILE_BYTES {
         return Err(ProjectIndexerError::FileTooLarge(relative_path.to_string()));
     }
-    scan_file(root, &path).map(Some)
+    // The size checked above can grow before the read: the read itself enforces the cap.
+    scan_file(root, &path, cancellation, Some(MAX_TARGETED_FILE_BYTES))
+        .map_err(|error| match error {
+            ProjectIndexerError::FileTooLarge(_) => {
+                ProjectIndexerError::FileTooLarge(relative_path.to_string())
+            }
+            error => error,
+        })
+        .map(Some)
 }
 
-fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerError> {
+/// Fingerprints and describes one file, checking `cancellation` before each read unit and
+/// refusing to read past `max_bytes`.
+fn scan_file(
+    root: &Path,
+    path: &Path,
+    cancellation: &IndexCancellation,
+    max_bytes: Option<u64>,
+) -> Result<ScannedFile, ProjectIndexerError> {
     let relative = path
         .strip_prefix(root)
         .map_err(|_| ProjectIndexerError::InvalidRoot)?;
@@ -175,12 +188,16 @@ fn scan_file(root: &Path, path: &Path) -> Result<ScannedFile, ProjectIndexerErro
     let mut buffer = [0_u8; 64 * 1024];
     let mut total_bytes = 0_u64;
     loop {
+        cancellation.check()?;
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         total_bytes = total_bytes
             .saturating_add(u64::try_from(read).map_err(|_| ProjectIndexerError::CountOverflow)?);
+        if max_bytes.is_some_and(|max_bytes| total_bytes > max_bytes) {
+            return Err(ProjectIndexerError::FileTooLarge(relative_path));
+        }
         hasher.update(&buffer[..read]);
         if excerpt.len() < EXCERPT_BYTES {
             let remaining = EXCERPT_BYTES - excerpt.len();

@@ -44,8 +44,9 @@ pub(super) async fn require_current(
     Err(ProjectIndexerError::SupersededRefresh)
 }
 
-/// What every publication transaction of one index operation checks under the writer
-/// lock before it commits: the operation was not cancelled and is still the newest one.
+/// What every publication transaction of one index operation checks once it holds the
+/// writer lock: the operation was not cancelled and is still the newest one. A cancel
+/// arriving after that check lets the transaction's one bounded unit commit.
 #[derive(Clone, Copy)]
 pub(super) struct PublicationFence<'a> {
     pub(super) generation: RefreshGeneration,

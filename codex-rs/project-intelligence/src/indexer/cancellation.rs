@@ -5,9 +5,11 @@ use std::sync::atomic::Ordering;
 /// Cooperative stop signal for one index operation.
 ///
 /// A blocking scan cannot be aborted by dropping the future that awaits it, so the
-/// scanner checks this signal between files and publication checks it before each
-/// bounded transaction. A cancelled operation publishes nothing further and returns
-/// [`super::ProjectIndexerError::Cancelled`]; units already committed stay committed.
+/// scanner checks this signal before each read unit and every publication transaction
+/// checks it once it holds the writer lock. A transaction that passed that check before
+/// the cancel may still commit its one bounded unit; after that, the operation publishes
+/// nothing further and returns [`super::ProjectIndexerError::Cancelled`]. Units already
+/// committed stay committed.
 #[derive(Clone, Debug, Default)]
 pub struct IndexCancellation(Arc<AtomicBool>);
 

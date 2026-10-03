@@ -3,6 +3,7 @@ use std::fs;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
+use super::super::IndexCancellation;
 use super::*;
 use crate::indexer::regions::MAX_REGION_DESCRIPTION_BYTES;
 
@@ -20,10 +21,27 @@ fn coverage_describes_searchable_content_instead_of_bytes_scanned() {
     )
     .expect("truncated fixture should write");
 
-    let concise = scan_file(temp_dir.path(), &concise_path).expect("concise file should scan");
-    let region = scan_file(temp_dir.path(), &region_path).expect("region file should scan");
-    let truncated =
-        scan_file(temp_dir.path(), &truncated_path).expect("truncated file should scan");
+    let concise = scan_file(
+        temp_dir.path(),
+        &concise_path,
+        &IndexCancellation::default(),
+        None,
+    )
+    .expect("concise file should scan");
+    let region = scan_file(
+        temp_dir.path(),
+        &region_path,
+        &IndexCancellation::default(),
+        None,
+    )
+    .expect("region file should scan");
+    let truncated = scan_file(
+        temp_dir.path(),
+        &truncated_path,
+        &IndexCancellation::default(),
+        None,
+    )
+    .expect("truncated file should scan");
 
     assert_eq!(concise.coverage, ContextMapCoverage::Complete);
     assert_eq!(region.coverage, ContextMapCoverage::Complete);
@@ -47,7 +65,8 @@ fn regions_split_before_searchable_text_would_be_truncated() {
         .join("\n");
     fs::write(&path, content).expect("scorecard fixture should write");
 
-    let file = scan_file(temp_dir.path(), &path).expect("scorecard should scan");
+    let file = scan_file(temp_dir.path(), &path, &IndexCancellation::default(), None)
+        .expect("scorecard should scan");
 
     assert!(file.regions.len() > 1);
     assert!(
@@ -84,7 +103,7 @@ fn project_region_budget_preserves_the_complete_file_inventory() {
             max_files: 10,
             max_project_regions: 1,
         },
-        scan_file,
+        |root, path| scan_file(root, path, &IndexCancellation::default(), None),
     )
     .expect("project should scan");
 

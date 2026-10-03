@@ -279,9 +279,12 @@ impl ProjectIndexer {
         let scan_root = project_root.clone();
         let scan_path = relative_path.clone();
         let scan_started = Instant::now();
-        let file = tokio::task::spawn_blocking(move || scan_project_file(&scan_root, &scan_path))
-            .await
-            .map_err(ProjectIndexerError::ScanTask)??;
+        let scan_cancellation = cancellation.clone();
+        let file = tokio::task::spawn_blocking(move || {
+            scan_project_file(&scan_root, &scan_path, &scan_cancellation)
+        })
+        .await
+        .map_err(ProjectIndexerError::ScanTask)??;
         let scan_duration_ms = elapsed_millis(scan_started);
         let publication_started = Instant::now();
         let Some(file) = file else {

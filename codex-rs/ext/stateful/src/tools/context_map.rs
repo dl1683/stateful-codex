@@ -151,12 +151,12 @@ impl ContextMapQueryTool {
                 self.services.cost_ledger(),
                 &call.turn_id,
                 started.elapsed(),
-                matches!(outcome, IndexOperation::Pending),
+                &outcome,
             );
             match outcome {
                 IndexOperation::Finished(Ok(indexed)) => indexed_on_demand = indexed,
                 IndexOperation::Finished(Err(error)) => return Err(respond(error)),
-                IndexOperation::Pending => {
+                IndexOperation::Pending | IndexOperation::Waiting => {
                     return Err(respond(
                         "timedOutWorkPending: the project index is still being built and was not abandoned; retry shortly, or read a known file with evidence_read relativePath",
                     ));
@@ -330,11 +330,11 @@ impl ContextMapRefreshTool {
             self.services.cost_ledger(),
             &call.turn_id,
             started.elapsed(),
-            matches!(outcome, IndexOperation::Pending),
+            &outcome,
         );
         let report = match outcome {
             IndexOperation::Finished(report) => report.map_err(respond)?,
-            IndexOperation::Pending => {
+            IndexOperation::Pending | IndexOperation::Waiting => {
                 return Err(respond(
                     "timedOutWorkPending: a project index operation is still running and was not abandoned; its coverage is not yet published. Retry shortly",
                 ));

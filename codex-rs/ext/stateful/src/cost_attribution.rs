@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use crate::index_gate::IndexOperation;
+
 /// Turns tracked at once; a turn whose summary never drains its counters cannot grow
 /// the ledger without bound.
 const MAX_TRACKED_TURNS: usize = 256;
@@ -57,15 +59,22 @@ impl CostLedger {
     }
 }
 
-/// Records one index operation a caller waited `waited` for.
-pub(crate) fn record_index_operation(
+/// Records how one gated index operation ended for its caller after `waited`: an
+/// operation that started counts, whether it finished, failed or is still running; a
+/// request that never obtained the permit counts only as pending.
+pub(crate) fn record_index_operation<T>(
     ledger: &CostLedger,
     turn_id: &str,
     waited: std::time::Duration,
-    pending: bool,
+    outcome: &IndexOperation<T>,
 ) {
+    let (started, pending) = match outcome {
+        IndexOperation::Finished(_) | IndexOperation::Failed(_) => (true, false),
+        IndexOperation::Pending => (true, true),
+        IndexOperation::Waiting => (false, true),
+    };
     ledger.record(turn_id, |counters| {
-        counters.index_operations += 1;
+        counters.index_operations += u64::from(started);
         counters.index_operations_pending += u64::from(pending);
         counters.index_wait_ms = counters
             .index_wait_ms

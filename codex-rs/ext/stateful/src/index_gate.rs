@@ -30,9 +30,12 @@ const BACKGROUND_CEILING: Duration = Duration::from_secs(120);
 pub(crate) enum IndexOperation<T> {
     /// The operation exited within the caller's deadline.
     Finished(T),
-    /// This or an earlier operation for the project is still running past the deadline.
-    /// It keeps the project's permit until it exits; a later request may retry.
+    /// The operation started and is still running past the deadline. It keeps the
+    /// project's permit until it exits; a later request may retry.
     Pending,
+    /// An earlier operation for the project held the permit for the whole deadline; this
+    /// one never started.
+    Waiting,
     /// The operation's task panicked or was aborted.
     Failed(String),
 }
@@ -44,15 +47,6 @@ pub(crate) struct IndexGates {
 }
 
 impl IndexGates {
-    fn gate(&self, project_id: &str) -> Arc<Semaphore> {
-        self.gates
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(project_id.to_string())
-            .or_insert_with(|| Arc::new(Semaphore::new(1)))
-            .clone()
-    }
-
     /// Runs `operation` under the project's index permit, waiting at most `deadline` in
     /// total for the permit and the operation.
     pub(crate) async fn run<T, F>(
@@ -81,11 +75,17 @@ impl IndexGates {
         T: Send + 'static,
     {
         let started = Instant::now();
-        let permit =
-            match tokio::time::timeout(deadline, self.gate(project_id).acquire_owned()).await {
-                Ok(Ok(permit)) => permit,
-                Ok(Err(_)) | Err(_) => return IndexOperation::Pending,
-            };
+        let gate = self
+            .gates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(project_id.to_string())
+            .or_insert_with(|| Arc::new(Semaphore::new(1)))
+            .clone();
+        let permit = match tokio::time::timeout(deadline, gate.acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) | Err(_) => return IndexOperation::Waiting,
+        };
         let cancellation = IndexCancellation::default();
         let work = operation(cancellation.clone());
         let task = tokio::spawn(async move {

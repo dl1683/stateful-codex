@@ -25,7 +25,6 @@ use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::cost_attribution::record_index_operation;
 use crate::read_receipts::READ_RECEIPT_ID_BYTES;
 use crate::services::ProjectIntelligenceServices;
 
@@ -148,24 +147,9 @@ impl EvidenceReadTool {
                 ));
             }
         };
-        let started = std::time::Instant::now();
-        let read = self
-            .read_with_refresh(project_roots, locator, max_bytes)
-            .await;
-        let pending = matches!(
-            &read,
-            Err(FunctionCallError::RespondToModel(message))
-                if message.starts_with("timedOutWorkPending:")
-        );
-        if pending || matches!(read, Ok((_, true))) {
-            record_index_operation(
-                self.services.cost_ledger(),
-                &call.turn_id,
-                started.elapsed(),
-                pending,
-            );
-        }
-        let (result, source_refreshed) = read?;
+        let (result, source_refreshed) = self
+            .read_in_turn(Some(&call.turn_id), project_roots, locator, max_bytes)
+            .await?;
 
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let hit = &result.hit;
@@ -228,8 +212,20 @@ impl EvidenceReadTool {
         bounded_json_output(&call, output)
     }
 
+    #[cfg(test)]
     async fn read_with_refresh(
         &self,
+        project_roots: Vec<PathBuf>,
+        locator: EvidenceReadLocator,
+        max_bytes: u32,
+    ) -> Result<(EvidenceReadResult, bool), FunctionCallError> {
+        self.read_in_turn(/*turn_id*/ None, project_roots, locator, max_bytes)
+            .await
+    }
+
+    async fn read_in_turn(
+        &self,
+        turn_id: Option<&str>,
         project_roots: Vec<PathBuf>,
         locator: EvidenceReadLocator,
         max_bytes: u32,
@@ -246,6 +242,7 @@ impl EvidenceReadTool {
                     &self.services,
                     evidence_refresh::ExplicitRead {
                         project_id: self.project_id.clone(),
+                        turn_id: turn_id.map(str::to_string),
                         project_roots,
                         requested_root: project_root,
                         relative_path,

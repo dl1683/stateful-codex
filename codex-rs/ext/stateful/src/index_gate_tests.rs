@@ -45,7 +45,7 @@ async fn timed_out_work_holds_the_permit_until_it_exits_and_then_allows_a_retry(
         .await;
     assert_eq!(
         (second, starts.load(Ordering::SeqCst)),
-        (IndexOperation::Pending, 1)
+        (IndexOperation::Waiting, 1)
     );
 
     release.send(()).expect("slow operation is still waiting");
