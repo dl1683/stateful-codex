@@ -31,6 +31,20 @@ impl BlackboardStore {
         update: BlackboardEntryUpdate,
         change: Option<&crate::ChangeRecord>,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.update_entry_with_context(project_id, id, update, change, /*context*/ None)
+            .await
+    }
+
+    /// Like `update_entry_recorded`, also recording `context` for the new revision in the
+    /// same transaction (without it, the revision keeps its predecessor's context).
+    pub(super) async fn update_entry_with_context(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        update: BlackboardEntryUpdate,
+        change: Option<&crate::ChangeRecord>,
+        context: Option<&crate::KnowledgeContext>,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
         update.validate(id)?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| BlackboardStoreError::RevisionOverflow)?;
@@ -128,6 +142,16 @@ impl BlackboardStore {
             now,
         )
         .await?;
+        if let Some(context) = context {
+            super::knowledge::write_context(
+                &mut transaction,
+                project_id,
+                id,
+                next_revision,
+                context,
+            )
+            .await?;
+        }
         if let Some(change) = change {
             super::knowledge::append_change(
                 &mut transaction,
