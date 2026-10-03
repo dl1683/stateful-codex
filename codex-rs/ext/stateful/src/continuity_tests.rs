@@ -36,7 +36,6 @@ fn record(turns: Vec<CapturedTurn>) -> ContinuityRecord {
         captured_at_ms: ANSWERED_AT_MS + 120_000,
         turns,
         more_turns: false,
-        unrelated_omitted: 0,
         unreadable_threads: 0,
         history_unavailable: false,
         latest_run: None,
