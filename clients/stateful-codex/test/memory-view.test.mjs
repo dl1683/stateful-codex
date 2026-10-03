@@ -34,7 +34,10 @@ const memory = {
 };
 
 test("memory lists sections with forget and correct, and names what a correction does", async () => {
-  const html = renderMemory({ memory, memoryEditing: "agent-1" });
+  const html = renderMemory({
+    memory,
+    memoryDrafts: { "agent-1": { baseRevision: 1, content: "Prefer <tabs>." } },
+  });
   const url = new URL("snapshots/memory.html", import.meta.url);
   if (process.env.UPDATE_SNAPSHOTS) await writeFile(url, `${html}\n`);
   assert.equal(`${html}\n`, await readFile(url, "utf8"));
@@ -83,8 +86,36 @@ test("the run badge separates the answer from the durable run", () => {
 test("a shortened entry offers no correction that would drop its tail", () => {
   const html = renderMemory({
     memory: { items: [item("long-1", "userRule", "x".repeat(10), { contentTruncated: true })], more: false, error: null },
-    memoryEditing: "long-1",
+    memoryDrafts: { "long-1": { baseRevision: 1, content: "x" } },
   });
   assert.doesNotMatch(html, /data-memory-correct|data-action="memory-correct"/);
   assert.match(html, /Too long to correct here/);
+});
+
+test("drafts survive re-rendering, conflicts keep the text, and orphaned drafts stay visible", () => {
+  const html = renderMemory({
+    memory: {
+      items: [
+        item("rule-1", "userRule", "Never commit.", { revision: 3, scopeTitle: "Ground rules for this investigation" }),
+        item("note-1", "knowledge", "Relayed by the user.", { attributedTo: "Priya" }),
+      ],
+      cursor: "next",
+      pages: 1,
+      error: null,
+    },
+    memoryDrafts: {
+      "rule-1": { baseRevision: 2, content: "Never commit or push." },
+      "gone-1": { baseRevision: 1, content: "My unsaved words." },
+    },
+    memoryAddition: { kind: "decision", content: "Months use mth.", reason: "minutes" },
+  });
+  assert.match(html, /<textarea name="content" aria-label="Corrected text" required>Never commit or push\.<\/textarea>/);
+  assert.match(html, /data-revision="2"/);
+  assert.match(html, /changed elsewhere since you began/);
+  assert.match(html, /My unsaved words\./);
+  assert.match(html, /Only in the investigation: Ground rules for this investigation/);
+  assert.match(html, /Priya's words you passed on, not your rule/);
+  assert.match(html, /data-action="memory-more"/);
+  assert.match(html, /<option value="decision" selected>/);
+  assert.match(html, /Months use mth\./);
 });

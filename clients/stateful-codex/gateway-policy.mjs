@@ -23,6 +23,7 @@ export const WEB_RPC_METHODS = new Set([
   "projectIntelligence/status",
   "projectIntelligence/tree",
   "statefulMeasurement/list",
+  "statefulMemory/add",
   "statefulMemory/correct",
   "statefulMemory/forget",
   "statefulMemory/read",
@@ -165,6 +166,7 @@ const EXECUTION_PARAMS = {
     threadId: isString,
     cursor: (cursor) => cursor === null || isString(cursor),
     limit: (limit) => Number.isInteger(limit) && limit > 0 && limit <= 100,
+    backgroundSection: isBoolean,
   },
   "statefulMemory/forget": { threadId: isString, entryId: isString, expectedRevision: isRevision },
   "statefulMemory/correct": {
@@ -172,6 +174,15 @@ const EXECUTION_PARAMS = {
     entryId: isString,
     expectedRevision: isRevision,
     content: (content) => isString(content) && content.length <= 2000,
+    backgroundSection: isBoolean,
+  },
+  "statefulMemory/add": {
+    threadId: isString,
+    kind: (kind) => ["rule", "background", "decision", "note"].includes(kind),
+    content: (content) => isString(content) && content.trim().length > 0 && content.length <= 2000,
+    reason: (reason) => reason === null || (isString(reason) && reason.length <= 1000),
+    clientActionId: (id) => isString(id) && id.length > 0 && id.length <= 128,
+    backgroundSection: isBoolean,
   },
 };
 

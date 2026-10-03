@@ -13,6 +13,7 @@ import {
   sendFirstTurn,
   startFollowUp,
 } from "./follow-up.mjs";
+import { createDrafts } from "./memory-drafts.mjs";
 import { createWorkspaceDom, watchFindingFilter } from "./workspace-dom.mjs";
 import { requestKey } from "./workspace-view.mjs";
 import {
@@ -69,7 +70,6 @@ const state = {
   recapDismissed: false,
   receipts: [],
   memory: null,
-  memoryEditing: null,
   answering: new Set(),
   runGeneration: 0,
   activityTruncated: false,
@@ -92,6 +92,8 @@ const sourceSearch = createSourceSearch({
 });
 const drafts = view.drafts;
 const readMemorySummary = createSummaryReader(rpc, { threadId, storage: sessionStorage });
+// What the person is writing in the memory panel lives here, not in the re-rendered panel.
+const memoryDrafts = createDrafts(sessionStorage, threadId);
 
 async function boot() {
   render();
@@ -293,21 +295,52 @@ async function refreshWorkspace() {
   render();
 }
 
-// Two pages at most; a failure is shown in the panel rather than failing the whole refresh.
+// The first page, keeping as many further pages as the person had opened; "Show more" reads
+// the next. A failure is shown in the panel rather than failing the whole refresh.
 async function readMemory() {
+  const wanted = Math.max(1, state.memory?.pages ?? 1);
   try {
     const items = [];
     let cursor = null;
-    for (let page = 0; page < 2; page += 1) {
-      const response = await rpc("statefulMemory/read", { threadId, cursor, limit: 50 });
+    let pages = 0;
+    do {
+      const response = await rpc("statefulMemory/read", {
+        threadId,
+        cursor,
+        limit: 50,
+        backgroundSection: true,
+      });
       items.push(...response.data);
       cursor = response.nextCursor ?? null;
-      if (!cursor) break;
-    }
-    return { items, more: Boolean(cursor), error: null };
+      pages += 1;
+    } while (cursor && pages < wanted);
+    return { items, cursor, pages, error: null };
   } catch (error) {
-    return { items: [], more: false, error: error.message };
+    return { items: [], cursor: null, pages: 1, error: error.message };
   }
+}
+
+async function readMoreMemory() {
+  const memory = state.memory;
+  if (!memory?.cursor) return;
+  try {
+    const response = await rpc("statefulMemory/read", {
+      threadId,
+      cursor: memory.cursor,
+      limit: 50,
+      backgroundSection: true,
+    });
+    const known = new Set(memory.items.map((item) => item.entryId));
+    memory.items.push(...response.data.filter((item) => !known.has(item.entryId)));
+    memory.cursor = response.nextCursor ?? null;
+    memory.pages += 1;
+  } catch {
+    // Memory changed since the first page: list it again, keeping the pages opened.
+    memory.pages += 1;
+    state.memory = await readMemory();
+    state.notice = "Project memory changed while you were reading it; the list was read again.";
+  }
+  render(["memory"]);
 }
 
 function memoryItem(entryId) {
@@ -350,6 +383,8 @@ async function readHierarchy() {
 const baseTitle = document.title;
 
 function render(sections) {
+  state.memoryDrafts = memoryDrafts.corrections();
+  state.memoryAddition = memoryDrafts.addition();
   view.update(state, sections);
   document.title = documentTitle(baseTitle, state.pendingRequests.length);
 }
@@ -389,6 +424,25 @@ function handleEvent(message) {
 watchFindingFilter(app, (filter) => {
   state.findingFilter = filter;
   render(["findings"]);
+});
+
+// Every keystroke in a memory form goes to its draft, so no re-render can lose it.
+app.addEventListener("input", (event) => {
+  const target = event.target;
+  const correction = target.closest("form[data-memory-correct]");
+  if (correction && target.name === "content") {
+    memoryDrafts.edit(correction.dataset.memoryCorrect, target.value);
+    return;
+  }
+  if (target.closest("form[data-memory-add]") && ["kind", "content", "reason"].includes(target.name)) {
+    memoryDrafts.editAddition(target.name, target.value);
+  }
+});
+app.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target.closest("form[data-memory-add]") && target.name === "kind") {
+    memoryDrafts.editAddition("kind", target.value);
+  }
 });
 
 app.addEventListener("submit", async (event) => {
@@ -436,18 +490,47 @@ app.addEventListener("submit", async (event) => {
       // Refresh after the submission settles, so the clean selector shows the persisted mode.
       await refresh();
     } else if (form.dataset.memoryCorrect) {
-      const content = form.querySelector('[name="content"]').value.trim();
-      if (!content) return;
+      const entryId = form.dataset.memoryCorrect;
+      const draft = memoryDrafts.correction(entryId);
+      const content = (draft?.content ?? form.querySelector('[name="content"]').value).trim();
+      if (!content || !draft) return;
+      // The revision the draft started from: a change made elsewhere meanwhile is refused,
+      // and the draft stays for the person to copy.
       const response = await action("Saving the correction", () =>
         rpc("statefulMemory/correct", {
           threadId,
-          entryId: form.dataset.memoryCorrect,
-          expectedRevision: Number(form.dataset.revision),
+          entryId,
+          expectedRevision: draft.baseRevision,
           content,
+          backgroundSection: true,
         }),
       );
-      state.memoryEditing = null;
+      memoryDrafts.close(entryId);
       state.notice = `Corrected: "${response.item.content}".`;
+      await refresh();
+    } else if (form.dataset.memoryAdd) {
+      if (!memoryDrafts.addition().content.trim()) return;
+      // One identity per addition the person writes, so a retried submit adds it once.
+      if (!memoryDrafts.addition().actionId) {
+        memoryDrafts.editAddition("actionId", crypto.randomUUID());
+      }
+      const addition = memoryDrafts.addition();
+      const content = addition.content.trim();
+      const response = await action("Adding to memory", () =>
+        rpc("statefulMemory/add", {
+          threadId,
+          kind: addition.kind,
+          content,
+          reason: addition.kind === "decision" && addition.reason.trim() ? addition.reason.trim() : null,
+          clientActionId: addition.actionId,
+          backgroundSection: true,
+        }),
+      );
+      memoryDrafts.clearAddition();
+      state.notice =
+        response.outcome === "added"
+          ? `Added: "${response.item.content}".`
+          : `Already saved: "${response.item.content}".`;
       await refresh();
     } else if (form.dataset.requestKey) {
       await answerUserRequest(form);
@@ -515,16 +598,22 @@ app.addEventListener("click", async (event) => {
       case "show-requests":
         view.showRequests();
         break;
-      case "memory-correct":
-        state.memoryEditing = button.dataset.entryId;
+      case "memory-correct": {
+        const item = memoryItem(button.dataset.entryId);
+        if (!item) break;
+        memoryDrafts.open(item.entryId, item.revision, item.content);
         render(["memory"]);
+        break;
+      }
+      case "memory-more":
+        await readMoreMemory();
         break;
       case "recap-dismiss":
         state.recapDismissed = true;
         render(["recap"]);
         break;
       case "memory-cancel":
-        state.memoryEditing = null;
+        memoryDrafts.close(button.dataset.entryId);
         render(["memory"]);
         break;
       case "memory-forget": {

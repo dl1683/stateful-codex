@@ -157,7 +157,37 @@ test("the allowlist covers every method the client calls", async () => {
 });
 
 test("memory methods accept exactly the shapes the page sends", () => {
-  assert.equal(checkRpcParams("statefulMemory/read", { threadId: "t", cursor: null, limit: 50 }), null);
+  assert.equal(
+    checkRpcParams("statefulMemory/read", {
+      threadId: "t",
+      cursor: null,
+      limit: 50,
+      backgroundSection: true,
+    }),
+    null,
+  );
+  assert.equal(
+    checkRpcParams("statefulMemory/add", {
+      threadId: "t",
+      kind: "decision",
+      content: "Months use mth.",
+      reason: "readers confused mo with minutes",
+      clientActionId: "a-1",
+      backgroundSection: true,
+    }),
+    null,
+  );
+  assert.equal(
+    checkRpcParams("statefulMemory/add", {
+      threadId: "t",
+      kind: "secret",
+      content: "x",
+      reason: null,
+      clientActionId: "a-1",
+      backgroundSection: true,
+    }),
+    "statefulMemory/add kind has an unsupported value",
+  );
   assert.equal(
     checkRpcParams("statefulMemory/forget", { threadId: "t", entryId: "e", expectedRevision: 2 }),
     null,
@@ -168,6 +198,7 @@ test("memory methods accept exactly the shapes the page sends", () => {
       entryId: "e",
       expectedRevision: 2,
       content: "Run only the affected tests.",
+      backgroundSection: true,
     }),
     null,
   );
@@ -181,11 +212,17 @@ test("memory methods accept exactly the shapes the page sends", () => {
       entryId: "e",
       expectedRevision: 2,
       content: "x".repeat(2001),
+      backgroundSection: true,
     }),
     "statefulMemory/correct content has an unsupported value",
   );
   assert.equal(
-    checkRpcParams("statefulMemory/read", { threadId: "t", cursor: null, limit: 500 }),
+    checkRpcParams("statefulMemory/read", {
+      threadId: "t",
+      cursor: null,
+      limit: 500,
+      backgroundSection: true,
+    }),
     "statefulMemory/read limit has an unsupported value",
   );
 });
