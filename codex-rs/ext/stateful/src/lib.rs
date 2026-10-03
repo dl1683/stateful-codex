@@ -3,6 +3,7 @@
 mod attribution;
 mod autonomy;
 mod background;
+mod capture_policy;
 mod checkout;
 mod checkpoint;
 mod completion;

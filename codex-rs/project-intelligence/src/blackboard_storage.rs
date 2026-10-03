@@ -28,6 +28,7 @@ use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
+mod duplicate;
 mod fence;
 mod knowledge;
 mod query;

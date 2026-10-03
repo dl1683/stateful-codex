@@ -32,6 +32,8 @@ use serde_json::json;
 use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
+use crate::capture_policy::RecordOutcome;
+use crate::capture_policy::routine_summary_refusal;
 use crate::events::CaptureOutcome;
 use crate::events::KnowledgeCategory;
 use crate::events::receipt_text;
@@ -253,7 +255,7 @@ impl BlackboardRecorder {
         turn_id: &str,
         source_id: &str,
         project_roots: &[std::path::PathBuf],
-    ) -> Result<BlackboardEntry, FunctionCallError> {
+    ) -> Result<RecordOutcome, FunctionCallError> {
         let RecordArguments {
             idempotency_key,
             node_id,
@@ -284,7 +286,8 @@ impl BlackboardRecorder {
             }
             return self
                 .record_instruction(turn_id, user_quote, rule_scope)
-                .await;
+                .await
+                .map(RecordOutcome::Created);
         }
         if user_quote.is_some() || rule_scope.is_some() {
             return Err(respond(
@@ -348,6 +351,17 @@ impl BlackboardRecorder {
         let entry = if let Some(existing) = retried {
             existing
         } else if supersedes.is_empty() {
+            if let Some(refusal) = routine_summary_refusal(value.kind, &value.content) {
+                return Err(respond(refusal));
+            }
+            if let Some(existing) = store
+                .active_agent_entry_with_content(&self.project_id, value.kind, &value.content)
+                .await
+                .map_err(respond)?
+                && existing.id != id
+            {
+                return Ok(RecordOutcome::AlreadyPresent(existing));
+            }
             store.create_entry(id, value).await.map_err(respond)?
         } else {
             // The new entry and the end of the entries it replaces commit together.
@@ -410,7 +424,7 @@ impl BlackboardRecorder {
                 text: receipt_text(&entry.value.content),
             });
         }
-        Ok(entry)
+        Ok(RecordOutcome::Created(entry))
     }
 
     async fn project_node_id(&self) -> Result<HierarchyNodeId, FunctionCallError> {
@@ -495,6 +509,7 @@ impl BlackboardBatchRecordTool {
             &call,
             &json!({
                 "recorded": u64::MAX,
+                "alreadyPresent": u64::MAX,
                 "failed": u64::MAX,
                 "results": (0..records.len())
                     .map(|index| json!({
@@ -502,6 +517,7 @@ impl BlackboardBatchRecordTool {
                         "entryId": worst_identifier(""),
                         "revision": u64::MAX,
                         "recorded": false,
+                        "alreadyPresent": false,
                         "error": worst_receipt_error(),
                     }))
                     .collect::<Vec<_>>(),
@@ -524,6 +540,7 @@ impl BlackboardBatchRecordTool {
         let mut results = Vec::with_capacity(records.len());
         let mut entry_ids = HashMap::with_capacity(records.len());
         let mut recorded = 0usize;
+        let mut already_present = 0usize;
         let project_roots = if records
             .iter()
             .all(|record| record.evidence.is_empty() && record.premises.is_empty())
@@ -539,7 +556,7 @@ impl BlackboardBatchRecordTool {
                 .record(record, &call.turn_id, &call.call_id, &project_roots)
                 .await
             {
-                Ok(entry) => {
+                Ok(RecordOutcome::Created(entry)) => {
                     recorded += 1;
                     entry_ids.insert(record_key, entry.id.clone());
                     results.push(json!({
@@ -549,6 +566,19 @@ impl BlackboardBatchRecordTool {
                         "recorded": true,
                     }));
                 }
+                // The same wording is already current: relations may point at it, but
+                // nothing new was saved.
+                Ok(RecordOutcome::AlreadyPresent(entry)) => {
+                    already_present += 1;
+                    entry_ids.insert(record_key, entry.id.clone());
+                    results.push(json!({
+                        "index": index,
+                        "entryId": entry.id.to_string(),
+                        "revision": entry.revision,
+                        "recorded": false,
+                        "alreadyPresent": true,
+                    }));
+                }
                 Err(error) => results.push(json!({
                     "index": index,
                     "recorded": false,
@@ -556,7 +586,10 @@ impl BlackboardBatchRecordTool {
                 })),
             }
         }
-        let failed = results.len().saturating_sub(recorded);
+        let failed = results
+            .len()
+            .saturating_sub(recorded)
+            .saturating_sub(already_present);
         let mut relation_results = Vec::with_capacity(relations.len());
         let mut relations_recorded = 0usize;
         for (index, relation) in relations.into_iter().enumerate() {
@@ -617,6 +650,7 @@ impl BlackboardBatchRecordTool {
             &call,
             json!({
                 "recorded": recorded,
+                "alreadyPresent": already_present,
                 "failed": failed,
                 "results": results,
                 "relationsRecorded": relations_recorded,
@@ -642,7 +676,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record. sourceVerified needs evidence copied from evidence_read. Items are idempotent."
+                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record. sourceVerified needs evidence copied from evidence_read. Items are idempotent; an exact copy of current knowledge is alreadyPresent and not saved again, and progress or status summaries are refused."
             ),
             strict: false,
             defer_loading: None,
@@ -870,3 +904,7 @@ fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
 }
 use std::sync::Arc;
+
+#[cfg(test)]
+#[path = "blackboard_write_tests.rs"]
+mod tests;
