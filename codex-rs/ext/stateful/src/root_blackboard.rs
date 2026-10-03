@@ -322,7 +322,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         }
     }
     let (evidence_aliases, sources) = render_evidence_catalog(output, root);
-    if !rules.is_empty() && !knowledge.is_empty() {
+    if (!rules.is_empty() || !background.is_empty()) && !knowledge.is_empty() {
         append_line(output, KNOWLEDGE_HEADER);
     }
     for (index, hit) in &knowledge {

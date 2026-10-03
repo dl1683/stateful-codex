@@ -301,10 +301,39 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
         .into_iter()
         .map(|rule| rule.text)
         .collect::<Vec<_>>();
-    text.lines()
-        .flat_map(|line| clauses(line.trim()))
+    // Only the user's own plain prose counts: fenced blocks, quoted lines, indented or list
+    // lines and the block a colon-terminated line introduces ("She wrote:", until a blank
+    // line) may be someone else's words.
+    let mut fenced = false;
+    let mut introduced = false;
+    let mut own_lines = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if trimmed.is_empty() {
+            // An introduced block ends at a blank line.
+            introduced = false;
+            continue;
+        }
+        let plain = !fenced
+            && !introduced
+            && !trimmed.starts_with('>')
+            && !line.starts_with([' ', '\t'])
+            && list_item_body(trimmed).is_none();
+        introduced = introduced || trimmed.ends_with(':');
+        if plain {
+            own_lines.push(trimmed);
+        }
+    }
+    own_lines
+        .into_iter()
+        .flat_map(clauses)
         .filter(|clause| {
-            !clause.ends_with('?')
+            !clause.contains(['"', '\u{201c}', '\u{201d}'])
+                && !clause.ends_with('?')
                 && !clause.ends_with(':')
                 && clause.len() <= MAX_RULE_BYTES
                 && !rules.iter().any(|rule| rule == clause)
@@ -393,18 +422,20 @@ const RULE_NOUNS: &[&str] = &[
 /// phrases (split at punctuation) opens with a retrieval request, and it names rules.
 pub(crate) fn asks_about_rules(clause: &str) -> bool {
     let normalized = normalize(clause);
-    // "From now on, repeat my instructions word for word." asks for every later reply.
-    !has_phrase(&normalized, STRONG_STANDING_PHRASES)
-        && has_phrase(&normalized, RULE_NOUNS)
-        && clause
-            .split([':', ',', ';', '-'])
-            .map(normalize)
-            .any(|phrase| {
-                let body = strip_list_marker(&phrase);
-                RULE_REQUEST_OPENINGS
-                    .iter()
-                    .any(|opening| body == *opening || body.starts_with(&format!("{opening} ")))
-            })
+    if !has_phrase(&normalized, RULE_NOUNS) {
+        return false;
+    }
+    let opens_request = |phrase: String| {
+        let body = strip_list_marker(&phrase).to_string();
+        RULE_REQUEST_OPENINGS
+            .iter()
+            .any(|opening| body == *opening || body.starts_with(&format!("{opening} ")))
+    };
+    let mut phrases = clause.split([':', ',', ';', '-']).map(normalize);
+    // "List the preferences I gave you for all our work." opens with the request; "From now
+    // on, repeat my instructions word for word." makes the request a standing rule.
+    phrases.next().is_some_and(opens_request)
+        || (!has_phrase(&normalized, STRONG_STANDING_PHRASES) && phrases.any(opens_request))
 }
 
 /// Whether `clause` reports what someone else said or advised rather than stating the

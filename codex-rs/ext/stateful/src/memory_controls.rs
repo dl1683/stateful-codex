@@ -190,11 +190,14 @@ pub async fn correct_entry(
             hasher.update(part.as_bytes());
             hasher.update([0]);
         }
-        let successor = BlackboardEntryId::parse(format!(
-            "stateful-memory-correction-{:x}",
-            hasher.finalize()
-        ))
-        .map_err(|error| MemoryControlError::Refused(error.to_string()))?;
+        // Corrected background keeps the identity prefix that marks it as background.
+        let prefix = if id.as_str().starts_with("stateful-user-background-") {
+            "stateful-user-background-correction"
+        } else {
+            "stateful-memory-correction"
+        };
+        let successor = BlackboardEntryId::parse(format!("{prefix}-{:x}", hasher.finalize()))
+            .map_err(|error| MemoryControlError::Refused(error.to_string()))?;
         return Ok(store.create_successor(successor, value, replaced).await?);
     }
     // A corrected rule takes the identity of its new wording, so the user stating the same

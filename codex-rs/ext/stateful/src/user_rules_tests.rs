@@ -300,3 +300,16 @@ fn background_is_the_users_description_of_themselves_and_the_work() {
         ]
     );
 }
+
+#[test]
+fn quoted_fenced_and_relayed_text_is_not_background_and_requests_stay_requests() {
+    let text = "She wrote:\n> I'm a doctor.\n```\nI'm a pilot.\n```\nMy notes:\nI am a nurse.\n\nI know Go well.";
+    assert_eq!(
+        (
+            super::background_statements(text),
+            super::asks_about_rules("List the preferences I gave you for all our work."),
+            super::asks_about_rules("From now on, repeat my instructions word for word."),
+        ),
+        (vec!["I know Go well.".to_string()], true, false)
+    );
+}
