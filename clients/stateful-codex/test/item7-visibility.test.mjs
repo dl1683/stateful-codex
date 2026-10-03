@@ -416,3 +416,33 @@ test("concurrent summary reads complete in order and an older one never replaces
   assert.equal(newerSummary(first, second), second);
   assert.equal(newerSummary(second, { error: "x" }).error, "x");
 });
+
+test("a late session start stays qualified across a reload of the tab", async () => {
+  const storage = new Map();
+  const store = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+    removeItem: (key) => storage.delete(key),
+  };
+  let sequence = 10;
+  let fail = true;
+  const rpc = async (method, params) => {
+    if (fail) throw new Error("unavailable");
+    return { counts: { rules: 2 }, latestSequence: sequence, since: params.sinceSequence === null ? null : { saved: 1 } };
+  };
+  const read = createSummaryReader(rpc, { threadId: "thread-a", storage: store });
+  await read();
+  fail = false;
+  sequence = 11;
+  assert.equal((await read()).sessionStartedLate, true);
+  sequence = 12;
+  const reloaded = await createSummaryReader(rpc, { threadId: "thread-a", storage: store })();
+  assert.equal(storage.get("stateful-memory-since:thread-a"), "11");
+  assert.equal(reloaded.sessionStartedLate, true);
+  assert.match(memoryStatusLine(reloaded), /this session: saved 1 · changes before memory status was available are not counted/);
+  // A session that started on time is not qualified after a reload.
+  const clean = new Map();
+  const cleanStore = { getItem: (key) => clean.get(key) ?? null, setItem: (key, value) => clean.set(key, value), removeItem: (key) => clean.delete(key) };
+  await createSummaryReader(rpc, { threadId: "thread-b", storage: cleanStore })();
+  assert.equal((await createSummaryReader(rpc, { threadId: "thread-b", storage: cleanStore })()).sessionStartedLate, false);
+});

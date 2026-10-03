@@ -16,6 +16,7 @@ export async function readExecutionSnapshot(rpc, threadId) {
 }
 
 const watermarkKey = (threadId) => `stateful-memory-since:${threadId}`;
+const lateKey = (threadId) => `stateful-memory-started-late:${threadId}`;
 
 // Reads the project's memory counts plus what changed since this page session began. The
 // session starts at the journal sequence of the first successful read, kept in memory for this
@@ -26,7 +27,8 @@ const watermarkKey = (threadId) => `stateful-memory-since:${threadId}`;
 // are marked as starting late instead of silently omitting what was saved meanwhile.
 export function createSummaryReader(rpc, { threadId, storage }) {
   let watermark = readWatermark(storage, threadId);
-  let startedLate = false;
+  // Restored with the watermark: a session that started late stays qualified across reloads.
+  let startedLate = watermark !== null && readFlag(storage, lateKey(threadId));
   let queue = Promise.resolve();
   const read = async () => {
     try {
@@ -38,6 +40,8 @@ export function createSummaryReader(rpc, { threadId, storage }) {
       if (watermark === null && Number.isInteger(summary.latestSequence)) {
         watermark = summary.latestSequence;
         try {
+          if (startedLate) storage?.setItem(lateKey(threadId), "1");
+          else storage?.removeItem?.(lateKey(threadId));
           storage?.setItem(watermarkKey(threadId), String(watermark));
         } catch {
           // Without storage the session totals restart on reload; this page keeps them.
@@ -76,6 +80,14 @@ function emptyTotals() {
     scopesEnded: 0,
     captureIncomplete: 0,
   };
+}
+
+function readFlag(storage, key) {
+  try {
+    return storage?.getItem(key) === "1";
+  } catch {
+    return false;
+  }
 }
 
 function readWatermark(storage, threadId) {
