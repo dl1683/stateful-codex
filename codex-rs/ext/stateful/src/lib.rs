@@ -6,6 +6,7 @@ mod background;
 mod checkout;
 mod checkpoint;
 mod completion;
+mod continuation;
 mod continuity;
 mod continuity_source;
 mod conversation_summaries;
@@ -29,6 +30,7 @@ mod tools;
 mod user_messages;
 mod user_rules;
 mod visible_root;
+mod window_policy;
 mod world_state;
 
 use std::sync::Arc;
@@ -47,6 +49,7 @@ use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::ProjectRefreshStatus;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
+use codex_stateful_runtime::ContextWindowMode;
 use codex_thread_store::ThreadStore;
 
 use crate::continuity::continuity_world_state_section;
@@ -174,6 +177,21 @@ impl ContextContributor for StatefulExtension {
                 return Vec::new();
             };
             let thread_id = input.thread_id.to_string();
+            let runtime_store = match self.services.as_ref() {
+                Some(services) => services.runtime().await.ok(),
+                None => None,
+            };
+            let stored_window =
+                window_policy::stored_window(runtime_store, &thread_id, &input.context_window)
+                    .await;
+            let window = stored_window.clone().unwrap_or_else(|| {
+                window_policy::proposed_window(
+                    &thread_id,
+                    &input.context_window,
+                    input.previous_world_state,
+                )
+            });
+            let continuation_window = window.mode == ContextWindowMode::Continuation;
             let run_activity = self.run_activity.for_thread(&thread_id);
             let run_status = self
                 .run_world_state(selected.project_id(), &thread_id, &run_activity)
@@ -276,10 +294,48 @@ impl ContextContributor for StatefulExtension {
                 ProjectIntelligenceStatus::Missing { .. }
                 | ProjectIntelligenceStatus::Unavailable { .. } => None,
             };
-            let mut sections = vec![project_world_state_section(
-                status,
-                Some((self.visible_root.clone(), thread_id.clone())),
-            )];
+            // A continuation window keeps the full project packet when its rules do not fit
+            // whole, so no rule is dropped; a new window records that as its decision.
+            let continuation_project = continuation_window
+                .then(|| continuation::continuation_project(&status))
+                .flatten();
+            let window = match stored_window {
+                Some(stored) => stored,
+                None => {
+                    let mode = if continuation_project.is_some() {
+                        ContextWindowMode::Continuation
+                    } else {
+                        ContextWindowMode::Full
+                    };
+                    window_policy::decide_window(
+                        runtime_store,
+                        codex_stateful_runtime::ContextWindowDecision { mode, ..window },
+                    )
+                    .await
+                }
+            };
+            let continuation_window = window.mode == ContextWindowMode::Continuation;
+            let visible_root = (self.visible_root.clone(), thread_id.clone());
+            let mut sections = vec![
+                window_policy::window_section(&window),
+                match continuation_project.filter(|_| continuation_window) {
+                    Some(project) => {
+                        continuation::continuation_project_section(project, visible_root)
+                    }
+                    None => project_world_state_section(status, Some(visible_root)),
+                },
+            ];
+            // A continuation window's own conversation is in its retained messages and summary;
+            // only other threads' turns remain worth showing.
+            let continuity = continuity
+                .map(|mut continuity| {
+                    if continuation_window {
+                        continuity.turns.retain(|turn| !turn.current_thread);
+                        continuity.latest_run = None;
+                    }
+                    continuity
+                })
+                .filter(|continuity| !continuation_window || !continuity.turns.is_empty());
             match (continuity, available_project_id) {
                 (Some(continuity), _) => sections.push(continuity_world_state_section(
                     &continuity,
@@ -293,7 +349,11 @@ impl ContextContributor for StatefulExtension {
             sections.push(scope_note.section());
             sections.push(checkout_report.section());
             if let Some(run_status) = run_status {
-                sections.push(run_world_state_section(run_status));
+                sections.push(if continuation_window {
+                    run_world_state::run_continuation_section(run_status)
+                } else {
+                    run_world_state_section(run_status)
+                });
             }
             sections
         })

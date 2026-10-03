@@ -20,11 +20,11 @@ use crate::root_blackboard::short_digest;
 use crate::visible_root::VisibleRoot;
 use crate::visible_root::VisibleRootRegistry;
 
-const WORLD_STATE_ID: &str = "stateful_project";
+pub(super) const WORLD_STATE_ID: &str = "stateful_project";
 pub(super) const START_MARKER: &str = "<stateful_project>";
 pub(super) const END_MARKER: &str = "</stateful_project>";
-const UPDATE_START_MARKER: &str = "<stateful_project_update>";
-const UPDATE_END_MARKER: &str = "</stateful_project_update>";
+pub(super) const UPDATE_START_MARKER: &str = "<stateful_project_update>";
+pub(super) const UPDATE_END_MARKER: &str = "</stateful_project_update>";
 pub(super) const MAX_BODY_BYTES: usize =
     MAX_MODEL_ITEM_BYTES - START_MARKER.len() - END_MARKER.len();
 pub(super) const MAX_ESTIMATED_TOKENS: usize = 8 * 1024;
@@ -681,7 +681,7 @@ fn single_line(value: &str) -> String {
         .collect()
 }
 
-fn is_project_fragment(role: &str, text: &str, project_id: &str) -> bool {
+pub(super) fn is_project_fragment(role: &str, text: &str, project_id: &str) -> bool {
     role == "developer"
         && text.trim_start().starts_with(START_MARKER)
         && text.contains(&format!("Project ID: {project_id}"))

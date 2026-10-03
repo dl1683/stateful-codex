@@ -70,7 +70,7 @@ const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_950;
 
 const PROJECT_ID: &str = "project-1";
 
-fn promoted_entry(index: usize) -> BlackboardHit {
+pub(crate) fn promoted_entry(index: usize) -> BlackboardHit {
     BlackboardHit::new(
         BlackboardEntry {
             id: BlackboardEntryId::parse(format!("entry-{index:02}")).expect("valid entry ID"),
@@ -104,7 +104,7 @@ fn promoted_entry(index: usize) -> BlackboardHit {
 }
 
 /// What the user said about themselves, as host capture stores it.
-fn background_entry() -> BlackboardHit {
+pub(crate) fn background_entry() -> BlackboardHit {
     let mut hit = promoted_entry(10);
     hit.entry.id =
         BlackboardEntryId::parse("stateful-user-background-0a1b2c").expect("valid entry ID");
@@ -117,7 +117,7 @@ fn background_entry() -> BlackboardHit {
     hit
 }
 
-fn project_status() -> ProjectIntelligenceStatus {
+pub(crate) fn project_status() -> ProjectIntelligenceStatus {
     ProjectIntelligenceStatus::Available {
         project: Box::new(StoredProject {
             id: PROJECT_ID.to_string(),
@@ -151,7 +151,7 @@ fn project_status() -> ProjectIntelligenceStatus {
     }
 }
 
-fn run_status(mode: WorkflowMode) -> RunWorldStateStatus {
+pub(crate) fn run_status(mode: WorkflowMode) -> RunWorldStateStatus {
     let run_id = StatefulRunId::parse("run-1").expect("valid run id");
     RunWorldStateStatus::Available {
         run: Box::new(StatefulRun {

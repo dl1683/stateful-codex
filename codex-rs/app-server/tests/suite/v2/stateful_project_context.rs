@@ -141,8 +141,9 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
     let _: codex_app_server_protocol::TurnCompletedNotification =
         server.read_notification("turn/completed").await?;
     run_turn(&mut server, &started.thread.id).await?;
-    assert_latest_request_has_project(&responses, &created.project.id).await?;
+    assert_latest_request_has_continuation(&responses, &created.project.id).await?;
 
+    // A fork is another thread: it starts with the full packet.
     let forked: ThreadForkResponse = server
         .request(|request_id| ClientRequest::ThreadFork {
             request_id,
@@ -170,7 +171,8 @@ async fn selected_project_context_survives_fork_and_cold_resume() -> Result<()> 
         })
         .await?;
     run_turn(&mut server, &resumed.thread.id).await?;
-    assert_latest_request_has_project(&responses, &created.project.id).await?;
+    // A cold resume keeps the compacted window's continuation packet.
+    assert_latest_request_has_continuation(&responses, &created.project.id).await?;
 
     let unselected = server.start_thread(ThreadStartParams::default()).await?;
     run_turn(&mut server, &unselected.thread.id).await?;
@@ -1655,5 +1657,24 @@ async fn seed_context_map(
             },
         )
         .await?;
+    Ok(())
+}
+
+async fn assert_latest_request_has_continuation(
+    responses: &wiremock::MockServer,
+    project_id: &str,
+) -> Result<()> {
+    let requests = responses.received_requests().await.unwrap_or_default();
+    let body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("model request should be recorded")
+        .body_json::<serde_json::Value>()?
+        .to_string();
+    assert_eq!(body.matches("<stateful_project>").count(), 1);
+    assert!(body.contains(&format!("Project ID: {project_id}")));
+    assert!(body.contains("continues the same thread after context compaction"));
+    assert!(!body.contains("A decisive project fact survives every thread view."));
     Ok(())
 }

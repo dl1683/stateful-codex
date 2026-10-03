@@ -1,9 +1,11 @@
 //! Stateful project context across compaction boundaries.
 //!
-//! Every model request must carry exactly one full project root: installed in the replacement
-//! history by mid-turn compaction, not repeated on an unchanged step, amended by one update when the
-//! root changes, left out of a manual checkpoint and reinjected on the next turn, and reinjected
-//! once when a thread is cold-resumed from either a compacted or an already repaired history.
+//! Every model request carries exactly one project packet. The thread's first window holds the
+//! full root; a window opened by compaction in the same thread holds the continuation packet
+//! (rules and a memory pointer) beside the native summary: installed in the replacement history
+//! by mid-turn compaction, not repeated on an unchanged step, amended by a one-line receipt when
+//! only the root revision changes, left out of a manual checkpoint and injected on the next turn,
+//! and kept, not replaced by the full root, when the thread is cold-resumed.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -190,42 +192,36 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
         [
             RootView::seeded(seeded.root_revision),
             RootView::seeded(seeded.root_revision),
-            RootView::seeded(seeded.root_revision),
-            RootView::seeded(seeded.root_revision),
-            RootView::amended(seeded.root_revision, revised.update_revision),
-            RootView::amended(seeded.root_revision, revised.update_revision),
-            RootView::revised(revised.update_revision),
-            RootView::revised(revised.update_revision),
-            RootView::revised(revised.update_revision),
+            RootView::continuation(seeded.root_revision),
+            RootView::continuation(seeded.root_revision),
+            RootView::receipt(seeded.root_revision, revised.update_revision),
+            RootView::receipt(seeded.root_revision, revised.update_revision),
+            RootView::continuation(revised.update_revision),
+            RootView::continuation(revised.update_revision),
+            RootView::continuation(revised.update_revision),
         ]
     );
     assert!(seeded.root_revision.is_some() && revised.update_revision > seeded.root_revision);
 
-    // The mid-turn checkpoint installs the root; the manual checkpoint leaves it to the next turn.
+    // The mid-turn checkpoint installs the packet; the manual checkpoint leaves it to the next turn.
     assert_eq!(checkpoint_root_counts(&rollout)?, vec![1, 0]);
 
-    // The continuity record is installed once per context window: every request holds exactly
-    // one, and the record rebuilt at the mid-turn boundary already shows that turn in progress.
+    // The thread's own conversation record belongs to its first window only: after compaction
+    // the summary and retained messages carry it, and this project has no other thread.
     assert_eq!(
         requests
             .iter()
             .map(|request| continuity_records(request).len())
             .collect::<Vec<_>>(),
-        vec![1; 9]
-    );
-    assert!(
-        continuity_records(mid_turn_continuation)[0].contains("in progress"),
-        "{:?}",
-        continuity_records(mid_turn_continuation)
+        vec![1, 1, 0, 0, 0, 0, 0, 0, 0]
     );
     Ok(())
 }
 
-/// Repeated mid-turn compactions and a compaction at a turn boundary each leave exactly one
-/// continuity record in the next request, and the boundary record already shows the turn
-/// that just finished.
+/// Repeated mid-turn compactions and a compaction at a turn boundary never reinstall the
+/// thread's own conversation record beside the native summary.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn continuity_record_is_reinstalled_once_after_every_compaction() -> Result<()> {
+async fn own_continuity_record_stays_in_the_first_window_across_compactions() -> Result<()> {
     let server = responses::start_mock_server().await;
     let over_limit_call = |id: &str| {
         responses::sse(vec![
@@ -315,8 +311,10 @@ model_auto_compact_token_limit = 200000"
         .filter(|(_, phase)| phase.is_none())
         .map(|(request, _)| continuity_records(request))
         .collect::<Vec<_>>();
-    assert_eq!(records.iter().map(Vec::len).collect::<Vec<_>>(), vec![1; 4]);
-    assert!(records[3][0].contains("Continue the project work."));
+    assert_eq!(
+        records.iter().map(Vec::len).collect::<Vec<_>>(),
+        vec![1, 0, 0, 0]
+    );
     Ok(())
 }
 
@@ -432,10 +430,20 @@ impl RootView {
         }
     }
 
-    fn revised(root_revision: Option<u64>) -> Self {
+    /// The continuation packet: project identity and rules, not the promoted knowledge.
+    fn continuation(root_revision: Option<u64>) -> Self {
         Self {
-            root_has_later_fact: true,
+            root_has_seeded_fact: false,
             ..Self::seeded(root_revision)
+        }
+    }
+
+    /// A continuation packet amended by a revision-only receipt that repeats no knowledge.
+    fn receipt(root_revision: Option<u64>, update_revision: Option<u64>) -> Self {
+        Self {
+            updates: 1,
+            update_revision,
+            ..Self::continuation(root_revision)
         }
     }
 }

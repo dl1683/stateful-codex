@@ -82,6 +82,39 @@ struct EntryLayout<'a> {
     omitted: u64,
 }
 
+fn projection_aliases(projection: &RootBlackboardProjection) -> HashMap<String, String> {
+    projection
+        .data
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| (hit.entry.id.to_string(), format!("E{}", index + 1)))
+        .collect()
+}
+
+impl<'a> EntryLayout<'a> {
+    fn new(root: &'a ResolvedRootBlackboard, entry_aliases: &'a HashMap<String, String>) -> Self {
+        let projection = &root.projection;
+        Self {
+            entry_aliases,
+            identity_aliases: projection
+                .data
+                .iter()
+                .map(|hit| (hit.entry.id.to_string(), hit.entry.id.to_string()))
+                .collect(),
+            identity_evidence: root
+                .evidence_routes
+                .keys()
+                .map(|route| (route.clone(), route.to_string()))
+                .collect(),
+            evidence_audit: root.evidence_audit.as_ref(),
+            predecessors: &root.predecessors,
+            entries: Vec::with_capacity(projection.data.len()),
+            shown: Vec::with_capacity(projection.data.len()),
+            omitted: 0,
+        }
+    }
+}
+
 impl EntryLayout<'_> {
     fn place(
         &mut self,
@@ -251,6 +284,78 @@ impl RootBlackboardStatus {
     }
 }
 
+/// The user's rules and what they said about themselves, laid out exactly as in the full
+/// packet (same aliases, same order), without any other knowledge.
+pub(super) struct UserEntries {
+    /// Entries shown whole and needing nothing else from the packet (ID, alias, revision).
+    pub(super) complete_entries: Vec<(String, String, u64)>,
+    /// Applicable rules or background entries that could not be shown whole.
+    pub(super) incomplete: usize,
+}
+
+pub(super) fn render_user_entries(
+    output: &mut String,
+    root: &ResolvedRootBlackboard,
+) -> UserEntries {
+    let projection = &root.projection;
+    let entry_aliases = projection_aliases(projection);
+    let mut layout = EntryLayout::new(root, &entry_aliases);
+    let (rules, rest): (Vec<_>, Vec<_>) = projection
+        .data
+        .iter()
+        .enumerate()
+        .partition(|(_, hit)| hit.entry.value.kind == BlackboardKind::Instruction);
+    let background = rest
+        .into_iter()
+        .filter(|(_, hit)| is_user_background(hit))
+        .collect::<Vec<_>>();
+    if rules.is_empty() {
+        append_line(output, "User rules: none recorded.");
+    } else {
+        append_line(output, USER_RULES_HEADER);
+        for (index, hit) in &rules {
+            layout.place(output, *index, hit, &HashMap::new());
+        }
+    }
+    if !background.is_empty() {
+        append_line(output, USER_BACKGROUND_HEADER);
+        for (index, hit) in &background {
+            layout.place(output, *index, hit, &HashMap::new());
+        }
+    }
+    if let Some(note) = &root.scope_note {
+        append_line(output, note);
+    }
+    if root.quarantined_rules > 0 {
+        append_line(
+            output,
+            &format!(
+                "- {} agent-recorded rules are not applied: they are not the user's own words.",
+                root.quarantined_rules
+            ),
+        );
+    }
+    let shown = layout.shown.len();
+    let complete_entries = layout
+        .shown
+        .into_iter()
+        .filter_map(|(index, alias)| {
+            let hit = &projection.data[index];
+            (hit.relations.is_empty()
+                && hit.entry.value.evidence.is_empty()
+                && hit.entry.value.premises.is_empty())
+            .then(|| (hit.entry.id.to_string(), alias, hit.entry.revision))
+        })
+        .collect();
+    UserEntries {
+        complete_entries,
+        // Entries beyond the projection bound may include rules, so they count as not shown.
+        incomplete: (rules.len() + background.len())
+            .saturating_sub(shown)
+            .saturating_add(usize::try_from(projection.omitted_entries).unwrap_or(usize::MAX)),
+    }
+}
+
 pub(super) fn render_root_blackboard(
     output: &mut String,
     status: &RootBlackboardStatus,
@@ -284,30 +389,9 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         output,
         "Root blackboard (active, explicitly promoted knowledge):",
     );
-    let entry_aliases = projection
-        .data
-        .iter()
-        .enumerate()
-        .map(|(index, hit)| (hit.entry.id.to_string(), format!("E{}", index + 1)))
-        .collect::<HashMap<_, _>>();
-    let mut layout = EntryLayout {
-        entry_aliases: &entry_aliases,
-        identity_aliases: projection
-            .data
-            .iter()
-            .map(|hit| (hit.entry.id.to_string(), hit.entry.id.to_string()))
-            .collect(),
-        identity_evidence: root
-            .evidence_routes
-            .keys()
-            .map(|route| (route.clone(), route.to_string()))
-            .collect(),
-        evidence_audit: root.evidence_audit.as_ref(),
-        predecessors: &root.predecessors,
-        entries: Vec::with_capacity(projection.data.len()),
-        shown: Vec::with_capacity(projection.data.len()),
-        omitted: projection.omitted_entries,
-    };
+    let entry_aliases = projection_aliases(projection);
+    let mut layout = EntryLayout::new(root, &entry_aliases);
+    layout.omitted = projection.omitted_entries;
     // The user's rules are laid out first, before the source catalog and any other entry,
     // so no amount of other knowledge can push them out of the packet.
     let (rules, knowledge): (Vec<_>, Vec<_>) = projection

@@ -328,6 +328,99 @@ fn render_steering(output: &mut String, steering: &[StatefulSteering], steering_
     );
 }
 
+impl RunWorldStateStatus {
+    /// The run packet for a window that continues after compaction in the same thread: binding
+    /// identity, revision, mode constraints and unresolved steering, without re-sending the
+    /// goal, strategy or obligation that the earlier window carried.
+    fn render_continuation(&self) -> String {
+        let mut output = String::new();
+        line(
+            &mut output,
+            "The durable Stateful run selected by the user continues in this compacted thread. Its goal, strategy and current obligation are not repeated here; stateful_run_read reads them exactly.",
+        );
+        field(&mut output, "Project ID", self.project_id());
+        let Self::Available {
+            run,
+            steering,
+            steering_complete,
+            ..
+        } = self
+        else {
+            line(
+                &mut output,
+                "Run state is unavailable. Do not claim Stateful progress, completion, or steering reconciliation until it can be read.",
+            );
+            return output;
+        };
+        field(&mut output, "Run ID", run.id.as_str());
+        field(&mut output, "Run revision", &run.revision.to_string());
+        line(
+            &mut output,
+            &format!(
+                "Run-update precondition: pass expectedRevision: {} to stateful_run_update. This is the run revision; never substitute the separate project intelligence revision.",
+                run.revision
+            ),
+        );
+        field(&mut output, "Mode", mode_name(run.value.mode));
+        field(&mut output, "Status", status_name(run.status));
+        match run.value.mode {
+            WorkflowMode::Socratic if run.status == StatefulRunStatus::Pending => line(
+                &mut output,
+                "Mode obligation: question and synthesize only. Do not invoke execution tools or modify project files until the user explicitly resumes this run.",
+            ),
+            WorkflowMode::Collaborative => line(
+                &mut output,
+                "Mode obligation: this Collaborative run stays open across turns; complete it only when the user says the overall goal is done.",
+            ),
+            WorkflowMode::Autonomous | WorkflowMode::Socratic => line(
+                &mut output,
+                "Mode obligation: continue the authorized work; complete once, as the final Stateful mutation, only at a genuine terminal condition.",
+            ),
+        }
+        append_segment(
+            &mut output,
+            MAX_STEERING_BYTES,
+            STEERING_SHORTENED,
+            |segment| render_steering(segment, steering, *steering_complete),
+        );
+        output
+    }
+}
+
+/// The run section of a continuation window; see [`RunWorldStateStatus::render_continuation`].
+pub(super) fn run_continuation_section(
+    status: RunWorldStateStatus,
+) -> WorldStateSectionContribution {
+    let body = status.render_continuation();
+    let project_id = status.project_id().to_string();
+    let run_id = status.run_id().map(str::to_string);
+    let snapshot = json!({
+        "mode": "continuation",
+        "runId": run_id,
+        "fingerprint": line_digest(&body),
+    });
+    WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
+        match previous {
+            PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
+            PreviousWorldStateSection::Absent
+            | PreviousWorldStateSection::Unknown
+            | PreviousWorldStateSection::Known(_) => Some(RenderedWorldStateFragment::new(
+                "developer",
+                (START_MARKER, END_MARKER),
+                body.clone(),
+            )),
+        }
+    })
+    .with_legacy_matcher({
+        let project_id = project_id.clone();
+        let run_id = run_id.clone();
+        move |role, text| matches_fragment(role, text, &project_id, run_id.as_deref())
+    })
+    .with_retained_fragment_matcher(move |role, text| {
+        matches_fragment(role, text, &project_id, run_id.as_deref())
+    })
+}
+
 pub(super) fn run_world_state_section(
     status: RunWorldStateStatus,
 ) -> WorldStateSectionContribution {
