@@ -45,17 +45,20 @@ impl StatefulRunStore {
             let run_id = StatefulRunId::parse(run_id)?;
             let run = load_run(&mut transaction, &run_id).await?;
             transaction.commit().await?;
-            return Ok(run.map(|run| {
-                (
-                    RunTurnAdmission {
-                        turn_id: turn_id.to_string(),
-                        thread_id: thread_id.to_string(),
-                        run_id,
-                        generation: u64::try_from(generation).unwrap_or_default(),
-                    },
-                    run,
-                )
-            }));
+            // A replay under another project is not this turn's admission; the original stays.
+            return Ok(run
+                .filter(|run| run.value.project_id == project_id)
+                .map(|run| {
+                    (
+                        RunTurnAdmission {
+                            turn_id: turn_id.to_string(),
+                            thread_id: thread_id.to_string(),
+                            run_id,
+                            generation: u64::try_from(generation).unwrap_or_default(),
+                        },
+                        run,
+                    )
+                }));
         }
         let bound = sqlx::query_as::<_, (String, i64)>(
             "SELECT run_id, generation FROM stateful_thread_run_bindings WHERE thread_id = ?",

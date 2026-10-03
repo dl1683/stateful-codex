@@ -107,6 +107,25 @@ async fn continuation_turns_keep_the_bound_run_and_a_terminal_run_is_never_reope
         ),
         Some(("run-2".to_string(), 2))
     );
+    // Replaying an admitted turn under another project returns nothing and keeps the original.
+    assert_eq!(
+        admitted(
+            store
+                .admit_run_turn("project-2", "thread-1", "turn-3")
+                .await
+                .expect("other-project replay")
+        ),
+        None
+    );
+    assert_eq!(
+        admitted(
+            store
+                .admit_run_turn("project-1", "thread-1", "turn-3")
+                .await
+                .expect("original replay")
+        ),
+        Some(("run-2".to_string(), 2))
+    );
     // Another project's run never admits this project's turn.
     assert_eq!(
         admitted(
