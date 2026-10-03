@@ -40,6 +40,9 @@ const TOOL_NAME: &str = "evidence_read";
 const DEFAULT_BYTES: u32 = 8 * 1024;
 const MAX_BYTES: u32 = 12 * 1024;
 
+/// Longest a read may spend building a never-built project index before it gives up.
+const ON_DEMAND_INDEX_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EvidenceArguments {
@@ -251,19 +254,41 @@ impl EvidenceReadTool {
                     self.services.context_map().await.map_err(respond)?.clone(),
                 );
                 if matches!(error, EvidenceReadError::SourceNotIndexed(_)) {
-                    // A project whose source map was never built (for example a documents-only
-                    // project) is indexed on demand, once, so the read can proceed.
-                    indexer
-                        .refresh(ProjectIndexRequest {
+                    // Only a project whose source map was never built (for example a
+                    // documents-only project) is indexed here, within a time bound; a file
+                    // missing from a built index is reported, not a reason to reindex.
+                    let never_indexed = self
+                        .services
+                        .hierarchy()
+                        .await
+                        .map_err(respond)?
+                        .project_intelligence_status(&self.project_id)
+                        .await
+                        .is_ok_and(|status| status.last_refresh.is_none());
+                    if !never_indexed {
+                        return Err(read_error(error));
+                    }
+                    match tokio::time::timeout(
+                        ON_DEMAND_INDEX_BUDGET,
+                        indexer.refresh(ProjectIndexRequest {
                             project_id: self.project_id.clone(),
                             roots: project_roots.clone(),
-                        })
-                        .await
-                        .map_err(|refresh| {
-                            respond(format!(
+                        }),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(refresh)) => {
+                            return Err(respond(format!(
                                 "{error}; indexing the project failed ({refresh}). Read the file directly instead; an evidence receipt is optional"
-                            ))
-                        })?;
+                            )));
+                        }
+                        Err(_) => {
+                            return Err(respond(format!(
+                                "{error}; the project is too large to index during this call. Read the file directly instead; an evidence receipt is optional"
+                            )));
+                        }
+                    }
                 } else {
                     let project_root = self
                         .refresh_root(&project_roots, project_root.as_ref(), &relative_path)
