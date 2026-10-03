@@ -141,12 +141,18 @@ impl StatefulRunStore {
         thread_id: &str,
     ) -> Result<Option<StatefulRun>, StatefulRunStoreError> {
         let raw_id = sqlx::query_scalar::<_, String>(
+            // The run the thread's turns are bound to (see `admit_run_turn`) comes first while
+            // it is active, so every reader agrees with the turn admissions.
             "SELECT run.id FROM stateful_runs AS run
              JOIN stateful_run_threads AS thread ON thread.run_id = run.id
              WHERE thread.thread_id = ?
                AND run.status NOT IN ('completed', 'cancelled', 'failed')
-             ORDER BY run.updated_at_ms DESC, run.id LIMIT 1",
+             ORDER BY run.id = COALESCE((
+                 SELECT binding.run_id FROM stateful_thread_run_bindings AS binding
+                 WHERE binding.thread_id = ?
+             ), '') DESC, run.updated_at_ms DESC, run.id LIMIT 1",
         )
+        .bind(thread_id)
         .bind(thread_id)
         .fetch_optional(&self.pool)
         .await?;
