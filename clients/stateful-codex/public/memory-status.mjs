@@ -57,6 +57,10 @@ export function renderRecap(state) {
     recap.decisions?.length ||
     recap.openChecks?.length ||
     recap.commits?.length ||
+    recap.moreRules ||
+    recap.moreDecisions ||
+    recap.moreOpenChecks ||
+    recap.moreCommits ||
     recap.captureIncomplete;
   if (!hasContent) return "";
   const rows = [];
@@ -67,26 +71,29 @@ export function renderRecap(state) {
   rows.push(list("Rules that apply", recap.rules, recap.moreRules, (rule) => escapeHtml(clipText(rule, 200))));
   rows.push(
     list("Current decisions", recap.decisions, recap.moreDecisions, (decision) =>
-      `${escapeHtml(clipText(decision.text, 200))}${decision.reason ? ` <small>Because: ${escapeHtml(clipText(decision.reason, 200))}</small>` : ""}`,
+      `${escapeHtml(clipText(decision.text, 200))}${decision.reason ? ` <small>Because: ${escapeHtml(clipText(decision.reason, 200))}</small>` : ""}${decision.reported ? " <small>(the assistant’s conclusion)</small>" : ""}`,
     ),
   );
   rows.push(
-    list("Commits remembered since then (from workspace history)", recap.commits, recap.moreCommits, (commit) =>
+    list("Commits remembered from workspace history", recap.commits, recap.moreCommits, (commit) =>
       escapeHtml(clipText(commit, 160)),
     ),
   );
   rows.push(list("Open checks", recap.openChecks, recap.moreOpenChecks, (check) => escapeHtml(clipText(check, 200))));
   if (recap.captureIncomplete) {
     rows.push(
-      `<p class="microcopy">${recap.captureIncomplete === 1 ? "One capture" : `${recap.captureIncomplete} captures`} could not finish since then; something you said may be missing from memory.</p>`,
+      `<p class="microcopy">${recap.captureIncomplete === 1 ? "One capture" : `${recap.captureIncomplete} captures`} could not finish since the last finished work; something you said may be missing from memory.</p>`,
     );
   }
-  rows.push(`<p class="microcopy">No next step was recorded. Tell the agent what you would like to do next.</p>`);
+  if (recap.historyComplete === false) {
+    rows.push(`<p class="microcopy">Some earlier work could not be read, so this may not be the latest.</p>`);
+  }
+  rows.push(`<p class="microcopy">Tell the agent where you would like to pick up.</p>`);
   return `<section class="workspace-panel recap" data-recap><div class="panel-heading"><h2>Where things stand, as of ${escapeHtml(formatDate(recap.asOf))}</h2><button class="text-button" data-action="recap-dismiss">Hide</button></div>${rows.join("")}</section>`;
 }
 
 function list(title, items, more, renderItem) {
-  if (!items?.length) return "";
+  if (!items?.length && !more) return "";
   const extra = more ? `<li class="microcopy">and ${more} more</li>` : "";
   return `<div class="recap-list"><h3>${title}</h3><ul>${items.map((item) => `<li>${renderItem(item)}</li>`).join("")}${extra}</ul></div>`;
 }

@@ -290,7 +290,8 @@ test("the return card is dated, bounded, and invents no next step", () => {
   assert.match(html, /Last finished 2026-09-21 14:13 UTC/);
   assert.match(html, /Because: Clause 7 replaces the 40% threshold — the agreement says so\./);
   assert.match(html, /and 2 more/);
-  assert.match(html, /No next step was recorded/);
+  assert.doesNotMatch(html, /No next step was recorded/);
+  assert.match(html, /Tell the agent where you would like to pick up/);
   assert.equal(renderRecap({ recap: { asOf: 1, rules: [], decisions: [], openChecks: [], commits: [] } }), "");
   assert.equal(renderRecap({ recap: workspaceFixture().recap, recapDismissed: true }), "");
 });
@@ -445,4 +446,28 @@ test("a late session start stays qualified across a reload of the tab", async ()
   const cleanStore = { getItem: (key) => clean.get(key) ?? null, setItem: (key, value) => clean.set(key, value), removeItem: (key) => clean.delete(key) };
   await createSummaryReader(rpc, { threadId: "thread-b", storage: cleanStore })();
   assert.equal((await createSummaryReader(rpc, { threadId: "thread-b", storage: cleanStore })()).sessionStartedLate, false);
+});
+
+test("recap marks the assistant's conclusions, keeps hidden overflow visible and qualifies unread history", () => {
+  const html = renderRecap({
+    recap: {
+      asOf: 1790000000,
+      lastWork: { threadId: "t", finishedAt: 1789990000, request: "Draft § 3 — conclusion" },
+      rules: [],
+      moreRules: 2,
+      decisions: [{ text: "Use SQLite.", reason: null, reported: true }],
+      moreDecisions: 0,
+      openChecks: [],
+      moreOpenChecks: 0,
+      commits: [],
+      moreCommits: 0,
+      captureIncomplete: 0,
+      historyComplete: false,
+    },
+  });
+  assert.match(html, /Rules that apply/);
+  assert.match(html, /and 2 more/);
+  assert.match(html, /the assistant’s conclusion/);
+  assert.match(html, /Some earlier work could not be read/);
+  assert.match(html, /Draft § 3 — conclusion/);
 });
