@@ -103,6 +103,12 @@ fn classifies_requests_by_their_reference_to_earlier_work() {
             "Implement the patch you described in parser.rs",
             RequestScope::Continuity,
         ),
+        // Shared work named explicitly stays continuity next to a named file.
+        ("Apply your approach to number.py", RequestScope::Continuity),
+        (
+            "Fix the issue you found in parser.rs",
+            RequestScope::Continuity,
+        ),
         // Without a named subject a deictic word points at earlier work.
         (
             "Please fix that bug in the parser module",
