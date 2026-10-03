@@ -190,12 +190,18 @@ impl ContextContributor for StatefulExtension {
                 &input.context_window,
             )
             .await;
-            let window = stored_window.clone().unwrap_or_else(|| {
+            let settled_window = window_policy::settled_window(
+                &thread_id,
+                selected.project_id(),
+                &input.context_window,
+                input.previous_world_state,
+                stored_window.clone(),
+            );
+            let window = settled_window.clone().unwrap_or_else(|| {
                 window_policy::proposed_window(
                     &thread_id,
                     selected.project_id(),
                     &input.context_window,
-                    input.previous_world_state,
                     thread_record,
                 )
             });
@@ -314,9 +320,7 @@ impl ContextContributor for StatefulExtension {
                 .then(|| {
                     continuation::continuation_project(
                         &status,
-                        if stored_window.is_some()
-                            || window.reason == codex_stateful_runtime::ContextWindowReason::Unknown
-                        {
+                        if settled_window.is_some() {
                             continuation::Admission::Opened
                         } else {
                             continuation::Admission::Opening
@@ -324,8 +328,8 @@ impl ContextContributor for StatefulExtension {
                     )
                 })
                 .flatten();
-            let window = match stored_window {
-                Some(stored) => stored,
+            let window = match settled_window {
+                Some(settled) => settled,
                 None => {
                     let mode = if continuation_project.is_some() {
                         ContextWindowMode::Continuation

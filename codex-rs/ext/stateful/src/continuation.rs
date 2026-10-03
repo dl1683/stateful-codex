@@ -51,6 +51,15 @@ pub(crate) struct ContinuationProject {
     body: String,
     /// Rule and background entries shown whole: (entry ID, alias, revision).
     complete_entries: Vec<(String, String, u64)>,
+    /// Whether every applicable rule and background entry is shown whole, read from current
+    /// memory. Only then can a line missing from the body mean the entry no longer applies.
+    coverage: Coverage,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Coverage {
+    Complete,
+    Partial,
 }
 
 /// The continuation body for `status`. While opening, `None` means the window must open with
@@ -100,6 +109,7 @@ pub(crate) fn continuation_project(
             revision: None,
             body,
             complete_entries: Vec::new(),
+            coverage: Coverage::Partial,
         });
     };
     let revision = root.projection.revision;
@@ -116,7 +126,7 @@ pub(crate) fn continuation_project(
         Admission::Opened if shown.incomplete > 0 => append_line(
             &mut body,
             &format!(
-                "{} of the user's rules or background entries could not be shown whole here; memory_read with the question \"what are my rules\" returns them exactly.",
+                "{} of the user's rules or background entries are not shown whole here; they still apply. blackboard_query with rootPromotion \"promoted\" (following its pages) returns each with its full text.",
                 shown.incomplete
             ),
         ),
@@ -127,6 +137,11 @@ pub(crate) fn continuation_project(
         revision: Some(revision),
         body,
         complete_entries: shown.complete_entries,
+        coverage: if shown.incomplete == 0 {
+            Coverage::Complete
+        } else {
+            Coverage::Partial
+        },
     })
 }
 
@@ -142,6 +157,7 @@ pub(crate) fn continuation_project_section(
         revision,
         body,
         complete_entries,
+        coverage,
     } = project;
     let lines = stable_lines(&body);
     let fingerprint = short_digest(
@@ -151,12 +167,16 @@ pub(crate) fn continuation_project_section(
             .collect::<Vec<_>>()
             .join(","),
     );
-    let snapshot = json!({
+    // No null fields: the host drops them from the persisted baseline, and the comparison
+    // must match what it persists.
+    let mut snapshot = json!({
         "mode": "continuation",
         "fingerprint": fingerprint,
         "lines": lines.iter().map(|(key, digest)| json!([key, digest])).collect::<Vec<_>>(),
-        "rootRevision": revision,
     });
+    if let Some(revision) = revision {
+        snapshot["rootRevision"] = json!(revision);
+    }
     let matcher_project_id = project_id.clone();
     WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         let (registry, thread_id) = &visible_root;
@@ -178,9 +198,9 @@ pub(crate) fn continuation_project_section(
                 if previous.get("mode") == snapshot.get("mode")
                     && previous.get("fingerprint") == snapshot.get("fingerprint") =>
             {
-                if let Some(revision) = revision {
-                    registry.advance_revision(thread_id, revision);
-                }
+                // Unreadable memory has no revision to report.
+                let revision = revision?;
+                registry.advance_revision(thread_id, revision);
                 Some(RenderedWorldStateFragment::new(
                     "developer",
                     (UPDATE_START_MARKER, UPDATE_END_MARKER),
@@ -196,7 +216,7 @@ pub(crate) fn continuation_project_section(
                 Some(RenderedWorldStateFragment::new(
                     "developer",
                     (UPDATE_START_MARKER, UPDATE_END_MARKER),
-                    correction(&project_id, &revision_text, previous, &body),
+                    correction(&project_id, &revision_text, previous, &body, coverage),
                 ))
             }
             PreviousWorldStateSection::Absent
@@ -243,7 +263,13 @@ fn stable_lines(body: &str) -> Vec<(String, String)> {
 }
 
 /// The exact lines that changed since `previous`, and the aliases no longer shown.
-fn correction(project_id: &str, revision: &str, previous: &Value, body: &str) -> String {
+fn correction(
+    project_id: &str,
+    revision: &str,
+    previous: &Value,
+    body: &str,
+    coverage: Coverage,
+) -> String {
     let previous_lines = previous
         .get("lines")
         .and_then(Value::as_array)
@@ -252,8 +278,13 @@ fn correction(project_id: &str, revision: &str, previous: &Value, body: &str) ->
         .filter_map(|pair| Some((pair.get(0)?.as_str()?, pair.get(1)?.as_str()?)))
         .collect::<Vec<_>>();
     let current = stable_lines(body);
+    let completion = if revision == "unknown" {
+        "project memory cannot be read now, so do not complete the run yet".to_string()
+    } else {
+        format!("use rootRevision {revision} for completion")
+    };
     let mut text = format!(
-        "Project ID: {project_id}. The user's rules or this packet changed; use rootRevision {revision} for completion. These lines replace the earlier lines with the same alias, or are new:"
+        "Project ID: {project_id}. The user's rules or this packet changed; {completion}. These lines replace the earlier lines with the same alias, or are new:"
     );
     for (line, (_, digest)) in body
         .lines()
@@ -268,8 +299,11 @@ fn correction(project_id: &str, revision: &str, previous: &Value, body: &str) ->
             text.push_str(line);
         }
     }
+    // Only complete, current coverage can show that an entry stopped applying; unreadable
+    // memory or an entry that cannot be shown whole says nothing about it.
     let removed = previous_lines
         .iter()
+        .filter(|_| coverage == Coverage::Complete)
         .filter(|(key, _)| key.starts_with('E'))
         .filter(|(key, _)| !current.iter().any(|(current_key, _)| current_key == key))
         .map(|(key, _)| *key)

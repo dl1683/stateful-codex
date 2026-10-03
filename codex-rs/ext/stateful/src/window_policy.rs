@@ -33,41 +33,69 @@ pub(crate) enum ThreadRecord {
     Unrecorded,
 }
 
-/// The decision this step proposes when the window has none yet. `Continuation` is only a
+/// The mode an ordinary step must keep because of what the model already holds, ahead of any
+/// stored decision: the persisted World State records the carrier actually installed.
+pub(crate) fn settled_window(
+    thread_id: &str,
+    project_id: &str,
+    view: &ContextWindowView,
+    previous_world_state: Option<&Map<String, Value>>,
+    stored: Option<ContextWindowDecision>,
+) -> Option<ContextWindowDecision> {
+    if view.build != WindowBuild::OrdinaryStep {
+        return stored;
+    }
+    let reason = stored
+        .as_ref()
+        .map_or(ContextWindowReason::Unknown, |stored| stored.reason);
+    let mode = match installed(project_id, view, previous_world_state) {
+        // This window's carrier for this project, installed by this thread or inherited by a
+        // fork with its parent's history: keep rendering what the model holds.
+        Installed::Carrier(mode) => mode,
+        // Another project's packet is installed: this selection starts in full.
+        Installed::OtherProject => ContextWindowMode::Full,
+        Installed::Nothing => return stored,
+    };
+    Some(decision(thread_id, project_id, view, mode, reason))
+}
+
+/// The decision this step proposes when nothing is settled yet. `Continuation` is only a
 /// proposal for a new window: the caller keeps the full packet when the continuation cannot
 /// carry every rule whole.
 pub(crate) fn proposed_window(
     thread_id: &str,
     project_id: &str,
     view: &ContextWindowView,
-    previous_world_state: Option<&Map<String, Value>>,
     record: ThreadRecord,
 ) -> ContextWindowDecision {
-    let (mode, reason) = match view.build {
-        WindowBuild::CompactionBoundary => (
+    let (mode, reason) = match (view.build, record) {
+        (WindowBuild::CompactionBoundary, _) => (
             ContextWindowMode::Continuation,
             ContextWindowReason::Compaction,
         ),
-        WindowBuild::ContextReset => (ContextWindowMode::Full, ContextWindowReason::Reset),
-        WindowBuild::OrdinaryStep => {
-            match (recorded(project_id, view, previous_world_state), record) {
-                // This window's own record, or a carrier a fork inherited with its history: keep
-                // rendering what the model already holds.
-                (Some(mode), _) => (mode, ContextWindowReason::Unknown),
-                (None, _) if view.number == 0 => {
-                    (ContextWindowMode::Full, ContextWindowReason::ThreadStart)
-                }
-                // A compaction that deferred its initial context to this step.
-                (None, ThreadRecord::Known) => (
-                    ContextWindowMode::Continuation,
-                    ContextWindowReason::Compaction,
-                ),
-                (None, ThreadRecord::Unrecorded) => {
-                    (ContextWindowMode::Full, ContextWindowReason::Unknown)
-                }
-            }
+        (WindowBuild::ContextReset, _) => (ContextWindowMode::Full, ContextWindowReason::Reset),
+        (WindowBuild::OrdinaryStep, _) if view.number == 0 => {
+            (ContextWindowMode::Full, ContextWindowReason::ThreadStart)
+        }
+        // A compaction that deferred its initial context to this step.
+        (WindowBuild::OrdinaryStep, ThreadRecord::Known) => (
+            ContextWindowMode::Continuation,
+            ContextWindowReason::Compaction,
+        ),
+        (WindowBuild::OrdinaryStep, ThreadRecord::Unrecorded) => {
+            (ContextWindowMode::Full, ContextWindowReason::Unknown)
         }
     };
+    decision(thread_id, project_id, view, mode, reason)
+}
+
+fn decision(
+    thread_id: &str,
+    project_id: &str,
+    view: &ContextWindowView,
+    mode: ContextWindowMode,
+    reason: ContextWindowReason,
+) -> ContextWindowDecision {
     ContextWindowDecision {
         thread_id: thread_id.to_string(),
         project_id: project_id.to_string(),
@@ -139,23 +167,35 @@ pub(crate) fn window_section(decision: &ContextWindowDecision) -> WorldStateSect
     })
 }
 
-/// The mode recorded for this project and window in the persisted World State, by this
-/// thread or (for a fork, which copies its parent's history and window identity) its parent.
-fn recorded(
+enum Installed {
+    Carrier(ContextWindowMode),
+    OtherProject,
+    Nothing,
+}
+
+/// What the persisted World State says is installed: this project's carrier for this window
+/// (recorded by this thread or, for a fork, which copies its parent's history and window
+/// identity, by its parent), another project's packet, or nothing known.
+fn installed(
     project_id: &str,
     view: &ContextWindowView,
     previous_world_state: Option<&Map<String, Value>>,
-) -> Option<ContextWindowMode> {
-    let recorded = previous_world_state?.get(WORLD_STATE_ID)?;
-    if recorded.get("projectId")?.as_str()? != project_id
-        || recorded.get("windowId")?.as_str()? != view.id
-    {
-        return None;
+) -> Installed {
+    let Some(recorded) = previous_world_state.and_then(|previous| previous.get(WORLD_STATE_ID))
+    else {
+        return Installed::Nothing;
+    };
+    let field = |name: &str| recorded.get(name).and_then(Value::as_str);
+    if field("projectId").is_some_and(|recorded| recorded != project_id) {
+        return Installed::OtherProject;
     }
-    match recorded.get("mode")?.as_str()? {
-        "full" => Some(ContextWindowMode::Full),
-        "continuation" => Some(ContextWindowMode::Continuation),
-        _ => None,
+    if field("windowId") != Some(view.id.as_str()) {
+        return Installed::Nothing;
+    }
+    match field("mode") {
+        Some("full") => Installed::Carrier(ContextWindowMode::Full),
+        Some("continuation") => Installed::Carrier(ContextWindowMode::Continuation),
+        Some(_) | None => Installed::Nothing,
     }
 }
 

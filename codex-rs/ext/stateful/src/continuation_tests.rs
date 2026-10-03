@@ -129,7 +129,10 @@ fn rules_that_do_not_fit_keep_the_full_packet() {
         PreviousWorldStateSection::Absent,
     )
     .expect("rendered");
-    assert!(body.contains("could not be shown whole here"), "{body}");
+    assert!(
+        body.contains("are not shown whole here; they still apply"),
+        "{body}"
+    );
     let unreadable = continuation_project(&unavailable, Admission::Opened).expect("kept");
     let body = rendered(
         &continuation_project_section(
@@ -225,5 +228,53 @@ fn continuation_run_packet_keeps_constraints_without_goal_or_obligation() {
             PreviousWorldStateSection::Known(section.snapshot())
         ),
         None
+    );
+}
+
+#[test]
+fn unreadable_memory_never_revokes_a_rule_and_an_unchanged_outage_is_silent() {
+    let registry = || (VisibleRootRegistry::default(), "thread-1".to_string());
+    let readable = continuation_project_section(
+        continuation_project(
+            &status_with(vec![user_rule(1, "Metric units only.")]),
+            Admission::Opening,
+        )
+        .expect("fits"),
+        registry(),
+    );
+    let unavailable = ProjectIntelligenceStatus::Unavailable {
+        project_id: "project-1".to_string(),
+    };
+    let outage = continuation_project_section(
+        continuation_project(&unavailable, Admission::Opened).expect("kept"),
+        registry(),
+    );
+    let notice = outage
+        .render_diff(PreviousWorldStateSection::Known(readable.snapshot()))
+        .expect("notice")
+        .body()
+        .to_string();
+    assert!(
+        notice.contains("could not be read for this step"),
+        "{notice}"
+    );
+    assert!(!notice.contains("No longer shown or in force"), "{notice}");
+    assert!(notice.contains("do not complete the run yet"), "{notice}");
+    // The persisted snapshot has no null fields, so the same outage renders nothing again.
+    assert!(!outage.snapshot().to_string().contains("null"));
+    assert_eq!(
+        rendered(&outage, PreviousWorldStateSection::Known(outage.snapshot())),
+        None
+    );
+    // Back to readable: the rule line is restated, nothing is revoked.
+    let restored = readable
+        .render_diff(PreviousWorldStateSection::Known(outage.snapshot()))
+        .expect("restored")
+        .body()
+        .to_string();
+    assert!(restored.contains("Metric units only."), "{restored}");
+    assert!(
+        !restored.contains("No longer shown or in force"),
+        "{restored}"
     );
 }

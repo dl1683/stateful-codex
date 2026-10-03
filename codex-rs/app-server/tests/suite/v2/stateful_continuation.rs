@@ -58,6 +58,7 @@ async fn continuation_keeps_hidden_findings_selectable_and_a_new_project_starts_
             ]),
             reply("after-query"),
             reply("other-project"),
+            reply("back-to-first"),
         ],
     )
     .await;
@@ -93,22 +94,14 @@ async fn continuation_keeps_hidden_findings_selectable_and_a_new_project_starts_
     run_turn(&mut app, &thread_id).await?;
     compact(&mut app, &thread_id).await?;
     run_turn(&mut app, &thread_id).await?;
-    let _: ThreadMetadataUpdateResponse = app
-        .request(|request_id| ClientRequest::ThreadMetadataUpdate {
-            request_id,
-            params: ThreadMetadataUpdateParams {
-                thread_id: thread_id.clone(),
-                project_id: Some(other.clone()),
-                daybreak_enabled: None,
-                git_info: None,
-            },
-        })
-        .await?;
+    select_project(&mut app, &thread_id, &other).await?;
+    run_turn(&mut app, &thread_id).await?;
+    select_project(&mut app, &thread_id, &first).await?;
     run_turn(&mut app, &thread_id).await?;
 
     let requests = mock.requests();
-    let [_, _, continued, after_query, switched] = requests.as_slice() else {
-        panic!("expected five model requests, got {}", requests.len());
+    let [_, _, continued, after_query, switched, returned] = requests.as_slice() else {
+        panic!("expected six model requests, got {}", requests.len());
     };
 
     // The continuation carrier does not repeat the promoted fact.
@@ -141,6 +134,30 @@ async fn continuation_keeps_hidden_findings_selectable_and_a_new_project_starts_
     assert_eq!(switched_carriers.len(), 1, "{switched_carriers:?}");
     assert!(switched_carriers[0].contains(OTHER_PROJECT_FACT));
     assert!(!switched_carriers[0].contains("continues the same thread after context compaction"));
+
+    // Returning to the first project is another selection: it starts that project's full
+    // packet once (the earlier continuation stays in history as the older carrier).
+    let first_carriers = project_carriers(returned)
+        .into_iter()
+        .filter(|carrier| carrier.contains(&format!("Project ID: {first}")))
+        .collect::<Vec<_>>();
+    assert_eq!(first_carriers.len(), 2, "{first_carriers:?}");
+    assert!(first_carriers[1].contains(SEEDED_FACT));
+    Ok(())
+}
+
+async fn select_project(app: &mut TestAppServer, thread_id: &str, project_id: &str) -> Result<()> {
+    let _: ThreadMetadataUpdateResponse = app
+        .request(|request_id| ClientRequest::ThreadMetadataUpdate {
+            request_id,
+            params: ThreadMetadataUpdateParams {
+                thread_id: thread_id.to_string(),
+                project_id: Some(project_id.to_string()),
+                daybreak_enabled: None,
+                git_info: None,
+            },
+        })
+        .await?;
     Ok(())
 }
 
