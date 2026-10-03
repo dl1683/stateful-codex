@@ -226,3 +226,44 @@ fn nested_headers_and_requests_about_rules() {
         )
     );
 }
+
+#[test]
+fn neutral_nested_headers_keep_the_enclosing_restriction_and_rules_about_rules_are_rules() {
+    let task = "For this task:
+- Check the setup.
+  Details:
+  - Never run migrations.";
+    let relayed = "The assistant suggested these preferences:
+- Check the setup.
+  Details:
+  - Never run migrations.";
+    let standing = "From now on, quote my instructions word for word.";
+    assert_eq!(
+        (
+            marked_rules(task),
+            super::inherited_scope(task, "- Never run migrations."),
+            marked_rules(relayed),
+            super::inherited_scope(relayed, "- Never run migrations."),
+            marked_rules(standing),
+            super::asks_about_rules(standing),
+            super::asks_about_rules("Show me the rules you follow here."),
+        ),
+        (
+            ["- Check the setup.", "- Never run migrations."]
+                .map(|text| RuleClause {
+                    text: text.to_string(),
+                    standing: RuleStanding::Pending,
+                })
+                .to_vec(),
+            Some(super::HeaderScope::Pending),
+            Vec::new(),
+            Some(super::HeaderScope::Reported),
+            vec![RuleClause {
+                text: standing.to_string(),
+                standing: RuleStanding::Standing,
+            }],
+            false,
+            true,
+        )
+    );
+}

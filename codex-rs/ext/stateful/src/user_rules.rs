@@ -171,9 +171,10 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
         if trimmed.is_empty() {
             continue;
         }
+        let was_in_list = in_list;
         let is_list_item = in_list_item(line, trimmed, &mut in_list);
         if !is_list_item {
-            list_header = header_scope(trimmed);
+            list_header = next_header(line, trimmed, was_in_list, list_header);
         }
         let inherited = if is_list_item { list_header } else { None };
         for clause in clauses(trimmed) {
@@ -181,7 +182,7 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
                 continue;
             }
             let normalized = normalize(clause);
-            if is_reported_speech(&normalized) || is_request_about_rules(&normalized) {
+            if is_reported_speech(&normalized) || asks_about_rules(clause) {
                 continue;
             }
             let standing = match inherited {
@@ -235,9 +236,10 @@ pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<HeaderScope> {
         if trimmed.is_empty() {
             continue;
         }
+        let was_in_list = in_list;
         let is_list_item = in_list_item(line, trimmed, &mut in_list);
         if !is_list_item {
-            list_header = header_scope(trimmed);
+            list_header = next_header(line, trimmed, was_in_list, list_header);
         }
         if clauses(trimmed).contains(&clause) {
             return if is_list_item { list_header } else { None };
@@ -256,25 +258,58 @@ fn in_list_item(line: &str, trimmed: &str, in_list: &mut bool) -> bool {
     *in_list
 }
 
-/// Asking for rules ("list the standing rules I gave you") names rules without stating one.
-const RULE_REQUEST_PHRASES: &[&str] = &[
-    "list the",
-    "list my",
-    "list all",
-    "list every",
+/// The scope a non-item line gives the list items after it. A header nested inside a list
+/// narrows the enclosing scope and never widens it, so a neutral "Details:" under "For this
+/// task:" keeps its items task-limited.
+fn next_header(
+    line: &str,
+    trimmed: &str,
+    was_in_list: bool,
+    enclosing: Option<HeaderScope>,
+) -> Option<HeaderScope> {
+    let scope = header_scope(trimmed);
+    if !(was_in_list && line.starts_with([' ', '\t'])) {
+        return scope;
+    }
+    let strictness = |scope: Option<HeaderScope>| match scope {
+        None => 0,
+        Some(HeaderScope::Standing) => 1,
+        Some(HeaderScope::Pending) => 2,
+        Some(HeaderScope::Reported) => 3,
+    };
+    if strictness(scope) >= strictness(enclosing) {
+        scope
+    } else {
+        enclosing
+    }
+}
+
+/// Openings of a request to retrieve rules ("list the standing rules I gave you"). They
+/// count only at the head of a phrase, so "From now on, quote my instructions word for
+/// word." is still a rule.
+const RULE_REQUEST_OPENINGS: &[&str] = &[
+    "list",
     "show me",
     "show the",
-    "repeat the",
+    "show my",
+    "repeat",
     "recite",
     "remind me",
-    "tell me the",
-    "tell me what",
-    "what are the",
-    "what are my",
-    "what rules",
-    "which rules",
-    "word for word",
-    "rules i gave you",
+    "tell me",
+    "what are",
+    "what were",
+    "which",
+    "give me",
+    "print",
+    "can you list",
+    "could you list",
+    "can you show",
+    "could you show",
+    "can you tell",
+    "could you tell",
+    "please list",
+    "please show",
+    "please repeat",
 ];
 const RULE_NOUNS: &[&str] = &[
     "rule",
@@ -285,13 +320,19 @@ const RULE_NOUNS: &[&str] = &[
     "instructions",
 ];
 
-/// Whether `clause` asks about the user's rules rather than stating one.
+/// Whether `clause` asks to retrieve the user's rules rather than stating one: one of its
+/// phrases (split at punctuation) opens with a retrieval request, and it names rules.
 pub(crate) fn asks_about_rules(clause: &str) -> bool {
-    is_request_about_rules(&normalize(clause))
-}
-
-fn is_request_about_rules(normalized: &str) -> bool {
-    has_phrase(normalized, RULE_REQUEST_PHRASES) && has_phrase(normalized, RULE_NOUNS)
+    has_phrase(&normalize(clause), RULE_NOUNS)
+        && clause
+            .split([':', ',', ';', '-'])
+            .map(normalize)
+            .any(|phrase| {
+                let body = strip_list_marker(&phrase);
+                RULE_REQUEST_OPENINGS
+                    .iter()
+                    .any(|opening| body == *opening || body.starts_with(&format!("{opening} ")))
+            })
 }
 
 /// Whether `clause` reports what someone else said or advised rather than stating the
