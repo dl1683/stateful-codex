@@ -407,3 +407,46 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
         (true, RootPromotion::Candidate)
     );
 }
+
+/// Background is stored once, verbatim, as promoted user-authored knowledge.
+#[tokio::test]
+async fn background_is_stored_once_in_the_users_words() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let text = "I know Python well but only a little Rust.";
+    for turn in ["turn-1", "turn-2"] {
+        super::capture_background(
+            &services,
+            /*event_sink*/ None,
+            "project-1",
+            "thread-1",
+            turn,
+            text,
+        )
+        .await;
+    }
+    let store = services.blackboard().await.expect("blackboard");
+    let root = store
+        .root_projection(RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 10,
+        })
+        .await
+        .expect("root");
+    assert_eq!(
+        root.data
+            .iter()
+            .map(|hit| (
+                hit.entry.value.content.clone(),
+                hit.entry.value.provenance.kind,
+                hit.entry.value.root_promotion
+            ))
+            .collect::<Vec<_>>(),
+        vec![(
+            text.to_string(),
+            BlackboardProvenanceKind::User,
+            RootPromotion::Promoted
+        )]
+    );
+}

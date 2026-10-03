@@ -4312,6 +4312,13 @@
             "recipe"
           ],
           "type": "string"
+        },
+        {
+          "description": "What the user said about themselves or the whole work, in their words.",
+          "enum": [
+            "background"
+          ],
+          "type": "string"
         }
       ]
     },

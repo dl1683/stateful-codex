@@ -348,6 +348,9 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                         codex_stateful_extension::KnowledgeCategory::Finding => {
                             codex_app_server_protocol::StatefulKnowledgeCategory::Finding
                         }
+                        codex_stateful_extension::KnowledgeCategory::Background => {
+                            codex_app_server_protocol::StatefulKnowledgeCategory::Background
+                        }
                     },
                     outcome: match outcome {
                         codex_stateful_extension::CaptureOutcome::Stored => {

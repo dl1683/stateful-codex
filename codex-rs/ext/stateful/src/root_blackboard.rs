@@ -30,6 +30,19 @@ const MAX_ENTRY_BYTES: usize = 3 * 1024;
 const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 4 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
 const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
+pub(super) const USER_BACKGROUND_HEADER: &str =
+    "User background (the user's own words about themselves and this work):";
+
+fn is_user_background(hit: &BlackboardHit) -> bool {
+    hit.entry.value.kind == BlackboardKind::Fact
+        && hit.entry.value.provenance.kind == BlackboardProvenanceKind::User
+        && hit
+            .entry
+            .id
+            .as_str()
+            .starts_with("stateful-user-background-")
+}
+
 pub(super) const USER_RULES_HEADER: &str = "User rules (the user's exact words; they apply to all work in this project until the user changes them):";
 const KNOWLEDGE_HEADER: &str = "Other promoted knowledge:";
 
@@ -295,6 +308,16 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
     if !rules.is_empty() {
         append_line(output, USER_RULES_HEADER);
         for (index, hit) in &rules {
+            layout.place(output, *index, hit, &HashMap::new());
+        }
+    }
+    // What the user said about themselves follows the rules, also ahead of the catalog.
+    let (background, knowledge): (Vec<_>, Vec<_>) = knowledge
+        .into_iter()
+        .partition(|(_, hit)| is_user_background(hit));
+    if !background.is_empty() {
+        append_line(output, USER_BACKGROUND_HEADER);
+        for (index, hit) in &background {
             layout.place(output, *index, hit, &HashMap::new());
         }
     }

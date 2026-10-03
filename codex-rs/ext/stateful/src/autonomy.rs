@@ -246,6 +246,15 @@ impl TurnLifecycleContributor for StatefulExtension {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    crate::rule_capture::capture_background(
+                        services,
+                        self.event_sink.as_deref(),
+                        selected.project_id(),
+                        &thread.thread_id,
+                        input.turn_id,
+                        &text,
+                    )
+                    .await;
                     crate::rule_capture::capture_marked_rules(
                         services,
                         self.event_sink.as_deref(),

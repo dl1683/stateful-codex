@@ -5239,6 +5239,7 @@ class StatefulKnowledgeCategory(
         | Literal["rule"]
         | Literal["pendingRule"]
         | Literal["recipe"]
+        | Literal["background"]
     ]
 ):
     model_config = ConfigDict(
@@ -5248,7 +5249,8 @@ class StatefulKnowledgeCategory(
         StatefulKnowledgeCategoryValue
         | Literal["rule"]
         | Literal["pendingRule"]
-        | Literal["recipe"],
+        | Literal["recipe"]
+        | Literal["background"],
         Field(description="What a knowledge receipt says was saved."),
     ]
 

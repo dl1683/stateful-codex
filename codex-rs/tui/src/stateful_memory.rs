@@ -396,6 +396,7 @@ pub(crate) fn receipt_cell(
         StatefulKnowledgeCategory::Decision => "Saved a decision",
         StatefulKnowledgeCategory::Recipe => "Saved a project recipe",
         StatefulKnowledgeCategory::Finding => "Saved a finding",
+        StatefulKnowledgeCategory::Background => "Saved what you said about yourself",
     };
     Some(PlainHistoryCell::new(vec![
         vec![

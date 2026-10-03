@@ -153,7 +153,10 @@ impl ProjectIntelligenceStatus {
                 root_blackboard,
             } => {
                 append_field(&mut body, "Project name", &project.name);
-                append_line(&mut body, "Project roots:");
+                append_line(
+                    &mut body,
+                    "Project roots (paths below are relative to a root, not to the working directory):",
+                );
                 let roots_start = body.len();
                 let mut included = 0;
                 for root in &project.roots {

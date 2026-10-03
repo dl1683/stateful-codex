@@ -288,3 +288,15 @@ fn consecutive_nested_headers_and_standing_retrieval_rules() {
         (Some(super::HeaderScope::Pending), true, false, true)
     );
 }
+
+#[test]
+fn background_is_the_users_description_of_themselves_and_the_work() {
+    let text = "Hi! I know Python well but only a little Rust. I'm not changing any code, just reading. From now on, explain Rust ideas with Python comparisons. Do you know tokio? The assistant said I'm a beginner.";
+    assert_eq!(
+        super::background_statements(text),
+        vec![
+            "I know Python well but only a little Rust.".to_string(),
+            "I'm not changing any code, just reading.".to_string(),
+        ]
+    );
+}

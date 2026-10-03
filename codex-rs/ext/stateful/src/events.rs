@@ -58,6 +58,8 @@ pub enum KnowledgeCategory {
     /// How to build, test or run the project here.
     Recipe,
     Finding,
+    /// What the user said about themselves or the whole work, in their words.
+    Background,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

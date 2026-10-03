@@ -170,6 +170,7 @@ pub enum StatefulKnowledgeCategory {
     Decision,
     Recipe,
     Finding,
+    Background,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -197,6 +198,7 @@ impl StatefulKnowledgeCategory {
             Self::Decision => "decision",
             Self::Recipe => "recipe",
             Self::Finding => "finding",
+            Self::Background => "background about you",
         }
     }
 }
@@ -228,6 +230,7 @@ impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
                 Category::Decision => StatefulKnowledgeCategory::Decision,
                 Category::Recipe => StatefulKnowledgeCategory::Recipe,
                 Category::Finding => StatefulKnowledgeCategory::Finding,
+                Category::Background => StatefulKnowledgeCategory::Background,
             },
             outcome: match notification.outcome {
                 Outcome::Stored => StatefulCaptureOutcome::Stored,

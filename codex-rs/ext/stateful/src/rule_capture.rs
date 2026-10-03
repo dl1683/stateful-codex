@@ -83,6 +83,109 @@ pub(crate) struct CapturedRule {
     pub(crate) newly_stored: bool,
 }
 
+/// Stores what the user says about themselves or the whole work ("I know Python well but
+/// only a little Rust") verbatim, as promoted user-authored background. A statement already
+/// stored is not stored twice, and one the user forgot stays forgotten.
+pub(crate) async fn capture_background(
+    services: &ProjectIntelligenceServices,
+    event_sink: Option<&dyn StatefulEventSink>,
+    project_id: &str,
+    thread_id: &str,
+    turn_id: &str,
+    text: &str,
+) {
+    for statement in crate::user_rules::background_statements(text) {
+        if let Err(error) = store_background(
+            services, event_sink, project_id, thread_id, turn_id, &statement,
+        )
+        .await
+        {
+            tracing::warn!(%project_id, %error, "failed to capture user background");
+        }
+    }
+}
+
+async fn store_background(
+    services: &ProjectIntelligenceServices,
+    event_sink: Option<&dyn StatefulEventSink>,
+    project_id: &str,
+    thread_id: &str,
+    turn_id: &str,
+    statement: &str,
+) -> Result<(), String> {
+    let store = services
+        .blackboard()
+        .await
+        .map_err(|error| error.to_string())?;
+    let normalized = statement.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut hasher = Sha256::new();
+    hasher.update(project_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(normalized.as_bytes());
+    let id = BlackboardEntryId::parse(format!("stateful-user-background-{:x}", hasher.finalize()))
+        .map_err(|error| error.to_string())?;
+    let (entry, outcome) = match store
+        .get_entry(project_id, &id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Some(existing) if existing.state == BlackboardEntryState::Active => {
+            (existing, CaptureOutcome::AlreadyStored)
+        }
+        Some(_) => return Ok(()),
+        None => {
+            let node_id = services.project_node_id(project_id).await?;
+            let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
+                .map_err(|error| error.to_string())?;
+            let entry = store
+                .create_entry(
+                    id,
+                    NewBlackboardEntry {
+                        project_id: project_id.to_string(),
+                        node_id,
+                        kind: BlackboardKind::Fact,
+                        content: statement.to_string(),
+                        structured_value: None,
+                        confidence,
+                        verification: BlackboardVerification::Unverified,
+                        importance: BlackboardImportance::High,
+                        root_promotion: RootPromotion::Promoted,
+                        evidence: Vec::new(),
+                        premises: Vec::new(),
+                        provenance: BlackboardProvenance {
+                            kind: BlackboardProvenanceKind::User,
+                            source_id: user_message_source(thread_id, turn_id),
+                        },
+                    },
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            if let Some(event_sink) = event_sink {
+                event_sink.emit(StatefulEvent::BlackboardUpdated {
+                    project_id: project_id.to_string(),
+                    entity_kind: BlackboardEntityKind::Entry,
+                    entity_id: entry.id.to_string(),
+                    revision: entry.revision,
+                });
+            }
+            (entry, CaptureOutcome::Stored)
+        }
+    };
+    if let Some(event_sink) = event_sink {
+        event_sink.emit(StatefulEvent::KnowledgeCaptured {
+            project_id: project_id.to_string(),
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            entry_id: entry.id.to_string(),
+            revision: entry.revision,
+            category: KnowledgeCategory::Background,
+            outcome,
+            text: receipt_text(&entry.value.content),
+        });
+    }
+    Ok(())
+}
+
 /// Stores the rules `text` explicitly marks: standing ones promoted, pending ones (marked
 /// as standing but also task-limited) as candidates that are never applied.
 pub(crate) async fn capture_marked_rules(
