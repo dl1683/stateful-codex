@@ -19194,16 +19194,22 @@
           "type": "integer"
         },
         "indexOperations": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
         "indexOperationsPending": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
         "indexWaitMs": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
@@ -19219,11 +19225,15 @@
           "type": "integer"
         },
         "memoryRecordsAlreadyPresent": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
         "memoryRecordsRefused": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
@@ -19234,16 +19244,22 @@
           "type": "integer"
         },
         "packetContinuityBytes": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
         "packetProjectBytes": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
         "recipesGrounded": {
+          "default": 0,
+          "description": "Absent from servers that predate it; read as zero.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
@@ -19325,17 +19341,9 @@
         "conversationReadCalls",
         "evidenceReadCalls",
         "failedStatefulToolCalls",
-        "indexOperations",
-        "indexOperationsPending",
-        "indexWaitMs",
         "knowledgeQueryCalls",
         "materialFindingsReused",
-        "memoryRecordsAlreadyPresent",
-        "memoryRecordsRefused",
         "obligationWriteCalls",
-        "packetContinuityBytes",
-        "packetProjectBytes",
-        "recipesGrounded",
         "rootEntriesLoaded",
         "rootEvidenceRoutesChecked",
         "rootEvidenceRoutesCurrent",

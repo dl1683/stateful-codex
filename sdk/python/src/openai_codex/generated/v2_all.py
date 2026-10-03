@@ -5196,17 +5196,73 @@ class StatefulAttributionCounters(BaseModel):
     conversation_read_calls: Annotated[int, Field(alias="conversationReadCalls", ge=0)]
     evidence_read_calls: Annotated[int, Field(alias="evidenceReadCalls", ge=0)]
     failed_stateful_tool_calls: Annotated[int, Field(alias="failedStatefulToolCalls", ge=0)]
-    index_operations: Annotated[int, Field(alias="indexOperations", ge=0)]
-    index_operations_pending: Annotated[int, Field(alias="indexOperationsPending", ge=0)]
-    index_wait_ms: Annotated[int, Field(alias="indexWaitMs", ge=0)]
+    index_operations: Annotated[
+        int | None,
+        Field(
+            alias="indexOperations",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
+    index_operations_pending: Annotated[
+        int | None,
+        Field(
+            alias="indexOperationsPending",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
+    index_wait_ms: Annotated[
+        int | None,
+        Field(
+            alias="indexWaitMs",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
     knowledge_query_calls: Annotated[int, Field(alias="knowledgeQueryCalls", ge=0)]
     material_findings_reused: Annotated[int, Field(alias="materialFindingsReused", ge=0)]
-    memory_records_already_present: Annotated[int, Field(alias="memoryRecordsAlreadyPresent", ge=0)]
-    memory_records_refused: Annotated[int, Field(alias="memoryRecordsRefused", ge=0)]
+    memory_records_already_present: Annotated[
+        int | None,
+        Field(
+            alias="memoryRecordsAlreadyPresent",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
+    memory_records_refused: Annotated[
+        int | None,
+        Field(
+            alias="memoryRecordsRefused",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
     obligation_write_calls: Annotated[int, Field(alias="obligationWriteCalls", ge=0)]
-    packet_continuity_bytes: Annotated[int, Field(alias="packetContinuityBytes", ge=0)]
-    packet_project_bytes: Annotated[int, Field(alias="packetProjectBytes", ge=0)]
-    recipes_grounded: Annotated[int, Field(alias="recipesGrounded", ge=0)]
+    packet_continuity_bytes: Annotated[
+        int | None,
+        Field(
+            alias="packetContinuityBytes",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
+    packet_project_bytes: Annotated[
+        int | None,
+        Field(
+            alias="packetProjectBytes",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
+    recipes_grounded: Annotated[
+        int | None,
+        Field(
+            alias="recipesGrounded",
+            description="Absent from servers that predate it; read as zero.",
+            ge=0,
+        ),
+    ] = 0
     root_entries_loaded: Annotated[int, Field(alias="rootEntriesLoaded", ge=0)]
     root_evidence_routes_checked: Annotated[int, Field(alias="rootEvidenceRoutesChecked", ge=0)]
     root_evidence_routes_current: Annotated[int, Field(alias="rootEvidenceRoutesCurrent", ge=0)]
