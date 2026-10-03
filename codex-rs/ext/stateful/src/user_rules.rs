@@ -39,7 +39,7 @@ pub(crate) struct RuleClause {
 }
 
 /// Imperative openings that make "never"/"always" a rule rather than narration.
-const IMPERATIVE_LEADS: &[&str] = &[
+pub(crate) const IMPERATIVE_LEADS: &[&str] = &[
     "never",
     "always",
     "please never",
@@ -103,7 +103,7 @@ const INVESTIGATION_PHRASES: &[&str] = &[
 ];
 
 /// Markers that make a rule's standing unambiguous even next to a task word.
-const STRONG_STANDING_PHRASES: &[&str] = &[
+pub(crate) const STRONG_STANDING_PHRASES: &[&str] = &[
     "from now on",
     "going forward",
     "in future",
@@ -183,6 +183,40 @@ const WEAK_TASK_PHRASES: &[&str] = &[
     "before starting",
     "before you start",
 ];
+
+/// Tracks Markdown fences: a fence opened by three or more backticks or tildes closes only
+/// at a line of the same character at least as long.
+#[derive(Default)]
+pub(crate) struct Fence {
+    open: Option<(char, usize)>,
+}
+
+impl Fence {
+    /// Feeds one trimmed line; true when the line is a delimiter or inside a fence.
+    pub(crate) fn skips(&mut self, trimmed: &str) -> bool {
+        let delimiter = ['`', '~'].into_iter().find_map(|mark| {
+            let run = trimmed
+                .chars()
+                .take_while(|character| *character == mark)
+                .count();
+            (run >= 3).then_some((mark, run))
+        });
+        match (self.open, delimiter) {
+            (Some((mark, length)), Some((found, run)))
+                if found == mark && run >= length && trimmed.len() == run =>
+            {
+                self.open = None;
+                true
+            }
+            (Some(_), _) => true,
+            (None, Some(opened)) => {
+                self.open = Some(opened);
+                true
+            }
+            (None, None) => false,
+        }
+    }
+}
 
 /// The scope a list header gives the items below it: a header such as "My working
 /// preferences for the whole week:" makes them standing, "For this task:" makes them
@@ -304,15 +338,32 @@ pub(crate) fn reports_speech(clause: &str) -> bool {
         || crate::quotation::Quotations::new(clause).relays_clause(clause)
 }
 
-pub(crate) fn standing_of(normalized: &str) -> RuleStanding {
-    // A rule for a whole investigation outlives the current turn: "during this
-    // investigation" is its scope, not a task limit, and its other words are end conditions.
+/// Whether `normalized` limits itself explicitly to the current task. "During this
+/// investigation" is a rule's scope, not a task limit.
+pub(crate) fn has_explicit_task_limit(normalized: &str) -> bool {
     let investigation = has_phrase(normalized, INVESTIGATION_PHRASES);
-    let explicit = EXPLICIT_TASK_PHRASES
+    EXPLICIT_TASK_PHRASES
         .iter()
         .filter(|phrase| !(investigation && **phrase == "during this"))
-        .any(|phrase| has_phrase(normalized, &[phrase]));
-    if explicit
+        .any(|phrase| has_phrase(normalized, &[phrase]))
+}
+
+/// Whether a quoted passage reads as an instruction (it opens with an imperative or a
+/// standing phrase), rather than naming a term such as "standing rule".
+pub(crate) fn reads_as_instruction(normalized: &str) -> bool {
+    let body = strip_list_marker(normalized);
+    IMPERATIVE_LEADS
+        .iter()
+        .chain(STRONG_STANDING_PHRASES)
+        .chain(["only", "don't", "do not", "please", "make sure"].iter())
+        .any(|lead| body.starts_with(&format!("{lead} ")))
+}
+
+pub(crate) fn standing_of(normalized: &str) -> RuleStanding {
+    // A rule for a whole investigation outlives the current turn, and its other words are
+    // end conditions.
+    let investigation = has_phrase(normalized, INVESTIGATION_PHRASES);
+    if has_explicit_task_limit(normalized)
         || (has_phrase(normalized, WEAK_TASK_PHRASES)
             && !has_phrase(normalized, STRONG_STANDING_PHRASES)
             && !investigation)

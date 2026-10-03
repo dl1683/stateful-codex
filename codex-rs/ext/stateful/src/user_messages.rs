@@ -62,8 +62,9 @@ impl UserMessageRegistry {
         if text.trim().is_empty() {
             return;
         }
-        // A long message keeps only whole lines, so no sentence can lose its qualifiers to
-        // the bound; a first line longer than the bound keeps nothing.
+        // A long message keeps only whole units (a line with its indented continuations), so
+        // no rule can lose its qualifiers to the bound; a first unit longer than the bound
+        // keeps nothing.
         let end = if text.len() <= MAX_MESSAGE_BYTES {
             text.len()
         } else {
@@ -71,7 +72,18 @@ impl UserMessageRegistry {
             while !text.is_char_boundary(limit) {
                 limit -= 1;
             }
-            match text[..limit].rfind('\n') {
+            // The last kept line may be continued by indented lines that did not fit, so the
+            // message ends before the last line that starts a new unit.
+            let kept = match text[..limit].rfind('\n') {
+                Some(newline) => &text[..newline],
+                None => return,
+            };
+            let unit_start = kept.match_indices('\n').rev().find_map(|(index, _)| {
+                kept[index + 1..]
+                    .starts_with(|character: char| !character.is_whitespace())
+                    .then_some(index)
+            });
+            match unit_start {
                 Some(newline) => newline,
                 None => return,
             }

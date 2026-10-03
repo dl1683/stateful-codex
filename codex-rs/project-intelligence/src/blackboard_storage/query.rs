@@ -369,8 +369,10 @@ impl BlackboardStore {
              ORDER BY CASE WHEN revision.kind = 'instruction'
                      AND revision.provenance_kind = 'user' THEN 0
                  WHEN revision.provenance_kind = 'user' THEN 1 ELSE 2 END,
-                 CASE WHEN revision.provenance_kind = 'user' THEN entry.created_at_ms END,
-                 CASE WHEN revision.provenance_kind = 'user' THEN entry.rowid END,
+                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                     THEN entry.created_at_ms END,
+                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                     THEN entry.rowid END,
                  CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                  WHEN 'normal' THEN 2 ELSE 3 END, entry.id

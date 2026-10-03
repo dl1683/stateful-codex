@@ -4,13 +4,14 @@
 //! same words under the same identity.
 
 use crate::quotation::Quotations;
-use crate::user_rules::EXPLICIT_TASK_PHRASES;
+use crate::user_rules::Fence;
 use crate::user_rules::HeaderScope;
 use crate::user_rules::MAX_RULE_BYTES;
 use crate::user_rules::RuleClause;
 use crate::user_rules::RuleStanding;
 use crate::user_rules::asks_about_rules;
 use crate::user_rules::clauses;
+use crate::user_rules::has_explicit_task_limit;
 use crate::user_rules::has_phrase;
 use crate::user_rules::has_standing_marker;
 use crate::user_rules::header_scope;
@@ -106,8 +107,13 @@ fn kept_clauses<'a>(text: &str, quotations: &Quotations<'_>, unit: &RuleUnit<'a>
             }
             // Clauses are slices of `text`, so their offsets locate them in its quotations.
             let start = clause.as_ptr() as usize - text.as_ptr() as usize;
+            let end = start + clause.len();
+            // A clause that is wholly a quotation is someone's words, whatever it says.
+            let body = list_item_body(clause).map_or(*clause, str::trim_start);
+            let body_start = end - body.len();
             !(is_reported_speech(&normalize(clause))
-                || quotations.relays(start, start + clause.len())
+                || quotations.relays(start, end)
+                || quotations.wholly_quoted(body_start, end)
                 || asks_about_rules(clause))
         })
         .collect()
@@ -134,7 +140,7 @@ fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<RuleC
                 // Under a header the user wrote, a weak task word ("until we agree") is the
                 // rule's ending condition; only an explicit limit makes it pending.
                 HeaderScope::Standing | HeaderScope::Reported => {
-                    if has_phrase(&normalized, EXPLICIT_TASK_PHRASES) {
+                    if has_explicit_task_limit(&normalized) {
                         RuleStanding::Pending
                     } else {
                         RuleStanding::Standing
@@ -191,15 +197,10 @@ fn rule_units(text: &str) -> Vec<RuleUnit<'_>> {
     let mut list_header: Option<ListHeader<'_>> = None;
     let mut in_list = false;
     let mut item_open = false;
-    let mut fenced = false;
+    let mut fence = Fence::default();
     for line in text.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fenced = !fenced;
-            item_open = false;
-            continue;
-        }
-        if fenced || trimmed.starts_with('>') {
+        if fence.skips(trimmed) || trimmed.starts_with('>') {
             item_open = false;
             continue;
         }
@@ -250,6 +251,14 @@ fn next_list_header<'a>(
             .last()
             .copied()
             .filter(|clause| has_phrase(&normalize(clause), LIMITED_SCOPE_PHRASES)),
+    });
+    let nested = was_in_list && line.starts_with([' ', '\t']);
+    let inherited_scope = enclosing
+        .filter(|_| nested)
+        .and_then(|enclosing| enclosing.limited_scope);
+    let own = own.map(|own| ListHeader {
+        limited_scope: own.limited_scope.or(inherited_scope),
+        ..own
     });
     match (own, enclosing) {
         (Some(own), _) if own.scope == scope => Some(own),

@@ -210,6 +210,11 @@ fn rule_receipts_are_numbered_and_show_the_rule_after_its_framing() {
             "turn-2",
             "Never run git commit: I review and commit everything myself, every time.",
         ),
+        // Scoped framing is part of the rule; a long preview ends at a word boundary.
+        receipt(
+            "turn-3",
+            "Some ground rules for this whole investigation, which may take a few days: Do NOT change any code until we have agreed on the root cause.",
+        ),
     ];
     insta::assert_snapshot!(
         "memory_rule_receipts_skip_framing",

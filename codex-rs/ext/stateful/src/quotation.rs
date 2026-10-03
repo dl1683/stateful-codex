@@ -90,7 +90,7 @@ impl<'a> Quotations<'a> {
                     .is_some_and(|next| next.refers_back && next.reports_speech);
                 // A quoted instruction ("\"From now on, never commit.\"") is someone's
                 // words even unattributed; a quoted term ('Next:') is not.
-                let instruction = crate::user_rules::has_standing_marker(
+                let instruction = crate::user_rules::reads_as_instruction(
                     &crate::user_rules::normalize(&text[span.open..span.close]),
                 );
                 own || introduced || referred_back || instruction
@@ -146,6 +146,16 @@ impl<'a> Quotations<'a> {
                 .checked_sub(1)
                 .and_then(|previous| sentences.get(previous))
                 .is_some_and(|previous| previous.introduces && previous.reports_speech)
+    }
+
+    /// Whether one quotation spans the whole of `start..end`, apart from trailing
+    /// punctuation: the part is a quotation, not the user's words around it.
+    pub(crate) fn wholly_quoted(&self, start: usize, end: usize) -> bool {
+        let part = self.text[start..end].trim_end_matches(['.', '!', ';', ',', ' ']);
+        let end = start + part.len();
+        self.spans
+            .iter()
+            .any(|span| span.open <= start && end <= span.close && span.close > start)
     }
 
     /// Like `relays`, for a clause found in the message (judged alone if not found).

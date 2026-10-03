@@ -70,3 +70,25 @@ fn a_long_message_keeps_only_whole_lines() {
         None
     );
 }
+
+/// Review round 1: a message over the bound keeps only whole units, so a rule never loses an
+/// indented qualifier that did not fit.
+#[test]
+fn a_long_message_never_keeps_an_item_without_its_continuation() {
+    let registry = UserMessageRegistry::default();
+    let filler = "word ".repeat(3_000);
+    let qualifier = format!("  Only {}for this task only.", "very ".repeat(2_000));
+    let message = format!("{filler}\nStanding rules:\n- Never touch docs.\n{qualifier}");
+    registry.record("thread-1", "project-1", "turn-1", &text(&message));
+    assert_eq!(
+        (
+            registry
+                .find("thread-1", "project-1", "Never touch docs")
+                .is_some(),
+            registry
+                .find("thread-1", "project-1", "Standing rules")
+                .is_some(),
+        ),
+        (false, true)
+    );
+}

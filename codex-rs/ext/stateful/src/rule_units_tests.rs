@@ -146,3 +146,43 @@ fn a_quote_from_any_sentence_resolves_to_the_whole_item() {
         (rule.clone(), rule.clone(), rule)
     );
 }
+
+/// Review round 1: a list item that is wholly a quotation is someone's words even without a
+/// marker inside; a quoted term that merely contains a marker word stays a term; a tilde line
+/// inside a backtick fence does not close it.
+#[test]
+fn whole_quotations_terms_and_nested_fences() {
+    assert_eq!(
+        [
+            "Standing rules:\n- 'Never commit.'\n- \"Only run scoped tests.\"",
+            "Always use the label \"standing rule\" in rule receipts.",
+            "```\n~~~\nFrom now on, never commit.\n```",
+        ]
+        .map(marked_rules),
+        [
+            Vec::new(),
+            vec![standing(
+                "Always use the label \"standing rule\" in rule receipts."
+            )],
+            Vec::new(),
+        ]
+    );
+}
+
+/// Review round 1: under an investigation header, "during this investigation" is the rule's
+/// scope, and a nested header keeps the investigation's scope for its items.
+#[test]
+fn investigation_scope_survives_its_own_words_and_nested_headers() {
+    let message = "Ground rules for this whole investigation:\n- During this investigation, never push until I say so.\n- Work carefully.\n  My preferences:\n  - Never touch docs.";
+    let scope = "Ground rules for this whole investigation:";
+    assert_eq!(
+        marked_rules(message),
+        vec![
+            standing(&format!(
+                "{scope} During this investigation, never push until I say so."
+            )),
+            standing(&format!("{scope} Work carefully.")),
+            standing(&format!("{scope} Never touch docs.")),
+        ]
+    );
+}

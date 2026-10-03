@@ -395,6 +395,11 @@ fn preview(text: &str) -> String {
         return format!("\"{single}\"");
     }
     let cut = single.chars().take(MAX_CHARS).collect::<String>();
+    // End at a word boundary when one is near, so the preview never stops mid-word.
+    let cut = match cut.rfind(' ') {
+        Some(space) if space > cut.len() / 2 => cut[..space].trim_end(),
+        Some(_) | None => cut.as_str(),
+    };
     format!("\"{cut}…\"")
 }
 
@@ -405,6 +410,17 @@ fn rule_body(text: &str) -> &str {
     const MIN_BODY_CHARS: usize = 20;
     const FRAMING_NOUNS: &[&str] = &["rule", "rules", "preference", "preferences"];
     const INSTRUCTION_WORDS: &[&str] = &["never", "always", "don't", "do", "must", "should"];
+    // Framing that limits where the rules apply is part of what was saved.
+    const SCOPE_WORDS: &[&str] = &[
+        "investigation",
+        "bug",
+        "issue",
+        "incident",
+        "until",
+        "today",
+        "task",
+        "week",
+    ];
     let Some((framing, body)) = text.split_once(": ") else {
         return text;
     };
@@ -417,9 +433,9 @@ fn rule_body(text: &str) -> &str {
         && words
             .iter()
             .any(|word| FRAMING_NOUNS.contains(&word.as_str()))
-        && !words
-            .iter()
-            .any(|word| INSTRUCTION_WORDS.contains(&word.as_str()))
+        && !words.iter().any(|word| {
+            INSTRUCTION_WORDS.contains(&word.as_str()) || SCOPE_WORDS.contains(&word.as_str())
+        })
         && body.trim().chars().count() >= MIN_BODY_CHARS;
     if recognised { body.trim() } else { text }
 }

@@ -64,13 +64,12 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
     // Only the user's own plain prose counts: fenced blocks, quoted lines, indented or list
     // lines and the block a colon-terminated line introduces ("She wrote:", until a blank
     // line) may be someone else's words.
-    let mut fenced = false;
+    let mut fence = crate::user_rules::Fence::default();
     let mut introduced = false;
     let mut statements = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fenced = !fenced;
+        if fence.skips(trimmed) {
             continue;
         }
         if trimmed.is_empty() {
@@ -78,8 +77,7 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
             introduced = false;
             continue;
         }
-        let plain = !fenced
-            && !introduced
+        let plain = !introduced
             && !trimmed.starts_with('>')
             && !line.starts_with([' ', '\t'])
             && list_item_body(trimmed).is_none();
