@@ -925,6 +925,24 @@ client_request_definitions! {
         serialization: global("project-intelligence"),
         response: v2::StatefulMemoryAddResponse,
     },
+    #[experimental("statefulMemory/activity")]
+    StatefulMemoryActivity => "statefulMemory/activity" {
+        params: v2::StatefulMemoryActivityParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::StatefulMemoryActivityResponse,
+    },
+    #[experimental("statefulMemory/summary")]
+    StatefulMemorySummary => "statefulMemory/summary" {
+        params: v2::StatefulMemorySummaryParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::StatefulMemorySummaryResponse,
+    },
+    #[experimental("statefulMemory/recap")]
+    StatefulMemoryRecap => "statefulMemory/recap" {
+        params: v2::StatefulMemoryRecapParams,
+        serialization: global_shared_read("project-intelligence"),
+        response: v2::StatefulMemoryRecapResponse,
+    },
     #[experimental("statefulMeasurement/list")]
     StatefulMeasurementList => "statefulMeasurement/list" {
         params: v2::StatefulMeasurementListParams,

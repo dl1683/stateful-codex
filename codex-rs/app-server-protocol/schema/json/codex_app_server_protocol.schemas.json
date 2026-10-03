@@ -21688,6 +21688,13 @@
               "background"
             ],
             "type": "string"
+          },
+          {
+            "description": "A commit remembered from the workspace history. Who made it is not known.",
+            "enum": [
+              "commit"
+            ],
+            "type": "string"
           }
         ]
       },
@@ -21985,6 +21992,213 @@
           }
         ]
       },
+      "StatefulMemoryChange": {
+        "description": "One committed memory change.",
+        "properties": {
+          "category": {
+            "$ref": "#/definitions/v2/StatefulMemoryChangeCategory"
+          },
+          "createdAt": {
+            "description": "Unix seconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "entryId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation": {
+            "$ref": "#/definitions/v2/StatefulMemoryOperation"
+          },
+          "origin": {
+            "$ref": "#/definitions/v2/StatefulMemoryOrigin"
+          },
+          "preview": {
+            "description": "At most 240 bytes, cut on a character boundary.",
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "sequence": {
+            "description": "Position in the project's journal; strictly increasing.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "threadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "turnId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "category",
+          "createdAt",
+          "operation",
+          "origin",
+          "preview",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "StatefulMemoryChangeCategory": {
+        "description": "What kind of knowledge a change concerned.",
+        "enum": [
+          "rule",
+          "background",
+          "attributedContext",
+          "decision",
+          "brainstormOption",
+          "ruledOut",
+          "openCheck",
+          "recipe",
+          "codeObservation",
+          "commitObservation",
+          "note",
+          "legacy"
+        ],
+        "type": "string"
+      },
+      "StatefulMemoryChangeTotals": {
+        "description": "Committed changes counted over a stretch of the journal.",
+        "properties": {
+          "captureIncomplete": {
+            "description": "Captures that could not finish.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "commitsRemembered": {
+            "description": "Commits remembered from the workspace history.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "corrected": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "forgotten": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "invalidated": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "promoted": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "saved": {
+            "description": "New entries saved, commits remembered not included.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "scopesEnded": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "captureIncomplete",
+          "commitsRemembered",
+          "corrected",
+          "forgotten",
+          "invalidated",
+          "promoted",
+          "saved",
+          "scopesEnded"
+        ],
+        "type": "object"
+      },
+      "StatefulMemoryCounts": {
+        "description": "What current project memory holds, by what new work does with it.",
+        "properties": {
+          "background": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "commits": {
+            "description": "Commits remembered from the workspace history.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "decisions": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "openChecks": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "other": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "pendingRules": {
+            "description": "The user's task-limited rules, kept but not applied.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "rules": {
+            "description": "The user's standing rules, applied.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "unverifiedRules": {
+            "description": "Rules not in the user's words, never applied.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "background",
+          "commits",
+          "decisions",
+          "openChecks",
+          "other",
+          "pendingRules",
+          "rules",
+          "unverifiedRules"
+        ],
+        "type": "object"
+      },
       "StatefulMemoryItem": {
         "description": "One current entry of project memory.",
         "properties": {
@@ -22042,6 +22256,80 @@
           "updatedAt"
         ],
         "type": "object"
+      },
+      "StatefulMemoryOperation": {
+        "description": "What a committed memory change did.",
+        "oneOf": [
+          {
+            "enum": [
+              "saved",
+              "corrected",
+              "forgotten"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Kept words started to apply.",
+            "enum": [
+              "promoted"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "No longer current (the source it described changed).",
+            "enum": [
+              "invalidated"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "An investigation ended, so its rules stopped applying.",
+            "enum": [
+              "scopeEnded"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "A capture could not finish; something may be missing.",
+            "enum": [
+              "captureIncomplete"
+            ],
+            "type": "string"
+          }
+        ]
+      },
+      "StatefulMemoryOrigin": {
+        "description": "Who caused a memory change.",
+        "oneOf": [
+          {
+            "description": "Captured from the user's own words.",
+            "enum": [
+              "hostCapture"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "The user's own memory control (TUI, web panel, CLI).",
+            "enum": [
+              "directControl"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Written by the model.",
+            "enum": [
+              "modelTool"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Observed in the workspace (a commit in its history).",
+            "enum": [
+              "hostObserved"
+            ],
+            "type": "string"
+          }
+        ]
       },
       "StatefulMemoryReplaced": {
         "description": "An earlier entry that a memory item replaced.",
@@ -22223,6 +22511,50 @@
             "type": "array"
           }
         },
+        "type": "object"
+      },
+      "StatefulRecapDecision": {
+        "properties": {
+          "reason": {
+            "description": "The recorded reason, when one was recorded; at most 240 bytes.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "At most 240 bytes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "StatefulRecapWork": {
+        "description": "The last finished piece of work in the project.",
+        "properties": {
+          "finishedAt": {
+            "description": "Unix seconds when it finished.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "request": {
+            "description": "The opening of what was asked, at most 240 bytes.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "finishedAt",
+          "threadId"
+        ],
         "type": "object"
       },
       "StatefulRun": {

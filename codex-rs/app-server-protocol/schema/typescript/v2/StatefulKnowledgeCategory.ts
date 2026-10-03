@@ -5,4 +5,4 @@
 /**
  * What a knowledge receipt says was saved.
  */
-export type StatefulKnowledgeCategory = "rule" | "pendingRule" | "decision" | "recipe" | "finding" | "background";
+export type StatefulKnowledgeCategory = "rule" | "pendingRule" | "decision" | "recipe" | "finding" | "background" | "commit";

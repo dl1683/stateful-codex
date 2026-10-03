@@ -4319,6 +4319,13 @@
             "background"
           ],
           "type": "string"
+        },
+        {
+          "description": "A commit remembered from the workspace history. Who made it is not known.",
+          "enum": [
+            "commit"
+          ],
+          "type": "string"
         }
       ]
     },

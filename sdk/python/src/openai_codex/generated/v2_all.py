@@ -5240,6 +5240,7 @@ class StatefulKnowledgeCategory(
         | Literal["pendingRule"]
         | Literal["recipe"]
         | Literal["background"]
+        | Literal["commit"]
     ]
 ):
     model_config = ConfigDict(
@@ -5250,7 +5251,8 @@ class StatefulKnowledgeCategory(
         | Literal["rule"]
         | Literal["pendingRule"]
         | Literal["recipe"]
-        | Literal["background"],
+        | Literal["background"]
+        | Literal["commit"],
         Field(description="What a knowledge receipt says was saved."),
     ]
 
@@ -5277,6 +5279,111 @@ class StatefulMemoryAddOutcome(Enum):
     added = "added"
     already_present = "alreadyPresent"
     already_done = "alreadyDone"
+
+
+class StatefulMemoryChangeCategory(Enum):
+    rule = "rule"
+    background = "background"
+    attributed_context = "attributedContext"
+    decision = "decision"
+    brainstorm_option = "brainstormOption"
+    ruled_out = "ruledOut"
+    open_check = "openCheck"
+    recipe = "recipe"
+    code_observation = "codeObservation"
+    commit_observation = "commitObservation"
+    note = "note"
+    legacy = "legacy"
+
+
+class StatefulMemoryChangeTotals(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    capture_incomplete: Annotated[
+        int, Field(alias="captureIncomplete", description="Captures that could not finish.", ge=0)
+    ]
+    commits_remembered: Annotated[
+        int,
+        Field(
+            alias="commitsRemembered",
+            description="Commits remembered from the workspace history.",
+            ge=0,
+        ),
+    ]
+    corrected: Annotated[int, Field(ge=0)]
+    forgotten: Annotated[int, Field(ge=0)]
+    invalidated: Annotated[int, Field(ge=0)]
+    promoted: Annotated[int, Field(ge=0)]
+    saved: Annotated[
+        int, Field(description="New entries saved, commits remembered not included.", ge=0)
+    ]
+    scopes_ended: Annotated[int, Field(alias="scopesEnded", ge=0)]
+
+
+class StatefulMemoryCounts(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    background: Annotated[int, Field(ge=0)]
+    commits: Annotated[
+        int, Field(description="Commits remembered from the workspace history.", ge=0)
+    ]
+    decisions: Annotated[int, Field(ge=0)]
+    open_checks: Annotated[int, Field(alias="openChecks", ge=0)]
+    other: Annotated[int, Field(ge=0)]
+    pending_rules: Annotated[
+        int,
+        Field(
+            alias="pendingRules",
+            description="The user's task-limited rules, kept but not applied.",
+            ge=0,
+        ),
+    ]
+    rules: Annotated[int, Field(description="The user's standing rules, applied.", ge=0)]
+    unverified_rules: Annotated[
+        int,
+        Field(
+            alias="unverifiedRules",
+            description="Rules not in the user's words, never applied.",
+            ge=0,
+        ),
+    ]
+
+
+class StatefulMemoryOperationValue(Enum):
+    saved = "saved"
+    corrected = "corrected"
+    forgotten = "forgotten"
+
+
+class StatefulMemoryOperation(
+    RootModel[
+        StatefulMemoryOperationValue
+        | Literal["promoted"]
+        | Literal["invalidated"]
+        | Literal["scopeEnded"]
+        | Literal["captureIncomplete"]
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        StatefulMemoryOperationValue
+        | Literal["promoted"]
+        | Literal["invalidated"]
+        | Literal["scopeEnded"]
+        | Literal["captureIncomplete"],
+        Field(description="What a committed memory change did."),
+    ]
+
+
+class StatefulMemoryOrigin(Enum):
+    host_capture = "hostCapture"
+    direct_control = "directControl"
+    model_tool = "modelTool"
+    host_observed = "hostObserved"
 
 
 class StatefulMemoryReplaced(BaseModel):
@@ -5329,6 +5436,30 @@ class StatefulObligationPacket(BaseModel):
     requested_judgment: Annotated[list[str] | None, Field(alias="requestedJudgment")] = []
     strategy: list[str] | None = []
     uncertainty: list[str] | None = []
+
+
+class StatefulRecapDecision(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    reason: Annotated[
+        str | None,
+        Field(description="The recorded reason, when one was recorded; at most 240 bytes."),
+    ] = None
+    text: Annotated[str, Field(description="At most 240 bytes.")]
+
+
+class StatefulRecapWork(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    finished_at: Annotated[
+        int, Field(alias="finishedAt", description="Unix seconds when it finished.")
+    ]
+    request: Annotated[
+        str | None, Field(description="The opening of what was asked, at most 240 bytes.")
+    ] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class StatefulRunBudget(BaseModel):
@@ -10392,6 +10523,25 @@ class StatefulMeasurementSummary(BaseModel):
     token_usage: Annotated[TokenUsageBreakdown | None, Field(alias="tokenUsage")] = None
     trajectory: TurnTrajectory | None = None
     turns_with_token_usage: Annotated[int, Field(alias="turnsWithTokenUsage", ge=0)]
+
+
+class StatefulMemoryChange(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    category: StatefulMemoryChangeCategory
+    created_at: Annotated[int, Field(alias="createdAt", description="Unix seconds.")]
+    entry_id: Annotated[str | None, Field(alias="entryId")] = None
+    group_id: Annotated[str | None, Field(alias="groupId")] = None
+    operation: StatefulMemoryOperation
+    origin: StatefulMemoryOrigin
+    preview: Annotated[str, Field(description="At most 240 bytes, cut on a character boundary.")]
+    revision: Annotated[int | None, Field(ge=0)] = None
+    sequence: Annotated[
+        int, Field(description="Position in the project's journal; strictly increasing.", ge=0)
+    ]
+    thread_id: Annotated[str | None, Field(alias="threadId")] = None
+    turn_id: Annotated[str | None, Field(alias="turnId")] = None
 
 
 class StatefulMemoryItem(BaseModel):

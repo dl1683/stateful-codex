@@ -57,6 +57,8 @@ use crate::error_code::method_not_found;
 
 #[path = "stateful_memory.rs"]
 mod stateful_memory;
+#[path = "stateful_memory_activity.rs"]
+mod stateful_memory_activity;
 
 const DEFAULT_QUERY_LIMIT: u32 = 20;
 
