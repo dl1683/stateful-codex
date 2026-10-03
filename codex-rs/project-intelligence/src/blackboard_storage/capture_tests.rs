@@ -18,6 +18,7 @@ use crate::CaptureGroup;
 use crate::CaptureMember;
 use crate::CaptureSource;
 use crate::CaptureUnit;
+use crate::CategoryQuery;
 use crate::ChangeOperation;
 use crate::ChangeOrigin;
 use crate::ChangeRecord;
@@ -138,6 +139,18 @@ async fn store(temp_dir: &TempDir) -> BlackboardStore {
     BlackboardStore::open(&sqlite)
         .await
         .expect("blackboard opens")
+}
+
+fn query<'a>(lifecycle: CandidateLifecycle, topic: &'a [String], limit: u32) -> CategoryQuery<'a> {
+    CategoryQuery {
+        project_id: PROJECT_ID,
+        categories: &[KnowledgeCategory::RuledOut],
+        legacy_kinds: &[BlackboardKind::RejectedApproach],
+        lifecycle,
+        topic,
+        changed_since_ms: None,
+        limit,
+    }
 }
 
 async fn forget(store: &BlackboardStore, entry: &BlackboardEntry) {
@@ -347,13 +360,7 @@ async fn categorized_entries_are_read_before_any_ranking() {
         .await
         .expect("commit");
     let (entries, more) = store
-        .categorized_entries(
-            PROJECT_ID,
-            &[KnowledgeCategory::RuledOut],
-            &[BlackboardKind::RejectedApproach],
-            CandidateLifecycle::Current,
-            /*limit*/ 10,
-        )
+        .categorized_entries(query(CandidateLifecycle::Current, &[], 10))
         .await
         .expect("read");
     assert_eq!(
@@ -374,24 +381,45 @@ async fn categorized_entries_are_read_before_any_ranking() {
         )
     );
     let (limited, more) = store
-        .categorized_entries(
-            PROJECT_ID,
-            &[KnowledgeCategory::RuledOut],
-            &[BlackboardKind::RejectedApproach],
-            CandidateLifecycle::Current,
-            /*limit*/ 2,
-        )
+        .categorized_entries(query(CandidateLifecycle::Current, &[], 2))
         .await
         .expect("read");
     assert_eq!((limited.len(), more), (2, true));
-    let (retired_entries, _) = store
-        .categorized_entries(
+    // A topic word reaches the oldest entry even under a limit the newer ones fill.
+    let topic = vec!["legacy".to_string()];
+    let (on_topic, _) = store
+        .categorized_entries(query(CandidateLifecycle::Current, &topic, 1))
+        .await
+        .expect("read");
+    assert_eq!(
+        on_topic
+            .iter()
+            .map(|entry| entry.id.to_string())
+            .collect::<Vec<_>>(),
+        vec![legacy.id.to_string()]
+    );
+    // Word-for-word lookup finds the forgotten entry however old.
+    let same = store
+        .entries_with_words(
             PROJECT_ID,
-            &[KnowledgeCategory::RuledOut],
-            &[BlackboardKind::RejectedApproach],
-            CandidateLifecycle::Retired,
-            /*limit*/ 10,
+            KnowledgeCategory::RuledOut,
+            BlackboardKind::RejectedApproach,
+            "retired",
+            "no-digest",
         )
+        .await
+        .expect("words");
+    assert_eq!(
+        same.iter()
+            .map(|entry| (entry.id.to_string(), entry.state))
+            .collect::<Vec<_>>(),
+        vec![(
+            retired.id.to_string(),
+            crate::BlackboardEntryState::Tombstoned
+        )]
+    );
+    let (retired_entries, _) = store
+        .categorized_entries(query(CandidateLifecycle::Retired, &[], 10))
         .await
         .expect("read");
     assert_eq!(

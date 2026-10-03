@@ -402,3 +402,56 @@ async fn an_item_too_large_for_any_page_is_cut_and_passed() {
         )
     );
 }
+
+/// An entry whose escaped content is larger than any result (control characters) is shown
+/// cut, the page says it is not complete, the cursor moves past it, and entryId reads it.
+#[tokio::test]
+async fn escaping_heavy_items_still_make_progress() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let node_id = services.project_node_id(PROJECT_ID).await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    store
+        .create_entry(
+            BlackboardEntryId::parse("dense").expect("id"),
+            agent_entry(
+                &node_id,
+                BlackboardKind::RejectedApproach,
+                &format!("Dense{}end", "\u{1}".repeat(4_000)),
+            ),
+        )
+        .await
+        .expect("dense");
+    let tool = super::super::memory_read::MemoryReadTool::new(
+        PROJECT_ID.to_string(),
+        "thread-1".to_string(),
+        services.clone(),
+        Arc::new(InMemoryThreadStore::default()),
+    );
+    let read = |arguments: Value| {
+        let tool = &tool;
+        async move {
+            let output = tool.handle(call(arguments)).await.expect("read");
+            serde_json::from_str::<Value>(&output.log_output()).expect("JSON")
+        }
+    };
+    let page = read(json!({"kind": "ruledOut"})).await;
+    let whole = read(json!({"entryId": "dense"})).await;
+    assert_eq!(
+        (
+            page["requested"]["items"][0]["contentComplete"].clone(),
+            page["requested"]["coverage"]["complete"].clone(),
+            page["requested"]["coverage"]["nextCursor"].clone(),
+            whole["entryId"].clone(),
+            whole["contentComplete"].clone(),
+        ),
+        (
+            json!(false),
+            json!(false),
+            Value::Null,
+            json!("dense"),
+            json!(false),
+        )
+    );
+}

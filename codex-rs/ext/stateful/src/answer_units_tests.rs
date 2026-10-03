@@ -255,3 +255,36 @@ fn typographic_apostrophes_still_mark_a_tentative_heading() {
         AnswerUnits::default()
     );
 }
+
+#[test]
+fn uncertainty_about_the_same_item_anywhere_keeps_it_out() {
+    let answer = "Ruled out:\n- DNS; still possible, not checked yet.\n- Proxy\n  Not checked yet; still possible.\n- Cache: not dismissed.\n- Disk: eliminated, the other host fails too.\n";
+    let units = answer_units(answer);
+    assert_eq!(
+        (texts(answer, &units.ruled_out), units.omitted.len()),
+        (vec!["Disk: eliminated, the other host fails too."], 3)
+    );
+}
+
+#[test]
+fn a_made_choice_with_an_undecided_alternative_is_a_decision() {
+    let answer = "Decision: use SQLite because we have not decided how to provision Redis.\n\nDecision: use rustls; the OpenSSL route is still undecided.\n";
+    let units = answer_units(answer);
+    assert_eq!(
+        units
+            .decisions
+            .iter()
+            .map(|decision| (
+                decision.choice.text.as_str(),
+                decision.reason.as_ref().map(|reason| reason.text.as_str())
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "use SQLite",
+                Some("we have not decided how to provision Redis.")
+            ),
+            ("use rustls; the OpenSSL route is still undecided.", None),
+        ]
+    );
+}

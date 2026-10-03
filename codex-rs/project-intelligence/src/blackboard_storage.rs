@@ -29,6 +29,7 @@ use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
 mod capture;
+mod capture_read;
 mod fence;
 mod knowledge;
 mod query;
@@ -37,9 +38,10 @@ mod review;
 mod succession;
 mod update;
 
-pub use capture::CandidateLifecycle;
-pub use capture::CategorizedEntry;
-pub use capture::MAX_CATEGORIZED_ENTRIES;
+pub use capture_read::CandidateLifecycle;
+pub use capture_read::CategorizedEntry;
+pub use capture_read::CategoryQuery;
+pub use capture_read::MAX_CATEGORIZED_ENTRIES;
 pub use fence::CompletionFence;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;

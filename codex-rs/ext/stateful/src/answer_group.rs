@@ -3,13 +3,13 @@
 //! forgot), the atomic commit, and the receipt of what was actually committed.
 
 use codex_project_intelligence::BlackboardEntryId;
+use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::BlackboardVerification;
-use codex_project_intelligence::CandidateLifecycle;
 use codex_project_intelligence::CaptureGroup;
 use codex_project_intelligence::CaptureSource;
 use codex_project_intelligence::CaptureUnit;
@@ -41,8 +41,6 @@ use crate::user_rules::normalize;
 
 /// Confidence recorded for what an answer reported: the assistant's account, unverified.
 const ANSWER_CONFIDENCE_BASIS_POINTS: u16 = 6_000;
-/// Model-written entries compared against the answer's units for exact wording.
-const MAX_RECONCILED_ENTRIES: u32 = 400;
 
 /// One kind of group an answer can produce.
 pub(crate) struct GroupKind {
@@ -122,34 +120,8 @@ pub(crate) async fn commit_group(
         ],
     );
     // An entry already holding exactly this unit's words (a model write, or a project-wide
-    // entry when this thread works in an investigation) is the same unit, not a second one.
-    // The same words forgotten or replaced earlier, under any identity, stay forgotten.
-    let (existing, retired) = match (
-        store
-            .categorized_entries(
-                source.project_id,
-                &[category],
-                &[entry_kind],
-                CandidateLifecycle::Current,
-                MAX_RECONCILED_ENTRIES,
-            )
-            .await,
-        store
-            .categorized_entries(
-                source.project_id,
-                &[category],
-                &[entry_kind],
-                CandidateLifecycle::Retired,
-                MAX_RECONCILED_ENTRIES,
-            )
-            .await,
-    ) {
-        (Ok((existing, _)), Ok((retired, _))) => (existing, retired),
-        (Err(error), _) | (_, Err(error)) => {
-            tracing::warn!(project_id = %source.project_id, %error, "failed to read memory for an answer capture");
-            return;
-        }
-    };
+    // entry when this thread works in an investigation) is the same unit, not a second one;
+    // the same words forgotten or replaced earlier, under any identity, stay forgotten.
     let applies = |candidate: &CategorizedEntry| match &candidate.context {
         Some(other) => {
             other.authority == KnowledgeAuthority::AssistantReported
@@ -166,6 +138,8 @@ pub(crate) async fn commit_group(
                 continue;
             }
         };
+        let words = normalize(&content);
+        let words_digest = format!("{:x}", Sha256::digest(words.as_bytes()));
         let context = KnowledgeContext {
             scope_id: placement.scope_id.clone(),
             source_sequence: placement.source_sequence,
@@ -176,16 +150,38 @@ pub(crate) async fn commit_group(
                     "sourceLocator": source.capture.locator,
                     "sourceDigest": source.capture.digest,
                     "answerOpening": source.opening,
+                    "wordsDigest": words_digest,
                     "details": payload,
                 })
                 .to_string(),
             ),
             ..KnowledgeContext::new(category, KnowledgeAuthority::AssistantReported)
         };
-        let words = normalize(&content);
-        if let Some(same) = existing
+        let same_words = match store
+            .entries_with_words(
+                source.project_id,
+                category,
+                entry_kind,
+                &content.split_whitespace().collect::<Vec<_>>().join(" "),
+                &words_digest,
+            )
+            .await
+        {
+            Ok(entries) => entries
+                .into_iter()
+                .filter(|candidate| applies(candidate) && normalize(&candidate.content) == words)
+                .collect::<Vec<_>>(),
+            Err(error) => {
+                tracing::warn!(project_id = %source.project_id, %error, "failed to read memory for an answer capture");
+                return;
+            }
+        };
+        // An open check is only ever created with its context, never attached to an entry
+        // another writer could be changing, so its protection holds from its first revision.
+        let reusable = category != Category::OpenCheck;
+        if let Some(same) = same_words
             .iter()
-            .find(|candidate| applies(candidate) && normalize(&candidate.content) == words)
+            .find(|candidate| reusable && candidate.state == BlackboardEntryState::Active)
         {
             units.push(CaptureUnit::Existing {
                 id: same.id.clone(),
@@ -217,11 +213,9 @@ pub(crate) async fn commit_group(
             .and_then(|_| unit_entry_id(source.project_id, category, None, &words))
             .into_iter()
             .chain(
-                retired
+                same_words
                     .iter()
-                    .filter(|candidate| {
-                        applies(candidate) && normalize(&candidate.content) == words
-                    })
+                    .filter(|candidate| candidate.state != BlackboardEntryState::Active)
                     .map(|candidate| candidate.id.clone()),
             )
             .collect();

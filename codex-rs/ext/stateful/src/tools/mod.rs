@@ -9,6 +9,7 @@ mod conversation_read;
 mod evidence;
 mod memory_read;
 mod obligation;
+mod recall_page;
 mod recall_plan;
 mod run;
 mod run_read;

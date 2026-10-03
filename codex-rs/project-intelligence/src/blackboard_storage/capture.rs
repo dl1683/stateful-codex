@@ -6,58 +6,24 @@ use sqlx::FromRow;
 use sqlx::SqliteConnection;
 
 use crate::BlackboardEntry;
-use crate::BlackboardEntryId;
 use crate::BlackboardEntryState;
-use crate::BlackboardKind;
-use crate::BlackboardProvenanceKind;
 use crate::CaptureGroup;
 use crate::CaptureMember;
 use crate::CaptureSource;
 use crate::CaptureUnit;
 use crate::CommittedCapture;
-use crate::KnowledgeCategory;
-use crate::KnowledgeContext;
 use crate::MemberOutcome;
 use crate::storage::unix_timestamp_millis;
 
 use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::insert_new_entry;
-use super::kind_name;
 use super::knowledge::append_change;
 use super::knowledge::context_of;
 use super::knowledge::parse;
 use super::knowledge::write_context;
 use super::load_entry;
 use super::load_entry_by_id;
-use super::parse_kind;
-use super::parse_provenance;
-
-/// Most entries one category read returns.
-pub const MAX_CATEGORIZED_ENTRIES: u32 = 5_000;
-
-/// Which lifecycle a category read selects.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CandidateLifecycle {
-    /// Active entries that are current or need a check.
-    Current,
-    /// Entries that were forgotten or replaced.
-    Retired,
-}
-
-/// One entry of a category read: what recall and capture need, without evidence or
-/// relations, and the context of its current revision (`None` for entries written before
-/// contexts were recorded).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CategorizedEntry {
-    pub id: BlackboardEntryId,
-    pub revision: u64,
-    pub kind: BlackboardKind,
-    pub content: String,
-    pub provenance_kind: BlackboardProvenanceKind,
-    pub created_at_ms: i64,
-    pub context: Option<KnowledgeContext>,
-}
 
 impl BlackboardStore {
     /// Commits one capture. Units are judged in order: a new identity is saved with its
@@ -225,114 +191,6 @@ impl BlackboardStore {
         let mut connection = self.pool.acquire().await?;
         load_capture(&mut connection, project_id, group_id).await
     }
-
-    /// Entries whose current context is in `categories`, plus entries without any context
-    /// whose kind is in `legacy_kinds`: current ones (active, and current or in need of a
-    /// check) or retired ones (forgotten or replaced). Newest first, a group's members in
-    /// source order, read in one query without loading whole entries. At most `limit`
-    /// (capped at `MAX_CATEGORIZED_ENTRIES`) are returned; the flag says whether more exist.
-    pub async fn categorized_entries(
-        &self,
-        project_id: &str,
-        categories: &[KnowledgeCategory],
-        legacy_kinds: &[BlackboardKind],
-        lifecycle: CandidateLifecycle,
-        limit: u32,
-    ) -> Result<(Vec<CategorizedEntry>, bool), BlackboardStoreError> {
-        let limit = limit.clamp(1, MAX_CATEGORIZED_ENTRIES);
-        // The values are fixed identifiers, so a JSON array of them needs no escaping.
-        let json_array = |names: Vec<&str>| {
-            format!(
-                "[{}]",
-                names
-                    .iter()
-                    .map(|name| format!("\"{name}\""))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
-        };
-        let categories = json_array(
-            categories
-                .iter()
-                .map(|category| category.as_str())
-                .collect(),
-        );
-        let legacy_kinds = json_array(legacy_kinds.iter().map(|kind| kind_name(*kind)).collect());
-        let current = lifecycle == CandidateLifecycle::Current;
-        let rows = sqlx::query_as::<_, StoredCandidate>(
-            "SELECT entry.id, entry.revision, entry.created_at_ms, revision.kind, revision.content,
-                    revision.provenance_kind, context.category, context.authority,
-                    context.scope_id, context.end_condition, context.source_sequence,
-                    context.unit_ordinal, context.group_id, context.validity, context.payload
-             FROM blackboard_entries AS entry
-             JOIN blackboard_entry_revisions AS revision
-               ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             LEFT JOIN knowledge_context AS context
-               ON context.entry_id = entry.id AND context.revision = (
-                   SELECT MAX(latest.revision) FROM knowledge_context AS latest
-                   WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
-             WHERE entry.project_id = ? AND ((? AND revision.state = 'active')
-                    OR (NOT ? AND revision.state <> 'active'))
-               AND ((context.category IN (SELECT value FROM json_each(?))
-                     AND (NOT ? OR context.validity IN ('current', 'needs_check')))
-                    OR (context.entry_id IS NULL
-                        AND revision.kind IN (SELECT value FROM json_each(?))))
-             ORDER BY entry.created_at_ms DESC, context.group_id,
-                 COALESCE(context.unit_ordinal, 0), entry.id
-             LIMIT ?",
-        )
-        .bind(project_id)
-        .bind(current)
-        .bind(current)
-        .bind(categories)
-        .bind(current)
-        .bind(legacy_kinds)
-        .bind(i64::from(limit) + 1)
-        .fetch_all(&self.pool)
-        .await?;
-        let more = rows.len() > limit as usize;
-        let entries = rows
-            .into_iter()
-            .take(limit as usize)
-            .map(StoredCandidate::into_entry)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok((entries, more))
-    }
-
-    /// Capture groups of `kind` that recognized units they did not keep, newest first, at
-    /// most `limit`, and how many such groups exist.
-    pub async fn incomplete_captures(
-        &self,
-        project_id: &str,
-        kind: &str,
-        limit: u32,
-    ) -> Result<(Vec<CommittedCapture>, u64), BlackboardStoreError> {
-        let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM capture_groups
-             WHERE project_id = ? AND kind = ? AND (omitted > 0 OR failed > 0)",
-        )
-        .bind(project_id)
-        .bind(kind)
-        .fetch_one(&self.pool)
-        .await?;
-        let groups = sqlx::query_as::<_, StoredGroup>(
-            "SELECT * FROM capture_groups
-             WHERE project_id = ? AND kind = ? AND (omitted > 0 OR failed > 0)
-             ORDER BY recorded_at_ms DESC, group_id LIMIT ?",
-        )
-        .bind(project_id)
-        .bind(kind)
-        .bind(i64::from(limit))
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .map(|group| group.into_capture(Vec::new()))
-        .collect::<Result<Vec<_>, _>>()?;
-        Ok((
-            groups,
-            u64::try_from(total).map_err(|_| BlackboardStoreError::CountOverflow)?,
-        ))
-    }
 }
 
 /// Whether an identity's stored entry still holds the same knowledge: same kind and the
@@ -412,7 +270,7 @@ async fn write_group(
     Ok(())
 }
 
-async fn load_capture(
+pub(super) async fn load_capture(
     connection: &mut SqliteConnection,
     project_id: &str,
     group_id: &str,
@@ -461,7 +319,7 @@ async fn member_entries(
 }
 
 #[derive(FromRow)]
-struct StoredGroup {
+pub(super) struct StoredGroup {
     project_id: String,
     group_id: String,
     thread_id: Option<String>,
@@ -479,7 +337,7 @@ struct StoredGroup {
 }
 
 impl StoredGroup {
-    fn into_capture(
+    pub(super) fn into_capture(
         self,
         members: Vec<CaptureMember>,
     ) -> Result<CommittedCapture, BlackboardStoreError> {
@@ -506,63 +364,6 @@ impl StoredGroup {
                 .map(|(locator, digest)| CaptureSource { locator, digest }),
             members,
             newly_committed: true,
-        })
-    }
-}
-
-#[derive(FromRow)]
-struct StoredCandidate {
-    id: String,
-    revision: i64,
-    created_at_ms: i64,
-    kind: String,
-    content: String,
-    provenance_kind: String,
-    category: Option<String>,
-    authority: Option<String>,
-    scope_id: Option<String>,
-    end_condition: Option<String>,
-    source_sequence: Option<i64>,
-    unit_ordinal: Option<i64>,
-    group_id: Option<String>,
-    validity: Option<String>,
-    payload: Option<String>,
-}
-
-impl StoredCandidate {
-    fn into_entry(self) -> Result<CategorizedEntry, BlackboardStoreError> {
-        let context = match (self.category, self.authority, self.validity) {
-            (Some(category), Some(authority), Some(validity)) => Some(KnowledgeContext {
-                category: parse(&category)?,
-                authority: parse(&authority)?,
-                scope_id: self.scope_id,
-                end_condition: self.end_condition,
-                source_sequence: self
-                    .source_sequence
-                    .map(u64::try_from)
-                    .transpose()
-                    .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
-                unit_ordinal: self
-                    .unit_ordinal
-                    .map(u32::try_from)
-                    .transpose()
-                    .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
-                group_id: self.group_id,
-                validity: parse(&validity)?,
-                payload: self.payload,
-            }),
-            _ => None,
-        };
-        Ok(CategorizedEntry {
-            id: BlackboardEntryId::parse(&self.id)
-                .map_err(|_| BlackboardStoreError::CorruptEntry(self.id.clone()))?,
-            revision: u64::try_from(self.revision)
-                .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
-            kind: parse_kind(&self.kind)?,
-            content: self.content,
-            provenance_kind: parse_provenance(&self.provenance_kind)?,
-            created_at_ms: self.created_at_ms,
-            context,
         })
     }
 }

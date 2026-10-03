@@ -693,10 +693,10 @@ async fn lifecycle_changes_keep_the_texts_authorship() {
     );
 }
 
-/// An open check cannot be retired or replaced by the model without evidence; replacing it
-/// with an entry that carries evidence settles it.
+/// The model cannot retire, reword or replace an open check, even with an entry whose
+/// evidence is current and source-verified; it can still change its promotion.
 #[tokio::test]
-async fn an_open_check_closes_only_with_evidence() {
+async fn the_model_cannot_close_an_open_check() {
     let (temp_dir, tool, entry_id, successor_id, project_root, receipt_id) = fixture().await;
     let store =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(temp_dir.path().abs()));
@@ -741,7 +741,7 @@ async fn an_open_check_closes_only_with_evidence() {
         "successorEntryId": successor_id
     }))
     .await
-    .map(|entry| entry.state);
+    .map(|entry| entry.revision);
     let refused = || {
         Err(codex_extension_api::FunctionCallError::RespondToModel(
             super::super::blackboard_supersede::OPEN_CHECK_STAYS_OPEN.to_string(),
@@ -749,6 +749,6 @@ async fn an_open_check_closes_only_with_evidence() {
     };
     assert_eq!(
         (retired, replaced_without_evidence, settled),
-        (refused(), refused(), Ok(BlackboardEntryState::Superseded))
+        (refused(), refused(), refused())
     );
 }

@@ -15,6 +15,7 @@ use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::CandidateLifecycle;
 use codex_project_intelligence::CategorizedEntry;
+use codex_project_intelligence::CategoryQuery;
 use codex_project_intelligence::KnowledgeAuthority;
 use codex_project_intelligence::KnowledgeCategory;
 use codex_project_intelligence::KnowledgeScope;
@@ -75,9 +76,9 @@ impl RecallKind {
             " chose ",
             " chosen ",
             " choice ",
-            " why did we ",
-            " why do we ",
-            " why we ",
+            " why did we choose ",
+            " why did we pick ",
+            " why did we go with ",
         ]) {
             Some(Self::Decision)
         } else if has(&[" rule ", " rules ", " instruction"]) {
@@ -184,7 +185,7 @@ pub(super) struct KindRecall {
     pub(super) coverage: Value,
 }
 
-/// Every current item of `kind` (recorded since `since_ms` when given), topic and
+/// Every current item of `kind` (changed since `since_ms` when given), topic and
 /// investigation first, whole groups together.
 pub(super) async fn kind_recall(
     store: &BlackboardStore,
@@ -195,19 +196,41 @@ pub(super) async fn kind_recall(
     since_ms: Option<i64>,
 ) -> Result<KindRecall, String> {
     let (categories, legacy_kinds) = kind.categories();
-    let (mut entries, more) = store
-        .categorized_entries(
-            project_id,
-            categories,
-            legacy_kinds,
-            CandidateLifecycle::Current,
-            MAX_CATEGORIZED_ENTRIES,
-        )
+    let topic = terms
+        .iter()
+        .filter(|term| !INTENT_WORDS.contains(&term.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    // Items on the topic are read first, by the store, so newer unrelated items can never
+    // cut them off; the newest items of the kind fill the rest.
+    let query = |topic| CategoryQuery {
+        project_id,
+        categories,
+        legacy_kinds,
+        lifecycle: CandidateLifecycle::Current,
+        topic,
+        changed_since_ms: since_ms,
+        limit: MAX_CATEGORIZED_ENTRIES,
+    };
+    let (mut entries, mut more) = if topic.is_empty() {
+        (Vec::new(), false)
+    } else {
+        store
+            .categorized_entries(query(&topic))
+            .await
+            .map_err(|error| error.to_string())?
+    };
+    let (newest, more_newest) = store
+        .categorized_entries(query(&[]))
         .await
         .map_err(|error| error.to_string())?;
-    if let Some(since) = since_ms {
-        entries.retain(|entry| entry.created_at_ms >= since);
-    }
+    more |= more_newest;
+    let read = entries
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<HashSet<_>>();
+    entries.extend(newest.into_iter().filter(|entry| !read.contains(&entry.id)));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.created_at_ms));
     let scope = store
         .thread_scope(project_id, thread_id)
         .await
@@ -291,11 +314,6 @@ pub(super) async fn kind_recall(
         });
     }
 
-    let topic = terms
-        .iter()
-        .filter(|term| !INTENT_WORDS.contains(&term.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
     // A group is on the topic when any member, or the answer it came from, mentions it.
     let on_topic = |group: &Group<'_>| {
         topic.is_empty()
@@ -350,7 +368,7 @@ pub(super) async fn kind_recall(
     // of them was saved, so a complete page is never mistaken for a complete capture.
     let (incomplete, incomplete_total) = match kind.group_kind() {
         Some(group_kind) => store
-            .incomplete_captures(project_id, group_kind, MAX_INCOMPLETE_CAPTURES)
+            .incomplete_captures(project_id, group_kind, since_ms, MAX_INCOMPLETE_CAPTURES)
             .await
             .map_err(|error| error.to_string())?,
         None => (Vec::new(), 0),
@@ -368,6 +386,7 @@ pub(super) async fn kind_recall(
         "threadInvestigation": scope.map(|scope| scope.title),
         "matching": items.len(),
         "moreOfThisKindThanRead": more,
+        // Counted over the requested period (all time without since), not only this topic.
         "capturesWithUnitsNotKept": incomplete_total,
         "latestCapturesWithUnitsNotKept": incomplete
             .into_iter()

@@ -18,6 +18,7 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardEntryScope;
 use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardHit;
@@ -44,6 +45,8 @@ use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
+use super::recall_page::fill_page;
+use super::recall_page::whole_entry_result;
 use super::recall_plan::RecallKind;
 use super::recall_plan::kind_recall;
 use super::respond;
@@ -92,6 +95,7 @@ struct MemoryReadArguments {
     include_history: Option<bool>,
     kind: Option<RecallKind>,
     cursor: Option<String>,
+    entry_id: Option<String>,
 }
 
 pub(super) struct MemoryReadTool {
@@ -121,6 +125,9 @@ impl MemoryReadTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: MemoryReadArguments = parse_arguments(&call)?;
+        if let Some(entry_id) = &arguments.entry_id {
+            return self.whole_entry(&call, entry_id).await;
+        }
         let terms = arguments
             .question
             .as_deref()
@@ -210,39 +217,9 @@ impl MemoryReadTool {
                 Some(_) => (0, true),
                 None => (0, false),
             };
-            let mut next = start;
-            for item in &recall.items[start..] {
-                let mut item = item.clone();
-                let page_empty = next == start;
-                if let Some(items) = result["requested"]["items"].as_array_mut() {
-                    items.push(item.clone());
-                }
-                if result.to_string().len() > limit {
-                    if let Some(items) = result["requested"]["items"].as_array_mut() {
-                        items.pop();
-                    }
-                    if !page_empty {
-                        break;
-                    }
-                    // No page can hold this item whole: cut it to what fits and say so, so
-                    // the cursor still moves on.
-                    let room = limit.saturating_sub(result.to_string().len() + 200);
-                    let content = item["content"].as_str().unwrap_or_default().to_string();
-                    item["content"] = json!(excerpt(&content, &[], room / 2));
-                    item["contentComplete"] = json!(false);
-                    if let Some(items) = result["requested"]["items"].as_array_mut() {
-                        items.push(item.clone());
-                    }
-                    if result.to_string().len() > limit {
-                        if let Some(items) = result["requested"]["items"].as_array_mut() {
-                            items.pop();
-                        }
-                        break;
-                    }
-                }
-                requested_ids.insert(item["entryId"].as_str().unwrap_or_default().to_string());
-                next += 1;
-            }
+            let page = fill_page(&mut result, &recall.items, start, limit);
+            let next = page.next;
+            requested_ids = page.shown;
             let more = recall.coverage["moreOfThisKindThanRead"]
                 .as_bool()
                 .unwrap_or(false);
@@ -250,7 +227,13 @@ impl MemoryReadTool {
             coverage["startAt"] = json!(start);
             coverage["returned"] = json!(next - start);
             coverage["notReturnedBySize"] = json!(recall.items.len() - next);
-            let all_returned = start == 0 && next == recall.items.len() && !more;
+            coverage["shownCut"] = json!(page.cut);
+            coverage["passedBySize"] = json!(page.skipped);
+            let all_returned = start == 0
+                && next == recall.items.len()
+                && !more
+                && page.cut.is_empty()
+                && page.skipped == 0;
             let captures_whole = recall.coverage["capturesWithUnitsNotKept"]
                 .as_u64()
                 .is_some_and(|count| count == 0);
@@ -323,6 +306,24 @@ impl MemoryReadTool {
             result["coverage"]["note"] = json!("the result budget was too small for any item");
         }
         bounded_json_output(&call, result)
+    }
+
+    /// One entry's whole content: the route for an item a recall page had to cut.
+    async fn whole_entry(
+        &self,
+        call: &ToolCall<'_>,
+        entry_id: &str,
+    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        let id = BlackboardEntryId::parse(entry_id).map_err(respond)?;
+        let store = self.services.blackboard().await.map_err(respond)?;
+        let entry = store
+            .get_entry(&self.project_id, &id)
+            .await
+            .map_err(respond)?
+            .ok_or_else(|| respond(format!("no entry {entry_id} in this project")))?;
+        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let result = whole_entry_result(&entry, |result| fits_response(result, budget));
+        bounded_json_output(call, result)
     }
 
     /// Matching or recent entries, each current entry followed by its history, and whether
@@ -769,7 +770,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "One recall of earlier work when the packet and conversation lack the answer: what was decided and why, what was ruled out, what is still open, what changed, a summary since a date. Asking about one kind (or passing kind) lists every current item of it, topic first, whole, with a cursor when more remain. Returns matching knowledge with status (current, replaced, retired), what it replaced, source and dates, plus matching earlier turns, in one result; its evidence needs no confirmation read. Do not chain reads; skip it when the packet already answers.".to_string(),
+            description: "One recall of earlier work when the packet and conversation lack the answer: what was decided and why, ruled out or left open, what changed, a summary since a date. One kind (asked about, or passed as kind) lists all its current items, topic first, paged by cursor; entryId reads one whole. Returns matching knowledge with status (current, replaced, retired), what it replaced, source and dates, plus matching earlier turns, in one result; its evidence needs no confirmation read. Do not chain reads; skip it when the packet already answers.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -779,7 +780,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
                     "since": {"type": "string", "description": "YYYY-MM-DD (UTC)"},
                     "includeHistory": {"type": "boolean"},
                     "kind": {"type": "string", "enum": ["ruledOut", "decision", "openCheck", "rule", "background"]},
-                    "cursor": {"type": "string", "description": "nextCursor of the previous page"}
+                    "cursor": {"type": "string", "description": "nextCursor of the previous page"},
+                    "entryId": {"type": "string"}
                 },
                 "additionalProperties": false
             }))

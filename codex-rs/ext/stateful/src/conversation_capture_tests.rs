@@ -4,6 +4,7 @@ use codex_extension_api::ExtensionData;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::CandidateLifecycle;
+use codex_project_intelligence::CategoryQuery;
 use codex_project_intelligence::KnowledgeCategory as Category;
 use codex_project_intelligence::KnowledgeScope;
 use codex_project_intelligence::ScopeKind;
@@ -119,13 +120,15 @@ async fn stored(
 ) -> Vec<(String, Option<Category>, Option<String>, Value)> {
     let store = services.blackboard().await.expect("store");
     let (entries, _) = store
-        .categorized_entries(
-            PROJECT_ID,
+        .categorized_entries(CategoryQuery {
+            project_id: PROJECT_ID,
             categories,
-            &[BlackboardKind::RejectedApproach],
-            CandidateLifecycle::Current,
-            /*limit*/ 50,
-        )
+            legacy_kinds: &[BlackboardKind::RejectedApproach],
+            lifecycle: CandidateLifecycle::Current,
+            topic: &[],
+            changed_since_ms: None,
+            limit: 50,
+        })
         .await
         .expect("entries");
     entries
@@ -292,13 +295,15 @@ async fn answers_reconcile_with_existing_memory() {
     let saved = stored(&services, &[Category::RuledOut]).await;
     // The user forgets both items: the host-saved one and the model's own matched entry.
     let (current, _) = store
-        .categorized_entries(
-            PROJECT_ID,
-            &[Category::RuledOut],
-            &[],
-            CandidateLifecycle::Current,
-            /*limit*/ 10,
-        )
+        .categorized_entries(CategoryQuery {
+            project_id: PROJECT_ID,
+            categories: &[Category::RuledOut],
+            legacy_kinds: &[],
+            lifecycle: CandidateLifecycle::Current,
+            topic: &[],
+            changed_since_ms: None,
+            limit: 10,
+        })
         .await
         .expect("entries");
     for forgotten in current {

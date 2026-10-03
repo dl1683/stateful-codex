@@ -51,6 +51,7 @@ pub use blackboard_storage::BlackboardStore;
 pub use blackboard_storage::BlackboardStoreError;
 pub use blackboard_storage::CandidateLifecycle;
 pub use blackboard_storage::CategorizedEntry;
+pub use blackboard_storage::CategoryQuery;
 pub use blackboard_storage::CompletionFence;
 pub use blackboard_storage::CreateOutcome;
 pub use blackboard_storage::MAX_CATEGORIZED_ENTRIES;

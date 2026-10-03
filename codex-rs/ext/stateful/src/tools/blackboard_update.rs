@@ -288,11 +288,10 @@ impl BlackboardUpdateTool {
                 actual: current.revision,
             }));
         }
-        // An open check stays open until evidence settles it: the model cannot retire or
-        // reword it, and can replace it only with an entry whose evidence is current and
-        // source-verified. The host checks that the evidence is current, not that it answers
-        // the check. A passing run or a finished task does not close it; the user can, with
-        // /memory.
+        // An open check stays open until the user closes it with /memory: the model cannot
+        // retire, reword or replace it, whatever it has since found. A passing run or a
+        // finished task does not close it either. Its context is written with the entry,
+        // never attached later, so this reading holds through the update.
         let open_check = store
             .knowledge_context(&self.project_id, &id)
             .await
@@ -304,23 +303,7 @@ impl BlackboardUpdateTool {
                 MutationArguments::Revise { kind, content, .. } => {
                     kind.is_none() && content.is_none()
                 }
-                MutationArguments::Retire { .. } => false,
-                MutationArguments::Supersede {
-                    successor_entry_id, ..
-                } => {
-                    let successor =
-                        BlackboardEntryId::parse(successor_entry_id.as_str()).map_err(respond)?;
-                    // Settling evidence is current source-verified evidence, not any link.
-                    store
-                        .get_hit(&self.project_id, &successor)
-                        .await
-                        .map_err(respond)?
-                        .is_some_and(|successor| {
-                            !successor.entry.value.evidence.is_empty()
-                                && successor.effective_verification
-                                    == BlackboardVerification::SourceVerified
-                        })
-                }
+                MutationArguments::Retire { .. } | MutationArguments::Supersede { .. } => false,
             };
             if !settled {
                 return Err(respond(super::blackboard_supersede::OPEN_CHECK_STAYS_OPEN));

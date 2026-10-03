@@ -360,10 +360,7 @@ impl BlackboardRecorder {
                 supersedes,
             )
             .await?;
-            // Evidence links resolved for this write are current; a check needs them
-            // source-verified to be settled.
-            if value.evidence.is_empty()
-                || value.verification != BlackboardVerification::SourceVerified
+            // An open check is closed only by the user.
             {
                 let replaced_ids = replaced
                     .iter()

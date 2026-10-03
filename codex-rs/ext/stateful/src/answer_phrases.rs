@@ -159,22 +159,56 @@ pub(crate) fn label_of(label: &str) -> Option<Label> {
     }
 }
 
-/// Whether a ruled-out item does not settle its rejection: its first clause (before a
-/// semicolon or sentence end) is tentative. A later clause about another cause ("likely a
-/// parser bug instead") does not unsettle the rejection itself.
+/// Clause words that turn a later clause to another candidate ("likely a parser bug
+/// instead"), so its uncertainty is not about the rejected item.
+const CONTRAST_WORDS: &[&str] = &["instead", "rather", "another", "other", "elsewhere"];
+
+/// Whether a ruled-out item does not settle its rejection: a clause says the item is still
+/// possible, unchecked or not ruled out, or negates the rejection ("not dismissed"). A later
+/// clause about another cause ("likely a parser bug instead") does not unsettle it.
 pub(crate) fn is_tentative_rejection(item: &str) -> bool {
-    let first = item
-        .split([';', '\n'])
+    item.split([';', '\n'])
+        .flat_map(|part| part.split(". "))
+        .enumerate()
+        .any(|(index, clause)| {
+            let words = normalized(clause);
+            let about_another =
+                index > 0 && words.split(' ').any(|word| CONTRAST_WORDS.contains(&word));
+            !about_another
+                && (has_phrase(&words, NOT_REJECTED_PHRASES) || negates_rejection(&words))
+        })
+}
+
+/// Whether normalized `words` deny a rejection ("not dismissed", "never eliminated").
+fn negates_rejection(words: &str) -> bool {
+    RULED_OUT_PHRASES.iter().any(|phrase| {
+        [
+            "not",
+            "never",
+            "not yet",
+            "not been",
+            "wasn't",
+            "isn't",
+            "hasn't been",
+        ]
+        .iter()
+        .any(|negation| has_phrase(words, &[&format!("{negation} {phrase}")]))
+    })
+}
+
+/// Whether a stated choice says that nothing was chosen. Only the choice itself is judged
+/// (before a semicolon, "because" or sentence end), not what it says about alternatives.
+pub(crate) fn is_unmade_choice(choice: &str) -> bool {
+    let choice = choice
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .split(" because ")
         .next()
         .unwrap_or_default()
         .split(". ")
         .next()
         .unwrap_or_default();
-    has_phrase(&normalized(first), NOT_REJECTED_PHRASES)
-}
-
-/// Whether a stated choice says that nothing was chosen.
-pub(crate) fn is_unmade_choice(choice: &str) -> bool {
     let words = normalized(choice);
     has_phrase(&words, UNMADE_PHRASES)
         || UNMADE_CHOICES
