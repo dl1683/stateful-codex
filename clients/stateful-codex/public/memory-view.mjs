@@ -48,9 +48,13 @@ function renderItem(item, editing) {
   const replaces = item.replaces?.length
     ? `<small>Replaces: ${escapeHtml(item.replaces[0].content)}</small>`
     : "";
-  const correct = editing
+  // A shortened entry cannot be corrected here: saving the excerpt would drop its unseen tail.
+  const correctButton = item.contentTruncated
+    ? `<small>Too long to correct here; forget it and state the new wording instead.</small>`
+    : `<button class="text-button" data-action="memory-correct" data-entry-id="${id}">Correct</button>`;
+  const correct = editing && !item.contentTruncated
     ? `<form class="stack memory-correct" data-memory-correct="${id}" data-revision="${item.revision}"><textarea name="content" aria-label="Corrected text" required>${escapeHtml(item.content)}</textarea><div class="control-row"><button class="primary">${item.section === "unverifiedRule" ? "Correct and apply as your rule" : "Save correction"}</button><button type="button" class="secondary" data-action="memory-cancel">Cancel</button></div></form>`
-    : `<div class="control-row"><button class="text-button" data-action="memory-correct" data-entry-id="${id}">Correct</button><button class="text-button" data-action="memory-forget" data-entry-id="${id}" data-revision="${item.revision}">Forget</button></div>`;
+    : `<div class="control-row">${correctButton}<button class="text-button" data-action="memory-forget" data-entry-id="${id}" data-revision="${item.revision}">Forget</button></div>`;
   return `<article data-memory-entry="${id}"><p>${escapeHtml(item.content)}${item.contentTruncated ? "…" : ""}</p>${replaces}${correct}</article>`;
 }
 

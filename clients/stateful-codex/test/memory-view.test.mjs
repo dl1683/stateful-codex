@@ -75,3 +75,12 @@ test("the run badge separates the answer from the durable run", () => {
     ["Stateful Codex", "(2) Approval needed · Stateful Codex"],
   );
 });
+
+test("a shortened entry offers no correction that would drop its tail", () => {
+  const html = renderMemory({
+    memory: { items: [item("long-1", "userRule", "x".repeat(10), { contentTruncated: true })], more: false, error: null },
+    memoryEditing: "long-1",
+  });
+  assert.doesNotMatch(html, /data-memory-correct|data-action="memory-correct"/);
+  assert.match(html, /Too long to correct here/);
+});
