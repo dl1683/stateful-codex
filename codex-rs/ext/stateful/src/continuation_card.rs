@@ -5,8 +5,10 @@
 //! turn on unrelated work. When the request that opens the window names salient terms,
 //! the record keeps the newest turns, every turn sharing those terms, and at most one
 //! other recent turn; the rest are counted in the record's footer with their retrieval
-//! route. A request without salient terms keeps the whole record: an ambiguous reference
-//! falls back to full continuity instead of a guessed topic. Current code state, decisions
+//! route. A request without salient terms, or one that points at an earlier answer
+//! instead of naming its subject ("apply your fix", "do what you proposed"), keeps the
+//! whole record: an ambiguous reference falls back to full continuity instead of a
+//! guessed topic. Current code state, decisions
 //! with reasons and recipes stay in their own sections (checkout report and root).
 
 use std::collections::HashSet;
@@ -105,13 +107,37 @@ const COMMON_WORDS: &[&str] = &[
     "rest",
 ];
 
+/// Words that point at an earlier answer without naming its subject.
+const POINTING_WORDS: &[&str] = &[
+    "you",
+    "your",
+    "yours",
+    "that",
+    "those",
+    "it",
+    "its",
+    "proposed",
+    "proposal",
+    "suggested",
+    "suggestion",
+    "mentioned",
+    "said",
+    "discussed",
+    "agreed",
+    "recommended",
+    "offered",
+];
+
 /// Narrows `record` to the turns that matter for `request`; see the module comment.
 pub(crate) fn focus_on_request(record: &mut ContinuityRecord, request: Option<&str>) {
     let Some(request) = request else {
         return;
     };
     let terms = salient_terms(request);
-    if terms.is_empty() || record.turns.len() <= NEWEST_KEPT + UNRELATED_KEPT {
+    if terms.is_empty()
+        || points_at_an_earlier_answer(request)
+        || record.turns.len() <= NEWEST_KEPT + UNRELATED_KEPT
+    {
         return;
     }
     let mut unrelated_kept = 0;
@@ -129,6 +155,13 @@ pub(crate) fn focus_on_request(record: &mut ContinuityRecord, request: Option<&s
         }
     }
     record.unrelated_omitted += omitted;
+}
+
+fn points_at_an_earlier_answer(request: &str) -> bool {
+    request
+        .split(|character: char| !character.is_alphanumeric())
+        .map(str::to_lowercase)
+        .any(|word| POINTING_WORDS.contains(&word.as_str()))
 }
 
 fn shares_terms(turn: &CapturedTurn, terms: &HashSet<String>) -> bool {

@@ -74,10 +74,12 @@ fn a_continuation_keeps_recent_and_related_turns_and_counts_the_rest() {
                 "Build the top idea from the compact formatting brainstorm."
             )),
             kept(Some("Continue where we left off, please.")),
+            kept(Some("Apply your fix to the intcomma tests.")),
             kept(None),
         ],
         [
             (ids(&["t6", "t5", "t4", "t3"]), 2),
+            (ids(&["t6", "t5", "t4", "t3", "t2", "t1"]), 0),
             (ids(&["t6", "t5", "t4", "t3", "t2", "t1"]), 0),
             (ids(&["t6", "t5", "t4", "t3", "t2", "t1"]), 0),
         ]
