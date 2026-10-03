@@ -11,7 +11,7 @@ import {
 import { admitRpcMethod } from "../gateway-policy.mjs";
 import { runStateLabel } from "../public/memory-view.mjs";
 import { clipText, groupReceipt, knowledgeReceipt } from "../public/memory-receipts.mjs";
-import { memoryStatusLine, renderRecap } from "../public/memory-status.mjs";
+import { memoryStatusLine } from "../public/memory-status.mjs";
 import { createSummaryReader, newerSummary } from "../public/status-reads.mjs";
 import { createWorkspaceDom } from "../public/workspace-dom.mjs";
 import { applyWorkspaceEvent } from "../public/workspace-events.mjs";
@@ -284,18 +284,6 @@ test("memory holding only unverified rules or other entries is not called empty"
   );
 });
 
-test("the return card is dated, bounded, and invents no next step", () => {
-  const html = renderRecap({ recap: workspaceFixture().recap });
-  assert.match(html, /Where things stand, as of 2026-09-21 15:13 UTC/);
-  assert.match(html, /Last finished 2026-09-21 14:13 UTC/);
-  assert.match(html, /Because: Clause 7 replaces the 40% threshold — the agreement says so\./);
-  assert.match(html, /and 2 more/);
-  assert.doesNotMatch(html, /No next step was recorded/);
-  assert.match(html, /Tell the agent where you would like to pick up/);
-  assert.equal(renderRecap({ recap: { asOf: 1, rules: [], decisions: [], openChecks: [], commits: [] } }), "");
-  assert.equal(renderRecap({ recap: workspaceFixture().recap, recapDismissed: true }), "");
-});
-
 test("one conversation composer; steering is a collapsed run control", () => {
   const html = renderWorkspace(workspaceFixture());
   assert.equal(html.match(/<textarea/g)?.length, 2);
@@ -305,9 +293,11 @@ test("one conversation composer; steering is a collapsed run control", () => {
 });
 
 test("the gateway admits the new read methods", () => {
-  for (const method of ["statefulMemory/summary", "statefulMemory/recap", "thread/turns/list", "thread/read"]) {
+  for (const method of ["statefulMemory/summary", "thread/turns/list", "thread/read"]) {
     assert.equal(admitRpcMethod(method), true, method);
   }
+  // The return card is off: its read is not admitted.
+  assert.equal(admitRpcMethod("statefulMemory/recap"), false);
 });
 
 const UNICODE = "Check § 4–7 — “Ananya’s” note, Zoë 👩‍💻";
@@ -342,7 +332,7 @@ test("section signs, dashes, curly quotes and names round-trip through clipping 
   });
   view.update(state, ["notices"]);
   assert.equal(root.querySelector(".receipt").textContent, `Saved your rule: "${UNICODE}"`);
-  assert.match(root.querySelector("[data-recap]").textContent, /Check § 7 of the amendment — does it change the threshold\?/);
+  assert.equal(root.querySelector("[data-recap]"), null);
 });
 
 test("commit counts come from the committed totals, and failures are said", () => {
@@ -446,28 +436,4 @@ test("a late session start stays qualified across a reload of the tab", async ()
   const cleanStore = { getItem: (key) => clean.get(key) ?? null, setItem: (key, value) => clean.set(key, value), removeItem: (key) => clean.delete(key) };
   await createSummaryReader(rpc, { threadId: "thread-b", storage: cleanStore })();
   assert.equal((await createSummaryReader(rpc, { threadId: "thread-b", storage: cleanStore })()).sessionStartedLate, false);
-});
-
-test("recap marks the assistant's conclusions, keeps hidden overflow visible and qualifies unread history", () => {
-  const html = renderRecap({
-    recap: {
-      asOf: 1790000000,
-      lastWork: { threadId: "t", finishedAt: 1789990000, request: "Draft § 3 — conclusion" },
-      rules: [],
-      moreRules: 2,
-      decisions: [{ text: "Use SQLite.", reason: null, reported: true }],
-      moreDecisions: 0,
-      openChecks: [],
-      moreOpenChecks: 0,
-      commits: [],
-      moreCommits: 0,
-      captureIncomplete: 0,
-      historyComplete: false,
-    },
-  });
-  assert.match(html, /Rules that apply/);
-  assert.match(html, /and 2 more/);
-  assert.match(html, /the assistant’s conclusion/);
-  assert.match(html, /Some earlier work could not be read/);
-  assert.match(html, /Draft § 3 — conclusion/);
 });

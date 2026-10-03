@@ -4,7 +4,7 @@ import {
 } from "./approval-view.mjs";
 import { describeAnswer, normalizeThreadItem } from "./answer-provenance.mjs";
 import { renderMemory, runStateLabel } from "./memory-view.mjs";
-import { renderMemoryStatus, renderRecap } from "./memory-status.mjs";
+import { renderMemoryStatus } from "./memory-status.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { effectiveFreshness, isRootUnavailable, rootKey } from "./source-availability.mjs";
 
@@ -27,7 +27,6 @@ export const WORKSPACE_SLOTS = {
   header: renderHeader,
   notices: renderNotices,
   "memory-status": renderMemoryStatus,
-  recap: renderRecap,
   intelligence: renderIntelligence,
   hierarchy: renderHierarchy,
   "routing-results": renderRoutingResults,
@@ -70,7 +69,6 @@ export function renderWorkspaceShell(state, slotHtml) {
         </aside>
         <section class="stack-panel main-work">
           ${renderRequests(state)}
-          ${slot("recap")}
           ${slot("obligation")}
           ${slot("strategy")}
           ${slot("result")}

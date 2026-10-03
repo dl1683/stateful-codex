@@ -99,11 +99,3 @@ function readWatermark(storage, threadId) {
     return null;
   }
 }
-
-export async function readRecap(rpc, threadId) {
-  try {
-    return await rpc("statefulMemory/recap", { threadId });
-  } catch (error) {
-    return { error: error.message };
-  }
-}

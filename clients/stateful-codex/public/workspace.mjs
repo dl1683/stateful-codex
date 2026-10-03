@@ -4,7 +4,7 @@ import { findTurnMeasurement, latestAnswerTurn } from "./answer-provenance.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { applySnapshot, beginSnapshot, createExecution } from "./execution-state.mjs";
-import { createSummaryReader, newerSummary, readExecutionSnapshot, readRecap } from "./status-reads.mjs";
+import { createSummaryReader, newerSummary, readExecutionSnapshot } from "./status-reads.mjs";
 import { createSourceSearch } from "./source-search.mjs";
 import { submitSteering } from "./steering-submit.mjs";
 import {
@@ -65,8 +65,6 @@ const state = {
   // Unknown until thread/read or a live turn event says otherwise; never assumed idle.
   execution: createExecution(),
   memorySummary: null,
-  recap: null,
-  recapDismissed: false,
   receipts: [],
   memory: null,
   memoryEditing: null,
@@ -102,9 +100,6 @@ async function boot() {
     render(["memory-status"]);
     await ensureRun();
     await refresh();
-    // The return card is read once per page load; it describes where things stood on arrival.
-    state.recap = await readRecap(rpc, threadId);
-    render(["recap"]);
   } catch (error) {
     fail(error);
   }
@@ -519,9 +514,6 @@ app.addEventListener("click", async (event) => {
         state.memoryEditing = button.dataset.entryId;
         render(["memory"]);
         break;
-      case "recap-dismiss":
-        state.recapDismissed = true;
-        render(["recap"]);
         break;
       case "memory-cancel":
         state.memoryEditing = null;

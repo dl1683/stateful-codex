@@ -1,8 +1,7 @@
-// Passive memory status and the dated return card, both read from the server's journal-backed
-// projections (statefulMemory/summary and statefulMemory/recap): nothing here is tallied from
-// notifications, and nothing asks the model.
+// Passive memory status, read from the server's journal-backed projection
+// (statefulMemory/summary): nothing here is tallied from notifications, and nothing asks the
+// model.
 
-import { clipText } from "./memory-receipts.mjs";
 
 // "Memory: 2 rules · 1 decision · 1 open check", plus what this page's session changed.
 export function memoryStatusLine(summary) {
@@ -44,69 +43,6 @@ export function sessionChanges(since) {
 
 export function renderMemoryStatus(state) {
   return `<p class="memory-status microcopy" data-memory-status>${escapeHtml(memoryStatusLine(state.memorySummary))}</p>`;
-}
-
-// The return card: dated, bounded, assembled from stored memory. With no recorded next step it
-// invites the person to choose rather than inventing one.
-export function renderRecap(state) {
-  const recap = state.recap;
-  if (!recap || recap.error || state.recapDismissed) return "";
-  const hasContent =
-    recap.lastWork ||
-    recap.rules?.length ||
-    recap.decisions?.length ||
-    recap.openChecks?.length ||
-    recap.commits?.length ||
-    recap.moreRules ||
-    recap.moreDecisions ||
-    recap.moreOpenChecks ||
-    recap.moreCommits ||
-    recap.captureIncomplete ||
-    recap.historyComplete === false;
-  if (!hasContent) return "";
-  const rows = [];
-  if (recap.lastWork) {
-    const request = recap.lastWork.request ? ` — “${escapeHtml(clipText(recap.lastWork.request, 160))}”` : "";
-    rows.push(`<p>Last finished ${escapeHtml(formatDate(recap.lastWork.finishedAt))}${request}</p>`);
-  } else {
-    rows.push(`<p class="microcopy">The last finished work could not be determined.</p>`);
-  }
-  rows.push(list("Rules that apply", recap.rules, recap.moreRules, (rule) => escapeHtml(clipText(rule, 200))));
-  rows.push(
-    list("Current decisions", recap.decisions, recap.moreDecisions, (decision) =>
-      `${escapeHtml(clipText(decision.text, 200))}${decision.reason ? ` <small>Because: ${escapeHtml(clipText(decision.reason, 200))}</small>` : ""}${decision.reported ? " <small>(the assistant’s conclusion)</small>" : ""}`,
-    ),
-  );
-  rows.push(
-    list("Commits remembered from workspace history", recap.commits, recap.moreCommits, (commit) =>
-      escapeHtml(clipText(commit, 160)),
-    ),
-  );
-  rows.push(list("Open checks", recap.openChecks, recap.moreOpenChecks, (check) => escapeHtml(clipText(check, 200))));
-  if (recap.captureIncomplete) {
-    rows.push(
-      `<p class="microcopy">${recap.captureIncomplete === 1 ? "One capture" : `${recap.captureIncomplete} captures`} could not finish since the last finished work; something you said may be missing from memory.</p>`,
-    );
-  }
-  rows.push(`<p class="microcopy">Capture gaps from before the last finished work are not tracked here.</p>`);
-  if (recap.historyComplete === false) {
-    rows.push(`<p class="microcopy">Some earlier work could not be read, so this may not be the latest.</p>`);
-  }
-  rows.push(`<p class="microcopy">Tell the agent where you would like to pick up.</p>`);
-  return `<section class="workspace-panel recap" data-recap><div class="panel-heading"><h2>Where things stand, as of ${escapeHtml(formatDate(recap.asOf))}</h2><button class="text-button" data-action="recap-dismiss">Hide</button></div>${rows.join("")}</section>`;
-}
-
-function list(title, items, more, renderItem) {
-  if (!items?.length && !more) return "";
-  const extra = more ? `<li class="microcopy">and ${more} more</li>` : "";
-  return `<div class="recap-list"><h3>${title}</h3><ul>${items.map((item) => `<li>${renderItem(item)}</li>`).join("")}${extra}</ul></div>`;
-}
-
-// Unix seconds as "2026-10-03 14:05 UTC": the same everywhere, independent of the browser locale.
-export function formatDate(seconds) {
-  if (!Number.isFinite(seconds)) return "an unknown time";
-  const iso = new Date(seconds * 1000).toISOString();
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 }
 
 function plural(value, one, many = `${one}s`) {
