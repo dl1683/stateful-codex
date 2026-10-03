@@ -55,7 +55,9 @@ use crate::world_state::project_world_state_section;
 /// The product install default (about 230 bytes) took Autonomous to 13,120 (project 6,747,
 /// run 3,561, record 2,812 at its floor). The provenance policy and root section headers
 /// took it to 13,360 (project 6,987); the supersession guidance to 13,509 (project 7,136).
-const MAX_FIXTURE_PACKET_BYTES: usize = 13_600;
+/// Answering rule questions from the packet and one whole-question memory_read (horizon2
+/// S17 made 19 conversation reads) took it to 13,741 (project 7,368).
+const MAX_FIXTURE_PACKET_BYTES: usize = 13_800;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010.
 const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_500;

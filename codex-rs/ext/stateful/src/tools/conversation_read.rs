@@ -316,7 +316,9 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ConversationReadTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        ToolExposure::DirectModelOnly
+        // memory_read answers recall in one call; this full-transcript reader is found
+        // through tool search when a specific turn is needed.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
