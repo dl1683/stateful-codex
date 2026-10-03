@@ -10,6 +10,7 @@ mod steering_storage;
 mod storage;
 mod task_capsule;
 mod window_journal;
+mod window_recovery;
 
 pub use context_window::ContextWindowDecision;
 pub use context_window::ContextWindowMode;
@@ -54,3 +55,4 @@ pub use window_journal::WindowEvent;
 pub use window_journal::WindowEventKind;
 pub use window_journal::WindowPublication;
 pub use window_journal::WindowPublicationState;
+pub use window_recovery::IdleStaging;

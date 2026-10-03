@@ -76,14 +76,14 @@ struct StoredEvent {
 }
 
 #[derive(FromRow)]
-struct StoredPublication {
-    thread_id: String,
-    from_seq: i64,
-    through_seq: i64,
-    project_id: String,
-    entry_id: String,
-    content: String,
-    state: String,
+pub(crate) struct StoredPublication {
+    pub(crate) thread_id: String,
+    pub(crate) from_seq: i64,
+    pub(crate) through_seq: i64,
+    pub(crate) project_id: String,
+    pub(crate) entry_id: String,
+    pub(crate) content: String,
+    pub(crate) state: String,
 }
 
 impl StatefulRunStore {
@@ -431,18 +431,18 @@ impl StatefulRunStore {
     }
 }
 
-fn validate_identity(value: &str) -> Result<(), StatefulRunStoreError> {
+pub(crate) fn validate_identity(value: &str) -> Result<(), StatefulRunStoreError> {
     if value.is_empty() || value.len() > MAX_IDENTITY_BYTES || value.chars().any(char::is_control) {
         return Err(StatefulRunStoreError::InvalidRecordId);
     }
     Ok(())
 }
 
-fn parse_seq(value: i64) -> Result<u64, StatefulRunStoreError> {
+pub(crate) fn parse_seq(value: i64) -> Result<u64, StatefulRunStoreError> {
     u64::try_from(value).map_err(|_| StatefulRunStoreError::CorruptCount)
 }
 
-fn to_i64(value: u64) -> Result<i64, StatefulRunStoreError> {
+pub(crate) fn to_i64(value: u64) -> Result<i64, StatefulRunStoreError> {
     i64::try_from(value).map_err(|_| StatefulRunStoreError::CountOverflow)
 }
 
@@ -482,7 +482,9 @@ fn parse_event(row: StoredEvent) -> Result<WindowEvent, StatefulRunStoreError> {
     })
 }
 
-fn parse_publication(row: StoredPublication) -> Result<WindowPublication, StatefulRunStoreError> {
+pub(crate) fn parse_publication(
+    row: StoredPublication,
+) -> Result<WindowPublication, StatefulRunStoreError> {
     Ok(WindowPublication {
         thread_id: row.thread_id,
         from_seq: parse_seq(row.from_seq)?,

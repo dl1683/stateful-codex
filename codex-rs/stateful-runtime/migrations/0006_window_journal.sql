@@ -31,3 +31,13 @@ CREATE TABLE stateful_window_publications (
 
 CREATE INDEX stateful_window_publications_pending
 ON stateful_window_publications (project_id, state, created_at_ms);
+
+-- A window closed by compaction or a reset, through this journal sequence: its suffix must be
+-- published even if staging failed when the window opened.
+CREATE TABLE stateful_window_closures (
+    thread_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    through_seq INTEGER NOT NULL CHECK (through_seq > 0),
+    created_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, project_id, through_seq)
+);
