@@ -132,6 +132,7 @@ impl BlackboardStore {
                 &value.project_id,
                 &first.id,
                 &id,
+                value.kind,
                 /*revision*/ 1,
             )
             .await?;

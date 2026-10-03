@@ -184,6 +184,68 @@ pub struct CaptureGroup {
     pub failed: u32,
 }
 
+/// What became of one unit a capture recognized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemberOutcome {
+    Saved,
+    AlreadyPresent,
+    /// The same words were saved once and later forgotten or replaced; a new source does not
+    /// bring them back.
+    NotRestored,
+    /// Recognized but not kept (too long to keep whole, or not a valid entry).
+    Omitted,
+}
+
+/// One unit of a capture, in source order.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CaptureUnit {
+    /// A new entry under `id`, unless that identity is already stored, or it or one of
+    /// `retired_identities` (the same words elsewhere) was forgotten or replaced.
+    Entry {
+        id: crate::BlackboardEntryId,
+        retired_identities: Vec<crate::BlackboardEntryId>,
+        value: Box<crate::NewBlackboardEntry>,
+        context: KnowledgeContext,
+        change: ChangeRecord,
+    },
+    /// An entry already holding exactly these words (a model write of this turn); it gets
+    /// `context` if it has none and is listed as already present.
+    Existing {
+        id: crate::BlackboardEntryId,
+        context: KnowledgeContext,
+    },
+    /// Recognized but not kept; `note` says what it was and why.
+    Omitted { note: String },
+}
+
+/// Where a capture's units were read from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaptureSource {
+    /// Stable route to the source ("assistant-answer:<thread>/<turn>/<item>").
+    pub locator: String,
+    /// SHA-256 of the exact source text, hex.
+    pub digest: String,
+}
+
+/// One member of a stored capture group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaptureMember {
+    pub ordinal: u32,
+    pub entry_id: Option<String>,
+    pub outcome: MemberOutcome,
+    pub note: Option<String>,
+}
+
+/// A committed capture: the group with its counts, where it was read from, and its members.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommittedCapture {
+    pub group: CaptureGroup,
+    pub source: Option<CaptureSource>,
+    pub members: Vec<CaptureMember>,
+    /// False when the same source was committed before and this returned that result.
+    pub newly_committed: bool,
+}
+
 macro_rules! string_enum {
     ($name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
         impl $name {
@@ -256,4 +318,10 @@ string_enum!(ChangeOrigin {
     DirectControl => "direct_control",
     ModelTool => "model_tool",
     HostObserved => "host_observed",
+});
+string_enum!(MemberOutcome {
+    Saved => "saved",
+    AlreadyPresent => "already_present",
+    NotRestored => "not_restored",
+    Omitted => "omitted",
 });

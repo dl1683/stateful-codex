@@ -28,6 +28,7 @@ use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
+mod capture;
 mod fence;
 mod knowledge;
 mod query;
@@ -36,6 +37,8 @@ mod review;
 mod succession;
 mod update;
 
+pub use capture::CategorizedEntry;
+pub use capture::MAX_CATEGORIZED_ENTRIES;
 pub use fence::CompletionFence;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;

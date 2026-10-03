@@ -429,15 +429,20 @@ pub(super) async fn write_context(
 }
 
 /// Copies the newest context of `from` to revision `revision` of `to` (a successor keeps its
-/// predecessor's category, scope and position).
+/// predecessor's category, scope and position). An open check replaced by something other
+/// than a question was settled: its successor is not an open check.
 pub(super) async fn carry_context(
     connection: &mut SqliteConnection,
     project_id: &str,
     from: &BlackboardEntryId,
     to: &BlackboardEntryId,
+    to_kind: crate::BlackboardKind,
     revision: i64,
 ) -> Result<(), BlackboardStoreError> {
-    if let Some(context) = context_of(&mut *connection, project_id, from.as_str()).await? {
+    if let Some(context) = context_of(&mut *connection, project_id, from.as_str()).await?
+        && (context.category != crate::KnowledgeCategory::OpenCheck
+            || to_kind == crate::BlackboardKind::Question)
+    {
         write_context(connection, project_id, to, revision, &context).await?;
     }
     Ok(())
@@ -490,7 +495,7 @@ fn bounded_preview(text: &str) -> &str {
     &text[..end]
 }
 
-async fn context_of(
+pub(super) async fn context_of(
     connection: &mut SqliteConnection,
     project_id: &str,
     entry_id: &str,
@@ -510,7 +515,9 @@ async fn context_of(
     .transpose()
 }
 
-fn parse<T: std::str::FromStr<Err = String>>(value: &str) -> Result<T, BlackboardStoreError> {
+pub(super) fn parse<T: std::str::FromStr<Err = String>>(
+    value: &str,
+) -> Result<T, BlackboardStoreError> {
     value
         .parse()
         .map_err(|error: String| BlackboardStoreError::InvalidStoredKnowledge(error))
