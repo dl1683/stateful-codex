@@ -252,10 +252,13 @@ pub(crate) fn inherited_scope(text: &str, clause: &str) -> Option<HeaderScope> {
 /// one (a Markdown lazy continuation keeps the item, and so the header, it continues).
 /// Tracks across lines whether a list is open.
 fn in_list_item(line: &str, trimmed: &str, in_list: &mut bool) -> bool {
-    // An indented header ("  For this task:") opens its own nested scope instead.
-    let continuation = *in_list && line.starts_with([' ', '\t']) && !trimmed.ends_with(':');
-    *in_list = list_item_body(trimmed).is_some() || continuation;
-    *in_list
+    let indented = *in_list && line.starts_with([' ', '\t']);
+    // An indented header ("  For this task:") opens its own nested scope instead, and the
+    // list stays open around it so a further nested header still narrows the same list.
+    let continuation = indented && !trimmed.ends_with(':');
+    let is_item = list_item_body(trimmed).is_some() || continuation;
+    *in_list = is_item || indented;
+    is_item
 }
 
 /// The scope a non-item line gives the list items after it. A header nested inside a list
@@ -323,7 +326,10 @@ const RULE_NOUNS: &[&str] = &[
 /// Whether `clause` asks to retrieve the user's rules rather than stating one: one of its
 /// phrases (split at punctuation) opens with a retrieval request, and it names rules.
 pub(crate) fn asks_about_rules(clause: &str) -> bool {
-    has_phrase(&normalize(clause), RULE_NOUNS)
+    let normalized = normalize(clause);
+    // "From now on, repeat my instructions word for word." asks for every later reply.
+    !has_phrase(&normalized, STRONG_STANDING_PHRASES)
+        && has_phrase(&normalized, RULE_NOUNS)
         && clause
             .split([':', ',', ';', '-'])
             .map(normalize)

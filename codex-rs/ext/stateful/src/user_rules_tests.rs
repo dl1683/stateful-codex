@@ -267,3 +267,24 @@ fn neutral_nested_headers_keep_the_enclosing_restriction_and_rules_about_rules_a
         )
     );
 }
+
+#[test]
+fn consecutive_nested_headers_and_standing_retrieval_rules() {
+    let task = "For this task:
+- Check the setup.
+  Details:
+    Migration policy:
+    - Never run migrations.";
+    let repeat = "From now on, repeat my instructions word for word.";
+    assert_eq!(
+        (
+            super::inherited_scope(task, "- Never run migrations."),
+            marked_rules(task)
+                .iter()
+                .all(|rule| rule.standing == RuleStanding::Pending),
+            super::asks_about_rules(repeat),
+            super::asks_about_rules("Repeat my instructions word for word."),
+        ),
+        (Some(super::HeaderScope::Pending), true, false, true)
+    );
+}
