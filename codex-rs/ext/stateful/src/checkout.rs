@@ -50,6 +50,8 @@ const MAX_LISTED: usize = 10;
 /// Longest report rendered for one turn.
 pub(crate) const MAX_REPORT_BYTES: usize = 1_536;
 const OBSERVATION_BUDGET: Duration = Duration::from_secs(2);
+/// Longest a turn's start spends qualifying remembered assertions against changed files.
+const QUALIFICATION_BUDGET: Duration = Duration::from_millis(1_500);
 const COMMIT_FACT_CONFIDENCE_BASIS_POINTS: u16 = 10_000;
 
 /// What the turn's start found changed since the last observation, for this turn's packet.
@@ -337,6 +339,8 @@ async fn compare(
 ) -> (Option<CheckoutReport>, bool) {
     let mut complete = true;
     let mut lines = Vec::new();
+    // One deadline for qualifying remembered assertions across all roots of this turn.
+    let qualification_deadline = tokio::time::Instant::now() + QUALIFICATION_BUDGET;
     for sample in samples {
         let Some(before) = previous
             .roots
@@ -470,6 +474,29 @@ async fn compare(
             (_, GitWorktreeObservation::Unknown(_)) => {
                 root_lines.push("Whether there are uncommitted changes is unknown.".to_string());
             }
+        }
+        // Remembered assertions depending on files changed since they were last qualified.
+        if let (Some(worktree_root), GitHeadObservation::Commit { oid, .. }) =
+            (&sample.observation.worktree_root, &sample.observation.head)
+        {
+            let previous_head = match &before.head {
+                RepositoryHead::Commit { oid, .. } => Some(oid.as_str()),
+                RepositoryHead::Unborn { .. } | RepositoryHead::Unknown { .. } => None,
+            };
+            let root = crate::source_qualification::ObservedRoot {
+                project_root: &sample.project_root,
+                worktree_root,
+                head: &oid.0,
+                previous_head,
+            };
+            let lines = crate::source_qualification::qualify_root(
+                services,
+                project_id,
+                &root,
+                qualification_deadline,
+            )
+            .await;
+            root_lines.extend(lines.into_iter().map(|line| format!("- {line}")));
         }
         if !root_lines.is_empty() {
             lines.push(format!("{}:", single_line(&sample.project_root)));

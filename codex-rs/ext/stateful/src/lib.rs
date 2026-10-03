@@ -25,6 +25,7 @@ mod run_world_state;
 mod services;
 mod socratic;
 mod source_freshness;
+mod source_qualification;
 mod tools;
 mod user_messages;
 mod user_rules;
