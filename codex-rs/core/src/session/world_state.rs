@@ -24,7 +24,10 @@ use crate::context::world_state::ToolsState;
 use crate::context::world_state::WorldState;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use codex_connectors::AppToolPolicyEvaluator;
+use codex_extension_api::ContextWindowView;
+use codex_extension_api::WindowBuild;
 use codex_extension_api::WorldStateContributionInput;
+use codex_extension_api::WorldStateSectionContribution;
 use codex_features::Feature;
 use codex_file_system::FileSystemSandboxContext;
 use codex_prompts::ApprovalPromptContext;
@@ -290,34 +293,15 @@ impl Session {
                 Arc::clone(&extension_metrics),
             ));
         }
-        let environments = step_context.environments.to_selections();
-        let ready_selected_capability_roots = step_context
-            .selected_capability_roots
-            .iter()
-            .map(|root| root.selected_root().clone())
-            .collect::<Vec<_>>();
-        let previous_world_state = self.state.lock().await.history.world_state_checkpoint();
-        for contributor in self.services.extensions.context_contributors() {
-            for section in contributor
-                .contribute_world_state(WorldStateContributionInput {
-                    thread_id: self.thread_id(),
-                    turn_id: turn_context.sub_id.as_str(),
-                    model_info: &step_context.settings.model_info,
-                    environments: &environments,
-                    ready_selected_capability_roots: &ready_selected_capability_roots,
-                    executor_capability_discovery: step_context
-                        .executor_capability_discovery
-                        .as_deref(),
-                    extension_metrics: Some(Arc::clone(&extension_metrics)),
-                    session_store: &self.services.session_extension_data,
-                    thread_store: &self.services.thread_extension_data,
-                    turn_store: turn_context.extension_data.as_ref(),
-                    previous_world_state: previous_world_state.as_ref().map(|state| &state.state),
-                })
-                .await
-            {
-                world_state.add_extension_section(section);
-            }
+        for section in self
+            .extension_world_state_sections(
+                step_context,
+                Arc::clone(&extension_metrics),
+                WindowBuild::OrdinaryStep,
+            )
+            .await
+        {
+            world_state.add_extension_section(section);
         }
         let mut multi_agent_mode = MultiAgentModeState::new(
             super::multi_agents::effective_multi_agent_mode(step_context),
@@ -378,5 +362,76 @@ impl Session {
             ));
         }
         Ok(world_state)
+    }
+
+    /// Extension-owned sections for one step. At a window boundary the host overlays these on
+    /// the step's captured state, so only extensions re-render for the window being opened.
+    pub(crate) async fn extension_world_state_sections(
+        &self,
+        step_context: &StepContext,
+        extension_metrics: Arc<dyn codex_extension_api::ExtensionMetrics>,
+        build: WindowBuild,
+    ) -> Vec<WorldStateSectionContribution> {
+        let turn_context = step_context.turn.as_ref();
+        let environments = step_context.environments.to_selections();
+        let ready_selected_capability_roots = step_context
+            .selected_capability_roots
+            .iter()
+            .map(|root| root.selected_root().clone())
+            .collect::<Vec<_>>();
+        let (previous_world_state, context_window) = {
+            let state = self.state.lock().await;
+            (
+                state.history.world_state_checkpoint(),
+                ContextWindowView {
+                    number: state.auto_compact_window_number(),
+                    id: state.auto_compact_window_ids().window_id.to_string(),
+                    build,
+                },
+            )
+        };
+        let mut sections = Vec::new();
+        for contributor in self.services.extensions.context_contributors() {
+            sections.extend(
+                contributor
+                    .contribute_world_state(WorldStateContributionInput {
+                        thread_id: self.thread_id(),
+                        turn_id: turn_context.sub_id.as_str(),
+                        model_info: &step_context.settings.model_info,
+                        environments: &environments,
+                        ready_selected_capability_roots: &ready_selected_capability_roots,
+                        executor_capability_discovery: step_context
+                            .executor_capability_discovery
+                            .as_deref(),
+                        extension_metrics: Some(Arc::clone(&extension_metrics)),
+                        session_store: &self.services.session_extension_data,
+                        thread_store: &self.services.thread_extension_data,
+                        turn_store: turn_context.extension_data.as_ref(),
+                        previous_world_state: previous_world_state
+                            .as_ref()
+                            .map(|state| &state.state),
+                        context_window: context_window.clone(),
+                    })
+                    .await,
+            );
+        }
+        sections
+    }
+
+    /// The World State a new context window installs: `world_state`'s host sections, captured
+    /// for the step, with extension sections rendered for the window being opened.
+    pub(crate) async fn world_state_at_window_boundary(
+        &self,
+        step_context: &StepContext,
+        world_state: &WorldState,
+        build: WindowBuild,
+    ) -> WorldState {
+        let extension_metrics = super::extension_metrics::from_session_telemetry(
+            step_context.session_telemetry.clone(),
+        );
+        let sections = self
+            .extension_world_state_sections(step_context, extension_metrics, build)
+            .await;
+        world_state.with_extension_sections(sections)
     }
 }

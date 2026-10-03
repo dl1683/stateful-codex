@@ -30,6 +30,32 @@ pub struct WorldStateContributionInput<'a> {
     /// left model history; use a retained-fragment matcher before referring back to it.
     /// After compaction, sections may contain only retained extension metadata.
     pub previous_world_state: Option<&'a serde_json::Map<String, Value>>,
+    /// The thread's current context window and why this World State is being built.
+    pub context_window: ContextWindowView,
+}
+
+/// The thread's current context window, as the host tracks it across compactions and resumes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContextWindowView {
+    /// 0 for the thread's first window; each compaction or context reset advances it.
+    pub number: u64,
+    /// Host identity of the current window. Resume restores it; a fork copies it, so pair it
+    /// with the thread identity before treating it as this thread's own window.
+    pub id: String,
+    pub build: WindowBuild,
+}
+
+/// Why the host is building World State, relative to the thread's context window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WindowBuild {
+    /// An ordinary sampling step inside the current window.
+    #[default]
+    OrdinaryStep,
+    /// The initial context installed beside a native compaction summary, which keeps the
+    /// conversation's retained user messages.
+    CompactionBoundary,
+    /// The initial context of a window that replaced history without any summary.
+    ContextReset,
 }
 
 /// What the harness knows about the previous value of one extension-owned section.

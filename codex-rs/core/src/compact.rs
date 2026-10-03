@@ -31,6 +31,7 @@ use codex_analytics::CompactionStatus;
 use codex_analytics::CompactionStrategy;
 use codex_analytics::CompactionTrigger;
 use codex_analytics::now_unix_seconds;
+use codex_extension_api::WindowBuild;
 use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::ResponseItemId;
@@ -101,12 +102,22 @@ pub(crate) async fn build_compaction_initial_context(
             world_state,
             step_context,
         } => {
+            // Callers advance the window first: host sections stay as captured for the step,
+            // while extensions render for the window this checkpoint opens.
+            let world_state = Arc::new(
+                Box::pin(sess.world_state_at_window_boundary(
+                    step_context,
+                    world_state,
+                    WindowBuild::CompactionBoundary,
+                ))
+                .await,
+            );
             let items = sess
                 .build_initial_context_with_world_state(step_context, world_state.as_ref())
                 .await;
             (
                 items.into_iter().map(ResponseItemEnvelope::new).collect(),
-                Some(Arc::clone(world_state)),
+                Some(world_state),
             )
         }
         InitialContextInjection::DoNotInject => (Vec::new(), None),

@@ -34,7 +34,9 @@ use serde_json::Value;
 use sha1::Digest;
 use sha1::Sha1;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
 pub(crate) use agents_md::AgentsMdState;
 pub(crate) use apps_instructions::AppsInstructionsState;
@@ -285,7 +287,9 @@ fn hash_component(hasher: &mut Sha1, value: &str) {
 /// Live model-visible state, keyed by the same stable section IDs used in rollouts.
 #[derive(Default)]
 pub(crate) struct WorldState {
-    sections: IndexMap<&'static str, Box<dyn ErasedWorldStateSection>>,
+    sections: IndexMap<&'static str, Arc<dyn ErasedWorldStateSection>>,
+    /// Sections contributed by extensions rather than the host.
+    extension_ids: HashSet<&'static str>,
 }
 
 /// Compact comparison state for each model-visible world-state section.
@@ -363,7 +367,7 @@ impl WorldState {
             !self.sections.contains_key(id),
             "duplicate world-state section ID: {id}"
         );
-        self.sections.insert(id, Box::new(section));
+        self.sections.insert(id, Arc::new(section));
     }
 
     pub(crate) fn add_extension_section(&mut self, section: WorldStateSectionContribution) {
@@ -372,7 +376,8 @@ impl WorldState {
             !self.sections.contains_key(id),
             "duplicate world-state section ID: {id}"
         );
-        let section = Box::new(ExtensionWorldStateSection(section));
+        let section = Arc::new(ExtensionWorldStateSection(section));
+        self.extension_ids.insert(id);
         if id == "host_skills"
             && let Some(index) = self.sections.get_index_of(PermissionsState::ID)
         {
@@ -380,6 +385,48 @@ impl WorldState {
         } else {
             self.sections.insert(id, section);
         }
+    }
+
+    /// A copy whose host sections (and their order) are kept while every extension section is
+    /// replaced by `sections`, placed where the extension sections were.
+    pub(crate) fn with_extension_sections(
+        &self,
+        sections: impl IntoIterator<Item = WorldStateSectionContribution>,
+    ) -> Self {
+        let mut state = Self::default();
+        let mut anchor = None;
+        for (id, section) in &self.sections {
+            if self.extension_ids.contains(id) {
+                if *id != "host_skills" && anchor.is_none() {
+                    anchor = Some(state.sections.len());
+                }
+                continue;
+            }
+            state.sections.insert(id, Arc::clone(section));
+        }
+        let mut at = anchor.unwrap_or(state.sections.len());
+        for section in sections {
+            let id = section.id();
+            assert!(
+                !state.sections.contains_key(id),
+                "duplicate world-state section ID: {id}"
+            );
+            let section = Arc::new(ExtensionWorldStateSection(section));
+            state.extension_ids.insert(id);
+            match state.sections.get_index_of(PermissionsState::ID) {
+                Some(index) if id == "host_skills" => {
+                    state.sections.shift_insert(index, id, section);
+                    if index <= at {
+                        at += 1;
+                    }
+                }
+                Some(_) | None => {
+                    state.sections.shift_insert(at, id, section);
+                    at += 1;
+                }
+            }
+        }
+        state
     }
 
     pub(crate) fn snapshot(&self) -> WorldStateSnapshot {

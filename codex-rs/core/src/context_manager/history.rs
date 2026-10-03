@@ -479,6 +479,10 @@ impl ContextManager {
         self.world_state_baseline = Some(snapshot);
     }
 
+    pub(crate) fn world_state_baseline(&self) -> Option<&WorldStateSnapshot> {
+        self.world_state_baseline.as_ref()
+    }
+
     pub(crate) fn world_state_checkpoint(&self) -> Option<WorldStateItem> {
         self.world_state_baseline
             .clone()

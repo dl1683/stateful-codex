@@ -65,8 +65,10 @@ pub use turn_lifecycle::TurnErrorInput;
 pub use turn_lifecycle::TurnStartInput;
 pub use turn_lifecycle::TurnStartPhase;
 pub use turn_lifecycle::TurnStopInput;
+pub use world_state::ContextWindowView;
 pub use world_state::PreviousWorldStateSection;
 pub use world_state::RenderedWorldStateFragment;
+pub use world_state::WindowBuild;
 pub use world_state::WorldStateContributionInput;
 pub use world_state::WorldStateSectionContribution;
 

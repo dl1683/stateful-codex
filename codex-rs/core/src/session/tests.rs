@@ -11448,7 +11448,12 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         crate::compact::build_compaction_initial_context(&session, &retained).await;
 
     assert_eq!(restored_a, initial_a);
-    assert!(Arc::ptr_eq(restored_world.as_ref().unwrap(), &world_a));
+    // The boundary overlay re-renders extension sections for the new window; with nothing
+    // window-dependent, it equals the captured step's state.
+    assert_eq!(
+        restored_world.as_ref().unwrap().snapshot(),
+        world_a.snapshot()
+    );
     let initial_a = initial_a
         .into_iter()
         .map(ResponseItemEnvelope::into_item)

@@ -106,6 +106,7 @@ async fn cloud_preference_preserves_aliases_reads_and_executor_fallback() -> Tes
             let sections = registry.context_contributors()[0]
                 .contribute_world_state(WorldStateContributionInput {
                     previous_world_state: Some(&previous),
+                    context_window: Default::default(),
                     model_info: &model_info,
                     thread_id: codex_protocol::ThreadId::new(),
                     turn_id: stage,

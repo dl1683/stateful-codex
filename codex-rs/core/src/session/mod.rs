@@ -73,6 +73,7 @@ use codex_extension_api::ConversationHistorySnapshot;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::PromptSlot;
 use codex_extension_api::TurnContextContributionInput;
+use codex_extension_api::WindowBuild;
 use codex_features::FEATURES;
 use codex_features::Feature;
 use codex_features::unstable_features_warning_event;
@@ -3631,8 +3632,16 @@ impl Session {
         let turn_context = step_context.turn.as_ref();
         // Render model-visible state from the same step used to build and run tools.
         let world_state = Arc::new(self.build_world_state_for_step(step_context).await?);
-        // Derive the model update and persisted patch from the same two snapshots.
-        let previous_snapshot = previous_world_state.snapshot();
+        // Derive the model update and persisted patch from the same two snapshots. A compaction
+        // during the turn installs a new baseline, which supersedes the turn's earlier state.
+        let previous_snapshot = self
+            .state
+            .lock()
+            .await
+            .history
+            .world_state_baseline()
+            .cloned()
+            .unwrap_or_else(|| previous_world_state.snapshot());
         let world_state_snapshot = world_state.snapshot();
         let world_state_item = world_state_snapshot
             .merge_patch_from(&previous_snapshot)
@@ -4596,6 +4605,15 @@ impl Session {
             state.start_new_context_window()
         };
         let (window_number, window_ids) = window;
+        // This window replaced history without a summary; extensions render for it.
+        let world_state = Arc::new(
+            Box::pin(self.world_state_at_window_boundary(
+                step_context,
+                world_state.as_ref(),
+                WindowBuild::ContextReset,
+            ))
+            .await,
+        );
         let context_items = self
             .build_initial_context_with_world_state(step_context, world_state.as_ref())
             .await
