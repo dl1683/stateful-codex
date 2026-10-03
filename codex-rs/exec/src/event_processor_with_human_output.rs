@@ -38,6 +38,8 @@ pub(crate) struct EventProcessorWithHumanOutput {
     final_message_rendered: bool,
     emit_final_message_on_shutdown: bool,
     stateful_attribution: StatefulAttributionAccumulator,
+    /// What project memory newly saved during this run, by kind, for the closing summary.
+    memory_saved: std::collections::BTreeMap<&'static str, usize>,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -63,6 +65,7 @@ impl EventProcessorWithHumanOutput {
             final_message_rendered: false,
             emit_final_message_on_shutdown: false,
             stateful_attribution: StatefulAttributionAccumulator::default(),
+            memory_saved: std::collections::BTreeMap::new(),
         }
     }
 
@@ -348,6 +351,23 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             | ServerNotification::ContextCompacted(_) => CodexStatus::Running,
             ServerNotification::StatefulKnowledgeCaptured(notification) => {
                 let receipt = crate::exec_events::StatefulKnowledgeEvent::from(&notification);
+                if matches!(
+                    receipt.outcome,
+                    crate::exec_events::StatefulCaptureOutcome::Stored
+                ) {
+                    *self
+                        .memory_saved
+                        .entry(match receipt.category {
+                            crate::exec_events::StatefulKnowledgeCategory::Rule => "standing rule",
+                            crate::exec_events::StatefulKnowledgeCategory::PendingRule => {
+                                "pending rule (not applied)"
+                            }
+                            crate::exec_events::StatefulKnowledgeCategory::Decision => "decision",
+                            crate::exec_events::StatefulKnowledgeCategory::Recipe => "recipe",
+                            crate::exec_events::StatefulKnowledgeCategory::Finding => "finding",
+                        })
+                        .or_default() += 1;
+                }
                 eprintln!(
                     "{} {} {}: \"{}\"",
                     "stateful:".style(self.cyan).style(self.bold),
@@ -484,6 +504,20 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             && let Some(path) = self.last_message_path.as_deref()
         {
             handle_last_message(self.final_message.as_deref(), path);
+        }
+
+        // The run's memory changes, repeated after the work so they are not lost in it.
+        if !self.memory_saved.is_empty() {
+            let saved = self
+                .memory_saved
+                .iter()
+                .map(|(kind, count)| format!("{count} {kind}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!(
+                "{} saved {saved} this run",
+                "project memory:".style(self.cyan).style(self.bold),
+            );
         }
 
         let usage = self.stateful_attribution.usage();

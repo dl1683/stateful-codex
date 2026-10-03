@@ -378,3 +378,67 @@ async fn exec_resume_joins_an_open_collaborative_run_only_without_the_flag() -> 
     );
     Ok(())
 }
+
+/// A rule the user marks in the prompt is acknowledged on stderr in human output and as a
+/// `stateful.knowledge` event in JSON output.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_shows_a_receipt_for_a_captured_rule() -> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    let response_mock = responses::mount_sse_sequence(
+        &server,
+        (0..2)
+            .map(|_| {
+                responses::sse(vec![
+                    responses::ev_response_created("response-1"),
+                    responses::ev_assistant_message("message-1", "done"),
+                    responses::ev_completed("response-1"),
+                ])
+            })
+            .collect(),
+    )
+    .await;
+    let prompt = "From now on, never run the whole test suite.";
+    let human = test
+        .cmd_with_server(&server)
+        .arg("--stateful")
+        .arg("collaborative")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg(prompt)
+        .assert()
+        .success();
+    let json = test
+        .cmd_with_server(&server)
+        .arg("--stateful")
+        .arg("collaborative")
+        .arg("--json")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg(prompt)
+        .assert()
+        .success();
+
+    assert_eq!(response_mock.requests().len(), 2);
+    let stderr = String::from_utf8_lossy(&human.get_output().stderr).to_string();
+    assert!(
+        stderr.contains(
+            "stateful: saved standing rule: \"From now on, never run the whole test suite.\""
+        ) && stderr.contains("project memory: saved 1 standing rule this run"),
+        "{stderr}"
+    );
+    let knowledge = String::from_utf8_lossy(&json.get_output().stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["type"] == "stateful.knowledge");
+    assert_eq!(
+        knowledge.map(|event| (event["outcome"].clone(), event["category"].clone())),
+        Some((
+            serde_json::json!("already_stored"),
+            serde_json::json!("rule")
+        ))
+    );
+    Ok(())
+}
