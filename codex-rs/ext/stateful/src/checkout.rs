@@ -100,9 +100,7 @@ async fn observe_turn_start_unbounded(
     // the permit must then still see the hold rather than publish over unprocessed changes.
     services.set_checkout_hold(project_id, /*held*/ true);
     let budget = GitObservationBudget::until(tokio::time::Instant::now() + OBSERVATION_BUDGET);
-    let Some((current, samples)) = sample(project_id, roots, &budget).await else {
-        return None;
-    };
+    let (current, samples) = sample(project_id, roots, &budget).await?;
     let store = match services.repository_observations().await {
         Ok(store) => store,
         Err(error) => {
