@@ -177,6 +177,8 @@ async fn list(
         }
     }
     items.truncate(MAX_LISTED);
+    // Numbers follow the order the sections are shown in.
+    items.sort_by_key(|item| section_rank(item.section));
     let run = read_run(request_handle, thread_id).await;
     listing.replace(Some(ShownListing {
         thread_id: thread_id.to_string(),
@@ -293,6 +295,7 @@ pub(crate) fn memory_lines(
             StatefulMemorySection::UnverifiedRule,
             "Rules not in your words (not applied)",
         ),
+        (StatefulMemorySection::Background, "About you (your words)"),
         (StatefulMemorySection::Decision, "Decisions"),
         (StatefulMemorySection::Knowledge, "Other knowledge"),
     ];
@@ -362,12 +365,25 @@ fn run_line(run: &StatefulRun) -> String {
     }
 }
 
+/// Where a section is shown in the listing.
+fn section_rank(section: StatefulMemorySection) -> u8 {
+    match section {
+        StatefulMemorySection::UserRule => 0,
+        StatefulMemorySection::PendingRule => 1,
+        StatefulMemorySection::UnverifiedRule => 2,
+        StatefulMemorySection::Background => 3,
+        StatefulMemorySection::Decision => 4,
+        StatefulMemorySection::Knowledge => 5,
+    }
+}
+
 fn section_noun(section: StatefulMemorySection) -> &'static str {
     match section {
         StatefulMemorySection::UserRule => "rule (applied)",
         StatefulMemorySection::PendingRule => "task-limited rule (not applied)",
         StatefulMemorySection::UnverifiedRule => "rule (not applied)",
         StatefulMemorySection::Decision => "decision",
+        StatefulMemorySection::Background => "note about you",
         StatefulMemorySection::Knowledge => "entry",
     }
 }

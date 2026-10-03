@@ -205,6 +205,7 @@ async fn memory_item(
         MemorySection::PendingRule => ApiSection::PendingRule,
         MemorySection::UnverifiedRule => ApiSection::UnverifiedRule,
         MemorySection::Decision => ApiSection::Decision,
+        MemorySection::Background => ApiSection::Background,
         MemorySection::Knowledge => ApiSection::Knowledge,
     };
     let (content, content_truncated) = bounded(&entry.value.content, MAX_CONTENT_BYTES);

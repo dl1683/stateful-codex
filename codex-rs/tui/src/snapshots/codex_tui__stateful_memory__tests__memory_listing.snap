@@ -11,8 +11,11 @@ Your rules (applied to all work)
 Task-limited rules (kept, not applied)
   2. Don't modify any files today.
 
+About you (your words)
+  3. I'm a backend developer, mostly Go for the last six years.
+
 Decisions
-  3. Months use the symbol mth.
+  4. Months use the symbol mth.
      replaces: "Months use the symbol mo."
 
   /memory forget <number> · /memory correct <number> <new text> · no model turn is used

@@ -5275,6 +5275,7 @@ class StatefulMemorySection(
         | Literal["userRule"]
         | Literal["pendingRule"]
         | Literal["unverifiedRule"]
+        | Literal["background"]
     ]
 ):
     model_config = ConfigDict(
@@ -5284,7 +5285,8 @@ class StatefulMemorySection(
         StatefulMemorySectionValue
         | Literal["userRule"]
         | Literal["pendingRule"]
-        | Literal["unverifiedRule"],
+        | Literal["unverifiedRule"]
+        | Literal["background"],
         Field(description="Where a memory item belongs, matching what new work applies."),
     ]
 

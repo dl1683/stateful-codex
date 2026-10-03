@@ -57,13 +57,16 @@ use crate::world_state::project_world_state_section;
 /// took it to 13,360 (project 6,987); the supersession guidance to 13,509 (project 7,136).
 /// Answering rule questions from the packet and one whole-question memory_read (horizon2
 /// S17 made 19 conversation reads) took it to 13,741 (project 7,368); truncated-rule,
-/// strategy-supersession and root-relative path guidance to 13,866 (project 7,493).
-const MAX_FIXTURE_PACKET_BYTES: usize = 14_000;
+/// strategy-supersession and root-relative path guidance to 13,866 (project 7,493); a
+/// background entry and the guidance on relayed words (tui8) to 14,129 (project 7,756).
+const MAX_FIXTURE_PACKET_BYTES: usize = 14_250;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010. The recall,
 /// truncated-rule, strategy and root-relative path guidance (field evidence from horizon2,
-/// prop2 and learn2) took it to 10,560 against 12,702.
-const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_700;
+/// prop2 and learn2) took it to 10,560 against 12,702. A background entry in the fixture
+/// and the guidance on relayed words and claims about the user (tui8) took it to 10,823
+/// against 12,965.
+const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_950;
 
 const PROJECT_ID: &str = "project-1";
 
@@ -100,6 +103,20 @@ fn promoted_entry(index: usize) -> BlackboardHit {
     )
 }
 
+/// What the user said about themselves, as host capture stores it.
+fn background_entry() -> BlackboardHit {
+    let mut hit = promoted_entry(10);
+    hit.entry.id =
+        BlackboardEntryId::parse("stateful-user-background-0a1b2c").expect("valid entry ID");
+    hit.entry.value.kind = BlackboardKind::Fact;
+    hit.entry.value.content = "I'm a backend developer, mostly Go for the last six years, so my Python is a bit rusty, and I maintain this fork for our internal ops dashboards.".to_string();
+    hit.entry.value.provenance = BlackboardProvenance {
+        kind: BlackboardProvenanceKind::User,
+        source_id: "user-message:thread-1/turn-1".to_string(),
+    };
+    hit
+}
+
 fn project_status() -> ProjectIntelligenceStatus {
     ProjectIntelligenceStatus::Available {
         project: Box::new(StoredProject {
@@ -120,7 +137,10 @@ fn project_status() -> ProjectIntelligenceStatus {
                 RootBlackboardProjection {
                     project_id: PROJECT_ID.to_string(),
                     revision: 12,
-                    data: (1..=10).map(promoted_entry).collect(),
+                    data: (1..=9)
+                        .map(promoted_entry)
+                        .chain([background_entry()])
+                        .collect(),
                     omitted_entries: 0,
                     candidate_entries: 0,
                 },

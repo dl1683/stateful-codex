@@ -2,6 +2,7 @@
 //! ("I know Python well but only a little Rust"): background a later session needs, kept
 //! apart from rules.
 
+use crate::quotation::Quotations;
 use crate::user_rules::MAX_RULE_BYTES;
 use crate::user_rules::clauses;
 use crate::user_rules::is_reported_speech;
@@ -41,17 +42,21 @@ const BACKGROUND_OPENINGS: &[&str] = &[
     "i will not be changing",
     "i'm only reading",
     "i'm just reading",
+    "i maintain",
+    "i'm the maintainer",
+    "i am the maintainer",
+    "i work on",
+    "i'm rusty",
+    "my python is",
 ];
 
 /// Clauses of `text` in which the user describes themselves or the whole work, in their
-/// words. Questions, rules and relayed speech are not background.
+/// words. Questions, rules and relayed speech are not background. Each clause is judged on
+/// its own: a colleague quoted elsewhere in the message does not hide the user's own
+/// description of themselves, while a clause that touches a quotation, sits in a sentence
+/// that reports speech, or comes from a block someone else's words may fill is left out.
 pub(crate) fn background_statements(text: &str) -> Vec<String> {
-    // A message that quotes or shows code anywhere may carry someone else's words on any
-    // line, so it contributes no background at all; missing a statement costs less than
-    // attributing a stranger's self-description to the user.
-    if quotes_or_shows_code(text) {
-        return Vec::new();
-    }
+    let quotations = Quotations::new(text);
     let rules = marked_rules(text)
         .into_iter()
         .map(|rule| rule.text)
@@ -61,7 +66,7 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
     // line) may be someone else's words.
     let mut fenced = false;
     let mut introduced = false;
-    let mut own_lines = Vec::new();
+    let mut statements = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
@@ -79,56 +84,61 @@ pub(crate) fn background_statements(text: &str) -> Vec<String> {
             && !line.starts_with([' ', '\t'])
             && list_item_body(trimmed).is_none();
         introduced = introduced || trimmed.ends_with(':');
-        // A line that quotes, shows code or introduces words after a colon ("She wrote: ...")
-        // is left out whole: splitting it into sentences would lose that context.
-        if plain && !trimmed.contains(['"', '\u{201c}', '\u{201d}', '`', ':']) {
-            own_lines.push(trimmed);
+        if !plain {
+            continue;
+        }
+        for clause in clauses(trimmed) {
+            // Clauses are slices of `text`, so their offsets locate them in its quotations.
+            let start = clause.as_ptr() as usize - text.as_ptr() as usize;
+            if quotations.touches_quotation(start, start + clause.len())
+                || quotations.in_reported_sentence(start)
+                || clause.contains(QUOTE_OR_CODE_MARKS)
+                || clause.ends_with('?')
+                || clause.ends_with(':')
+                || clause.len() > MAX_RULE_BYTES
+                || rules.iter().any(|rule| rule == clause)
+                || is_reported_speech(&normalize(clause))
+            {
+                continue;
+            }
+            // A framing before a colon ("Quick intro since this is our first session: I'm
+            // a ...") is not part of the description; the words after it are.
+            let statement = match clause.split_once(": ") {
+                Some((framing, _)) if describes_self(framing) => clause,
+                Some((_, rest)) if describes_self(rest) => rest.trim(),
+                Some(_) => continue,
+                None if describes_self(clause) => clause,
+                None => continue,
+            };
+            statements.push(statement.to_string());
         }
     }
-    own_lines
-        .into_iter()
-        .flat_map(clauses)
-        .filter(|clause| {
-            !clause.contains(['"', '\u{201c}', '\u{201d}'])
-                && !clause.ends_with('?')
-                && !clause.ends_with(':')
-                && clause.len() <= MAX_RULE_BYTES
-                && !rules.iter().any(|rule| rule == clause)
-                && !is_reported_speech(&normalize(clause))
-                && clause
-                    .split([':', ',', ';', '-'])
-                    .map(normalize)
-                    .any(|phrase| {
-                        let body = strip_list_marker(&phrase);
-                        let body = ["and ", "also ", "oh and ", "but ", "so ", "well "]
-                            .iter()
-                            .find_map(|lead| body.strip_prefix(lead))
-                            .unwrap_or(body);
-                        BACKGROUND_OPENINGS.iter().any(|opening| {
-                            body == *opening || body.starts_with(&format!("{opening} "))
-                        })
-                    })
-        })
-        .map(str::to_string)
-        .collect()
+    statements
 }
 
-/// Whether `text` holds a quotation (double or curly quotes, or a single quote opening a
-/// word) or code (backticks or a fence).
-fn quotes_or_shows_code(text: &str) -> bool {
-    if text.contains([
-        '"', '\u{201c}', '\u{201d}', '\u{2018}', '`', '\u{ab}', '\u{bb}',
-    ]) || text.contains("~~~")
-    {
-        return true;
-    }
-    // An apostrophe inside a word ("I'm") is not a quotation; one opening a word is.
-    let mut previous = ' ';
-    for character in text.chars() {
-        if matches!(character, '\'' | '\u{2019}') && !previous.is_alphanumeric() {
-            return true;
-        }
-        previous = character;
-    }
-    false
+/// Marks that show a quotation or code in a clause.
+const QUOTE_OR_CODE_MARKS: [char; 7] = [
+    '"', '\u{201c}', '\u{201d}', '\u{2018}', '`', '\u{ab}', '\u{bb}',
+];
+
+/// Whether a phrase of `clause` opens with a first-person description of the user or the
+/// work ("I know Python well", "I'm not changing any code").
+fn describes_self(clause: &str) -> bool {
+    clause
+        .split([':', ',', ';', '-'])
+        .map(normalize)
+        .any(|phrase| {
+            let body = strip_list_marker(&phrase);
+            let body = ["and ", "also ", "oh and ", "but ", "so ", "well "]
+                .iter()
+                .find_map(|lead| body.strip_prefix(lead))
+                .unwrap_or(body);
+            BACKGROUND_OPENINGS
+                .iter()
+                .any(|opening| body == *opening || body.starts_with(&format!("{opening} ")))
+        })
 }
+
+#[cfg(test)]
+#[path = "background_tests.rs"]
+mod tests;

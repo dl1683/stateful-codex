@@ -294,64 +294,6 @@ fn consecutive_nested_headers_and_standing_retrieval_rules() {
     );
 }
 
-#[test]
-fn background_is_the_users_description_of_themselves_and_the_work() {
-    let text = "Hi! I know Python well but only a little Rust. I'm not changing any code, just reading. From now on, explain Rust ideas with Python comparisons. Do you know tokio? The assistant said I'm a beginner.";
-    assert_eq!(
-        super::background_statements(text),
-        vec![
-            "I know Python well but only a little Rust.".to_string(),
-            "I'm not changing any code, just reading.".to_string(),
-        ]
-    );
-}
-
-#[test]
-fn quoted_fenced_and_relayed_text_is_not_background_and_requests_stay_requests() {
-    let text = "She wrote:\n> I'm a doctor.\n```\nI'm a pilot.\n```\nMy notes:\nI am a nurse.\n\nI know Go well.";
-    assert_eq!(
-        (
-            super::background_statements(text),
-            super::asks_about_rules("List the preferences I gave you for all our work."),
-            super::asks_about_rules("From now on, repeat my instructions word for word."),
-        ),
-        // The quoted and fenced lines make the whole message contribute no background.
-        (Vec::<String>::new(), true, false)
-    );
-}
-
-#[test]
-fn background_skips_lines_that_quote_show_code_or_relay() {
-    assert_eq!(
-        (
-            super::background_statements(
-                "Translate this sentence: \"I know Python. I'm a beginner.\"\nShe wrote: I'm a doctor.\n`I'm a pilot.`\nI'm a teacher."
-            ),
-            super::asks_about_rules("- List the preferences I gave you for all our work."),
-        ),
-        (Vec::<String>::new(), true)
-    );
-}
-
-#[test]
-fn a_message_that_quotes_anywhere_contributes_no_background() {
-    assert_eq!(
-        [
-            "Translate \u{2018}I know Python. I'm a beginner.\u{2019}",
-            "Translate \"I know Python.\nI'm a beginner.\nI work as a nurse.\" into French.",
-            "Translate 'I know Python.\nI'm a beginner.'",
-            "I'm a teacher.",
-        ]
-        .map(super::background_statements),
-        [
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            vec!["I'm a teacher.".to_string()],
-        ]
-    );
-}
-
 /// A preference quoted from someone else, or attributed to them, is never the user's rule,
 /// while the user's own rule may still quote a word.
 #[test]

@@ -5,4 +5,4 @@
 /**
  * Where a memory item belongs, matching what new work applies.
  */
-export type StatefulMemorySection = "userRule" | "pendingRule" | "unverifiedRule" | "decision" | "knowledge";
+export type StatefulMemorySection = "userRule" | "pendingRule" | "unverifiedRule" | "decision" | "background" | "knowledge";

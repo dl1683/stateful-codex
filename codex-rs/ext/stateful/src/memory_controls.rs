@@ -22,6 +22,9 @@ use sha2::Sha256;
 
 use crate::rule_capture::user_rule_entry_id;
 
+/// Identity prefix of the user's background entries (also of their corrections).
+pub(crate) const USER_BACKGROUND_ID_PREFIX: &str = "stateful-user-background-";
+
 /// Longest corrected text accepted, in bytes.
 pub const MAX_CORRECTION_BYTES: usize = 2_000;
 
@@ -39,6 +42,8 @@ pub enum MemorySection {
     /// A rule not in the user's own words, never applied.
     UnverifiedRule,
     Decision,
+    /// What the user said about themselves or the whole work, in their words.
+    Background,
     Knowledge,
 }
 
@@ -54,6 +59,11 @@ pub fn memory_section(entry: &BlackboardEntry) -> MemorySection {
         }
         (BlackboardKind::Instruction, _) => MemorySection::UnverifiedRule,
         (BlackboardKind::Decision, _) => MemorySection::Decision,
+        (BlackboardKind::Fact, BlackboardProvenanceKind::User)
+            if entry.id.as_str().starts_with(USER_BACKGROUND_ID_PREFIX) =>
+        {
+            MemorySection::Background
+        }
         _ => MemorySection::Knowledge,
     }
 }
@@ -152,6 +162,7 @@ pub async fn correct_entry(
         MemorySection::UserRule
         | MemorySection::PendingRule
         | MemorySection::Decision
+        | MemorySection::Background
         | MemorySection::Knowledge => current.value.root_promotion,
     };
     let confidence = ConfidenceScore::from_basis_points(10_000)
@@ -191,7 +202,7 @@ pub async fn correct_entry(
             hasher.update([0]);
         }
         // Corrected background keeps the identity prefix that marks it as background.
-        let prefix = if id.as_str().starts_with("stateful-user-background-") {
+        let prefix = if id.as_str().starts_with(USER_BACKGROUND_ID_PREFIX) {
             "stateful-user-background-correction"
         } else {
             "stateful-memory-correction"

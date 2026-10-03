@@ -21885,6 +21885,13 @@
               "unverifiedRule"
             ],
             "type": "string"
+          },
+          {
+            "description": "What the user said about themselves or the whole work, in their own words.",
+            "enum": [
+              "background"
+            ],
+            "type": "string"
           }
         ]
       },

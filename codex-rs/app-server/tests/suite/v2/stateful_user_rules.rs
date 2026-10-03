@@ -295,7 +295,8 @@ async fn a_quoted_colleagues_preference_is_never_the_users_rule() -> Result<()> 
 }
 
 /// tui8's natural opening: both rules of a message that also relays a colleague's habit are
-/// captured, each with its own receipt, and a fresh thread applies them in the order written.
+/// captured, each with its own receipt, the user's background is kept in their words, and a
+/// fresh thread applies the rules in the order written.
 #[tokio::test]
 async fn every_rule_of_a_natural_opening_is_captured_in_order() -> Result<()> {
     const OPENING: &str = "Hi! Quick intro since this is our first session together: I'm a backend developer, mostly Go for the last six years, so my Python is a bit rusty, and I maintain this humanize fork for our internal ops dashboards. Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself. And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step. Also FYI, Priya (she co-maintains the fork with me) wrote in our team chat: \"Always run the full test suite and mypy on the whole repo after every single change.\" Today I'd like a small helper, naturalrate, for transfer speeds. First get oriented and propose a short plan. No code yet.";
@@ -336,17 +337,27 @@ async fn every_rule_of_a_natural_opening_is_captured_in_order() -> Result<()> {
     )
     .await;
     run_turn(&mut server, &thread, OPENING).await?;
+    // Two rules and the user's background; the colleague's quoted habit is neither.
     let mut rule_receipts = Vec::new();
-    while rule_receipts.len() < 2 {
+    let mut background_receipts = Vec::new();
+    for _ in 0..3 {
         let receipt: StatefulKnowledgeCapturedNotification = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             server.read_notification("statefulKnowledge/captured"),
         )
         .await??;
-        if receipt.category == StatefulKnowledgeCategory::Rule {
-            rule_receipts.push((receipt.outcome, receipt.text));
+        match receipt.category {
+            StatefulKnowledgeCategory::Rule => rule_receipts.push((receipt.outcome, receipt.text)),
+            _ => background_receipts.push((receipt.category, receipt.text)),
         }
     }
+    assert_eq!(
+        background_receipts,
+        vec![(
+            StatefulKnowledgeCategory::Background,
+            "I'm a backend developer, mostly Go for the last six years, so my Python is a bit rusty, and I maintain this humanize fork for our internal ops dashboards.".to_string(),
+        )]
+    );
     let commit_rule = "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself.";
     let next_rule = "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.";
     assert_eq!(

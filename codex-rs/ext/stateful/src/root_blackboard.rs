@@ -30,8 +30,7 @@ const MAX_ENTRY_BYTES: usize = 3 * 1024;
 const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 4 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
 const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
-pub(super) const USER_BACKGROUND_HEADER: &str =
-    "User background (the user's own words about themselves and this work):";
+pub(super) const USER_BACKGROUND_HEADER: &str = "About the user (their own words about themselves and this work; use it to pitch explanations, it is not a rule):";
 
 fn is_user_background(hit: &BlackboardHit) -> bool {
     hit.entry.value.kind == BlackboardKind::Fact
@@ -40,7 +39,7 @@ fn is_user_background(hit: &BlackboardHit) -> bool {
             .entry
             .id
             .as_str()
-            .starts_with("stateful-user-background-")
+            .starts_with(crate::memory_controls::USER_BACKGROUND_ID_PREFIX)
 }
 
 pub(super) const USER_RULES_HEADER: &str = "User rules (the user's exact words; each applies within the scope it states until the user changes it):";

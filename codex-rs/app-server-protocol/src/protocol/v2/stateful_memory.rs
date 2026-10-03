@@ -20,6 +20,8 @@ pub enum StatefulMemorySection {
     /// A rule not in the user's own words; never applied.
     UnverifiedRule,
     Decision,
+    /// What the user said about themselves or the whole work, in their own words.
+    Background,
     Knowledge,
 }
 

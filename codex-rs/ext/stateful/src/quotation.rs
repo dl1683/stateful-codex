@@ -125,6 +125,29 @@ impl<'a> Quotations<'a> {
         inside || holds_attributed || (self.attributes_speech && after_ambiguous)
     }
 
+    /// Whether the part from `start` to `end` holds or begins inside any quotation, or
+    /// follows an unclosed single quote, attributed or not.
+    pub(crate) fn touches_quotation(&self, start: usize, end: usize) -> bool {
+        self.spans
+            .iter()
+            .any(|span| span.open < end && start < span.close)
+            || self.ambiguous_from.is_some_and(|open| open < end)
+    }
+
+    /// Whether the sentence holding byte `offset` reports speech, or follows a sentence
+    /// that introduces someone's words ("She wrote:").
+    pub(crate) fn in_reported_sentence(&self, offset: usize) -> bool {
+        let sentences = sentences(self.text, &self.spans);
+        let index = sentences.partition_point(|sentence| sentence.end <= offset);
+        sentences
+            .get(index)
+            .is_some_and(|sentence| sentence.reports_speech)
+            || index
+                .checked_sub(1)
+                .and_then(|previous| sentences.get(previous))
+                .is_some_and(|previous| previous.introduces && previous.reports_speech)
+    }
+
     /// Like `relays`, for a clause found in the message (judged alone if not found).
     pub(crate) fn relays_clause(&self, clause: &str) -> bool {
         match self.text.find(clause) {

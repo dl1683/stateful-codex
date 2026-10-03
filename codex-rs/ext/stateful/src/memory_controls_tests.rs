@@ -197,3 +197,48 @@ async fn corrections_of_agent_rules_and_decisions() {
         )
     );
 }
+
+/// What the user said about themselves is reviewed as "about you", and stays so after the
+/// user corrects it; an agent's finding is other knowledge.
+#[tokio::test]
+async fn background_is_its_own_section_before_and_after_correction() {
+    let state_home = TempDir::new().expect("state home");
+    let services = services(&state_home);
+    crate::rule_capture::capture_background(
+        &services,
+        /*event_sink*/ None,
+        "project-1",
+        "thread-1",
+        "turn-1",
+        "I'm a backend developer, mostly Go.",
+    )
+    .await;
+    let store = services.blackboard().await.expect("store");
+    let page = store
+        .active_review_page(
+            "project-1",
+            /*offset*/ 0,
+            /*limit*/ 10,
+            /*expected_revision*/ None,
+        )
+        .await
+        .expect("review")
+        .expect("page");
+    let background = page.entries[0].clone();
+    let corrected = correct_entry(
+        store,
+        "project-1",
+        &background.id,
+        background.revision,
+        "I'm a backend developer, mostly Go, and I'm new to Python packaging.",
+    )
+    .await
+    .expect("correct");
+    assert_eq!(
+        (
+            memory_section(&background),
+            memory_section(&corrected.successor),
+        ),
+        (MemorySection::Background, MemorySection::Background)
+    );
+}

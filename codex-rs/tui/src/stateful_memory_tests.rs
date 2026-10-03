@@ -99,6 +99,12 @@ fn memory_listing_numbers_entries_by_section_and_names_the_open_run() {
             BlackboardKind::Instruction,
             "Don't modify any files today.",
         ),
+        item(
+            "background",
+            StatefulMemorySection::Background,
+            BlackboardKind::Fact,
+            "I'm a backend developer, mostly Go for the last six years.",
+        ),
         decision,
     ];
     let run = StatefulRun {
