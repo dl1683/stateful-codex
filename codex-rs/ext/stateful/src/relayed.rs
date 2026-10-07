@@ -31,11 +31,10 @@ use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::quotation::Quotations;
-use crate::rule_capture::user_message_source;
 use crate::services::ProjectIntelligenceServices;
-use crate::user_rules::has_standing_marker;
-use crate::user_rules::normalize;
-use crate::user_rules::reads_as_instruction;
+use crate::attributed_text::has_standing_marker;
+use crate::attributed_text::normalize;
+use crate::attributed_text::reads_as_instruction;
 
 pub(crate) const WORLD_STATE_ID: &str = "stateful_relayed_words";
 pub(crate) const START_MARKER: &str = "<stateful_relayed_words>";
@@ -224,7 +223,7 @@ async fn store_relayed(
                 premises: Vec::new(),
                 provenance: BlackboardProvenance {
                     kind: BlackboardProvenanceKind::User,
-                    source_id: user_message_source(thread_id, turn_id),
+                    source_id: format!("user-message:{thread_id}/{turn_id}"),
                 },
             },
             KnowledgeContext {

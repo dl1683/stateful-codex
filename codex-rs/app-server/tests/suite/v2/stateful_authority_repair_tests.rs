@@ -138,13 +138,18 @@ async fn delegated_document_retains_source_and_target_without_general_rule_promo
         .await?
         .thread
         .id;
+    let _: codex_app_server_protocol::StatefulMemoryAddResponse = server.request(|request_id| ClientRequest::StatefulMemoryAdd {
+        request_id,
+        params: codex_app_server_protocol::StatefulMemoryAddParams {
+            thread_id: thread.clone(), expected_project_id: project.project.id.clone(),
+            kind: codex_app_server_protocol::StatefulMemoryAddKind::Rule,
+            content: GENERAL.to_string(), scope: None, reason: None,
+            client_action_id: "direct-general-rule".to_string(), background_section: true,
+        },
+    }).await?;
     let log = responses::mount_sse_sequence(&responses_server, vec![
         tool_call("read-document", "evidence_read", json!({"relativePath":"lena-request.md"})),
         assistant("Read Lena's request."),
-        tool_call("enlarge-scope", "blackboard_record_batch", json!({"records":[{
-            "idempotencyKey":"enlarge-document", "kind":"instruction", "content":DOCUMENT, "userQuote":DOCUMENT, "ruleScope":"standing",
-            "confidenceBasisPoints":10000, "verification":"unverified", "importance":"high", "rootPromotion":"promoted"
-        }]})),
         assistant("Only the named artifact is delegated."),
         assistant("Unrelated review."),
     ]).await;
@@ -171,12 +176,6 @@ async fn delegated_document_retains_source_and_target_without_general_rule_promo
             .is_some()
     );
     run_turn(&mut server, &thread, RELAY).await?;
-    let refusal: Value = serde_json::from_str(
-        &log.requests()[3]
-            .function_call_output_text("enlarge-scope")
-            .expect("guard output"),
-    )?;
-    assert_eq!(refusal["results"][0]["recorded"], json!(false));
     let memory: StatefulMemoryReadResponse = server
         .request(|request_id| ClientRequest::StatefulMemoryRead {
             request_id,
@@ -242,7 +241,7 @@ async fn delegated_document_retains_source_and_target_without_general_rule_promo
         .thread
         .id;
     run_turn(&mut server, &fresh, "Prepare an unrelated review.md.").await?;
-    let packet = log.requests()[4].body_json().to_string();
+    let packet = log.requests()[3].body_json().to_string();
     assert!(packet.contains(GENERAL));
     assert!(!packet.contains(DOCUMENT));
     assert_eq!(

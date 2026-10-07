@@ -270,43 +270,6 @@ async fn the_user_adds_each_kind_directly() {
     );
 }
 
-/// A direct rule makes the same words apply when they were kept as a task-limited rule.
-#[tokio::test]
-async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
-    let state_home = TempDir::new().expect("state home");
-    let services =
-        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
-    let pending = crate::rule_group::capture_marked_rules(
-        &services,
-        /*event_sink*/ None,
-        "project-1",
-        "thread-1",
-        "turn-1",
-        "Never run migrations during this pass.",
-    )
-    .await
-    .remove(0)
-    .entry;
-    let node_id = services.project_node_id("project-1").await.expect("node");
-    let store = services.blackboard().await.expect("store");
-    let (added, outcome) = add_entry(
-        store,
-        &crate::memory_controls::MemoryActor {
-            thread_id: None,
-            action_id: Some("action-1".to_string()),
-        },
-        "project-1",
-        node_id,
-        MemoryAddition::Rule { scope: None },
-        "Never run migrations during this pass.",
-    )
-    .await
-    .expect("added");
-    assert_eq!(
-        (added.id == pending.id, memory_section(&added), outcome),
-        (true, MemorySection::UserRule, AddOutcome::Added)
-    );
-}
 
 /// Item 3 review 2: an action is bound to its complete request (a decision with a reason is
 /// not the same request as one whose words contain "Reason:"), and a scoped rule must name
@@ -687,7 +650,7 @@ async fn concurrent_clients_replay_only_the_matching_full_request() {
                 winner_ids
             );
             for words in [words, other_words] {
-                let id = crate::rule_capture::user_rule_entry_id(
+                let id = crate::rule_identity::user_rule_entry_id(
                     "project-1",
                     /*scope_id*/ None,
                     words,

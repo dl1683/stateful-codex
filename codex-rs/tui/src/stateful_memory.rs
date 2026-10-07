@@ -4,7 +4,6 @@
 use codex_app_server_protocol::StatefulCaptureOutcome;
 use codex_app_server_protocol::StatefulKnowledgeCapturedNotification;
 use codex_app_server_protocol::StatefulKnowledgeCategory;
-use codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification;
 use codex_app_server_protocol::StatefulMemoryItem;
 use codex_app_server_protocol::StatefulMemorySection;
 use codex_app_server_protocol::StatefulRun;
@@ -293,116 +292,6 @@ fn receipt_cell(
     ])
 }
 
-/// The counted receipt for everything one message's capture committed: how many rules were
-/// saved, each by its opening words, and anything already saved, kept but not applied, too
-/// long to keep, or failed. A capture that changed nothing and lost nothing says nothing.
-pub(crate) fn group_receipt_cell(
-    notification: &StatefulKnowledgeGroupCapturedNotification,
-) -> Option<PlainHistoryCell> {
-    let changed = notification.saved + notification.pending;
-    let lost = notification.omitted + notification.failed;
-    if changed == 0 && lost == 0 {
-        return None;
-    }
-    let plural = |count: u32, one: &str, many: &str| {
-        if count == 1 {
-            format!("{count} {one}")
-        } else {
-            format!("{count} {many}")
-        }
-    };
-    let headline = match (notification.saved, notification.pending) {
-        (0, 0) => "Nothing new was saved".to_string(),
-        (saved, 0) => format!("Saved {}", plural(saved, "rule", "rules")),
-        (0, pending) => format!(
-            "Saved {} for this task only (not applied later)",
-            plural(pending, "rule", "rules")
-        ),
-        (saved, pending) => format!(
-            "Saved {} and {} for this task only",
-            plural(saved, "rule", "rules"),
-            plural(pending, "rule", "rules")
-        ),
-    };
-    let mut lines: Vec<Line<'static>> = vec![
-        vec![
-            "• ".dim(),
-            headline.dim(),
-            " · /memory to review".dark_gray(),
-        ]
-        .into(),
-    ];
-    let mut number = 0;
-    for item in &notification.items {
-        if item.outcome == StatefulCaptureOutcome::AlreadyStored {
-            continue;
-        }
-        number += 1;
-        let note = match item.category {
-            StatefulKnowledgeCategory::PendingRule => " (this task only)",
-            StatefulKnowledgeCategory::Rule
-            | StatefulKnowledgeCategory::Decision
-            | StatefulKnowledgeCategory::Recipe
-            | StatefulKnowledgeCategory::Finding
-            | StatefulKnowledgeCategory::Background => "",
-        };
-        lines.push(
-            format!("    {number}. {}{note}", preview(rule_body(&item.text)))
-                .dim()
-                .into(),
-        );
-    }
-    if let Some(scope) = &notification.scope_title {
-        lines.push(
-            format!("    For the investigation: {}", preview(scope))
-                .dim()
-                .into(),
-        );
-    }
-    if notification.already_present > 0 {
-        lines.push(
-            format!(
-                "    {} already saved",
-                plural(notification.already_present, "rule was", "rules were")
-            )
-            .dim()
-            .into(),
-        );
-    }
-    for omitted in &notification.omitted_items {
-        lines.push(
-            format!(
-                "    Not saved, too long to keep whole: {}",
-                preview(omitted)
-            )
-            .dim()
-            .into(),
-        );
-    }
-    if notification.failed > 0 {
-        lines.push(
-            format!(
-                "    {} could not be saved",
-                plural(notification.failed, "rule", "rules")
-            )
-            .dim()
-            .into(),
-        );
-    }
-    let recognized = notification.recognized;
-    if let Some(declared) = notification.declared_count
-        && declared != recognized
-    {
-        lines.push(
-            format!(
-                "    You mentioned {declared}; {recognized} were recognized. /memory add rule <text> adds a missing one."
-            )
-            .dim()
-            .into(),
-        );
-    }
-    Some(PlainHistoryCell::new(lines))
-}
 
 #[cfg(test)]
 #[path = "stateful_memory_tests.rs"]

@@ -13,12 +13,8 @@ use super::MemorySection;
 use super::correct_entry;
 use super::forget_entry;
 use super::memory_section;
-use crate::rule_capture::RuleSource;
-use crate::rule_capture::store_user_rule;
-use crate::rule_capture::user_rule_entry_id;
-use crate::rule_group::capture_marked_rules;
 use crate::services::ProjectIntelligenceServices;
-use crate::user_rules::RuleStanding;
+use crate::rule_identity::user_rule_entry_id;
 
 const RULE: &str = "From now on, never run the whole test suite.";
 
@@ -26,62 +22,6 @@ fn services(state_home: &TempDir) -> ProjectIntelligenceServices {
     ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()))
 }
 
-/// Forgetting a rule retires it; replaying the message that stated it does not restore it.
-#[tokio::test]
-async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
-    let state_home = TempDir::new().expect("state home");
-    let services = services(&state_home);
-    let rule = capture_marked_rules(
-        &services,
-        /*event_sink*/ None,
-        "project-1",
-        "thread-1",
-        "turn-1",
-        RULE,
-    )
-    .await
-    .remove(0)
-    .entry;
-    let store = services.blackboard().await.expect("store");
-    let forgotten = forget_entry(
-        store,
-        &crate::memory_controls::MemoryActor::default(),
-        "project-1",
-        &rule.id,
-        rule.revision,
-    )
-    .await
-    .expect("forget");
-    let replayed = store_user_rule(
-        &services,
-        /*event_sink*/ None,
-        "project-1",
-        RuleSource {
-            thread_id: "thread-1",
-            turn_id: "turn-1",
-            receipt_turn_id: "turn-2",
-
-            placement: crate::rule_capture::RulePlacement::project(
-                codex_project_intelligence::ChangeOrigin::HostCapture,
-            ),
-        },
-        RULE,
-        RuleStanding::Standing,
-    )
-    .await;
-    assert_eq!(
-        (
-            forgotten.state,
-            forgotten.value.provenance.kind,
-            replayed.is_err()
-        ),
-        (
-            BlackboardEntryState::Tombstoned,
-            BlackboardProvenanceKind::User,
-            true
-        )
-    );
-}
 
 /// A corrected rule takes its new wording's identity and stays applied; the old wording
 /// keeps its authorship as history; a retry returns the same correction.
@@ -89,18 +29,9 @@ async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
 async fn correcting_a_rule_replaces_it_and_a_retry_is_idempotent() {
     let state_home = TempDir::new().expect("state home");
     let services = services(&state_home);
-    let rule = capture_marked_rules(
-        &services,
-        /*event_sink*/ None,
-        "project-1",
-        "thread-1",
-        "turn-1",
-        RULE,
-    )
-    .await
-    .remove(0)
-    .entry;
+    let node_id = services.project_node_id("project-1").await.expect("node");
     let store = services.blackboard().await.expect("store");
+    let rule = crate::add_entry(store, &crate::MemoryActor { thread_id: Some("thread-1".into()), action_id: Some("add-rule".into()) }, "project-1", node_id, crate::MemoryAddition::Rule { scope: None }, RULE).await.expect("add").0;
     let corrected = "Never run the whole test suite; run the affected tests.";
     let first = correct_entry(
         store,

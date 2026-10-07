@@ -264,53 +264,6 @@ fn rule_receipts_are_numbered_and_show_the_rule_after_its_framing() {
     );
 }
 
-/// tui8: one counted receipt for the two rules of the opening message, with an
-/// already-saved one, an omitted one and a declared count that does not match.
-#[test]
-fn group_receipts_count_what_was_committed() {
-    use codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification;
-    use codex_app_server_protocol::StatefulKnowledgeGroupItem;
-    let item = |text: &str, outcome| StatefulKnowledgeGroupItem {
-        entry_id: "entry".to_string(),
-        revision: 1,
-        category: StatefulKnowledgeCategory::Rule,
-        outcome,
-        text: text.to_string(),
-    };
-    let notification = StatefulKnowledgeGroupCapturedNotification {
-        project_id: "project-1".to_string(),
-        thread_id: "thread-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        group_id: "group-1".to_string(),
-        category: StatefulKnowledgeCategory::Rule,
-        declared_count: Some(5),
-        recognized: 4,
-        saved: 2,
-        already_present: 1,
-        pending: 0,
-        omitted: 1,
-        failed: 0,
-        items: vec![
-            item(
-                "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself.",
-                StatefulCaptureOutcome::Stored,
-            ),
-            item(
-                "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.",
-                StatefulCaptureOutcome::Stored,
-            ),
-            item("Never touch docs/.", StatefulCaptureOutcome::AlreadyStored),
-        ],
-        omitted_items: vec!["From now on, never touch xxxxxxxx...".to_string()],
-        scope_title: None,
-    };
-    insta::assert_snapshot!(
-        "memory_group_receipt",
-        super::group_receipt_cell(&notification)
-            .map(|cell| render(cell.display_lines(/*width*/ 200)))
-            .unwrap_or_default()
-    );
-}
 
 #[test]
 fn memory_help_and_investigations_show_explicit_targets() {

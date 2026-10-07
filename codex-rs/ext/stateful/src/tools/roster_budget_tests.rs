@@ -30,7 +30,6 @@ fn stateful_tool_roster_stays_within_its_request_budget() {
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
-        crate::user_messages::UserMessageRegistry::default(),
     );
     let sizes = tools
         .iter()

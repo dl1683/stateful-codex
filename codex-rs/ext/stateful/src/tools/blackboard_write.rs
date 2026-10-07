@@ -37,18 +37,6 @@ use crate::events::KnowledgeCategory;
 use crate::events::receipt_text;
 use crate::services::ProjectIntelligenceServices;
 
-use crate::rule_capture::RulePlacement;
-use crate::rule_capture::RuleSource;
-use crate::rule_capture::store_user_rule;
-use crate::rule_units::rule_for_clause;
-use crate::user_messages::UserMessageRegistry;
-use crate::user_rules::MAX_RULE_BYTES;
-
-/// Longest user decision kept whole from the user's message.
-const MAX_USER_DECISION_BYTES: usize = 2_000;
-use crate::user_rules::RuleStanding;
-use crate::user_rules::reports_speech;
-
 use crate::visible_root::VisibleRootRegistry;
 
 use super::blackboard_evidence::EvidenceArguments;
@@ -90,20 +78,9 @@ struct RecordArguments {
     evidence: Vec<EvidenceArguments>,
     #[serde(default)]
     premises: Vec<PremiseArguments>,
-    /// For kind instruction: the user's exact words for one rule.
-    user_quote: Option<String>,
-    /// For kind instruction: whether the rule outlives the current task.
-    rule_scope: Option<RuleScope>,
     /// Current entries this record replaces.
     #[serde(default)]
     supersedes: Vec<SupersedeReference>,
-}
-
-#[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum RuleScope {
-    Standing,
-    Task,
 }
 
 #[derive(Deserialize)]
@@ -132,7 +109,6 @@ struct BlackboardRecorder {
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
-    user_messages: UserMessageRegistry,
     visible_root: VisibleRootRegistry,
 }
 
@@ -143,7 +119,6 @@ impl BlackboardRecorder {
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
-        user_messages: UserMessageRegistry,
         visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
@@ -152,146 +127,8 @@ impl BlackboardRecorder {
             services,
             projects,
             event_sink,
-            user_messages,
             visible_root,
         }
-    }
-
-    /// Stores a rule only as the user wrote it: the whole sentence of a recorded human
-    /// message of this thread that contains `userQuote`. Earlier turns are not searched
-    /// (their stored summaries carry no input origin). Task-limited directions and relayed
-    /// advice are not stored, whatever scope the caller claims.
-    async fn record_instruction(
-        &self,
-        receipt_turn_id: &str,
-        user_quote: Option<String>,
-        rule_scope: Option<RuleScope>,
-    ) -> Result<BlackboardEntry, FunctionCallError> {
-        let (Some(quote), Some(scope)) = (user_quote, rule_scope) else {
-            return Err(respond(
-                "kind instruction needs userQuote (the user's exact words for one rule) and ruleScope (standing or task)",
-            ));
-        };
-        if matches!(scope, RuleScope::Task) {
-            return Err(respond(
-                "nothing written: a task-limited direction applies in this conversation only",
-            ));
-        }
-        let (message, clause) = self
-            .user_messages
-            .find(&self.thread_id, &self.project_id, &quote)
-            .ok_or_else(|| {
-                respond(
-                    "userQuote is not inside exactly one complete sentence of a user message recorded in this thread",
-                )
-            })?;
-        if crate::user_rules::asks_about_rules(&clause) {
-            return Err(respond(
-                "nothing written: that sentence asks about rules; it does not state one",
-            ));
-        }
-        let relayed = respond(
-            "nothing written: that sentence relays someone else's words, not the user's rule",
-        );
-        if reports_speech(&clause)
-            || crate::quotation::Quotations::new(&message.text).relays_clause(&clause)
-        {
-            return Err(relayed);
-        }
-        // The rule is the whole unit holding the quote (a list item with its header's scope),
-        // exactly as host capture stores it, so both paths share one wording and identity.
-        let rule = rule_for_clause(&message.text, &clause, &quote).ok_or(relayed)?;
-        if rule.clause.standing == RuleStanding::Pending {
-            return Err(respond(
-                "nothing written: the user limited that sentence to the current task",
-            ));
-        }
-        let (thread_id, turn_id) = (self.thread_id.clone(), message.turn_id);
-        if rule.clause.text.len() > MAX_RULE_BYTES {
-            return Err(respond(format!(
-                "the rule holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
-            )));
-        }
-        // A rule of an investigation keeps the scope host capture gave the same message; one
-        // whose investigation is unknown is not stored as a rule for all work.
-        let scope_id = match &rule.scope {
-            Some(_) => {
-                let store = self
-                    .services
-                    .blackboard()
-                    .await
-                    .map_err(|error| respond(error.to_string()))?;
-                Some(
-                    crate::rule_group::message_scope_id(
-                        store,
-                        &self.project_id,
-                        &thread_id,
-                        &turn_id,
-                        &message.text,
-                    )
-                    .await
-                    .ok_or_else(|| {
-                        respond("nothing written: the investigation that rule is limited to is not recorded")
-                    })?,
-                )
-            }
-            None => None,
-        };
-        store_user_rule(
-            &self.services,
-            self.event_sink.as_deref(),
-            &self.project_id,
-            RuleSource {
-                thread_id: &thread_id,
-                turn_id: &turn_id,
-                receipt_turn_id,
-
-                placement: RulePlacement {
-                    scope_id,
-                    end_condition: rule
-                        .scope
-                        .as_ref()
-                        .and_then(|hint| hint.end_condition.clone()),
-                    ..RulePlacement::project(codex_project_intelligence::ChangeOrigin::ModelTool)
-                },
-            },
-            &rule.clause.text,
-            RuleStanding::Standing,
-        )
-        .await
-        .map(|captured| captured.entry)
-        .map_err(respond)
-    }
-
-    /// The whole decision of a recorded user message holding `quote` (the item or line it is
-    /// in), with its source. Relayed words are refused.
-    fn user_decision(&self, quote: &str) -> Result<(String, String), FunctionCallError> {
-        let (message, clause) = self
-            .user_messages
-            .find(&self.thread_id, &self.project_id, quote)
-            .ok_or_else(|| {
-                respond(
-                    "userQuote is not inside exactly one complete sentence of a user message recorded in this thread",
-                )
-            })?;
-        if reports_speech(&clause)
-            || crate::quotation::Quotations::new(&message.text).relays_clause(&clause)
-        {
-            return Err(respond(
-                "nothing written: that sentence relays someone else's words, not the user's decision",
-            ));
-        }
-        let decision =
-            crate::rule_units::unit_text_for_clause(&message.text, &clause).unwrap_or(clause);
-        if decision.len() > MAX_USER_DECISION_BYTES {
-            return Err(respond(format!(
-                "the user's decision holding userQuote exceeds {MAX_USER_DECISION_BYTES} bytes; record it without userQuote"
-            )));
-        }
-        Ok((
-            decision,
-            crate::rule_capture::user_message_source(&self.thread_id, &message.turn_id),
-        ))
     }
 
     async fn record(
@@ -313,8 +150,6 @@ impl BlackboardRecorder {
             root_promotion,
             evidence,
             premises,
-            user_quote,
-            rule_scope,
             supersedes,
         } = arguments;
         if verification == BlackboardVerification::UserConfirmed {
@@ -324,43 +159,11 @@ impl BlackboardRecorder {
             ));
         }
         if kind == BlackboardKind::Instruction {
-            if !supersedes.is_empty() {
-                return Err(respond(
-                    "a changed user rule replaces the old one with blackboard_update_batch supersede once the user has stated it",
-                ));
-            }
-            return self
-                .record_instruction(turn_id, user_quote, rule_scope)
-                .await;
+            return Err(respond("user rules require an explicit statefulMemory add or correct action"));
         }
-        if rule_scope.is_some() {
-            return Err(respond("ruleScope applies to kind instruction only"));
-        }
-        // The user's own decision is kept whole and verbatim (all its sentences: the choice,
-        // its reason, any limit), with the user as its author; only kind decision may quote.
-        let (content, provenance) = match user_quote {
-            Some(quote) if kind == BlackboardKind::Decision => {
-                let (text, source) = self.user_decision(&quote)?;
-                (
-                    text,
-                    BlackboardProvenance {
-                        kind: BlackboardProvenanceKind::User,
-                        source_id: source,
-                    },
-                )
-            }
-            Some(_) => {
-                return Err(respond(
-                    "userQuote applies to kind instruction (a rule) or decision (the user's own decision)",
-                ));
-            }
-            None => (
-                content,
-                BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::Agent,
-                    source_id: source_id.to_string(),
-                },
-            ),
+        let provenance = BlackboardProvenance {
+            kind: BlackboardProvenanceKind::Agent,
+            source_id: source_id.to_string(),
         };
         let (evidence, inferred_node_id) = resolve_evidence(
             &self.project_id,
@@ -518,7 +321,6 @@ impl BlackboardBatchRecordTool {
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
-        user_messages: UserMessageRegistry,
         visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
@@ -528,7 +330,6 @@ impl BlackboardBatchRecordTool {
                 services.clone(),
                 projects,
                 event_sink.clone(),
-                user_messages,
                 visible_root,
             ),
             relator: BlackboardRelateTool::new(project_id, services, event_sink),
@@ -710,7 +511,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record; a decision the user stated, as kind decision with userQuote (kept whole and verbatim). sourceVerified needs evidence copied from evidence_read. Items are idempotent."
+                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. All model records have Agent provenance; user rules and user-authored decisions require explicit memory controls. sourceVerified needs evidence copied from evidence_read. Items are idempotent."
             ),
             strict: false,
             defer_loading: None,
@@ -758,7 +559,7 @@ fn record_schema() -> serde_json::Value {
         "properties": {
             "idempotencyKey": {"type": "string"},
             "nodeId": {"type": "string"},
-            "kind": {"type": "string", "enum": ["instruction", "fact", "claim", "number", "decision", "strategy", "question", "contradiction", "failure", "rejectedApproach", "signal", "note"]},
+            "kind": {"type": "string", "enum": ["fact", "claim", "number", "decision", "strategy", "question", "contradiction", "failure", "rejectedApproach", "signal", "note"]},
             "content": {"type": "string"},
             "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false},
             "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
@@ -767,8 +568,6 @@ fn record_schema() -> serde_json::Value {
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
             "evidence": evidence_schema(),
             "premises": premise_schema(),
-            "userQuote": {"type": "string"},
-            "ruleScope": {"type": "string", "enum": ["standing", "task"]},
             "supersedes": supersedes_schema()
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],

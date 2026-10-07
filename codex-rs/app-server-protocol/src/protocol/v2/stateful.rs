@@ -540,50 +540,6 @@ pub struct StatefulKnowledgeCapturedNotification {
     pub text: String,
 }
 
-/// One saved unit of a counted group receipt.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct StatefulKnowledgeGroupItem {
-    pub entry_id: String,
-    #[ts(type = "number")]
-    pub revision: u64,
-    pub category: StatefulKnowledgeCategory,
-    pub outcome: StatefulCaptureOutcome,
-    /// The entry's content, at most 240 bytes.
-    pub text: String,
-}
-
-/// The committed outcome of one capture (all the rules one message marked), counted: sent
-/// once after every unit was stored or refused, so it never claims more than was saved.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct StatefulKnowledgeGroupCapturedNotification {
-    pub project_id: String,
-    pub thread_id: String,
-    pub turn_id: String,
-    pub group_id: String,
-    pub category: StatefulKnowledgeCategory,
-    /// A count the user's words declared ("Two standing rules"), when they did.
-    pub declared_count: Option<u32>,
-    pub recognized: u32,
-    /// Saved and applied.
-    pub saved: u32,
-    pub already_present: u32,
-    /// Saved but not applied (limited to a task).
-    pub pending: u32,
-    /// Recognized but too long to keep whole; not saved.
-    pub omitted: u32,
-    pub failed: u32,
-    /// Saved, kept and already-saved units in the order written.
-    pub items: Vec<StatefulKnowledgeGroupItem>,
-    /// Openings of omitted units.
-    pub omitted_items: Vec<String>,
-    /// The investigation these rules are limited to, in the user's words.
-    pub scope_title: Option<String>,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

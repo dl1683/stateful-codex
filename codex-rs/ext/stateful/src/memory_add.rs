@@ -28,7 +28,7 @@ use crate::memory_controls::MAX_CORRECTION_BYTES;
 use crate::memory_controls::MemoryActor;
 use crate::memory_controls::MemoryControlError;
 use crate::memory_controls::USER_BACKGROUND_ID_PREFIX;
-use crate::rule_capture::user_rule_entry_id;
+use crate::rule_identity::user_rule_entry_id;
 
 /// Generations of one wording tried before giving up.
 const MAX_GENERATIONS: u32 = 64;
@@ -158,9 +158,9 @@ pub async fn add_entry(
                         "this thread continues no open investigation; join one (/memory investigations) or add the rule without a scope".to_string(),
                     )
                 })?;
-            let normalized = crate::user_rules::normalize(&named);
+            let normalized = crate::attributed_text::normalize(&named);
             let names_it = named == bound.scope_id
-                || normalized == crate::user_rules::normalize(&bound.title)
+                || normalized == crate::attributed_text::normalize(&bound.title)
                 || CURRENT_INVESTIGATION.contains(&normalized.as_str());
             if !names_it {
                 return Err(MemoryControlError::Refused(format!(

@@ -337,39 +337,6 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                     text,
                 },
             ),
-            StatefulEvent::KnowledgeGroupCaptured(receipt) => {
-                ServerNotification::StatefulKnowledgeGroupCaptured(
-                    codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification {
-                        project_id: receipt.project_id,
-                        thread_id: receipt.thread_id,
-                        turn_id: receipt.turn_id,
-                        group_id: receipt.group_id,
-                        category: api_category(receipt.category),
-                        declared_count: receipt.declared_count,
-                        recognized: receipt.recognized,
-                        saved: receipt.saved,
-                        already_present: receipt.already_present,
-                        pending: receipt.pending,
-                        omitted: receipt.omitted,
-                        failed: receipt.failed,
-                        items: receipt
-                            .items
-                            .into_iter()
-                            .map(
-                                |item| codex_app_server_protocol::StatefulKnowledgeGroupItem {
-                                    entry_id: item.entry_id,
-                                    revision: item.revision,
-                                    category: api_category(item.category),
-                                    outcome: api_outcome(item.outcome),
-                                    text: item.text,
-                                },
-                            )
-                            .collect(),
-                        omitted_items: receipt.omitted_items,
-                        scope_title: receipt.scope_title,
-                    },
-                )
-            }
             StatefulEvent::AttributionCompleted { summary } => {
                 let notification = StatefulAttributionCompletedNotification {
                     project_id: summary.project_id,

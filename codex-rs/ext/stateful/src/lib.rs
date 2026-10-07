@@ -17,17 +17,14 @@ mod read_receipts;
 mod relayed;
 mod request_scope;
 mod root_blackboard;
-mod rule_capture;
-mod rule_group;
+mod rule_identity;
 mod rule_scope;
-mod rule_units;
 mod run_world_state;
 mod services;
 mod socratic;
 mod source_freshness;
 mod tools;
-mod user_messages;
-mod user_rules;
+mod attributed_text;
 mod visible_root;
 mod world_state;
 
@@ -73,8 +70,6 @@ pub use autonomy::RunAdmissionFence;
 pub use autonomy::bound_run_turn;
 pub use events::BlackboardEntityKind;
 pub use events::CaptureOutcome;
-pub use events::GroupReceipt;
-pub use events::GroupReceiptItem;
 pub use events::KnowledgeCategory;
 pub use events::MAX_RECEIPT_TEXT_BYTES;
 pub use events::StatefulEvent;
@@ -161,7 +156,6 @@ struct StatefulExtension {
     attribution: attribution::StatefulAttributionTracker,
     visible_root: visible_root::VisibleRootRegistry,
     run_activity: checkpoint::RunActivityRegistry,
-    user_messages: user_messages::UserMessageRegistry,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -617,7 +611,6 @@ impl ToolContributor for StatefulExtension {
             self.projects.clone(),
             self.event_sink.clone(),
             self.visible_root.clone(),
-            self.user_messages.clone(),
         )
     }
 }
@@ -638,7 +631,6 @@ pub fn install<C: Sync>(
         attribution: attribution::StatefulAttributionTracker::default(),
         visible_root: visible_root::VisibleRootRegistry::default(),
         run_activity: checkpoint::RunActivityRegistry::default(),
-        user_messages: user_messages::UserMessageRegistry::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());

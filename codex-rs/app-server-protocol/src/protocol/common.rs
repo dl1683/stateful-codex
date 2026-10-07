@@ -2102,7 +2102,6 @@ server_notification_definitions! {
     StatefulAttributionCompleted => "statefulAttribution/completed" (v2::StatefulAttributionCompletedNotification),
     #[experimental("statefulKnowledge/captured")]
     StatefulKnowledgeCaptured => "statefulKnowledge/captured" (v2::StatefulKnowledgeCapturedNotification),
-    StatefulKnowledgeGroupCaptured => "statefulKnowledge/groupCaptured" (v2::StatefulKnowledgeGroupCapturedNotification),
     #[experimental("thread/project/updated")]
     ThreadProjectUpdated => "thread/project/updated" (v2::ThreadProjectUpdatedNotification),
     #[experimental("thread/environment/connected")]

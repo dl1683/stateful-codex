@@ -222,14 +222,6 @@ impl TurnLifecycleContributor for StatefulExtension {
                     input.turn_store,
                     input.user_input,
                 );
-                if let Some(thread) = input.thread_store.get::<SelectedThread>() {
-                    self.user_messages.record(
-                        &thread.thread_id,
-                        selected.project_id(),
-                        input.turn_id,
-                        input.user_input,
-                    );
-                }
                 if let (Some(thread), Some(services)) = (
                     input.thread_store.get::<SelectedThread>(),
                     self.services.as_ref(),
@@ -246,15 +238,6 @@ impl TurnLifecycleContributor for StatefulExtension {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    crate::rule_group::capture_marked_rules(
-                        services,
-                        self.event_sink.as_deref(),
-                        selected.project_id(),
-                        &thread.thread_id,
-                        input.turn_id,
-                        &text,
-                    )
-                    .await;
                     // Someone else's instruction the user passes on is kept as attributed
                     // context and noted for this turn as carrying no authority.
                     let relayed = crate::relayed::relayed_instructions(&text);

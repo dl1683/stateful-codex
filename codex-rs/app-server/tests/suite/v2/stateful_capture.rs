@@ -618,10 +618,8 @@ async fn first_record_in_an_unindexed_project_succeeds() -> Result<()> {
                 "blackboard_record_batch",
                 json!({"records": [{
                     "idempotencyKey": "rule-metric-only",
-                    "kind": "instruction",
-                    "content": "Metric only, never cups or ounces.",
-                    "userQuote": "metric only",
-                    "ruleScope": "standing",
+                    "kind": "fact",
+                    "content": "The recipe measurements are metric.",
                     "confidenceBasisPoints": 10000,
                     "verification": "unverified",
                     "importance": "high",

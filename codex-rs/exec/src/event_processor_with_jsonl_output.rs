@@ -520,23 +520,6 @@ impl EventProcessorWithJsonOutput {
             ServerNotification::RawResponseCompleted(_)
             | ServerNotification::RawResponseItemCompleted(_)
             | ServerNotification::ContextCompacted(_) => CodexStatus::Running,
-            ServerNotification::StatefulKnowledgeGroupCaptured(notification) => {
-                let (receipts, summary) = crate::exec_events::group_receipts(&notification);
-                for receipt in receipts {
-                    #[allow(clippy::print_stderr)]
-                    {
-                        eprintln!("stateful: {}", receipt.summary());
-                    }
-                    self.emit(ThreadEvent::StatefulKnowledge(receipt));
-                }
-                if let Some(summary) = summary {
-                    #[allow(clippy::print_stderr)]
-                    {
-                        eprintln!("stateful: {summary}");
-                    }
-                }
-                CodexStatus::Running
-            }
             ServerNotification::StatefulKnowledgeCaptured(notification) => {
                 let receipt = crate::exec_events::StatefulKnowledgeEvent::from(&notification);
                 // The person watching a JSON run reads stderr, not the event stream.

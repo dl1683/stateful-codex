@@ -78,17 +78,12 @@ pub(crate) struct Quotations<'a> {
     spans: Vec<Span>,
     /// Whether the span at the same index is attributed to someone else.
     attributed: Vec<bool>,
-    /// Where an unclosed single quote opened, if any.
-    ambiguous_from: Option<usize>,
-    /// A speech verb appears somewhere outside quotations.
-    attributes_speech: bool,
 }
 
 impl<'a> Quotations<'a> {
     pub(crate) fn new(text: &'a str) -> Self {
-        let (spans, ambiguous_from) = spans(text);
+        let (spans, _) = spans(text);
         let sentences = sentences(text, &spans);
-        let attributes_speech = sentences.iter().any(|sentence| sentence.reports_speech);
         let attributed = spans
             .iter()
             .map(|span| {
@@ -106,7 +101,7 @@ impl<'a> Quotations<'a> {
                 // A quoted instruction ("\"From now on, never commit.\"") is someone's
                 // words even unattributed; a quoted term ('Next:') is not.
                 let instruction = !span.code
-                    && crate::user_rules::reads_as_instruction(&crate::user_rules::normalize(
+                    && crate::attributed_text::reads_as_instruction(&crate::attributed_text::normalize(
                         &text[span.open..span.close],
                     ));
                 own || introduced || referred_back || instruction
@@ -116,49 +111,9 @@ impl<'a> Quotations<'a> {
             text,
             spans,
             attributed,
-            ambiguous_from,
-            attributes_speech,
         }
     }
 
-    /// Whether the part from `start` to `end` (byte offsets) may be someone else's words:
-    /// it begins inside a quotation, it holds a quotation that is attributed to someone else
-    /// or is itself an instruction, or an ambiguous single quote opened before its end in a
-    /// message that reports speech.
-    pub(crate) fn relays(&self, start: usize, end: usize) -> bool {
-        // Spans are sorted and disjoint: the last one opening before `start` is the only one
-        // that can contain it.
-        let first_at_or_after = self.spans.partition_point(|span| span.open < start);
-        let inside = first_at_or_after
-            .checked_sub(1)
-            .is_some_and(|index| start < self.spans[index].close);
-        let holds_attributed = self.spans[first_at_or_after..]
-            .iter()
-            .zip(&self.attributed[first_at_or_after..])
-            .take_while(|(span, _)| span.open < end)
-            .any(|(_, attributed)| *attributed);
-        let after_ambiguous = self.ambiguous_from.is_some_and(|open| open < end);
-        inside || holds_attributed || (self.attributes_speech && after_ambiguous)
-    }
-
-    /// Whether the part from `start` to `end` holds or begins inside any quotation, or
-    /// follows an unclosed single quote, attributed or not.
-    pub(crate) fn touches_quotation(&self, start: usize, end: usize) -> bool {
-        self.spans
-            .iter()
-            .any(|span| span.open < end && start < span.close)
-            || self.ambiguous_from.is_some_and(|open| open < end)
-    }
-
-    /// Whether one quotation spans the whole of `start..end`, apart from trailing
-    /// punctuation: the part is a quotation, not the user's words around it.
-    pub(crate) fn wholly_quoted(&self, start: usize, end: usize) -> bool {
-        let part = self.text[start..end].trim_end_matches(['.', '!', ';', ',', ' ']);
-        let end = start + part.len();
-        self.spans
-            .iter()
-            .any(|span| span.open <= start && end <= span.close && span.close > start)
-    }
 
     /// Quotations attributed to someone else (not code), each with the sentence that
     /// attributes it.
@@ -196,16 +151,6 @@ impl<'a> Quotations<'a> {
             .collect()
     }
 
-    /// Like `relays`, for a clause found in the message (judged alone if not found).
-    pub(crate) fn relays_clause(&self, clause: &str) -> bool {
-        match self.text.find(clause) {
-            Some(start) => self.relays(start, start + clause.len()),
-            None => {
-                let alone = Quotations::new(clause);
-                alone.relays(0, clause.len())
-            }
-        }
-    }
 }
 
 /// Splits `text` into sentences without splitting a quotation: a sentence ends at a newline,
@@ -437,6 +382,3 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
     (spans, ambiguous_from)
 }
 
-#[cfg(test)]
-#[path = "quotation_tests.rs"]
-mod tests;

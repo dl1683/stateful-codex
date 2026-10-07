@@ -24,7 +24,7 @@ use codex_project_intelligence::SupersededEntry;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::rule_capture::user_rule_entry_id;
+use crate::rule_identity::user_rule_entry_id;
 
 /// Identity prefix of the user's background entries (also of their corrections).
 pub(crate) const USER_BACKGROUND_ID_PREFIX: &str = "stateful-user-background-";

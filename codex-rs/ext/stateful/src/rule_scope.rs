@@ -137,6 +137,4 @@ fn shown_title(title: &str) -> String {
     }
 }
 
-#[cfg(test)]
-#[path = "rule_scope_tests.rs"]
-mod tests;
+

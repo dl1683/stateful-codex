@@ -394,12 +394,12 @@ impl BlackboardUpdateTool {
                     || (clear_structured_value && update.structured_value.is_some());
                 if user_rule && source_meaning_changed {
                     return Err(respond(
-                        "a user rule keeps the user's exact words; record the new wording with userQuote and supersede this entry",
+                        "a user rule keeps the user's exact words; change it with an explicit memory correction",
                     ));
                 }
                 if !user_rule && kind == Some(BlackboardKind::Instruction) {
                     return Err(respond(
-                        "a rule must be the user's own words; record it as kind instruction with userQuote",
+                        "a rule must be the user's own words; add it with an explicit memory action",
                     ));
                 }
                 let revised_verification = verification.unwrap_or(update.verification);
