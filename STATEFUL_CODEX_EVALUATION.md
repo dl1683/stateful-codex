@@ -1188,187 +1188,127 @@ compaction correctly surfaced four incomplete or superseded turns instead of
 treating them as valid. Published Codex or Luna scores stay contextual unless
 model, benchmark version, harness, budget, retries and scoring are comparable.
 
-## Benchmark SC-EVAL-023: six-project breadth screen
+## SC-EVAL-023: six-project breadth screen (2026-09-22)
 
-Status: completed and retained as directional evidence; the cohort was
-pre-registered before any model arm was run on 2026-09-22.
+Cohort pre-registered before any arm ran, chosen by workload coverage: AGI
+Thesis (technical-thesis and evidence synthesis), Latent-Space-Reasoning
+(long-running empirical research), Open Exploration (publication research and
+buyer evidence), Iqidis (production TypeScript application analysis),
+new-computation-model (mathematical and theoretical-computer-science research),
+and memory-benchmark-harness (reserved replication, agent-memory evaluation
+software). The first five are the longitudinal cohort if the screen is valid;
+the sixth is never substituted for an unfavorable result; procurement is
+excluded as the frozen development case. Source selections and one question
+per project are frozen in `eval/manifests/breadth-projects.json`. Each arm gets
+an isolated copy of the `rg --files`-visible corpus without caches, build
+outputs, credentials, prior `.blackboard` or `.codex` state; the AGI corpus is
+bounded to the root thesis controls plus `publication` and `reviews` (its
+multi-gigabyte raw experiment store is outside the screen). The six pre-run
+corpus hashes and file counts are in `breadth-snapshot-hashes.json`; preparation
+verifies byte identity between arms and the runner rehashes before and after
+every turn. Both arms: branch debug binary, cached login with API keys removed,
+Luna at high effort, read-only permissions, one continuous thread per project;
+Stateful in explicit Autonomous mode. A run is valid only if it completes,
+preserves the corpus, exposes project state, commits its durable result, and
+yields the blinded quality, source-audit and state observations.
 
-The cohort is selected by workload coverage rather than expected outcome:
+**Pre-cohort isolation correction.** The first AGI pair was an infrastructure
+dry run: Stateful's stderr showed an attempted read of the host memory registry,
+because removing API-key variables had kept the login but not disabled Codex's
+memory subsystem. Ordinary used 1,158,270 total and 132,734 uncached tokens;
+Stateful 1,394,703 and 137,743, with 18 against 10 read-bearing operations.
+These stay an operational diagnostic and are excluded, since prior
+project-specific memory could replace the work being measured. The next
+Latent-Space-Reasoning ordinary arm was interrupted once the path was confirmed,
+before any outcome was accepted. The runner now requires an explicit
+disabled-memory policy (`memories.use_memories=false` and
+`memories.generate_memories=false`) with the login kept, and the cohort
+restarted from fresh snapshot paths; every final result was collected after the
+correction and none was selected for inclusion.
 
-- AGI Thesis: technical-thesis and evidence synthesis;
-- Latent-Space-Reasoning: long-running empirical research;
-- Open Exploration: publication research and buyer evidence;
-- Iqidis: production TypeScript application analysis;
-- new-computation-model: mathematical and theoretical-computer-science research;
-- memory-benchmark-harness: reserved replication in agent-memory evaluation
-  software.
+**Outcome: unfavorable and directional only.** Both blind graders preferred
+ordinary on five projects and disagreed on AGI Thesis. All twelve arms had zero
+compactions, so the screen tested neither compaction survival nor mature state.
+The grading packet placed an auxiliary `S` object (the model-submitted Stateful
+completion narrative, not the persisted result or project intelligence) beside
+the blinded answers, which could reveal the Stateful arm. The grades stay
+unchanged but support no causal quality claim. A valid rerun needs answer-only
+public packets with a disjoint private mapping, hash-pinned SQLite artifacts
+after every Stateful turn, and separate grading of submitted answer, persisted
+result, obligations and project intelligence.
 
-The first five are the preselected longitudinal cohort if the breadth screen is
-operationally valid. The sixth is reported as a reserved replication rather
-than substituted for an unfavorable result. Procurement is excluded because it
-is the frozen development case. The exact source selections and one breadth
-question per project are frozen in `eval/manifests/breadth-projects.json`.
+## SC-EVAL-024 and SC-EVAL-025: source revision and compaction diagnostics (2026-09-23)
 
-Each arm receives an isolated copy of the same `rg --files`-visible current
-corpus, with ignored caches, build outputs, credentials, prior `.blackboard`,
-and prior `.codex` state excluded. The AGI corpus is intentionally bounded to
-the root thesis controls plus `publication` and `reviews`; its multi-gigabyte
-raw experiment store is outside this screen. The six pre-run corpus hashes and
-file counts are frozen in `breadth-snapshot-hashes.json`. The preparation tool
-verifies byte identity between arms, and the runner rehashes the corpus before
-and after every turn.
+Mechanism diagnostics, not protocol-valid comparisons: the independent quality,
+source-audit and state observations were never supplied. Both arms, failed
+infrastructure attempts and the two compaction regimes are kept, and neither
+regime substitutes for the other.
 
-Both arms use the branch debug binary, cached ChatGPT login with API-key
-environment variables removed, Luna at high reasoning effort, read-only source
-permissions, and one continuous thread per project. Stateful uses explicit
-Autonomous mode. A run is operationally valid only if it completes, preserves
-the corpus, exposes project state, commits its durable result, and yields the
-required blinded quality, source-audit, and state observations.
+**SC-EVAL-024 (20,000-token total-context limit).** Clean cohort under
+`%LOCALAPPDATA%/Temp/stateful-source-canary-run-final-8421d388` (snapshot
+`stateful-source-canary-snapshot-final-8421d388`). Ordinary thread
+`01a0cd05-8c21-7990-93a1-5e6727e82259` and Stateful thread
+`01a0cd05-8a7b-7603-8adc-f7055ac91c10` answered all four cases correctly.
+Stateful detected the changed policy, replaced the threshold of 10 with 6,
+changed permitted to not permitted at the unchanged count of 8, and kept the old
+conclusion and fingerprint as superseded history; four terminal run and state
+artifacts were captured on the one thread. **Economics failed decisively:**
+ordinary 229,285 total, 41,637 uncached, 15 responses, one compaction, 179,756
+ms; Stateful 833,145 total, 229,241 uncached, 39 responses, 16 compactions,
+1,007,707 ms. Reconciliation splits Stateful into 449,138 productive tokens over
+23 responses and 384,007 compaction tokens over 16 responses; the extra
+compaction explains about 60.3% of the 603,860-token gap. The fixed Stateful
+prefix began near the artificial limit, so post-compaction requests kept hitting
+it: valid extreme-stress evidence, not proof that the roughly 2.5 KiB root causes
+that cost. Three correctness limits: runs started on resumed threads claimed an
+Autonomous continuation against the previous run's last turn before the new
+question arrived; the first project fragment after the hidden file replacement
+still labelled old promoted evidence current until model-driven refresh repaired
+it; and the v1 launch finding cited `policy.md` lines 3-5 although the threshold
+is on line 6 (the answer was right because the model read the whole file). Old
+entries were current-query-inaccessible and their source bytes were not kept
+after overwrite; the historical answer was helped because v2 restated the old
+threshold. Commit `c65993a196` binds Autonomous continuation to a turn that
+started while the same run was active (the resumed-exec test rejects a
+continuation instruction in a new prompt); commit `aae58b6512` makes run states
+pin their exact rollout path so graders verify the session ID.
 
-### Pre-cohort isolation correction
-
-The first AGI pair was an infrastructure dry run, not an SC-EVAL-023 result.
-The arms completed against identical unchanged corpora, but the Stateful stderr
-showed an attempted read of the host memory registry. Removing API-key
-environment variables had preserved cached ChatGPT login as intended, but had
-not disabled Codex's separate memory subsystem. The ordinary arm used
-1,158,270 total tokens and 132,734 uncached-input-plus-output tokens; the
-Stateful arm used 1,394,703 and 137,743 respectively, with 18 versus 10
-read-bearing operations. Those values remain an operational diagnostic only.
-They are excluded from the registered cohort because project-specific prior
-memory could replace work that either experimental condition was meant to do.
-
-The following Latent-Space-Reasoning ordinary arm was interrupted as soon as
-the contamination path was confirmed, before any outcome was accepted. The
-runner now requires an explicit disabled-memory policy and passes both
-`memories.use_memories=false` and `memories.generate_memories=false` while
-retaining the cached ChatGPT login. The registered cohort will restart from
-fresh snapshot paths so the completed dry-run Stateful project identity and
-state cannot carry forward. Every final result will therefore be collected
-after this correction; no favorable or unfavorable completed result was
-selected for inclusion.
-
-### Directional outcome
-
-The completed six-project screen is retained as unfavorable directional
-evidence, not as a protocol-valid persistence comparison. Both blind graders
-preferred ordinary Codex on five projects and disagreed on AGI Thesis. All
-twelve arms had zero compactions, so the screen did not test survival through
-compaction or the value of mature accumulated state.
-
-The original grading packet also placed an auxiliary `S` object beside the
-blinded A/B answers. That object was the model-submitted Stateful completion
-narrative rather than the persisted run result or project intelligence, and
-its placement could disclose which answer was Stateful. The recorded grades
-remain unchanged, but no causal quality claim is made from them. A valid rerun
-must use answer-only public packets with a disjoint private arm mapping, retain
-hash-pinned SQLite artifacts after every Stateful turn, and grade the submitted
-answer, persisted result, obligations, and project intelligence separately.
-
-## Benchmarks SC-EVAL-024 and SC-EVAL-025: source revision and compaction diagnostics
-
-Status: mechanism diagnostics completed on 2026-09-23. Neither cohort is a
-protocol-valid comparative result because the required independent quality,
-source-audit, and state observations have not yet been supplied. Both arms,
-failed infrastructure attempts, and the two distinct compaction regimes remain
-preserved; one regime is not substituted for the other.
-
-SC-EVAL-024 used a 20,000-token total-context limit. Its final clean cohort is
-under `%LOCALAPPDATA%/Temp/stateful-source-canary-run-final-8421d388`, with the
-matched snapshot under `stateful-source-canary-snapshot-final-8421d388`.
-Ordinary thread `01a0cd05-8c21-7990-93a1-5e6727e82259` and Stateful thread
-`01a0cd05-8a7b-7603-8adc-f7055ac91c10` both answered all four diagnostic cases
-correctly. Stateful detected the changed policy, replaced the current threshold
-of 10 with 6, changed the decision from permitted to not permitted at the
-unchanged measured count of 8, and retained the old conclusion and source
-fingerprint as superseded history. Four separate terminal run/state artifacts
-were captured on the one continued thread.
-
-The total-context stress economics failed decisively. Ordinary Codex used
-229,285 total tokens, 41,637 uncached input plus output tokens, 15 model
-responses, one canonical compaction, and 179,756 ms. Stateful used 833,145 total
-tokens, 229,241 uncached input plus output tokens, 39 model responses, 16
-canonical compactions, and 1,007,707 ms. Canonical reconciliation separates
-Stateful's usage into 449,138 productive-inference tokens across 23 responses
-and 384,007 compaction tokens across 16 responses; the additional compaction
-cost explains about 60.3% of the 603,860-token gap. The fixed Stateful prefix
-began near the artificial limit, so post-compaction requests repeatedly reached
-the same total-context threshold. This is valid extreme-stress evidence, not a
-claim that the approximately 2.5 KiB root blackboard intrinsically causes that
-cost.
-
-That cohort exposed and preserved three correctness limitations. First, runs
-started on resumed threads claimed an Autonomous continuation against the
-previous run's last turn before the new explicit question arrived. Second, the
-initial project fragment after the hidden file replacement still labelled the
-old promoted evidence current; model-driven context-map refresh discovered and
-repaired it only after inference began. Third, the v1 launch finding cited
-`policy.md` lines 3-5 although its decisive threshold appeared on line 6. The
-answer was correct because the model had read the full file, but that persisted
-locator was not semantically sufficient. Historical entries also remain
-current-query-inaccessible, and their original source bytes are not retained
-after overwrite; the successful historical answer was helped by v2 restating
-the old threshold.
-
-Commit `c65993a196` binds Autonomous continuation eligibility to a turn that
-actually started while the same run was active. The resumed-exec integration
-test rejects an automatic-continuation instruction in the new explicit prompt.
-Commit `aae58b6512` makes new longitudinal run states pin their exact rollout
-path, and graders verify its session ID instead of guessing from a shared
-directory.
-
-SC-EVAL-025 then used the same frozen sources, questions, model, effort, login,
-memory isolation, and source intervention with a 20,000-token
-`body_after_prefix` limit. Its clean artifacts are under
-`%LOCALAPPDATA%/Temp/stateful-source-growth-run-897af904` and
+**SC-EVAL-025 (20,000-token `body_after_prefix` limit).** Same sources,
+questions, model, effort, login, memory isolation and intervention. Artifacts
+under `%LOCALAPPDATA%/Temp/stateful-source-growth-run-897af904` and
 `stateful-source-growth-snapshot-897af904`. Ordinary thread
-`01a0cd2a-7895-7bf2-bfaf-5378018974ee` used 1,002,847 total tokens, 83,039
-uncached input plus output tokens, 39 responses, and 557,834 ms. Stateful thread
-`01a0cd2a-766c-7b33-9e9a-9453429cd40b` used 507,855 total tokens, 62,415
-uncached input plus output tokens, 17 responses, and 209,877 ms: reductions of
-49.36%, 24.84%, 56.41%, and 62.38%, respectively. Both arms answered all four
-cases correctly. Every Stateful question created its own completed run on the
-same thread, every state artifact reports zero continuations used, and both run
-states pin their exact dated rollout.
+`01a0cd2a-7895-7bf2-bfaf-5378018974ee`: 1,002,847 total, 83,039 uncached, 39
+responses, 557,834 ms. Stateful thread `01a0cd2a-766c-7b33-9e9a-9453429cd40b`:
+507,855 total, 62,415 uncached, 17 responses, 209,877 ms, i.e. 49.36%, 24.84%,
+56.41% and 62.38% lower. Both answered all four cases correctly; each Stateful
+question created its own completed run, every artifact reports zero
+continuations, and both run states pin their dated rollout. **Neither arm
+compacted**, so this is an economics and lifecycle improvement, not
+equal-pressure compaction continuity; that needs a separately frozen lower
+growth threshold, and production-default economics remain a separate lane.
+Automated raw-read counts from these Windows rollouts are lower bounds (looped
+`type`, `find` and `findstr` commands are not expanded per file), so no
+read-saving claim is made.
 
-Neither SC-EVAL-025 arm compacted. It therefore isolates a useful economics and
-lifecycle improvement but does not prove equal-pressure compaction continuity.
-A separately frozen lower incremental-growth threshold is needed if that
-specific mechanism is retested. Production-default economics also remain a
-separate lane. Automated raw-read counts from these Windows rollouts are lower
-bounds because the parser does not yet expand looped `type`, `find`, and
-`findstr` commands into per-file reads; no read-saving claim is made from those
-counts.
+## SC-EVAL-026: explicit historical-state retrieval (2026-09-23)
 
-## Benchmark SC-EVAL-026: explicit historical-state retrieval
-
-Status: matched mechanism diagnostic completed on 2026-09-23. It is not a
-protocol-valid comparative result because blinded quality, independent source
-audits, and state observations were not collected before arm identity was
-revealed. The case named `post-compaction-recall` also observed zero compactions
-in both arms, so this run does not establish post-compaction recall.
-
-The frozen v2 source removed every mention of the old threshold. The clean
-artifacts are under
-`%LOCALAPPDATA%/Temp/stateful-history-run-20260923b`; ordinary thread
-`01a0cd7a-c1cb-7a42-8e28-b40463edce51` and Stateful thread
-`01a0cd75-5ad7-7f83-90cf-a2aec12ade18` each completed all four turns on their
-first attempt. Both arms returned the correct v1 and v2 decisions in every
-turn. Stateful persisted the old 10-defect policy and permitted decision as
-superseded revisions, kept the current 6-defect policy and not-permitted
-decision active, and preserved the unchanged measured count of 8.
-
-The reconcile turn provides direct mechanism evidence. Its rollout contains
-`blackboard_query({entryScope: "historical", ...})`; the response returns the
-superseded v1 entries, correct old source fingerprint
-`79647a43c5c02d1c26d56b5ccbac4287f70f7afb62e6697e86941603d65d01ed`, and
-threshold 10 with stale historical verification. The model then correctly
-distinguishes that history from the current 6-defect source. This closes the
-prior defect where a correct history answer could be inferred from v2 restating
-v1. It does not prove counterfactual dependence on the query, because native
-same-thread conversation history was also present.
-
-The economics failed:
+Matched mechanism diagnostic, not protocol-valid: blinded quality, source audits
+and state observations were not collected before arm identity was known, and the
+case named `post-compaction-recall` saw zero compactions in both arms, so it does
+not show post-compaction recall. The frozen v2 source removed every mention of
+the old threshold. Artifacts under `%LOCALAPPDATA%/Temp/stateful-history-run-20260923b`;
+ordinary thread `01a0cd7a-c1cb-7a42-8e28-b40463edce51` and Stateful thread
+`01a0cd75-5ad7-7f83-90cf-a2aec12ade18` completed all four turns first time with
+correct v1 and v2 decisions. Stateful kept the old 10-defect policy and permitted
+decision as superseded revisions, the current 6-defect policy and not-permitted
+decision active, and the unchanged count of 8. The reconcile turn's rollout
+contains `blackboard_query({entryScope: "historical", ...})`, which returned the
+superseded v1 entries, the correct old fingerprint
+`79647a43c5c02d1c26d56b5ccbac4287f70f7afb62e6697e86941603d65d01ed` and threshold
+10 with stale historical verification; the model then separated that history
+from the current source. This closes the earlier defect where history could be
+inferred from v2 restating v1, but does not prove counterfactual dependence,
+because same-thread conversation history was also present.
 
 | Measure | Ordinary | Stateful | Stateful change |
 | --- | ---: | ---: | ---: |
@@ -1380,73 +1320,58 @@ The economics failed:
 | Canonical compactions | 0 | 0 | 0 |
 | Turn duration | 132,442 ms | 317,816 ms | +185,374 ms |
 
-The excess work is not attributable to compaction in this run. The trace shows
-a malformed v1 persistence call, one correct stale-source rejection followed by
-refresh, a v2 relationship failure that required another mutation, and repeated
-semantic persistence rounds. The last turn is directionally better on marginal
-uncached usage—5,260 Stateful versus 9,541 ordinary—but the four-turn
-maturation-inclusive lifetime remains a large regression.
+The excess is not compaction: a malformed v1 persistence call, a correct
+stale-source rejection followed by refresh, a v2 relationship failure needing
+another mutation, and repeated persistence rounds. The last turn is
+directionally better on marginal uncached usage (5,260 against 9,541), but the
+four-turn lifetime is a large regression. Three integrity defects: the reconcile
+completion copied the fingerprint wrongly as the invented hybrid
+`79647ad1f8e25747262bade3cba32bbd2b85f1db12c9c2cf00d607f71e36561d` (stored
+links keep the correct value); Stateful answer links use `/C:/...`, which is not
+a valid Windows path although prose and ranges are right; and the runner kept
+only a hash of each turn's corpus, so its grading packet would have shown v2
+while grading a v1 answer. Commit `462b5a25c1` keeps one content-addressed corpus
+artifact per distinct turn revision and makes a separate blinded packet per
+question for future runs. SC-EVAL-026 stays ungraded rather than reconstructing
+observations after seeing the arms.
 
-Three integrity defects remain visible. First, the reconcile completion copied
-the correct fingerprint incorrectly as the invented hybrid
-`79647ad1f8e25747262bade3cba32bbd2b85f1db12c9c2cf00d607f71e36561d`;
-the authoritative stored evidence links still contain the correct fingerprint.
-Second, Stateful answer links use `/C:/...` and are not valid Windows paths even
-though their prose and line ranges are substantively correct. Third, the runner
-retained only a hash of each turn's corpus; after intervention its grading
-packet would have shown v2 while grading the v1 answer. Commit `462b5a25c1`
-fixes future runs by preserving one content-addressed corpus artifact per
-distinct turn revision and producing a separate blinded packet for every
-question. SC-EVAL-026 remains honestly ungraded rather than reconstructing
-missing observations after seeing the arms.
+## External custom-harness benchmark ladder (2026-09-23)
 
-## External custom-harness benchmark ladder
+Primary-source review only; no submission, maintainer contact or external run
+at that point. The unit is an agent-model pair, so model-only scores from an
+organizer scaffold cannot measure Stateful Codex; the program runs the same
+built binary and `gpt-5.6-luna` with Stateful off and on.
 
-Status: primary-source review completed on 2026-09-23; no public submission,
-maintainer contact, or external benchmark run has been performed.
+1. **Terminal-Bench 2.1**: the strongest immediate local comparison. Its 89-task
+   dataset and Harbor runner accept custom agents and its table includes Codex
+   CLI; GPT-5.3-Codex scores 79.1% with Codex CLI and 68.5% with Terminus 2,
+   showing the harness matters. Official community submissions were closed;
+   public Harbor uploads are shareable but not leaderboard rows. The full
+   protocol is five trials per task, 445 per arm.
+2. **SWE-bench Verified and Multilingual**: the open publication route (Stateful
+   generates patches; the official harness grades; `swebench submit package`,
+   `publish`, `register` and `verify` produce a public artifact repository and
+   registration pull request; metadata records agent and model separately). The
+   default `swebench infer` uses mini-SWE-agent and must not replace our agent.
+3. **SWE-bench Pro V2**: a locked local protocol and adapter reference released
+   on 2026-09-22 with 642 tasks, not comparable with v1 results; it ships a
+   pinned Codex adapter and fresh-sandbox regrading; no open custom-agent
+   leaderboard path verified.
+4. **SWE-Marathon v1.1**: the most relevant long-horizon supplement; 20 tasks
+   through Harbor; its public scripts name Codex with `gpt-5.6-luna` at high
+   effort, which is a declared configuration, not a measured score; no open
+   submission process verified.
+5. **DeepSWE v1.1**: runs custom harnesses locally, but its leaderboard
+   standardizes on mini-SWE-agent, so its Luna result is not a
+   Stateful-versus-Codex baseline.
 
-The relevant unit is an agent-model pair. Published model-only scores from an
-organizer-controlled scaffold cannot measure Stateful Codex. The external
-program therefore uses the same built Codex binary and `gpt-5.6-luna` setting
-with Stateful disabled and enabled, changing only the intentional project-state
-layer.
+Plan then: one version-pinned Harbor installed-agent adapter (not one script per
+benchmark) that installs a hashed bundle, isolates state per task and trial,
+emits schema-valid ATIF trajectories, keeps all-attempt token and latency costs,
+and captures the final patch even on failure; a three-to-five-task smoke before
+any frozen full run; official claims only from the complete benchmark.
 
-1. Terminal-Bench 2.1 is the strongest immediate local harness comparison. Its
-   89-task public dataset and Harbor runner accept arbitrary custom agents, and
-   its published table includes Codex CLI. GPT-5.3-Codex scores 79.1% with
-   Codex CLI and 68.5% with Terminus 2, directly demonstrating that the harness
-   changes the outcome. Official community submissions are currently closed;
-   public Harbor uploads are shareable evidence but do not create an official
-   leaderboard row. The full published protocol requires five trials for every
-   task, or 445 trials per arm.
-2. SWE-bench Verified and Multilingual currently provide the open publication
-   route. Stateful Codex generates patches; the official harness grades them;
-   `swebench submit package`, `publish`, `register`, and `verify` produce a
-   public artifact repository and registration pull request. Metadata records
-   the agent separately from the model. The default `swebench infer` command
-   uses mini-SWE-agent and must not replace our custom agent execution.
-3. SWE-bench Pro V2 is a useful locked local protocol and adapter reference,
-   but it was released on 2026-09-22 with 642 tasks and must not be compared to
-   older v1 results. Its repository includes a pinned Codex adapter and
-   fresh-sandbox patch regrading. An open custom-agent leaderboard admission
-   path has not been verified.
-4. SWE-Marathon v1.1 is the highest-relevance long-horizon supplement. Its 20
-   tasks run through Harbor and its public scripts name Codex with
-   `gpt-5.6-luna` at high effort. A declared configuration is not a measured
-   score, and no open official submission process has been verified.
-5. DeepSWE v1.1 can run custom harnesses locally, but its official leaderboard
-   standardizes on mini-SWE-agent. Its published Luna result is therefore not a
-   Stateful-versus-Codex-harness baseline.
-
-The next implementation is one version-pinned Harbor installed-agent adapter,
-not one script per benchmark. It must install a hashed Stateful bundle, isolate
-project state per task and trial, preserve state only within that trial, emit
-schema-valid ATIF trajectories, retain all-attempt token and latency costs, and
-capture the final patch even on failure. A three-to-five-task smoke precedes
-any frozen full run. Official claims require the complete benchmark and its
-canonical limits; pilot results remain engineering diagnostics.
-
-## Benchmark SC-EVAL-027: Terminal-Bench `fix-git` technical control
+## SC-EVAL-027: Terminal-Bench `fix-git` technical control
 
 Status: one ordinary control and three Stateful replications completed on
 2026-09-23. This is a successful harness and evidence-export pilot, not an
@@ -1513,7 +1438,7 @@ scan found no matches. The machine-readable tracked result is
 `clients/stateful-codex/eval/results/terminal-bench-2-1-fix-git-20260923.json`.
 The packet has not been uploaded or presented as an official leaderboard entry.
 
-## Benchmark SC-EVAL-028: Terminal-Bench four-task Stateful smoke
+## SC-EVAL-028: Terminal-Bench four-task Stateful smoke
 
 Status: passed on 2026-09-23. One Stateful trial each of
 `cobol-modernization`, `vulnerable-secret`, `db-wal-recovery`, and
@@ -1963,7 +1888,7 @@ recoverable as
 The shared procurement, licensing and source-change fixtures and the generic
 `--manifest` runner remain, and the external partial records are unchanged.
 
-## Benchmark SC-EVAL-030: feedback-conditioned persistent-state pilot
+## SC-EVAL-030: feedback-conditioned persistent-state pilot
 
 ### Question and protocol
 
@@ -2053,7 +1978,7 @@ first gate is a custom-harness compatibility and scoring smoke; a larger run is
 allowed only after task isolation, artifact capture, and evaluator integrity
 are demonstrated.
 
-## Benchmark SC-EVAL-031: BixBench custom-harness gate
+## SC-EVAL-031: BixBench custom-harness gate
 
 Status: pre-registered on 2026-09-23 before any BixBench model call; compatible
 local gates completed on 2026-09-24.
@@ -2199,7 +2124,7 @@ structured answer and treats Codex JSONL usage as cumulative thread snapshots
 rather than summing them across turns. The published v1/v2 results predate
 those two controls and remain labelled accordingly.
 
-## Benchmark SC-EVAL-032: Pramana ten-question matched stateful/ordinary A/B
+## SC-EVAL-032: Pramana ten-question matched stateful/ordinary A/B
 
 Status: completed on 2026-09-24. All 20 turns and the blind grading (two rounds) are finished.
 
@@ -2636,7 +2561,7 @@ Every memory run uses one isolated project and store per persona or episode, nev
 and hashes state before evaluation, gives each test a fresh copy of that state and a fresh runtime database, and
 publishes the world state shown to every session, per-response token usage, trajectories and integrity hashes.
 
-## Benchmark SC-EVAL-033: matched behaviour study at the Phase A freeze (Campaign II, 2026-09-28/29)
+## SC-EVAL-033: matched behaviour study at the Phase A freeze (Campaign II, 2026-09-28/29)
 
 Status: internal study, not a public benchmark. Every comparison uses the same freeze binary with and without
 `--stateful`, the same model and reasoning setting (Luna, high), isolated project copies and state stores, host memories
@@ -2706,7 +2631,7 @@ it reduces cost where re-reading is expensive. It does not yet improve short or 
 cheap lookups, standing instructions are not captured deterministically, and the TUI does not expose it. Detailed
 findings, repro paths and the ranked improvement backlog are kept in the campaign notes outside the repository.
 
-## Benchmark SC-EVAL-034: 25-question model eval, GPT-6.1 Sol, Stateful vs ordinary (2026-09-30)
+## SC-EVAL-034: 25-question model eval, GPT-6.1 Sol, Stateful vs ordinary (2026-09-30)
 
 **Setup.** 25 questions in five batches, run in order in one working directory per arm, same machine, same day: b1 and b2 objective mathematics; b3 grounding in chip repositories; b4 open insight; b5 deep reasoning. Ordinary arm: codex-cli 0.159.2. Stateful arm: the fork at 4ea34e7d10 with the workspace version stamped to 0.159.2 (debug build with the code-mode host), one project store across all five batches. Costs are list-price equivalents computed from session usage records at $2 per 1M uncached input, $0.10 per 1M cached input and $10 per 1M output (ChatGPT login; nothing was billed).
 
@@ -2730,7 +2655,7 @@ findings, repro paths and the ranked improvement backlog are kept in the campaig
 - **Standing instructions are saved but not reliably applied.** "Remember for every future session" was honoured in a later fresh thread 2/4 by each arm. All 4 Stateful stores did capture it as a user-priority instruction entry, so the gap is in applying stored instructions, not capturing them. Ordinary Codex persisted it by writing it into the project's own handoff files. (An earlier version of this line said 0/4 stores contained it; that was a measurement error, corrected here.)
 - **Web UI:** live responses from concurrent sessions on one server leak into each other's pages; "Open workspace" ignores the first click; continuing without a desired outcome silently does nothing.
 
-## Benchmark SC-EVAL-035: October 2–3 hands-on campaign (Campaign II continued, 2026-10-02/03)
+## SC-EVAL-035: October 2–3 hands-on campaign (Campaign II continued, 2026-10-02/03)
 
 Status: internal hands-on study, not a public benchmark. Claude used the product as a person would (CLI, TUI and web UI)
 on real repositories and public corpora. Every comparison runs the same binary with and without `--stateful`
