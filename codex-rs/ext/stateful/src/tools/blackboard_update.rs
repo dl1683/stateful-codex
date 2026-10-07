@@ -287,8 +287,19 @@ impl BlackboardUpdateTool {
                 actual: current.revision,
             }));
         }
-        // A user rule is the user's own words: an agent may change its promotion or retire or
-        // supersede it, but never rewrite it, and promotion keeps the user's provenance.
+        let context = store
+            .knowledge_context(&self.project_id, &current.id)
+            .await
+            .map_err(respond)?;
+        if context.as_ref().is_some_and(|context| {
+            context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+        }) && !matches!(mutation, MutationArguments::Retire { .. })
+        {
+            return Err(respond(
+                "direct-human memory cannot be revised, promoted or replaced by the model; use an explicit memory correction",
+            ));
+        }
+        // Legacy user rules without recorded authority still keep the user's exact words.
         let user_rule = current.value.kind == BlackboardKind::Instruction
             && current.value.provenance.kind == BlackboardProvenanceKind::User;
         let original = (
@@ -301,14 +312,9 @@ impl BlackboardUpdateTool {
         // carries to its successor, or by the note's identity) are kept for explanation only:
         // no mutation ever makes them applied memory.
         let attributed = current.id.as_str().starts_with("stateful-relayed-")
-            || store
-                .knowledge_context(&self.project_id, &current.id)
-                .await
-                .map_err(respond)?
-                .is_some_and(|context| {
-                    context.category
-                        == codex_project_intelligence::KnowledgeCategory::AttributedContext
-                });
+            || context.is_some_and(|context| {
+                context.category == codex_project_intelligence::KnowledgeCategory::AttributedContext
+            });
         let mut update = BlackboardEntryUpdate {
             expected_revision: current.revision,
             kind: current.value.kind,
@@ -536,7 +542,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing entries, each independent. setRootPromotion: promote a project-wide candidate (not verification). revise: change content, confidence, verification, importance, evidence, or premises (empty array clears); changing source-verified meaning needs fresh evidence_read receipts. supersede: a newer entry replaces an older one, including a \"current\" value that is no longer current. retire: obsolete with no successor. Nothing forgets or deletes: history, run results and conversation keep the text; if the user asks to forget, say so and state what remains. Copy a returned historicalFinding into materialHistoricalFindings when material to completion."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing entries, each independent. Direct-human memory cannot be revised, promoted or replaced by the model; use explicit user memory controls. setRootPromotion: promote a project-wide candidate (not verification). revise: change content, confidence, verification, importance, evidence, or premises (empty array clears); changing source-verified meaning needs fresh evidence_read receipts. supersede: a newer entry replaces an older one, including a \"current\" value that is no longer current. retire: obsolete with no successor. Nothing forgets or deletes: history, run results and conversation keep the text; if the user asks to forget, say so and state what remains. Copy a returned historicalFinding into materialHistoricalFindings when material to completion."
             ),
             strict: false,
             defer_loading: None,

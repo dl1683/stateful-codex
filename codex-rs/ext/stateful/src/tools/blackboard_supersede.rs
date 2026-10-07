@@ -2,7 +2,7 @@
 //!
 //! An E alias resolves only through what this thread's packet actually showed (the entry
 //! and the revision shown), never against a newer projection; an entry ID must carry the
-//! revision the caller saw. A user rule can be replaced only by another user rule.
+//! revision the caller saw. Model succession never replaces direct-human memory.
 
 use codex_extension_api::FunctionCallError;
 use codex_project_intelligence::BlackboardEntry;
@@ -40,7 +40,7 @@ pub(super) fn supersedes_schema() -> serde_json::Value {
     json!({
         "type": "array",
         "maxItems": MAX_SUPERSEDED_ENTRIES,
-        "description": "Current entries this record replaces (same subject and scope): an E alias from this thread's packet, or entryId with the revision you saw.",
+        "description": "Assistant-origin entries this record replaces; direct-human memory cannot be replaced by the model (same subject and scope): an E alias from this thread's packet, or entryId with the revision you saw.",
         "items": {
             "type": "object",
             "properties": {
@@ -70,6 +70,20 @@ pub(super) async fn committed_succession(
         return Ok(None);
     };
     let replaced = store.superseded_by(project_id, id).await.map_err(respond)?;
+    for predecessor in &replaced {
+        if store
+            .knowledge_context(project_id, &predecessor.id)
+            .await
+            .map_err(respond)?
+            .is_some_and(|context| {
+                context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+            })
+        {
+            return Err(respond(
+                "direct-human memory cannot be replaced by model succession; use an explicit memory correction",
+            ));
+        }
+    }
     let same_value = existing.state == BlackboardEntryState::Active
         && NewBlackboardEntry {
             root_promotion: existing.value.root_promotion,
@@ -165,14 +179,20 @@ pub(super) async fn resolve_superseded(
                 "entry {id} changed since revision {revision}; read it again before replacing it"
             )));
         }
-        if store
+        let context = store
             .knowledge_context(project_id, &id)
             .await
-            .map_err(respond)?
-            .is_some_and(|context| {
-                context.category == codex_project_intelligence::KnowledgeCategory::AttributedContext
-            })
-        {
+            .map_err(respond)?;
+        if context.as_ref().is_some_and(|context| {
+            context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+        }) {
+            return Err(respond(
+                "direct-human memory cannot be replaced by model succession; use an explicit memory correction",
+            ));
+        }
+        if context.is_some_and(|context| {
+            context.category == codex_project_intelligence::KnowledgeCategory::AttributedContext
+        }) {
             return Err(respond(
                 "an attributed note cannot be rewritten or promoted by model succession",
             ));

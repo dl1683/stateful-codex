@@ -446,3 +446,6 @@ async fn large_scope_history_is_quarantined_and_retained_reads_stay_bounded() ->
     assert_eq!(count, 4096);
     Ok(())
 }
+
+#[path = "stateful_memory_cut_tests.rs"]
+mod cut_tests;

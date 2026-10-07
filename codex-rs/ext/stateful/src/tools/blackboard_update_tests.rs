@@ -667,7 +667,7 @@ async fn attributed_notes_are_never_promoted_by_meaning() {
 }
 
 #[tokio::test]
-async fn a_user_rule_is_superseded_only_by_a_user_rule() {
+async fn model_cannot_supersede_a_direct_user_rule() {
     let (_temp_dir, tool, _entry_id, successor_id, project_root, _receipt_id) = fixture().await;
     let node = tool
         .services
@@ -704,67 +704,52 @@ async fn a_user_rule_is_superseded_only_by_a_user_rule() {
         .expect_err("an agent finding cannot replace a user rule");
     assert_eq!(
         error.to_string(),
-        "a user rule can be replaced only by the user's new rule in their own words"
+        "direct-human memory cannot be revised, promoted or replaced by the model; use an explicit memory correction"
     );
 }
 
-/// Superseding a user rule with the user's new rule keeps the old text attributed to the
-/// user, and so does retiring one.
+/// Model retirement hides the entry without changing the user's retained wording or author.
 #[tokio::test]
-async fn lifecycle_changes_keep_the_texts_authorship() {
+async fn model_retirement_keeps_the_texts_authorship() {
     let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
-    let services = &tool.services;
-    let add = |action: &'static str, text: &'static str| async move {
-        let node = services.project_node_id(PROJECT_ID).await.expect("node");
-        let store = services.blackboard().await.expect("store");
-        crate::add_entry(
-            store,
-            &crate::MemoryActor {
-                thread_id: Some("thread-1".into()),
-                action_id: Some(action.into()),
-            },
-            PROJECT_ID,
-            node,
-            crate::MemoryAddition::Rule { scope: None },
-            text,
-        )
+    let node = tool
+        .services
+        .project_node_id(PROJECT_ID)
         .await
-        .expect("add")
-        .0
-    };
-    let old = add("turn-1", "From now on, never run the whole test suite.").await;
-    let new = add("turn-2", "From now on, run only the affected tests.").await;
-    let other = add("turn-3", "From now on, never push.").await;
-    let superseded = tool
-        .apply_mutation(
-            mutation(json!({
-                "action": "supersede",
-                "entryId": old.id.to_string(),
-                "expectedRevision": old.revision,
-                "successorEntryId": new.id.to_string()
-            })),
-            "turn-4",
-            std::slice::from_ref(&project_root),
-        )
-        .await
-        .expect("supersede");
+        .expect("node");
+    let store = tool.services.blackboard().await.expect("store");
+    let rule = crate::add_entry(
+        store,
+        &crate::MemoryActor {
+            thread_id: Some("thread-1".into()),
+            action_id: Some("retire-rule".into()),
+        },
+        PROJECT_ID,
+        node,
+        crate::MemoryAddition::Rule { scope: None },
+        "From now on, never push.",
+    )
+    .await
+    .expect("add")
+    .0;
     let retired = tool
         .apply_mutation(
             mutation(json!({
                 "action": "retire",
-                "entryId": other.id.to_string(),
-                "expectedRevision": other.revision
+                "entryId": rule.id.to_string(),
+                "expectedRevision": rule.revision
             })),
-            "turn-4",
+            "turn-retire",
             std::slice::from_ref(&project_root),
         )
         .await
         .expect("retire");
     assert_eq!(
+        (retired.value, retired.state, retired.revision),
         (
-            superseded.value.provenance.clone(),
-            retired.value.provenance
-        ),
-        (old.value.provenance, other.value.provenance)
+            rule.value,
+            BlackboardEntryState::Tombstoned,
+            rule.revision + 1
+        )
     );
 }
