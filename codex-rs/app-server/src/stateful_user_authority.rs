@@ -43,6 +43,7 @@ fn user_authority_method(request: &ClientRequest) -> Option<&'static str> {
         ClientRequest::StatefulMemoryForget { .. } => Some("statefulMemory/forget"),
         ClientRequest::StatefulMemoryCorrect { .. } => Some("statefulMemory/correct"),
         ClientRequest::StatefulMemoryAdd { .. } => Some("statefulMemory/add"),
+        ClientRequest::StatefulMemoryScope { .. } => Some("statefulMemory/scope"),
         _ => None,
     }
 }

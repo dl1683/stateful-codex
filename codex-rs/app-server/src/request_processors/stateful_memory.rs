@@ -15,6 +15,10 @@ use codex_app_server_protocol::StatefulMemoryItem;
 use codex_app_server_protocol::StatefulMemoryReadParams;
 use codex_app_server_protocol::StatefulMemoryReadResponse;
 use codex_app_server_protocol::StatefulMemoryReplaced;
+use codex_app_server_protocol::StatefulMemoryScope;
+use codex_app_server_protocol::StatefulMemoryScopeAction;
+use codex_app_server_protocol::StatefulMemoryScopeParams;
+use codex_app_server_protocol::StatefulMemoryScopeResponse;
 use codex_app_server_protocol::StatefulMemorySection as ApiSection;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
@@ -109,8 +113,13 @@ impl BlackboardRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let project_id = self.thread_project(&params.thread_id).await?;
         let id = entry_id(params.entry_id)?;
+        let actor = codex_stateful_extension::MemoryActor {
+            thread_id: Some(params.thread_id.clone()),
+            action_id: None,
+        };
         let entry = codex_stateful_extension::forget_entry(
             self.store().await?,
+            &actor,
             &project_id,
             &id,
             params.expected_revision,
@@ -134,8 +143,13 @@ impl BlackboardRequestProcessor {
         let project_id = self.thread_project(&params.thread_id).await?;
         let id = entry_id(params.entry_id)?;
         let store = self.store().await?;
+        let actor = codex_stateful_extension::MemoryActor {
+            thread_id: Some(params.thread_id.clone()),
+            action_id: None,
+        };
         let succession = codex_stateful_extension::correct_entry(
             store,
+            &actor,
             &project_id,
             &id,
             params.expected_revision,
@@ -168,6 +182,18 @@ impl BlackboardRequestProcessor {
         if params.client_action_id.trim().is_empty() || params.client_action_id.len() > 128 {
             return Err(invalid_params("clientActionId must be 1-128 bytes"));
         }
+        // A field the kind does not use is refused rather than dropped.
+        let given = |value: &Option<String>| {
+            value
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        };
+        if given(&params.reason) && params.kind != StatefulMemoryAddKind::Decision {
+            return Err(invalid_params("reason is only for a decision"));
+        }
+        if given(&params.scope) && params.kind != StatefulMemoryAddKind::Rule {
+            return Err(invalid_params("scope is only for a rule"));
+        }
         let node_id = self.memory_node(&project_id).await?;
         let store = self.store().await?;
         let addition = match params.kind {
@@ -180,13 +206,17 @@ impl BlackboardRequestProcessor {
             },
             StatefulMemoryAddKind::Note => MemoryAddition::Note,
         };
+        let actor = codex_stateful_extension::MemoryActor {
+            thread_id: Some(params.thread_id.clone()),
+            action_id: Some(params.client_action_id.clone()),
+        };
         let (entry, outcome) = codex_stateful_extension::add_entry(
             store,
+            &actor,
             &project_id,
             node_id,
             addition,
             &params.content,
-            &params.client_action_id,
         )
         .await
         .map_err(control_error)?;
@@ -205,6 +235,90 @@ impl BlackboardRequestProcessor {
             }
             .into(),
         ))
+    }
+
+    pub(crate) async fn memory_scope(
+        &self,
+        params: StatefulMemoryScopeParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let project_id = self.thread_project(&params.thread_id).await?;
+        let store = self.store().await?;
+        let named = || {
+            params
+                .scope_id
+                .clone()
+                .ok_or_else(|| invalid_params("scopeId names the investigation for join and end"))
+        };
+        match params.action {
+            StatefulMemoryScopeAction::List => {}
+            StatefulMemoryScopeAction::Join => {
+                let scope_id = named()?;
+                let scope = store
+                    .scope(&project_id, &scope_id)
+                    .await
+                    .map_err(blackboard_error)?
+                    .ok_or_else(|| invalid_params("no such investigation in this project"))?;
+                if scope.state != codex_project_intelligence::ScopeState::Open {
+                    return Err(invalid_params("that investigation has ended"));
+                }
+                store
+                    .bind_thread_scope(&project_id, &params.thread_id, &scope_id)
+                    .await
+                    .map_err(blackboard_error)?;
+            }
+            StatefulMemoryScopeAction::Leave => {
+                store
+                    .unbind_thread_scope(&project_id, &params.thread_id)
+                    .await
+                    .map_err(blackboard_error)?;
+            }
+            StatefulMemoryScopeAction::End => {
+                let scope_id = named()?;
+                let scope = store
+                    .scope(&project_id, &scope_id)
+                    .await
+                    .map_err(blackboard_error)?
+                    .ok_or_else(|| invalid_params("no such investigation in this project"))?;
+                let actor = codex_stateful_extension::MemoryActor {
+                    thread_id: Some(params.thread_id.clone()),
+                    action_id: None,
+                };
+                store
+                    .end_scope(
+                        &project_id,
+                        &scope_id,
+                        &format!("direct-control:{}", params.thread_id),
+                        &codex_project_intelligence::ChangeRecord {
+                            operation: codex_project_intelligence::ChangeOperation::ScopeEnded,
+                            origin: codex_project_intelligence::ChangeOrigin::DirectControl,
+                            category: codex_project_intelligence::KnowledgeCategory::Rule,
+                            action_id: actor.action_id,
+                            thread_id: actor.thread_id,
+                            turn_id: None,
+                            group_id: None,
+                            preview: scope.title,
+                        },
+                    )
+                    .await
+                    .map_err(blackboard_error)?;
+            }
+        }
+        let (bound_scope, scopes) = store
+            .thread_scopes(&project_id, &params.thread_id)
+            .await
+            .map_err(blackboard_error)?;
+        let bound = bound_scope.map(|scope| scope.scope_id);
+        let scopes = scopes
+            .into_iter()
+            .map(|scope| StatefulMemoryScope {
+                this_thread: bound.as_deref() == Some(scope.scope_id.as_str()),
+                open: scope.state == codex_project_intelligence::ScopeState::Open,
+                scope_id: scope.scope_id,
+                title: scope.title,
+                end_condition: scope.end_condition,
+            })
+            .collect();
+        Ok(Some(StatefulMemoryScopeResponse { scopes }.into()))
     }
 
     /// The project's root node, created when the project has none yet.
@@ -310,6 +424,37 @@ async fn memory_item(
         MemorySection::Knowledge => ApiSection::Knowledge,
     };
     let (content, content_truncated) = bounded(&entry.value.content, MAX_CONTENT_BYTES);
+    let context = store
+        .knowledge_context(&entry.value.project_id, &entry.id)
+        .await
+        .map_err(blackboard_error)?;
+    let scope_title = match context
+        .as_ref()
+        .and_then(|context| context.scope_id.as_deref())
+    {
+        Some(scope_id) => store
+            .scope(&entry.value.project_id, scope_id)
+            .await
+            .map_err(blackboard_error)?
+            .map(|scope| scope.title),
+        None => None,
+    };
+    let attributed_to = context
+        .as_ref()
+        .and_then(|context| context.payload.as_deref())
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|payload| payload.get("speaker")?.as_str().map(str::to_string));
+    let authority = context.map(|context| {
+        use codex_app_server_protocol::StatefulMemoryAuthority as Api;
+        use codex_project_intelligence::KnowledgeAuthority;
+        match context.authority {
+            KnowledgeAuthority::HumanDirect => Api::HumanDirect,
+            KnowledgeAuthority::AssistantReported => Api::AssistantReported,
+            KnowledgeAuthority::ReportedThirdParty => Api::ReportedThirdParty,
+            KnowledgeAuthority::HostObserved => Api::HostObserved,
+            KnowledgeAuthority::LegacyUnknown => Api::LegacyUnknown,
+        }
+    });
     Ok(StatefulMemoryItem {
         entry_id: entry.id.to_string(),
         revision: entry.revision,
@@ -320,6 +465,9 @@ async fn memory_item(
         source: api_provenance_kind(entry.value.provenance.kind),
         updated_at: entry.updated_at_ms.div_euclid(1_000),
         replaces,
+        authority,
+        scope_title,
+        attributed_to,
     })
 }
 

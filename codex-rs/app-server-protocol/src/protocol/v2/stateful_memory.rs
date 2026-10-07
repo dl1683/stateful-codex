@@ -57,6 +57,28 @@ pub struct StatefulMemoryItem {
     pub updated_at: i64,
     /// What this entry replaced, newest first, at most three.
     pub replaces: Vec<StatefulMemoryReplaced>,
+    /// On whose authority the entry rests, when recorded (older entries have none).
+    pub authority: Option<StatefulMemoryAuthority>,
+    /// The investigation a rule is limited to, in the user's words.
+    pub scope_title: Option<String>,
+    /// Whose words a relayed note keeps, as the user named them.
+    pub attributed_to: Option<String>,
+}
+
+/// On whose authority a memory entry rests.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryAuthority {
+    /// The user's own words or control action.
+    HumanDirect,
+    /// What the assistant said; not the user's word and not verified.
+    AssistantReported,
+    /// Someone else's words the user passed on.
+    ReportedThirdParty,
+    /// Observed by the host (a command, a commit, source bytes).
+    HostObserved,
+    LegacyUnknown,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -185,4 +207,54 @@ pub enum StatefulMemoryAddOutcome {
 pub struct StatefulMemoryAddResponse {
     pub item: StatefulMemoryItem,
     pub outcome: StatefulMemoryAddOutcome,
+}
+
+/// What the user does with the investigations rules can be limited to.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryScopeAction {
+    /// List the project's investigations and which one this thread continues.
+    List,
+    /// This thread continues the named investigation; its rules apply here.
+    Join,
+    /// This thread no longer continues any investigation.
+    Leave,
+    /// End the named investigation; its rules stop applying everywhere (kept in history).
+    End,
+}
+
+/// Lists, joins, leaves or ends an investigation for a thread, with no model turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryScopeParams {
+    pub thread_id: String,
+    pub action: StatefulMemoryScopeAction,
+    /// The investigation for join and end.
+    #[ts(optional = nullable)]
+    pub scope_id: Option<String>,
+}
+
+/// One investigation rules can be limited to.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryScope {
+    pub scope_id: String,
+    /// The user's words naming it.
+    pub title: String,
+    pub open: bool,
+    /// When its rules stop applying, in the user's words.
+    pub end_condition: Option<String>,
+    /// Whether this thread continues it.
+    pub this_thread: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryScopeResponse {
+    /// The project's investigations after the action, newest first.
+    pub scopes: Vec<StatefulMemoryScope>,
 }

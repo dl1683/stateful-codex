@@ -4341,6 +4341,39 @@
         }
       ]
     },
+    "StatefulMemoryScopeAction": {
+      "description": "What the user does with the investigations rules can be limited to.",
+      "oneOf": [
+        {
+          "description": "List the project's investigations and which one this thread continues.",
+          "enum": [
+            "list"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This thread continues the named investigation; its rules apply here.",
+          "enum": [
+            "join"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This thread no longer continues any investigation.",
+          "enum": [
+            "leave"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "End the named investigation; its rules stop applying everywhere (kept in history).",
+          "enum": [
+            "end"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "StatefulRunBudget": {
       "properties": {
         "maxContinuations": {
