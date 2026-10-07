@@ -112,7 +112,10 @@ async fn corrected_attributed_notes_refuse_model_rewrite_promotion_and_successio
     let note = original
         .data
         .into_iter()
-        .find(|item| item.attributed_to.is_some())
+        .find(|item| {
+            item.authority
+                == Some(codex_app_server_protocol::StatefulMemoryAuthority::ReportedThirdParty)
+        })
         .expect("attributed note");
     let corrected: StatefulMemoryCorrectResponse = server
         .request(|request_id| ClientRequest::StatefulMemoryCorrect {
@@ -178,13 +181,13 @@ async fn corrected_attributed_notes_refuse_model_rewrite_promotion_and_successio
     assert!(
         update
             .to_string()
-            .contains("never promoted or revised by the model")
+            .contains("direct-human memory cannot be revised")
     );
     assert!(
         promotion
             .to_string()
-            .contains("never promoted or revised by the model")
+            .contains("direct-human memory cannot be revised")
     );
-    assert!(successor.to_string().contains("attributed note"));
+    assert!(successor.to_string().contains("direct-human memory"));
     Ok(())
 }

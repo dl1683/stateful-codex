@@ -123,4 +123,80 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
         );
     }
     assert_eq!(outcomes, vec![true, true, false, false, false, false]);
+
+    // Legacy committed successions from User-provenance entries are excluded on replay,
+    // irrespective of the authority recorded on the predecessor.
+    for authority in [
+        None,
+        Some(codex_project_intelligence::KnowledgeAuthority::AssistantReported),
+        Some(codex_project_intelligence::KnowledgeAuthority::HumanDirect),
+    ] {
+        let predecessor_id =
+            BlackboardEntryId::parse(format!("user-{authority:?}")).expect("predecessor ID");
+        let successor_id =
+            BlackboardEntryId::parse(format!("successor-{authority:?}")).expect("successor ID");
+        let mut user_value = value("User's corrected words and reason.");
+        user_value.provenance.kind = BlackboardProvenanceKind::User;
+        let predecessor = store
+            .create_entry(predecessor_id.clone(), user_value)
+            .await
+            .expect("user predecessor");
+        if let Some(authority) = authority {
+            store
+                .record_context(
+                    &predecessor,
+                    &codex_project_intelligence::KnowledgeContext::new(
+                        codex_project_intelligence::KnowledgeCategory::Decision,
+                        authority,
+                    ),
+                    /*change*/ None,
+                )
+                .await
+                .expect("historical authority");
+        }
+        let successor = store
+            .create_successor(
+                successor_id.clone(),
+                value("Historical model successor."),
+                vec![SupersededEntry {
+                    id: predecessor_id.clone(),
+                    expected_revision: 1,
+                }],
+            )
+            .await
+            .expect("historical succession");
+        let before = store
+            .get_entry(PROJECT_ID, &predecessor_id)
+            .await
+            .expect("predecessor");
+        let error = committed_succession(
+            store,
+            &registry,
+            PROJECT_ID,
+            "thread-1",
+            &successor_id,
+            &successor.successor.value,
+            &[SupersedeReference::Entry {
+                entry_id: predecessor_id.to_string(),
+                revision: 1,
+            }],
+        )
+        .await
+        .expect_err("User-provenance replay refused");
+        assert!(error.to_string().contains("direct-human"));
+        assert_eq!(
+            store
+                .get_entry(PROJECT_ID, &predecessor_id)
+                .await
+                .expect("unchanged"),
+            before
+        );
+        assert_eq!(
+            store
+                .get_entry(PROJECT_ID, &successor_id)
+                .await
+                .expect("successor"),
+            Some(successor.successor)
+        );
+    }
 }

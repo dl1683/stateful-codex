@@ -373,7 +373,7 @@ async fn model_must_downgrade_before_changing_user_confirmed_meaning() {
                 state: BlackboardEntryState::Active,
                 superseded_by: None,
                 provenance: BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::User,
+                    kind: BlackboardProvenanceKind::Agent,
                     source_id: "host-user-action".to_string(),
                 },
             },
@@ -585,7 +585,7 @@ async fn attributed_notes_are_never_promoted_by_meaning() {
                 evidence: Vec::new(),
                 premises: Vec::new(),
                 provenance: BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::User,
+                    kind: BlackboardProvenanceKind::Agent,
                     source_id: "user-message:thread-1:turn-1".to_string(),
                 },
             },

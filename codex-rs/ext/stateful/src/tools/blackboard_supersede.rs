@@ -71,13 +71,14 @@ pub(super) async fn committed_succession(
     };
     let replaced = store.superseded_by(project_id, id).await.map_err(respond)?;
     for predecessor in &replaced {
-        if store
-            .knowledge_context(project_id, &predecessor.id)
-            .await
-            .map_err(respond)?
-            .is_some_and(|context| {
-                context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
-            })
+        if predecessor.value.provenance.kind == BlackboardProvenanceKind::User
+            || store
+                .knowledge_context(project_id, &predecessor.id)
+                .await
+                .map_err(respond)?
+                .is_some_and(|context| {
+                    context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+                })
         {
             return Err(respond(
                 "direct-human memory cannot be replaced by model succession; use an explicit memory correction",
@@ -183,9 +184,11 @@ pub(super) async fn resolve_superseded(
             .knowledge_context(project_id, &id)
             .await
             .map_err(respond)?;
-        if context.as_ref().is_some_and(|context| {
-            context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
-        }) {
+        if current.value.provenance.kind == BlackboardProvenanceKind::User
+            || context.as_ref().is_some_and(|context| {
+                context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+            })
+        {
             return Err(respond(
                 "direct-human memory cannot be replaced by model succession; use an explicit memory correction",
             ));

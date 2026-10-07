@@ -291,9 +291,11 @@ impl BlackboardUpdateTool {
             .knowledge_context(&self.project_id, &current.id)
             .await
             .map_err(respond)?;
-        if context.as_ref().is_some_and(|context| {
-            context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
-        }) && !matches!(mutation, MutationArguments::Retire { .. })
+        if (current.value.provenance.kind == BlackboardProvenanceKind::User
+            || context.as_ref().is_some_and(|context| {
+                context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+            }))
+            && !matches!(mutation, MutationArguments::Retire { .. })
         {
             return Err(respond(
                 "direct-human memory cannot be revised, promoted or replaced by the model; use an explicit memory correction",
