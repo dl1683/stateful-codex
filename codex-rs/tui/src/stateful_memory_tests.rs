@@ -17,6 +17,62 @@ use super::ReceiptTally;
 use super::memory_lines;
 use crate::history_cell::HistoryCell;
 
+#[test]
+fn memory_shortened_text_and_scope_states_are_explicit() {
+    use codex_app_server_protocol::StatefulMemoryScopeState;
+    let items = [
+        StatefulMemoryScopeState::Open,
+        StatefulMemoryScopeState::NotBoundHere,
+        StatefulMemoryScopeState::Ended,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, state)| {
+        let mut item = item(
+            &format!("rule-{index}"),
+            StatefulMemorySection::UserRule,
+            BlackboardKind::Instruction,
+            "Preserve the full qualification of this rule.",
+        );
+        item.content_truncated = true;
+        item.scope_title = Some("Parser investigation".to_string());
+        item.scope_state = Some(state);
+        (index + 1, item)
+    })
+    .collect::<Vec<_>>();
+    insta::assert_snapshot!(
+        "memory_shortened_scopes",
+        render(memory_lines(&items, Footer::Complete, /*run*/ None))
+    );
+}
+
+#[test]
+fn leave_acknowledgement_uses_the_committed_scope_snapshot() {
+    use codex_app_server_protocol::StatefulMemoryScope;
+    use codex_app_server_protocol::StatefulMemoryScopeAction;
+    use codex_app_server_protocol::StatefulMemoryScopeResponse;
+    let response = StatefulMemoryScopeResponse {
+        scopes: vec![StatefulMemoryScope {
+            scope_id: "rejoined".to_string(),
+            title: "Parser investigation".to_string(),
+            open: true,
+            end_condition: None,
+            this_thread: true,
+        }],
+    };
+    insta::assert_snapshot!(
+        "memory_leave_rejoined",
+        render(super::scope_lines(
+            &response,
+            crate::stateful_memory_commands::scope_acknowledgement(
+                &response,
+                StatefulMemoryScopeAction::Leave,
+                /*scope_id*/ None
+            )
+        ))
+    );
+}
+
 fn render(lines: Vec<ratatui::text::Line<'static>>) -> String {
     lines
         .into_iter()
@@ -43,6 +99,7 @@ fn item(
         replaces: Vec::new(),
         authority: None,
         scope_title: None,
+        scope_state: None,
         attributed_to: None,
     }
 }

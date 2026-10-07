@@ -60,59 +60,62 @@ impl App {
             .set_mcp_startup_expected_servers(enabled_config_mcp_servers);
     }
 
-    pub(super) async fn handle_app_server_event(
-        &mut self,
-        app_server_client: &AppServerSession,
+    // Notifications enter lifecycle dispatch too; do not embed this large frame in callers.
+    pub(super) fn handle_app_server_event<'a>(
+        &'a mut self,
+        app_server_client: &'a AppServerSession,
         event: AppServerEvent,
-    ) {
-        match event {
-            AppServerEvent::Lagged { skipped } => {
-                tracing::warn!(
-                    skipped,
-                    "app-server event consumer lagged; dropping ignored events"
-                );
-                self.refresh_mcp_startup_expected_servers_from_config();
-                self.chat_widget.finish_mcp_startup_after_lag();
-                if let Some(task) = self.agents_overview.refresh_task.take() {
-                    task.abort();
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        Box::pin(async move {
+            match event {
+                AppServerEvent::Lagged { skipped } => {
+                    tracing::warn!(
+                        skipped,
+                        "app-server event consumer lagged; dropping ignored events"
+                    );
+                    self.refresh_mcp_startup_expected_servers_from_config();
+                    self.chat_widget.finish_mcp_startup_after_lag();
+                    if let Some(task) = self.agents_overview.refresh_task.take() {
+                        task.abort();
+                    }
+                    self.agents_overview.request_id = None;
+                    self.agents_overview.refresh_pending = false;
+                    self.agents_overview.initialized = false;
+                    self.agents_overview.refresh_notifications.clear();
+                    self.agents_overview.activity.clear();
+                    self.agents_overview.last_messages.clear();
+                    self.agents_overview.usage.clear();
+                    self.agents_overview.pending_usage = None;
+                    self.agents_overview.usage_disabled = false;
+                    self.repaint_agents_overview();
+                    self.refresh_agents_overview_threads(app_server_client);
                 }
-                self.agents_overview.request_id = None;
-                self.agents_overview.refresh_pending = false;
-                self.agents_overview.initialized = false;
-                self.agents_overview.refresh_notifications.clear();
-                self.agents_overview.activity.clear();
-                self.agents_overview.last_messages.clear();
-                self.agents_overview.usage.clear();
-                self.agents_overview.pending_usage = None;
-                self.agents_overview.usage_disabled = false;
-                self.repaint_agents_overview();
-                self.refresh_agents_overview_threads(app_server_client);
-            }
-            AppServerEvent::ServerNotification(notification) => {
-                let request_resolved = matches!(
-                    notification.as_ref(),
-                    ServerNotification::ServerRequestResolved(_)
-                );
-                self.handle_server_notification_event(app_server_client, *notification)
-                    .await;
-                if request_resolved {
+                AppServerEvent::ServerNotification(notification) => {
+                    let request_resolved = matches!(
+                        notification.as_ref(),
+                        ServerNotification::ServerRequestResolved(_)
+                    );
+                    self.handle_server_notification_event(app_server_client, *notification)
+                        .await;
+                    if request_resolved {
+                        self.repaint_agents_overview();
+                    }
+                }
+                AppServerEvent::ServerRequest(request) => {
+                    self.handle_server_request_event(app_server_client, *request)
+                        .await;
                     self.repaint_agents_overview();
                 }
-            }
-            AppServerEvent::ServerRequest(request) => {
-                self.handle_server_request_event(app_server_client, *request)
-                    .await;
-                self.repaint_agents_overview();
-            }
-            AppServerEvent::Disconnected { message } => {
-                if self.begin_reconnect() {
-                    return;
+                AppServerEvent::Disconnected { message } => {
+                    if self.begin_reconnect() {
+                        return;
+                    }
+                    tracing::warn!("app-server event stream disconnected: {message}");
+                    self.chat_widget.add_error_message(message.clone());
+                    self.app_event_tx.send(AppEvent::FatalExitRequest(message));
                 }
-                tracing::warn!("app-server event stream disconnected: {message}");
-                self.chat_widget.add_error_message(message.clone());
-                self.app_event_tx.send(AppEvent::FatalExitRequest(message));
             }
-        }
+        })
     }
 
     async fn handle_server_notification_event(

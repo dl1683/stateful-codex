@@ -1090,6 +1090,9 @@ pub(crate) enum AppEvent {
     /// The result of a `/memory` command, shown only while its thread is the active one.
     StatefulMemoryResult {
         thread_id: ThreadId,
+        project_id: String,
+        client_id: uuid::Uuid,
+        operation: u64,
         cell: Box<dyn HistoryCell>,
         /// The numbered listing generation the cell shows, if it shows one.
         listing_generation: Option<u64>,

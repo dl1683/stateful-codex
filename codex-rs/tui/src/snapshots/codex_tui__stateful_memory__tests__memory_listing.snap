@@ -5,7 +5,7 @@ expression: "render(memory_lines(&items.into_iter().enumerate().map(|(index, ite
 Project memory
   Collaborative run open · it stays open between answers and after you quit
 
-Your rules (applied to all work)
+Your retained rules
   1. From now on, never run the whole test suite.
      rule@1
 

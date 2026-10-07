@@ -25,115 +25,119 @@ use codex_app_server_protocol::WindowsSandboxSetupMode;
 pub(super) const SHUTDOWN_FIRST_EXIT_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 2);
 
 impl App {
-    pub(crate) async fn handle_event(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_server: &mut AppServerSession,
+    // Keep the dispatcher frame off callers' stacks, including lifecycle test futures.
+    pub(crate) fn handle_event<'a>(
+        &'a mut self,
+        tui: &'a mut tui::Tui,
+        app_server: &'a mut AppServerSession,
         event: AppEvent,
-    ) -> Result<AppRunControl> {
-        let from_agents_overview = matches!(event, AppEvent::ForkAgentsOverviewThreadReady { .. });
-        let event = if let AppEvent::ForkAgentsOverviewThreadReady { thread_id } = event {
-            if self.current_displayed_thread_id() != Some(thread_id)
-                || (self.thread_unavailable(thread_id)
-                    && !self.chat_widget.is_external_writer_view())
-            {
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<AppRunControl>> + 'a>> {
+        Box::pin(async move {
+            let from_agents_overview =
+                matches!(event, AppEvent::ForkAgentsOverviewThreadReady { .. });
+            let event = if let AppEvent::ForkAgentsOverviewThreadReady { thread_id } = event {
+                if self.current_displayed_thread_id() != Some(thread_id)
+                    || (self.thread_unavailable(thread_id)
+                        && !self.chat_widget.is_external_writer_view())
+                {
+                    self.chat_widget.fork_in_progress = false;
+                    return Ok(AppRunControl::Continue);
+                }
+                AppEvent::ForkCurrentSession { name: None }
+            } else {
+                event
+            };
+            // Release the shortcut's input guard even when a fork is rejected below.
+            if matches!(event, AppEvent::ForkCurrentSession { .. }) {
                 self.chat_widget.fork_in_progress = false;
+            }
+            if self.reconnect.offline
+                && !matches!(
+                    &event,
+                    AppEvent::OpenDaemonMenu
+                        | AppEvent::OpenWarnings
+                        | AppEvent::CopyWarning(_)
+                        | AppEvent::UpdateWarnings { .. }
+                        | AppEvent::CopySelection { .. }
+                        | AppEvent::ConfirmDaemonUpdate(_)
+                        | AppEvent::RunDaemonUpdate(_)
+                        | AppEvent::InsertHistoryCell(_)
+                        | AppEvent::CommitRealtimeTranscriptHistory
+                        | AppEvent::ResetTranscriptForThreadSwitch
+                        | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
+                        | AppEvent::FinishPromptRevert { .. }
+                        | AppEvent::ManagedWorktreeCreated(_)
+                        | AppEvent::AgentsOverviewWorktreeCreated(_)
+                        | AppEvent::AppendMessageHistoryEntry { .. }
+                        | AppEvent::BeginInitialHistoryReplayBuffer
+                        | AppEvent::BeginThreadSwitchHistoryReplayBuffer
+                        | AppEvent::EndInitialHistoryReplayBuffer
+                        | AppEvent::FatalExitRequest(_)
+                )
+            {
                 return Ok(AppRunControl::Continue);
             }
-            AppEvent::ForkCurrentSession { name: None }
-        } else {
-            event
-        };
-        // Release the shortcut's input guard even when a fork is rejected below.
-        if matches!(event, AppEvent::ForkCurrentSession { .. }) {
-            self.chat_widget.fork_in_progress = false;
-        }
-        if self.reconnect.offline
-            && !matches!(
-                &event,
-                AppEvent::OpenDaemonMenu
-                    | AppEvent::OpenWarnings
-                    | AppEvent::CopyWarning(_)
-                    | AppEvent::UpdateWarnings { .. }
-                    | AppEvent::CopySelection { .. }
-                    | AppEvent::ConfirmDaemonUpdate(_)
-                    | AppEvent::RunDaemonUpdate(_)
-                    | AppEvent::InsertHistoryCell(_)
-                    | AppEvent::CommitRealtimeTranscriptHistory
-                    | AppEvent::ResetTranscriptForThreadSwitch
-                    | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
-                    | AppEvent::FinishPromptRevert { .. }
-                    | AppEvent::ManagedWorktreeCreated(_)
-                    | AppEvent::AgentsOverviewWorktreeCreated(_)
-                    | AppEvent::AppendMessageHistoryEntry { .. }
-                    | AppEvent::BeginInitialHistoryReplayBuffer
-                    | AppEvent::BeginThreadSwitchHistoryReplayBuffer
-                    | AppEvent::EndInitialHistoryReplayBuffer
-                    | AppEvent::FatalExitRequest(_)
-            )
-        {
-            return Ok(AppRunControl::Continue);
-        }
-        if matches!(
-            &event,
-            AppEvent::OpenWindowsSandboxEnablePrompt { .. }
-                | AppEvent::OpenWindowsSandboxFallbackPrompt { .. }
-                | AppEvent::BeginWindowsSandboxElevatedSetup { .. }
-                | AppEvent::BeginWindowsSandboxLegacySetup { .. }
-                | AppEvent::EnableWindowsSandboxForAgentMode { .. }
-        ) && !self.windows_sandbox_setup_is_local()
-        {
             if matches!(
                 &event,
-                AppEvent::OpenWindowsSandboxFallbackPrompt { .. }
+                AppEvent::OpenWindowsSandboxEnablePrompt { .. }
+                    | AppEvent::OpenWindowsSandboxFallbackPrompt { .. }
+                    | AppEvent::BeginWindowsSandboxElevatedSetup { .. }
+                    | AppEvent::BeginWindowsSandboxLegacySetup { .. }
                     | AppEvent::EnableWindowsSandboxForAgentMode { .. }
-            ) {
-                self.chat_widget.clear_windows_sandbox_setup_status();
+            ) && !self.windows_sandbox_setup_is_local()
+            {
+                if matches!(
+                    &event,
+                    AppEvent::OpenWindowsSandboxFallbackPrompt { .. }
+                        | AppEvent::EnableWindowsSandboxForAgentMode { .. }
+                ) {
+                    self.chat_widget.clear_windows_sandbox_setup_status();
+                }
+                self.chat_widget.add_info_message(
+                    "Windows sandbox setup requires local connections and executors.".to_string(),
+                    /*hint*/ None,
+                );
+                return Ok(AppRunControl::Continue);
             }
-            self.chat_widget.add_info_message(
-                "Windows sandbox setup requires local connections and executors.".to_string(),
-                /*hint*/ None,
-            );
-            return Ok(AppRunControl::Continue);
-        }
-        if self.chat_widget.has_misalignment_policy_violation()
-            && matches!(
-                event,
-                AppEvent::OpenAgentPicker
-                    | AppEvent::SelectAgentThread(_)
-                    | AppEvent::StartSide { .. }
-                    | AppEvent::ForkCurrentSession { .. }
-                    | AppEvent::StartManagedWorktree {
-                        mode: crate::app_event::ManagedWorktreeMode::Fork,
-                        ..
-                    }
-                    | AppEvent::RevertSessionForPromptEdit { .. }
-                    | AppEvent::SetThreadGoalDraft { .. }
-                    | AppEvent::SetThreadGoalStatus {
-                        status: ThreadGoalStatus::Active,
-                        ..
-                    }
-            )
-        {
-            return Ok(AppRunControl::Continue);
-        }
+            if self.chat_widget.has_misalignment_policy_violation()
+                && matches!(
+                    event,
+                    AppEvent::OpenAgentPicker
+                        | AppEvent::SelectAgentThread(_)
+                        | AppEvent::StartSide { .. }
+                        | AppEvent::ForkCurrentSession { .. }
+                        | AppEvent::StartManagedWorktree {
+                            mode: crate::app_event::ManagedWorktreeMode::Fork,
+                            ..
+                        }
+                        | AppEvent::RevertSessionForPromptEdit { .. }
+                        | AppEvent::SetThreadGoalDraft { .. }
+                        | AppEvent::SetThreadGoalStatus {
+                            status: ThreadGoalStatus::Active,
+                            ..
+                        }
+                )
+            {
+                return Ok(AppRunControl::Continue);
+            }
 
-        // Keep the picker check and model update in one event without recursively polling this
-        // large dispatcher on the TUI thread's stack.
-        let (event, sparkle_model) = match event {
-            AppEvent::AstraSelectedFromModelPicker {
-                thread_id,
-                model,
-                action,
-            } => {
-                let should_offer = self.chat_widget.current_model() != model
-                    && self.chat_widget.sparkle_thread_for_picker_action(&model) == Some(thread_id);
-                let next_event = action.into_app_event(model.clone());
-                (next_event, should_offer.then_some(model))
-            }
-            event => (event, None),
-        };
-        match event {
+            // Keep the picker check and model update in one event without recursively polling this
+            // large dispatcher on the TUI thread's stack.
+            let (event, sparkle_model) = match event {
+                AppEvent::AstraSelectedFromModelPicker {
+                    thread_id,
+                    model,
+                    action,
+                } => {
+                    let should_offer = self.chat_widget.current_model() != model
+                        && self.chat_widget.sparkle_thread_for_picker_action(&model)
+                            == Some(thread_id);
+                    let next_event = action.into_app_event(model.clone());
+                    (next_event, should_offer.then_some(model))
+                }
+                event => (event, None),
+            };
+            match event {
             AppEvent::OpenDaemonMenu => self.open_daemon_menu(),
             AppEvent::ConfirmDaemonUpdate(source) => self.confirm_daemon_update(source),
             AppEvent::RunDaemonUpdate(source) => {
@@ -855,11 +859,18 @@ impl App {
             }
             AppEvent::StatefulMemoryResult {
                 thread_id,
+                project_id,
+                client_id,
+                operation,
                 cell,
                 listing_generation,
             } => {
                 // A reply for a thread the user has left belongs to that thread, not this one.
-                if self.chat_widget.thread_id() == Some(thread_id) {
+                let current_project = if self.chat_widget.thread_id() == Some(thread_id) && app_server.client_id == client_id {
+                    Box::pin(app_server.thread_read(thread_id, /*include_turns*/ false)).await.ok().map(|response| response.project_id.unwrap_or_default())
+                } else { None };
+                if current_project.as_deref() == Some(project_id.as_str())
+                    && self.memory_listing.accepts(operation, &thread_id.to_string(), listing_generation) {
                     self.insert_history_cell(tui, cell);
                     // Its numbers are now what the user sees.
                     if let Some(generation) = listing_generation {
@@ -1572,11 +1583,17 @@ impl App {
                 self.fetch_mcp_inventory(app_server, detail, thread_id);
             }
             AppEvent::StatefulMemory { thread_id, args } => {
+                let project = match thread_id {
+                    Some(thread) => Box::pin(app_server.thread_read(thread, /*include_turns*/ false)).await.ok().and_then(|response| response.project_id),
+                    None => None,
+                };
                 crate::stateful_memory_commands::run(
                     app_server.request_handle(),
                     self.memory_listing.clone(),
                     thread_id,
                     args,
+                    project.unwrap_or_default(),
+                    app_server.client_id,
                     self.app_event_tx.clone(),
                 );
             }
@@ -3363,11 +3380,12 @@ impl App {
                 }
             }
         }
-        if let Some(model) = sparkle_model {
-            self.chat_widget
-                .on_sparkle_model_selected_from_picker(&model);
-        }
-        Ok(AppRunControl::Continue)
+            if let Some(model) = sparkle_model {
+                self.chat_widget
+                    .on_sparkle_model_selected_from_picker(&model);
+            }
+            Ok(AppRunControl::Continue)
+        })
     }
 
     async fn apply_keymap_capture(

@@ -1,0 +1,22 @@
+---
+source: tui/src/stateful_memory_tests.rs
+expression: "render(memory_lines(&items, Footer::Complete, None))"
+---
+Project memory
+
+Your retained rules
+  1. Preserve the full qualification of this rule.
+     rule-0@1
+     Shortened. Exact text: blackboard_query entryId="rule-0" expectedEntryRevision=1
+     investigation: "Parser investigation" (open, bound here)
+  2. Preserve the full qualification of this rule.
+     rule-1@1
+     Shortened. Exact text: blackboard_query entryId="rule-1" expectedEntryRevision=1
+     investigation: "Parser investigation" (not bound here)
+  3. Preserve the full qualification of this rule.
+     rule-2@1
+     Shortened. Exact text: blackboard_query entryId="rule-2" expectedEntryRevision=1
+     investigation: "Parser investigation" (ended)
+
+  List numbers are display conveniences. Use the shown ID@REV for changes.
+  /memory add · /memory forget <ID@REV> · /memory correct <ID@REV> <new text> · /memory help · no model turn is used

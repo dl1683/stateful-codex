@@ -315,6 +315,7 @@ pub(crate) struct AppServerBootstrap {
 
 pub(crate) struct AppServerSession {
     client: AppServerClient,
+    pub(crate) client_id: Uuid,
     next_request_id: i64,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
     task_tool_threads: HashSet<ThreadId>,
@@ -420,6 +421,7 @@ impl AppServerSession {
     pub(crate) fn new(client: AppServerClient, thread_params_mode: ThreadParamsMode) -> Self {
         Self {
             client,
+            client_id: Uuid::new_v4(),
             next_request_id: 1,
             history_pagination: HashMap::new(),
             task_tool_threads: HashSet::new(),
@@ -740,15 +742,21 @@ impl AppServerSession {
     }
 
     #[cfg(test)]
-    pub(crate) async fn start_thread(&mut self, config: &Config) -> Result<AppServerStartedThread> {
-        self.start_thread_with_session_start_source(
-            &LocalSettings::from(config),
-            config,
-            /*session_start_source*/ None,
-            /*remote_cwd_override*/ None,
-            /*selected_profile*/ None,
-        )
-        .await
+    pub(crate) fn start_thread<'a>(
+        &'a mut self,
+        config: &'a Config,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<AppServerStartedThread>> + 'a>>
+    {
+        Box::pin(async move {
+            self.start_thread_with_session_start_source(
+                &LocalSettings::from(config),
+                config,
+                /*session_start_source*/ None,
+                /*remote_cwd_override*/ None,
+                /*selected_profile*/ None,
+            )
+            .await
+        })
     }
 
     pub(crate) async fn start_thread_with_session_start_source(

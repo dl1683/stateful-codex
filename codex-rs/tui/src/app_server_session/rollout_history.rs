@@ -131,13 +131,14 @@ impl AppServerSession {
             .history_mode = history_mode;
     }
 
-    pub(crate) async fn resume_thread(
-        &mut self,
-        local_settings: &crate::local_settings::LocalSettings,
+    pub(crate) fn resume_thread<'a>(
+        &'a mut self,
+        local_settings: &'a crate::local_settings::LocalSettings,
         config: Config,
         thread_id: ThreadId,
         model_settings: ResumeModelSettings,
-    ) -> Result<AppServerStartedThread> {
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<AppServerStartedThread>> + 'a>>
+    {
         Box::pin(self.resume_thread_with_permission_overrides(
             local_settings,
             config,
@@ -145,7 +146,6 @@ impl AppServerSession {
             model_settings,
             crate::resume_permissions::ResumePermissions::default(),
         ))
-        .await
     }
 
     pub(crate) async fn resume_thread_with_permission_overrides(

@@ -40,10 +40,7 @@ pub(crate) fn memory_lines(
         return lines;
     }
     let sections = [
-        (
-            StatefulMemorySection::UserRule,
-            "Your rules (applied to all work)",
-        ),
+        (StatefulMemorySection::UserRule, "Your retained rules"),
         (
             StatefulMemorySection::PendingRule,
             "Task-limited rules (kept, not applied)",
@@ -73,14 +70,18 @@ pub(crate) fn memory_lines(
                     .dim()
                     .into(),
             );
+            if item.content_truncated {
+                lines.push(format!("     Shortened. Exact text: blackboard_query entryId=\"{}\" expectedEntryRevision={}", item.entry_id, item.revision).dim().into());
+            }
             if let Some(replaced) = item.replaces.first() {
                 lines.push(vec!["     replaces: ".dim(), preview(&replaced.content).dim()].into());
             }
             if let Some(scope) = &item.scope_title {
                 lines.push(
                     vec![
-                        "     only in the investigation: ".dim(),
+                        "     investigation: ".dim(),
                         preview(scope).dim(),
+                        format!(" ({})", scope_state(item.scope_state)).dim(),
                     ]
                     .into(),
                 );
@@ -151,7 +152,7 @@ pub(crate) fn section_rank(section: StatefulMemorySection) -> u8 {
 
 pub(crate) fn section_noun(section: StatefulMemorySection) -> &'static str {
     match section {
-        StatefulMemorySection::UserRule => "rule (applied)",
+        StatefulMemorySection::UserRule => "retained rule",
         StatefulMemorySection::PendingRule => "task-limited rule (not applied)",
         StatefulMemorySection::UnverifiedRule => "rule (not applied)",
         StatefulMemorySection::Decision => "decision",
@@ -443,4 +444,14 @@ pub(crate) fn scope_lines(
     }
     lines.push("List numbers are display conveniences. /memory join <scope-ID> · /memory end <scope-ID> · /memory leave".dim().into());
     lines
+}
+
+fn scope_state(state: Option<codex_app_server_protocol::StatefulMemoryScopeState>) -> &'static str {
+    use codex_app_server_protocol::StatefulMemoryScopeState;
+    match state {
+        Some(StatefulMemoryScopeState::Open) => "open, bound here",
+        Some(StatefulMemoryScopeState::NotBoundHere) => "not bound here",
+        Some(StatefulMemoryScopeState::Ended) => "ended",
+        Some(StatefulMemoryScopeState::Unknown) | None => "unknown",
+    }
 }

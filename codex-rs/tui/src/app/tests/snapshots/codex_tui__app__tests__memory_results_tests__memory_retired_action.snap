@@ -1,0 +1,5 @@
+---
+source: tui/src/app/tests/memory_results_tests.rs
+expression: "cell.display_lines(200).iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\")"
+---
+■ Nothing was added: statefulMemory/add failed: this action was already acknowledged, but its entry is retired; nothing was restored (code -32602)
