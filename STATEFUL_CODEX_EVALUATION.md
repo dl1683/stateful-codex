@@ -883,623 +883,310 @@ route. Open: concurrent root revisions, representative precision and recall,
 maturation-inclusive economics, and the approval-gated repository-wide Rust
 suite.
 
-## Benchmark SC-EVAL-015: two-project release distribution
-
-Status: stopped after the first maturation run exposed a completion-contract
-retry on 2026-09-22; no matched outcome case was run.
-
-The frozen manifest is
-`clients/stateful-codex/eval/manifests/release-distribution.json`. It contains
-six outcome questions across the independently matured procurement and
-licensing projects: binding vendor viability, authority and cost, the verified
-continuity basis, current licensing economics, Canadian territory, and
-termination/data-security risk. Each case fixes its prompt, expected semantic
-concepts, prohibited conclusions, project identity, and requirement that the
-Stateful completion result plus returned completion basis preserve the same
-material coverage as the visible answer.
-
-Each fixture will be copied to a fresh temporary directory and hashed before
-execution. One Collaborative Stateful maturation run per project will use the
-exact manifest prompt, then each case will run as a fresh ordinary thread and a
-fresh Stateful thread attached to that project's durable intelligence. Every
-pair must use the same rebuilt branch binary, cached ChatGPT login with
-`OPENAI_API_KEY` and `CODEX_API_KEY` removed, model, reasoning effort, prompt,
-working directory, roots, approval policy, sandbox policy, and permission
-profile. Codex's separate user-memory feature will be disabled in both
-conditions because it already contains notes about these fixtures and would
-leak expected answers into the benchmark; Stateful project intelligence remains
-enabled only for the Stateful condition. Pair order will alternate which
-condition runs first. The two actual
-maturation rollouts are mandatory inputs to the aggregate scorer; a missing
-project maturation is an error rather than a zero-cost default.
-
-The correctness gate requires all twelve visible answers to contain every
-registered concept and no prohibited conclusion. Each of the six Stateful runs
-must also complete once without a completion retry, expose a successful durable
-completion record in the rollout, and pass the same semantic checks across its
-submitted result and returned completion basis. A live API read must separately
-confirm that terminal revision and persisted result; the rollout reconstruction
-is not treated as authoritative storage evidence. Both fixture copies must
-remain byte-identical.
-
-The retrieval gate requires Stateful to use fewer aggregate read-bearing calls
-and fewer unique raw project files than ordinary Codex without weakening exact
-source citations. The economics gate requires lower aggregate full follow-up
-tokens and will report uncached follow-up usage, both measured maturation runs,
-total lifetime delta, win counts, and projected break-even without hiding a
-regression. No uncached or maturation-inclusive advantage will be claimed
-unless the measured totals actually establish it.
-
-Commit `c60f6c969d` prepared the evaluator for this distribution: a case can require registered concepts in the
-Stateful completion result and returned completion basis, not only the visible answer; completion attempts are
-counted; and every measured maturation rollout is accepted. Its 11-test suite passed and reconstructed the real
-SC-EVAL-014 completion as one attempt with 15 checklist items.
-
-This distribution is deliberately broader than a same-question replication but
-is still two small synthetic knowledge corpora. It can close the observed
-cross-case durable-coverage and short-distribution gates. It cannot alone prove
-large-corpus scaling, code-editing workloads, multi-day cache behavior,
-concurrent root revisions, or general production readiness.
-
-### Execution result
-
-The fresh procurement maturation completed thread
-`01a0ca24-35fc-7513-9ec0-6d422e1cae46` and persisted 13 source-verified
-findings plus 14 relationships across all eight files. It correctly captured
-the conjunctive gates, authority order, Alder and Birch failures, Cedar's sole
-apparent eligibility, chronology, costs, and unresolved final-award question.
-The source copy was byte-identical before execution, and the final answer
-reported no source edits.
-
-The completion path needed three attempts. First, the model selected all 13
-root aliases even though the tool cap is eight. After correctly reducing the
-selection, it copied project-intelligence revision 45 into both `rootRevision`
-and the unrelated `expectedRevision`; the run correctly rejected that call
-because its revision was 1. The third call used `expectedRevision: 1`,
-`rootRevision: 45`, and eight aliases and completed successfully at run revision
-2. The run consumed 453,078 full tokens and 68,054 uncached input plus output.
-
-This is a product-contract failure rather than evidence about the matched
-distribution. The rendered root said to select every material alias despite the
-eight-item bound, and the two nearby revision numbers were not explicitly
-distinguished at the call site. No ordinary or follow-up Stateful cases were
-run. SC-EVAL-015 is retained as negative evidence and is not used for release
-economics.
-
-Commit `6f0f03c981` makes the contract self-consistent. The run World State now
-renders the exact current `expectedRevision` and says not to substitute project
-intelligence revision. The root footer and tool schema say to select at most
-eight highest-priority directly material aliases and preserve additional
-conclusions in the final semantic obligation. Focused extension tests pass 6/6,
-the scoped lint and repository formatting completed, and the branch CLI was
-rebuilt. The unchanged code-mode companion rebuild remains blocked by the known
-external Windows V8 archive download; the existing matching binary is retained.
-
-## Benchmark SC-EVAL-016: disambiguated two-project distribution
-
-Status: stopped after both maturation runs exposed a separate evidence-schema
-contradiction on 2026-09-22; no matched outcome case was run.
-
-SC-EVAL-016 repeats the exact frozen SC-EVAL-015 manifest and protocol from
-fresh byte-identical procurement and licensing directories using the rebuilt
-CLI from `6f0f03c981`. The same two maturation prompts, six matched questions,
-condition-order alternation, disabled ordinary memory, authentication, model,
-effort, roots, permissions, correctness gates, live persisted-result checks,
-and economics accounting apply without modification.
-
-The added operational gate is explicit: each maturation and Stateful follow-up
-must select no more than eight aliases, must keep run `expectedRevision`
-distinct from project `rootRevision`, and must complete on its first terminal
-call. Any retry is retained as a failure and its cost remains in the rollout.
-Fresh directories and project identities prevent the successful SC-EVAL-015
-maturation state from entering this replication.
-
-### Execution result
-
-The repaired completion contract passed in both fresh projects. Procurement
-thread `01a0ca30-f52a-71b2-b6ca-3e52e7c1d9dc` selected exactly eight aliases,
-kept run revision 1 distinct from project revision 41, and completed on its
-first terminal call. It persisted 14 source-verified findings and nine
-relationships. The run used six model responses, five outer calls, 159,212 full
-tokens, and 65,004 uncached input plus output. Relative to SC-EVAL-015's failed
-preflight, full usage fell 64.86% and the two completion retries disappeared.
-
-Licensing thread `01a0ca36-26b2-7ef3-9117-b51c4b9af46b` also completed on its
-first terminal call with the correct run/root revisions and eight aliases. It
-persisted 12 source-verified findings and 13 relationships, used seven model
-responses and six outer calls, and consumed 207,649 full tokens plus 58,657
-uncached input and output. Both fresh corpora remained byte-identical.
-
-The licensing run exposed a different pre-completion retry. Its first atomic
-batch supplied both `contextMapEntryId` and `relativePath` for each evidence
-item. Runtime correctly rejected the entire batch because exactly one route
-identity is valid, but the published JSON schema used `anyOf`, which allowed an
-item containing both alternatives. The second batch used only context-map IDs
-and succeeded. Continuing the matched cases would mix a known avoidable
-maturation cost into the release distribution, so execution stopped before any
-ordinary or follow-up run.
-
-Commit `22290f0b98` replaces the evidence schema's `anyOf` with `oneOf` and
-states the mutual exclusion on the array and both identity fields. Focused
-extension tests pass 6/6, the scoped lint and repository formatting completed,
-and the branch CLI was rebuilt. The evaluator was also corrected in
-`d9a3a970c1` to recognize the nested completion output produced when the final
-obligation and terminal update are correctly grouped in one code-mode call; its
-11-test suite passes and reconstructs both live completion records.
-
-## Benchmark SC-EVAL-017: exclusive-evidence two-project distribution
-
-Status: completed on 2026-09-22; mechanism and semantic-correctness review
-passed, retrieval improved, and maturation-inclusive economics failed.
-
-SC-EVAL-017 repeats the exact frozen six-case manifest and all SC-EVAL-016
-conditions from two new byte-identical project directories using the rebuilt
-CLI from `22290f0b98`. Neither prior project's durable intelligence will be
-reused. In addition to the existing completion gate, each maturation must
-persist its coherent evidence-linked batch without retrying an invalid evidence
-identity. Any failure or retry remains in the rollout and stops execution before
-the matched cases. If both maturations pass, all six ordinary/Stateful pairs
-will run under the already frozen order and gates.
-
-### Execution result
-
-Both fresh maturation preflights passed the repaired contracts without an
-invalid evidence identity or terminal-call retry. Procurement thread
-`01a0ca3e-3bf3-7ad1-b99e-90b2b78ef2d9` persisted eight findings and nine
-relationships in run
-`run-6d5c68a0f1e9ecd3788f58983a232299470658112e0124c3aaa869e60f38e695`;
-licensing thread `01a0ca41-cee0-7402-b78f-8a925d3b80bd` persisted fourteen
-findings and ten relationships in run
-`run-86ae359bc9dc850cdde43ab432a1080bbfdbf82d964dfd586eae359e22c67a1e`.
-Each completed on its first terminal call. Together they consumed 447,702 full
-tokens, 114,134 uncached input-plus-output tokens, and fifteen model responses.
-The licensing maturation also discovered a cross-source closing gap: the
-executed side letter requires both Canadian regulatory consent and licensor
-written acknowledgement, while the closing checklist explicitly tracks only
-the consent.
-
-All twelve frozen matched runs completed. Every Stateful follow-up completed on
-its first terminal call, and no Stateful rollout contains a failed script or
-terminal mutation. A fresh real-gateway read independently confirmed all six
-Stateful runs as `completed` at revision 2 with nonempty persisted results.
-Post-run SHA-256 comparison found no difference between either temporary corpus
-and its source fixture: all eight procurement files and all ten licensing files
-remained byte-identical.
-
-The unchanged literal scorer reports the distribution as failed. It passes all
-three licensing pairs and the visible procurement continuity pair, but rejects
-semantically correct procurement wording such as "the only vendor shown to pass
-every binding deployment criterion" because the frozen alternatives require
-"only viable" or "sole viable." It similarly rejects complete statements about
-all three sub-cap totals and preliminary, non-final committee notes because the
-registered phrases are narrower. The durable continuity result says Cedar
-"meets the continuity gate" with 120 hours and 24 hours of headroom rather than
-using the scorer's exact "satisfies" alternative. These misses are retained
-unchanged as evidence about evaluator brittleness; the manifest was not tuned
-after seeing the answers. Independent semantic review finds all twelve visible
-answers and all six Stateful durable results correct, complete for the prompts,
-properly caveated, and source-grounded.
-
-Retrieval improved materially. Ordinary Codex used 20 read-bearing outer calls;
-Stateful used seven, a 65% reduction. Manual call-input inspection shows ordinary
-Codex reopened all project files in every case, totaling 54 per-question unique
-raw-file reads, while Stateful opened 29, a 46.30% reduction. Model responses
-fell from 26 to 21 (19.23%). Stateful follow-ups used 77,806 uncached
-input-plus-output tokens versus 97,693 for ordinary Codex, a 20.36% reduction,
-and won five of six pairs on that measure.
-
-The full-token and lifetime gates failed. Stateful follow-ups used 430,830 full
-tokens versus 381,853 for ordinary Codex, a 12.83% increase, and won only one of
-six pairs. Including the two required maturations raises Stateful lifetime use
-to 878,532 full tokens and 191,940 uncached tokens, respectively 496,679
-(130.07%) and 94,247 (96.47%) above the ordinary series. The observed uncached
-slope projects break-even only around question 35; the observed full-token slope
-has no break-even. Procurement follow-ups account for the full-token regression,
-while the licensing cases show one substantial full-token win and two near-ties.
-
-SC-EVAL-017 therefore establishes the intended continuity, durable semantic
-integrity, decisive-detail preservation, selective routing, exact-source
-verification, and read-only behavior across this small distribution. It does
-not establish lower full lifetime token use or release readiness. The next
-optimization must explain and reduce procurement's repeated cached-context and
-completion overhead without deleting the rich root knowledge that enabled the
-correct cross-source answers. A future preregistered replication also needs a
-semantic evaluator or human rubric fixed before execution; post-hoc expansion
-of this frozen lexical scorer would invalidate the present result.
-
-## Benchmark SC-EVAL-018: single-call completion and outcome-bounded verification
-
-Status: pre-registered before implementation on 2026-09-22.
-
-Response-by-response inspection of SC-EVAL-017 localizes the procurement
-regression. The authority case spent four model responses because it published
-its final obligation and completion in separate inference rounds. The continuity
-case spent five responses because it first verified the four decisive continuity
-sources, then opened two adjacent residency and price sources, and only afterward
-grouped final persistence. The completion call also returned 5,842-7,151
-characters of checklist output, but the avoidable 20,000-plus-token model rounds
-are the dominant cost.
-
-The implementation under test will make the final semantic obligation part of
-the terminal `stateful_run_update` input. Intermediate `obligation_update` calls
-remain available when learning or strategy materially changes during longer
-work, but one terminal tool operation must express the final packet, result, root
-revision, and material root aliases. The selected-project guidance will also say
-that exact verification is bounded by the requested outcome: current verified
-root knowledge may supply adjacent context, but the model should not reopen
-sources merely to prove gates that the question does not ask it to decide.
-
-The replication will use the unchanged authority-and-cost and continuity-basis
-prompts from
-`clients/stateful-codex/eval/manifests/release-distribution.json`. Each runs in a
-fresh ordinary thread and a fresh Stateful thread attached to the mature
-SC-EVAL-017 procurement project. Both conditions use the same rebuilt branch
-binary, cached ChatGPT login with both API-key variables removed, disabled
-ordinary Codex memory, model, effort, roots, permissions, and alternating order.
-The already measured maturation cost remains reported but is not repeated
-because this experiment isolates follow-up completion and verification behavior.
-
-The mechanism gate requires each Stateful run to use one exact-evidence batch,
-one terminal update containing its final obligation, no separate final
-`obligation_update`, one successful completion attempt, at most three model
-responses, a completed revision-2 API result, and no source edit. The semantic
-gate is a human rubric frozen here: authority must preserve all three approved
-totals, the controlling order, the conjunctive/non-waivable rule, and the
-preliminary-not-final distinction; continuity must preserve the verified
-88/91/94/96-hour history, North Ridge, Birch's 72-hour/24-hour consequence,
-Cedar's 120-hour claim and ordering preservation, the verified-history versus
-vendor-claim distinction, and no final-award implication.
-
-The efficiency gate requires fewer full and uncached tokens than the
-corresponding SC-EVAL-017 Stateful runs, whose aggregate was 189,003 full and
-32,587 uncached input-plus-output tokens. The result will also be compared with
-the ordinary SC-EVAL-017 aggregate of 114,445 full and 34,573 uncached tokens,
-but this two-case diagnostic does not replace a fresh full release distribution
-or establish maturation-inclusive release economics.
-
-### Execution result
-
-The change was committed as `3dc47450a5`. The single-call completion mechanism passed in both Stateful runs. Authority
-thread `01a0ca7a-4d3d-71f3-9123-6fa1be61bbe9` used one five-file evidence batch
-and one terminal `stateful_run_update` carrying `finalObligation`; continuity
-thread `01a0ca7b-b2a1-72e3-b15d-3edf978b1a45` used two evidence batches and the
-same single terminal operation. Neither used a separate final
-`obligation_update`, both completed on their first attempt, and live API reads
-confirmed revision-2 completed results of 7,923 and 5,466 characters. No
-Stateful rollout contained a failure marker, and all eight source files remained
-byte-identical.
-
-The authority run met the three-response target. Its first response received no
-cached input, unlike the preceding project-affine runs, so it consumed 64,248
-full and 28,920 uncached tokens. The continuity run still opened finance and
-security after its first decisive four-file continuity batch because the model
-chose to establish all three viability gates. It therefore used four responses,
-80,045 full tokens, and 10,413 uncached tokens. The exact-outcome guidance did
-not eliminate that adjacent verification round, so the one-batch/three-response
-mechanism gate failed for continuity.
-
-Together the two Stateful runs used 144,293 full tokens, 44,710 fewer than
-SC-EVAL-017's 189,003, a 23.66% improvement. Responses fell from nine to seven.
-The zero-cache authority start raised aggregate uncached usage to 39,333, 20.70%
-above the previous 32,587 despite continuity's improvement. The same-binary
-ordinary replications used 136,346 full and 28,058 uncached tokens; Stateful was
-5.83% higher on full tokens and 40.18% higher on uncached tokens in this live
-pair. The ordinary authority run also emitted a non-fatal missing collaboration-
-thread host log after producing its correct answer; that environmental event is
-retained and not attributed to Stateful.
-
-Both visible answers and durable results preserve the registered substantive
-facts without an unsupported award. A narrower final-assembly defect remains:
-both submitted terminal narratives explicitly said the committee recorded no
-final approval or that Cedar's status was viability rather than final approval,
-while the later visible prose reduced that to provisional/current-evidence
-wording. The completion checklist did not prevent this small but consequential
-caveat loss. SC-EVAL-018 therefore passes the single-call completion change and
-full-token improvement target, but fails its complete mechanism gate and its
-uncached target. It is not a release-economics result.
-
-## Benchmark SC-EVAL-019: submitted-result final-answer fidelity
-
-Status: pre-registered before implementation on 2026-09-22.
-
-The completion tool will return the model's own concise submitted terminal
-narrative as a named `submittedResult`, in addition to the bounded checklist.
-Its instruction will require the visible final answer to preserve that narrative
-without dropping or weakening any conclusion, caveat, uncertainty, or blocker;
-formatting and exact-source links may improve, but semantic compression may not
-remove material content. This does not change the durable result, root
-blackboard, obligation packet, or evidence policy.
-
-The exact SC-EVAL-018 authority and continuity prompts will each run once in a
-fresh Stateful thread on the same mature procurement project and rebuilt branch
-binary. Authentication, disabled ordinary memory, model, effort, working
-directory, roots, permissions, and no-edit boundary remain unchanged. No
-ordinary replication is needed because the change affects only post-completion
-Stateful answer assembly.
-
-The mechanism gate requires one successful terminal call carrying
-`finalObligation`, a returned `submittedResult`, no separate final obligation
-call, a completed revision-2 API result, and a byte-identical corpus. The
-semantic gate requires the visible answer to preserve every material conclusion
-in `submittedResult`, including all three authoritative totals and non-waiver
-order for authority, the complete 96/72/24/120-hour distinction for continuity,
-verified history versus vendor claims, and the explicit statement that viability
-is not a recorded final approval. Any new unsupported conclusion or weakened
-caveat fails the run. Token use and response count will be reported, but this is
-a correctness replication rather than an economics claim.
-
-### Execution result
-
-The change was committed as `633de3b08b`. SC-EVAL-019 passed every registered mechanism and semantic gate. Authority
-thread `01a0ca86-4356-7403-82de-3701e6c14f87` used one evidence batch and one
-terminal call; continuity thread `01a0ca87-6f61-7da1-a1ba-f5c2a1d25499` used
-two evidence batches and one terminal call. Both completion outputs contained
-the named `submittedResult`, neither used a separate final obligation, both
-completed on the first attempt, and neither contained a failure marker. Live
-API reads confirmed runs
-`run-84a3c6207976ad707a7b82bb0d4276c5efcb1fd56dbf9954228f1b53c624a3a0`
-and
-`run-8d73434252388fb04cf8a2d356eaa36fbaf89e3572ab541817b2aa9e5416697f`
-as completed at revision 2. Their persisted results contain 6,742 and 5,474
-characters, and the corpus remained byte-identical.
-
-The visible authority answer preserved all three totals, the controlling order,
-the conjunctive/non-waivable rule, Alder and Birch's distinct failures, Cedar's
-current evidence status, and the explicit statement that no final approval is
-recorded. The visible continuity answer preserved the verified 88/91/94/96-hour
-history, North Ridge, Birch's 72-hour queue and 24-hour loss, Cedar's 120-hour
-claim and ordering preservation, the verified-history/vendor-claim distinction,
-and the explicit statement that Cedar's viability is not a recorded final
-approval. Neither added an unsupported award or certainty claim.
-
-The runs used seven responses, 145,312 full tokens, and 24,224 uncached
-input-plus-output tokens. Relative to SC-EVAL-018, full usage rose 1,019 tokens
-(0.71%) while uncached usage fell 15,109 tokens (38.42%) because both initial
-requests reused the project cache. Against SC-EVAL-018's same-binary ordinary
-pair, Stateful used 6.58% more full tokens but 13.66% fewer uncached tokens. The
-final-answer fidelity defect is closed. The remaining full-token difference is
-largely the continuity run's second evidence/inference round, not completion
-persistence or final-answer repair.
-
-## Benchmark SC-EVAL-020: bounded-outcome continuity replication
-
-Status: pre-registered before implementation on 2026-09-22.
-
-The selected-project guidance will make outcome scope explicit: do not turn a
-question about one criterion or decision dimension into an overall project
-determination. Verify and conclude the requested dimension; use current
-source-verified root knowledge only as labelled adjacent context, and state when
-broader viability or approval is outside the evidence review rather than opening
-unrequested sources to re-prove it. This remains domain-neutral and does not
-restrict the model when the user's requested outcome actually requires all
-dimensions.
-
-The unchanged continuity-basis prompt will run in one fresh Stateful thread on
-the same mature procurement project and rebuilt branch binary, with the same
-authentication, disabled ordinary memory, model, effort, directory, roots,
-permissions, and no-edit boundary. It will be compared with SC-EVAL-019
-continuity thread `01a0ca87-6f61-7da1-a1ba-f5c2a1d25499` and the same-binary
-ordinary continuity thread `01a0ca7c-e83d-7322-8333-f02a40622fdb`.
-
-The mechanism gate requires one evidence batch limited to
-`binding-criteria.md`, `operations-log.md`, `vendor-birch.md`, and
-`vendor-cedar.md`; one terminal call with `finalObligation` and
-`submittedResult`; at most three model responses; one completion attempt; a
-completed revision-2 API result; and an unchanged corpus. The semantic gate
-requires all SC-EVAL-019 continuity facts and caveats while stating that the
-answer decides the continuity dimension, not overall approval. Opening finance,
-security, committee, or Alder sources fails the bounded-outcome gate even if the
-answer remains correct. Full and uncached usage must be below SC-EVAL-019's
-84,033 and 13,377 tokens; comparison with the ordinary 78,593 full and 14,337
-uncached tokens remains diagnostic rather than a release-distribution claim.
-
-### Execution result
-
-The bounded-outcome behavior passed. Thread
-`01a0ca8e-d9f8-7ca3-9ec6-ac8b351debd7` opened exactly the four registered
-continuity sources in one evidence batch, did not open finance, security,
-committee, or Alder material, and concluded only the offline-acceptance
-dimension. Its visible answer preserved the complete verified-history and vendor-
-claim distinction, Birch's 24-hour operational loss, Cedar's 24-hour stated
-margin, and the explicit boundary that this was not final approval across all
-gates. It returned `submittedResult`, completed once, contained no failure
-marker, and left the corpus byte-identical. A live API read confirmed run
-`run-fe5316cfad34b5ecdfce74f6d000a721f93b79cdd1962b68e864ec9e93acb1f9`
-completed at revision 2 with a 4,442-character result.
-
-The complete mechanism and economics gates did not pass. After the decisive
-evidence batch, the model used a separate `obligation_update` containing all of
-its final learning and implications but no `next`, blocker, or requested user
-judgment, then immediately sent the terminal call with substantially the same
-packet. That added a fourth response. The run used 81,003 full and 15,467
-uncached tokens: 3.61% fewer full tokens but 15.62% more uncached tokens than
-SC-EVAL-019 continuity, and 3.07% more full plus 7.88% more uncached than the
-same-binary ordinary run. SC-EVAL-020 closes the adjacent-source behavior defect
-but exposes a redundant semantic-persistence round.
-
-## Benchmark SC-EVAL-021: substantive intermediate-obligation gate
-
-Status: pre-registered before implementation on 2026-09-22.
-
-An intermediate `obligation_update` will require evidence of substantive work
-remaining: at least one nonempty `next`, `blockers`, or `requestedJudgment`
-field. Its schema and tool description will tell the model that answer drafting,
-formatting, and terminal persistence are not substantive next work. When the
-learning packet is final and only the answer remains, the model must place that
-packet directly in `stateful_run_update.finalObligation`. Runtime validation
-will reject an empty-future intermediate packet before persistence. This keeps
-meaningful real-time transparency for longer investigations while eliminating a
-duplicate update at the end of a short task.
-
-The exact SC-EVAL-020 continuity prompt will run once in a fresh Stateful thread
-on the same mature project and rebuilt branch binary under the unchanged model,
-effort, authentication, memory, directory, roots, permissions, and no-edit
-conditions. The mechanism gate requires one four-file evidence batch, no
-intermediate obligation call or rejected retry, one terminal call, three model
-responses, one completion attempt, a revision-2 API result, and an unchanged
-corpus. The SC-EVAL-020 semantic rubric remains unchanged. Full usage must be
-below both SC-EVAL-020's 81,003 tokens and the same-binary ordinary run's 78,593;
-uncached usage must be below SC-EVAL-020's 15,467 and will be compared with the
-ordinary 14,337 without assuming stable provider cache behavior.
-
-### Execution result
-
-SC-EVAL-021 preserved the correct retrieval and answer boundary but failed the
-registered workflow and efficiency gates. Thread
-`01a0ca9f-9c48-7c42-bf59-c760f4af492f` opened exactly the four registered
-continuity sources in one evidence batch and no others. Its visible answer and
-durable result preserve the verified 88/91/94/96-hour history, North Ridge,
-Birch's 72-hour queue and 24-hour intake loss, Cedar's 120-hour claim and
-timestamp/order statement, the verified-history versus vendor-claim
-distinction, and the boundary that this is not final procurement approval. A
-live API read confirmed run
-`run-f4453bd9e75fae9a5a0df210bc0376a8793c523e1ec215710bc9730e5a5a93d5`
-completed at revision 2 with a 4,478-character result. All eight corpus files
-remain byte-identical to the fixture.
-
-The model attempted an intermediate packet whose sole field was scalar `next`.
-The conditional schema had repeated only `minItems` inside its `anyOf` branch;
-the code-mode tool surface consequently did not preserve the base array shape,
-and deserialization rejected the string before persistence. The retry supplied
-the expected list and persisted an obligation containing only a plan to
-synthesize and compare evidence that had already been reviewed. It then
-completed in the following response. The run therefore used five responses,
-one rejected intermediate call, one recorded intermediate call, and one
-successful completion. It consumed 102,833 full tokens and 27,057 uncached
-input-plus-output tokens, respectively 26.95% and 74.93% above SC-EVAL-020 and
-30.84% and 88.72% above the same-binary ordinary run.
-
-This result shows that the first gate was structurally too weak and its
-conditional schema was unnecessarily fragile. A forward-looking sentence alone
-is not a meaningful semantic update, and synthesizing already-reviewed evidence
-into the answer is not additional project work. The failed attempt and retry
-remain in the rollout; SC-EVAL-021 does not pass.
-
-## Benchmark SC-EVAL-022: meaningful intermediate-obligation remediation
-
-Status: pre-registered before implementation on 2026-09-22.
-
-The intermediate tool will retain the ordinary array schema for every packet
-field instead of layering partial property definitions through `anyOf`.
-Runtime validation will require both (a) a forward signal in `next`, `blockers`,
-or `requestedJudgment` and (b) meaningful semantic content in `rationale`,
-`learning`, `implication`, `strategy`, `changed`, `uncertainty`, `blockers`, or
-`requestedJudgment`. A packet containing only `next` will be rejected before
-persistence. Model guidance will state that summarizing, synthesizing, or
-comparing evidence already reviewed for the current answer is final reasoning,
-not substantive remaining work. Short tasks should complete directly; longer
-investigations retain intermediate transparency when evidence, strategy,
-uncertainty, blockers, or user judgment materially change while more work
-remains.
-
-The exact continuity prompt will run once more in a fresh Stateful thread on
-the same mature project and rebuilt binary under the unchanged model, effort,
-authentication, memory, directory, roots, permissions, and no-edit conditions.
-The mechanism gate requires one four-file evidence batch, no intermediate
-obligation call or rejected retry, one terminal call, three model responses,
-one completion attempt, a revision-2 API result, and an unchanged corpus. The
-semantic rubric remains unchanged. Full usage must be below SC-EVAL-020's
-81,003 and the ordinary run's 78,593 tokens; uncached usage must be below
-SC-EVAL-020's 15,467 and will be compared with ordinary's 14,337.
-
-### Execution result
-
-SC-EVAL-022 removed the malformed scalar retry but failed the registered
-retrieval, workflow, response-count, and economics gates. Thread
-`01a0cab8-0dff-7c32-afd4-927ea33683b8` first opened the four registered
-continuity sources, then opened `finance-schedule.md` and
-`security-addendum.md` to make an unrequested all-gate viability determination.
-It persisted an intermediate packet whose stated remaining work was to complete
-the answer, then completed in the following response. There was no rejected
-tool call, and the final obligation and completed run now committed through the
-same storage transaction. (An adversarial checkpoint before this run had found that terminal `stateful_run_update`
-wrote the final obligation and the run transition in two SQLite transactions; commit `f42997030f` made it one guarded
-transaction, and a forced obligation-identity failure proves the run update rolls back.)
-
-The visible answer and durable result are substantively correct and preserve
-the verified outage history, North Ridge, the 24-hour Birch loss, Cedar's
-claimed 120-hour capacity and ordering preservation, the verified-history
-versus vendor-claim distinction, and the no-final-approval caveat. A live API
-read confirmed run
-`run-3e2303305a5733db09daa1d7642895b73f64e3e543e90971d64a6a5e185ddde7`
-completed at revision 2 with a 5,340-character result. The eight source files
-remain byte-identical to the fixture.
-
-The run used five model responses, two evidence batches, one intermediate
-obligation, one successful completion, 109,325 full tokens, and 31,501 uncached
-input-plus-output tokens. That is 34.96% more full and 103.66% more uncached
-than SC-EVAL-020, and 39.10% more full plus 119.72% more uncached than the
-same-binary ordinary run. SC-EVAL-022 does not pass.
-
-This procurement continuity prompt has now served as a repeated development
-case. Further prompt-specific policy tuning would risk overfitting while still
-being unable to validate semantic novelty structurally. The case is frozen
-here. The next evaluation work moves to diverse projects and measures whether
-intermediate updates are useful as an outcome, rather than adding another
-presence-rule proxy.
-
-## Longitudinal evaluation program
-
-Status: design and tooling phase begins after SC-EVAL-022; no comparative
-project result is pre-registered yet.
-
-The next experiment follows the user-directed ladder while preventing
-selection and accounting bias:
-
-1. Curate six diverse projects and publish all six breadth results. Five
-   longitudinal projects will be selected by domain and workload coverage
-   before comparative results are observed; the sixth is a reserved replication
-   project, not a pool from which only winners are chosen.
-2. Run matched continuous ordinary and Stateful threads from empty state over
-   20 sequential questions on each of the five projects. Both arms receive the
-   same ordered work and native history; cross-thread transfer is a separate
-   experiment.
-3. Record per-turn rather than cumulative-session usage, actual compaction
-   events, source regions and repeat reads, retries, wall time, state revisions,
-   injected root size, maintenance cost, state freshness, and cumulative cost
-   from question one.
-4. Include tasks that genuinely cross compaction boundaries, a thread restart,
-   source revisions that invalidate prior conclusions, cross-source deductions,
-   contradictions, and questions whose supported answer is unknown.
-5. Freeze semantic obligations and a blinded evidence rubric before execution.
-   Literal term matching remains diagnostic only. Visible answers and durable
-   state are scored separately for correctness, decisive-detail coverage,
-   unsupported claims, uncertainty calibration, contradiction handling, and
-   stale-state repair.
-
-The existing one-rollout-per-question series comparator cannot measure this
-design because cumulative usage would be double-counted in continued threads.
-A turn-aware evaluator is therefore a prerequisite, not post-hoc analysis.
-Published external Codex or Luna scores remain contextual unless model,
-benchmark version, harness, budget, retry policy, and scoring are demonstrably
-comparable.
-
-### Turn-aware evaluator checkpoint
-
-The prerequisite evaluator is now implemented at
-`clients/stateful-codex/eval/compare-longitudinal-rollouts.mjs`. It consumes one
-continuous rollout per arm, attributes response usage through persisted turn
-IDs, reconciles the response sum with the recorded turn total, and reports
-per-turn plus cumulative cost without re-summing cumulative thread usage. It
-also records actual compaction checkpoints, latency, read operations, rejected
-tool results, exact `evidence_read` regions, completion attempts, and the
-model-visible Stateful project/root projection size, revision, omissions, and
-freshness at each turn.
-
-The evaluator deliberately does not infer semantic quality, complete source
-access, or deep-state size from rollout prose. Frozen case-keyed observation
-files provide blinded rubric scores, an audited source ledger, and post-turn
-state counts. Missing required evidence invalidates the comparison. Literal
-term checks remain explicitly diagnostic. Multi-project aggregation reports
-project win counts and labels projects—not questions—as the clustered units.
-
-The complete frozen method and observation shape are in
-`clients/stateful-codex/eval/LONGITUDINAL_PROTOCOL.md`; a non-registered shape
-example is in `eval/manifests/longitudinal-template.json`. The synthetic focused
-tests pass, and the parser was also exercised against an existing five-turn
-rollout containing a canonical compaction. That live historical file correctly
-surfaced four incomplete/superseded turns rather than silently treating them as
-valid observations. No six-project result has been run or claimed yet.
+## Two-project release distribution SC-EVAL-015 to SC-EVAL-017 (2026-09-22)
+
+Frozen manifest `clients/stateful-codex/eval/manifests/release-distribution.json`:
+six outcome questions across independently matured procurement and licensing
+projects (binding vendor viability, authority and cost, the verified continuity
+basis, current licensing economics, Canadian territory, termination and
+data-security risk), each with prompt, expected concepts, prohibited
+conclusions, project identity, and a requirement that the Stateful completion
+result plus returned completion basis keep the same material coverage as the
+visible answer. Protocol: fresh hashed copies; one Collaborative maturation per
+project with the manifest prompt; each case as a fresh ordinary and a fresh
+Stateful thread; same rebuilt binary, login, model, effort, prompt, directory,
+roots, approval, sandbox and permission profile; Codex user memory disabled in
+both arms (it already held notes about these fixtures and would leak answers);
+pair order alternating; both actual maturation rollouts mandatory scorer inputs
+(a missing one is an error, not zero cost). Gates: correctness (all twelve
+answers carry every concept and no prohibited conclusion; each Stateful run
+completes once with a successful durable record, semantic checks pass across
+result and completion basis, a live API read confirms the terminal revision,
+both corpora byte-identical); retrieval (fewer read-bearing calls and unique raw
+files without weaker citations); economics (lower aggregate full follow-up
+tokens, with uncached, both maturations, lifetime delta, win counts and
+break-even reported). Two small synthetic corpora cannot show large-corpus
+scaling, code-editing work, multi-day cache behavior, concurrent root revisions
+or production readiness.
+
+Commit `c60f6c969d` prepared the evaluator for this distribution: a case can
+require registered concepts in the Stateful completion result and returned
+completion basis, not only the visible answer; completion attempts are
+counted; and every measured maturation rollout is accepted. Its 11-test suite
+passed and reconstructed the real SC-EVAL-014 completion as one attempt with
+15 checklist items.
+
+**SC-EVAL-015 (stopped; no matched case run).** Procurement maturation thread
+`01a0ca24-35fc-7513-9ec0-6d422e1cae46` persisted 13 source-verified findings and
+14 relationships across all eight files (conjunctive gates, authority order,
+Alder and Birch failures, Cedar's sole apparent eligibility, chronology, costs,
+unresolved final award); source unchanged, no edits. Completion took three
+attempts: the model first selected all 13 aliases against the cap of eight,
+then copied project-intelligence revision 45 into both `rootRevision` and the
+unrelated `expectedRevision` (the run was at revision 1, so it was rejected),
+then succeeded with `expectedRevision: 1`, `rootRevision: 45` and eight aliases
+at run revision 2. 453,078 full and 68,054 uncached. The rendered root had told
+the model to select every material alias despite the cap, and the two revisions
+were not distinguished at the call site: a product-contract failure, kept as
+negative evidence and excluded from release economics. Commit `6f0f03c981`
+renders the exact `expectedRevision`, says not to substitute the
+project-intelligence revision, and says to select at most eight
+highest-priority aliases and keep the rest in the final obligation (extension
+6/6, scoped lint and formatting; CLI rebuilt; the companion rebuild stayed
+blocked by the Windows V8 archive download, so the existing matching binary was
+kept).
+
+**SC-EVAL-016 (stopped; no matched case run).** Same manifest and protocol from
+fresh copies with the `6f0f03c981` CLI, plus an operational gate: at most eight
+aliases, run and root revisions kept distinct, first-call completion, any retry
+kept as a failure. Procurement thread `01a0ca30-f52a-71b2-b6ca-3e52e7c1d9dc`
+selected eight aliases, kept run revision 1 apart from project revision 41,
+completed first time, persisted 14 findings and nine relationships, and used six
+responses, five outer calls, 159,212 full and 65,004 uncached (full 64.86% below
+SC-EVAL-015's failed preflight, with no completion retries). Licensing thread
+`01a0ca36-26b2-7ef3-9117-b51c4b9af46b` also completed first time with the
+correct revisions and eight aliases, persisting 12 findings and 13 relationships
+in seven responses and six outer calls (207,649 full, 58,657 uncached); both
+corpora unchanged. Its first atomic batch, however, gave both
+`contextMapEntryId` and `relativePath` per evidence item; runtime correctly
+rejected the batch (exactly one identity is valid) but the published schema's
+`anyOf` allowed both. To avoid mixing a known avoidable cost into the
+distribution, execution stopped. Commit `22290f0b98` uses `oneOf` with explicit
+mutual-exclusion text (extension 6/6, lint, formatting, CLI rebuilt); commit
+`d9a3a970c1` lets the evaluator read the nested completion output of a grouped
+obligation-plus-completion code-mode call (11-test suite; reconstructs both live
+completions).
+
+**SC-EVAL-017 (completed): correct and selective; full and lifetime economics
+failed.** Same manifest and conditions from two new copies with the
+`22290f0b98` CLI and no reuse of earlier projects; any invalid-evidence retry in
+maturation would stop the run. Procurement thread
+`01a0ca3e-3bf3-7ad1-b99e-90b2b78ef2d9` (run
+`run-6d5c68a0f1e9ecd3788f58983a232299470658112e0124c3aaa869e60f38e695`) persisted
+eight findings and nine relationships; licensing thread
+`01a0ca41-cee0-7402-b78f-8a925d3b80bd` (run
+`run-86ae359bc9dc850cdde43ab432a1080bbfdbf82d964dfd586eae359e22c67a1e`) fourteen
+findings and ten relationships; each completed first time. Together: 447,702
+full, 114,134 uncached, fifteen responses. The licensing maturation found a
+cross-source closing gap: the executed side letter requires both Canadian
+regulatory consent and licensor written acknowledgement, while the closing
+checklist tracks only consent. All twelve matched runs completed; every
+Stateful follow-up completed first time with no failed script or terminal
+mutation; a fresh gateway read confirmed all six Stateful runs `completed` at
+revision 2 with nonempty results; all eight procurement and ten licensing files
+stayed byte-identical.
+
+The unchanged lexical scorer reports failure: it passes the three licensing
+pairs and the visible procurement continuity pair but rejects correct wording
+such as "the only vendor shown to pass every binding deployment criterion" (the
+alternatives require "only viable" or "sole viable"), complete statements of all
+three sub-cap totals, preliminary non-final committee notes, and a durable
+continuity result saying Cedar "meets the continuity gate" with 120 hours and 24
+hours of headroom rather than "satisfies". These misses are kept unchanged; the
+manifest was not tuned. Independent semantic review finds all twelve visible
+answers and all six durable results correct, complete, caveated and grounded.
+
+Retrieval improved: read-bearing calls 20 to 7 (65% fewer); per-question unique
+raw-file reads 54 to 29 (46.30% fewer; ordinary reopened every file every time);
+responses 26 to 21 (19.23%); uncached follow-ups 97,693 to 77,806 (20.36% fewer,
+winning five of six pairs). Full follow-ups rose from 381,853 to 430,830
+(+12.83%, winning one of six). With both maturations Stateful used 878,532 full
+and 191,940 uncached, 496,679 (130.07%) and 94,247 (96.47%) above ordinary.
+Uncached break-even projects to about question 35; full tokens have none.
+Procurement follow-ups carry the full-token regression; licensing shows one
+substantial win and two near ties. The next optimization had to reduce
+procurement's repeated cached-context and completion overhead without deleting
+the rich root knowledge that enabled the correct cross-source answers. A future replication needs a semantic
+evaluator or human rubric fixed before execution; widening this lexical scorer
+after the fact would invalidate the result.
+
+## Short-workflow replications SC-EVAL-018 to SC-EVAL-022 (2026-09-22)
+
+All on the mature SC-EVAL-017 procurement project and the unchanged
+`release-distribution.json` prompts, same rebuilt binary and conditions, user
+memory disabled. Each was pre-registered before implementation; all corpus
+files stayed byte-identical and every run was confirmed by a live API read.
+
+| Run | Thread | Responses | Full | Uncached | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| 018 authority | `01a0ca7a-4d3d-71f3-9123-6fa1be61bbe9` | 3 | 64,248 | 28,920 | mechanism passed; zero-cache first response |
+| 018 continuity | `01a0ca7b-b2a1-72e3-b15d-3edf978b1a45` | 4 | 80,045 | 10,413 | extra adjacent-verification round |
+| 019 authority | `01a0ca86-4356-7403-82de-3701e6c14f87` | — | — | — | passed |
+| 019 continuity | `01a0ca87-6f61-7da1-a1ba-f5c2a1d25499` | — | 84,033 | 13,377 | passed |
+| 020 continuity | `01a0ca8e-d9f8-7ca3-9ec6-ac8b351debd7` | 4 | 81,003 | 15,467 | retrieval passed; redundant obligation round |
+| 021 continuity | `01a0ca9f-9c48-7c42-bf59-c760f4af492f` | 5 | 102,833 | 27,057 | failed |
+| 022 continuity | `01a0cab8-0dff-7c32-afd4-927ea33683b8` | 5 | 109,325 | 31,501 | failed |
+
+The same-binary ordinary continuity run (`01a0ca7c-e83d-7322-8333-f02a40622fdb`)
+used 78,593 full and 14,337 uncached; the two SC-EVAL-018 ordinary runs together
+used 136,346 full and 28,058 uncached.
+
+**SC-EVAL-018: single-call completion and outcome-bounded verification.**
+SC-EVAL-017 traces localized the procurement regression: authority published
+its final obligation and completion in separate rounds (four responses);
+continuity verified the four decisive sources, then opened two adjacent
+residency and price sources before grouping persistence (five responses); the
+completion call also returned 5,842-7,151 characters of checklist output, but
+the avoidable 20,000-plus-token rounds dominate. Change: the final semantic
+obligation becomes part of the terminal `stateful_run_update` (intermediate
+`obligation_update` stays for real mid-course changes), and guidance says
+verification is bounded by the requested outcome. Gates: one evidence batch, one
+terminal update carrying the obligation, no separate final obligation, one
+completion attempt, at most three responses, a completed revision-2 result.
+Human rubric: authority keeps all three approved totals, the controlling order,
+the conjunctive non-waivable rule and preliminary-not-final; continuity keeps
+the verified 88/91/94/96-hour history, North Ridge, Birch's 72-hour queue and
+24-hour consequence, Cedar's 120-hour claim and ordering preservation,
+verified-history versus vendor-claim, and no final-award implication.
+Efficiency gate: below SC-EVAL-017's Stateful 189,003 full and 32,587 uncached
+for these two cases (ordinary was 114,445 and 34,573). The change was committed
+as `3dc47450a5`. Both runs used one terminal call carrying `finalObligation`,
+no separate final obligation, first-attempt completion and no failure marker;
+results of 7,923 and 5,466 characters. Authority met three responses (one
+five-file batch). Continuity opened finance and security after its first
+four-file batch to settle all three viability gates, so the
+one-batch/three-response gate failed for it. Total 144,293 full (44,710 below
+189,003, 23.66%), responses nine to seven, but 39,333 uncached (20.70% above
+32,587) because of the zero-cache authority start; against the same-binary
+ordinary pair, +5.83% full and +40.18% uncached. The ordinary authority run
+logged a non-fatal missing collaboration-thread host message, not attributed to
+Stateful. Both submitted narratives said no final approval was recorded (or
+that Cedar's status was viability, not approval), but the later visible prose
+softened that to provisional wording: a caveat loss the checklist did not
+prevent. Verdict: single-call completion and the full-token target passed; the
+complete mechanism gate and the uncached target failed. This two-case
+diagnostic is not a release-economics result.
+
+**SC-EVAL-019: submitted-result fidelity.** Completion returns the model's own
+submitted narrative as `submittedResult` and requires the visible answer to keep
+every conclusion, caveat, uncertainty and blocker (formatting may change).
+Stateful only (the change affects only post-completion answer assembly); gates: one terminal call with `finalObligation`, a returned
+`submittedResult`, no separate final obligation, revision-2 result, unchanged
+corpus, and an answer keeping every material conclusion (all three totals and
+the non-waiver order; the 96/72/24/120-hour distinction; verified history
+versus vendor claims; viability is not a recorded final approval). The change
+was committed as `633de3b08b`. Every gate passed: authority used one evidence
+batch and one terminal call, continuity two batches and one terminal call; runs
+`run-84a3c6207976ad707a7b82bb0d4276c5efcb1fd56dbf9954228f1b53c624a3a0` and
+`run-8d73434252388fb04cf8a2d356eaa36fbaf89e3572ab541817b2aa9e5416697f` completed
+at revision 2 with 6,742 and 5,474 characters; both visible answers kept every
+registered point with no unsupported award or certainty. Seven responses,
+145,312 full and 24,224 uncached: +1,019 full (+0.71%) and -15,109 uncached
+(-38.42%) against SC-EVAL-018 because both first requests reused the project
+cache; against the same-binary ordinary pair +6.58% full and -13.66% uncached.
+The fidelity defect is closed; the remaining full-token gap is continuity's
+second evidence round.
+
+**SC-EVAL-020: bounded outcome.** Guidance: do not turn a one-dimension
+question into an overall project determination; use verified root knowledge
+only as labelled adjacent context. Gates: one evidence batch limited to
+`binding-criteria.md`, `operations-log.md`, `vendor-birch.md` and
+`vendor-cedar.md` (opening finance, security, committee or Alder files fails the
+gate even with a correct answer); one terminal call with `finalObligation` and
+`submittedResult`; at most three responses; one completion; revision-2 result;
+full and uncached below SC-EVAL-019 continuity's 84,033 and 13,377. The run
+opened exactly the four sources, concluded only the offline-acceptance
+dimension, kept the verified-history and vendor-claim distinction, Birch's
+24-hour loss, Cedar's 24-hour stated margin and the not-final-approval boundary;
+run `run-fe5316cfad34b5ecdfce74f6d000a721f93b79cdd1962b68e864ec9e93acb1f9`
+completed at revision 2 with a 4,442-character result. The mechanism and
+economics gates failed: after the evidence batch the model sent a separate
+`obligation_update` with all its final learning but no `next`, blocker or
+requested judgment, then the terminal call with nearly the same packet (a fourth
+response). 81,003 full and 15,467 uncached: 3.61% fewer full and 15.62% more
+uncached than SC-EVAL-019 continuity, and 3.07% more full and 7.88% more uncached
+than ordinary.
+
+**SC-EVAL-021: substantive intermediate obligation.** An intermediate
+`obligation_update` must carry nonempty `next`, `blockers` or
+`requestedJudgment`; answer drafting, formatting and terminal persistence are
+not next work, and a final packet with only the answer left belongs directly in
+`stateful_run_update.finalObligation`; an empty-future packet is rejected before
+persistence. Gates:
+one four-file batch, no intermediate obligation or rejected retry, one terminal
+call, three responses, one completion, revision-2 result, full below 81,003 and
+78,593, uncached below 15,467 (compared with 14,337). Retrieval and answer
+passed (exactly the four sources; the 88/91/94/96 history, North Ridge, Birch's
+72-hour queue and 24-hour intake loss, Cedar's 120-hour claim and
+timestamp/order statement, verified-history versus vendor-claim, not final
+approval); run
+`run-f4453bd9e75fae9a5a0df210bc0376a8793c523e1ec215710bc9730e5a5a93d5` completed
+at revision 2 with 4,478 characters. **Workflow and efficiency failed.** The
+conditional schema repeated only `minItems` inside its `anyOf` branch, so the
+code-mode surface lost the array shape and a scalar `next` was rejected; the
+retry persisted an obligation whose only content was a plan to synthesize
+already-reviewed evidence. Five responses (one rejected and one recorded
+intermediate call, one completion); 102,833 full and 27,057 uncached, 26.95% and
+74.93% above SC-EVAL-020 and 30.84% and 88.72% above ordinary. A forward-looking
+sentence is not a meaningful update.
+
+**SC-EVAL-022: meaningful intermediate obligation.** Plain array schemas for
+every field; runtime requires both a forward signal (`next`, `blockers` or
+`requestedJudgment`) and semantic content (`rationale`, `learning`,
+`implication`, `strategy`, `changed`, `uncertainty`, `blockers` or
+`requestedJudgment`); a `next`-only packet is rejected; synthesizing evidence
+already reviewed is final reasoning, not remaining work. Same gates as
+SC-EVAL-021. The scalar retry was gone, but retrieval, workflow, response-count
+and economics gates failed: the model opened the four sources, then
+`finance-schedule.md` and `security-addendum.md` for an unrequested all-gate
+determination, persisted an intermediate packet whose remaining work was "complete
+the answer", and completed in the next response. No rejected tool call, and the
+final obligation and completed run now committed through the same storage
+transaction. (An adversarial checkpoint before this run had found that terminal
+`stateful_run_update` wrote the final obligation and the run transition in two
+SQLite transactions; commit `f42997030f` made it one guarded transaction, and a
+forced obligation-identity failure proves the run update rolls back.) The answer
+and result were correct (outage history, North Ridge, Birch's 24-hour loss,
+Cedar's 120-hour claim and ordering, verified-history versus vendor-claim, no
+final approval); run
+`run-3e2303305a5733db09daa1d7642895b73f64e3e543e90971d64a6a5e185ddde7` completed
+at revision 2 with 5,340 characters. Five responses, two evidence batches, one
+intermediate obligation, one completion; 109,325 full and 31,501 uncached,
+34.96% and 103.66% above SC-EVAL-020 and 39.10% and 119.72% above ordinary.
+**This procurement continuity prompt is frozen as a development case**: more
+prompt-specific tuning would overfit, and evaluation moves to diverse projects,
+judging intermediate updates by usefulness rather than presence rules.
+
+## Longitudinal evaluation program (from 2026-09-22)
+
+The ladder after SC-EVAL-022, designed to prevent selection and accounting bias:
+
+1. Curate six diverse projects and publish all six breadth results; five
+   longitudinal projects are chosen for domain and workload coverage before any
+   comparative result, and the sixth is a reserved replication, not a pool for
+   winners.
+2. Run matched continuous ordinary and Stateful threads from empty state over 20
+   sequential questions on each of the five projects; cross-thread transfer is a
+   separate experiment.
+3. Record per-turn usage, actual compactions, source regions and repeat reads,
+   retries, wall time, state revisions, injected root size, maintenance cost,
+   freshness and cumulative cost from question one.
+4. Include compaction boundaries, a thread restart, source revisions that
+   invalidate prior conclusions, cross-source deductions, contradictions and
+   questions whose supported answer is unknown.
+5. Freeze semantic obligations and a blinded evidence rubric before execution;
+   literal term matching stays diagnostic; visible answers and durable state are
+   scored separately.
+
+The one-rollout-per-question series comparator would double-count cumulative
+usage in a continued thread, so a turn-aware evaluator was a prerequisite.
+`clients/stateful-codex/eval/compare-longitudinal-rollouts.mjs` now consumes one
+continuous rollout per arm, attributes response usage by turn ID, reconciles it
+with recorded turn totals, and reports per-turn and cumulative cost, compaction
+checkpoints, latency, read operations, rejected tool results, exact
+`evidence_read` regions, completion attempts and the model-visible project and
+root size, revision, omissions and freshness per turn. It does not infer quality,
+complete source access or deep-state size from prose; case-keyed observation
+files supply blinded scores, an audited source ledger and state counts, and
+missing evidence invalidates the comparison. Multi-project aggregation reports
+project win counts with projects, not questions, as the clustered units. The
+method is in
+[`LONGITUDINAL_PROTOCOL.md`](./clients/stateful-codex/eval/LONGITUDINAL_PROTOCOL.md);
+`eval/manifests/longitudinal-template.json` is a non-registered shape example.
+Synthetic tests passed, and a historical five-turn rollout with a canonical
+compaction correctly surfaced four incomplete or superseded turns instead of
+treating them as valid. Published Codex or Luna scores stay contextual unless
+model, benchmark version, harness, budget, retries and scoring are comparable.
 
 ## Benchmark SC-EVAL-023: six-project breadth screen
 
