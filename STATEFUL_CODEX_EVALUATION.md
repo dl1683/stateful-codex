@@ -3590,7 +3590,9 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   autonomous continuations in the headless aggregate. First live reconciliation: a collaborative Luna run on the
   licensing fixture took 34.801 seconds with 134,782 input, 97,536 cached and 1,352 output tokens; one completed turn,
   five World State samples, 65 root entries across samples, ten current evidence routes, ten physical sources, 4,837
-  source bytes hashed, three successful Stateful calls, aliases `E4` and `E7` selected; the answer applied the 6%
+  source bytes hashed, three successful Stateful calls (one evidence read, one obligation write, one run update) and two
+  selected material findings. The raw rollout independently contained exactly three code-mode calls, to `evidence_read`,
+  `obligation_update` and `stateful_run_update`, with aliases `E4` and `E7` selected at completion; the answer applied the 6%
   royalty effective 2026-03-01. It also showed two duplicate ignored-config warnings. Counter definitions: evidence-route
   counts are blackboard provenance routes, while `root_unique_sources_observed` counts physical files deduplicated during
   a recomputed audit; root entries are counted per World State sample, not as unique knowledge; material reuse is
