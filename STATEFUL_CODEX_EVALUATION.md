@@ -198,8 +198,9 @@ terminal run (Completed)`.
 No fresh screenshot-based run was possible in this session because the in-app
 browser automation capability was unavailable. HTTP delivery, real gateway RPC,
 real model execution, durable state reads, and renderer tests were exercised.
-Rebuilding the code-mode companion was independently blocked by the pinned V8
-archive download on Windows; the live gateway used the existing companion from
+Rebuilding the code-mode companion was independently blocked before compiling
+project code: the pinned V8 archive could not be downloaded on Windows and the
+Python fallback was unavailable; the live gateway used the existing companion from
 the prior validated build. This limits the scope of the fresh client claim but
 does not affect the successful branch CLI rebuild or the real gateway/model
 results above.
@@ -918,7 +919,9 @@ another relationship batch, and a retry after one copied endpoint ID was
 malformed. Commit `093cfc3211` raises the bounded finding batch to 24 and lets
 the same call persist up to 48 relationships by referencing the records'
 idempotency keys. The existing single-record and entry-ID relation tools remain
-available for incremental updates.
+available for incremental updates. A focused app-server integration proved that
+one model call persists two findings plus their relationship (extension 5/5,
+app-server 1/1).
 
 This replication will copy the unchanged ten-file licensing corpus to a fresh
 temporary directory so project identity and durable state start empty, rebuild
@@ -1003,7 +1006,9 @@ include a deterministic, response-bounded inventory of current source routes.
 The tool description directs the model to use those routes directly and call
 `context_map_query` only when the inventory is truncated or insufficient. The
 app-server protocol remains unchanged, and projects with more routes than the
-bounded response retain targeted query as the fallback.
+bounded response retain targeted query as the fallback. Storage 26/26 and
+extension 5/5 passed, and an app-server integration proved that a model refresh
+over two files receives both routes in its next request.
 
 This replication will copy the unchanged ten-file licensing corpus to another
 fresh temporary directory, rebuild the branch CLI, remove API-key environment
@@ -1084,7 +1089,9 @@ fingerprints in blackboard writes with current route references. The tool
 resolves and verifies the authoritative context-map entry and fingerprint. When
 `nodeId` is omitted, evidence from exactly one source also places the finding on
 that file node; cross-source findings remain project-wide and root promotion is
-unchanged.
+unchanged. Extension 5/5 passed, and focused app-server tests proved the live
+oversized request observed in SC-EVAL-007 and route-resolved, source-verified,
+file-level batch persistence.
 
 This replication will use another fresh byte-identical copy of the same
 ten-file licensing corpus, rebuilt branch CLI, cached ChatGPT login, cleared
@@ -1172,7 +1179,10 @@ blackboard evidence through validation, SQLite revisions, query results, root
 World State aliases, app-server v2, and browser evidence reads. It retains one
 source link per finding and one bounded inclusive range per source. Existing
 whole-source links remain valid. Focused storage, protocol, extension,
-app-server, and browser-client tests pass.
+app-server, and browser-client tests pass; the model-facing integration proves
+that `lineRange: {start: 2, end: 3}` is returned by the next query and rendered
+as `S1:L2-L3` in the next request's World State, and the browser API returns
+only those exact lines.
 
 SC-EVAL-008 also showed that a model can mark a run completed, persist a final
 valid finding, and then attempt another completion update. Terminal runs must
@@ -1548,7 +1558,10 @@ adds exact source paths and line ranges when available, and appends them ahead
 of the bounded final-obligation learning, implications, uncertainties, and
 blockers in the durable result. Empty selection remains possible only as an
 explicit assertion that no root finding is material; unknown, duplicate, or
-oversized selections fail before completion.
+oversized selections fail before completion. Extension 6/6 passed; an
+app-server integration proved a selected root finding is visible in initial
+World State, returned in the completion checklist and present in the stored
+terminal result; the stricter Autonomous continuation integration also passed.
 
 The replication will rebuild the native CLI from `0f7684a3f4` and submit the
 exact SC-EVAL-010 termination-risk prompt in one fresh Collaborative thread
@@ -1646,7 +1659,8 @@ malformed alias, duplicate selection, or out-of-range alias before terminal
 mutation. New knowledge created during the current run remains covered by the
 automatically appended final semantic packet; if root ordering changes, the
 model must review the new revision rather than silently binding an old alias to
-a different finding.
+a different finding. Extension 6/6 passed, and the durable-result and Autonomous
+app-server scenarios each passed.
 
 The replication will rebuild the native CLI from `4efb44bcab` and submit the
 exact termination-risk prompt again in one fresh Collaborative thread bound to
@@ -3496,7 +3510,7 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   repeats, plus 2 failed and 7 unresolved attempts; 6 attempts had no concrete identity. Earlier syntactic reread counts
   must be regenerated before reuse. This repairs telemetry; it does not show any repeat was unnecessary. Client suite
   41/41.
-- **Root projection snapshot (issue #20, closed):** `c4067d433b` builds the root projection in one read transaction.
+- **Root projection snapshot (issue #20, closed):** `c4067d433b` builds the root projection in one read transaction (37/37).
   `c6266e5559` does the same for ordinary blackboard search and context-map reads (two WAL regressions; 40/40). Neither
   claims a mixed projection was ever observed.
 - **Generic upsert:** `f0c9366f50` rejects a caller-chosen `sourceVerified` grade without a host receipt; `9d0b2b113e`
@@ -3542,7 +3556,8 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   requests, 50,457 total tokens, 11,417 uncached input plus output, 2,554 bytes and 17.1 seconds: 66.16% and 60.34%
   below the cold turn. Limits: a tiny fixture; the first refresh indexed four diagnostic stdout and stderr files written
   inside the project; `gpt-6-luna` and `gpt-6-sol` were unavailable through the ChatGPT endpoint; the CLI reported
-  version `0.0.0` and predated the newest commits because a rebuild failed on the `v8` 150.4.0 archive download.
+  version `0.0.0` and predated the newest commits because a rebuild was blocked before linking when the `v8` 150.4.0 archive download and
+  the local Python fallback both failed.
 - **Route diversity (issue #17):** `fb3b60a55a`. With 160 matching files under `reviews/`, the decisive 161st match
   under `docs/` was dropped by the old `limit * 16` early stop; a bounded FTS window plus one exhaustion-probe row now
   returns `docs/guide.md` and an exact `truncated` flag (`mayHaveMore` in the tool, exposed by `contextMap/query`)
@@ -3561,7 +3576,9 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   write transaction (43/43). Targeted single-file refresh stays outside that generation policy with only its per-file
   atomic transaction; broader live-edit coordination remains open under issue #16.
 - **Completion learning:** `dc2dd91aeb` rejects completion with non-empty `finalObligation.learning` unless a current
-  root alias or exact historical revision is selected (extension 28/28). The host cannot check semantic equivalence.
+  root alias or exact historical revision is selected; the rejected run stays running and no final obligation is
+  written (extension 28/28; both completion-guard integrations, the Autonomous continuation integration and the
+  unselected-provenance integration passed). The host cannot check semantic equivalence.
 
 ### Attribution, trajectory and measurement (2026-09-26 to 2026-09-27)
 
@@ -3574,7 +3591,11 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   licensing fixture took 34.801 seconds with 134,782 input, 97,536 cached and 1,352 output tokens; one completed turn,
   five World State samples, 65 root entries across samples, ten current evidence routes, ten physical sources, 4,837
   source bytes hashed, three successful Stateful calls, aliases `E4` and `E7` selected; the answer applied the 6%
-  royalty effective 2026-03-01. It also showed two duplicate ignored-config warnings.
+  royalty effective 2026-03-01. It also showed two duplicate ignored-config warnings. Counter definitions: evidence-route
+  counts are blackboard provenance routes, while `root_unique_sources_observed` counts physical files deduplicated during
+  a recomputed audit; root entries are counted per World State sample, not as unique knowledge; material reuse is
+  credited only when exact current aliases or historical revisions are selected and the terminal completion succeeds
+  (attempted or rejected selections do not count).
 - **Headless trajectory:** `a3f27fb130`, `1cdf984ef8`, `a288e3eb54` add duration, completed model responses (failed
   provider-request attempts are not observable to the client and are not counted), compactions, tool calls by kind and
   output bytes, with `turn.progress` and `stateful.attribution` JSONL snapshots (`codex-exec` 122/122).

@@ -330,8 +330,9 @@ time.
   record with their reason. Missing measurements stay missing.
 - **Count the right things.** `codex exec` "tokens used" is uncached input plus
   output; cumulative and cached input are in the `--json` usage events.
-  Compactions are not in the `--json` stream; count `"type":"compacted"`
-  records in the session rollout. Distinguish what the state database captured
+  Canonical compaction events and their replacement history are read from
+  the session rollout (`"type":"compacted"` records); the `--json` stream
+  carries only cumulative compaction counters in its trajectory records. Distinguish what the state database captured
   from what the model actually received, and host maintenance from model work.
 - **Headless hygiene.** Close stdin for background `codex exec` (`< /dev/null`)
   or it can hang before creating a session. Stopping a campaign means stopping
