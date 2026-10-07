@@ -16,8 +16,6 @@ use crate::BlackboardQueryResult;
 use crate::BlackboardRouteKnowledge;
 use crate::BlackboardRouteKnowledgeQuery;
 use crate::ContextMapEntryId;
-use crate::RootBlackboardProjection;
-use crate::RootBlackboardQuery;
 use crate::search::literal_prefix_expression;
 use crate::storage::load_node;
 
@@ -28,12 +26,6 @@ use super::load_entry;
 use super::parse_stored;
 use super::promotion_name;
 use super::relation::load_relations_for_entry;
-
-#[derive(FromRow)]
-struct RootEntryCounts {
-    promoted: i64,
-    candidates: i64,
-}
 
 #[derive(FromRow)]
 struct StoredRouteKnowledge {
@@ -337,82 +329,6 @@ impl BlackboardStore {
         .await?
         .unwrap_or_default();
         Ok(u64::try_from(revision).unwrap_or_default())
-    }
-
-    pub async fn root_projection(
-        &self,
-        query: RootBlackboardQuery,
-    ) -> Result<RootBlackboardProjection, BlackboardStoreError> {
-        query.validate()?;
-        let mut transaction = self.pool.begin().await?;
-        let counts = sqlx::query_as::<_, RootEntryCounts>(
-            "SELECT
-                COALESCE(SUM(CASE WHEN revision.root_promotion = 'promoted' THEN 1 ELSE 0 END), 0)
-                    AS promoted,
-                COALESCE(SUM(CASE WHEN revision.root_promotion = 'candidate' THEN 1 ELSE 0 END), 0)
-                    AS candidates
-             FROM blackboard_entries AS entry
-             JOIN blackboard_entry_revisions AS revision
-               ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             WHERE entry.project_id = ? AND revision.state = 'active'",
-        )
-        .bind(&query.project_id)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let entry_ids = sqlx::query_scalar::<_, String>(
-            "SELECT entry.id
-             FROM blackboard_entries AS entry
-             JOIN blackboard_entry_revisions AS revision
-               ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             WHERE entry.project_id = ? AND revision.state = 'active'
-               AND revision.root_promotion = 'promoted'
-             ORDER BY CASE WHEN revision.kind = 'instruction'
-                     AND revision.provenance_kind = 'user' THEN 0
-                 WHEN revision.provenance_kind = 'user' THEN 1 ELSE 2 END,
-                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
-                     THEN (SELECT context.source_sequence FROM knowledge_context AS context
-                           WHERE context.entry_id = entry.id
-                           ORDER BY context.revision DESC LIMIT 1) END,
-                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
-                     THEN (SELECT context.unit_ordinal FROM knowledge_context AS context
-                           WHERE context.entry_id = entry.id
-                           ORDER BY context.revision DESC LIMIT 1) END,
-                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
-                     THEN entry.created_at_ms END,
-                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
-                     THEN entry.rowid END,
-                 CASE revision.importance
-                 WHEN 'critical' THEN 0 WHEN 'high' THEN 1
-                 WHEN 'normal' THEN 2 ELSE 3 END, entry.id
-             LIMIT ?",
-        )
-        .bind(&query.project_id)
-        .bind(i64::from(query.max_entries))
-        .fetch_all(&mut *transaction)
-        .await?;
-        let mut data = Vec::with_capacity(entry_ids.len());
-        for raw_id in entry_ids {
-            data.push(load_hit(&mut transaction, &query.project_id, raw_id).await?);
-        }
-        let revision = sqlx::query_scalar::<_, i64>(
-            "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
-        )
-        .bind(&query.project_id)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .unwrap_or_default();
-        transaction.commit().await?;
-        Ok(RootBlackboardProjection {
-            project_id: query.project_id,
-            revision: u64::try_from(revision)
-                .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
-            data,
-            omitted_entries: u64::try_from(counts.promoted)
-                .map_err(|_| BlackboardStoreError::CountOverflow)?
-                .saturating_sub(u64::from(query.max_entries)),
-            candidate_entries: u64::try_from(counts.candidates)
-                .map_err(|_| BlackboardStoreError::CountOverflow)?,
-        })
     }
 }
 

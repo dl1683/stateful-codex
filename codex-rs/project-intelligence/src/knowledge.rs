@@ -165,6 +165,32 @@ pub struct MemoryChange {
     pub created_at_ms: i64,
 }
 
+/// What became of one recognized unit of a capture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemberOutcome {
+    Saved,
+    AlreadyPresent,
+    /// Saved but not applied (limited to a task).
+    Pending,
+    /// Recognized but not stored (too long to keep whole).
+    Omitted,
+    Failed,
+    /// An earlier source cannot restore wording retired by the user.
+    NotRestored,
+}
+
+/// One unit of a capture, in the order the user wrote it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaptureGroupMember {
+    pub ordinal: u32,
+    pub entry_id: Option<String>,
+    pub revision: Option<u64>,
+    pub outcome: MemberOutcome,
+    /// At most `MAX_CHANGE_PREVIEW_BYTES`.
+    pub preview: String,
+    pub reason: Option<String>,
+}
+
 /// The outcome of one capture: what it recognized and what became of each unit.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CaptureGroup {
@@ -182,6 +208,8 @@ pub struct CaptureGroup {
     pub pending: u32,
     pub omitted: u32,
     pub failed: u32,
+    /// Every recognized unit and what became of it, in the order written.
+    pub members: Vec<CaptureGroupMember>,
 }
 
 macro_rules! string_enum {
@@ -257,3 +285,25 @@ string_enum!(ChangeOrigin {
     ModelTool => "model_tool",
     HostObserved => "host_observed",
 });
+string_enum!(MemberOutcome {
+    Saved => "saved",
+    AlreadyPresent => "already_present",
+    Pending => "pending",
+    Omitted => "omitted",
+    Failed => "failed",
+    NotRestored => "not_restored",
+});
+
+/// How investigations bear on one thread, read with the root projection it explains.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ThreadScopes {
+    /// The scope the thread is bound to, open or ended.
+    pub bound: Option<KnowledgeScope>,
+    /// All of the project's scopes, newest first.
+    pub scopes: Vec<KnowledgeScope>,
+    /// Promoted entries left out because they belong to an open investigation the thread does
+    /// not continue (entries of ended investigations are left out without a count).
+    pub scoped_elsewhere: u64,
+    /// Older rules naming a piece of work without a recorded scope, left out everywhere.
+    pub legacy_held_back: u64,
+}

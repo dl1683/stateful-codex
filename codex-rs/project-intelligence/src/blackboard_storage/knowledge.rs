@@ -10,13 +10,12 @@ use crate::BlackboardEntry;
 use crate::BlackboardEntryId;
 use crate::BlackboardEntryState;
 use crate::CaptureGroup;
+use crate::CaptureGroupMember;
 use crate::ChangeRecord;
 use crate::KnowledgeContext;
-use crate::KnowledgeScope;
 use crate::MAX_CHANGE_PREVIEW_BYTES;
 use crate::MemoryChange;
 use crate::NewBlackboardEntry;
-use crate::ScopeState;
 use crate::storage::unix_timestamp_millis;
 
 use super::BlackboardStore;
@@ -42,7 +41,7 @@ impl BlackboardStore {
         &self,
         id: BlackboardEntryId,
         value: NewBlackboardEntry,
-        context: KnowledgeContext,
+        mut context: KnowledgeContext,
         change: ChangeRecord,
     ) -> Result<(BlackboardEntry, CreateOutcome), BlackboardStoreError> {
         value.validate()?;
@@ -58,6 +57,10 @@ impl BlackboardStore {
             return Ok((existing, CreateOutcome::AlreadyPresent));
         }
         let now = unix_timestamp_millis()?;
+        if context.source_sequence.is_none() && context.category == crate::KnowledgeCategory::Rule {
+            context.source_sequence =
+                Some(super::source_order::allocate_on(&mut transaction, &value.project_id).await?);
+        }
         insert_new_entry(&mut transaction, &id, &value, now).await?;
         write_context(&mut transaction, &value.project_id, &id, 1, &context).await?;
         append_change(
@@ -142,16 +145,9 @@ impl BlackboardStore {
         project_id: &str,
     ) -> Result<u64, BlackboardStoreError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let next = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO knowledge_source_sequences (project_id, next_sequence) VALUES (?, 2)
-             ON CONFLICT(project_id) DO UPDATE SET next_sequence = next_sequence + 1
-             RETURNING next_sequence - 1",
-        )
-        .bind(project_id)
-        .fetch_one(&mut *transaction)
-        .await?;
+        let next = super::source_order::allocate_on(&mut transaction, project_id).await?;
         transaction.commit().await?;
-        u64::try_from(next).map_err(|_| BlackboardStoreError::RevisionOverflow)
+        Ok(next)
     }
 
     /// Journals a change that has no entry revision of its own (a scope ended, a capture that
@@ -207,6 +203,25 @@ impl BlackboardStore {
         rows.into_iter().map(StoredChange::into_change).collect()
     }
 
+    /// The first journal row a direct action wrote, if it ran: a retried action finds what it
+    /// did instead of doing it again.
+    pub async fn change_for_action(
+        &self,
+        project_id: &str,
+        action_id: &str,
+    ) -> Result<Option<MemoryChange>, BlackboardStoreError> {
+        sqlx::query_as::<_, StoredChange>(
+            "SELECT * FROM memory_changes WHERE project_id = ? AND action_id = ?
+             ORDER BY sequence LIMIT 1",
+        )
+        .bind(project_id)
+        .bind(action_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .map(StoredChange::into_change)
+        .transpose()
+    }
+
     /// The newest journal sequence of the project (0 when nothing was journaled).
     pub async fn latest_change_sequence(
         &self,
@@ -222,172 +237,64 @@ impl BlackboardStore {
         u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
     }
 
-    /// Stores the outcome of one capture (replacing an earlier record of the same group).
+    /// Stores the outcome of one capture with every member, in one transaction. The first
+    /// record of a group stands: a retried capture of the same message does not rewrite what
+    /// it first saved. Returns whether this call stored it.
     pub async fn record_capture_group(
         &self,
         group: &CaptureGroup,
-    ) -> Result<(), BlackboardStoreError> {
+    ) -> Result<bool, BlackboardStoreError> {
         let now = unix_timestamp_millis()?;
-        sqlx::query(
-            "INSERT OR REPLACE INTO capture_groups (
-                project_id, group_id, thread_id, turn_id, kind, declared_count, recognized,
-                saved, already_present, pending, omitted, failed, recorded_at_ms
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&group.project_id)
-        .bind(&group.group_id)
-        .bind(&group.thread_id)
-        .bind(&group.turn_id)
-        .bind(&group.kind)
-        .bind(group.declared_count.map(i64::from))
-        .bind(i64::from(group.recognized))
-        .bind(i64::from(group.saved))
-        .bind(i64::from(group.already_present))
-        .bind(i64::from(group.pending))
-        .bind(i64::from(group.omitted))
-        .bind(i64::from(group.failed))
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let stored = write_capture_group(&mut transaction, group, now).await?;
+        transaction.commit().await?;
+        Ok(stored)
     }
 
-    /// Opens `scope` unless a scope with its ID exists; returns the stored scope.
-    pub async fn open_scope(
-        &self,
-        scope: &KnowledgeScope,
-    ) -> Result<KnowledgeScope, BlackboardStoreError> {
-        let now = unix_timestamp_millis()?;
-        sqlx::query(
-            "INSERT INTO knowledge_scopes (
-                project_id, scope_id, kind, title, state, end_condition, opened_source,
-                ended_source, created_at_ms, updated_at_ms
-             ) VALUES (?, ?, ?, ?, 'open', ?, ?, NULL, ?, ?)
-             ON CONFLICT(project_id, scope_id) DO NOTHING",
-        )
-        .bind(&scope.project_id)
-        .bind(&scope.scope_id)
-        .bind(scope.kind.as_str())
-        .bind(&scope.title)
-        .bind(&scope.end_condition)
-        .bind(&scope.opened_source)
-        .bind(now)
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
-        self.scope(&scope.project_id, &scope.scope_id)
-            .await?
-            .ok_or_else(|| BlackboardStoreError::EntryNotFound(scope.scope_id.clone()))
-    }
-
-    pub async fn scope(
+    /// A stored capture group with its members in order, so a receipt can be replayed.
+    pub async fn capture_group(
         &self,
         project_id: &str,
-        scope_id: &str,
-    ) -> Result<Option<KnowledgeScope>, BlackboardStoreError> {
-        sqlx::query_as::<_, StoredScope>(
-            "SELECT * FROM knowledge_scopes WHERE project_id = ? AND scope_id = ?",
+        group_id: &str,
+    ) -> Result<Option<CaptureGroup>, BlackboardStoreError> {
+        let Some(row) = sqlx::query_as::<_, StoredGroup>(
+            "SELECT * FROM capture_groups WHERE project_id = ? AND group_id = ?",
         )
         .bind(project_id)
-        .bind(scope_id)
+        .bind(group_id)
         .fetch_optional(&self.pool)
         .await?
-        .map(StoredScope::into_scope)
-        .transpose()
-    }
-
-    /// Scopes of the project, newest first, optionally only those in `state`.
-    pub async fn scopes(
-        &self,
-        project_id: &str,
-        state: Option<ScopeState>,
-    ) -> Result<Vec<KnowledgeScope>, BlackboardStoreError> {
-        sqlx::query_as::<_, StoredScope>(
-            "SELECT * FROM knowledge_scopes
-             WHERE project_id = ? AND (? IS NULL OR state = ?)
-             ORDER BY created_at_ms DESC, scope_id",
+        else {
+            return Ok(None);
+        };
+        let members = sqlx::query_as::<_, StoredMember>(
+            "SELECT * FROM capture_group_members
+             WHERE project_id = ? AND group_id = ? ORDER BY ordinal",
         )
         .bind(project_id)
-        .bind(state.map(ScopeState::as_str))
-        .bind(state.map(ScopeState::as_str))
+        .bind(group_id)
         .fetch_all(&self.pool)
         .await?
         .into_iter()
-        .map(StoredScope::into_scope)
-        .collect()
-    }
-
-    /// Ends an open scope, journaling `change`. Ending an ended scope changes nothing and
-    /// returns false.
-    pub async fn end_scope(
-        &self,
-        project_id: &str,
-        scope_id: &str,
-        ended_source: &str,
-        change: &ChangeRecord,
-    ) -> Result<bool, BlackboardStoreError> {
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let now = unix_timestamp_millis()?;
-        let ended = sqlx::query(
-            "UPDATE knowledge_scopes SET state = 'ended', ended_source = ?, updated_at_ms = ?
-             WHERE project_id = ? AND scope_id = ? AND state = 'open'",
-        )
-        .bind(ended_source)
-        .bind(now)
-        .bind(project_id)
-        .bind(scope_id)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected()
-            == 1;
-        if ended {
-            append_change(&mut transaction, project_id, None, change, now).await?;
-        }
-        transaction.commit().await?;
-        Ok(ended)
-    }
-
-    /// Binds a thread to a scope (replacing an earlier binding).
-    pub async fn bind_thread_scope(
-        &self,
-        project_id: &str,
-        thread_id: &str,
-        scope_id: &str,
-    ) -> Result<(), BlackboardStoreError> {
-        let now = unix_timestamp_millis()?;
-        sqlx::query(
-            "INSERT INTO knowledge_scope_bindings (project_id, thread_id, scope_id, bound_at_ms)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(project_id, thread_id) DO UPDATE
-             SET scope_id = excluded.scope_id, bound_at_ms = excluded.bound_at_ms",
-        )
-        .bind(project_id)
-        .bind(thread_id)
-        .bind(scope_id)
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    /// The scope a thread is bound to, if any.
-    pub async fn thread_scope(
-        &self,
-        project_id: &str,
-        thread_id: &str,
-    ) -> Result<Option<KnowledgeScope>, BlackboardStoreError> {
-        sqlx::query_as::<_, StoredScope>(
-            "SELECT scope.* FROM knowledge_scope_bindings AS binding
-             JOIN knowledge_scopes AS scope
-               ON scope.project_id = binding.project_id AND scope.scope_id = binding.scope_id
-             WHERE binding.project_id = ? AND binding.thread_id = ?",
-        )
-        .bind(project_id)
-        .bind(thread_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .map(StoredScope::into_scope)
-        .transpose()
+        .map(StoredMember::into_member)
+        .collect::<Result<Vec<_>, _>>()?;
+        let count =
+            |value: i64| u32::try_from(value).map_err(|_| BlackboardStoreError::RevisionOverflow);
+        Ok(Some(CaptureGroup {
+            project_id: row.project_id,
+            group_id: row.group_id,
+            thread_id: row.thread_id,
+            turn_id: row.turn_id,
+            kind: row.kind,
+            declared_count: row.declared_count.map(count).transpose()?,
+            recognized: count(row.recognized)?,
+            saved: count(row.saved)?,
+            already_present: count(row.already_present)?,
+            pending: count(row.pending)?,
+            omitted: count(row.omitted)?,
+            failed: count(row.failed)?,
+            members,
+        }))
     }
 }
 
@@ -438,6 +345,12 @@ pub(super) async fn carry_context(
     revision: i64,
 ) -> Result<(), BlackboardStoreError> {
     if let Some(context) = context_of(&mut *connection, project_id, from.as_str()).await? {
+        // The successor's words are new: what the payload said about the old words (who
+        // spoke them) no longer holds, so it is not carried.
+        let context = KnowledgeContext {
+            payload: None,
+            ..context
+        };
         write_context(connection, project_id, to, revision, &context).await?;
     }
     Ok(())
@@ -451,6 +364,22 @@ pub(super) async fn append_change(
     change: &ChangeRecord,
     now: i64,
 ) -> Result<u64, BlackboardStoreError> {
+    // An action identity binds one journaled change: a second writer of the same user action
+    // (a concurrent retry) fails inside its own transaction, so it commits nothing.
+    if let Some(action_id) = &change.action_id {
+        let recorded = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM memory_changes WHERE project_id = ? AND action_id = ?)",
+        )
+        .bind(project_id)
+        .bind(action_id)
+        .fetch_one(&mut *connection)
+        .await?;
+        if recorded != 0 {
+            return Err(BlackboardStoreError::ActionAlreadyRecorded(
+                action_id.clone(),
+            ));
+        }
+    }
     let preview = bounded_preview(&change.preview);
     let sequence = sqlx::query_scalar::<_, i64>(
         "INSERT INTO memory_changes (
@@ -479,7 +408,7 @@ pub(super) async fn append_change(
     u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
 }
 
-fn bounded_preview(text: &str) -> &str {
+pub(super) fn bounded_preview(text: &str) -> &str {
     if text.len() <= MAX_CHANGE_PREVIEW_BYTES {
         return text;
     }
@@ -490,7 +419,7 @@ fn bounded_preview(text: &str) -> &str {
     &text[..end]
 }
 
-async fn context_of(
+pub(super) async fn context_of(
     connection: &mut SqliteConnection,
     project_id: &str,
     entry_id: &str,
@@ -510,7 +439,9 @@ async fn context_of(
     .transpose()
 }
 
-fn parse<T: std::str::FromStr<Err = String>>(value: &str) -> Result<T, BlackboardStoreError> {
+pub(super) fn parse<T: std::str::FromStr<Err = String>>(
+    value: &str,
+) -> Result<T, BlackboardStoreError> {
     value
         .parse()
         .map_err(|error: String| BlackboardStoreError::InvalidStoredKnowledge(error))
@@ -555,32 +486,41 @@ impl StoredContext {
 }
 
 #[derive(FromRow)]
-struct StoredScope {
+struct StoredGroup {
     project_id: String,
-    scope_id: String,
+    group_id: String,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
     kind: String,
-    title: String,
-    state: String,
-    end_condition: Option<String>,
-    opened_source: String,
-    ended_source: Option<String>,
-    created_at_ms: i64,
-    updated_at_ms: i64,
+    declared_count: Option<i64>,
+    recognized: i64,
+    saved: i64,
+    already_present: i64,
+    pending: i64,
+    omitted: i64,
+    failed: i64,
 }
 
-impl StoredScope {
-    fn into_scope(self) -> Result<KnowledgeScope, BlackboardStoreError> {
-        Ok(KnowledgeScope {
-            project_id: self.project_id,
-            scope_id: self.scope_id,
-            kind: parse(&self.kind)?,
-            title: self.title,
-            state: parse(&self.state)?,
-            end_condition: self.end_condition,
-            opened_source: self.opened_source,
-            ended_source: self.ended_source,
-            created_at_ms: self.created_at_ms,
-            updated_at_ms: self.updated_at_ms,
+#[derive(FromRow)]
+struct StoredMember {
+    ordinal: i64,
+    entry_id: Option<String>,
+    revision: Option<i64>,
+    outcome: String,
+    preview: String,
+    reason: Option<String>,
+}
+
+impl StoredMember {
+    fn into_member(self) -> Result<CaptureGroupMember, BlackboardStoreError> {
+        Ok(CaptureGroupMember {
+            ordinal: u32::try_from(self.ordinal)
+                .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
+            entry_id: self.entry_id,
+            revision: self.revision.map(unsigned).transpose()?,
+            outcome: parse(&self.outcome)?,
+            preview: self.preview,
+            reason: self.reason,
         })
     }
 }
@@ -627,3 +567,61 @@ impl StoredChange {
 #[cfg(test)]
 #[path = "knowledge_tests.rs"]
 mod tests;
+
+pub(super) async fn write_capture_group(
+    connection: &mut SqliteConnection,
+    group: &CaptureGroup,
+    now: i64,
+) -> Result<bool, BlackboardStoreError> {
+    let stored = sqlx::query(
+        "INSERT INTO capture_groups (
+                project_id, group_id, thread_id, turn_id, kind, declared_count, recognized,
+                saved, already_present, pending, omitted, failed, recorded_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(project_id, group_id) DO NOTHING",
+    )
+    .bind(&group.project_id)
+    .bind(&group.group_id)
+    .bind(&group.thread_id)
+    .bind(&group.turn_id)
+    .bind(&group.kind)
+    .bind(group.declared_count.map(i64::from))
+    .bind(i64::from(group.recognized))
+    .bind(i64::from(group.saved))
+    .bind(i64::from(group.already_present))
+    .bind(i64::from(group.pending))
+    .bind(i64::from(group.omitted))
+    .bind(i64::from(group.failed))
+    .bind(now)
+    .execute(&mut *connection)
+    .await?
+    .rows_affected()
+        == 1;
+    if stored {
+        for member in &group.members {
+            sqlx::query(
+                "INSERT INTO capture_group_members (
+                        project_id, group_id, ordinal, entry_id, revision, outcome, preview,
+                        reason
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&group.project_id)
+            .bind(&group.group_id)
+            .bind(i64::from(member.ordinal))
+            .bind(&member.entry_id)
+            .bind(
+                member
+                    .revision
+                    .map(i64::try_from)
+                    .transpose()
+                    .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
+            )
+            .bind(member.outcome.as_str())
+            .bind(bounded_preview(&member.preview))
+            .bind(&member.reason)
+            .execute(&mut *connection)
+            .await?;
+        }
+    }
+    Ok(stored)
+}

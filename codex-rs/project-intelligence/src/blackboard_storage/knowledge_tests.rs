@@ -306,7 +306,340 @@ async fn scopes_open_bind_and_end_once() {
             Some("scope-1".to_string()),
             (true, false),
             0,
-            1,
+            2,
+        )
+    );
+    assert!(
+        store
+            .bind_thread_scope(PROJECT_ID, "late-thread", "scope-1")
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store
+            .thread_scope(PROJECT_ID, "late-thread")
+            .await
+            .expect("binding"),
+        None
+    );
+    let (bound, snapshot) = store
+        .thread_scopes(PROJECT_ID, "thread-2")
+        .await
+        .expect("snapshot");
+    assert_eq!(bound, snapshot.into_iter().next());
+    assert_eq!(
+        store
+            .latest_change_sequence(PROJECT_ID)
+            .await
+            .expect("sequence"),
+        2
+    );
+    store.pool.close().await;
+    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(temp_dir.path().abs()))
+        .await
+        .expect("reopen");
+    assert!(
+        reopened
+            .bind_thread_scope(PROJECT_ID, "late-thread", "scope-1")
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        reopened
+            .thread_scope(PROJECT_ID, "late-thread")
+            .await
+            .expect("binding"),
+        None
+    );
+    assert_eq!(
+        reopened
+            .latest_change_sequence(PROJECT_ID)
+            .await
+            .expect("sequence"),
+        2
+    );
+}
+
+/// Foundation: one user action binds one journaled change; a second writer of the same action
+/// commits nothing (its entry is rolled back with it).
+#[tokio::test]
+async fn an_action_binds_one_change() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let store = store(&temp_dir).await;
+    let with_action = |preview: &str| ChangeRecord {
+        action_id: Some("action-1".to_string()),
+        ..change(ChangeOperation::Saved, preview)
+    };
+    let first = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("entry-1").expect("id"),
+            rule("Never push."),
+            KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect),
+            with_action("Never push."),
+        )
+        .await
+        .map(|(_, outcome)| outcome);
+    let second = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("entry-2").expect("id"),
+            rule("Never commit."),
+            KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect),
+            with_action("Never commit."),
+        )
+        .await
+        .map(|(_, outcome)| outcome)
+        .map_err(|error| error.to_string());
+    let second_entry = store
+        .get_entry(
+            PROJECT_ID,
+            &BlackboardEntryId::parse("entry-2").expect("id"),
+        )
+        .await
+        .expect("read");
+    assert_eq!(
+        (first.ok(), second, second_entry.is_none()),
+        (
+            Some(CreateOutcome::Created),
+            Err("this user action was already recorded: action-1".to_string()),
+            true
+        )
+    );
+}
+
+fn capture_request() -> crate::CaptureWrite {
+    let scope = KnowledgeScope {
+        project_id: PROJECT_ID.to_string(),
+        scope_id: "scope-atomic".to_string(),
+        kind: ScopeKind::Investigation,
+        title: "Atomic investigation".to_string(),
+        state: ScopeState::Open,
+        end_condition: None,
+        opened_source: "user-message:thread-1/turn-1".to_string(),
+        ended_source: None,
+        created_at_ms: 0,
+        updated_at_ms: 0,
+    };
+    crate::CaptureWrite {
+        project_id: PROJECT_ID.to_string(),
+        scope: Some(scope),
+        group: Some(crate::CaptureGroup {
+            project_id: PROJECT_ID.to_string(),
+            group_id: "group-atomic".to_string(),
+            thread_id: Some("thread-1".to_string()),
+            turn_id: Some("turn-1".to_string()),
+            kind: "rules".to_string(),
+            ..Default::default()
+        }),
+        units: ["Never push.", "Preserve whole reasons: §3.2–§4 — α."]
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, words)| {
+                crate::CaptureUnitWrite::Entry(Box::new(crate::CaptureEntryWrite {
+                    candidates: vec![
+                        BlackboardEntryId::parse(format!("atomic-{ordinal}")).expect("id"),
+                    ],
+                    value: rule(words),
+                    context: KnowledgeContext {
+                        scope_id: Some("scope-atomic".to_string()),
+                        group_id: Some("group-atomic".to_string()),
+                        ..KnowledgeContext::new(
+                            KnowledgeCategory::Rule,
+                            KnowledgeAuthority::HumanDirect,
+                        )
+                    },
+                    change: change(ChangeOperation::Saved, words),
+                    authority: crate::CaptureAuthority::Message {
+                        after_change: 0,
+                        stated_at_ms: 0,
+                    },
+                }))
+            })
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn capture_rolls_back_at_group_and_member_commit_then_cold_retries() {
+    for (table, trigger) in [
+        ("capture_groups", "fail_group"),
+        ("capture_group_members", "fail_member"),
+    ] {
+        let home = TempDir::new().expect("home");
+        let store = store(&home).await;
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE TRIGGER {trigger} BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'injected failure'); END")))
+            .execute(&store.pool).await.expect("install fault");
+        assert!(store.write_capture(capture_request()).await.is_err());
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blackboard_entries")
+            .fetch_one(&store.pool)
+            .await
+            .expect("entries");
+        assert_eq!(
+            (
+                count,
+                store
+                    .latest_change_sequence(PROJECT_ID)
+                    .await
+                    .expect("journal"),
+                store
+                    .scope(PROJECT_ID, "scope-atomic")
+                    .await
+                    .expect("scope"),
+                store
+                    .capture_group(PROJECT_ID, "group-atomic")
+                    .await
+                    .expect("group")
+            ),
+            (0, 0, None, None)
+        );
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
+            .execute(&store.pool)
+            .await
+            .expect("remove fault");
+        store.pool.close().await;
+        let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+            .await
+            .expect("reopen");
+        let committed = reopened
+            .write_capture(capture_request())
+            .await
+            .expect("retry");
+        let group = committed.group.expect("committed group");
+        assert_eq!(
+            (group.recognized, group.saved, group.members.len()),
+            (2, 2, 2)
+        );
+        assert_eq!(
+            reopened
+                .write_capture(capture_request())
+                .await
+                .expect("replay")
+                .group,
+            Some(group)
+        );
+        assert_eq!(
+            reopened
+                .latest_change_sequence(PROJECT_ID)
+                .await
+                .expect("journal"),
+            3
+        );
+    }
+}
+
+#[tokio::test]
+async fn direct_noop_outcome_rolls_back_with_its_action_binding() {
+    let home = TempDir::new().expect("home");
+    let store = store(&home).await;
+    let request = |action: &str| crate::CaptureWrite {
+        project_id: PROJECT_ID.to_string(),
+        group: None,
+        scope: None,
+        units: vec![crate::CaptureUnitWrite::Entry(Box::new(
+            crate::CaptureEntryWrite {
+                candidates: vec![BlackboardEntryId::parse("direct-atomic").expect("id")],
+                value: rule("Never push."),
+                context: KnowledgeContext::new(
+                    KnowledgeCategory::Rule,
+                    KnowledgeAuthority::HumanDirect,
+                ),
+                change: ChangeRecord {
+                    action_id: Some(action.to_string()),
+                    group_id: Some("exact-request".to_string()),
+                    origin: ChangeOrigin::DirectControl,
+                    ..change(ChangeOperation::Saved, "Never push.")
+                },
+                authority: crate::CaptureAuthority::DirectAction,
+            },
+        ))],
+    };
+    store.write_capture(request("first")).await.expect("first");
+    sqlx::query("CREATE TRIGGER fail_outcome BEFORE INSERT ON capture_action_outcomes BEGIN SELECT RAISE(ABORT, 'injected outcome failure'); END")
+        .execute(&store.pool).await.expect("fault");
+    assert!(store.write_capture(request("noop")).await.is_err());
+    assert_eq!(
+        store
+            .change_for_action(PROJECT_ID, "noop")
+            .await
+            .expect("journal"),
+        None
+    );
+    sqlx::query("DROP TRIGGER fail_outcome")
+        .execute(&store.pool)
+        .await
+        .expect("remove fault");
+    store.pool.close().await;
+    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+        .await
+        .expect("reopen");
+    let retry = reopened
+        .write_capture(request("noop"))
+        .await
+        .expect("retry");
+    assert_eq!(retry.entries[0].1, crate::MemberOutcome::AlreadyPresent);
+    assert!(matches!(
+        reopened.write_capture(request("noop")).await,
+        Err(super::BlackboardStoreError::ActionAlreadyRecorded(_))
+    ));
+    assert_eq!(
+        reopened
+            .latest_change_sequence(PROJECT_ID)
+            .await
+            .expect("sequence"),
+        2
+    );
+}
+
+#[tokio::test]
+async fn legacy_scope_quarantine_precedes_root_limit_and_snapshot_keeps_context() {
+    let home = TempDir::new().expect("home");
+    let store = store(&home).await;
+    for ordinal in 0..257 {
+        store
+            .create_entry(
+                BlackboardEntryId::parse(format!("legacy-{ordinal}")).expect("id"),
+                rule("Never change code during this investigation."),
+            )
+            .await
+            .expect("legacy");
+    }
+    let id = BlackboardEntryId::parse("applicable-rule").expect("id");
+    let (_, _) = store
+        .create_entry_with_context(
+            id.clone(),
+            rule("Always preserve reasons."),
+            KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect),
+            change(ChangeOperation::Saved, "Always preserve reasons."),
+        )
+        .await
+        .expect("rule");
+    let (root, scopes) = store
+        .root_projection_for_thread(
+            crate::RootBlackboardQuery {
+                project_id: PROJECT_ID.to_string(),
+                max_entries: 1,
+            },
+            "thread-1",
+        )
+        .await
+        .expect("snapshot");
+    assert_eq!(
+        (
+            root.data
+                .into_iter()
+                .map(|hit| hit.entry.id)
+                .collect::<Vec<_>>(),
+            root.omitted_entries,
+            scopes.legacy_held_back,
+            root.contexts.get(id.as_str()).cloned()
+        ),
+        (
+            vec![id],
+            0,
+            257,
+            Some(KnowledgeContext {
+                source_sequence: Some(1),
+                ..KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect)
+            })
         )
     );
 }

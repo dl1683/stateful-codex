@@ -503,6 +503,8 @@ pub struct RootBlackboardProjection {
     pub project_id: String,
     pub revision: u64,
     pub data: Vec<BlackboardHit>,
+    /// Revision-bound meanings loaded in the same snapshot as entries and scope eligibility.
+    pub contexts: std::collections::HashMap<String, crate::KnowledgeContext>,
     pub omitted_entries: u64,
     pub candidate_entries: u64,
 }

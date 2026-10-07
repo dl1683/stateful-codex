@@ -28,14 +28,23 @@ use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
+mod capture_write;
 mod fence;
 mod knowledge;
 mod query;
 mod relation;
 mod review;
+mod root_projection;
+mod scopes;
+mod source_order;
 mod succession;
 mod update;
 
+pub use capture_write::CaptureAuthority;
+pub use capture_write::CaptureEntryWrite;
+pub use capture_write::CaptureUnitWrite;
+pub use capture_write::CaptureWrite;
+pub use capture_write::CaptureWriteResult;
 pub use fence::CompletionFence;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;
@@ -552,6 +561,8 @@ pub enum BlackboardStoreError {
     NodeNotFound(String),
     #[error("blackboard entry not found: {0}")]
     EntryNotFound(String),
+    #[error("this user action was already recorded: {0}")]
+    ActionAlreadyRecorded(String),
     #[error("stored knowledge context is invalid: {0}")]
     InvalidStoredKnowledge(String),
     #[error("blackboard entry ID was already used for different content: {0}")]
