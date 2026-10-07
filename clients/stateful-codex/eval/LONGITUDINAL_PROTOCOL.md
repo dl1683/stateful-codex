@@ -290,7 +290,7 @@ that the runner captures after every Stateful turn.
 Prepare answer and state grading through separate commands and directories:
 
 ```text
-npm run eval:prepare-grading -- --manifest ... --result-root ...   --snapshot-root ... --output PUBLIC_PACKETS   --mapping-output PRIVATE_MAPPING --seed FROZEN_SEED
+npm run eval:prepare-grading -- --manifest ... --result-root ...   --snapshot-root ... --output PUBLIC_PACKETS   --mapping-output PRIVATE_MAPPING --seed FROZEN_SEED --sessions-root SESSIONS
 
 npm run eval:prepare-state-grading -- --manifest ... --result-root ...   --snapshot-root ... --output STATE_PACKETS
 ```
@@ -344,9 +344,11 @@ Evaluate a mature project's structured blackboard against a versioned semantic
 manifest through the live gateway:
 
 ```powershell
-npm run eval:state -- --project <project-id> [--gateway URL] [--manifest PATH]
+npm run eval:state -- --project <project-id> --gateway http://127.0.0.1:4173 [--manifest PATH]
 ```
 
+The script's own default gateway is `http://127.0.0.1:4174`, the port used in
+the recorded evaluations; pass `--gateway` for the default `npm start` port.
 The default procurement manifest checks expected decisions, decisive facts,
 contradictions, and open questions. It reports semantic probe recall separately
 from supported-entry precision. A supported entry must be active,

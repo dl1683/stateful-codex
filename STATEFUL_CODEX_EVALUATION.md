@@ -3388,7 +3388,8 @@ Status: transferred on 2026-10-07 from the retired restart handoff and clean-bui
 `46d9071051445583c00b21e0163d373372d1a966`). These are small mechanism gates and component checkpoints run after
 SC-EVAL-032 on the published line (heads `19222f07f331`, then `89e79f57f1`). None is a broad benchmark or a cost
 claim. Unless stated, the canaries used Luna, cached ChatGPT login with API-key variables removed, isolated project
-copies and disabled host memories. Every named commit is an ancestor of `stateful/main`.
+copies and disabled host memories. Every named commit except the rejected prototype `a6cdb157de` is an ancestor of
+`stateful/main`.
 
 The product problem these gates serve is the coupled loop behind issues #15, #16 and #17: precise semantic capture,
 continuity across turns, threads and compaction, active retrieval, exact routing for missing detail, point-of-use
@@ -3518,13 +3519,16 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   generic API reports stored state and does not re-read sources. Suites: project-intelligence 38, extension 27,
   app-server-protocol 310 with one skip. Whether Luna uses the path is unmeasured.
 - **Interrupted refresh:** `dc51e7b320`: an injected `PermissionDenied` read yields an incomplete inventory, no missing
-  reconciliation, and the last complete generation stays queryable (41/41).
+  reconciliation, and the last complete generation stays queryable (41/41). This protects only within the
+  scanner's error contract; it does not make a genuinely deleted file distinguishable from every host-specific
+  filesystem anomaly.
 - **Index cost profile:** with 496 regions, initial publication was about 277 ms at 16 files, 450 ms at 124 and 828 ms
   at 496; unchanged publication about 110, 155 and 332 ms; at 160 files and 4,960 regions, scan, initial and unchanged
   publication were about 1.26, 3.43 and 1.33 seconds. Roughly linear, so the 169-248 second Pramana refresh cannot be
   assigned to the per-region SQL loop; filesystem, OneDrive or antivirus effects, database growth, contention or older
   code may dominate. No indexer rewrite was made. `99fb9ce290` adds `regionsIndexed`, `scanDurationMs` and
-  `publicationDurationMs` to refresh results (`contextMap/refresh` and the tool). Issue #19 stays open until a real
+  `publicationDurationMs` to refresh results (`contextMap/refresh` and the tool; project-intelligence 41/41, extension
+  27/27, protocol 310/310 with one skip, two public app-server integrations). Issue #19 stays open until a real
   refresh records them.
 - **Thread-view continuity:** `f2af68d17b` proves a completed outcome and its learning reach a second thread on the
   same project while a private transcript marker does not. Live canary, `gpt-5.6-sol` at high: thread
@@ -3542,7 +3546,9 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
 - **Route diversity (issue #17):** `fb3b60a55a`. With 160 matching files under `reviews/`, the decisive 161st match
   under `docs/` was dropped by the old `limit * 16` early stop; a bounded FTS window plus one exhaustion-probe row now
   returns `docs/guide.md` and an exact `truncated` flag (`mayHaveMore` in the tool, exposed by `contextMap/query`)
-  instead of guessing from `data.len() == limit`. Ranking quality and cost are not established.
+  instead of guessing from `data.len() == limit`. The exhausted ten-result request reports `truncated: false`; a
+  three-result request reports `truncated: true` (project-intelligence 41/41, extension 27/27, protocol 310/310 with
+  one skip, two affected app-server integrations). Ranking quality and cost are not established.
 - **File-to-region knowledge:** `b85c1dbe64` counts active findings across a file and its direct regions with
   `COUNT(DISTINCT entry.id)`, so a file-cited finding shows on a child region without a second read (42/42).
 - **Unchecked audit transitions:** `5dc0fd7b14` stops normalising `uncheckedThisTurn` to `current` in the semantic
@@ -3550,8 +3556,10 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   (extension 27/27).
 - **Refresh health:** `f177cce404`, `197c48ba8c`, `8884f86384` persist full-refresh health (inventory versus region
   coverage, counts, skipped and missing paths, truncation, timings) through restart, expose it in v2, World State and
-  the browser, and retry incomplete projects at startup (PI 42, extension 28, protocol 310 with one skip, browser 44).
-  `3578c5e5a0` fences competing full refreshes by a durable generation checked inside each write transaction (43/43).
+  the browser, and retry incomplete projects at startup (PI 42, extension 28, protocol 310 with one skip, browser 44, four affected
+  app-server integrations). `3578c5e5a0` fences competing full refreshes by a durable generation checked inside each
+  write transaction (43/43). Targeted single-file refresh stays outside that generation policy with only its per-file
+  atomic transaction; broader live-edit coordination remains open under issue #16.
 - **Completion learning:** `dc2dd91aeb` rejects completion with non-empty `finalObligation.learning` unless a current
   root alias or exact historical revision is selected (extension 28/28). The host cannot check semantic equivalence.
 
@@ -3559,19 +3567,24 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
 
 - **Attribution (issue #24):** `1f55cc0d62` adds a content-free per-turn Stateful contribution record, the
   `statefulAttribution/completed` notification and an invocation-level `stateful_attribution` object in `codex exec
-  --json` (extension 29, protocol 310 with one skip). First live reconciliation: a collaborative Luna run on the
+  --json` (extension 29, protocol 310 with one skip). The real app-server steering trajectory reconciled four Stateful
+  calls (one obligation write, two steering writes, one run update) and one selected material finding; a headless
+  regression merged two turn summaries into one terminal aggregate. `duration_ms` is tracked turn time, summed across
+  autonomous continuations in the headless aggregate. First live reconciliation: a collaborative Luna run on the
   licensing fixture took 34.801 seconds with 134,782 input, 97,536 cached and 1,352 output tokens; one completed turn,
   five World State samples, 65 root entries across samples, ten current evidence routes, ten physical sources, 4,837
   source bytes hashed, three successful Stateful calls, aliases `E4` and `E7` selected; the answer applied the 6%
   royalty effective 2026-03-01. It also showed two duplicate ignored-config warnings.
-- **Headless trajectory:** `a3f27fb130`, `1cdf984ef8`, `a288e3eb54` add duration, responses, compactions, tool calls by
-  kind and output bytes, with `turn.progress` and `stateful.attribution` JSONL snapshots (`codex-exec` 122/122).
+- **Headless trajectory:** `a3f27fb130`, `1cdf984ef8`, `a288e3eb54` add duration, completed model responses (failed
+  provider-request attempts are not observable to the client and are not counted), compactions, tool calls by kind and
+  output bytes, with `turn.progress` and `stateful.attribution` JSONL snapshots (`codex-exec` 122/122).
 - **Correction, 2026-09-27: the first live trajectory claim was invalid.** The licensing run recorded after
   `19222f07f3` had correct attribution and answer but zero responses, tool calls, output bytes and compactions: the
   counters were fed only by raw response-item notifications that ordinary headless clients do not receive, and the
   compaction event was consumed before the accumulator. The claim that issue #24 was partly closed is withdrawn. The
-  repair moves accounting behind the app-server boundary, publishes `turn/trajectory/updated`, measures failed and
-  interrupted invocations, and reports resume usage relative to the current invocation; the TypeScript Jest
+  repair moves accounting behind the app-server boundary, publishes `turn/trajectory/updated` (the terminal notification is guaranteed; intermediate updates may coalesce or
+  drop under backpressure), records failed and interrupted invocations as a status (still not a count of failed
+  provider requests), and reports resume usage relative to the current invocation; the TypeScript Jest
   run stayed blocked by a Windows `file://C:\\...` module-resolution failure.
 - **Migration and backfill (issues #29, #31; #30 to recheck):** LF/CRLF-equivalent checksums, background insert-only
   backfill with filesystem fallback, owner-token fencing, and a one-time legacy reset in the migration then numbered
@@ -3579,13 +3592,15 @@ Code and Droid reviews challenged the slice and agreed that semantic dependency 
   races; Claude Code and Droid reviews could not run (HTTPS forced through an unavailable `127.0.0.1:9` proxy) and
   are not claimed. `codex-state` plus `codex-rollout` 331/331.
 - **Durable turn measurements:** records keyed by run, project, thread and turn, merged in either arrival order, with
-  graceful-shutdown draining; `statefulMeasurement/list` and `statefulMeasurement/summary` (runtime 5/5; four schema
-  fixture checks). Astra and Sol found the binding-loss, arrival-race, failed-status, notification-loss,
+  graceful-shutdown draining; `statefulMeasurement/list` and `statefulMeasurement/summary` (runtime 5/5, including exact aggregation over a
+  truncated newest-two-record window; four schema fixture checks; a public app-server test read one record back
+  through list and an exact one-record summary). Astra and Sol found the binding-loss, arrival-race, failed-status, notification-loss,
   destructive-replay, mutable-ordering and shutdown-cancellation defects that drove the redesign. A combined broad
   app-server run stalled at 45 percent and is not claimed.
 - **Startup warnings:** an exec-only one-for-one deduper removes the duplicate ignored-config warning.
 - **Measured-work panel:** the browser shows the bounded summary; a later review found the refresh race and the
-  false-zero trajectory rendering, both fixed (refresh-policy 2/2, workspace-view 5/5). Node's test worker could not
+  false-zero trajectory rendering, both fixed (the initial panel passed four workspace-view assertions in-process; after the fixes refresh-policy 2/2,
+  workspace-view 5/5). Node's test worker could not
   spawn in that sandbox (`EPERM`); the assertions passed in-process.
 
 Pause validation on 2026-09-27: refresh-policy 2/2, workspace-view 5/5, `codex-stateful-runtime` 5/5, `codex-state`
@@ -3598,8 +3613,10 @@ handled in `stateful/main`; no TUI build was rerun for this record.
 Operational notes from the same period: on 2026-09-26 a long-running Codex process returned `401 Unauthorized:
 Incorrect API key provided` because it predated a fresh `codex login`; no API key or override existed at any scope; a
 newly started `codex-cli 0.157.1` reported `Logged in using ChatGPT` and a read-only `codex exec --json` request
-returned `AUTH_OK`. A Windows scheduled task (`StatefulCodex-Hourly-Droid-Review`) ran a four-stage Droid and Codex
-review of a detached worktree; its first full cycle (`%LOCALAPPDATA%\StatefulCodex\hourly-droid-reviews\20260926-110328`)
+returned `AUTH_OK`. A Windows scheduled task (`StatefulCodex-Hourly-Droid-Review`, script
+`C:\Users\devan\.codex\automations\stateful-droid-hourly\run-review.ps1`) ran a four-stage Droid and Codex review of
+a detached worktree of the committed head, never overlapping and bounded to three hours, with Codex progress events
+kept separate from the final critique so raw event streams were not fed back as peer analysis; its first full cycle (`%LOCALAPPDATA%\StatefulCodex\hourly-droid-reviews\20260926-110328`)
 drove the confirmation threat-model audit and the hashing fix, after which Factory returned HTTP 402 (usage windows
 exhausted, Droid `0.228.0`).
 
