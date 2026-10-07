@@ -18,6 +18,7 @@ mod paths;
 mod runtime;
 mod sqlite;
 mod telemetry;
+mod thread_project_admission;
 
 pub use log_db::LogWriteFailureReporter;
 pub use model::CreatedProject;
@@ -37,6 +38,7 @@ pub use model::RolloutMigrationState;
 pub use runtime::BackfillLease;
 pub use runtime::StateRuntime;
 pub use sqlite::SqliteConfig;
+pub use thread_project_admission::ThreadProjectAdmission;
 
 pub use audit::ThreadStateAuditRow;
 pub use audit::read_thread_state_audit_rows;
