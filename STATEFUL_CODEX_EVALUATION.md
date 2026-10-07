@@ -2719,15 +2719,7 @@ build version and is not permitted.
 The tracked result is
 `clients/stateful-codex/eval/results/terminal-bench-2-1-stateful-smoke4-20260923.json`.
 
-SC-EVAL-029, the proposed product-specific concurrent project-family smoke, was
-retired before it produced a result. One procurement turn completed correctly
-but hit an over-narrow state-evidence assertion; one source-change turn
-completed before the orchestration process interrupted its second turn; and
-the first licensing turn was interrupted. Those partial records remain outside
-Git as negative harness evidence and are not repaired, scored, or described as
-Terminal-Bench. Terminal-Bench 2.1 defines 89 independent tasks rather than
-cross-task longitudinal families, so no relationship between its tasks will be
-inferred for evaluation.
+SC-EVAL-029 was retired here; see its own record after this entry.
 
 The next external gate follows the canonical Terminal-Bench 2.1 protocol: all
 89 official tasks, five fresh independent trials per task, 445 trials total.
@@ -3103,6 +3095,35 @@ not an official 445-trial score. The 78.65% breadth rate is directional
 pass-at-one evidence only; Terminal-Bench's published five-attempt protocol
 still requires 445 fresh independent trials and reports both trial accuracy and
 task-level pass-at-five.
+
+## SC-EVAL-029: concurrent project-family smoke (retired 2026-09-23)
+
+SC-EVAL-029, the proposed product-specific concurrent project-family smoke, was
+retired before it produced a result. One procurement turn completed correctly
+but hit an over-narrow state-evidence assertion; one source-change turn
+completed before the orchestration process interrupted its second turn; and
+the first licensing turn was interrupted. Those partial records remain outside
+Git as negative harness evidence and are not repaired, scored, or described as
+Terminal-Bench. Terminal-Bench 2.1 defines 89 independent tasks rather than
+cross-task longitudinal families, so no relationship between its tasks will be
+inferred for evaluation.
+
+**Disposition (2026-10-07 cleanup).** Its only dedicated input,
+`clients/stateful-codex/eval/manifests/concurrent-family-smoke.json` (231 lines,
+SHA-256 `d0795c14cc3e62796b3f68cdf460f5dac5d3ffd0db5e4e1b9e521764fd9ec386`),
+was removed from the tree. No script, test, package command or document
+selected it. It named "SC-EVAL-029 concurrent family inheritance smoke":
+`gpt-5.6-luna` at high effort, Autonomous mode, memories disabled, a
+20,000-token `body_after_prefix` compaction limit, and three families
+(`procurement-smoke` with cases `viability`, `authority-and-cost` and
+`continuity-basis`; `licensing-smoke` with `economics`, `territory` and
+`termination-risk`; `source-change-smoke` over the `source-change-canary` fixture with `learn-v1`,
+`revise-v2` carrying the `executed-policy-v2-smoke` intervention, and
+`reconcile`). The exact file is
+recoverable as
+`46d9071051445583c00b21e0163d373372d1a966:clients/stateful-codex/eval/manifests/concurrent-family-smoke.json`.
+The shared procurement, licensing and source-change fixtures and the generic
+`--manifest` runner remain, and the external partial records are unchanged.
 
 ## Benchmark SC-EVAL-030: feedback-conditioned persistent-state pilot
 
