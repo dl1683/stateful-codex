@@ -139,13 +139,25 @@ published Codex `rusty-v8-v150.4.0` release because the upstream crate's default
 sandbox archive URL returns 404. This was a local artifact override, not a
 dependency or source change.
 
+The first focused native validation on 2026-09-21 built the branch CLI, passed five Stateful TUI tests and
+snapshots, and ran two cached-login CLI runs against `clients/stateful-codex/public` without source edits; they reused
+project intelligence across threads and produced durable obligations (threads
+`01a0c5d8-d37a-71c3-9904-8561c286afe8` and `01a0c5e2-1a12-7603-85fa-08f138dcc93c`). The first rendered Edge/CDP run
+(continue, fork, Socratic gate, exact evidence, autonomous pause/resume, reload recovery) left its machine-readable
+result and screenshots under `%LOCALAPPDATA%/Temp/stateful-client-live-1790028346984`. It found and fixed three client
+defects: an invalid context-search limit, stale thread-scoped session keys that reopened the wrong run, and an
+unsupported fresh-history call surfacing as a user-visible error. On this Windows host some model-issued shell
+commands failed before execution because the Windows Store `pwsh.exe` returned access denied; Stateful recovery and
+non-shell tools continued, and that host failure is not reported as successful command execution.
+
 These checks demonstrate operability, not comparative product advantage.
 
 ### 2026-09-22 noninteractive CLI and live client regression
 
 Testing exposed that root-level `--stateful` selection was silently dropped by
 `codex exec`; the first attempted run therefore was not valid Stateful evidence.
-After sharing native startup between TUI and exec and propagating the selection,
+After sharing native startup between TUI and exec, propagating the selection, and
+attaching the chosen project before `thread/start`,
 rollout `01a0c83a-c55b-75d0-89fa-8ab8b9cbebd5` ran through cached ChatGPT login
 with both API-key environment variables removed. It received a selected project
 and durable run, used `steering_query`, bounded `evidence_read` calls, one semantic
@@ -977,7 +989,7 @@ lifetime projection, the improved maturation plus three Stateful follow-ups
 would cost 636,650 full tokens versus 428,784 ordinary tokens, a remaining
 207,866-token deficit. The observed average full-token follow-up saving projects
 full-token break-even around question eight instead of question fifteen. The
-same series would still cost 165,866 uncached tokens versus 73,456 ordinary, so
+same series would still cost 165,866 uncached tokens versus 73,456 ordinary (a 92,410-token deficit), so
 there is still no observed uncached break-even. These cross-run calculations are
 not a matched end-to-end rerun and must not be presented as a release claim.
 
@@ -1753,6 +1765,11 @@ total lifetime delta, win counts, and projected break-even without hiding a
 regression. No uncached or maturation-inclusive advantage will be claimed
 unless the measured totals actually establish it.
 
+Commit `c60f6c969d` prepared the evaluator for this distribution: a case can require registered concepts in the
+Stateful completion result and returned completion basis, not only the visible answer; completion attempts are
+counted; and every measured maturation rollout is accepted. Its 11-test suite passed and reconstructed the real
+SC-EVAL-014 completion as one attempt with 15 checklist items.
+
 This distribution is deliberately broader than a same-question replication but
 is still two small synthetic knowledge corpora. It can close the observed
 cross-case durable-coverage and short-distribution gates. It cannot alone prove
@@ -1977,7 +1994,7 @@ or establish maturation-inclusive release economics.
 
 ### Execution result
 
-The single-call completion mechanism passed in both Stateful runs. Authority
+The change was committed as `3dc47450a5`. The single-call completion mechanism passed in both Stateful runs. Authority
 thread `01a0ca7a-4d3d-71f3-9123-6fa1be61bbe9` used one five-file evidence batch
 and one terminal `stateful_run_update` carrying `finalObligation`; continuity
 thread `01a0ca7b-b2a1-72e3-b15d-3edf978b1a45` used two evidence batches and the
@@ -2048,7 +2065,7 @@ a correctness replication rather than an economics claim.
 
 ### Execution result
 
-SC-EVAL-019 passed every registered mechanism and semantic gate. Authority
+The change was committed as `633de3b08b`. SC-EVAL-019 passed every registered mechanism and semantic gate. Authority
 thread `01a0ca86-4356-7403-82de-3701e6c14f87` used one evidence batch and one
 terminal call; continuity thread `01a0ca87-6f61-7da1-a1ba-f5c2a1d25499` used
 two evidence batches and one terminal call. Both completion outputs contained
@@ -2230,7 +2247,9 @@ continuity sources, then opened `finance-schedule.md` and
 It persisted an intermediate packet whose stated remaining work was to complete
 the answer, then completed in the following response. There was no rejected
 tool call, and the final obligation and completed run now committed through the
-same storage transaction.
+same storage transaction. (An adversarial checkpoint before this run had found that terminal `stateful_run_update`
+wrote the final obligation and the run transition in two SQLite transactions; commit `f42997030f` made it one guarded
+transaction, and a forced obligation-identity failure proves the run update rolls back.)
 
 The visible answer and durable result are substantively correct and preserve
 the verified outage history, North Ridge, the 24-hour Birch loss, Cedar's
@@ -3313,7 +3332,7 @@ Status: completed on 2026-09-24. All 20 turns and the blind grading (two rounds)
 
 This was a qualitative probe requested by Devansh, not a protocol-valid longitudinal result. It used one project, one grader, and n=10.
 
-**Scope (added 2026-09-27):** this is the *one continuous thread* regime, where ordinary Codex's own conversation already acts as memory. Across **separate sessions** on the same project, hands-on testing found the opposite: Stateful was 20–54% cheaper after the first session, with comparable answers (issue #35; the "Cost evidence" section of `STATEFUL_CODEX_TESTING_HANDOFF.md`). The thesis holds across sessions and is currently inverted within a long thread.
+**Scope (added 2026-09-27):** this is the *one continuous thread* regime, where ordinary Codex's own conversation already acts as memory. Across **separate sessions** on the same project, hands-on testing found the opposite: Stateful was 20–54% cheaper after the first session, with comparable answers (issue #35; see "Hands-on product testing, issues #24-#42" below). The thesis holds across sessions and is currently inverted within a long thread.
 
 **Setup.** The corpus was the Pramana chip repository snapshot at commit `9c16fb73dc`, placed in isolated copies with per-turn corpus hashes. Each arm ran in one continuous thread (baseline `01a0d326-52f0-70c0-b61b-32244cf8ab36`, stateful `01a0d32b-e40e-72c2-b7f1-a6f1a4a04808`). Both arms used the default model at high effort, read-only, with memories disabled and a dedicated `CODEX_HOME`.
 
@@ -3362,6 +3381,284 @@ In q06, a finding that was present in the stateful arm's injected summary (a rea
 - durable state plus the compacted replacement does not yet preserve enough prior conclusions to prevent rebuild reading.
 
 SC-EVAL-024 had already exposed a compaction-cost pathology under an artificial limit; this probe shows a related one under default limits.
+
+## Mechanism canaries and implementation checkpoints (2026-09-24 to 2026-09-27)
+
+Status: transferred on 2026-10-07 from the retired restart handoff and clean-build plan (recoverable at
+`46d9071051445583c00b21e0163d373372d1a966`). These are small mechanism gates and component checkpoints run after
+SC-EVAL-032 on the published line (heads `19222f07f331`, then `89e79f57f1`). None is a broad benchmark or a cost
+claim. Unless stated, the canaries used Luna, cached ChatGPT login with API-key variables removed, isolated project
+copies and disabled host memories. Every named commit is an ancestor of `stateful/main`.
+
+The product problem these gates serve is the coupled loop behind issues #15, #16 and #17: precise semantic capture,
+continuity across turns, threads and compaction, active retrieval, exact routing for missing detail, point-of-use
+freshness, and therefore less rereading. SC-EVAL-032 showed the loop was not working: the stateful/ordinary cost ratio
+worsened from 1.72x in q01-q05 to 2.58x in q06-q10, q06 had a decisive finding in state but did not use it, and q10
+lacked a decisive fact in state that the old file-only context map could not route to.
+
+### Exact-region routing and the frozen q10 evidence
+
+Commits `3fd48bdf16` (routes survive scan limits), `9a27507d90` (fingerprint-bound evidence routes), `e0c66eb5f7`
+(an edit that shifts lines between query and read fails closed), `4242a7a9df` (regions split at 64 lines and 4 KiB;
+a route never claims a range whose matched text was truncated; stable cell identity), `f9b3e37602` (file node, file
+entry, regions and retirements publish in one SQLite transaction; a forced mid-publication failure leaves the previous
+generation visible), `e90eaed41d` (FTS ranks a bounded candidate page before hierarchy validation; per-source and
+top-level-directory caps; literal multi-token queries), `d5b35490c6` (app-server proof of exact region knowledge reuse)
+and `f1e7002acd` (240-byte UTF-8-safe previews centred on the matching window). Validation: project-intelligence 37/37,
+Stateful extension 24/24, the targeted app-server route/read/record/requery test, `just fix` and `just fmt`. The
+rejected bare-line-range prototype stays only on `checkpoint/stateful-region-routing-unsafe-20260925` at `a6cdb157de`.
+
+The two q10 `context_map_query` inputs were recovered read-only from the protected rollout:
+`STRATEGY_MAP earliest missing link final artifact end-to-end proof certificate integration` and
+`PLAN.md Production integration merge winning src main proof migration next action`. The frozen corpus had 1,537
+indexed files and 25,096 regions; the source scan alone took 12.362 seconds; the SQLite database was 107,503,616 bytes;
+full debug indexing varied from about 169 to 248 seconds under build and system contention (no indexing improvement is
+claimed). Before the FTS pre-limit the two queries took about 50.107 and 27.998 seconds; after it, max-10 probes took
+about 111.6 and 71.3 ms and later max-20 probes about 145-180 ms. Recall was mixed: query 1 did not put the decisive
+passages in its top 10 (with max 20, `PLAN.md:116-168` ranked 15 and `SCORECARD.md:48-76` ranked 19; in raw FTS they
+ranked 50 and 65), while query 2 ranked them 2 and 6. Promoting those two cells artificially would be
+benchmark-specific overfitting. Conclusion: routing and latency improved and the real second query reaches both facts;
+q10 is not "solved".
+
+### Behavioural reuse canaries (2026-09-26)
+
+Licensing fixture, two read-only turns in one thread, a project-state artifact after each turn.
+
+- **Cued root reuse.** Turn 1 (controlling royalty as of 2026-03-15) made five exact evidence reads, concluded 6% of
+  net sales effective 2026-03-01, and reached intelligence revision 45 with two current root entries and four evidence
+  routes. Turn 2, told to start from verified project intelligence, queried state, made zero source reads, gave the same
+  answer and left revision 45 unchanged. Responses 5 to 3, tool calls 4 to 2, source reads 5 to 0; input 104,781 to
+  87,787; uncached input 27,981 to 7,659 (72.6%); output 2,283 to 753; model-turn time 52.8 to 20.8 seconds.
+  Limitations: the prompt cued state-first behaviour, the fact was root-promoted, the source was unchanged and the
+  fixture is small.
+- **Uncued deeper-state reuse.** Turn 1 persisted one source-verified conclusion at `executed-amendment-1.md` file
+  scope (the records audit is quarterly and binding under an executed amendment); the root stayed empty. Turn 2 asked
+  the same question without mentioning memory, queried state, made zero source reads, answered correctly and left
+  intelligence revision 43 and entry revision 1 unchanged. Responses 7 to 3, tool calls 6 to 2, source reads 1 to 0;
+  input 135,455 to 75,342; uncached input 26,399 to 6,478 (75.5%); output 1,422 to 592; time 41.4 to 18.0 seconds.
+  This closes the small root and deeper-state reuse gate only; it says nothing about compaction, changed sources, large
+  corpora or an advantage over ordinary Codex.
+- Two evaluator defects were found and fixed, not product failures: an evidence assertion broke on a phrase spanning a
+  line break (`six\npercent`; whitespace normalised in `66f9831b31`), and the summariser carried only the revision-0
+  packet into the next turn (deltas `0 -> 42 -> 43` are now folded in `4a5558fbda`). The companion rebuild could not
+  download the prebuilt V8 archive; the existing companion executed every canary tool call.
+
+### Compaction continuity canary (2026-09-26)
+
+A five-file synthetic UART certificate corpus modelled on the Pramana reset-boundary failure, Luna at medium effort,
+automatic compaction forced at a low token limit. The q02-style turn persisted five current source-verified root
+findings at intelligence revision 35, including the decisive contrast (production resets both synchronizer stages low;
+the formal model initialises both high and has no production reset branch), and compacted twice; the post-compaction
+packet held all five findings and routes. The uncued q06-style prompt ("What would a skeptical certificate reviewer
+attack first in RX-EXACT? ...") started at revision 35 with 16 hierarchy nodes, 10 context-map entries and all five
+entries, made zero reads or queries, chose the reset-to-first-frame mismatch as the strongest attack, kept the caveat
+that the sources alone do not prove an unconditional extra push, wrote no duplicate state, and compacted twice more.
+Responses 8 to 4; tool calls 5 to 1; read-bearing calls 1 to 0; input 167,724 to 87,480; uncached input 43,564 to
+17,848; output 11,207 to 4,837; runner time 218.5 to 97.4 seconds. Limits: five files, root-promoted findings,
+unchanged source, a continuous thread, aggressive forced compaction and no ordinary arm. Two precursor attempts with the
+same finding were rejected by an over-specific bag-of-words assertion (`different`, `unsound`, `do not agree`); the
+final gate asserts one current entry co-locating production, formal, reset, low and high with the production lines
+cited. Exact-synonym assertions are an eval fragility, not product evidence.
+
+### Changed-authority canary (2026-09-26)
+
+Base policy threshold 10 (executed), draft amendment threshold 6, assessment count 8. Turn 1 correctly said launch was
+permitted (the draft was not binding), persisted four entries and ended at revision 25. Between turns only the
+amendment changed (executed effective 2026-03-01, replacing the threshold with 6); the user did not announce it. Before
+the first response of turn 2 the point-of-use audit advanced 25 to 26 and marked the old root decision and route
+stale; the model read the changed source, concluded launch was not permitted (8 exceeds 6), superseded the old
+decision and completed at revision 35. Safe but inefficient: turn 1 used 157,121 input, 40,129 uncached input, 7,664
+output, 8 responses, 5 tool calls, 2 compactions and 161.0 seconds; turn 2 used 320,041 input, 52,265 uncached input,
+14,495 output, 14 responses, 9 tool calls (2 blackboard queries, 2 context-map queries, 1 read-bearing call), 4
+compactions and 288.6 seconds. One completion was rejected because supersession moved the old entry from revision 1 to
+2 while the model still sent 1; it recovered on retry. Cleanup debt: the earlier draft-status entry stayed active with
+a stale fingerprint, and the conditional base-authority fact stayed active because its bytes did not change. The
+summariser first misreported turn 2 as starting at revision 25 (a pre-prompt compaction usage record was mistaken for
+the first response); it now folds `world_state` root revisions and reports 25 at turn start, 26 at first response, 35
+at completion.
+
+The trajectory decomposition found two tool-contract costs (the first query isolated `amendment.md` as stale but gave
+no copyable refresh locator, so the model reread all four sources; the obsolete revision 1 was resubmitted after
+supersession). Fixes: `f2fbe0a390` adds `refreshInput` to stale hits; `74bc2e949b` returns a copyable
+`historicalFinding` at the new revision after supersede or retire; `a78f394b8b` enumerates changed-source dependents
+(file seed expands to current and retired region routes, transactional, revision-pinned pagination, invalid seeds
+rejected). Suites: Stateful extension 24/24, project-intelligence 37/37, targeted app-server integrations, scoped
+Clippy (the pre-existing `RootBlackboardStatus` large-enum warning remains). These give a six-call repair path in
+place of the frozen nine-call path; that is a displacement theory, not a measured result. Independent Astra, Claude
+Code and Droid reviews challenged the slice and agreed that semantic dependency provenance is a separate layer.
+
+### Telemetry, snapshot and trust repairs
+
+- **Evidence-read accounting (issue #18, closed):** `649a89e116` and `7f94840695` pair tool results with calls and
+  count completed reads by source fingerprint and exact range, longitudinally. A read-only replay of the protected
+  SC-EVAL-032 rollout found 178 completed reads: 143 new exact identities, 22 prior-turn repeats and 13 within-turn
+  repeats, plus 2 failed and 7 unresolved attempts; 6 attempts had no concrete identity. Earlier syntactic reread counts
+  must be regenerated before reuse. This repairs telemetry; it does not show any repeat was unnecessary. Client suite
+  41/41.
+- **Root projection snapshot (issue #20, closed):** `c4067d433b` builds the root projection in one read transaction.
+  `c6266e5559` does the same for ordinary blackboard search and context-map reads (two WAL regressions; 40/40). Neither
+  claims a mixed projection was ever observed.
+- **Generic upsert:** `f0c9366f50` rejects a caller-chosen `sourceVerified` grade without a host receipt; `9d0b2b113e`
+  proves it through public JSON-RPC.
+- **User confirmation (issue #23):** `44bf6dcc58` removes `userConfirmed` from model schemas, `6aa45e7f92` adds
+  `blackboard/confirm` (entry ID and expected revision only), `59ea293d75` adds the browser action (client 42/42; a
+  real-browser check proved the payload, badge and action removal). The accepted limit is the trust boundary in
+  `STATEFUL_CODEX_CURRENT_STATE.md`.
+- **Exact evidence in the browser (issue #22):** `b47e85b470` reconstructs the guarded route in `evidence/read` and
+  rejects a mismatched range.
+- **Hashing (issue #19 stays open):** `fc671dedb9` reuses one live source check per audit when file and region routes
+  share a source (26 extension tests).
+
+### Premises, refresh and routing checkpoints
+
+- **Revision-pinned semantic premises:** `b37d91d360`, `cae829c436`, `00e61132de`. An entry revision may name at most
+  16 exact revisions of active `sourceVerified` or `userConfirmed` entries it relied on; premises never count as direct
+  evidence or raise verification; freshness walks the premise graph, so a changed amendment makes an unchanged-source
+  conclusion stale and discoverable. Model record and update tools audit premise evidence against live bytes; the
+  generic API reports stored state and does not re-read sources. Suites: project-intelligence 38, extension 27,
+  app-server-protocol 310 with one skip. Whether Luna uses the path is unmeasured.
+- **Interrupted refresh:** `dc51e7b320`: an injected `PermissionDenied` read yields an incomplete inventory, no missing
+  reconciliation, and the last complete generation stays queryable (41/41).
+- **Index cost profile:** with 496 regions, initial publication was about 277 ms at 16 files, 450 ms at 124 and 828 ms
+  at 496; unchanged publication about 110, 155 and 332 ms; at 160 files and 4,960 regions, scan, initial and unchanged
+  publication were about 1.26, 3.43 and 1.33 seconds. Roughly linear, so the 169-248 second Pramana refresh cannot be
+  assigned to the per-region SQL loop; filesystem, OneDrive or antivirus effects, database growth, contention or older
+  code may dominate. No indexer rewrite was made. `99fb9ce290` adds `regionsIndexed`, `scanDurationMs` and
+  `publicationDurationMs` to refresh results (`contextMap/refresh` and the tool). Issue #19 stays open until a real
+  refresh records them.
+- **Thread-view continuity:** `f2af68d17b` proves a completed outcome and its learning reach a second thread on the
+  same project while a private transcript marker does not. Live canary, `gpt-5.6-sol` at high: thread
+  `01a0dec1-0f8a-70b0-a470-97c02d9fdfee` read `DEPLOYMENT.md:L1-L3` once and recorded the conjunctive gate (checksum
+  `C7-42` and a passing rollback rehearsal are both required); thread `01a0dec2-29d8-7382-bd14-d2c7a69740a9` reused it
+  with no evidence-read, context-map, shell or code-mode filesystem call (its four tool calls were blackboard and run
+  state). Turn 1 against turn 2: 149,106 against 130,142 total tokens; 28,786 against 15,070 uncached input plus output
+  (47.64% lower); six against five requests; 6,630 against 4,988 bytes of tool output; about 34.3 and 34.8 seconds.
+  The second prompt explicitly asked for a continuity finding, which caused a record/query/promote sequence. Control
+  thread `01a0dec6-c7cc-7603-86d5-61988c48dbdf` without that instruction used one `stateful_run_update` call, two
+  requests, 50,457 total tokens, 11,417 uncached input plus output, 2,554 bytes and 17.1 seconds: 66.16% and 60.34%
+  below the cold turn. Limits: a tiny fixture; the first refresh indexed four diagnostic stdout and stderr files written
+  inside the project; `gpt-6-luna` and `gpt-6-sol` were unavailable through the ChatGPT endpoint; the CLI reported
+  version `0.0.0` and predated the newest commits because a rebuild failed on the `v8` 150.4.0 archive download.
+- **Route diversity (issue #17):** `fb3b60a55a`. With 160 matching files under `reviews/`, the decisive 161st match
+  under `docs/` was dropped by the old `limit * 16` early stop; a bounded FTS window plus one exhaustion-probe row now
+  returns `docs/guide.md` and an exact `truncated` flag (`mayHaveMore` in the tool, exposed by `contextMap/query`)
+  instead of guessing from `data.len() == limit`. Ranking quality and cost are not established.
+- **File-to-region knowledge:** `b85c1dbe64` counts active findings across a file and its direct regions with
+  `COUNT(DISTINCT entry.id)`, so a file-cited finding shows on a child region without a second read (42/42).
+- **Unchecked audit transitions:** `5dc0fd7b14` stops normalising `uncheckedThisTurn` to `current` in the semantic
+  fingerprint, so a user-confirmed finding whose live audit becomes unchecked is invalidated in the next request
+  (extension 27/27).
+- **Refresh health:** `f177cce404`, `197c48ba8c`, `8884f86384` persist full-refresh health (inventory versus region
+  coverage, counts, skipped and missing paths, truncation, timings) through restart, expose it in v2, World State and
+  the browser, and retry incomplete projects at startup (PI 42, extension 28, protocol 310 with one skip, browser 44).
+  `3578c5e5a0` fences competing full refreshes by a durable generation checked inside each write transaction (43/43).
+- **Completion learning:** `dc2dd91aeb` rejects completion with non-empty `finalObligation.learning` unless a current
+  root alias or exact historical revision is selected (extension 28/28). The host cannot check semantic equivalence.
+
+### Attribution, trajectory and measurement (2026-09-26 to 2026-09-27)
+
+- **Attribution (issue #24):** `1f55cc0d62` adds a content-free per-turn Stateful contribution record, the
+  `statefulAttribution/completed` notification and an invocation-level `stateful_attribution` object in `codex exec
+  --json` (extension 29, protocol 310 with one skip). First live reconciliation: a collaborative Luna run on the
+  licensing fixture took 34.801 seconds with 134,782 input, 97,536 cached and 1,352 output tokens; one completed turn,
+  five World State samples, 65 root entries across samples, ten current evidence routes, ten physical sources, 4,837
+  source bytes hashed, three successful Stateful calls, aliases `E4` and `E7` selected; the answer applied the 6%
+  royalty effective 2026-03-01. It also showed two duplicate ignored-config warnings.
+- **Headless trajectory:** `a3f27fb130`, `1cdf984ef8`, `a288e3eb54` add duration, responses, compactions, tool calls by
+  kind and output bytes, with `turn.progress` and `stateful.attribution` JSONL snapshots (`codex-exec` 122/122).
+- **Correction, 2026-09-27: the first live trajectory claim was invalid.** The licensing run recorded after
+  `19222f07f3` had correct attribution and answer but zero responses, tool calls, output bytes and compactions: the
+  counters were fed only by raw response-item notifications that ordinary headless clients do not receive, and the
+  compaction event was consumed before the accumulator. The claim that issue #24 was partly closed is withdrawn. The
+  repair moves accounting behind the app-server boundary, publishes `turn/trajectory/updated`, measures failed and
+  interrupted invocations, and reports resume usage relative to the current invocation; the TypeScript Jest
+  run stayed blocked by a Windows `file://C:\\...` module-resolution failure.
+- **Migration and backfill (issues #29, #31; #30 to recheck):** LF/CRLF-equivalent checksums, background insert-only
+  backfill with filesystem fallback, owner-token fencing, and a one-time legacy reset in the migration then numbered
+  `0056` (now `0059`). Astra and Sol reviews found the overwrite, skip-on-failure, lease-fencing and initialisation
+  races; Claude Code and Droid reviews could not run (HTTPS forced through an unavailable `127.0.0.1:9` proxy) and
+  are not claimed. `codex-state` plus `codex-rollout` 331/331.
+- **Durable turn measurements:** records keyed by run, project, thread and turn, merged in either arrival order, with
+  graceful-shutdown draining; `statefulMeasurement/list` and `statefulMeasurement/summary` (runtime 5/5; four schema
+  fixture checks). Astra and Sol found the binding-loss, arrival-race, failed-status, notification-loss,
+  destructive-replay, mutable-ordering and shutdown-cancellation defects that drove the redesign. A combined broad
+  app-server run stalled at 45 percent and is not claimed.
+- **Startup warnings:** an exec-only one-for-one deduper removes the duplicate ignored-config warning.
+- **Measured-work panel:** the browser shows the bounded summary; a later review found the refresh race and the
+  false-zero trajectory rendering, both fixed (refresh-policy 2/2, workspace-view 5/5). Node's test worker could not
+  spawn in that sandbox (`EPERM`); the assertions passed in-process.
+
+Pause validation on 2026-09-27: refresh-policy 2/2, workspace-view 5/5, `codex-stateful-runtime` 5/5, `codex-state`
+plus `codex-rollout` 331/331, `codex-app-server-protocol` 310/310 with one skip, `codex-exec` 127/127, three focused
+app-server integrations, `just fmt`. That work was committed as `89e79f57f1` once `.git` became writable. It widened
+issue #38: the TUI did not compile because exhaustive `ServerNotification` matches lacked `StatefulAttributionCompleted`
+(added in `1f55cc0`) and `TurnTrajectoryUpdated`; the last commit whose TUI built was `926f2ac`. Both variants are
+handled in `stateful/main`; no TUI build was rerun for this record.
+
+Operational notes from the same period: on 2026-09-26 a long-running Codex process returned `401 Unauthorized:
+Incorrect API key provided` because it predated a fresh `codex login`; no API key or override existed at any scope; a
+newly started `codex-cli 0.157.1` reported `Logged in using ChatGPT` and a read-only `codex exec --json` request
+returned `AUTH_OK`. A Windows scheduled task (`StatefulCodex-Hourly-Droid-Review`) ran a four-stage Droid and Codex
+review of a detached worktree; its first full cycle (`%LOCALAPPDATA%\StatefulCodex\hourly-droid-reviews\20260926-110328`)
+drove the confirmation threat-model audit and the hashing fix, after which Factory returned HTTP 402 (usage windows
+exhausted, Droid `0.228.0`).
+
+Still open at that pause, and not since recorded as closed: a normal-home live smoke of startup recovery, non-zero
+trajectory counters, exact turn-local usage and agreement between the raw rollout and both measurement methods; real
+index-cost attribution (issue #19); authoritative monetary cost (the client sees no reliable unit or currency).
+
+## Hands-on product testing, issues #24-#42 (2026-09-25 to 2026-09-27)
+
+Status: transferred on 2026-10-07 from the retired product-testing handoff. Hands-on use of the CLI, headless and web
+surfaces; A/B arms ran `-m gpt-5.6-luna -c model_reasoning_effort="high"`. Tokens are the CLI's "tokens used",
+uncached input plus output, which excludes Stateful's large cached input (cached input costs about 10% of uncached).
+Raw notes, scripts and logs are outside the repository: `C:/Users/devan/sc_v2/` (campaign scripts `campaign*.sh` and
+`long*_run.sh`, timelines, answers, analysis scripts such as `cite_check.py`, `template_check.py`, `we_len.py`,
+`topic_tokens.py`, `build_packet.py` and `judge_pairs.sh`, and `sc_v2/review/v3_sc_notes.md`) and the PTY TUI driver
+`C:/Users/devan/sc_tui/drive.py`. Test builds then were the headless `codex-exec.exe` at `19222f0` and the CLI/TUI
+plus `codex-code-mode-host.exe` at `926f2ac`, run against an isolated store passed with `-c sqlite_home=...`.
+
+Cross-session series (issue #35): a fresh headless session per question on the same project; the ordinary arm starts
+cold each time.
+
+| Series | Stateful versus ordinary |
+| --- | --- |
+| Datadog analyst, 15 questions | -5% overall; -10% on Q6-15; Q15 (4-filing synthesis) -49% with identical numbers |
+| ServiceNow analyst, 12 questions | -30% tokens, but +102% wall time from SQLite pool contention under concurrency (#37) |
+| Python coding, 4 tasks (tests pass in both arms) | task 1 +37% (first contact); tasks 2-4 -33% tokens and about -35% time |
+| JavaScript site, 4 tasks | -27% tokens, -27% time; no first-contact penalty |
+| Research repos, 3 projects x 6 questions | -35% (series A), -54% (series B, more accumulated state); cheaper in 29 of 30 pairs; answers sometimes shorter |
+| Hardware RTL repo, 5 questions | -15% tokens, faster on all 5 |
+| First broad A/B, 4 projects (#32) | +5% overall, dominated by first-contact cost and thin learning capture |
+
+Reading: project memory paid off across sessions (20-54% fewer tokens after the first session, comparable answers);
+within one continuous thread (SC-EVAL-032: 2.0x input, 2.7x uncached, $18.16 against $9.02, blind quality 6-4 to
+ordinary, about 443k characters of re-injected packets) it was overhead. Each is n=1 per project.
+
+Long run v3 (2026-09-27, 150 independent topics) is **not memory evidence**: Stateful made about 3 memory-tool calls in
+844. It is kept for two process observations: the obligation was updated once at the start and then not for 31 minutes
+and 34 topics until compaction 1, then every 4-7 minutes; and right after compaction 1 re-injected the agent's own
+starting strategy (ignored for topics 21-39), behaviour switched to match it. The rolling obligation window also drops
+early learnings.
+
+Issues filed on `dl1683/stateful-codex`: #24 headless opacity (progress, cost, contribution record); #25 evolve beyond
+Codex limits (logins, providers, computer use, transparency); #26 version skew (an older binary silently loses memory);
+#27 thread crossing surfaces (partly resolved: the Continue picker lists TUI threads); #28 start-screen clutter and
+unstable re-rendering; #29-#31 migration line endings, stock-Codex migration skew and slow first-run backfill; #32 first
+A/B across 4 projects (+5% tokens, thin capture, a cited-but-wrong number); #33 and #36 headless transparency and UX
+(tool actions not streamed, counters read 0, PDFs opaque to evidence); #34 headless resume unsupported; #37 concurrent
+sessions starve on the SQLite pool; #35 the cross-session evidence above; #38 the interactive CLI did not compile from
+`1f55cc0`; #39 TUI and web report (prompt required at launch, placeholder branding, hierarchy freeze, excellent mid-run
+steering and obligation panel; every workspace page ended in a busy render loop of about 1.15 cores and 900 MB per tab
+even on a 220-file project, and DevTools evaluation over 45 s failed); #40 staleness detection works but line citations
+were off by 2-25 lines in 4 of 4 checked cases, where base Codex's were exact; #41 Socratic mode's first reply is a
+refusal and "resume implementation" is impossible headless; #42 a long single run took a scripted, templated shortcut
+(blinded judge preferred base 19/20). Fork issue #1: background `codex exec` hangs without closed stdin.
+
+Test-design lesson: Devansh's core question is whether nuanced facts and instructions given mid-session survive and are
+used many compactions later. Backlogs of independent units cannot answer it. The suggested test (not run then): one
+long session on cumulative work, nuanced facts injected at known times, several forced compactions, then check whether
+later decisions honour them and where they were written, measuring obligation cadence throughout.
 
 ## External benchmark program (from 2026-09-28)
 

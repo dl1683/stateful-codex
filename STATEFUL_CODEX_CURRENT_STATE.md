@@ -29,7 +29,9 @@ the ledger on 2026-10-07. Their text is recoverable from Git at
 
 ## 1. Which code this describes
 
-The published branch is `stateful/main` at `5eacf03387` (2026-09-30), the
+The fork began as `feature/stateful-codex` on upstream `origin/main` at
+`48f897e4ce94152818ce0563b3a8aac3a70ce9b8`. The published branch is
+`stateful/main` at `5eacf03387` (2026-09-30), the
 upstream sync that carries the fork at `4ea34e7d10`. Everything in sections 3
 to 6 is read from that source. This page is a source description, not a fresh
 build or test run: the 2026-10-07 cleanup audit ran only `npm test` in
@@ -130,7 +132,13 @@ code. Future work follows the master plan.
   progress, evidence, readiness or steering from assistant prose or tool text,
   and never labels a run ready, complete or verified from row counts, tool
   success, prose or an exit code.
-- **The app-server v2 API is the product boundary.** List methods use cursor
+- **The app-server v2 API is the product boundary.** The experimental methods
+  are `projectIntelligence/status` and `/tree`; `blackboard/query`, `/upsert`,
+  `/relate` and `/confirm`; `contextMap/query` and `/refresh`; `evidence/read`;
+  `statefulRun/start`, `/read`, `/pause`, `/resume`, `/cancel` and `/setMode`;
+  `obligation/list`; `steering/submit` and `/list`; and
+  `statefulMeasurement/list` and `/summary`, plus `*/updated` notifications.
+  List methods use cursor
   pagination; mutations take idempotency keys or expected revisions;
   notifications carry project, run and entity revision; clients recover gaps
   by reading state.
@@ -302,6 +310,16 @@ time.
   binary cannot be replaced; build into a separate target directory. A release
   binary built while its tree was being edited matches no commit and must not
   be frozen.
+- **Windows builds.** Build test binaries at below-normal priority and never
+  while an A/B campaign is running. If the pinned V8 prebuilt download fails,
+  point `RUSTY_V8_ARCHIVE` at `<target>/debug/gn_out/obj/rusty_v8.lib` and
+  `RUSTY_V8_SRC_BINDING_PATH` at
+  `<target>/stateful-v8-artifacts/src_binding_ptrcomp_sandbox_release_x86_64-pc-windows-msvc.rs`
+  (the published `rusty-v8-v150.4.0` archive and binding worked);
+  set `AWS_LC_SYS_PREBUILT_NASM=1`. After changing `.sql` migrations run
+  `cargo clean -p codex-state -p codex-project-intelligence -p codex-stateful-runtime`.
+  `git add` in a fresh copy can hit a transient "Permission denied" on
+  `.git/objects`; retry and verify the baseline commit before launching.
 - **Keep every attempt.** Invalid, failed and interrupted attempts stay in the
   record with their reason. Missing measurements stay missing.
 - **Count the right things.** `codex exec` "tokens used" is uncached input plus
@@ -320,6 +338,12 @@ time.
   whether nuanced mid-session facts survive many compactions.
 - **Test as a user.** Judge memory by using the CLI, TUI and web UI on real
   work; report quality, cost and operation (rules kept, survival through long
-  runs and compaction, speed).
+  runs and compaction, speed). Both arms run the same model, so quality should
+  be comparable; do not over-invest in arm-fairness confounds.
+- **Protected evidence.** The untracked directories
+  `clients/stateful-codex/eval/results/pramana-ab-2026-09-24/` (SC-EVAL-032) and
+  `clients/stateful-codex/eval/results/codex-vs-droid-2026-09-25/` are read-only
+  evidence: never modify, stage, delete or regenerate them, and never use
+  `git add .` or a directory-wide add under `eval/results`.
 - **Issues** go to `dl1683/stateful-codex`, never `openai/codex`.
 - Push only to the `stateful` remote.
