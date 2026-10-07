@@ -154,6 +154,9 @@ enum Subcommand {
     /// Run a code review non-interactively.
     Review(ReviewCommand),
 
+    /// Review, add, correct or forget a thread's project memory (Stateful), with no model turn.
+    Memory(codex_exec::MemoryArgs),
+
     /// Manage login.
     Login(LoginCommand),
 
@@ -1172,6 +1175,25 @@ async fn cli_main(
             );
             codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
         }
+        Some(Subcommand::Memory(memory_args)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "memory",
+            )?;
+            let mut exec_cli = ExecCli::try_parse_from(["codex", "exec"])?;
+            // Root options (--profile, -C, ...) choose the configuration and so the store.
+            exec_cli
+                .shared
+                .inherit_exec_root_options(&interactive.shared);
+            exec_cli.command = Some(ExecCommand::Memory(memory_args));
+            exec_cli.strict_config = root_strict_config;
+            prepend_config_flags(
+                &mut exec_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
+            codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
+        }
         Some(Subcommand::Mcp(mut mcp_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -1873,6 +1895,7 @@ fn profile_v2_for_subcommand<'a>(
     match subcommand {
         Subcommand::Agents(_)
         | Subcommand::Exec(_)
+        | Subcommand::Memory(_)
         | Subcommand::Review(_)
         | Subcommand::Resume(_)
         | Subcommand::Queue(_)
@@ -2192,6 +2215,9 @@ fn reject_unsupported_worktree_for_subcommand(
             Some(ExecCommand::Review(_)) => {
                 anyhow::bail!("`--worktree` is not supported for code review")
             }
+            Some(ExecCommand::Memory(_)) => {
+                anyhow::bail!("`--worktree` is not supported for project memory")
+            }
         },
         _ => {
             anyhow::bail!(
@@ -2236,6 +2262,7 @@ fn unsupported_subcommand_name_for_strict_config(
         None
         | Some(Subcommand::Agents(_))
         | Some(Subcommand::Exec(_))
+        | Some(Subcommand::Memory(_))
         | Some(Subcommand::Review(_))
         | Some(Subcommand::ExecServer(_))
         | Some(Subcommand::Resume(_))

@@ -305,7 +305,7 @@ pub(crate) fn group_receipts(
     if notification.failed > 0 {
         parts.push(format!("{} could not be saved", rules(notification.failed)));
     }
-    let recognized = notification.saved + notification.pending + notification.already_present;
+    let recognized = notification.recognized;
     if let Some(declared) = notification.declared_count
         && declared != recognized
     {

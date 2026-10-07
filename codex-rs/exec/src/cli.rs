@@ -185,6 +185,9 @@ pub enum Command {
 
     /// Run a code review against the current repository.
     Review(ReviewArgs),
+
+    /// Review, add, correct or forget a thread's project memory, with no model turn.
+    Memory(crate::memory_command::MemoryArgs),
 }
 
 #[derive(Args, Debug)]
