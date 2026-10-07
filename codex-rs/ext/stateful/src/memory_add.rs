@@ -160,19 +160,14 @@ pub async fn add_entry(
     let result = store
         .write_capture(codex_project_intelligence::CaptureWrite {
             project_id: project_id.to_string(),
-            group: None,
-            scope: None,
-            units: vec![codex_project_intelligence::CaptureUnitWrite::Entry(
-                Box::new(codex_project_intelligence::CaptureEntryWrite {
-                    candidates,
-                    value,
-                    context: KnowledgeContext {
-                        ..KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect)
-                    },
-                    change,
-                    authority: codex_project_intelligence::CaptureAuthority::DirectAction,
-                }),
-            )],
+            units: vec![codex_project_intelligence::CaptureEntryWrite {
+                candidates,
+                value,
+                context: KnowledgeContext {
+                    ..KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect)
+                },
+                change,
+            }],
         })
         .await;
     match result {

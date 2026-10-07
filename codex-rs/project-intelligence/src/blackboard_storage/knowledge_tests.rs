@@ -22,14 +22,11 @@ use crate::HierarchyStore;
 use crate::KnowledgeAuthority;
 use crate::KnowledgeCategory;
 use crate::KnowledgeContext;
-use crate::KnowledgeScope;
 use crate::NewBlackboardEntry;
 use crate::NewHierarchyNode;
 use crate::NodeKind;
 use crate::ProjectRelativePath;
 use crate::RootPromotion;
-use crate::ScopeKind;
-use crate::ScopeState;
 use crate::SupersededEntry;
 
 const PROJECT_ID: &str = "project-1";
@@ -285,148 +282,26 @@ async fn an_action_binds_one_change() {
     );
 }
 
-fn capture_request() -> crate::CaptureWrite {
-    let scope = KnowledgeScope {
-        project_id: PROJECT_ID.to_string(),
-        scope_id: "scope-atomic".to_string(),
-        kind: ScopeKind::Investigation,
-        title: "Atomic investigation".to_string(),
-        state: ScopeState::Open,
-        end_condition: None,
-        opened_source: "user-message:thread-1/turn-1".to_string(),
-        ended_source: None,
-        created_at_ms: 0,
-        updated_at_ms: 0,
-    };
-    crate::CaptureWrite {
-        project_id: PROJECT_ID.to_string(),
-        scope: Some(scope),
-        group: Some(crate::CaptureGroup {
-            project_id: PROJECT_ID.to_string(),
-            group_id: "group-atomic".to_string(),
-            thread_id: Some("thread-1".to_string()),
-            turn_id: Some("turn-1".to_string()),
-            kind: "rules".to_string(),
-            ..Default::default()
-        }),
-        units: ["Never push.", "Preserve whole reasons: §3.2–§4 — α."]
-            .into_iter()
-            .enumerate()
-            .map(|(ordinal, words)| {
-                crate::CaptureUnitWrite::Entry(Box::new(crate::CaptureEntryWrite {
-                    candidates: vec![
-                        BlackboardEntryId::parse(format!("atomic-{ordinal}")).expect("id"),
-                    ],
-                    value: rule(words),
-                    context: KnowledgeContext {
-                        scope_id: Some("scope-atomic".to_string()),
-                        group_id: Some("group-atomic".to_string()),
-                        ..KnowledgeContext::new(
-                            KnowledgeCategory::Rule,
-                            KnowledgeAuthority::HumanDirect,
-                        )
-                    },
-                    change: change(ChangeOperation::Saved, words),
-                    authority: crate::CaptureAuthority::Message,
-                }))
-            })
-            .collect(),
-    }
-}
-
-#[tokio::test]
-async fn capture_rolls_back_at_group_and_member_commit_then_cold_retries() {
-    for (table, trigger) in [
-        ("capture_groups", "fail_group"),
-        ("capture_group_members", "fail_member"),
-    ] {
-        let home = TempDir::new().expect("home");
-        let store = store(&home).await;
-        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE TRIGGER {trigger} BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'injected failure'); END")))
-            .execute(&store.pool).await.expect("install fault");
-        assert!(store.write_capture(capture_request()).await.is_err());
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blackboard_entries")
-            .fetch_one(&store.pool)
-            .await
-            .expect("entries");
-        assert_eq!(
-            (
-                count,
-                store
-                    .latest_change_sequence(PROJECT_ID)
-                    .await
-                    .expect("journal"),
-                store
-                    .scope(PROJECT_ID, "scope-atomic")
-                    .await
-                    .expect("scope"),
-                store
-                    .capture_group(PROJECT_ID, "group-atomic")
-                    .await
-                    .expect("group")
-            ),
-            (0, 0, None, None)
-        );
-        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
-            .execute(&store.pool)
-            .await
-            .expect("remove fault");
-        store.pool.close().await;
-        let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
-            .await
-            .expect("reopen");
-        let committed = reopened
-            .write_capture(capture_request())
-            .await
-            .expect("retry");
-        let group = committed.group.expect("committed group");
-        assert_eq!(
-            (group.recognized, group.saved, group.members.len()),
-            (2, 2, 2)
-        );
-        assert_eq!(
-            reopened
-                .write_capture(capture_request())
-                .await
-                .expect("replay")
-                .group,
-            Some(group)
-        );
-        assert_eq!(
-            reopened
-                .latest_change_sequence(PROJECT_ID)
-                .await
-                .expect("journal"),
-            3
-        );
-    }
-}
-
 #[tokio::test]
 async fn direct_noop_outcome_rolls_back_with_its_action_binding() {
     let home = TempDir::new().expect("home");
     let store = store(&home).await;
     let request = |action: &str| crate::CaptureWrite {
         project_id: PROJECT_ID.to_string(),
-        group: None,
-        scope: None,
-        units: vec![crate::CaptureUnitWrite::Entry(Box::new(
-            crate::CaptureEntryWrite {
-                candidates: vec![BlackboardEntryId::parse("direct-atomic").expect("id")],
-                value: rule("Never push."),
-                context: KnowledgeContext::new(
-                    KnowledgeCategory::Rule,
-                    KnowledgeAuthority::HumanDirect,
-                ),
-                change: ChangeRecord {
-                    action_id: Some(action.to_string()),
-                    group_id: Some("exact-request".to_string()),
-                    origin: ChangeOrigin::DirectControl,
-                    ..change(ChangeOperation::Saved, "Never push.")
-                },
-                authority: crate::CaptureAuthority::DirectAction,
+        units: vec![crate::CaptureEntryWrite {
+            candidates: vec![BlackboardEntryId::parse("direct-atomic").expect("id")],
+            value: rule("Never push."),
+            context: KnowledgeContext::new(
+                KnowledgeCategory::Rule,
+                KnowledgeAuthority::HumanDirect,
+            ),
+            change: ChangeRecord {
+                action_id: Some(action.to_string()),
+                group_id: Some("exact-request".to_string()),
+                origin: ChangeOrigin::DirectControl,
+                ..change(ChangeOperation::Saved, "Never push.")
             },
-        ))],
+        }],
     };
     store.write_capture(request("first")).await.expect("first");
     sqlx::query("CREATE TRIGGER fail_outcome BEFORE INSERT ON capture_action_outcomes BEGIN SELECT RAISE(ABORT, 'injected outcome failure'); END")

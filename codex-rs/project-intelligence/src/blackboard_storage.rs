@@ -40,9 +40,7 @@ mod source_order;
 mod succession;
 mod update;
 
-pub use capture_write::CaptureAuthority;
 pub use capture_write::CaptureEntryWrite;
-pub use capture_write::CaptureUnitWrite;
 pub use capture_write::CaptureWrite;
 pub use capture_write::CaptureWriteResult;
 pub use fence::CompletionFence;

@@ -126,8 +126,6 @@ pub use storage::HierarchySourceUpdate;
 pub use storage::HierarchyStore;
 pub use storage::HierarchyStoreError;
 
-pub use blackboard_storage::CaptureAuthority;
 pub use blackboard_storage::CaptureEntryWrite;
-pub use blackboard_storage::CaptureUnitWrite;
 pub use blackboard_storage::CaptureWrite;
 pub use blackboard_storage::CaptureWriteResult;

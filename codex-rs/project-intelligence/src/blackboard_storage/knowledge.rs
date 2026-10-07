@@ -237,20 +237,6 @@ impl BlackboardStore {
         u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
     }
 
-    /// Stores the outcome of one capture with every member, in one transaction. The first
-    /// record of a group stands: a retried capture of the same message does not rewrite what
-    /// it first saved. Returns whether this call stored it.
-    pub async fn record_capture_group(
-        &self,
-        group: &CaptureGroup,
-    ) -> Result<bool, BlackboardStoreError> {
-        let now = unix_timestamp_millis()?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let stored = write_capture_group(&mut transaction, group, now).await?;
-        transaction.commit().await?;
-        Ok(stored)
-    }
-
     /// A stored capture group with its members in order, so a receipt can be replayed.
     pub async fn capture_group(
         &self,
@@ -567,61 +553,3 @@ impl StoredChange {
 #[cfg(test)]
 #[path = "knowledge_tests.rs"]
 mod tests;
-
-pub(super) async fn write_capture_group(
-    connection: &mut SqliteConnection,
-    group: &CaptureGroup,
-    now: i64,
-) -> Result<bool, BlackboardStoreError> {
-    let stored = sqlx::query(
-        "INSERT INTO capture_groups (
-                project_id, group_id, thread_id, turn_id, kind, declared_count, recognized,
-                saved, already_present, pending, omitted, failed, recorded_at_ms
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(project_id, group_id) DO NOTHING",
-    )
-    .bind(&group.project_id)
-    .bind(&group.group_id)
-    .bind(&group.thread_id)
-    .bind(&group.turn_id)
-    .bind(&group.kind)
-    .bind(group.declared_count.map(i64::from))
-    .bind(i64::from(group.recognized))
-    .bind(i64::from(group.saved))
-    .bind(i64::from(group.already_present))
-    .bind(i64::from(group.pending))
-    .bind(i64::from(group.omitted))
-    .bind(i64::from(group.failed))
-    .bind(now)
-    .execute(&mut *connection)
-    .await?
-    .rows_affected()
-        == 1;
-    if stored {
-        for member in &group.members {
-            sqlx::query(
-                "INSERT INTO capture_group_members (
-                        project_id, group_id, ordinal, entry_id, revision, outcome, preview,
-                        reason
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&group.project_id)
-            .bind(&group.group_id)
-            .bind(i64::from(member.ordinal))
-            .bind(&member.entry_id)
-            .bind(
-                member
-                    .revision
-                    .map(i64::try_from)
-                    .transpose()
-                    .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
-            )
-            .bind(member.outcome.as_str())
-            .bind(bounded_preview(&member.preview))
-            .bind(&member.reason)
-            .execute(&mut *connection)
-            .await?;
-        }
-    }
-    Ok(stored)
-}
