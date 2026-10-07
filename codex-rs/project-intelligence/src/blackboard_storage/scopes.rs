@@ -1,12 +1,4 @@
-//! Exact historical scope lookup and preserved quarantine predicates.
-
-use sqlx::FromRow;
-
-use crate::KnowledgeScope;
-
-use super::BlackboardStore;
-use super::BlackboardStoreError;
-use super::knowledge::parse;
+//! Preserved historical scope quarantine predicates.
 
 /// Leaves out an entry (`entry` in the enclosing query) whose current meaning limits it to
 /// an investigation other than the open one the thread (the bound parameter) continues.
@@ -38,52 +30,3 @@ pub(super) const LEGACY_LIMITED_RULE: &str = "revision.kind = 'instruction'
                         OR LOWER(revision.content) LIKE '%this issue%'
                         OR LOWER(revision.content) LIKE '%this incident%'
                         OR LOWER(revision.content) LIKE '%this debugging%')";
-
-impl BlackboardStore {
-    pub async fn scope(
-        &self,
-        project_id: &str,
-        scope_id: &str,
-    ) -> Result<Option<KnowledgeScope>, BlackboardStoreError> {
-        sqlx::query_as::<_, StoredScope>(
-            "SELECT * FROM knowledge_scopes WHERE project_id = ? AND scope_id = ?",
-        )
-        .bind(project_id)
-        .bind(scope_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .map(StoredScope::into_scope)
-        .transpose()
-    }
-}
-
-#[derive(FromRow)]
-struct StoredScope {
-    project_id: String,
-    scope_id: String,
-    kind: String,
-    title: String,
-    state: String,
-    end_condition: Option<String>,
-    opened_source: String,
-    ended_source: Option<String>,
-    created_at_ms: i64,
-    updated_at_ms: i64,
-}
-
-impl StoredScope {
-    fn into_scope(self) -> Result<KnowledgeScope, BlackboardStoreError> {
-        Ok(KnowledgeScope {
-            project_id: self.project_id,
-            scope_id: self.scope_id,
-            kind: parse(&self.kind)?,
-            title: self.title,
-            state: parse(&self.state)?,
-            end_condition: self.end_condition,
-            opened_source: self.opened_source,
-            ended_source: self.ended_source,
-            created_at_ms: self.created_at_ms,
-            updated_at_ms: self.updated_at_ms,
-        })
-    }
-}

@@ -20,6 +20,7 @@ fn memory_shortened_text_and_scope_states_are_explicit() {
         StatefulMemoryScopeState::Open,
         StatefulMemoryScopeState::NotBoundHere,
         StatefulMemoryScopeState::Ended,
+        StatefulMemoryScopeState::Unsupported,
     ]
     .into_iter()
     .enumerate()
@@ -31,7 +32,6 @@ fn memory_shortened_text_and_scope_states_are_explicit() {
             "Preserve the full qualification of this rule.",
         );
         item.content_truncated = true;
-        item.scope_title = Some("Parser investigation".to_string());
         item.scope_state = Some(state);
         (index + 1, item)
     })
@@ -67,7 +67,6 @@ fn item(
         updated_at: 1_790_000_000,
         replaces: Vec::new(),
         authority: None,
-        scope_title: None,
         scope_state: None,
         attributed_to: None,
     }

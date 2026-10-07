@@ -59,8 +59,6 @@ pub struct StatefulMemoryItem {
     pub replaces: Vec<StatefulMemoryReplaced>,
     /// On whose authority the entry rests, when recorded (older entries have none).
     pub authority: Option<StatefulMemoryAuthority>,
-    /// The investigation a rule is limited to, in the user's words.
-    pub scope_title: Option<String>,
     /// Historical scope disposition; unsupported scopes are held back in every thread.
     pub scope_state: Option<StatefulMemoryScopeState>,
     /// Whose words a relayed note keeps, as the user named them.

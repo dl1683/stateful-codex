@@ -10401,13 +10401,6 @@ class StatefulMemoryItem(BaseModel):
             description="Historical scope disposition; unsupported scopes are held back in every thread.",
         ),
     ] = None
-    scope_title: Annotated[
-        str | None,
-        Field(
-            alias="scopeTitle",
-            description="The investigation a rule is limited to, in the user's words.",
-        ),
-    ] = None
     section: StatefulMemorySection
     source: Annotated[BlackboardProvenanceKind, Field(description="Who wrote this text.")]
     updated_at: Annotated[int, Field(alias="updatedAt", description="Unix seconds.")]

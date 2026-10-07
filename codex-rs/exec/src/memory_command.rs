@@ -246,10 +246,10 @@ pub(crate) fn listing(items: &[StatefulMemoryItem]) -> String {
                 ""
             };
             out.push_str(&format!("  - {content}{shortened}\n    {}\n", target(item)));
-            if let Some(scope) = &item.scope_title {
+            if let Some(state) = item.scope_state {
                 out.push_str(&format!(
-                    "    investigation: {scope} ({})\n",
-                    scope_state(item.scope_state)
+                    "    investigation: {}\n",
+                    scope_state(Some(state))
                 ));
             }
         }

@@ -342,23 +342,10 @@ async fn memory_item(
         .knowledge_context(&entry.value.project_id, &entry.id)
         .await
         .map_err(blackboard_error)?;
-    let (scope_title, scope_state) = match context
+    let scope_state = context
         .as_ref()
-        .and_then(|context| context.scope_id.as_deref())
-    {
-        Some(scope_id) => {
-            use codex_app_server_protocol::StatefulMemoryScopeState;
-            let scope = store
-                .scope(&entry.value.project_id, scope_id)
-                .await
-                .map_err(blackboard_error)?;
-            (
-                scope.map(|scope| scope.title),
-                Some(StatefulMemoryScopeState::Unsupported),
-            )
-        }
-        None => (None, None),
-    };
+        .and_then(|context| context.scope_id.as_ref())
+        .map(|_| codex_app_server_protocol::StatefulMemoryScopeState::Unsupported);
     let attributed_to = context
         .as_ref()
         .and_then(|context| context.payload.as_deref())
@@ -386,7 +373,6 @@ async fn memory_item(
         updated_at: entry.updated_at_ms.div_euclid(1_000),
         replaces,
         authority,
-        scope_title,
         scope_state,
         attributed_to,
     })

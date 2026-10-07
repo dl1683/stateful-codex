@@ -40,11 +40,10 @@ fn input_parser_preserves_unicode_after_valid_revision_targets() {
 fn retained_scope_review_never_claims_current_application() {
     use codex_app_server_protocol::StatefulMemoryScopeState;
     let mut scoped = item("scoped", StatefulMemorySection::UserRule, "Never push.");
-    scoped.scope_title = Some("Parser".to_string());
-    scoped.scope_state = Some(StatefulMemoryScopeState::Ended);
+    scoped.scope_state = Some(StatefulMemoryScopeState::Unsupported);
     assert_eq!(
         listing(&[scoped]),
-        "Your retained rules\n  - Never push.\n    scoped@2\n    investigation: Parser (ended)\n\n"
+        "Your retained rules\n  - Never push.\n    scoped@2\n    investigation: unsupported; held back\n\n"
     );
 }
 
@@ -60,7 +59,6 @@ fn item(entry_id: &str, section: StatefulMemorySection, content: &str) -> Statef
         updated_at: 1_790_000_000,
         replaces: Vec::new(),
         authority: None,
-        scope_title: None,
         scope_state: None,
         attributed_to: None,
     }

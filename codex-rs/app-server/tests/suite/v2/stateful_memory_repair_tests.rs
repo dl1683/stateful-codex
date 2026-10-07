@@ -393,7 +393,7 @@ async fn large_scope_history_is_quarantined_and_retained_reads_stay_bounded() ->
     assert!(
         page.data
             .iter()
-            .filter(|item| item.scope_title.is_some())
+            .filter(|item| item.entry_id.starts_with("historical-rule-"))
             .all(|item| item.scope_state
                 == Some(codex_app_server_protocol::StatefulMemoryScopeState::Unsupported))
     );
@@ -449,3 +449,6 @@ async fn large_scope_history_is_quarantined_and_retained_reads_stay_bounded() ->
 
 #[path = "stateful_memory_cut_tests.rs"]
 mod cut_tests;
+
+#[path = "stateful_scope_output_cut_tests.rs"]
+mod scope_output_cut_tests;

@@ -33,10 +33,6 @@ replaces: Array<StatefulMemoryReplaced>,
  */
 authority: StatefulMemoryAuthority | null,
 /**
- * The investigation a rule is limited to, in the user's words.
- */
-scopeTitle: string | null,
-/**
  * Historical scope disposition; unsupported scopes are held back in every thread.
  */
 scopeState: StatefulMemoryScopeState | null,

@@ -21908,13 +21908,6 @@
             ],
             "description": "Historical scope disposition; unsupported scopes are held back in every thread."
           },
-          "scopeTitle": {
-            "description": "The investigation a rule is limited to, in the user's words.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "section": {
             "$ref": "#/definitions/v2/StatefulMemorySection"
           },

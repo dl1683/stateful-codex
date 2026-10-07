@@ -75,14 +75,11 @@ pub(crate) fn memory_lines(
             if let Some(replaced) = item.replaces.first() {
                 lines.push(vec!["     replaces: ".dim(), preview(&replaced.content).dim()].into());
             }
-            if let Some(scope) = &item.scope_title {
+            if let Some(state) = item.scope_state {
                 lines.push(
-                    vec![
-                        "     investigation: ".dim(),
-                        preview(scope).dim(),
-                        format!(" ({})", scope_state(item.scope_state)).dim(),
-                    ]
-                    .into(),
+                    format!("     investigation: {}", scope_state(Some(state)))
+                        .dim()
+                        .into(),
                 );
             }
             if let Some(speaker) = &item.attributed_to {
