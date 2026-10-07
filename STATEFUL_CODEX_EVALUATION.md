@@ -6,8 +6,9 @@ defines the outcome being tested; component tests and a runnable interface are
 necessary, but are not evidence that Stateful Codex is better than ordinary
 Codex. Every entry keeps its failures, invalid or stopped runs, and negative
 economics. Entries were compacted on 2026-10-07 without changing any result;
-the uncompacted text is recoverable from Git at
-`46d9071051445583c00b21e0163d373372d1a966`.
+the uncompacted ledger (including evidence moved in from retired documents) is
+recoverable from Git at `910c6c045185807ed18bc136f75d7d6f99acc700`, and the
+pre-cleanup documents at `46d9071051445583c00b21e0163d373372d1a966`.
 
 ## Index
 
@@ -103,7 +104,7 @@ count, extension grouping and all eight filenames, and said nothing was edited.
 | Full input tokens | 68,968 | 84,145 (+15,177) | 128,712 (+59,744) |
 | Cached input tokens | 47,360 | 52,736 (+5,376) | 99,328 (+51,968) |
 | Uncached input tokens | 21,608 | 31,409 (+9,801) | 29,384 (+7,776) |
-| Output tokens | 932 | 1,332 | 1,539 |
+| Output tokens | 932 | 1,332 (+400) | 1,539 (+607) |
 | Full lifetime tokens | 69,900 | 85,477 (+15,577, +22.28%) | 130,251 (+60,351, +86.34%) |
 | Uncached input + output | 22,540 | 32,741 (+10,201, +45.26%) | 30,923 (+8,383, +37.19%) |
 | Model responses | 3 | 3 | 5 |
@@ -547,7 +548,9 @@ contract); removing either would remove the product being measured.
 1.4% first-request saving did not justify making core memory tools less
 discoverable. Future efficiency work keeps the rich root and run contract,
 measures distributions rather than one cache outcome, and targets stable prefix
-construction or maturation efficiency.
+construction or maturation efficiency. This one pair tests whether the intended
+payload changed; it cannot replace the three-pair distribution or establish
+maturation-inclusive break-even.
 
 ## Fresh rendered browser validation (2026-09-22)
 
@@ -686,7 +689,9 @@ through validation, SQLite revisions, queries, root World State aliases,
 app-server v2 and browser evidence reads (one bounded range per source;
 whole-source links stay valid); the integration proved `lineRange: {start: 2,
 end: 3}` is returned by the next query and rendered as `S1:L2-L3` in the next
-request's World State, and the browser API returns only those lines. The completion contract now says
+request's World State, and the browser API returns only those lines; focused
+storage, protocol, extension, app-server and browser-client tests passed. The
+completion contract now says
 all blackboard, relationship, obligation and verification work must finish
 before `completed`, and completion is the final Stateful mutation; terminal runs
 stay immutable. Thread `01a0c98a-e574-7912-ac68-9f55011304db`, project
@@ -753,8 +758,9 @@ ten files every time; Stateful verified four, three (with a repeated side-letter
 verification) and six. With maturation: 499,305 against 308,300 full (+191,005,
 +61.95%) and 151,657 against 65,356 uncached (+86,301, +132.05%); full-token
 break-even at about 13 questions, no uncached break-even. Manual review: both
-economics answers covered all four concepts and both territory answers all
-three despite scorer misses; the ordinary termination answer covered all four.
+economics answers covered all four concepts although the scorer missed the
+stale-proposal wording, and both territory answers covered all three despite a
+Stateful morphology miss; the ordinary termination answer covered all four.
 **The Stateful termination answer omitted the executed uncapped-liability
 carve-out** while correctly reporting 60 days, the $5.5 million planning
 scenario, the $3 million limit, the $2.5 million gross difference, unresolved
@@ -1070,7 +1076,9 @@ batch and one terminal call, continuity two batches and one terminal call; runs
 `run-84a3c6207976ad707a7b82bb0d4276c5efcb1fd56dbf9954228f1b53c624a3a0` and
 `run-8d73434252388fb04cf8a2d356eaa36fbaf89e3572ab541817b2aa9e5416697f` completed
 at revision 2 with 6,742 and 5,474 characters; both visible answers kept every
-registered point with no unsupported award or certainty. Seven responses,
+registered point with no unsupported award or certainty; neither rollout
+contained a failure marker. This is a correctness replication, not an economics
+claim. Seven responses,
 145,312 full and 24,224 uncached: +1,019 full (+0.71%) and -15,109 uncached
 (-38.42%) against SC-EVAL-018 because both first requests reused the project
 cache; against the same-binary ordinary pair +6.58% full and -13.66% uncached.
@@ -1089,7 +1097,8 @@ opened exactly the four sources, concluded only the offline-acceptance
 dimension, kept the verified-history and vendor-claim distinction, Birch's
 24-hour loss, Cedar's 24-hour stated margin and the not-final-approval boundary;
 run `run-fe5316cfad34b5ecdfce74f6d000a721f93b79cdd1962b68e864ec9e93acb1f9`
-completed at revision 2 with a 4,442-character result. The mechanism and
+completed at revision 2 with a 4,442-character result and the rollout contained
+no failure marker. The mechanism and
 economics gates failed: after the evidence batch the model sent a separate
 `obligation_update` with all its final learning but no `next`, blocker or
 requested judgment, then the terminal call with nearly the same packet (a fourth
@@ -1105,7 +1114,8 @@ not next work, and a final packet with only the answer left belongs directly in
 persistence. Gates:
 one four-file batch, no intermediate obligation or rejected retry, one terminal
 call, three responses, one completion, revision-2 result, full below 81,003 and
-78,593, uncached below 15,467 (compared with 14,337). Retrieval and answer
+78,593, uncached below 15,467 (compared with ordinary's 14,337 without assuming
+stable provider cache behavior). Retrieval and answer
 passed (exactly the four sources; the 88/91/94/96 history, North Ridge, Birch's
 72-hour queue and 24-hour intake loss, Cedar's 120-hour claim and
 timestamp/order statement, verified-history versus vendor-claim, not final
@@ -1183,6 +1193,9 @@ project win counts with projects, not questions, as the clustered units. The
 method is in
 [`LONGITUDINAL_PROTOCOL.md`](./clients/stateful-codex/eval/LONGITUDINAL_PROTOCOL.md);
 `eval/manifests/longitudinal-template.json` is a non-registered shape example.
+At this design and tooling checkpoint after SC-EVAL-022, no comparative project
+result had been pre-registered and no six-project result had been run or
+claimed.
 Synthetic tests passed, and a historical five-turn rollout with a canonical
 compaction correctly surfaced four incomplete or superseded turns instead of
 treating them as valid. Published Codex or Luna scores stay contextual unless
@@ -1213,7 +1226,8 @@ preserves the corpus, exposes project state, commits its durable result, and
 yields the blinded quality, source-audit and state observations.
 
 **Pre-cohort isolation correction.** The first AGI pair was an infrastructure
-dry run: Stateful's stderr showed an attempted read of the host memory registry,
+dry run: both arms completed against identical, unchanged corpora, but
+Stateful's stderr showed an attempted read of the host memory registry,
 because removing API-key variables had kept the login but not disabled Codex's
 memory subsystem. Ordinary used 1,158,270 total and 132,734 uncached tokens;
 Stateful 1,394,703 and 137,743, with 18 against 10 read-bearing operations.
@@ -1224,7 +1238,8 @@ before any outcome was accepted. The runner now requires an explicit
 disabled-memory policy (`memories.use_memories=false` and
 `memories.generate_memories=false`) with the login kept, and the cohort
 restarted from fresh snapshot paths; every final result was collected after the
-correction and none was selected for inclusion.
+correction, and no completed result, favorable or unfavorable, was selected for
+inclusion by its outcome.
 
 **Outcome: unfavorable and directional only.** Both blind graders preferred
 ordinary on five projects and disagreed on AGI Thesis. All twelve arms had zero
@@ -1323,7 +1338,7 @@ because same-thread conversation history was also present.
 The excess is not compaction: a malformed v1 persistence call, a correct
 stale-source rejection followed by refresh, a v2 relationship failure needing
 another mutation, and repeated persistence rounds. The last turn is
-directionally better on marginal uncached usage (5,260 against 9,541), but the
+directionally better on marginal uncached usage (5,260 Stateful against 9,541 ordinary), but the
 four-turn lifetime is a large regression. Three integrity defects: the reconcile
 completion copied the fingerprint wrongly as the invented hybrid
 `79647ad1f8e25747262bade3cba32bbd2b85f1db12c9c2cf00d607f71e36561d` (stored
