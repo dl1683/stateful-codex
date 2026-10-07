@@ -62,7 +62,8 @@ stream_max_retries = 0
         .await?;
     let local_settings = LocalSettings::from(&client_config);
     let expected_roots = vec![remote_cwd.clone(), extra_root.clone()];
-    let mut app_server = crate::start_embedded_app_server_for_picker(&server_config).await?;
+    let mut app_server =
+        Box::pin(crate::start_embedded_app_server_for_picker(&server_config)).await?;
     // Exercise remote request semantics with a real server and separate client config.
     app_server.thread_params_mode = ThreadParamsMode::Remote;
     app_server.remote_cwd_override = Some(remote_cwd.to_path_buf());
@@ -124,9 +125,8 @@ stream_max_retries = 0
         )
         .await?;
     assert_eq!(resumed.session.runtime_workspace_roots, expected_roots);
-    let forked = app_server
-        .fork_thread(&local_settings, client_config.clone(), thread_id)
-        .await?;
+    let forked =
+        Box::pin(app_server.fork_thread(&local_settings, client_config.clone(), thread_id)).await?;
     assert_eq!(forked.session.runtime_workspace_roots, expected_roots);
 
     // Existing tasks may retain roots that are no longer in the server defaults.
@@ -137,26 +137,24 @@ stream_max_retries = 0
     );
     std::fs::write(config_path, updated_config)?;
     let session_config = chat.config_ref().clone();
-    let forked = app_server
-        .fork_thread_at(
-            &local_settings,
-            session_config.clone(),
-            thread_id,
-            /*last_turn_id*/ None,
-            /*before_turn_id*/ None,
-            ForkGoalContinuation::StartIfIdle,
-            /*selected_profile*/ None,
-        )
-        .await?;
+    let forked = Box::pin(app_server.fork_thread_at(
+        &local_settings,
+        session_config.clone(),
+        thread_id,
+        /*last_turn_id*/ None,
+        /*before_turn_id*/ None,
+        ForkGoalContinuation::StartIfIdle,
+        /*selected_profile*/ None,
+    ))
+    .await?;
     assert_eq!(forked.session.runtime_workspace_roots, expected_roots);
-    let side = app_server
-        .fork_side_thread(
-            &local_settings,
-            session_config,
-            thread_id,
-            /*selected_profile*/ None,
-        )
-        .await?;
+    let side = Box::pin(app_server.fork_side_thread(
+        &local_settings,
+        session_config,
+        thread_id,
+        /*selected_profile*/ None,
+    ))
+    .await?;
     assert_eq!(side.session.runtime_workspace_roots, expected_roots);
 
     app_server.remote_cwd_override = None;
