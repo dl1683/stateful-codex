@@ -3533,3 +3533,86 @@ findings, repro paths and the ranked improvement backlog are kept in the campaig
 - **Compaction loses what the agent told the user.** In one continuous thread with forced compaction, "what were the three numbers you gave me earlier?" was answered with the same numbers by ordinary Codex 3/4 and by Stateful 0/4 (3 different, 1 partial), with no uncertainty acknowledged in any thread. Stateful compacted more often (11 vs 6) because of its larger fixed prefix.
 - **Standing instructions are saved but not reliably applied.** "Remember for every future session" was honoured in a later fresh thread 2/4 by each arm. All 4 Stateful stores did capture it as a user-priority instruction entry, so the gap is in applying stored instructions, not capturing them. Ordinary Codex persisted it by writing it into the project's own handoff files. (An earlier version of this line said 0/4 stores contained it; that was a measurement error, corrected here.)
 - **Web UI:** live responses from concurrent sessions on one server leak into each other's pages; "Open workspace" ignores the first click; continuing without a desired outcome silently does nothing.
+
+## Benchmark SC-EVAL-035: October 2–3 hands-on campaign (Campaign II continued, 2026-10-02/03)
+
+Status: internal hands-on study, not a public benchmark. Claude used the product as a person would (CLI, TUI and web UI)
+on real repositories and public corpora. Every comparison runs the same binary with and without `--stateful`
+(`collaborative` unless stated), with isolated homes and project copies, model gpt-5.6-luna at high reasoning unless
+stated, and auto-compaction at 80k tokens unless stated. **Every test is n=1 per arm.** One identical first-session prompt cost between 0.59M and 1.35M input tokens
+across arms and reruns, and the ordinary arm's totals moved 6-15% between identical reruns, so ratios within about
+±0.15 are noise. Builds, in order: `cont_0e160ee0f6` (first continuity release), `cont_9a3c2109d8` (lean memory protocol),
+`cont_27aa1988f8` (standing rules captured verbatim and placed first; receipts; cheap path), `cont_c466898af7`
+(integrated candidate: supersession, `memory_read`, stderr receipts) and `cont_e9ee21021e` (patch).
+
+### Across fresh threads: the 20-session horizon series (humanize, 20 new-thread sessions per arm)
+
+| Build | Cumulative input S/O | Uncached S/O | Excluding ordinary re-asks | Compactions S/O | `Next:` rule S/O | Re-asks S/O |
+|---|---:|---:|---:|---:|---:|---:|
+| `cont_9a3c2109d8` (horizon1) | 0.89x (16.16M / 18.25M) | 0.80x | 0.97x | 12 / 13 | 7/20 / 1/20 | 0 / 2 |
+| `cont_27aa1988f8` (horizon2) | 0.73x (13.53M / 18.62M) | 0.57x | 0.83x | 3 / 15 | 20/20 / 1/20 | 0 / 2 |
+| `cont_c466898af7` (horizon3) | 0.82x (13.15M / 15.95M) | 0.68x | 0.89x | 2 / 14 | 20/20 / 1/20 | 0 / 2 |
+
+- On horizon1 Stateful's per-session cost rose (ratio slope +0.045 per session, SE 0.021; the last six sessions cost
+  1.07x) because standing rules decayed out of the packet after session 5. Capturing rules verbatim and first fixed this:
+  0 full-suite runs in 20 sessions on horizon2 and horizon3, against full suites in 16/20 ordinary sessions; the ratio
+  slope became flat (+0.008, SE 0.030; then -0.005, SE 0.018).
+- The ordinary arm needed two re-asks in every horizon because it could not recall a brainstorm (session 4) or a review
+  (session 10) that existed only in conversation. On horizon3 the crossover gate (ahead by session 4 and through
+  session 20) passes as measured but fails when those re-asks are excluded (input crosses only at session 10).
+  Priced at assumed GPT-5-family list ratios ($1.25/M uncached, $0.125/M cached, $10/M output; Luna pricing
+  unconfirmed), horizon3 cost $4.71 vs $6.00 (0.78x).
+- On gpt-6.1-sol (sessions 1-8, `cont_e9ee21021e`), Stateful was 0.94x input and 0.86x uncached, but 1.10x / 0.92x
+  without the ordinary arm's one re-ask. The ordinary 6.1 arm wrote its own `AGENTS.md` with the rules and kept all of
+  them, so rule persistence is not a differentiator there; conversation-only recall still is.
+
+### Across fresh threads: other use cases (all n=1)
+
+| Test | Build | Input / uncached S/O | What memory changed |
+|---|---|---:|---|
+| click 7-day week (hand4 / hand7 rerun) | `0e160ee0f6` / `9a3c2109d8` | 1.01x / 0.85x, then 1.03x / 0.94x | `Next:` 12/12 vs 2/13; ordinary re-explain turn needed on day 2; weekly summary 556k vs 244k from 23 serial history reads |
+| re-asking a known "main issue" (refind1) | `9a3c2109d8` | 0.36x / 0.25x on the 4 repeats | same answer every time vs 4 different "main issues" in 5 asks |
+| FOMC analyst week (know1) | `9a3c2109d8` | 0.91x / 0.84x (1.30x input on sessions 2-5) | prior conclusions recalled 3/3 vs 0/3; stale conclusions corrected 4/4 vs 0 |
+| license review (legal1) | `9a3c2109d8` | 0.87x / 0.95x (1.52x input on sessions 2-5) | current on a swapped license vs stale; neither caught the decisive "uses" -> "contains" change |
+| multi-day debugging (debug1) | `9a3c2109d8` | 1.25x / 0.82x | ruled-out list kept vs a false "ruled out"; root-cause fix vs workaround; regression tests vacuous in both arms |
+| patent drafting (patent1) | `9a3c2109d8` | 1.14x / 0.96x | drafting rules 3/3 vs 0/3, but the ordinary arm's final claims were stronger |
+| codebase tutor (learn1 / learn2 replay) | `9a3c2109d8` / `27aa1988f8` | 1.25x / 1.23x, then 1.21x / 1.14x | day-5 loss of the learner's preferences fixed by verbatim rule capture |
+| data analysis with a revision (data1) | `27aa1988f8` | 0.85x / 1.03x | findings and preferences carried; Stateful made 3 framing errors, the ordinary arm none |
+| long-form essay (write1) | `e9ee21021e` | 0.93x / 0.80x | kept British spelling and did not adopt a co-founder's US preference; the ordinary arm switched and misattributed it |
+| literature synthesis, 25 arXiv papers (research1) | `e9ee21021e` | 1.21x / 1.16x | all three user decisions recalled with reasons vs ignored |
+
+### Within one run: no benefit yet
+
+| Test | Build | Cost S/O | Quality |
+|---|---|---|---|
+| long1: one 17-minute click task | `9a3c2109d8` | 1.36x input (3.71M / 2.72M) | blind Codex review: ordinary better, high confidence (probes 71/77 vs 73/77) |
+| long2: 7-hour research goal | `9a3c2109d8` | 1.12x input, 1.23x uncached, 10 / 10 compactions | blind Droid and Codex reviews: ordinary better (moderate; 65%) |
+| within1: 12-turn single thread, 50k compaction limit | `e9ee21021e` | 1.27x priced units, 1.43x input, 23 / 18 compactions | blind Codex review: Stateful better (~80%); never-restated facts recalled 2/3 vs 0/3; both lost the "next step", Stateful lost a learned test route after compaction |
+
+A measured forensic pass over these rollouts found the within-run excess is extra requests, not larger context: in
+long2, 66% of the excess was per-turn memory writes and 28% the fixed prefix; after compaction only 4 of 155 packet
+items were used before being re-derived, while about 90% of re-read files were the agent's own working set, which
+memory does not hold. within1 has a confound: `exec resume` drops the sandbox flag, so resume turns ran under
+workspace-write in both arms.
+
+### Surfaces
+
+- TUI on `cont_e9ee21021e`: memory is visible for the first time (receipts while working; `/memory` list, correct and
+  forget in about 1 s with no model turn, persisted across launches). One correction restored a dropped rule and
+  `Next:` then held 14/14 turns over 3 launches.
+- Web on the integrated candidate: a Project memory panel with one-click Forget works end to end; the workspace is still
+  a 17-section page.
+
+### Limits and open defects
+
+- Single runs throughout; the horizon gate result depends on the ordinary arm's re-asks; blind reviews are single
+  reviewers per test except long2.
+- Open: a two-rule message lost its second rule behind a truncated receipt; scoped "ground rules for this X"
+  were captured in one test and missed in two on the same build; background about the user is not captured, which
+  leads to invented preferences; decisions are forced into rule form and lose their verb; memory reads silently drop
+  ruled-out entries at size caps; `§` and dashes shown as U+FFFD (disputed: a later store check found correct UTF-8 bytes and traced two cases to a cp1252 console and PowerShell decoding; garbling reported in the injected context is unverified); "source is not indexed" errors for files that
+  exist; within-run cost and compactions remain above ordinary Codex.
+
+Per-test notes, tables, transcripts and review files are kept outside the repository in the campaign folder
+(`sc_dogfood/campaign2/<test>/NOTES.md`, harness folders `hz1_harness`-`hz3_harness`, and the consolidated
+`campaign2/FINDINGS.md`).
