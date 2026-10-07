@@ -24,10 +24,6 @@ pub(crate) struct UserMessage {
     pub(crate) project_id: String,
     pub(crate) turn_id: String,
     pub(crate) text: String,
-    /// When the host received the message (Unix milliseconds).
-    pub(crate) received_at_ms: i64,
-    /// The memory-change journal position when the host received it, if it could be read.
-    pub(crate) after_change: Option<u64>,
 }
 
 #[derive(Default)]
@@ -51,7 +47,6 @@ impl UserMessageRegistry {
         project_id: &str,
         turn_id: &str,
         content: &[UserInput],
-        after_change: Option<u64>,
     ) {
         let text = content
             .iter()
@@ -95,8 +90,6 @@ impl UserMessageRegistry {
             project_id: project_id.to_string(),
             turn_id: turn_id.to_string(),
             text: text[..end].to_string(),
-            received_at_ms: crate::rule_capture::now_ms(),
-            after_change,
         };
         let mut threads = self
             .threads
@@ -111,8 +104,7 @@ impl UserMessageRegistry {
             threads.order.push_back(thread_id.to_string());
         }
         let messages = threads.messages.entry(thread_id.to_string()).or_default();
-        // A message recorded again (a cold resume re-records the current turn) keeps the
-        // time it was first received.
+        // Cold resume may record the same message again; retain its original identity.
         if messages.iter().any(|existing| {
             existing.turn_id == message.turn_id
                 && existing.project_id == message.project_id

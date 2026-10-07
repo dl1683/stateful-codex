@@ -45,7 +45,7 @@ pub(crate) fn user_message_source(thread_id: &str, turn_id: &str) -> String {
 }
 
 /// Stable identity for a rule's exact wording within a project. Retired or superseded
-/// entries are immutable history, so restating such a rule stores it again under the next
+/// entries are immutable history. Only a fresh explicit addition may allocate a later
 /// generation of the same identity.
 pub(crate) fn user_rule_entry_id(
     project_id: &str,
@@ -72,19 +72,8 @@ pub(crate) fn user_rule_entry_id(
     BlackboardEntryId::parse(id).ok()
 }
 
-/// The current time in Unix milliseconds, the clock entry timestamps use.
-pub(crate) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        })
-}
-
-const RETIRED_BEFORE_MESSAGE: &str = "nothing written: this rule was retired after the user wrote that message; only a later message from the user restores it";
-
-/// Restatements of one wording after which a rule is no longer re-established.
-const MAX_RULE_GENERATIONS: u32 = 8;
+const RETIRED_RULE: &str =
+    "nothing written: this rule is retired; restore it only with an explicit memory addition";
 
 /// One user rule as the host recorded it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,12 +91,6 @@ pub(crate) struct RuleSource<'a> {
     pub(crate) turn_id: &'a str,
     /// The turn being run now, which the receipt belongs to.
     pub(crate) receipt_turn_id: &'a str,
-    /// When the user wrote that message (Unix milliseconds); orders it only against
-    /// retirements the journal did not record.
-    pub(crate) stated_at_ms: i64,
-    /// The memory-change journal position of that message: retirements journaled after it
-    /// are later than the message. None when unknown, which never restores a retired rule.
-    pub(crate) after_change: Option<u64>,
     /// Where the rule sits: its scope, its position in the conversation, its capture group.
     pub(crate) placement: RulePlacement,
 }
@@ -162,8 +145,7 @@ pub(crate) async fn store_user_rule(
         thread_id,
         turn_id,
         receipt_turn_id,
-        stated_at_ms,
-        after_change,
+
         mut placement,
     } = source;
     let change = |operation, entry_text: &str| ChangeRecord {
@@ -204,73 +186,35 @@ pub(crate) async fn store_user_rule(
             });
         }
     };
-    // The current generation of this wording, or the first free one after inactive history.
-    let mut id = None;
-    // Whether some generation was retired after the message stating it now: only a later
-    // message restores (or promotes) it.
-    let mut retired_after_message = false;
-    for generation in 0..MAX_RULE_GENERATIONS {
-        let candidate = user_rule_entry_id(
-            project_id,
-            placement.scope_id.as_deref(),
-            clause,
-            generation,
-        )
-        .ok_or_else(|| "the rule cannot be identified".to_string())?;
-        match store
-            .get_entry(project_id, &candidate)
-            .await
-            .map_err(|error| error.to_string())?
-        {
-            None => {
-                id = Some(candidate);
-                break;
-            }
-            Some(existing) if existing.state == BlackboardEntryState::Active => {
-                // Promoting a pending wording needs the same authority as re-establishing a
-                // retired one: a message written after the retirement.
-                if standing == RuleStanding::Standing
-                    && existing.value.root_promotion != RootPromotion::Promoted
-                    && retired_after_message
-                {
-                    return Err(RETIRED_BEFORE_MESSAGE.to_string());
-                }
-                return reconcile_active_rule(
-                    store,
-                    event_sink,
-                    project_id,
-                    user_message_source(thread_id, turn_id),
-                    existing,
-                    standing,
-                    &receipt,
-                    &change(ChangeOperation::Promoted, clause),
-                )
-                .await;
-            }
-            // Retired or superseded: the user restating it re-establishes it below.
-            Some(inactive) => {
-                let retired = store
-                    .retirement_sequence(&inactive)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let message_is_later = match (retired, after_change) {
-                    (Some(retired), Some(position)) => position >= retired,
-                    (Some(_), None) => false,
-                    // An older retirement the journal did not record.
-                    (None, _) => stated_at_ms > inactive.updated_at_ms,
-                };
-                retired_after_message |= !message_is_later;
-            }
+    // Automatic sources never allocate a restoration generation, including cold replay.
+    let id = user_rule_entry_id(
+        project_id,
+        placement.scope_id.as_deref(),
+        clause,
+        /*generation*/ 0,
+    )
+    .ok_or_else(|| "the rule cannot be identified".to_string())?;
+    match store
+        .get_entry(project_id, &id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        None => {}
+        Some(existing) if existing.state == BlackboardEntryState::Active => {
+            return reconcile_active_rule(
+                store,
+                event_sink,
+                project_id,
+                user_message_source(thread_id, turn_id),
+                existing,
+                standing,
+                &receipt,
+                &change(ChangeOperation::Promoted, clause),
+            )
+            .await;
         }
+        Some(_) => return Err(RETIRED_RULE.to_string()),
     }
-    // Only a message written after the retirement restores the rule; quoting the message
-    // that first stated it (or any other earlier one) never does.
-    if retired_after_message {
-        return Err(RETIRED_BEFORE_MESSAGE.to_string());
-    }
-    let id = id.ok_or_else(|| {
-        "this rule was retired too many times to be stored again automatically".to_string()
-    })?;
     let node_id = services.project_node_id(project_id).await?;
     let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
         .map_err(|error| error.to_string())?;
@@ -302,6 +246,9 @@ pub(crate) async fn store_user_rule(
         )
         .await
         .map_err(|error| error.to_string())?;
+    if entry.state != BlackboardEntryState::Active || entry.superseded_by.is_some() {
+        return Err(RETIRED_RULE.to_string());
+    }
     // A concurrent capture of the same words stored it first: only one save is claimed.
     if created == CreateOutcome::AlreadyPresent {
         receipt(&entry, CaptureOutcome::AlreadyStored);

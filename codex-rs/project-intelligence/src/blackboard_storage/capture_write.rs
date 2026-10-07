@@ -31,10 +31,8 @@ use super::write_revision;
 #[derive(Clone, Debug)]
 pub enum CaptureAuthority {
     DirectAction,
-    Message {
-        after_change: u64,
-        stated_at_ms: i64,
-    },
+    /// Historical conversation sources never restore retired wording.
+    Message,
 }
 
 /// One exact unit, with bounded candidate generations resolved under the writer lock.
@@ -290,29 +288,8 @@ async fn write_unit(
         let existing = load_entry(connection, &unit.value.project_id, id).await?;
         if let Some(mut entry) = existing {
             if entry.state != BlackboardEntryState::Active {
-                if let CaptureAuthority::Message {
-                    after_change,
-                    stated_at_ms,
-                } = unit.authority
-                {
-                    let retired: Option<i64> = if let Some(successor) = &entry.superseded_by {
-                        sqlx::query_scalar("SELECT MIN(sequence) FROM memory_changes WHERE project_id = ? AND entry_id = ?")
-                            .bind(&unit.value.project_id).bind(successor.as_str()).fetch_one(&mut *connection).await?
-                    } else {
-                        sqlx::query_scalar("SELECT MAX(sequence) FROM memory_changes WHERE project_id = ? AND entry_id = ? AND operation IN ('forgotten', 'invalidated')")
-                            .bind(&unit.value.project_id).bind(id.as_str()).fetch_one(&mut *connection).await?
-                    };
-                    let later = match retired {
-                        Some(retired) => {
-                            after_change
-                                >= u64::try_from(retired)
-                                    .map_err(|_| BlackboardStoreError::RevisionOverflow)?
-                        }
-                        None => stated_at_ms > entry.updated_at_ms,
-                    };
-                    if !later {
-                        return Ok(None);
-                    }
+                if matches!(unit.authority, CaptureAuthority::Message) {
+                    return Ok(None);
                 }
                 continue;
             }

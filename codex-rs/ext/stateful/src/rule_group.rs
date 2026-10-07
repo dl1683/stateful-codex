@@ -67,16 +67,6 @@ pub(crate) async fn capture_marked_rules(
             return Vec::new();
         }
     };
-    let after_change = match store
-        .message_watermark(project_id, thread_id, turn_id)
-        .await
-    {
-        Ok(position) => position,
-        Err(error) => {
-            tracing::warn!(%error, "capture source position is unknown");
-            return Vec::new();
-        }
-    };
     let node_id = match services.project_node_id(project_id).await {
         Ok(node) => node,
         Err(error) => {
@@ -137,16 +127,14 @@ pub(crate) async fn capture_marked_rules(
                 codex_project_intelligence::KnowledgeAuthority::HumanDirect,
             )
         };
-        let candidates = (0..8)
-            .filter_map(|generation| {
-                crate::rule_capture::user_rule_entry_id(
-                    project_id,
-                    scope_id.as_deref(),
-                    &rule.clause.text,
-                    generation,
-                )
-            })
-            .collect();
+        let candidates = crate::rule_capture::user_rule_entry_id(
+            project_id,
+            scope_id.as_deref(),
+            &rule.clause.text,
+            /*generation*/ 0,
+        )
+        .into_iter()
+        .collect();
         units.push(codex_project_intelligence::CaptureUnitWrite::Entry(
             Box::new(codex_project_intelligence::CaptureEntryWrite {
                 candidates,
@@ -185,10 +173,7 @@ pub(crate) async fn capture_marked_rules(
                     group_id: Some(group_id.clone()),
                     preview: rule.clause.text,
                 },
-                authority: codex_project_intelligence::CaptureAuthority::Message {
-                    after_change,
-                    stated_at_ms: crate::rule_capture::now_ms(),
-                },
+                authority: codex_project_intelligence::CaptureAuthority::Message,
             }),
         ));
     }

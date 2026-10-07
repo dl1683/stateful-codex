@@ -31,7 +31,6 @@ fn services(state_home: &TempDir) -> ProjectIntelligenceServices {
 async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
     let state_home = TempDir::new().expect("state home");
     let services = services(&state_home);
-    let stated_at_ms = crate::rule_capture::now_ms() - 1;
     let rule = capture_marked_rules(
         &services,
         /*event_sink*/ None,
@@ -61,8 +60,7 @@ async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
             thread_id: "thread-1",
             turn_id: "turn-1",
             receipt_turn_id: "turn-2",
-            stated_at_ms,
-            after_change: Some(0),
+
             placement: crate::rule_capture::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::HostCapture,
             ),

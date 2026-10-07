@@ -206,11 +206,7 @@ impl BlackboardRecorder {
                 "nothing written: the user limited that sentence to the current task",
             ));
         }
-        let (thread_id, turn_id, stated_at_ms) = (
-            self.thread_id.clone(),
-            message.turn_id,
-            message.received_at_ms,
-        );
+        let (thread_id, turn_id) = (self.thread_id.clone(), message.turn_id);
         if rule.clause.text.len() > MAX_RULE_BYTES {
             return Err(respond(format!(
                 "the rule holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
@@ -249,8 +245,7 @@ impl BlackboardRecorder {
                 thread_id: &thread_id,
                 turn_id: &turn_id,
                 receipt_turn_id,
-                stated_at_ms,
-                after_change: message.after_change,
+
                 placement: RulePlacement {
                     scope_id,
                     end_condition: rule

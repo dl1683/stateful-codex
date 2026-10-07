@@ -34,6 +34,47 @@ use crate::SupersededEntry;
 
 const PROJECT_ID: &str = "project-1";
 
+#[tokio::test]
+async fn leave_then_independent_join_returns_the_actual_bound_snapshot() {
+    let home = TempDir::new().expect("home");
+    let first = store(&home).await;
+    first
+        .open_scope(&KnowledgeScope {
+            project_id: PROJECT_ID.to_string(),
+            scope_id: "scope-rejoin".to_string(),
+            kind: ScopeKind::Investigation,
+            title: "Parser".to_string(),
+            state: ScopeState::Open,
+            end_condition: None,
+            opened_source: "user-message:thread-1/turn-1".to_string(),
+            ended_source: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        })
+        .await
+        .expect("open");
+    first
+        .bind_thread_scope(PROJECT_ID, "thread-1", "scope-rejoin")
+        .await
+        .expect("initial join");
+    let second = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+        .await
+        .expect("independent store");
+    first
+        .unbind_thread_scope(PROJECT_ID, "thread-1")
+        .await
+        .expect("leave");
+    second
+        .bind_thread_scope(PROJECT_ID, "thread-1", "scope-rejoin")
+        .await
+        .expect("concurrent rejoin");
+    let (bound, scopes) = first
+        .thread_scopes(PROJECT_ID, "thread-1")
+        .await
+        .expect("returned snapshot");
+    assert_eq!(bound, scopes.first().cloned());
+}
+
 fn rule(content: &str) -> NewBlackboardEntry {
     NewBlackboardEntry {
         project_id: PROJECT_ID.to_string(),
@@ -448,10 +489,7 @@ fn capture_request() -> crate::CaptureWrite {
                         )
                     },
                     change: change(ChangeOperation::Saved, words),
-                    authority: crate::CaptureAuthority::Message {
-                        after_change: 0,
-                        stated_at_ms: 0,
-                    },
+                    authority: crate::CaptureAuthority::Message,
                 }))
             })
             .collect(),

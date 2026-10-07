@@ -69,9 +69,16 @@ pub(crate) fn relayed_instructions(text: &str) -> Vec<RelayedQuote> {
     Quotations::new(text)
         .attributed_quotes()
         .into_iter()
-        .filter(|(quote, _)| {
+        .filter(|(quote, sentence)| {
+            let before = sentence
+                .find(quote)
+                .map_or(*sentence, |index| &sentence[..index]);
+            let words = normalize(before);
+            let self_speech = words
+                .split_whitespace()
+                .any(|word| matches!(word, "i" | "we"));
             let normalized = normalize(quote);
-            reads_as_instruction(&normalized) || has_standing_marker(&normalized)
+            !self_speech && (reads_as_instruction(&normalized) || has_standing_marker(&normalized))
         })
         .map(|(quote, sentence)| RelayedQuote {
             speaker: speaker(sentence, quote),
@@ -184,7 +191,7 @@ async fn store_relayed(
         "Relayed by the user, not the user's own rule or preference: {speaker}'s words, as the user passed them on: {}",
         Value::String(relayed.quote.clone())
     );
-    if content.len() > MAX_NOTE_BYTES {
+    if content.len() > MAX_NOTE_BYTES || relayed.sentence.len() > MAX_NOTE_BYTES {
         return Ok(());
     }
     let mut hasher = Sha256::new();
@@ -221,7 +228,10 @@ async fn store_relayed(
                 },
             },
             KnowledgeContext {
-                payload: Some(json!({ "speaker": speaker, "reporter": "user" }).to_string()),
+                payload: Some(
+                    json!({ "speaker": speaker, "reporter": "user", "sentence": relayed.sentence })
+                        .to_string(),
+                ),
                 ..KnowledgeContext::new(
                     KnowledgeCategory::AttributedContext,
                     KnowledgeAuthority::ReportedThirdParty,
