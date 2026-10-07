@@ -1,11 +1,12 @@
-//! Public qualification of title-free historical memory review.
+//! Public qualification of bounded historical memory metadata review.
 
 use super::*;
 use codex_app_server_protocol::StatefulMemoryScopeState;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn historical_megabyte_scope_scalars_stay_stored_and_out_of_public_review() -> Result<()> {
+async fn historical_megabyte_context_and_scope_scalars_stay_stored_and_out_of_public_review()
+-> Result<()> {
     let (home, mut server, project, thread, _responses_server) = setup().await?;
     let added: StatefulMemoryAddResponse = server
         .request(|request_id| ClientRequest::StatefulMemoryAdd {
@@ -29,7 +30,14 @@ async fn historical_megabyte_scope_scalars_stay_stored_and_out_of_public_review(
     let end_condition = "E".repeat(1024 * 1024);
     sqlx::query("INSERT INTO knowledge_scopes (project_id,scope_id,kind,title,state,end_condition,opened_source,ended_source,created_at_ms,updated_at_ms) VALUES (?,'huge-history','investigation',?,'ended',?,'historical-source','historical-end',1,1)")
         .bind(&project).bind(&title).bind(&end_condition).execute(&pool).await?;
-    sqlx::query("UPDATE knowledge_context SET scope_id='huge-history' WHERE entry_id=?")
+    let payload = json!({"speaker":"S".repeat(1024 * 1024)}).to_string();
+    let scope_id = "I".repeat(1024 * 1024);
+    let group_id = "G".repeat(1024 * 1024);
+    sqlx::query("UPDATE knowledge_context SET scope_id=?,end_condition=?,group_id=?,payload=? WHERE entry_id=?")
+        .bind(&scope_id)
+        .bind(&end_condition)
+        .bind(&group_id)
+        .bind(&payload)
         .bind(&added.item.entry_id)
         .execute(&pool)
         .await?;
@@ -59,11 +67,22 @@ async fn historical_megabyte_scope_scalars_stay_stored_and_out_of_public_review(
     let page: StatefulMemoryReadResponse = serde_json::from_value(wire.clone())?;
     let mut expected = added.item;
     expected.scope_state = Some(StatefulMemoryScopeState::Unsupported);
-    assert_eq!(page.data, vec![expected]);
+    assert_eq!(page.data, vec![expected.clone()]);
     assert!(wire["data"][0].get("scopeTitle").is_none());
+    assert_eq!(wire["data"][0]["attributedTo"], json!(null));
     assert!(serde_json::to_vec(&wire)?.len() < 4096);
     let stored: (String, String) = sqlx::query_as("SELECT title,end_condition FROM knowledge_scopes WHERE project_id=? AND scope_id='huge-history'")
         .bind(&project).fetch_one(&pool).await?;
     assert_eq!(stored, (title, end_condition));
+    let stored: (String, String, String, String) = sqlx::query_as(
+        "SELECT scope_id,end_condition,group_id,payload FROM knowledge_context WHERE entry_id=?",
+    )
+    .bind(&expected.entry_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        stored,
+        (scope_id, "E".repeat(1024 * 1024), group_id, payload)
+    );
     Ok(())
 }

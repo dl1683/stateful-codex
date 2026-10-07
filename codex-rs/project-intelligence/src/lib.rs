@@ -53,6 +53,7 @@ pub use blackboard_storage::CompletionFence;
 pub use blackboard_storage::CreateOutcome;
 pub use blackboard_storage::MAX_CHANGES_PAGE;
 pub use blackboard_storage::MAX_SUPERSEDED_ENTRIES;
+pub use blackboard_storage::ReviewContext;
 pub use blackboard_storage::ReviewPage;
 pub use blackboard_storage::Succession;
 pub use blackboard_storage::SupersededEntry;

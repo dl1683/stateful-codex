@@ -46,6 +46,7 @@ pub use capture_write::CaptureWriteResult;
 pub use fence::CompletionFence;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;
+pub use review::ReviewContext;
 pub use review::ReviewPage;
 pub use succession::MAX_SUPERSEDED_ENTRIES;
 pub use succession::Succession;

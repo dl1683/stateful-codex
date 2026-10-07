@@ -89,3 +89,39 @@ impl BlackboardStore {
         }))
     }
 }
+
+/// Bounded context metadata used by public memory review, excluding historical text fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReviewContext {
+    pub authority: crate::KnowledgeAuthority,
+    pub has_recorded_scope: bool,
+}
+
+impl BlackboardStore {
+    /// Reads only authority and scope presence for the newest applicable context revision.
+    pub async fn review_context(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+    ) -> Result<Option<ReviewContext>, BlackboardStoreError> {
+        let row = sqlx::query_as::<_, (String, bool)>(
+            "SELECT context.authority, context.scope_id IS NOT NULL
+             FROM knowledge_context AS context
+             JOIN blackboard_entries AS entry ON entry.id = context.entry_id
+             WHERE context.project_id = ? AND context.entry_id = ?
+               AND context.revision <= entry.revision
+             ORDER BY context.revision DESC LIMIT 1",
+        )
+        .bind(project_id)
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|(authority, has_recorded_scope)| {
+            Ok(ReviewContext {
+                authority: super::knowledge::parse(&authority)?,
+                has_recorded_scope,
+            })
+        })
+        .transpose()
+    }
+}

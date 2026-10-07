@@ -76,10 +76,7 @@ async fn historical_self_speech_has_no_third_party_row_or_annotation() -> Result
             .iter()
             .map(|item| (item.authority, item.attributed_to.as_deref()))
             .collect::<Vec<_>>(),
-        vec![(
-            Some(StatefulMemoryAuthority::ReportedThirdParty),
-            Some("Priya")
-        )]
+        vec![(Some(StatefulMemoryAuthority::ReportedThirdParty), None)]
     );
     assert!(
         log.requests()[1]
@@ -199,7 +196,7 @@ async fn delegated_document_retains_source_and_target_without_general_rule_promo
     let note = memory
         .data
         .iter()
-        .find(|item| item.attributed_to.as_deref() == Some("Lena"))
+        .find(|item| item.authority == Some(StatefulMemoryAuthority::ReportedThirdParty))
         .expect("retained colleague");
     assert_eq!(
         note.authority,

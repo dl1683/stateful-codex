@@ -339,18 +339,13 @@ async fn memory_item(
     };
     let (content, content_truncated) = bounded(&entry.value.content, MAX_CONTENT_BYTES);
     let context = store
-        .knowledge_context(&entry.value.project_id, &entry.id)
+        .review_context(&entry.value.project_id, &entry.id)
         .await
         .map_err(blackboard_error)?;
     let scope_state = context
         .as_ref()
-        .and_then(|context| context.scope_id.as_ref())
+        .filter(|context| context.has_recorded_scope)
         .map(|_| codex_app_server_protocol::StatefulMemoryScopeState::Unsupported);
-    let attributed_to = context
-        .as_ref()
-        .and_then(|context| context.payload.as_deref())
-        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
-        .and_then(|payload| payload.get("speaker")?.as_str().map(str::to_string));
     let authority = context.map(|context| {
         use codex_app_server_protocol::StatefulMemoryAuthority as Api;
         use codex_project_intelligence::KnowledgeAuthority;
@@ -374,7 +369,7 @@ async fn memory_item(
         replaces,
         authority,
         scope_state,
-        attributed_to,
+        attributed_to: None,
     })
 }
 
