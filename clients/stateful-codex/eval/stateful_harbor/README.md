@@ -81,14 +81,16 @@ the Stateful flag. After that control succeeds, broader local runs may use only
 not describe that as a causal A/B result: the public run used a released Codex
 binary rather than this branch build.
 
-The current published GPT-5.6 Luna comparator is Codex 0.144.1 at max effort:
+As observed on 2026-09-23, the published GPT-5.6 Luna comparator is Codex
+0.144.1 at max effort:
 445 trials, 75.73% accuracy with 1.32 percentage-point standard error. The
 content-addressed source is the Terminal-Bench 2.1
 [`2026-07-11-openai-gpt-5-6-luna-max-codex.json`](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/leaderboard/submissions/2026-07-11-openai-gpt-5-6-luna-max-codex.json)
 submission, backed by Harbor job `4860a28f-bc1a-5367-9885-57ff9ccc3a15`.
 Terminal-Bench 2.1 requires all 89 tasks and five trials per task for a full
-score. Community leaderboard submissions are currently closed, so local runs
-are evidence, not official leaderboard entries.
+score. Community leaderboard submissions were closed when checked on 2026-09-23, so
+local runs are evidence, not official leaderboard entries; recheck before
+planning a submission.
 
 Each attempt preserves native Codex logs, an ATIF v1.7 trajectory, adapter
 metadata containing the bundle and Harbor hashes, the bundle's package manifest,

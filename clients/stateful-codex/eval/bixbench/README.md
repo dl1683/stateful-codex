@@ -35,8 +35,9 @@ original breadth denominator.
 - Scientific environment source: `Future-House/data-analysis-crow` tag
   `v1.5.0`, commit `953a6b13c5f8e15354525bca08636f620994f954`.
 
-FutureHouse's published `futurehouse/bixbench:aviary-notebook-env` manifest is
-currently ARM64-only. An official-comparison attempt on AMD64 should rebuild
+FutureHouse's published `futurehouse/bixbench:aviary-notebook-env` manifest was
+ARM64-only when checked on 2026-09-24; recheck before relying on that. An
+official-comparison attempt on AMD64 should rebuild
 the environment from its pinned Dockerfile rather than substitute a generic
 image. This is a source-pinned rebuild, not the byte-identical published image:
 
@@ -127,7 +128,7 @@ Stateful run.
   diagnostic preserves upstream's punctuation-insensitive normalized match but
   rejects numeric sign or punctuation collisions that would change the value.
   BixBench's
-  current official postprocessing uses an LLM judge for open answers, including
+  official postprocessing (as of 2026-09-24) uses an LLM judge for open answers, including
   range questions, so these local checks are diagnostics rather than official
   BixBench scores. The exported official-shaped trajectories can be judged
   later under a pinned official protocol.

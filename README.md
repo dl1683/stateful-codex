@@ -9,130 +9,50 @@
 [Product intent](./STATEFUL_CODEX_PRODUCT_INTENT.md) · [Master plan](./STATEFUL_CODEX_MASTER_PLAN.md) · [Current state](./STATEFUL_CODEX_CURRENT_STATE.md) · [Evaluation record](./STATEFUL_CODEX_EVALUATION.md) · [Web client](./clients/stateful-codex)
 
 ![Research preview](https://img.shields.io/badge/status-research_preview-5eead4?style=flat-square&labelColor=0b1118)
-![Terminal-Bench breadth](https://img.shields.io/badge/Terminal--Bench_2.1-70%2F89_directional-5eead4?style=flat-square&labelColor=0b1118)
 ![License](https://img.shields.io/badge/license-Apache--2.0-93c5fd?style=flat-square&labelColor=0b1118)
 
 </div>
 
 Stateful Codex is an experimental fork of OpenAI Codex for complex work that
-outlives one context window. It treats the user-selected directory as a durable
-project, turns what the agent learns into queryable project intelligence, and
-keeps consequential reasoning visible while the work is happening.
-
-The aim is not “chat with memory.” It is an execution environment that becomes
-better informed as the project develops—without making the user repeatedly
-explain the project, reread the same corpus, or wait until the end to discover
-what the agent did.
+outlives one context window. The user-selected directory is a durable project.
+What the agent learns becomes queryable project intelligence: hierarchical
+blackboards of facts, decisions, contradictions and open questions, a separate
+context map that routes back to exact source, and semantic progress updates the
+user can steer while the work runs. It is not "chat with memory"; the goal is an
+execution environment that becomes better informed as the project develops.
 
 > [!IMPORTANT]
-> Stateful Codex is a research preview. Its first complete product slice works
-> through the native CLI and local browser UI, but evaluation is still active.
-> The repository records regressions and unfavorable results alongside wins.
+> Stateful Codex is a research preview. The published branch works through the
+> native CLI and a local browser client; the newest memory work is still on
+> unmerged branches, and evaluation is active. The evaluation record keeps
+> regressions and unfavorable results beside wins.
 
 ## Evidence so far
 
-The first results are encouraging enough to justify deeper evaluation. They are
-measured signals from the current research system, not claims of an official
-leaderboard submission or a controlled causal advantage over ordinary Codex.
+Measured signals, not leaderboard submissions or controlled causal claims. The
+[evaluation record](./STATEFUL_CODEX_EVALUATION.md) has methods, costs,
+failures and limits; [current state](./STATEFUL_CODEX_CURRENT_STATE.md) says
+which build each result came from.
 
 | Evaluation | Observed result | Important limitation |
 | --- | --- | --- |
-| 25-question model eval, GPT-6.1 Sol, Stateful vs ordinary Codex 0.159.2 (SC-EVAL-034) | Over five batches in one directory per arm, Stateful was **13.4% cheaper** (list-price equivalent $1.422 vs $1.641) and **12.3% faster** (2,342 s vs 2,669 s, on a slower debug build), with the same score on the objective batches (10/10). It cost more on the two small one-shot batches (+89%, +55%) and less once batches reused the same repositories (−25%, −22%, −9%). | One run per arm; only the two objective batches are scored; list-price equivalents from session usage (ChatGPT login, nothing billed). Earlier models' Stateful arms cost slightly more than ordinary on the same eval (GPT-5.6 Sol +3%, GPT-6 Astra +16%). |
-| Terminal-Bench 2.1 one-attempt breadth screen | **70 of 89 distinct tasks passed (78.65%)**: 3/4 easy, 45/55 medium, and 22/30 hard. | This is directional pass-at-one evidence, not the published 445-trial protocol or an official leaderboard score. |
-| Feedback-conditioned persistent-state pilot | Across eight task families completed through five attempts, fifth-attempt cost was **22.0% lower** than cold cost in aggregate, average warm-attempt cost was **20.8% lower**, and final success was **7/8 versus 5/8 cold**. Among the five families that passed both cold and final, final cost fell **25.8%**. | This first protocol run had no repeated ordinary-control arm. Regressions occurred, two persistence mutations were missed, and `video-processing` failed all five attempts while becoming 12.8% more expensive. |
-| Six-question, two-project matched series | Read-bearing calls fell **20 -> 7**, unique raw-file reads **54 -> 29**, and follow-up uncached input plus output **97,693 -> 77,806** while all six answers and durable results passed manual semantic review. | Follow-up full tokens increased **381,853 -> 430,830**; including project maturation, Stateful remained more expensive over this short series. |
-| Mature-project selective retrieval | On three matched questions, Stateful used **5 read-bearing calls vs. 11** and reduced follow-up full tokens **19.41%** while verifying narrower source sets. | Uncached follow-up usage increased **27.90%**, and maturation-inclusive cost had not yet broken even. |
-| Ten-question continuous-thread A/B (SC-EVAL-032) | In **one continuous thread** per arm, Stateful used **2.0x** the input and **2.7x** the uncached input of ordinary Codex, and blind quality was level-to-slightly-worse (6/10 preferred ordinary). | Within one thread, ordinary Codex's conversation already serves as memory; Stateful's re-injected project state and re-verification are overhead there. |
-| Cross-session hands-on series (issue #35) | With a **fresh session per question** on the same project, Stateful used **20–54% fewer tokens after the first session** (uncached input plus output) with comparable answers, across analyst, coding, web-content, research and RTL repositories. | The first session always costs more; single hands-on series (n=1 per project); some Stateful answers were shorter; the metric excludes cached input. |
-| Six-project cold breadth screen | Both blind graders preferred ordinary Codex on **5 of 6** projects and disagreed on the sixth. | Directional only: all arms had zero compactions, and an auxiliary Stateful narrative could disclose the treatment arm. The grades are preserved, but no causal quality claim is made. |
-| BixBench v1.5-compatible scientific gate | The five-question capsule gate produced **4/5 local passes with 5/5 valid notebooks**; the ten-capsule breadth gate produced **3/10 local matches but only 2/10 both correct and operationally valid**. A protocol-v2 repair made the correct Excel result reproducible and confirmed the interrupted CHIP task as a substantive miss. | Non-official compatible environment, no ordinary control, question-isolated state, and several prompts omit reference-workflow choices. Protocol-v1 replay was weaker than the repaired v2 boundary. |
+| October hands-on campaign (SC-EVAL-035, unmerged candidate builds) | Across 20 fresh-thread sessions, Stateful used 0.73x-0.89x the ordinary input and held a standing rule 20/20 against 1/20. Within one run it did not help: blind reviews preferred ordinary on two long runs, and a 12-turn replay cost 1.27x with 23 against 18 compactions. | n=1 per arm; the cross-session gain depends on the ordinary arm's re-asks (0.83x-0.97x without them); the first session costs more. |
+| 25-question model eval, GPT-6.1 Sol (SC-EVAL-034) | 13.4% cheaper ($1.422 against $1.641 list-price equivalent) and 12.3% faster, same objective score (10/10); more expensive on small one-shot batches (+89%, +55%). | One run per arm. Same-day negatives: stale memory served as current (0/10 against 7.5/10) and compaction lost numbers told to the user (0/4 against 3/4). |
+| One continuous thread, ten questions (SC-EVAL-032) | Stateful used 2.0x the input and 2.7x the uncached input; blind quality was level (6/10 preferred ordinary). | Inside one thread the conversation already serves as memory. |
+| Fresh session per question (issue #35) | 20-54% fewer tokens after the first session across analyst, coding, web, research and RTL repositories. | Single hands-on series; the metric excludes cached input. |
+| Terminal-Bench 2.1, one attempt per task | 70/89 (78.65%) on the original bundle; 68/89 (76.40%) on the later Phase A freeze. | Not the 445-trial protocol or an official score; the public Codex 75.73% comes from a different build. |
+| Feedback-conditioned pilot, 50 attempts (SC-EVAL-030) | Fifth attempts cost 22.0% less than cold attempts and passed 7/8 against 5/8. | No repeated ordinary arm; regressions occurred; `video-processing` failed all five attempts. |
+| BixBench v1.5-compatible gates (SC-EVAL-031) | 4/5 on one capsule; 3/10 local matches and 2/10 correct and valid on ten capsules. | Not the official image or judge; no ordinary control. |
 
-The longitudinal pilot was intentionally frozen after 50 valid attempts so the
-next evaluation can test a different domain rather than spend the next budget
-repeating the same tasks. It repaired two of the three cold failures in the
-complete cohort, but it also exposed pass-to-fail regressions and a task that
-did not improve. The machine-readable 50-attempt ledger is published at
-[clients/stateful-codex/eval/results/terminal-bench-2-1-feedback-pilot-50-20260923.json](./clients/stateful-codex/eval/results/terminal-bench-2-1-feedback-pilot-50-20260923.json).
-
-The public Codex 0.144.1 Luna-max Terminal-Bench submission reports 75.73% over
-445 trials. Stateful Codex's 78.65% result across all 89 distinct tasks is an
-encouraging signal, but the protocols and binaries differ, so the figures are
-reported beside one another rather than treated as a controlled head-to-head.
-The complete methodology, costs, task mix, failures, infrastructure repairs,
-and negative findings are preserved in the
-[evaluation record](./STATEFUL_CODEX_EVALUATION.md).
-
-The BixBench-compatible run is intentionally reported as mixed evidence, not a
-leaderboard claim. Its compact task-level answers, hashes, operational failures,
-repair controls, and scientific-workflow diagnoses are published in
-[the BixBench result record](./clients/stateful-codex/eval/results/bixbench-v1-5-compatible-gates-20260924.json).
-
-## What changes
-
-- **The directory defines the project.** Stateful Codex never guesses which
-  project a request belongs to. Threads are conversation views over the same
-  project intelligence, not memory boundaries.
-- **Hierarchical blackboards preserve understanding.** Project, directory,
-  file, and optional anchored-region records retain facts, decisions,
-  contradictions, open questions, failures, strategies, and relationships.
-- **A separate context map routes back to ground truth.** Memory says what the
-  system understands; the context map says where to verify it; source files
-  remain authoritative.
-- **Obligation packets explain the work semantically.** The UI reports what was
-  learned, why it matters, what changed, what remains uncertain, and what comes
-  next—instead of streaming an opaque tool-call transcript.
-- **Steering is part of execution.** Users can redirect an active investigation,
-  and the instruction, acknowledgement, application state, and resulting
-  strategy revision remain visible.
-- **Workflow mode is an explicit user choice.** Autonomous keeps working,
-  Collaborative exposes meaningful checkpoints without creating approval
-  gates, and Socratic questions and synthesizes before execution.
-- **Normal Codex authentication still works.** The CLI and loopback-only web
-  gateway use the account cached by `codex login`; Stateful Codex does not
-  require a separate API key.
-
-```mermaid
-flowchart LR
-    U[User-selected project] --> R[Always-loaded root blackboard]
-    R --> D[Relevant directory / file understanding]
-    D --> M[Context-map route]
-    M --> S[Exact source evidence]
-    S --> O[Semantic obligation + result]
-    O --> R
-    T[User steering] --> O
-```
-
-## What is working now
-
-The current branch includes the first end-to-end product slice:
-
-- durable project identity shared by new, resumed, and forked threads;
-- bounded, typed model context that survives compaction;
-- filesystem-shaped project intelligence with provenance, freshness, exact
-  evidence, relationships, and revision-safe mutation;
-- project-memory, context-map, evidence, obligation, steering, and completion
-  tools available to the model;
-- durable Autonomous, Collaborative, and Socratic workflows;
-- native `codex --stateful <mode>` and `codex exec --stateful <mode>` paths;
-- experimental app-server v2 APIs and revisioned events; and
-- a real local browser client for setup, progress, steering, source evidence,
-  findings, controls, recovery, and final results.
-
-### More than a system prompt
-
-The branch adds durable software boundaries rather than asking the model to
-pretend it has memory. Project intelligence has its own SQLite-backed crate and
-migrations; inference behavior is installed as a native extension; bounded
-state reaches the model through typed World State contributions; mutations use
-revision and idempotency contracts; app-server v2 owns the external API; and
-the CLI, TUI, generated SDKs, browser gateway, web client, and evaluation
-harnesses all consume those contracts. Ordinary Codex remains available when no
-Stateful mode is selected or the intelligence store cannot be used.
+Machine-readable records:
+[Terminal-Bench feedback pilot](./clients/stateful-codex/eval/results/terminal-bench-2-1-feedback-pilot-50-20260923.json)
+and [BixBench gates](./clients/stateful-codex/eval/results/bixbench-v1-5-compatible-gates-20260924.json).
 
 ## Try it
 
-Stateful Codex currently builds from source. Install the normal Codex
-prerequisites, sign in once with your ChatGPT account, and build the branch CLI:
+Stateful Codex builds from source. Sign in once with your ChatGPT account, then
+build the CLI and its code-mode companion from the same checkout; they must sit
+beside each other, as in a normal Codex package:
 
 ```powershell
 codex login
@@ -146,17 +66,21 @@ Run the native TUI from the directory that should define the project:
 .\target\debug\codex.exe --stateful collaborative "Map this project, identify the decisive open questions, and start resolving them."
 ```
 
-Or start the browser client:
+`codex exec --stateful <mode>` runs headlessly. Modes are `autonomous`,
+`collaborative` and `socratic`.
+
+Or start the browser client and open `http://127.0.0.1:4173`:
 
 ```powershell
 cd ..\clients\stateful-codex
 npm start
 ```
 
-Then open `http://127.0.0.1:4173`. The first screen asks you to choose the
-project, whether to create/continue/fork the thread view, the workflow mode, and
-the desired outcome. The gateway binds only to loopback and launches the local
-branch CLI with ChatGPT authentication.
+The first screen asks for the project, whether to create, continue or fork the
+thread, the workflow mode, and the desired outcome. The gateway binds only to
+loopback, uses the login cached by `codex login`, and strips API-key variables
+from the server it launches; it never needs an API key. Set `CODEX_BIN` only
+when the branch CLI is elsewhere.
 
 <p align="center">
   <img src="./clients/stateful-codex/assets/setup-ready.png" alt="Stateful Codex project, thread, and workflow-mode setup" width="88%" />
@@ -164,22 +88,24 @@ branch CLI with ChatGPT authentication.
 
 ## How to read this repository
 
-- [`STATEFUL_CODEX_PRODUCT_INTENT.md`](./STATEFUL_CODEX_PRODUCT_INTENT.md)
-  defines the user problem and is the highest-level source of truth.
-- [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md) is the
+- [`STATEFUL_CODEX_PRODUCT_INTENT.md`](./STATEFUL_CODEX_PRODUCT_INTENT.md): the
+  user problem and requirements; the highest-level source of truth.
+- [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md): the
   canonical build plan; its reference design is
   [`STATEFUL_CODEX_MEMORY_PLAN.md`](./STATEFUL_CODEX_MEMORY_PLAN.md).
-- [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md) records
-  the architecture, source reading path, unmerged work branches, open gates,
-  and operating rules.
-- [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md) is the
-  append-only evidence record, including negative results and invalidated runs.
-- [`clients/stateful-codex`](./clients/stateful-codex) contains the browser
-  client and reproducible evaluation harnesses.
-- [`codex-rs/project-intelligence`](./codex-rs/project-intelligence) and
-  [`codex-rs/ext/stateful`](./codex-rs/ext/stateful) own durable project
-  knowledge and inference-time behavior without turning `codex-core` into the
-  product database.
+- [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md):
+  architecture, source reading path, unmerged branches, open gates and
+  operating rules.
+- [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md): the
+  append-only evidence record, including negative and invalidated runs.
+- [`LONGITUDINAL_PROTOCOL.md`](./clients/stateful-codex/eval/LONGITUDINAL_PROTOCOL.md),
+  [`bixbench/README.md`](./clients/stateful-codex/eval/bixbench/README.md) and
+  [`stateful_harbor/README.md`](./clients/stateful-codex/eval/stateful_harbor/README.md):
+  evaluation methods and harness commands.
+- [`clients/stateful-codex`](./clients/stateful-codex): the browser client and
+  evaluation harnesses. [`codex-rs/project-intelligence`](./codex-rs/project-intelligence)
+  and [`codex-rs/ext/stateful`](./codex-rs/ext/stateful) own durable project
+  knowledge and inference-time behavior outside `codex-core`.
 
 ## Built on Codex
 

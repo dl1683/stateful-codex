@@ -260,26 +260,105 @@ version, model, harness, prompt budget, retry policy, tools, and scorer are
 demonstrably comparable. No causal advantage is claimed from unlike public
 scores.
 
-## Command
+## Commands
+
+All commands run from `clients/stateful-codex`. Each script prints its usage
+when an argument is missing.
+
+### Longitudinal cohort
+
+A scored cohort needs its own preregistered manifest, frozen before either arm
+runs. `eval/manifests/longitudinal-template.json` is an unexecuted shape
+example with placeholder questions: use it for a smoke test of the tooling, and
+never present a run of it as evidence that a cohort ran.
 
 ```text
-npm run eval:longitudinal -- \
-  --manifest eval/manifests/longitudinal-suite.json \
-  --pair PROJECT=ordinary-rollout.jsonl,stateful-rollout.jsonl \
-  --observations PROJECT=ordinary-observations.json,stateful-observations.json
+npm run eval:prepare -- --manifest SUITE.json --projects-root PROJECTS   --output SNAPSHOTS
+
+npm run eval:run-arm -- --manifest SUITE.json --project PROJECT   --arm baseline|stateful --snapshot-root SNAPSHOTS --output RESULTS   --codex CODEX_EXE [--sqlite-home PATH] [--codex-home PATH]   [--auth-home PATH] [--reconcile-failed REASON]
+
+npm run eval:longitudinal --   --manifest SUITE.json   --pair PROJECT=ordinary-rollout.jsonl,stateful-rollout.jsonl   --observations PROJECT=ordinary-observations.json,stateful-observations.json
 ```
 
 Repeat `--pair` and `--observations` for each project in the frozen manifest.
-The process exits nonzero when the comparison contract or required measurements
-are incomplete; performance losses do not make a valid experiment invalid.
+The comparison exits nonzero when the comparison contract or required
+measurements are incomplete; performance losses do not make a valid experiment
+invalid. `eval:export-state -- --sqlite-home PATH (--thread ID | --run ID)
+--output PATH [--corpus-revision HASH]` exports the canonical state artifact
+that the runner captures after every Stateful turn.
 
 Prepare answer and state grading through separate commands and directories:
 
 ```text
-npm run eval:prepare-grading -- --manifest ... --result-root ... \
-  --snapshot-root ... --output PUBLIC_PACKETS \
-  --mapping-output PRIVATE_MAPPING --seed FROZEN_SEED
+npm run eval:prepare-grading -- --manifest ... --result-root ...   --snapshot-root ... --output PUBLIC_PACKETS   --mapping-output PRIVATE_MAPPING --seed FROZEN_SEED
 
-npm run eval:prepare-state-grading -- --manifest ... --result-root ... \
-  --snapshot-root ... --output STATE_PACKETS
+npm run eval:prepare-state-grading -- --manifest ... --result-root ...   --snapshot-root ... --output STATE_PACKETS
 ```
+
+### Single pairs and short series
+
+Compare an ordinary rollout with a Stateful rollout only after running the
+same prompt through the same entry point, model, working directory, and
+permissions. The scorer verifies the model, reasoning effort, originator,
+source, approval and sandbox policy, permission profile, workspace roots,
+directory, and normalized prompt before treating the pair as comparable:
+
+```powershell
+npm run eval -- --baseline <baseline.jsonl> --stateful <stateful.jsonl> `
+  --expect "8 regular files" --expect "styles.css"
+```
+
+The report keeps full lifetime tokens separate from uncached tokens, checks the
+expected answer terms, and reports read-bearing tool calls plus Stateful
+retrieval and persistence calls. A read-bearing call is a rollout-level proxy,
+not an exact count of operating-system reads. A comparison that fails parity
+exits with status 2; a run that misses an expected term exits with status 3.
+
+For a pre-registered sequence of follow-up questions, use `eval:series` with
+one named pair per manifest case. The report checks semantic term groups and
+prohibited conclusions. Cases may require the same semantic coverage in the
+Stateful completion result and returned completion basis, preventing a correct
+visible answer from hiding lost project knowledge. A live API read remains the
+authoritative persisted-result check. The report aggregates follow-up usage,
+adds every recorded project-maturation rollout, and reports only a projected
+break-even when the observed average follow-up saving is positive:
+
+```powershell
+npm run eval:series -- --manifest eval/manifests/licensing-series.json `
+  --maturation-rollout <licensing-maturation.jsonl> `
+  --pair economics=<ordinary.jsonl>,<stateful.jsonl> `
+  --pair territory=<ordinary.jsonl>,<stateful.jsonl> `
+  --pair termination-risk=<ordinary.jsonl>,<stateful.jsonl>
+```
+
+Repeat `--maturation-rollout` for each independently matured project in a
+multi-project distribution. Omitting it uses the frozen aggregate recorded in
+the manifest. A manifest may set `expectedMaturationRollouts` to reject an
+accidentally incomplete lifetime-cost calculation. These literal term checks
+are one-rollout-per-question tools and remain diagnostic; they cannot measure a
+continued thread, which is why the longitudinal evaluator above exists.
+
+### Project-state regression probes
+
+Evaluate a mature project's structured blackboard against a versioned semantic
+manifest through the live gateway:
+
+```powershell
+npm run eval:state -- --project <project-id> [--gateway URL] [--manifest PATH]
+```
+
+The default procurement manifest checks expected decisions, decisive facts,
+contradictions, and open questions. It reports semantic probe recall separately
+from supported-entry precision. A supported entry must be active,
+source-verified, linked to evidence, and current against the indexed source.
+The command fails if the 50-entry snapshot is truncated, a probe is missing or
+unsupported, an entry lacks current support, or a prohibited affirmative claim
+appears. These deterministic probes are regression evidence, not a substitute
+for independent semantic review or a held-out precision benchmark.
+
+### Other harnesses
+
+The Harbor feedback series (`eval:harbor-feedback`,
+`eval:harbor-feedback-summary`) is documented in
+[`stateful_harbor/README.md`](./stateful_harbor/README.md), and the BixBench
+runner in [`bixbench/README.md`](./bixbench/README.md).
