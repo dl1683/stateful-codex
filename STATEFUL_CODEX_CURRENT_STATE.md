@@ -54,7 +54,7 @@ builder logs (`sc_dogfood/fix/*_LOG.md`) at the 2026-10-03 pause.
 
 | Branch | Tip | Status |
 | --- | --- | --- |
-| `fix/continuity` | `d10057bac0` | Continuity line (base `3da78a47c4`): trimmed packet, exact delivery floor, standing rules, deferred tools, lean protocol and window budget, each reviewed clean; frozen builds `cont_0e160ee0f6`, `cont_9a3c2109d8` and `cont_c466898af7` came from it. Also carries items 1-3 (`/memory`, `codex memory`, investigations), which hit the repair cap and stay open; on-demand indexing stopped at the cap with a zero-entry once-cell defect; the last two commits (`9b09858e40`, `d10057bac0`) are unreviewed post-cap fixes. |
+| `fix/continuity` | `d10057bac0` | Continuity line (base `3da78a47c4`): trimmed packet, exact delivery floor, standing rules, deferred tools, lean protocol and window budget, each reviewed clean; frozen builds `cont_0e160ee0f6`, `cont_9a3c2109d8` and `cont_c466898af7` came from it. Also carries items 1-3 (`/memory`, `codex memory`, investigations), which hit the repair cap and stay open; on-demand indexing stopped at the cap with a zero-entry once-cell defect; two post-cap commits (`9b09858e40`, `d10057bac0`) are unreviewed fixes. |
 | `h1done/foundation` | `9de1ef0052` | `fix/continuity` plus one unreviewed `wip` commit extracting the items 1-3 foundation (action-ID fence, root projection module, explicit-only investigation join/end, host background capture off). When saved it left 4 app-server Stateful tests failing; the rubric review was not run. |
 | `h1done/item4` | `7be002b288` | Item 4 reduced contract (base `52694362a1`): 2 of 4 slices committed, unreviewed (canonical identity index; capture judged by canonical identity inside the commit). Parser and recall slices must be redone. Its migration `0018` may clash with other branches. |
 | `h1done/item5file` | `4418ddc737` | File-level "needs check" replacement for item 5 (base `52694362a1`): project-intelligence jobs and `paths_changed_between` committed and tested but unreviewed, plus a `wip` worker commit. Read adapters, the remaining tests and the review are left. The rejected regex-confirmation pivot stays on `h1done/item5` (`0b458025a2`). |
@@ -213,11 +213,14 @@ follow-up, so an event during an in-flight read causes one final read.
   bounded windows (50 blackboard entries; 100 obligations, steering records,
   thread items and measurements; 20 context-map hits), not complete project
   history.
-- The TUI on this code renders little of the Stateful layer: obligation updates
-  are not shown, only the first message of a session becomes a Stateful run,
-  steering is not durable, a Socratic run cannot be moved to execution, and
-  `resume --stateful` is unusable (SC-EVAL-033). The memory-visible TUI measured
-  in SC-EVAL-035 is on the unmerged branches.
+- At the Phase A freeze (SC-EVAL-033, 2026-09-28/29) the TUI showed little of
+  the Stateful layer: obligation updates were not visible, only the first
+  message of a session became a Stateful run, steering was not durable, a
+  Socratic run could not be moved to execution, and `resume --stateful` was
+  unusable. The published source does route obligation notifications to a TUI
+  history cell (`stateful_ui.rs`, covered by a snapshot test), but no live TUI
+  check has been recorded since. The memory-visible TUI measured in SC-EVAL-035
+  is on the unmerged branches.
 
 ## 6. Persistence and compatibility
 
@@ -254,9 +257,12 @@ every test n=1 per arm):
   Stateful used 0.73x-0.89x the ordinary input, but the crossover depends on the
   ordinary arm's two re-asks (0.83x-0.97x without them). Rules captured verbatim
   held `Next:` 20/20 against 1/20.
-- Within one run it does not yet help: long1 and long2 cost more and blind
-  reviews preferred ordinary; within1 cost 1.27x priced units with 23 against
-  18 compactions, although it recalled never-restated facts 2/3 against 0/3.
+- Within one run it has not met the cost gate: long1 and long2 cost more and
+  blind reviews preferred ordinary; within1 cost 1.27x priced units with 23
+  against 18 compactions, although its blind review preferred Stateful (about
+  80%) and it recalled never-restated facts 2/3 against 0/3. Ratios within about
+  0.15 of 1.0 are noise at n=1, and within1's resume turns ran under
+  workspace-write in both arms.
 - The first session costs more (1.7-1.9x per the master plan).
 
 **Earlier evidence still standing:** SC-EVAL-034 (one run per arm; 13.4%
