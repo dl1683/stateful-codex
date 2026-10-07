@@ -511,6 +511,7 @@ export type { StatefulMemoryItem } from "./StatefulMemoryItem";
 export type { StatefulMemoryReplaced } from "./StatefulMemoryReplaced";
 export type { StatefulMemoryScope } from "./StatefulMemoryScope";
 export type { StatefulMemoryScopeAction } from "./StatefulMemoryScopeAction";
+export type { StatefulMemoryScopeState } from "./StatefulMemoryScopeState";
 export type { StatefulMemorySection } from "./StatefulMemorySection";
 export type { StatefulObligation } from "./StatefulObligation";
 export type { StatefulObligationPacket } from "./StatefulObligationPacket";

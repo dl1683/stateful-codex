@@ -5321,6 +5321,13 @@ class StatefulMemoryScopeAction(Enum):
     end = "end"
 
 
+class StatefulMemoryScopeState(Enum):
+    open = "open"
+    not_bound_here = "notBoundHere"
+    ended = "ended"
+    unknown = "unknown"
+
+
 class StatefulMemorySectionValue(Enum):
     decision = "decision"
     knowledge = "knowledge"
@@ -5344,7 +5351,9 @@ class StatefulMemorySection(
         | Literal["pendingRule"]
         | Literal["unverifiedRule"]
         | Literal["background"],
-        Field(description="Where a memory item belongs, matching what new work applies."),
+        Field(
+            description="Retained memory categories. These sections do not assert current applicability."
+        ),
     ]
 
 
@@ -10455,6 +10464,13 @@ class StatefulMemoryItem(BaseModel):
         Field(description="What this entry replaced, newest first, at most three."),
     ]
     revision: Annotated[int, Field(ge=0)]
+    scope_state: Annotated[
+        StatefulMemoryScopeState | None,
+        Field(
+            alias="scopeState",
+            description="Scope state observed for this thread; absent for project-wide entries.",
+        ),
+    ] = None
     scope_title: Annotated[
         str | None,
         Field(

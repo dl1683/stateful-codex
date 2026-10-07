@@ -29,6 +29,9 @@ use tempfile::TempDir;
 /// one-off restriction for the orientation.
 const OPENING: &str = "Morning! Before writing anything I'd like you to get oriented. A couple of ways I like to work, so you know: I review and commit everything myself, so please never run git commit or anything that rewrites history. Also, don't run the whole test suite every time - just run the test file(s) relevant to what you changed. The test env is the venv one level up (../venv). No code changes yet, just the exploration and the plan. Oh, and one more thing: end each of your replies with a single line starting with 'Next:' that says the one concrete next step you'd take.";
 
+#[path = "stateful_authority_repair_tests.rs"]
+mod repair_tests;
+
 #[tokio::test]
 async fn user_rules_are_kept_in_the_users_words_and_nothing_else_becomes_a_rule() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -500,6 +503,7 @@ async fn a_users_decision_is_kept_whole_as_a_decision() -> Result<()> {
         .request(|request_id| ClientRequest::StatefulMemoryRead {
             request_id,
             params: codex_app_server_protocol::StatefulMemoryReadParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread.clone(),
                 cursor: None,
                 limit: None,
@@ -614,10 +618,12 @@ async fn corrected_attributed_notes_refuse_model_rewrite_promotion_and_successio
     )
     .await?;
     let read = || {
+        let project = project.clone();
         let thread = thread.clone();
         move |request_id| ClientRequest::StatefulMemoryRead {
             request_id,
             params: StatefulMemoryReadParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread,
                 cursor: None,
                 limit: None,
@@ -635,6 +641,7 @@ async fn corrected_attributed_notes_refuse_model_rewrite_promotion_and_successio
         .request(|request_id| ClientRequest::StatefulMemoryCorrect {
             request_id,
             params: StatefulMemoryCorrectParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread.clone(),
                 entry_id: note.entry_id,
                 expected_revision: note.revision,

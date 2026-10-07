@@ -55,6 +55,8 @@ use crate::error_code::internal_error;
 use crate::error_code::invalid_params;
 use crate::error_code::method_not_found;
 
+#[path = "memory_admission.rs"]
+mod memory_admission;
 #[path = "stateful_memory.rs"]
 mod stateful_memory;
 

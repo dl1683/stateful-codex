@@ -72,7 +72,7 @@ fn user_authority_requests() -> Vec<(&'static str, ClientRequest)> {
             "statefulMemory/forget",
             request(
                 "statefulMemory/forget",
-                json!({"threadId": "thread-1", "entryId": "entry-1", "expectedRevision": 1}),
+                json!({"threadId": "thread-1", "expectedProjectId": "project-1", "entryId": "entry-1", "expectedRevision": 1}),
             ),
         ),
         (
@@ -81,6 +81,7 @@ fn user_authority_requests() -> Vec<(&'static str, ClientRequest)> {
                 "statefulMemory/correct",
                 json!({
                     "threadId": "thread-1",
+                    "expectedProjectId": "project-1",
                     "entryId": "entry-1",
                     "expectedRevision": 1,
                     "content": "Run only the affected tests."
@@ -91,7 +92,7 @@ fn user_authority_requests() -> Vec<(&'static str, ClientRequest)> {
             "statefulMemory/scope",
             request(
                 "statefulMemory/scope",
-                json!({"threadId": "thread-1", "action": "end", "scopeId": "scope-1"}),
+                json!({"threadId": "thread-1", "expectedProjectId": "project-1", "action": "end", "scopeId": "scope-1"}),
             ),
         ),
         (
@@ -100,6 +101,7 @@ fn user_authority_requests() -> Vec<(&'static str, ClientRequest)> {
                 "statefulMemory/add",
                 json!({
                     "threadId": "thread-1",
+                    "expectedProjectId": "project-1",
                     "kind": "rule",
                     "content": "Run only the affected tests.",
                     "clientActionId": "add-1"

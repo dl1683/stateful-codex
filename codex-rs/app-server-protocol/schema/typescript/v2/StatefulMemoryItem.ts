@@ -5,10 +5,11 @@ import type { BlackboardKind } from "./BlackboardKind";
 import type { BlackboardProvenanceKind } from "./BlackboardProvenanceKind";
 import type { StatefulMemoryAuthority } from "./StatefulMemoryAuthority";
 import type { StatefulMemoryReplaced } from "./StatefulMemoryReplaced";
+import type { StatefulMemoryScopeState } from "./StatefulMemoryScopeState";
 import type { StatefulMemorySection } from "./StatefulMemorySection";
 
 /**
- * One current entry of project memory.
+ * One active retained entry; its presence does not assert current applicability.
  */
 export type StatefulMemoryItem = { entryId: string, revision: number, section: StatefulMemorySection, kind: BlackboardKind,
 /**
@@ -35,6 +36,10 @@ authority: StatefulMemoryAuthority | null,
  * The investigation a rule is limited to, in the user's words.
  */
 scopeTitle: string | null,
+/**
+ * Scope state observed for this thread; absent for project-wide entries.
+ */
+scopeState: StatefulMemoryScopeState | null,
 /**
  * Whose words a relayed note keeps, as the user named them.
  */

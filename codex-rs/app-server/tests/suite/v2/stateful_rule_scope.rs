@@ -10,7 +10,6 @@ use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
-use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
@@ -76,6 +75,7 @@ async fn investigation_rules_apply_only_while_and_where_the_investigation_runs()
         .request(|request_id| ClientRequest::StatefulMemoryScope {
             request_id,
             params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: opened.clone(),
                 action: codex_app_server_protocol::StatefulMemoryScopeAction::List,
                 scope_id: None,
@@ -87,6 +87,7 @@ async fn investigation_rules_apply_only_while_and_where_the_investigation_runs()
         .request(|request_id| ClientRequest::StatefulMemoryScope {
             request_id,
             params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: continued.clone(),
                 action: codex_app_server_protocol::StatefulMemoryScopeAction::Join,
                 scope_id: Some(scope_id.clone()),
@@ -109,6 +110,7 @@ async fn investigation_rules_apply_only_while_and_where_the_investigation_runs()
         .request(|request_id| ClientRequest::StatefulMemoryScope {
             request_id,
             params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: continued.clone(),
                 action: codex_app_server_protocol::StatefulMemoryScopeAction::End,
                 scope_id: Some(scope_id.clone()),
@@ -137,6 +139,7 @@ async fn investigation_rules_apply_only_while_and_where_the_investigation_runs()
         .request(|request_id| ClientRequest::StatefulMemoryScope {
             request_id,
             params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: continued.clone(),
                 action: codex_app_server_protocol::StatefulMemoryScopeAction::List,
                 scope_id: None,
@@ -198,14 +201,7 @@ async fn investigation_rules_apply_only_while_and_where_the_investigation_runs()
 }
 
 async fn start_thread(server: &mut TestAppServer, project_id: &str) -> Result<String> {
-    Ok(server
-        .start_thread(ThreadStartParams {
-            project_id: Some(project_id.to_string()),
-            ..Default::default()
-        })
-        .await?
-        .thread
-        .id)
+    super::stateful_memory::start_thread(server, project_id).await
 }
 
 async fn run_turn(server: &mut TestAppServer, thread_id: &str, text: &str) -> Result<()> {

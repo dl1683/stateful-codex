@@ -34,6 +34,9 @@ const SUITE_RULE: &str = "From now on, never run the whole test suite.";
 const NEXT_RULE: &str = "From now on, end every reply with a line starting with 'Next:'.";
 const CORRECTED: &str = "End every reply with a line starting with 'Next step:'.";
 
+#[path = "stateful_memory_repair_tests.rs"]
+mod repair_tests;
+
 #[tokio::test]
 async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -72,9 +75,11 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
     run_turn(&mut server, &first, &format!("{SUITE_RULE} {NEXT_RULE}")).await?;
 
     let read = |thread_id: String| {
+        let project = project.clone();
         move |request_id| ClientRequest::StatefulMemoryRead {
             request_id,
             params: StatefulMemoryReadParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id,
                 cursor: None,
                 limit: None,
@@ -118,9 +123,11 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
     };
     let (suite, next) = (item(SUITE_RULE), item(NEXT_RULE));
     let page = |thread_id: String, cursor: Option<String>| {
+        let project = project.clone();
         move |request_id| ClientRequest::StatefulMemoryRead {
             request_id,
             params: StatefulMemoryReadParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id,
                 cursor,
                 limit: Some(1),
@@ -134,6 +141,7 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
         .request(|request_id| ClientRequest::StatefulMemoryForget {
             request_id,
             params: StatefulMemoryForgetParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: first.clone(),
                 entry_id: suite.entry_id.clone(),
                 expected_revision: suite.revision,
@@ -144,6 +152,7 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
         .request(|request_id| ClientRequest::StatefulMemoryCorrect {
             request_id,
             params: StatefulMemoryCorrectParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: first.clone(),
                 entry_id: next.entry_id.clone(),
                 expected_revision: next.revision,
@@ -158,6 +167,7 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
             "statefulMemory/read",
             Some(serde_json::json!({
                 "threadId": first,
+                "expectedProjectId": project.project.id,
                 "cursor": first_page.next_cursor,
                 "limit": 1
             })),
@@ -264,6 +274,7 @@ async fn background_is_reviewed_corrected_and_forgotten_as_background() -> Resul
         .request(|request_id| ClientRequest::StatefulMemoryAdd {
             request_id,
             params: StatefulMemoryAddParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread.clone(),
                 kind: StatefulMemoryAddKind::Background,
                 content: BACKGROUND.to_string(),
@@ -296,9 +307,11 @@ async fn background_is_reviewed_corrected_and_forgotten_as_background() -> Resul
     let _: codex_app_server_protocol::ThreadResumeResponse =
         server.read_response(request_id).await?;
     let read = |thread_id: String, background_section: bool| {
+        let project_id = project.project.id.clone();
         move |request_id| ClientRequest::StatefulMemoryRead {
             request_id,
             params: StatefulMemoryReadParams {
+                expected_project_id: project_id,
                 thread_id,
                 cursor: None,
                 limit: None,
@@ -310,11 +323,13 @@ async fn background_is_reviewed_corrected_and_forgotten_as_background() -> Resul
     let legacy: StatefulMemoryReadResponse = server.request(read(thread.clone(), false)).await?;
     let item = current.data[0].clone();
     let correct = |entry_id: String, expected_revision: u64, content: &str| {
+        let project_id = project.project.id.clone();
         let thread_id = thread.clone();
         let content = content.to_string();
         move |request_id| ClientRequest::StatefulMemoryCorrect {
             request_id,
             params: StatefulMemoryCorrectParams {
+                expected_project_id: project_id,
                 thread_id,
                 entry_id,
                 expected_revision,
@@ -341,6 +356,7 @@ async fn background_is_reviewed_corrected_and_forgotten_as_background() -> Resul
         .request(|request_id| ClientRequest::StatefulMemoryForget {
             request_id,
             params: StatefulMemoryForgetParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread.clone(),
                 entry_id: again.item.entry_id.clone(),
                 expected_revision: again.item.revision,
@@ -409,6 +425,7 @@ async fn the_user_adds_to_memory_without_a_model_turn() -> Result<()> {
     let thread = start_thread(&mut server, &project.project.id).await?;
     let add = |kind: StatefulMemoryAddKind, content: &str, reason: Option<&str>, action: &str| {
         let params = StatefulMemoryAddParams {
+            expected_project_id: project.project.id.clone(),
             thread_id: thread.clone(),
             kind,
             content: content.to_string(),
@@ -486,15 +503,27 @@ async fn the_user_adds_to_memory_without_a_model_turn() -> Result<()> {
     Ok(())
 }
 
-async fn start_thread(server: &mut TestAppServer, project_id: &str) -> Result<String> {
-    Ok(server
+pub(super) async fn start_thread(server: &mut TestAppServer, project_id: &str) -> Result<String> {
+    let thread = server
         .start_thread(ThreadStartParams {
             project_id: Some(project_id.to_string()),
             ..Default::default()
         })
         .await?
         .thread
-        .id)
+        .id;
+    // Establish a durable binding through public thread lifecycle APIs, with no model
+    // turn. Memory controls intentionally refuse unmaterialized/staged bindings.
+    let _: codex_app_server_protocol::ThreadSetNameResponse = server
+        .request(|request_id| ClientRequest::ThreadSetName {
+            request_id,
+            params: codex_app_server_protocol::ThreadSetNameParams {
+                thread_id: thread.clone(),
+                name: "Memory control fixture".to_string(),
+            },
+        })
+        .await?;
+    Ok(thread)
 }
 
 async fn run_turn(server: &mut TestAppServer, thread_id: &str, text: &str) -> Result<()> {
@@ -549,11 +578,13 @@ async fn public_noop_add_retry_after_forget_and_restart_does_not_restore_words()
     )
     .await?;
     let add = |action: &str| {
+        let project = project.clone();
         let thread = thread.clone();
         let action = action.to_string();
         move |request_id| ClientRequest::StatefulMemoryAdd {
             request_id,
             params: StatefulMemoryAddParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread,
                 kind: StatefulMemoryAddKind::Rule,
                 content: "Never push.".to_string(),
@@ -578,6 +609,7 @@ async fn public_noop_add_retry_after_forget_and_restart_does_not_restore_words()
         .request(|request_id| ClientRequest::StatefulMemoryForget {
             request_id,
             params: StatefulMemoryForgetParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread.clone(),
                 entry_id: first.item.entry_id.clone(),
                 expected_revision: first.item.revision,
@@ -597,11 +629,18 @@ async fn public_noop_add_retry_after_forget_and_restart_does_not_restore_words()
         .await?;
     let _: codex_app_server_protocol::ThreadResumeResponse =
         server.read_response(request_id).await?;
-    let retry: StatefulMemoryAddResponse = server.request(add("noop")).await?;
+    let retry_id = server.send_request("statefulMemory/add", Some(serde_json::json!({
+        "threadId": thread, "expectedProjectId": project.project.id, "kind": "rule", "content": "Never push.",
+        "clientActionId": "noop", "backgroundSection": true,
+    }))).await?;
+    let retry = server
+        .read_stream_until_error_message(codex_app_server_protocol::RequestId::Integer(retry_id))
+        .await?;
     let memory: StatefulMemoryReadResponse = server
         .request(|request_id| ClientRequest::StatefulMemoryRead {
             request_id,
             params: StatefulMemoryReadParams {
+                expected_project_id: project.project.id.clone(),
                 thread_id: thread.clone(),
                 cursor: None,
                 limit: None,
@@ -610,12 +649,50 @@ async fn public_noop_add_retry_after_forget_and_restart_does_not_restore_words()
         })
         .await?;
     assert_eq!(
-        (retry.outcome, retry.item.entry_id, memory.data),
-        (
-            codex_app_server_protocol::StatefulMemoryAddOutcome::AlreadyDone,
-            first.item.entry_id,
-            Vec::new()
-        )
+        (retry.error, memory.data),
+        (codex_app_server_protocol::JSONRPCErrorError {
+            code: -32602,
+            message: "this action was already acknowledged, but its entry is retired; nothing was restored".to_string(),
+            data: None,
+        }, Vec::new())
     );
+    // A fresh direct action may restore wording. Its own retry must then refuse once a
+    // correction supersedes that generation, rather than returning it as a current row.
+    let restored: StatefulMemoryAddResponse = server.request(add("fresh-restoration")).await?;
+    let corrected: StatefulMemoryCorrectResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryCorrect {
+            request_id,
+            params: StatefulMemoryCorrectParams {
+                thread_id: thread.clone(),
+                expected_project_id: project.project.id.clone(),
+                entry_id: restored.item.entry_id,
+                expected_revision: restored.item.revision,
+                content: "Push only after explicit approval.".to_string(),
+                background_section: true,
+            },
+        })
+        .await?;
+    let request_id = server.send_request("statefulMemory/add", Some(serde_json::json!({
+        "threadId": thread, "expectedProjectId": project.project.id, "kind": "rule", "content": "Never push.",
+        "clientActionId": "fresh-restoration", "backgroundSection": true,
+    }))).await?;
+    let superseded = server
+        .read_stream_until_error_message(codex_app_server_protocol::RequestId::Integer(request_id))
+        .await?;
+    let current: StatefulMemoryReadResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryRead {
+            request_id,
+            params: StatefulMemoryReadParams {
+                thread_id: thread.clone(),
+                expected_project_id: project.project.id.clone(),
+                cursor: None,
+                limit: None,
+                background_section: true,
+            },
+        })
+        .await?;
+    assert_eq!((superseded.error, current.data), (codex_app_server_protocol::JSONRPCErrorError {
+        code: -32602, message: "this action was already acknowledged, but its entry is retired; nothing was restored".to_string(), data: None,
+    }, vec![corrected.item]));
     Ok(())
 }

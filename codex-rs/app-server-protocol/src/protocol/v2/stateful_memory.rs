@@ -8,12 +8,12 @@ use serde::Serialize;
 use super::BlackboardKind;
 use super::BlackboardProvenanceKind;
 
-/// Where a memory item belongs, matching what new work applies.
+/// Retained memory categories. These sections do not assert current applicability.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
 pub enum StatefulMemorySection {
-    /// The user's standing rule in their own words; applied to new work.
+    /// The user's retained standing rule; scope eligibility is separate.
     UserRule,
     /// The user's rule limited to a task; kept, never applied.
     PendingRule,
@@ -38,7 +38,7 @@ pub struct StatefulMemoryReplaced {
     pub replaced_at: i64,
 }
 
-/// One current entry of project memory.
+/// One active retained entry; its presence does not assert current applicability.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -61,6 +61,8 @@ pub struct StatefulMemoryItem {
     pub authority: Option<StatefulMemoryAuthority>,
     /// The investigation a rule is limited to, in the user's words.
     pub scope_title: Option<String>,
+    /// Scope state observed for this thread; absent for project-wide entries.
+    pub scope_state: Option<StatefulMemoryScopeState>,
     /// Whose words a relayed note keeps, as the user named them.
     pub attributed_to: Option<String>,
 }
@@ -86,6 +88,8 @@ pub enum StatefulMemoryAuthority {
 #[ts(export_to = "v2/")]
 pub struct StatefulMemoryReadParams {
     pub thread_id: String,
+    /// The project observed by the client at submission; mismatch refuses the operation.
+    pub expected_project_id: String,
     #[ts(optional = nullable)]
     pub cursor: Option<String>,
     /// At most 100; defaults to 50.
@@ -113,6 +117,8 @@ pub struct StatefulMemoryReadResponse {
 #[ts(export_to = "v2/")]
 pub struct StatefulMemoryForgetParams {
     pub thread_id: String,
+    /// The project observed by the client at submission; mismatch refuses the operation.
+    pub expected_project_id: String,
     pub entry_id: String,
     #[ts(type = "number")]
     pub expected_revision: u64,
@@ -134,6 +140,8 @@ pub struct StatefulMemoryForgetResponse {
 #[ts(export_to = "v2/")]
 pub struct StatefulMemoryCorrectParams {
     pub thread_id: String,
+    /// The project observed by the client at submission; mismatch refuses the operation.
+    pub expected_project_id: String,
     pub entry_id: String,
     #[ts(type = "number")]
     pub expected_revision: u64,
@@ -172,6 +180,8 @@ pub enum StatefulMemoryAddKind {
 #[ts(export_to = "v2/")]
 pub struct StatefulMemoryAddParams {
     pub thread_id: String,
+    /// The project observed by the client at submission; mismatch refuses the operation.
+    pub expected_project_id: String,
     pub kind: StatefulMemoryAddKind,
     pub content: String,
     /// For a rule: where it applies, in the user's words ("this whole investigation, until
@@ -181,7 +191,8 @@ pub struct StatefulMemoryAddParams {
     /// For a decision: why it was made.
     #[ts(optional = nullable)]
     pub reason: Option<String>,
-    /// Identifies this user action; repeating it returns what the first request did.
+    /// Identifies this user action; replay returns its entry only while it remains active.
+    /// A retired or superseded entry refuses replay without restoring anything.
     pub client_action_id: String,
     /// Set by clients that know the `background` section.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -197,7 +208,7 @@ pub enum StatefulMemoryAddOutcome {
     Added,
     /// The same words were already current; nothing changed.
     AlreadyPresent,
-    /// This action was already carried out; its entry is returned unchanged.
+    /// This action was already carried out; its still-active entry is returned unchanged.
     AlreadyDone,
 }
 
@@ -230,6 +241,8 @@ pub enum StatefulMemoryScopeAction {
 #[ts(export_to = "v2/")]
 pub struct StatefulMemoryScopeParams {
     pub thread_id: String,
+    /// The project observed by the client at submission; mismatch refuses the operation.
+    pub expected_project_id: String,
     pub action: StatefulMemoryScopeAction,
     /// The investigation for join and end.
     #[ts(optional = nullable)]
@@ -257,4 +270,15 @@ pub struct StatefulMemoryScope {
 pub struct StatefulMemoryScopeResponse {
     /// The project's investigations after the action, newest first.
     pub scopes: Vec<StatefulMemoryScope>,
+}
+
+/// The retained investigation scope as observed during review, without asserting application.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryScopeState {
+    Open,
+    NotBoundHere,
+    Ended,
+    Unknown,
 }

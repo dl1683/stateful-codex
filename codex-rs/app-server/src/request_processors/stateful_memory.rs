@@ -25,18 +25,15 @@ use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::HierarchyNodeId;
 use codex_project_intelligence::ProjectIndexer;
-use codex_protocol::ThreadId;
 use codex_stateful_extension::AddOutcome;
 use codex_stateful_extension::BlackboardEntityKind;
 use codex_stateful_extension::MemoryAddition;
 use codex_stateful_extension::MemoryControlError;
 use codex_stateful_extension::MemorySection;
 use codex_stateful_extension::StatefulEvent;
-use codex_thread_store::ReadThreadParams;
 
 use super::BlackboardRequestProcessor;
 use super::blackboard_error;
-use super::project_error;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_params;
 use crate::request_processors::blackboard_api::api_kind;
@@ -53,7 +50,10 @@ impl BlackboardRequestProcessor {
         &self,
         params: StatefulMemoryReadParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let project_id = self.thread_project(&params.thread_id).await?;
+        let _admission = self
+            .admit_memory(&params.thread_id, &params.expected_project_id)
+            .await?;
+        let project_id = params.expected_project_id.clone();
         let store = self.store().await?;
         // A cursor names the project and the memory revision its page came from; after any
         // change the order may have shifted, so the reader starts again instead of skipping
@@ -91,7 +91,15 @@ impl BlackboardRequestProcessor {
             })?;
         let mut data = Vec::with_capacity(page.entries.len());
         for entry in page.entries {
-            data.push(memory_item(store, entry, Sections::of(params.background_section)).await?);
+            data.push(
+                memory_item(
+                    store,
+                    entry,
+                    &params.thread_id,
+                    Sections::of(params.background_section),
+                )
+                .await?,
+            );
         }
         let revision = page.revision;
         let next_cursor = page
@@ -111,7 +119,10 @@ impl BlackboardRequestProcessor {
         &self,
         params: StatefulMemoryForgetParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let project_id = self.thread_project(&params.thread_id).await?;
+        let _admission = self
+            .admit_memory(&params.thread_id, &params.expected_project_id)
+            .await?;
+        let project_id = params.expected_project_id.clone();
         let id = entry_id(params.entry_id)?;
         let actor = codex_stateful_extension::MemoryActor {
             thread_id: Some(params.thread_id.clone()),
@@ -140,7 +151,10 @@ impl BlackboardRequestProcessor {
         &self,
         params: StatefulMemoryCorrectParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let project_id = self.thread_project(&params.thread_id).await?;
+        let _admission = self
+            .admit_memory(&params.thread_id, &params.expected_project_id)
+            .await?;
+        let project_id = params.expected_project_id.clone();
         let id = entry_id(params.entry_id)?;
         let store = self.store().await?;
         let actor = codex_stateful_extension::MemoryActor {
@@ -166,6 +180,7 @@ impl BlackboardRequestProcessor {
                 item: memory_item(
                     store,
                     succession.successor,
+                    &params.thread_id,
                     Sections::of(params.background_section),
                 )
                 .await?,
@@ -178,7 +193,10 @@ impl BlackboardRequestProcessor {
         &self,
         params: StatefulMemoryAddParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let project_id = self.thread_project(&params.thread_id).await?;
+        let _admission = self
+            .admit_memory(&params.thread_id, &params.expected_project_id)
+            .await?;
+        let project_id = params.expected_project_id.clone();
         if params.client_action_id.trim().is_empty() || params.client_action_id.len() > 128 {
             return Err(invalid_params("clientActionId must be 1-128 bytes"));
         }
@@ -220,6 +238,13 @@ impl BlackboardRequestProcessor {
         )
         .await
         .map_err(control_error)?;
+        if entry.state != codex_project_intelligence::BlackboardEntryState::Active
+            || entry.superseded_by.is_some()
+        {
+            return Err(invalid_params(
+                "this action was already acknowledged, but its entry is retired; nothing was restored",
+            ));
+        }
         let outcome = match outcome {
             AddOutcome::Added => {
                 self.announce(&entry);
@@ -230,7 +255,13 @@ impl BlackboardRequestProcessor {
         };
         Ok(Some(
             StatefulMemoryAddResponse {
-                item: memory_item(store, entry, Sections::of(params.background_section)).await?,
+                item: memory_item(
+                    store,
+                    entry,
+                    &params.thread_id,
+                    Sections::of(params.background_section),
+                )
+                .await?,
                 outcome,
             }
             .into(),
@@ -241,7 +272,10 @@ impl BlackboardRequestProcessor {
         &self,
         params: StatefulMemoryScopeParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let project_id = self.thread_project(&params.thread_id).await?;
+        let _admission = self
+            .admit_memory(&params.thread_id, &params.expected_project_id)
+            .await?;
+        let project_id = params.expected_project_id.clone();
         let store = self.store().await?;
         let named = || {
             params
@@ -347,33 +381,6 @@ impl BlackboardRequestProcessor {
             revision: entry.revision,
         });
     }
-
-    /// The project of a thread, including one whose project is still pending persistence.
-    async fn thread_project(&self, raw_thread_id: &str) -> Result<String, JSONRPCErrorError> {
-        let thread_id = ThreadId::from_string(raw_thread_id)
-            .map_err(|_| invalid_params("threadId must be a valid thread ID"))?;
-        if let Some(project_id) = self
-            .thread_store
-            .read_pending_thread_metadata(thread_id)
-            .await
-            .map_err(project_error)?
-            .and_then(|metadata| metadata.project_id.flatten())
-        {
-            return Ok(project_id);
-        }
-        self.thread_store
-            .read_thread(ReadThreadParams {
-                thread_id,
-                include_archived: true,
-                include_history: false,
-            })
-            .await
-            .map_err(project_error)?
-            .project_id
-            .ok_or_else(|| {
-                invalid_params("this thread has no project, so it has no project memory")
-            })
-    }
 }
 
 /// The sections a client understands.
@@ -397,6 +404,7 @@ impl Sections {
 async fn memory_item(
     store: &BlackboardStore,
     entry: BlackboardEntry,
+    thread_id: &str,
     sections: Sections,
 ) -> Result<StatefulMemoryItem, JSONRPCErrorError> {
     let replaced = store
@@ -428,16 +436,34 @@ async fn memory_item(
         .knowledge_context(&entry.value.project_id, &entry.id)
         .await
         .map_err(blackboard_error)?;
-    let scope_title = match context
+    let (scope_title, scope_state) = match context
         .as_ref()
         .and_then(|context| context.scope_id.as_deref())
     {
-        Some(scope_id) => store
-            .scope(&entry.value.project_id, scope_id)
-            .await
-            .map_err(blackboard_error)?
-            .map(|scope| scope.title),
-        None => None,
+        Some(scope_id) => {
+            use codex_app_server_protocol::StatefulMemoryScopeState;
+            let (bound, scopes) = store
+                .thread_scopes(&entry.value.project_id, thread_id)
+                .await
+                .map_err(blackboard_error)?;
+            match scopes.into_iter().find(|scope| scope.scope_id == scope_id) {
+                Some(scope) => {
+                    let state = if scope.state != codex_project_intelligence::ScopeState::Open {
+                        StatefulMemoryScopeState::Ended
+                    } else if bound
+                        .as_ref()
+                        .is_some_and(|scope| scope.scope_id == scope_id)
+                    {
+                        StatefulMemoryScopeState::Open
+                    } else {
+                        StatefulMemoryScopeState::NotBoundHere
+                    };
+                    (Some(scope.title), Some(state))
+                }
+                None => (None, Some(StatefulMemoryScopeState::Unknown)),
+            }
+        }
+        None => (None, None),
     };
     let attributed_to = context
         .as_ref()
@@ -467,6 +493,7 @@ async fn memory_item(
         replaces,
         authority,
         scope_title,
+        scope_state,
         attributed_to,
     })
 }
