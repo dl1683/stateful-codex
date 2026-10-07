@@ -58,12 +58,16 @@ pub enum MemoryAction {
     },
     /// Replace an entry with your words: ENTRY_ID@REVISION as `list` printed it.
     Correct {
-        target: String,
+        #[arg(value_parser = parse_target)]
+        target: (String, u64),
         #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
         text: Vec<String>,
     },
     /// Stop using an entry (it stays in history): ENTRY_ID@REVISION as `list` printed it.
-    Forget { target: String },
+    Forget {
+        #[arg(value_parser = parse_target)]
+        target: (String, u64),
+    },
 }
 
 fn parse_kind(value: &str) -> Result<StatefulMemoryAddKind, String> {
@@ -83,6 +87,19 @@ fn parse_kind(value: &str) -> Result<StatefulMemoryAddKind, String> {
 #[allow(clippy::print_stdout)]
 pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> anyhow::Result<()> {
     let MemoryArgs { thread_id, action } = args;
+    let thread: codex_app_server_protocol::ThreadReadResponse = client
+        .request_typed(ClientRequest::ThreadRead {
+            request_id: RequestId::String(format!("codex-memory-binding-{}", uuid::Uuid::new_v4())),
+            params: codex_app_server_protocol::ThreadReadParams {
+                thread_id: thread_id.clone(),
+                include_turns: false,
+            },
+        })
+        .await?;
+    let project_id = thread
+        .thread
+        .project_id
+        .ok_or_else(|| anyhow::anyhow!("this thread has no project memory"))?;
     let request_id =
         |action: &str| RequestId::String(format!("codex-memory-{action}-{}", uuid::Uuid::new_v4()));
     match action {
@@ -91,6 +108,7 @@ pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> 
                 .request_typed(ClientRequest::StatefulMemoryRead {
                     request_id: request_id("read"),
                     params: StatefulMemoryReadParams {
+                        expected_project_id: project_id.clone(),
                         thread_id: thread_id.clone(),
                         cursor,
                         limit: Some(50),
@@ -118,6 +136,7 @@ pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> 
                 .request_typed(ClientRequest::StatefulMemoryAdd {
                     request_id: request_id("add"),
                     params: StatefulMemoryAddParams {
+                        expected_project_id: project_id.clone(),
                         thread_id,
                         kind,
                         content: text.join(" "),
@@ -142,11 +161,12 @@ pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> 
             println!("  {}", target(&response.item));
         }
         MemoryAction::Correct { target: aim, text } => {
-            let (entry_id, expected_revision) = parse_target(&aim)?;
+            let (entry_id, expected_revision) = aim;
             let response: StatefulMemoryCorrectResponse = client
                 .request_typed(ClientRequest::StatefulMemoryCorrect {
                     request_id: request_id("correct"),
                     params: StatefulMemoryCorrectParams {
+                        expected_project_id: project_id.clone(),
                         thread_id,
                         entry_id,
                         expected_revision,
@@ -164,11 +184,12 @@ pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> 
             println!("  now {}", target(&response.item));
         }
         MemoryAction::Forget { target: aim } => {
-            let (entry_id, expected_revision) = parse_target(&aim)?;
+            let (entry_id, expected_revision) = aim;
             let response: StatefulMemoryForgetResponse = client
                 .request_typed(ClientRequest::StatefulMemoryForget {
                     request_id: request_id("forget"),
                     params: StatefulMemoryForgetParams {
+                        expected_project_id: project_id.clone(),
                         thread_id,
                         entry_id,
                         expected_revision,
@@ -188,7 +209,7 @@ pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> 
 /// The listing, grouped by section, each entry with the target to correct or forget it.
 pub(crate) fn listing(items: &[StatefulMemoryItem]) -> String {
     let sections = [
-        (StatefulMemorySection::UserRule, "Your rules (applied)"),
+        (StatefulMemorySection::UserRule, "Your retained rules"),
         (
             StatefulMemorySection::PendingRule,
             "Task-limited rules (kept, not applied)",
@@ -226,7 +247,10 @@ pub(crate) fn listing(items: &[StatefulMemoryItem]) -> String {
             };
             out.push_str(&format!("  - {content}{shortened}\n    {}\n", target(item)));
             if let Some(scope) = &item.scope_title {
-                out.push_str(&format!("    only in the investigation: {scope}\n"));
+                out.push_str(&format!(
+                    "    investigation: {scope} ({})\n",
+                    scope_state(item.scope_state)
+                ));
             }
         }
         out.push('\n');
@@ -238,19 +262,22 @@ fn target(item: &StatefulMemoryItem) -> String {
     format!("{}@{}", item.entry_id, item.revision)
 }
 
-fn parse_target(target: &str) -> anyhow::Result<(String, u64)> {
+fn parse_target(target: &str) -> Result<(String, u64), String> {
     let (entry_id, revision) = target.rsplit_once('@').ok_or_else(|| {
-        anyhow::anyhow!("name the entry as ENTRY_ID@REVISION, exactly as `list` printed it")
+        "name the entry as ENTRY_ID@REVISION, exactly as `list` printed it".to_string()
     })?;
     let revision = revision
         .parse::<u64>()
-        .map_err(|_| anyhow::anyhow!("the revision after @ must be a number"))?;
+        .map_err(|_| "the revision after @ must be a positive number".to_string())?;
+    if entry_id.trim().is_empty() || revision == 0 {
+        return Err("name a nonempty entry ID and a positive revision".to_string());
+    }
     Ok((entry_id.to_string(), revision))
 }
 
 fn section_noun(section: StatefulMemorySection) -> &'static str {
     match section {
-        StatefulMemorySection::UserRule => "rule (applied)",
+        StatefulMemorySection::UserRule => "retained rule",
         StatefulMemorySection::PendingRule => "task-limited rule (not applied)",
         StatefulMemorySection::UnverifiedRule => "rule (not applied)",
         StatefulMemorySection::Background => "note about you",
@@ -262,3 +289,13 @@ fn section_noun(section: StatefulMemorySection) -> &'static str {
 #[cfg(test)]
 #[path = "memory_command_tests.rs"]
 mod tests;
+
+fn scope_state(state: Option<codex_app_server_protocol::StatefulMemoryScopeState>) -> &'static str {
+    use codex_app_server_protocol::StatefulMemoryScopeState;
+    match state {
+        Some(StatefulMemoryScopeState::Open) => "open, bound here",
+        Some(StatefulMemoryScopeState::NotBoundHere) => "not bound here",
+        Some(StatefulMemoryScopeState::Ended) => "ended",
+        Some(StatefulMemoryScopeState::Unknown) | None => "unknown",
+    }
+}

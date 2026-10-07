@@ -7,6 +7,47 @@ use pretty_assertions::assert_eq;
 use super::listing;
 use super::parse_target;
 
+#[test]
+fn input_parser_preserves_unicode_after_valid_revision_targets() {
+    use clap::Parser;
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        args: super::MemoryArgs,
+    }
+    let parsed = TestCli::try_parse_from([
+        "memory",
+        "--thread",
+        "T",
+        "correct",
+        "entry@1",
+        "Preserve §3.2–§4 — α.",
+    ])
+    .expect("valid input");
+    match parsed.args.action {
+        super::MemoryAction::Correct { target, text } => assert_eq!(
+            (target, text),
+            (
+                ("entry".to_string(), 1),
+                vec!["Preserve §3.2–§4 — α.".to_string()]
+            )
+        ),
+        action => panic!("unexpected action: {action:?}"),
+    }
+}
+
+#[test]
+fn retained_scope_review_never_claims_current_application() {
+    use codex_app_server_protocol::StatefulMemoryScopeState;
+    let mut scoped = item("scoped", StatefulMemorySection::UserRule, "Never push.");
+    scoped.scope_title = Some("Parser".to_string());
+    scoped.scope_state = Some(StatefulMemoryScopeState::Ended);
+    assert_eq!(
+        listing(&[scoped]),
+        "Your retained rules\n  - Never push.\n    scoped@2\n    investigation: Parser (ended)\n\n"
+    );
+}
+
 fn item(entry_id: &str, section: StatefulMemorySection, content: &str) -> StatefulMemoryItem {
     StatefulMemoryItem {
         entry_id: entry_id.to_string(),
@@ -20,6 +61,7 @@ fn item(entry_id: &str, section: StatefulMemorySection, content: &str) -> Statef
         replaces: Vec::new(),
         authority: None,
         scope_title: None,
+        scope_state: None,
         attributed_to: None,
     }
 }
@@ -45,7 +87,7 @@ fn listing_names_each_entry_by_identity_and_revision() {
             parse_target("stateful-user-rule-a").is_err(),
         ),
         (
-            "Your rules (applied)\n  - Never commit.\n    stateful-user-rule-a@2\n\nAbout you (your words)\n  - I'm a Go developer.\n    stateful-user-background-b@2\n\n"
+            "Your retained rules\n  - Never commit.\n    stateful-user-rule-a@2\n\nAbout you (your words)\n  - I'm a Go developer.\n    stateful-user-background-b@2\n\n"
                 .to_string(),
             Some(("stateful-user-rule-a".to_string(), 2)),
             true,
