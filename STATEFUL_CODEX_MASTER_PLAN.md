@@ -2,7 +2,7 @@
 
 Agreed with Devansh on 2026-10-07. This is the canonical build plan. It merges two sources:
 - the October 2–3 councils and hands-on campaign (evidence in SC-EVAL-035 and `campaign2/FINDINGS.md`);
-- the reference design `STATEFUL_CODEX_MEMORY_PLAN.md`, reviewed 2026-10-06.
+- the reference design [`STATEFUL_CODEX_MEMORY_PLAN.md`](./STATEFUL_CODEX_MEMORY_PLAN.md), reviewed 2026-10-06.
 
 The reference design stays as a detailed design reference, not as the execution plan. It was written without the October 2–3 evidence.
 

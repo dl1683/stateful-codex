@@ -2,8 +2,14 @@
 
 This document preserves the user problem and intended experience behind
 Stateful Codex. Read it before evaluating the architecture, implementation, or
-UI. The product charter and engine specification define technical contracts;
-this document defines what those contracts are meant to accomplish for people.
+UI. It states requirements, not demonstrated results:
+[`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md) records
+what is implemented and its technical contracts,
+[`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md) records what
+is being built next, and
+[`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md) records what
+has been measured. This document defines what those contracts are meant to
+accomplish for people.
 
 ## The problem
 

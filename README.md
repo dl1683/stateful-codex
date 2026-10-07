@@ -6,7 +6,7 @@
 
 **A project-intelligence layer for Codex that carries structured understanding across long-running work, threads, and compaction.**
 
-[Product intent](./STATEFUL_CODEX_PRODUCT_INTENT.md) · [Build plan](./STATEFUL_CODEX_BUILD_PLAN.md) · [Evaluation record](./STATEFUL_CODEX_EVALUATION.md) · [Web client](./clients/stateful-codex)
+[Product intent](./STATEFUL_CODEX_PRODUCT_INTENT.md) · [Master plan](./STATEFUL_CODEX_MASTER_PLAN.md) · [Current state](./STATEFUL_CODEX_CURRENT_STATE.md) · [Evaluation record](./STATEFUL_CODEX_EVALUATION.md) · [Web client](./clients/stateful-codex)
 
 ![Research preview](https://img.shields.io/badge/status-research_preview-5eead4?style=flat-square&labelColor=0b1118)
 ![Terminal-Bench breadth](https://img.shields.io/badge/Terminal--Bench_2.1-70%2F89_directional-5eead4?style=flat-square&labelColor=0b1118)
@@ -166,8 +166,12 @@ branch CLI with ChatGPT authentication.
 
 - [`STATEFUL_CODEX_PRODUCT_INTENT.md`](./STATEFUL_CODEX_PRODUCT_INTENT.md)
   defines the user problem and is the highest-level source of truth.
-- [`STATEFUL_CODEX_BUILD_PLAN.md`](./STATEFUL_CODEX_BUILD_PLAN.md) records the
-  clean-build architecture, stage gates, and current implementation checkpoint.
+- [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md) is the
+  canonical build plan; its reference design is
+  [`STATEFUL_CODEX_MEMORY_PLAN.md`](./STATEFUL_CODEX_MEMORY_PLAN.md).
+- [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md) records
+  the architecture, source reading path, unmerged work branches, open gates,
+  and operating rules.
 - [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md) is the
   append-only evidence record, including negative results and invalidated runs.
 - [`clients/stateful-codex`](./clients/stateful-codex) contains the browser
