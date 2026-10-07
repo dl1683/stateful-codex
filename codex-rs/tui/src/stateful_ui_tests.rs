@@ -20,7 +20,12 @@ use pretty_assertions::assert_eq;
 #[test]
 fn cli_selection_requires_a_goal_and_preserves_the_selected_mode() {
     assert_eq!(StatefulStartup::from_cli(None, None, None).unwrap(), None);
-    assert!(StatefulStartup::from_cli(Some(StatefulModeCliArg::Autonomous), None, None).is_err());
+    assert_eq!(
+        StatefulStartup::from_cli(Some(StatefulModeCliArg::Autonomous), None, None)
+            .unwrap()
+            .map(|startup| (startup.mode, startup.project_id, startup.goal)),
+        Some((StatefulWorkflowMode::Autonomous, None, None,))
+    );
     assert_eq!(
         StatefulStartup::from_cli(
             Some(StatefulModeCliArg::Collaborative),
@@ -31,8 +36,28 @@ fn cli_selection_requires_a_goal_and_preserves_the_selected_mode() {
         Some(StatefulStartup {
             mode: StatefulWorkflowMode::Collaborative,
             project_id: Some("project-1".to_string()),
-            goal: "investigate the evidence".to_string(),
+            goal: Some("investigate the evidence".to_string()),
         })
+    );
+}
+
+#[test]
+fn first_submitted_text_becomes_the_deferred_stateful_goal() {
+    assert_eq!(
+        goal_from_user_input(&[
+            UserInput::Image {
+                image: codex_app_server_protocol::ImageReference::Inline {
+                    url: "data:image/png;base64,placeholder".to_string(),
+                },
+                detail: None,
+            },
+            UserInput::Text {
+                text: "  investigate the evidence  ".to_string(),
+                text_elements: Vec::new(),
+            },
+        ])
+        .unwrap(),
+        "investigate the evidence"
     );
 }
 
@@ -128,7 +153,8 @@ fn completed_run_cell_renders_the_durable_result() {
 }
 
 #[tokio::test]
-async fn native_startup_attaches_the_selected_project_and_starts_the_run() -> Result<()> {
+async fn native_startup_with_prompt_attaches_the_selected_project_and_starts_the_run() -> Result<()>
+{
     let codex_home = tempfile::tempdir()?;
     let project = tempfile::tempdir()?;
     let mut config = ConfigBuilder::default()
@@ -223,6 +249,69 @@ async fn native_startup_attaches_the_selected_project_and_starts_the_run() -> Re
     assert_eq!(second_run.project_id, run.project_id);
     assert_ne!(second_run.id, run.id);
     assert_eq!(second_run.mode, StatefulWorkflowMode::Socratic);
+    app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_startup_without_prompt_starts_the_run_on_first_submitted_prompt() -> Result<()> {
+    let codex_home = tempfile::tempdir()?;
+    let project = tempfile::tempdir()?;
+    let mut config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .harness_overrides(ConfigOverrides {
+            cwd: Some(project.path().to_path_buf()),
+            ..ConfigOverrides::default()
+        })
+        .build()
+        .await?;
+    config.sqlite =
+        SqliteConfig::new_for_testing(AbsolutePathBuf::from_absolute_path(codex_home.path())?);
+    let local_settings = LocalSettings::from(&config);
+    let app_server = crate::start_embedded_app_server_for_picker(&config).await?;
+    let startup = StatefulStartup::from_cli(Some(StatefulModeCliArg::Collaborative), None, None)?
+        .context("deferred Stateful startup should exist")?;
+    let started = crate::app_server_session::start_thread_with_request_handle(
+        app_server.request_handle(),
+        &local_settings,
+        config.clone(),
+        ThreadParamsMode::Embedded,
+        /*remote_cwd_override*/ None,
+        ThreadToolTransport::Disabled,
+        Some(startup.clone()),
+    )
+    .await?;
+    let thread_id = started.session.thread_id;
+    let handle = app_server.request_handle();
+    let before_prompt: StatefulRunReadResponse = handle
+        .request_typed(ClientRequest::StatefulRunRead {
+            request_id: RequestId::String("read-deferred-stateful-run".to_string()),
+            params: StatefulRunReadParams {
+                run_id: None,
+                thread_id: Some(thread_id.to_string()),
+            },
+        })
+        .await?;
+    assert_eq!(before_prompt.run, None);
+
+    app_server
+        .start_stateful_run_for_prompt(&config, startup, thread_id, "Investigate the project")
+        .await?;
+
+    let after_prompt: StatefulRunReadResponse = handle
+        .request_typed(ClientRequest::StatefulRunRead {
+            request_id: RequestId::String("read-started-stateful-run".to_string()),
+            params: StatefulRunReadParams {
+                run_id: None,
+                thread_id: Some(thread_id.to_string()),
+            },
+        })
+        .await?;
+    let run = after_prompt
+        .run
+        .context("Stateful run should start after the first prompt")?;
+    assert_eq!(run.goal, "Investigate the project");
+    assert_eq!(run.mode, StatefulWorkflowMode::Collaborative);
     app_server.shutdown().await?;
     Ok(())
 }

@@ -1749,6 +1749,7 @@ pub(crate) async fn start_thread_with_request_handle(
     );
     thread_tool_transport.configure(&mut params);
     let prepared_stateful = match stateful_startup {
+        Some(stateful_startup) if stateful_startup.has_pending_goal() => None,
         Some(stateful_startup) => Some(
             crate::stateful_ui::prepare_startup(&request_handle, &mut params, stateful_startup)
                 .await?,
@@ -1774,6 +1775,28 @@ pub(crate) async fn start_thread_with_request_handle(
     }
     started.task_tools_available = task_tools_available;
     Ok(started)
+}
+
+impl AppServerSession {
+    pub(crate) async fn start_stateful_run_for_prompt(
+        &self,
+        config: &Config,
+        startup: crate::stateful_ui::StatefulStartup,
+        thread_id: ThreadId,
+        prompt: &str,
+    ) -> Result<()> {
+        let startup = startup.with_goal(prompt)?;
+        let mut params = thread_start_params_from_config(
+            config,
+            self.thread_params_mode(),
+            self.remote_cwd_override(),
+            /*session_start_source*/ None,
+        );
+        let prepared =
+            crate::stateful_ui::prepare_startup(&self.request_handle(), &mut params, startup)
+                .await?;
+        crate::stateful_ui::start_run(&self.request_handle(), &prepared, thread_id).await
+    }
 }
 
 pub(crate) fn status_account_display_from_auth_mode(

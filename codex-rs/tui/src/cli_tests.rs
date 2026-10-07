@@ -3,7 +3,7 @@ use clap::Parser;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn stateful_cli_requires_a_goal_and_preserves_the_explicit_mode() {
+fn stateful_cli_accepts_an_optional_goal_and_preserves_the_explicit_mode() {
     let cli = Cli::try_parse_from([
         "codex",
         "--stateful",
@@ -17,5 +17,8 @@ fn stateful_cli_requires_a_goal_and_preserves_the_explicit_mode() {
     assert_eq!(cli.stateful_project.as_deref(), Some("project-1"));
     assert_eq!(cli.prompt.as_deref(), Some("Investigate the project"));
 
-    assert!(Cli::try_parse_from(["codex", "--stateful", "autonomous"]).is_err());
+    let cli = Cli::try_parse_from(["codex", "--stateful", "autonomous"])
+        .expect("Stateful CLI may open before a goal is entered");
+    assert_eq!(cli.stateful_mode, Some(StatefulModeCliArg::Autonomous));
+    assert_eq!(cli.prompt, None);
 }

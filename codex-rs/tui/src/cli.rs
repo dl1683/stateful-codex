@@ -19,12 +19,7 @@ pub struct Cli {
     pub prompt: Option<String>,
 
     /// Start a Stateful Codex run for the current project directory in the selected workflow mode.
-    #[arg(
-        long = "stateful",
-        value_name = "MODE",
-        value_enum,
-        requires = "prompt"
-    )]
+    #[arg(long = "stateful", value_name = "MODE", value_enum)]
     pub stateful_mode: Option<StatefulModeCliArg>,
 
     /// Use an existing Stateful project when more than one project has the current directory.

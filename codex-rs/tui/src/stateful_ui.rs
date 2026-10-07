@@ -27,6 +27,7 @@ use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadStartParams;
+use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use color_eyre::eyre::Context;
 use color_eyre::eyre::ContextCompat;
@@ -38,7 +39,7 @@ use ratatui::text::Line;
 pub(crate) struct StatefulStartup {
     mode: StatefulWorkflowMode,
     project_id: Option<String>,
-    goal: String,
+    goal: Option<String>,
 }
 
 impl StatefulStartup {
@@ -50,15 +51,23 @@ impl StatefulStartup {
         let Some(mode) = mode else {
             return Ok(None);
         };
-        let goal = prompt
-            .map(str::trim)
-            .filter(|goal| !goal.is_empty())
-            .context("--stateful requires a non-empty goal prompt")?;
         Ok(Some(Self {
             mode: workflow_mode(mode),
             project_id,
-            goal: goal.to_string(),
+            goal: prompt.map(|prompt| prompt.trim().to_string()),
         }))
+    }
+
+    pub(crate) fn has_pending_goal(&self) -> bool {
+        self.goal.is_none()
+    }
+
+    pub(crate) fn with_goal(mut self, goal: &str) -> Result<Self> {
+        let goal = (!goal.trim().is_empty())
+            .then_some(goal.trim())
+            .context("--stateful requires a non-empty goal prompt")?;
+        self.goal = Some(goal.to_string());
+        Ok(self)
     }
 }
 
@@ -70,10 +79,28 @@ pub(crate) async fn prepare_startup(
     thread_params: &mut ThreadStartParams,
     startup: StatefulStartup,
 ) -> Result<PreparedStatefulStartup> {
-    let startup = ClientStatefulStartup::new(startup.mode, startup.project_id, startup.goal)?;
+    let StatefulStartup {
+        mode,
+        project_id,
+        goal,
+    } = startup;
+    let goal = goal.context("--stateful requires a non-empty goal prompt")?;
+    let startup = ClientStatefulStartup::new(mode, project_id, goal)?;
     Ok(PreparedStatefulStartup(
         prepare_stateful_startup(request_handle, thread_params, startup).await?,
     ))
+}
+
+pub(crate) fn goal_from_user_input(items: &[UserInput]) -> Result<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            UserInput::Text { text, .. } => Some(text.trim()),
+            _ => None,
+        })
+        .find(|goal| !goal.is_empty())
+        .map(str::to_string)
+        .context("--stateful requires a non-empty goal prompt")
 }
 
 pub(crate) async fn start_run(

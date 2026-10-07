@@ -986,6 +986,21 @@ impl App {
                     self.chat_widget.pre_draw_tick();
                     self.render_chat_widget_frame(tui, screen_size)?;
                 }
+                if let AppCommand::UserTurn { items, .. } = &op
+                    && let Some(startup) = self.pending_stateful_startup.clone()
+                    && let Some(thread_id) = self.active_thread_id
+                {
+                    let goal = crate::stateful_ui::goal_from_user_input(items)?;
+                    app_server
+                        .start_stateful_run_for_prompt(
+                            &self.config,
+                            startup,
+                            thread_id,
+                            &goal,
+                        )
+                        .await?;
+                    self.pending_stateful_startup = None;
+                }
                 self.chat_widget.prepare_local_op_submission(&op);
                 if let Err(err) = self.submit_active_thread_op(app_server, op).await {
                     if let Some(delivery_id) = realtime_speech_delivery_id {
