@@ -570,444 +570,174 @@ pixels tall with nothing hidden. Captures are under
 snapshot changed and the client suite passed 8/8. This is a rendered-browser
 pass for that executable, not cost evidence.
 
-## Benchmark SC-EVAL-006: linked-batch maturation replication
+## Maturation replications SC-EVAL-006 to SC-EVAL-009 (2026-09-22)
 
-Status: executed on 2026-09-22. The procedure below was committed before the
-run and was not changed after observing the result.
+Each is a same-corpus mechanism replication of the SC-EVAL-004 maturation
+prompt on a fresh byte-identical copy of the ten-file licensing corpus with a
+rebuilt CLI, not a held-out semantic test or an economics claim. Each procedure
+was committed before its run and kept even if the model ignored the new path or
+cost regressed. Project roots were temporary directories under
+`%LOCALAPPDATA%/Temp`; every corpus was unchanged after the run.
 
-The SC-EVAL-004 maturation trace required separate turns for a 16-record batch,
-a relationship batch using copied opaque entry IDs, a second two-record batch,
-another relationship batch, and a retry after one copied endpoint ID was
-malformed. Commit `093cfc3211` raises the bounded finding batch to 24 and lets
-the same call persist up to 48 relationships by referencing the records'
-idempotency keys. The existing single-record and entry-ID relation tools remain
-available for incremental updates. A focused app-server integration proved that
-one model call persists two findings plus their relationship (extension 5/5,
-app-server 1/1).
+| Measure | 004 | 006 | 007 | 008 | 009 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Model responses | 15 | 10 | 8 | 11 | 7 |
+| Outer custom tool calls | 14 | 9 | 7 | 10 | 6 |
+| Full tokens | 649,173 | 344,870 | 279,247 | 417,784 | 250,849 |
+| Uncached input plus output | 94,677 | 75,814 | 69,071 | 75,256 | 68,065 |
+| Final blackboard findings | 18 | 17 | 17 | 13 | 13 |
+| Relationships | 24 | 27 | 29 | 11 | 19 |
+| Failed or retried persistence calls | 1 | 0 | see text | 2 | 0 |
+| Literal concept probes (manual review) | 6/10 (10/10) | 3/10 (10/10) | 3/10 (10/10) | 4/10 (10/10) | 7/10 (10/10) |
 
-This replication will copy the unchanged ten-file licensing corpus to a fresh
-temporary directory so project identity and durable state start empty, rebuild
-the branch CLI, remove API-key environment variables, and run the exact
-SC-EVAL-004 maturation prompt with `gpt-5.6-luna` at `xhigh` through cached
-ChatGPT authentication. It will report model responses, tool-call sequence,
-blackboard records and relationships, full and uncached token usage, malformed
-or retried persistence calls, and source edits.
+### SC-EVAL-006: linked-batch maturation
 
-This is a same-corpus mechanism replication, not a new held-out semantic test.
-Its purpose is to determine whether the model naturally uses the linked batch
-and whether that removes persistence turns and opaque-ID failures while
-preserving the existing state quality. The result will be recorded even if the
-model ignores the new path or cost regresses. No claim about general maturation
-economics will be made from one replication.
+SC-EVAL-004 needed separate turns for a 16-record batch, a relationship batch
+using copied entry IDs, a second two-record batch, another relationship batch
+and a retry after one malformed endpoint. Commit `093cfc3211` raised the batch
+to 24 findings plus up to 48 relationships that reference the records'
+idempotency keys (single-record and entry-ID tools remain; an app-server
+integration proved one model call persists two findings plus their
+relationship, extension 5/5, app-server 1/1). Thread
+`01a0c91e-af11-7aa0-a7f9-cd77a9ccb9a2`, root
+`%LOCALAPPDATA%/Temp/stateful-maturation-1790080610019`. The model read all ten
+files, verified all ten in one parallel `evidence_read`, and committed 17
+findings and 27 relationships in one `blackboard_record_batch` with zero
+failures, no malformed ID and no retry; the unsupported corpus-inventory record
+of SC-EVAL-004 was not recreated. Against SC-EVAL-004: responses -5 (-33.33%),
+custom calls -5 (-35.71%), full -304,303 (-46.88%), uncached -18,863 (-19.92%).
+The frozen scorer found 17 of 17 active, current, source-verified,
+evidence-linked findings, zero forbidden conclusions and 3 of 10 literal
+probes; manual review found all ten concepts (authority hierarchy, current
+royalty, base cap and executed carve-outs, termination, territory,
+risk/insurance gap, preliminary-board contradiction, closing blockers, open
+insurance question). The misses come from single-entry string rules (`6%` for
+`six percent`, `convenience termination` for `termination for convenience`, one
+concept split across linked findings): perfect supported-entry precision and
+complete manual coverage, not a machine-scored recall pass. The run still made a
+full-corpus shell pass before verification, a context refresh plus two context
+queries, and three final blackboard checks in one turn. Directional projection
+with SC-EVAL-005's follow-ups: 636,650 full against 428,784 ordinary (207,866
+behind; break-even around question eight instead of fifteen) and 165,866
+uncached against 73,456 (a 92,410-token deficit; no uncached break-even). These
+cross-run calculations are not a matched rerun or a release claim.
 
-### Execution and result
+### SC-EVAL-007: refresh-route maturation
 
-Native Stateful CLI thread `01a0c91e-af11-7aa0-a7f9-cd77a9ccb9a2` used a
-fresh project rooted at
-`%LOCALAPPDATA%/Temp/stateful-maturation-1790080610019`, `gpt-5.6-luna` at
-`xhigh`, cached ChatGPT authentication, and no API-key environment variables.
-The temporary corpus contains the same ten filenames and is byte-for-byte
-identical to the committed licensing fixture. A post-run hash comparison also
-confirmed that no source file changed.
+Commit `88280d1f1d` made `context_map_refresh` return a deterministic,
+response-bounded inventory of current routes, with `context_map_query` as the
+fallback when the inventory is truncated or insufficient (protocol unchanged;
+storage 26/26, extension 5/5, an app-server integration proved a model refresh
+over two files receives both routes in its next request). Thread `01a0c93b-f307-7e12-856b-d242cacb5c1b`, project
+`01a0c93b-f2ef-7c00-bf49-710fdcd05d14`, root
+`%LOCALAPPDATA%/Temp/stateful-refresh-routes-1790082503050`. The only discovery
+call was the refresh, which returned all ten routes with
+`routesTruncated: false`; the model used them directly and made no context-map
+query, shell listing or shell read (two of each fewer than SC-EVAL-006). Against
+SC-EVAL-006: responses -2 (-20.00%), outer calls -2 (-22.22%), full -65,623
+(-19.03%), uncached -6,743 (-8.89%). Scorer: 17 of 17 supported, zero forbidden,
+3 of 10 literal; manual 10/10. Two avoidable retries remained: a parallel
+evidence call asked for `maxBytes: 100000` above the 12,288-byte limit, and
+the linked batch accepted 16 findings and 26 relationships but rejected one
+finding with a malformed copied fingerprint, repaired by a single-record retry
+plus its three relationships. An unrelated memory-maintenance patch also failed
+after state was complete. Projection with SC-EVAL-005's follow-ups: 571,027 full
+against 428,784 (142,243 behind; break-even around question seven); uncached
+159,123 against 73,456 (85,667 behind, no break-even).
 
-The model inspected all ten files, verified exact evidence from all ten through
-one parallel `evidence_read` call, and persisted 17 findings plus 27
-relationships. All 17 findings and all 27 relationships were accepted in one
-`blackboard_record_batch` call with zero failures. The relationship endpoints
-used local idempotency keys; there was no malformed opaque entry ID and no
-persistence retry. The unsupported corpus-inventory record from SC-EVAL-004
-was not recreated.
+### SC-EVAL-008: resolved-evidence maturation
 
-| Measure | SC-EVAL-004 | SC-EVAL-006 | Delta |
-| --- | ---: | ---: | ---: |
-| Model responses | 15 | 10 | -5 (-33.33%) |
-| Custom tool calls | 14 | 9 | -5 (-35.71%) |
-| Full tokens | 649,173 | 344,870 | -304,303 (-46.88%) |
-| Uncached input plus output | 94,677 | 75,814 | -18,863 (-19.92%) |
-| Blackboard findings | 18 | 17 | -1 |
-| Relationships | 24 | 27 | +3 |
-| Malformed or retried persistence calls | 1 | 0 | -1 |
+Commits `783bc5d4af` (clamp a positive oversized `evidence_read.maxBytes` to
+12,288 bytes and report it; zero stays invalid) and `c2708822c0` (blackboard
+writes cite current routes instead of model-copied fingerprints; the resolver
+stores the authoritative entry and fingerprint; a single-source finding without
+a `nodeId` lands on its file node, cross-source findings stay at project level,
+root promotion unchanged). Extension 5/5 passed, and focused app-server tests
+proved the live oversized request from SC-EVAL-007 and route-resolved,
+source-verified, file-level batch persistence.
+Intended: one refresh, one evidence turn, one obligation turn, one linked write,
+one completion, no retries. Thread `01a0c955-4d4c-7f81-a704-bcb568cc3407`,
+project `01a0c955-4d3d-7c83-94e8-eefa910dca54`, root
+`%LOCALAPPDATA%/Temp/stateful-resolved-evidence-1790084192908`. Both mechanisms
+worked live: `maxBytes: 30000` was clamped without a retry, and the successful
+batch carried 30 relative-path evidence references with no entry IDs,
+fingerprints or node IDs, correctly placed. **The cost regression is retained**
+(against SC-EVAL-007: responses +3, +37.50%; outer calls +3, +42.86%; full
++138,537, +49.61%; uncached +6,185, +8.95%; findings 13, relationships 11). The
+first linked batch was rejected because the model copied exact `lineRange`
+locators from `evidence_read` that blackboard evidence could not store; the
+retry dropped the ranges and committed 12 findings and 11 relationships. A later
+single write added a thirteenth finding after the model had already completed
+the run, so its second completion failed with no active run; no finding was
+lost, but the terminal result may omit the last question. All 13 findings were
+active, current, source-verified and evidence-linked; manual review found all
+ten concepts and nothing forbidden; the literal scorer matched 4 of 10
+(`passed: false`). Placement put the policy instruction and effective-date
+question on the policy file, the territory fact on the side letter, and
+cross-source conclusions at project scope. Two global-memory reads required by
+the environment are included in the cost. Against SC-EVAL-004 it still saved
+231,389 full (-35.64%) and 19,421 uncached (-20.51%), but SC-EVAL-007 was the
+better result. Next: persist exact line ranges and harden terminal ordering.
 
-The live frozen-manifest scorer returned 17 of 17 active, current,
-source-verified, evidence-linked findings, zero forbidden conclusions, and
-3 of 10 literal concept probes. Manual semantic review found all ten intended
-concepts: the authority hierarchy, current royalty, base cap and executed
-carve-outs, termination, territory, risk/insurance gap, preliminary-board
-contradiction, closing blockers, and open insurance question. The lower literal
-score is retained rather than tuned after observation. Its misses again require
-all registered strings in one finding and do not recognize representations such
-as `6%` for `six percent`, `convenience termination` for `termination for
-convenience`, or one concept intentionally split across linked executed-term and
-economics findings. The result therefore establishes perfect supported-entry
-precision and complete manual concept coverage, not a machine-scored semantic
-recall pass.
+### SC-EVAL-009: exact-provenance finalization
 
-The linked batch changed real model behavior and materially reduced maturation
-cost without thinning the root blackboard or hiding core memory tools. It does
-not establish general maturation economics: this is one same-corpus mechanism
-replication, and the run still used a full-corpus shell pass before exact-source
-verification, a context refresh plus two context queries, and three final
-blackboard checks grouped into one tool turn.
+Commit `db88bf1784` keeps optional exact line ranges from model evidence
+through validation, SQLite revisions, queries, root World State aliases,
+app-server v2 and browser evidence reads (one bounded range per source;
+whole-source links stay valid); the integration proved `lineRange: {start: 2,
+end: 3}` is returned by the next query and rendered as `S1:L2-L3` in the next
+request's World State, and the browser API returns only those lines. The completion contract now says
+all blackboard, relationship, obligation and verification work must finish
+before `completed`, and completion is the final Stateful mutation; terminal runs
+stay immutable. Thread `01a0c98a-e574-7912-ac68-9f55011304db`, project
+`01a0c98a-e567-7890-9711-3260f8fd1a0d`, root
+`%LOCALAPPDATA%/Temp/stateful-exact-provenance-1790087681185`. Six outer
+code-mode calls: refresh (combined with the required global-memory lookup; ten
+routes, no truncation), one parallel evidence read (`maxBytes: 50000` clamped to
+12,288 per request, all ten sources returned once), one obligation update, one
+linked batch, one verification call, and a final call that wrote the
+verification obligation and then `stateful_run_update(status: "completed")`. No
+context-map query and no shell listing or read. The single batch accepted all 13
+findings and 19 relationships with 30 ranged evidence links; a live API check
+found all 30 ranges intact and all 13 findings active, current, source-verified
+and linked. Completion succeeded at run revision 2 as the final mutation, so the
+terminal result holds the same findings, relationships, uncertainties and
+verification. Against SC-EVAL-008: responses -4 (-36.36%), outer calls -4
+(-40.00%), full -166,935 (-39.96%), uncached -7,191 (-9.56%), relationships +8
+(+72.73%), ranged links 0 to 30, failed or retried persistence calls 2 to 0. The
+two single-source risk findings landed on the risk-assessment file, the
+single-source territory finding on the side letter, and the ten cross-source
+findings at project scope; no record was unplaced, and root promotion stayed
+independent of placement.
 
-Using the already measured SC-EVAL-005 follow-up aggregate only as a directional
-lifetime projection, the improved maturation plus three Stateful follow-ups
-would cost 636,650 full tokens versus 428,784 ordinary tokens, a remaining
-207,866-token deficit. The observed average full-token follow-up saving projects
-full-token break-even around question eight instead of question fifteen. The
-same series would still cost 165,866 uncached tokens versus 73,456 ordinary (a 92,410-token deficit), so
-there is still no observed uncached break-even. These cross-run calculations are
-not a matched end-to-end rerun and must not be presented as a release claim.
+**Rendered exact-evidence check.** Edge 153 against the live port-4174 gateway
+first showed project status reporting 13 understandings while the findings view
+silently filtered out `strategy` and `decision` kinds and showed 11; the UI now
+renders every kind under `Project understanding & open signals` (client 8/8).
+The second render showed all 13 cards and all 30 range controls; `Open evidence
+· lines 5–11` opened only `risk-assessment.md` lines 5-11 (`408/455 bytes ·
+lines 5–11`), with no overflow at 1440 by 900 or 480 by 900 and no UI or RPC
+error (captures `%LOCALAPPDATA%/Temp/stateful-sc009-final-desktop.png` and
+`%LOCALAPPDATA%/Temp/stateful-sc009-final-mobile.png`). The frozen manifest found
+13 of 13 supported entries, zero forbidden conclusions and 7 of 10 literal
+probes; the misses were `supersede inconsistent` against `supersedes
+inconsistent`, a royalty concept split across the 6% finding and the stale-8%
+contradiction in numeric notation, and a base-cap finding without the literal
+`Section 7.3` label. After `turn.completed` and exit 0 the CLI logged one
+`UnknownProcessId` cleanup message for a finished command; it changed nothing
+but is kept as an operational signal. SC-EVAL-009 closes the two SC-EVAL-008
+failures; it does not establish precision and recall, lifetime savings or
+release readiness.
 
-## Benchmark SC-EVAL-007: refresh-route maturation replication
+## SC-EVAL-010: maturation plus follow-up series (2026-09-22)
 
-Status: executed on 2026-09-22. The procedure below was committed before the
-run and was not changed after observing the result.
-
-Commit `88280d1f1d` changes the model-facing `context_map_refresh` result to
-include a deterministic, response-bounded inventory of current source routes.
-The tool description directs the model to use those routes directly and call
-`context_map_query` only when the inventory is truncated or insufficient. The
-app-server protocol remains unchanged, and projects with more routes than the
-bounded response retain targeted query as the fallback. Storage 26/26 and
-extension 5/5 passed, and an app-server integration proved that a model refresh
-over two files receives both routes in its next request.
-
-This replication will copy the unchanged ten-file licensing corpus to another
-fresh temporary directory, rebuild the branch CLI, remove API-key environment
-variables, and run the exact SC-EVAL-004 maturation prompt with
-`gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication. It will compare
-against SC-EVAL-006 and report whether the model uses refresh-returned routes,
-context-map queries, shell listing or reads, exact evidence reads, model
-responses, custom tool calls, full and uncached token usage, state quality,
-persistence failures, and source edits.
-
-The intended mechanism result is removal of the separate file-list and
-context-map-query steps without weakening exact verification or durable state.
-The result will be retained if the model ignores the routes or cost regresses.
-Like SC-EVAL-006, this is a same-corpus mechanism replication rather than a new
-held-out semantic or general-economics claim.
-
-### Execution and result
-
-Native Stateful CLI thread `01a0c93b-f307-7e12-856b-d242cacb5c1b` used fresh
-project `01a0c93b-f2ef-7c00-bf49-710fdcd05d14` rooted at
-`%LOCALAPPDATA%/Temp/stateful-refresh-routes-1790082503050`. The rebuilt branch
-CLI ran `gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication with
-API-key environment variables removed. The temporary ten-file corpus was
-byte-identical before the run, and a post-run directory diff confirmed that it
-remained unchanged.
-
-The first and only discovery call was `context_map_refresh`. It returned all ten
-current routes with `routesTruncated: false`. The model explicitly used that
-inventory to launch exact verification. It issued no `context_map_query`, shell
-file listing, or shell content read. This removed the two context queries and
-broad shell pass observed in SC-EVAL-006.
-
-| Measure | SC-EVAL-006 | SC-EVAL-007 | Delta |
-| --- | ---: | ---: | ---: |
-| Model responses | 10 | 8 | -2 (-20.00%) |
-| Outer custom tool calls | 9 | 7 | -2 (-22.22%) |
-| Full tokens | 344,870 | 279,247 | -65,623 (-19.03%) |
-| Uncached input plus output | 75,814 | 69,071 | -6,743 (-8.89%) |
-| Context-map queries | 2 | 0 | -2 |
-| Shell listing or content passes | 2 | 0 | -2 |
-| Final blackboard findings | 17 | 17 | 0 |
-| Final relationships | 27 | 29 | +2 |
-
-The live frozen-manifest scorer again returned 17 of 17 active, current,
-source-verified, evidence-linked findings, zero forbidden conclusions, and 3 of
-10 literal probes. Manual review found all ten predeclared concepts. This
-preserves the SC-EVAL-006 quality interpretation: perfect supported-entry
-precision and complete manual concept coverage, but not a machine-scored
-semantic-recall pass.
-
-Two avoidable retries remain. The first parallel evidence call requested
-`maxBytes: 100000`, above the declared 12,288-byte tool limit, and was repeated
-with the legal limit. The linked batch then accepted 16 findings and 26
-relationships but rejected one finding whose copied source fingerprint was
-malformed; a single-record retry plus its three relationships produced the
-final 17 findings and 29 relationships. An unrelated memory-maintenance patch
-also failed after durable state was complete. These failures did not change the
-fixture or final state, but their turns and tokens count against the result.
-
-Using the already measured SC-EVAL-005 follow-up aggregate only as a directional
-projection, the new maturation plus three Stateful follow-ups would cost
-571,027 full tokens versus 428,784 ordinary tokens, a remaining 142,243-token
-deficit. The observed follow-up slope projects full-token break-even around
-question seven. Uncached usage would remain 159,123 versus 73,456, an
-85,667-token deficit with no observed break-even. A matched end-to-end series
-is still required before making a lifetime-economics claim.
-
-## Benchmark SC-EVAL-008: resolved-evidence maturation replication
-
-Status: executed on 2026-09-22. The procedure below was committed before the
-run and was not changed after observing the result.
-
-SC-EVAL-007 exposed two remaining model-correctable retries. Commit
-`783bc5d4af` clamps a positive oversized `evidence_read.maxBytes` request to the
-12,288-byte model-context boundary and reports the applied limit and clamp
-state; zero remains invalid. Commit `c2708822c0` replaces model-authored source
-fingerprints in blackboard writes with current route references. The tool
-resolves and verifies the authoritative context-map entry and fingerprint. When
-`nodeId` is omitted, evidence from exactly one source also places the finding on
-that file node; cross-source findings remain project-wide and root promotion is
-unchanged. Extension 5/5 passed, and focused app-server tests proved the live
-oversized request observed in SC-EVAL-007 and route-resolved, source-verified,
-file-level batch persistence.
-
-This replication will use another fresh byte-identical copy of the same
-ten-file licensing corpus, rebuilt branch CLI, cached ChatGPT login, cleared
-API-key variables, exact SC-EVAL-004 prompt, and `gpt-5.6-luna` at `xhigh`. It
-will compare with SC-EVAL-007 and report refresh-route use, evidence-read
-clamping or retries, blackboard batch success, source-route versus opaque-value
-evidence inputs, file-level placement, model responses, outer tool calls, full
-and uncached tokens, final state quality, and source edits.
-
-The intended mechanism result is one refresh, one exact-evidence turn, one
-obligation turn, one complete linked write, and one completion turn, with no
-retry for byte limits or evidence identity. The result will be retained if the
-model ignores the new contract or cost regresses. This remains a same-corpus
-mechanism replication, not a new held-out semantic or general-economics claim.
-
-### Execution and result
-
-Native Stateful CLI thread `01a0c955-4d4c-7f81-a704-bcb568cc3407` used fresh
-project `01a0c955-4d3d-7c83-94e8-eefa910dca54` rooted at
-`%LOCALAPPDATA%/Temp/stateful-resolved-evidence-1790084192908`. The rebuilt
-branch CLI ran `gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication
-with API-key environment variables removed. The ten-file corpus was
-byte-identical to the committed fixture before the run, and a post-run
-directory diff confirmed that it remained unchanged.
-
-The route resolver and evidence clamp both worked in live model behavior. The
-model requested `maxBytes: 30000`; the tool applied the 12,288-byte boundary
-without an error or retry. In the successful linked batch, the model supplied
-30 relative-path evidence references and no context-map entry IDs, source
-fingerprints, or node IDs. The resolver persisted current authoritative
-fingerprints, placed single-source findings on their file nodes, and retained
-cross-source conclusions at the project node. Root promotion remained
-independent.
-
-| Measure | SC-EVAL-007 | SC-EVAL-008 | Delta |
-| --- | ---: | ---: | ---: |
-| Model responses | 8 | 11 | +3 (+37.50%) |
-| Outer custom tool calls | 7 | 10 | +3 (+42.86%) |
-| Full tokens | 279,247 | 417,784 | +138,537 (+49.61%) |
-| Uncached input plus output | 69,071 | 75,256 | +6,185 (+8.95%) |
-| Final blackboard findings | 17 | 13 | -4 |
-| Final relationships | 29 | 11 | -18 |
-
-This cost regression is retained. It does not come from failure of the two
-mechanisms under test. The first linked batch was rejected because the model
-naturally copied exact `lineRange` locators from `evidence_read`, while
-blackboard evidence accepted source identity but could not persist line ranges.
-The retry removed the ranges and successfully committed 12 findings and 11
-relationships with zero item failures. A later single-record write added a
-thirteenth source-verified question. The model had already marked the run
-completed before that last write, so its second completion update failed with
-the selected thread having no active Stateful run. No durable finding was lost,
-but the stored terminal result may omit the final question.
-
-All 13 final findings are active, current, source-verified, and evidence-linked.
-Manual semantic review found all ten predeclared concepts and no forbidden
-conclusion. The unchanged literal scorer matched 4 of 10 probes and returned
-`passed: false`; its morphology and same-entry limitations remain visible rather
-than being tuned after the result. The live hierarchy showed the policy
-instruction and effective-date question on the policy file, the territory fact
-on the side-letter file, and genuinely cross-source conclusions at project
-scope.
-
-The run also performed two global-memory reads required by the surrounding
-Codex environment. They are not Stateful project-memory reads, but their turns
-and tokens remain included. Relative to the original SC-EVAL-004 maturation,
-SC-EVAL-008 still used 231,389 fewer full tokens (-35.64%) and 19,421 fewer
-uncached input plus output tokens (-20.51%), but SC-EVAL-007 is the better
-current result.
-
-The next bounded slice is therefore exact line-range persistence, followed by
-terminal-finalization hardening. Exact locators are part of trustworthy
-provenance and should survive from source verification into durable memory;
-they must not be discarded merely to avoid a retry. Completion must likewise
-remain terminal without allowing a model to strand a valid final finding
-outside the run's summarized result.
-
-## Benchmark SC-EVAL-009: exact-provenance finalization replication
-
-Status: executed on 2026-09-22. The procedure below was committed before the
-run and was not changed after observing the result.
-
-Commit `db88bf1784` preserves optional exact line ranges from model-authored
-blackboard evidence through validation, SQLite revisions, query results, root
-World State aliases, app-server v2, and browser evidence reads. It retains one
-source link per finding and one bounded inclusive range per source. Existing
-whole-source links remain valid. Focused storage, protocol, extension,
-app-server, and browser-client tests pass; the model-facing integration proves
-that `lineRange: {start: 2, end: 3}` is returned by the next query and rendered
-as `S1:L2-L3` in the next request's World State, and the browser API returns
-only those exact lines.
-
-SC-EVAL-008 also showed that a model can mark a run completed, persist a final
-valid finding, and then attempt another completion update. Terminal runs must
-not become generally mutable to accommodate that ordering error. Before this
-replication, the active-run context and terminal tool contract will state that
-all blackboard, relationship, obligation, and verification work must finish
-before `completed`, and that completion is the final Stateful mutation.
-
-The replication will use a fresh byte-identical copy of the same ten-file
-licensing corpus, rebuilt branch CLI, cached ChatGPT login, cleared API-key
-variables, exact SC-EVAL-004 prompt, and `gpt-5.6-luna` at `xhigh`. It will
-report whether exact line ranges survive the linked batch, whether the batch
-requires a retry, whether completion is the final Stateful mutation, model
-responses, outer calls, full and uncached tokens, state quality, hierarchy
-placement, and source edits.
-
-The intended mechanism result is one successful linked write containing exact
-line ranges and one final completion, with no evidence-shape retry and no
-post-completion mutation attempt. The result will be retained if the model
-still completes early or cost regresses. This is another same-corpus mechanism
-replication, not a general economics claim.
-
-### Execution and result
-
-Native Stateful CLI thread `01a0c98a-e574-7912-ac68-9f55011304db` used fresh
-project `01a0c98a-e567-7890-9711-3260f8fd1a0d` rooted at
-`%LOCALAPPDATA%/Temp/stateful-exact-provenance-1790087681185`. The rebuilt
-branch CLI ran `gpt-5.6-luna` at `xhigh` through cached ChatGPT authentication
-with `OPENAI_API_KEY` and `CODEX_API_KEY` cleared. Filename and SHA-256
-comparison established that the ten-file corpus was byte-identical to the
-committed fixture before the run. The same comparison after the run found all
-ten files unchanged.
-
-The run used six outer code-mode calls: one context-map refresh combined with
-the required global-memory lookup, one parallel exact-evidence read, one
-semantic obligation update, one linked blackboard batch, one focused
-blackboard-verification call, and one final call that wrote the verification
-obligation before completing the run. Refresh returned all ten routes with no
-truncation. The model issued no context-map query and no shell listing or
-content read of the corpus. Its one parallel `evidence_read` call requested
-`maxBytes: 50000`; the tool clamped each request to 12,288 bytes without an
-error or retry and returned all ten complete sources exactly once.
-
-The first and only linked write accepted all 13 findings and all 19
-relationships with zero failures. The model supplied 30 relative-path evidence
-links with bounded line ranges. Live API inspection after persistence found all
-30 ranges intact, all 13 findings active and current, and all 13 findings
-source-verified and evidence-linked. No evidence-shape retry, single-record
-repair, malformed endpoint, or post-completion mutation occurred.
-
-The terminal-ordering contract also changed live behavior as intended. The
-last outer call first persisted the final semantic obligation and then invoked
-`stateful_run_update(status: "completed")` sequentially. Completion succeeded
-at run revision 2 and was the final Stateful mutation. The terminal result
-therefore includes the same 13 findings, 19 relationships, explicit
-uncertainties, and verification outcome that existed when the run became
-inactive.
-
-| Measure | SC-EVAL-008 | SC-EVAL-009 | Delta |
-| --- | ---: | ---: | ---: |
-| Model responses | 11 | 7 | -4 (-36.36%) |
-| Outer custom tool calls | 10 | 6 | -4 (-40.00%) |
-| Full tokens | 417,784 | 250,849 | -166,935 (-39.96%) |
-| Uncached input plus output | 75,256 | 68,065 | -7,191 (-9.56%) |
-| Final blackboard findings | 13 | 13 | 0 |
-| Final relationships | 11 | 19 | +8 (+72.73%) |
-| Evidence links with exact ranges | 0 | 30 | +30 |
-| Failed or retried persistence calls | 2 | 0 | -2 |
-
-Hierarchy placement remained intentionally generic. The two single-source risk
-findings landed on the risk-assessment file node and the single-source territory
-finding landed on the executed-side-letter file node. The ten findings that
-synthesize multiple sources remained at project scope. No record was unplaced,
-and root promotion remained independent of hierarchy placement.
-
-### Rendered exact-evidence validation
-
-A direct Edge 153 render against the live port-4174 gateway reopened the
-completed SC-EVAL-009 project and exercised a persisted ranged-evidence control.
-The first pass exposed a transparency mismatch: project status reported 13
-understandings, while the findings surface silently filtered out the durable
-`strategy` and `decision` kinds and displayed only 11 cards. The UI now renders
-every blackboard kind under `Project understanding & open signals`; the reviewed
-workspace fixture includes strategy and decision cards, and the browser-client
-suite passes 8/8.
-
-The second live render displayed all 13 understanding cards, including one
-strategy and one decision, plus all 30 exact-range evidence controls. Clicking
-`Open evidence · lines 5–11` opened only `risk-assessment.md` lines 5–11 and
-displayed `408/455 bytes · lines 5–11`; the text began with the identifiable
-diagnostic-record fact and ended with the unresolved coverage/exclusions
-question. No UI or RPC error appeared. At both 1440 by 900 and 480 by 900, the
-page had no horizontal overflow and retained the completed run, semantic
-obligation, strategy, result, hierarchy, controls, exact evidence, and all
-project-understanding cards. The inspected captures are
-`%LOCALAPPDATA%/Temp/stateful-sc009-final-desktop.png` and
-`%LOCALAPPDATA%/Temp/stateful-sc009-final-mobile.png`.
-
-The unchanged frozen manifest found 13 of 13 currently supported entries,
-zero forbidden conclusions, and 7 of 10 literal concept probes. Manual semantic
-review found all ten predeclared concepts. The three literal misses remain
-visible: the authority record says `supersede inconsistent` rather than the
-manifest's `supersedes inconsistent`; the royalty concept is distributed across
-the operative 6% finding and the linked stale-8% contradiction and uses numeric
-notation; and the base-cap finding omits the literal `Section 7.3` label while
-preserving the amount, aggregate-cap rule, executed carve-outs, and exact source
-range. This establishes complete manual concept coverage and perfect
-supported-entry precision, not a machine-scored semantic-recall pass.
-
-After the successful `turn.completed` event and exit code 0, the CLI emitted a
-single `UnknownProcessId` cleanup log for an already-finished command process.
-It occurred after durable completion and did not change the rollout, project
-state, corpus, or exit result, but it remains recorded as an operational cleanup
-signal rather than being silently discarded.
-
-SC-EVAL-009 closes the two specific failures exposed by SC-EVAL-008: exact
-provenance now survives maturation, and completion is terminal without
-stranding a later durable write. It is still a same-corpus mechanism
-replication. It does not by itself establish general precision/recall,
-maturation-inclusive lifetime savings, or release readiness.
-
-## Benchmark SC-EVAL-010: current maturation-plus-follow-up series
-
-Status: executed on 2026-09-22 after pre-registration.
-
-This benchmark tests lifetime behavior using the completed SC-EVAL-009
-maturation and the exact three follow-up cases already frozen in
-`clients/stateful-codex/eval/manifests/licensing-series.json`. The maturation
-rollout is
+Pre-registered. The SC-EVAL-009 maturation (rollout
 `%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T10-35-18-01a0c98a-e574-7912-ac68-9f55011304db.jsonl`;
-its observed 250,849 full tokens, 68,065 uncached input-plus-output tokens, and
-7 model responses will be read from the rollout rather than replacing the old
-SC-EVAL-005 cost embedded in the frozen manifest.
-
-Each economics, territory, and termination-risk prompt will run once through a
-fresh ordinary native CLI thread and once through a fresh Collaborative
-Stateful native CLI thread explicitly bound to SC-EVAL-009 project
-`01a0c98a-e567-7890-9711-3260f8fd1a0d`. Every pair will use the same rebuilt
-branch binary, `gpt-5.6-luna` at `xhigh`, project directory, workspace roots,
-permissions, cached ChatGPT login, and cleared API-key environment. The corpus
-must remain byte-identical after all six runs.
-
-The existing parity and frozen lexical checks will remain unchanged. The report
-will preserve substantive manual review separately because prior runs establish
-that literal morphology and same-entry requirements can reject correct answers.
-It will report per-question and aggregate full and uncached tokens, model
-responses, read-bearing calls, exact files opened, follow-up wins, actual
-maturation-inclusive lifetime cost, and projected break-even only when average
-savings are positive.
-
-This benchmark can show whether the current mechanism repeats selective
-retrieval and whether the measured one-time maturation cost can plausibly
-amortize across this fixed workload. Three same-corpus questions are not a
-general workload distribution; regressions, scorer failures, and negative
-lifetime results will be retained.
-
-### Execution result
-
-All six fresh native CLI runs completed through cached ChatGPT login with the
-pre-registered binary, model, effort, permissions, roots, and prompts. The
-three Stateful runs were explicitly bound to SC-EVAL-009 project
-`01a0c98a-e567-7890-9711-3260f8fd1a0d`. SHA-256 comparison after the series
-found all ten working-corpus files byte-identical to the committed fixture.
+250,849 full, 68,065 uncached, 7 responses, read from the rollout rather than the
+manifest's old SC-EVAL-005 figure) plus the three frozen
+`licensing-series.json` follow-ups, each run once ordinary and once
+Collaborative Stateful bound to project `01a0c98a-e567-7890-9711-3260f8fd1a0d`.
+Lexical checks unchanged; manual review reported separately.
 
 | Case | Ordinary full | Stateful full | Ordinary uncached | Stateful uncached | Ordinary reads | Stateful reads |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -1016,92 +746,41 @@ found all ten working-corpus files byte-identical to the committed fixture.
 | termination-risk | 119,196 | 70,288 | 20,380 | 28,816 | 5 | 1 |
 | **Follow-up total** | **308,300** | **248,456** | **65,356** | **83,592** | **11** | **5** |
 
-Stateful saved 59,844 full follow-up tokens (19.41%), four model responses,
-and six read-bearing calls. It won full tokens on two of three questions. It
-lost uncached input plus output on every question, increasing aggregate
-uncached follow-up cost by 18,236 tokens (27.90%). Ordinary Codex broadly
-searched or opened all ten project files in every case. Stateful verified four
-exact files for economics, three for territory, and six for termination-risk;
-territory included a repeated side-letter verification. The reduced call count
-therefore represents materially more selective source access, although not the
-ideal one-verification path in every case.
+Stateful saved 59,844 full follow-up tokens (19.41%), four responses (15 to 11)
+and six read-bearing calls, winning full tokens on two of three questions, but
+lost uncached on all three (+18,236, +27.90%). Ordinary searched or opened all
+ten files every time; Stateful verified four, three (with a repeated side-letter
+verification) and six. With maturation: 499,305 against 308,300 full (+191,005,
++61.95%) and 151,657 against 65,356 uncached (+86,301, +132.05%); full-token
+break-even at about 13 questions, no uncached break-even. Manual review: both
+economics answers covered all four concepts and both territory answers all
+three despite scorer misses; the ordinary termination answer covered all four.
+**The Stateful termination answer omitted the executed uncapped-liability
+carve-out** while correctly reporting 60 days, the $5.5 million planning
+scenario, the $3 million limit, the $2.5 million gross difference, unresolved
+coverage and the planning-versus-legal distinction; the fact was in the root and
+the obligation. No forbidden claim. This shows continuity, exact routing and
+less broad rereading, not Stage 8: maturation is not amortized, uncached cost
+regresses consistently, a concept was dropped at the final answer, and three
+same-corpus questions are not a distribution.
 
-Including the measured SC-EVAL-009 maturation changes the comparison to 499,305
-Stateful full tokens versus 308,300 ordinary tokens, a 191,005-token (61.95%)
-regression. Uncached lifetime cost is 151,657 versus 65,356, an 86,301-token
-(132.05%) regression. If the observed average full-token follow-up saving held,
-the maturation investment would break even at approximately 13 questions.
-There is no projected uncached break-even because every Stateful follow-up was
-more expensive on that measure.
+## SC-EVAL-011: project-scoped prompt cache (2026-09-22)
 
-Manual answer review is more informative than the frozen literal scorer here.
-Both economics answers covered all four intended concepts despite the scorer
-missing the stale-proposal wording. Both territory answers covered all three
-concepts despite a Stateful morphology miss. The ordinary termination answer
-covered all four concepts. The Stateful termination answer correctly reported
-60 days, the $5.5 million planning scenario, the $3 million limit, the $2.5
-million gross difference, unresolved coverage, and the planning-versus-legal
-distinction, but its final answer omitted the executed uncapped-liability
-carve-out. That omission is substantive even though the durable root state and
-semantic obligation contained the fact. No answer made a forbidden claim.
-
-SC-EVAL-010 therefore demonstrates current-thread continuity, exact evidence
-routing, and a substantial reduction in broad rereading and full follow-up
-work. It does not close Stage 8. The one-time maturation cost is not amortized
-by this short series, uncached cost regresses consistently, one required concept
-was dropped between durable understanding and the final answer, and three
-same-corpus questions are not a representative workload distribution. The next
-release work should first explain and reduce the fixed uncached context cost
-without weakening the always-loaded root, then test final-answer coverage from
-selected durable findings, and only then run a broader pre-registered workload.
-
-## Benchmark SC-EVAL-011: project-scoped prompt-cache replication
-
-Status: passed on 2026-09-22 after pre-registration.
-
-SC-EVAL-010 showed that every ordinary first response reused 9,984 cached input
-tokens while every Stateful first response reused zero, including three
-consecutive threads over the same mature project. Per-response traces localized
-most of the uncached regression to this missing cross-thread prefix reuse rather
-than to repeated source reads or the approximately 4,500-token root increment.
-
-Commit `c0f120f009` introduces a mutable host-owned prompt-cache affinity. The
-explicitly selected Stateful project supplies the affinity; thread and session
-identity remain in request metadata, user project selection remains authoritative,
-and changing or clearing that selection updates cache routing. Internal review
-and ephemeral-fork overrides retain precedence. Focused tests verify the shared
-attachment, live key changes, selection synchronization, and equal outbound
-cache keys across two independent app-server threads.
-
-The live replication will rebuild the native CLI from `c0f120f009`, clear API-key
-environment variables, and use cached ChatGPT login with `gpt-5.6-luna` at
-`xhigh`. It will submit the exact SC-EVAL-010 economics prompt twice in two fresh
-Collaborative Stateful threads explicitly bound to mature project
-`01a0c98a-e567-7890-9711-3260f8fd1a0d` and the byte-identical ten-file corpus.
-No blackboard mutation or source edit is requested; each run may record its
-semantic obligation and terminal result.
-
-The first run is the cache warmer. The second run is the measurement. The report
-will preserve each response's input, cached input, uncached input, output, total
-tokens, calls, answer coverage, exact evidence access, and corpus SHA-256 state.
-The mechanism passes only if the second thread's first response reports nonzero
-cached input and lower uncached input than the warmer's first response while
-retaining the correct evidence-grounded answer. A 12,000-token cached prefix and
-at least 25% first-response uncached reduction are recorded as useful directional
-thresholds, not release claims. A miss or regression will be retained. Two
-same-project runs test cache routing only; they do not establish general lifetime
-economics or close Stage 8.
-
-### Execution result
-
-The rebuilt CLI completed two fresh Collaborative Stateful threads through
-cached ChatGPT login with cleared API-key variables. The warmer was thread
-`01a0c9ca-c37b-72c1-b176-0bf5a5420c11`; the measurement was thread
-`01a0c9cb-dc13-78a1-823e-b014ce67e8ce`. Both used the exact registered prompt,
-project, corpus, model, effort, and permissions. Each answered all four intended
-concepts, verified the same four exact source regions in one code-mode call,
-wrote one semantic obligation followed by terminal completion in a second call,
-and made no unsupported claim.
+Passed after pre-registration. In SC-EVAL-010 every ordinary first response
+reused 9,984 cached tokens and every Stateful first response zero, including
+three consecutive threads on the same project; traces put most of the uncached
+regression there rather than in rereads or the approximately 4,500-token root
+increment. Commit `c0f120f009` adds a host-owned prompt-cache affinity keyed by
+the explicitly selected project (live selection changes update it; thread and
+session identity stay in metadata; review and ephemeral-fork overrides keep
+precedence; two app-server threads share the outbound cache key in tests). The
+exact SC-EVAL-010 economics prompt ran in two fresh Collaborative threads on
+project `01a0c98a-e567-7890-9711-3260f8fd1a0d`: warmer
+`01a0c9ca-c37b-72c1-b176-0bf5a5420c11`, measurement
+`01a0c9cb-dc13-78a1-823e-b014ce67e8ce`. Pass required nonzero cached input and
+lower uncached input in the measurement's first response with a correct answer;
+a 12,000-token cached prefix and at least 25% first-response uncached reduction
+were registered as directional thresholds.
 
 | Measure | Warmer | Measurement | Delta |
 | --- | ---: | ---: | ---: |
@@ -1113,286 +792,96 @@ and made no unsupported claim.
 | Model responses | 3 | 3 | 0 |
 | Outer calls | 2 | 2 | 0 |
 
-The measurement therefore passes both registered directional thresholds: it
-reused 12,032 first-response tokens and reduced first-response uncached input by
-more than 25%. The result also confirms that the cache win did not come from
-less verification, fewer semantic writes, answer truncation, or source edits.
-Post-run SHA-256 comparison found all ten corpus files byte-identical to the
-committed fixture.
+Both answered all four concepts, verified the same four regions in one call,
+and wrote one obligation then completion in a second call; no unsupported claim
+and no edits. Both thresholds passed, and the cache win did not come from less
+verification, fewer writes, truncation or edits. This closes the cross-thread
+cache defect and shows a rich stable root need not be fully uncached on every
+adjacent thread;
+it does not cover cache expiry, idle periods, root revisions, other models or
+representative workloads, and it does not change SC-EVAL-010.
 
-SC-EVAL-011 closes the concrete cross-thread cache-affinity defect exposed by
-SC-EVAL-010. It supports the product model that threads are views over one
-project and shows that a rich stable root can remain available without being
-fully uncached on every adjacent thread. It does not retroactively change
-SC-EVAL-010 or prove durable savings after provider cache expiry, long idle
-periods, root revisions, different models, or representative workloads. Those
-conditions require a fresh matched distribution. Stage 8 remains open, with the
-final-answer coverage omission and broader lifetime replication still ahead.
+## Completion integrity SC-EVAL-012 to SC-EVAL-014 (2026-09-22)
 
-## Benchmark SC-EVAL-012: final semantic coverage replication
-
-Status: executed on 2026-09-22 after pre-registration; mechanism passed, final
-prose passed, and the durable-result gate failed.
-
-SC-EVAL-010's Stateful termination-risk answer omitted the executed
-uncapped-liability carve-out even though the root blackboard contained it, the
-model verified the controlling amendment, and the final semantic obligation
-recorded uncapped exposure. The omission occurred at finalization: both the
-persisted result and final prose dropped a material conclusion already present
-in the system's structured understanding.
-
-Commit `4fc80c460c` strengthens the domain-neutral completion contract. A run
-cannot complete without a final semantic obligation. Completion returns a
-bounded checklist drawn from that packet's learnings, implications,
-uncertainties, and blockers, plus an explicit instruction to reconcile the
-persisted result and final prose before replying. The checklist is capped at 16
-items and 640 bytes per item. It does not infer legal concepts, rewrite user
-goals, or add a second finalization turn.
-
-The replication will rebuild the native CLI from `4fc80c460c` and submit the
-exact SC-EVAL-010 termination-risk prompt in one fresh Collaborative thread
-bound to mature project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. It will use the
-same byte-identical corpus, cached ChatGPT login, cleared API keys,
-`gpt-5.6-luna` at `xhigh`, roots, and permissions.
-
-The mechanism passes only if the completion tool output exposes the material
-checklist and terminal completion remains the final Stateful mutation. The
-product behavior passes only if both the persisted result and final prose state
-that the executed amendment removes or carves data-security/confidentiality
-exposure out of the master agreement's general liability cap, while preserving
-the 60-day notice, $5.5 million planning scenario, $3 million identified cyber
-limit, $2.5 million gross difference, unresolved coverage, planning-versus-legal
-distinction, exact evidence, and read-only boundary. The corpus must remain
-byte-identical. A lexical scorer is not sufficient; the rollout, persisted
-state, and final answer will be reviewed directly. One same-corpus replication
-tests the observed coverage failure only and does not close Stage 8.
-
-### Execution result
-
-The rebuilt cached-login CLI completed thread
-`01a0c9d6-ae8c-7623-bd76-e3aed052708d` against the registered mature project,
-corpus, prompt, model, effort, roots, and permissions. Its rollout is
-`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T11-58-05-01a0c9d6-ae8c-7623-bd76-e3aed052708d.jsonl`.
-Post-run SHA-256 comparison found all ten corpus files byte-identical to the
-committed fixture.
-
-The mechanism gate passed. The model wrote a final semantic obligation and then
-made completion the final Stateful mutation. The completion output exposed 13
-bounded checklist items with zero omitted items, including the 60-day notice,
-the planning and insurance figures, uncertainty, and the binding policy's
-uncapped-exposure requirement.
-
-The final prose also passed the registered semantic gate. It expressly stated
-that executed amendment 2 carves data-security exposure out of the master
-agreement's general $2 million liability cap, while preserving the 60-day
+All three re-ran the exact SC-EVAL-010 termination-risk prompt in one fresh
+Collaborative thread on project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. The
+product gate in each: the persisted result and the final prose both state that
+executed amendment 2 removes data-security and confidentiality exposure (and
+IP indemnity) from the master agreement's general cap, and keep the 60-day
 notice, $5.5 million planning scenario, $3 million listed cyber limit, $2.5
 million gross difference, unresolved coverage, planning-versus-contractual
-distinction, exact file citations, and read-only boundary.
+distinction, exact evidence and read-only boundary. A lexical scorer was not
+used as the judge.
 
-The durable result failed. Its narrative said only that the binding policy
-requires uncapped or carved-out exposure to be identified. It did not state the
-material project conclusion already present in the root blackboard: executed
-amendment 2 actually removes the data-security, confidentiality, and IP
-indemnity exposure from the master cap. The final obligation also preserved the
-policy and coverage uncertainty but not that exact root conclusion. The
-post-completion checklist could improve the later assistant prose, but it could
-not alter the already-terminal result supplied as the completion argument.
+**SC-EVAL-012: final semantic coverage.** Commit `4fc80c460c`: a run cannot
+complete without a final semantic obligation, and completion returns a bounded
+checklist (at most 16 items of 640 bytes) from that packet's learnings,
+implications, uncertainties and blockers, with an instruction to reconcile
+result and prose; it infers no legal concepts, rewrites no user goal and adds no
+second finalization turn. Thread `01a0c9d6-ae8c-7623-bd76-e3aed052708d`,
+rollout
+`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T11-58-05-01a0c9d6-ae8c-7623-bd76-e3aed052708d.jsonl`.
+Mechanism passed (obligation then completion as the final mutation; 13 checklist
+items, none omitted). Final prose passed. **The durable result failed:** it said
+only that the binding policy requires uncapped or carved-out exposure to be
+identified, not that amendment 2 actually removes the data-security,
+confidentiality and IP-indemnity exposure from the cap; the final obligation
+also missed it, and a post-completion checklist cannot change an already
+terminal result. Four responses; 93,223 input (65,792 cached), 3,984 output.
 
-The run used four model responses. It recorded 93,223 input tokens, including
-65,792 cached input tokens, and 3,984 output tokens. This is a correctness
-replication rather than an economics comparison. SC-EVAL-012 therefore closes
-neither final semantic integrity nor Stage 8; it localizes the remaining defect
-to the boundary between selected durable project knowledge and terminal result
-assembly.
+**SC-EVAL-013: durable material findings.** Commit `0f7684a3f4`: root entries
+expose stable compact `K` references; completion must submit the material ones,
+which are resolved against the current root (verification, freshness, exact
+ranges) and placed ahead of the bounded final-obligation content in the result
+before the run becomes terminal; unknown, duplicate or oversized selections fail
+first; an empty selection asserts that no root finding is material (extension
+6/6; an app-server integration proved a selected root finding is visible in
+initial World State, returned in the checklist and stored in the terminal
+result; the stricter Autonomous continuation integration passed). Gates: `K` references exposed, the critical carve-out finding selected and
+returned as a `rootFinding` with its ranged routes, completion final, corpus
+unchanged. Thread `01a0c9f8-5fbb-7a23-ab17-dfaa26a73cfa`, rollout
+`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T12-34-53-01a0c9f8-5fbb-7a23-ab17-dfaa26a73cfa.jsonl`;
+gateway read confirmed run
+`run-4d7df998518f144b9fe69e173051aa2912e76f41d6dd6a2521cbc4e016f7f908` at
+terminal revision 2. All correctness gates passed: seven root findings were
+selected and returned first in the 16-item checklist (four lower-priority packet
+items omitted from the checklist but kept in the obligation), and the persisted
+result states that the $2 million aggregate cap does not govern data-security,
+confidentiality and IP-indemnity obligations, with the superseded 30-day
+baseline as well. Five responses and four outer calls (a non-project memory
+lookup, a five-file evidence batch, an obligation plus failed completion, a
+successful retry): 118,455 input (89,088 cached), 3,767 output, 122,222 full,
+33,134 uncached. **Negative ergonomics:** the model first submitted two
+hexadecimal references not in the rendered root; completion rejected the first
+before any mutation, and the retry with seven valid references cost an extra
+response and about 3,022 uncached tokens. Failing closed was correct; the fix
+is explicit selection by compact display aliases bound to a root revision
+(SC-EVAL-014). The result must be a bounded completion basis, not a dump of the
+root.
 
-## Benchmark SC-EVAL-013: durable material-finding completion replication
-
-Status: passed on 2026-09-22 after pre-registration, with one rejected opaque-
-reference attempt retained as an operational efficiency finding.
-
-Commit `0f7684a3f4` replaces the post-terminal reminder with a structured,
-domain-neutral completion basis. Root entries now expose compact stable `K`
-references in addition to ephemeral display aliases. A completed run must
-explicitly submit the root references material to the requested outcome. Before
-the run becomes terminal, the completion tool resolves those references against
-the current project root, carries forward their verification and freshness,
-adds exact source paths and line ranges when available, and appends them ahead
-of the bounded final-obligation learning, implications, uncertainties, and
-blockers in the durable result. Empty selection remains possible only as an
-explicit assertion that no root finding is material; unknown, duplicate, or
-oversized selections fail before completion. Extension 6/6 passed; an
-app-server integration proved a selected root finding is visible in initial
-World State, returned in the completion checklist and present in the stored
-terminal result; the stricter Autonomous continuation integration also passed.
-
-The replication will rebuild the native CLI from `0f7684a3f4` and submit the
-exact SC-EVAL-010 termination-risk prompt in one fresh Collaborative thread
-bound to mature project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. It will use the
-same byte-identical ten-file corpus, cached ChatGPT login, cleared API keys,
-`gpt-5.6-luna` at `xhigh`, roots, permissions, and read-only request.
-
-The mechanism passes only if:
-
-1. the root World State exposes stable `K` references;
-2. the completion call selects the reference for the source-verified critical
-   finding that executed amendment 2 removes data-security, confidentiality,
-   and IP-indemnity exposure from the master cap;
-3. the completion output returns that exact finding as a `rootFinding` with its
-   current verification state and ranged source routes;
-4. completion remains the final Stateful mutation; and
-5. the ten corpus files remain byte-identical.
-
-The product behavior passes only if both the persisted run result and final
-assistant prose explicitly state the executed carve-out while preserving the
-60-day notice, $5.5 million planning scenario, $3 million listed cyber limit,
-$2.5 million gross difference, unresolved coverage, planning-versus-contractual
-distinction, exact evidence, and read-only boundary. The result must contain a
-bounded durable completion basis rather than a dump of the root blackboard.
-
-The report will retain model responses, outer calls, per-response cached and
-uncached usage, selected root references, final checklist size, persisted
-result, final prose, mutation order, exact evidence access, and corpus hashes.
-A lexical scorer is not sufficient. One same-corpus replication can close only
-the observed finalization defect; it cannot establish representative
-precision/recall, cache behavior after expiry or root changes, lifetime
-economics, or Stage 8 release readiness.
-
-### Execution result
-
-The rebuilt cached-login CLI completed thread
-`01a0c9f8-5fbb-7a23-ab17-dfaa26a73cfa`; its rollout is
-`%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T12-34-53-01a0c9f8-5fbb-7a23-ab17-dfaa26a73cfa.jsonl`.
-It used the exact registered prompt, mature project, byte-identical corpus,
-model, effort, roots, permissions, and cleared API-key environment. A real
-gateway/API read after the turn confirmed run
-`run-4d7df998518f144b9fe69e173051aa2912e76f41d6dd6a2521cbc4e016f7f908`
-at terminal revision 2.
-
-All registered correctness gates passed. The initial World State exposed stable
-`K` references. The successful completion selected seven materially relevant
-root findings, including the source-verified critical carve-out record. The
-tool returned those findings first in the 16-item completion checklist with
-current verification and exact ranged routes; four lower-priority final-packet
-items were reported as omitted from the bounded checklist and remained in the
-structured obligation. Completion was the final Stateful mutation. SHA-256
-comparison found all ten corpus files unchanged.
-
-The persisted result now expressly records that the master agreement's $2
-million aggregate cap does not govern data-security, confidentiality, and
-IP-indemnity obligations under executed amendment 2. It includes the 60-day
-notice, superseded 30-day baseline, $5.5 million planning scenario, $3 million
-listed cyber limit, $2.5 million gross difference, unresolved coverage,
-planning-versus-contractual distinction, no-edit boundary, and exact source
-ranges. The final assistant prose independently preserves the same substantive
-conclusions and exact file citations. This closes the specific durable-result
-failure from SC-EVAL-012.
-
-The run used five model responses and four outer custom-tool calls: one
-non-project memory lookup, one five-file exact-evidence batch, one combined
-final-obligation/failed-completion call, and one successful completion retry.
-It consumed 118,455 input tokens, including 89,088 cached input tokens, and
-3,767 output tokens: 122,222 full tokens and 33,134 uncached input plus output.
-
-The failed attempt is material negative evidence about the mechanism's
-ergonomics. The model submitted two hexadecimal references that were not in the
-rendered root. Completion rejected the first unknown reference before changing
-run state, after which the model copied seven valid references and succeeded.
-Fail-closed behavior is correct, but opaque reference copying caused an
-avoidable response and approximately 3,022 uncached input-plus-output tokens in
-the retry response. The next narrow slice should retain explicit model
-selection while replacing opaque references with compact display aliases bound
-to an explicit root revision. That gives the tool an optimistic-concurrency
-check without asking the model to reproduce hashes.
-
-SC-EVAL-013 proves durable semantic carry-through for the observed failure. It
-does not establish representative final-answer recall or lifetime economics,
-and the opaque-reference retry should be removed before the broader matched
-distribution.
-
-## Benchmark SC-EVAL-014: revision-bound completion alias replication
-
-Status: passed on 2026-09-22 after pre-registration.
-
-Commit `4efb44bcab` removes the opaque `K` handles exposed by SC-EVAL-013.
-Completion now uses the compact `E` aliases already present in the root
-blackboard plus the project-intelligence revision shown beside them. The tool
-resolves aliases only against that exact revision and rejects a changed root,
-malformed alias, duplicate selection, or out-of-range alias before terminal
-mutation. New knowledge created during the current run remains covered by the
-automatically appended final semantic packet; if root ordering changes, the
-model must review the new revision rather than silently binding an old alias to
-a different finding. Extension 6/6 passed, and the durable-result and Autonomous
-app-server scenarios each passed.
-
-The replication will rebuild the native CLI from `4efb44bcab` and submit the
-exact termination-risk prompt again in one fresh Collaborative thread bound to
-mature project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. It will use the same
-byte-identical ten-file corpus, cached ChatGPT login, cleared API keys,
-`gpt-5.6-luna` at `xhigh`, roots, permissions, and read-only request.
-
-The mechanism passes only if the initial root exposes its revision and `E`
-aliases without opaque completion handles; the completion call supplies that
-exact `rootRevision`, selects the alias containing the executed liability
-carve-out, succeeds without an alias/reference retry, returns the selected
-current source-verified finding with ranged routes, and remains the final
-Stateful mutation. The corpus must remain byte-identical.
-
-The product behavior passes only if both the persisted run result and final
-assistant prose preserve the executed carve-out, 60-day notice, $5.5 million
-planning scenario, $3 million listed cyber limit, $2.5 million gross
-difference, unresolved coverage, planning-versus-contractual distinction,
-exact evidence, and read-only boundary. The report will retain every model
-response and outer call, the selected revision and aliases, persisted API
-result, final prose, mutation order, per-response cached and uncached usage,
-and corpus hashes.
-
-This replication tests whether the new addressing contract removes the exact
-copy failure observed in SC-EVAL-013 without weakening durable result coverage.
-It does not establish behavior after a concurrent root revision, representative
-precision/recall, lifetime economics, or Stage 8 release readiness.
-
-### Execution result
-
-The rebuilt cached-login CLI completed thread
-`01a0ca0b-28a8-7dd2-91b7-730d7c1c54f2`; its rollout is
+**SC-EVAL-014: revision-bound aliases.** Commit `4efb44bcab` replaces `K` handles
+with the root's compact `E` aliases plus the shown project-intelligence
+revision; a changed root, malformed, duplicate or out-of-range alias fails
+before terminal mutation, and new knowledge from the run is still covered by the
+appended final packet (extension 6/6; durable-result and Autonomous app-server
+scenarios passed). Thread `01a0ca0b-28a8-7dd2-91b7-730d7c1c54f2`, rollout
 `%USERPROFILE%/.codex/sessions/2026/09/22/rollout-2026-09-22T12-55-24-01a0ca0b-28a8-7dd2-91b7-730d7c1c54f2.jsonl`.
-It used the registered prompt, mature project, byte-identical ten-file corpus,
-model, effort, roots, permissions, and cleared API-key environment. The cached
-ChatGPT login supplied authentication.
-
-All registered mechanism gates passed. The initial root exposed revision 54 and
-compact `E` aliases without `K` handles. Completion supplied `rootRevision: 54`
-and selected `E1`, `E6`, `E8`, `E9`, `E12`, and `E13`; it succeeded on the first
-attempt, returned all six current source-verified root findings with exact
-ranged routes, and remained the final Stateful mutation. The rollout contains
-no opaque `K` reference. SHA-256 comparison found all ten corpus files
-byte-identical after the run.
-
-The product-behavior gates also passed. Both final prose and the persisted
-result preserve the 60-day notice, superseded 30-day baseline, $5.5 million
-planning scenario, $3 million listed cyber limit, $2.5 million gross difference,
-the executed amendment's data-security carve-out, pending coverage and counsel
-review, the planning-versus-contractual distinction, exact evidence, and the
-read-only boundary. A real gateway/API read confirmed run
-`run-2b309747a13c75404f697c262114b81fa63fc847e1de1432334ef244a817170e`
-at terminal revision 2 with a 5,016-character durable result. The completion
-checklist contained 15 items and omitted none.
-
-The run used four model responses and three outer custom-tool calls: one
-four-file exact-evidence batch, one final semantic obligation update, and one
-successful completion. It consumed 94,549 input tokens, including 66,816 cached
-input tokens, and 2,496 output tokens: 97,045 full tokens and 30,229 uncached
-input plus output. Relative to SC-EVAL-013, that is 25,177 fewer full tokens
-(20.60%), 2,905 fewer uncached input-plus-output tokens (8.77%), one fewer model
-response, one fewer outer call, and no completion retry. It also avoided a raw
-read of `binding-review-policy.md` because the verified root carried the needed
-relationship and route.
-
-SC-EVAL-014 closes the model-facing completion-addressing defect without losing
-durable semantic coverage. It remains one same-corpus replication. A broader
-pre-registered matched distribution, representative precision and recall,
-maturation-inclusive economics, concurrent-root behavior, and the approval-
-gated repository-wide Rust suite remain open Stage 8 evidence.
+The root showed revision 54 and `E` aliases with no `K` handle; completion sent
+`rootRevision: 54` with `E1`, `E6`, `E8`, `E9`, `E12` and `E13`, succeeded
+first time, returned all six current source-verified findings with ranges, and
+stayed the final mutation. Prose and persisted result passed every product gate
+(including the superseded 30-day baseline and pending coverage and counsel
+review); a gateway read confirmed run
+`run-2b309747a13c75404f697c262114b81fa63fc847e1de1432334ef244a817170e` at
+revision 2 with a 5,016-character result; the checklist had 15 items and omitted
+none. Four responses and three outer calls (a four-file evidence batch, an
+obligation update, completion): 94,549 input (66,816 cached), 2,496 output,
+97,045 full, 30,229 uncached; against SC-EVAL-013, 25,177 fewer full (20.60%),
+2,905 fewer uncached (8.77%), one fewer response and call, and no raw read of
+`binding-review-policy.md` because the root carried that relationship and
+route. Open: concurrent root revisions, representative precision and recall,
+maturation-inclusive economics, and the approval-gated repository-wide Rust
+suite.
 
 ## Benchmark SC-EVAL-015: two-project release distribution
 
