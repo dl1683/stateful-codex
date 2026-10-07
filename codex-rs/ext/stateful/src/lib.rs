@@ -2,18 +2,32 @@
 
 mod attribution;
 mod autonomy;
+mod background;
+mod checkout;
 mod checkpoint;
 mod completion;
+mod continuity;
+mod continuity_source;
+mod conversation_summaries;
 mod events;
 mod limits;
-mod outcome_world_state;
+mod memory_add;
+mod memory_controls;
+mod quotation;
 mod read_receipts;
+mod request_scope;
 mod root_blackboard;
+mod rule_capture;
+mod rule_group;
+mod rule_scope;
+mod rule_units;
 mod run_world_state;
 mod services;
 mod socratic;
 mod source_freshness;
 mod tools;
+mod user_messages;
+mod user_rules;
 mod visible_root;
 mod world_state;
 
@@ -35,8 +49,8 @@ use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_thread_store::ThreadStore;
 
-use crate::outcome_world_state::ProjectOutcomesStatus;
-use crate::outcome_world_state::project_outcomes_world_state_section;
+use crate::continuity::continuity_world_state_section;
+use crate::request_scope::RequestScope;
 use crate::root_blackboard::ResolvedRootBlackboard;
 use crate::root_blackboard::RootBlackboardStatus;
 use crate::run_world_state::RunWorldStateStatus;
@@ -56,9 +70,29 @@ pub use autonomy::AutonomousContinuationFuture;
 pub use autonomy::AutonomousContinuationOutcome;
 pub use autonomy::AutonomousContinuationRequest;
 pub use autonomy::AutonomousContinuationSink;
+pub use autonomy::RunAdmissionFence;
+pub use autonomy::bound_run_turn;
 pub use events::BlackboardEntityKind;
+pub use events::CaptureOutcome;
+pub use events::GroupReceipt;
+pub use events::GroupReceiptItem;
+pub use events::KnowledgeCategory;
+pub use events::MAX_RECEIPT_TEXT_BYTES;
 pub use events::StatefulEvent;
 pub use events::StatefulEventSink;
+pub use memory_add::AddOutcome;
+pub use memory_add::MemoryAddition;
+pub use memory_add::add_entry;
+pub use memory_controls::MAX_CORRECTION_BYTES;
+pub use memory_controls::MemoryControlError;
+pub use memory_controls::MemorySection;
+pub use memory_controls::correct_entry;
+pub use memory_controls::forget_entry;
+pub use memory_controls::memory_section;
+
+/// Bytes of Stateful developer content a fresh context window carries across the project
+/// packet, the run packet and the conversation record (about 3k tokens).
+const AGGREGATE_WINDOW_BYTES: usize = 12 * 1024;
 
 /// Canonical project selected by the user for a thread view.
 ///
@@ -127,6 +161,7 @@ struct StatefulExtension {
     attribution: attribution::StatefulAttributionTracker,
     visible_root: visible_root::VisibleRootRegistry,
     run_activity: checkpoint::RunActivityRegistry,
+    user_messages: user_messages::UserMessageRegistry,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -138,14 +173,69 @@ impl ContextContributor for StatefulExtension {
             let Some(selected) = input.thread_store.get::<SelectedProject>() else {
                 return Vec::new();
             };
+            let thread_id = input.thread_id.to_string();
+            let run_activity = self.run_activity.for_thread(&thread_id);
+            let run_status = self
+                .run_world_state(selected.project_id(), &thread_id, &run_activity)
+                .await;
+            // Autonomous and Socratic runs own a goal, and unreadable run state is not
+            // evidence of a self-contained request: both keep continuity.
+            let scope = match run_status.as_ref() {
+                None => RequestScope::of_turn(input.turn_store),
+                Some(RunWorldStateStatus::Available { run, .. })
+                    if run.value.mode == codex_stateful_runtime::WorkflowMode::Collaborative =>
+                {
+                    RequestScope::of_turn(input.turn_store)
+                }
+                Some(_) => RequestScope::Continuity,
+            };
+            // Scope notes this window already holds, plus this step's, count against the
+            // same window budget as the conversation record.
+            let scope_note = request_scope::ScopeNotePlan::new(
+                input
+                    .previous_world_state
+                    .and_then(|previous| previous.get(request_scope::WORLD_STATE_ID)),
+                input.turn_id,
+                scope,
+                input
+                    .turn_store
+                    .get::<request_scope::RequestHead>()
+                    .as_deref(),
+            );
+            let checkout_report = checkout::CheckoutReportPlan::new(
+                input
+                    .previous_world_state
+                    .and_then(|previous| previous.get(checkout::WORLD_STATE_ID)),
+                input.turn_id,
+                input
+                    .turn_store
+                    .get::<checkout::CheckoutReport>()
+                    .as_deref(),
+            );
+            let mut continuity = None;
             let status = match self
                 .projects
                 .read_project(selected.project_id().to_string())
                 .await
             {
                 Ok(Some(project)) => {
+                    let runtime = match self.services.as_ref() {
+                        Some(services) => services.runtime().await.ok(),
+                        None => None,
+                    };
+                    if scope == RequestScope::Continuity {
+                        continuity = Some(
+                            continuity_source::gather_continuity(
+                                self.projects.as_ref(),
+                                runtime,
+                                &project.id,
+                                &thread_id,
+                            )
+                            .await,
+                        );
+                    }
                     let root_blackboard = self
-                        .root_blackboard(&project, input.turn_id, input.turn_store)
+                        .root_blackboard(&project, &thread_id, input.turn_id, input.turn_store)
                         .await;
                     let last_refresh = self.project_refresh_status(&project.id).await;
                     ProjectIntelligenceStatus::Available {
@@ -168,19 +258,41 @@ impl ContextContributor for StatefulExtension {
                     }
                 }
             };
-            let thread_id = input.thread_id.to_string();
+            // One aggregate budget for a fresh window: the conversation record gets what the
+            // project and run packets leave, within its own bounds.
+            let packet_bytes = world_state::START_MARKER.len()
+                + status.render().0.len()
+                + world_state::END_MARKER.len()
+                + run_status.as_ref().map_or(0, |run| {
+                    run_world_state::START_MARKER.len()
+                        + run.render().len()
+                        + run_world_state::END_MARKER.len()
+                })
+                + scope_note.window_bytes
+                + checkout_report.window_bytes;
+            let continuity_bytes = AGGREGATE_WINDOW_BYTES.saturating_sub(packet_bytes);
+            let available_project_id = match &status {
+                ProjectIntelligenceStatus::Available { project, .. } => Some(project.id.clone()),
+                ProjectIntelligenceStatus::Missing { .. }
+                | ProjectIntelligenceStatus::Unavailable { .. } => None,
+            };
             let mut sections = vec![project_world_state_section(
                 status,
                 Some((self.visible_root.clone(), thread_id.clone())),
             )];
-            if let Some(outcomes) = self.project_outcomes(selected.project_id()).await {
-                sections.push(project_outcomes_world_state_section(outcomes));
+            match (continuity, available_project_id) {
+                (Some(continuity), _) => sections.push(continuity_world_state_section(
+                    &continuity,
+                    continuity_bytes,
+                )),
+                (None, Some(project_id)) => {
+                    sections.push(continuity::deferred_continuity_section(&project_id));
+                }
+                (None, None) => {}
             }
-            let run_activity = self.run_activity.for_thread(&thread_id);
-            if let Some(run_status) = self
-                .run_world_state(selected.project_id(), &thread_id, &run_activity)
-                .await
-            {
+            sections.push(scope_note.section());
+            sections.push(checkout_report.section());
+            if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }
             sections
@@ -207,46 +319,10 @@ impl StatefulExtension {
         }
     }
 
-    async fn project_outcomes(&self, project_id: &str) -> Option<ProjectOutcomesStatus> {
-        const MAX_OUTCOMES: usize = 5;
-
-        let services = self.services.as_ref()?;
-        let store = match services.runtime().await {
-            Ok(store) => store,
-            Err(error) => {
-                tracing::warn!(%project_id, %error, "failed to open Stateful outcome store");
-                return Some(ProjectOutcomesStatus::Unavailable {
-                    project_id: project_id.to_string(),
-                });
-            }
-        };
-        let mut outcomes = match store
-            .recent_completed_outcomes(project_id, (MAX_OUTCOMES + 1) as u32)
-            .await
-        {
-            Ok(outcomes) => outcomes,
-            Err(error) => {
-                tracing::warn!(%project_id, %error, "failed to load recent Stateful outcomes");
-                return Some(ProjectOutcomesStatus::Unavailable {
-                    project_id: project_id.to_string(),
-                });
-            }
-        };
-        if outcomes.is_empty() {
-            return None;
-        }
-        let has_more = outcomes.len() > MAX_OUTCOMES;
-        outcomes.truncate(MAX_OUTCOMES);
-        Some(ProjectOutcomesStatus::Available {
-            project_id: project_id.to_string(),
-            outcomes,
-            has_more,
-        })
-    }
-
     async fn root_blackboard(
         &self,
         project: &codex_thread_store::StoredProject,
+        thread_id: &str,
         turn_id: &str,
         turn_store: &ExtensionData,
     ) -> RootBlackboardStatus {
@@ -279,17 +355,22 @@ impl StatefulExtension {
                             /*audit*/ None,
                             /*audit_recomputed*/ false,
                         );
-                        return RootBlackboardStatus::Available(ResolvedRootBlackboard {
-                            projection,
-                            evidence_routes: Default::default(),
-                            evidence_audit: Some(EvidenceAudit {
-                                project_id: project_id.to_string(),
-                                statuses: Default::default(),
-                                cache_key: None,
-                                hashed_bytes: 0,
-                                observed_sources: 0,
-                            }),
-                        });
+                        let scope_view =
+                            rule_scope::ScopeView::load(store, &projection, thread_id).await;
+                        return RootBlackboardStatus::Available(
+                            ResolvedRootBlackboard::new(
+                                projection,
+                                Default::default(),
+                                Some(EvidenceAudit {
+                                    project_id: project_id.to_string(),
+                                    statuses: Default::default(),
+                                    cache_key: None,
+                                    hashed_bytes: 0,
+                                    observed_sources: 0,
+                                }),
+                            )
+                            .with_scope_view(&scope_view),
+                        );
                     }
                 };
                 let mut evidence_routes = std::collections::HashMap::new();
@@ -396,11 +477,17 @@ impl StatefulExtension {
                     Some(&evidence_audit),
                     audit_recomputed,
                 );
-                RootBlackboardStatus::Available(ResolvedRootBlackboard {
-                    projection,
-                    evidence_routes,
-                    evidence_audit: Some((*evidence_audit).clone()),
-                })
+                let predecessors = root_predecessors(store, project_id, &projection).await;
+                let scope_view = rule_scope::ScopeView::load(store, &projection, thread_id).await;
+                RootBlackboardStatus::Available(
+                    ResolvedRootBlackboard::new(
+                        projection,
+                        evidence_routes,
+                        Some((*evidence_audit).clone()),
+                    )
+                    .with_scope_view(&scope_view)
+                    .with_predecessors(predecessors),
+                )
             }
             Err(error) => {
                 tracing::warn!(%project_id, %error, "failed to load Stateful root blackboard");
@@ -490,6 +577,30 @@ impl StatefulExtension {
     }
 }
 
+/// The newest entry each projected entry replaced; a failed lookup only loses the
+/// "replaces" decoration.
+async fn root_predecessors(
+    store: &codex_project_intelligence::BlackboardStore,
+    project_id: &str,
+    projection: &codex_project_intelligence::RootBlackboardProjection,
+) -> Vec<(String, codex_project_intelligence::BlackboardEntry)> {
+    let successor_ids = projection
+        .data
+        .iter()
+        .map(|hit| hit.entry.id.clone())
+        .collect::<Vec<_>>();
+    match store.newest_predecessors(project_id, &successor_ids).await {
+        Ok(predecessors) => predecessors
+            .into_iter()
+            .map(|(successor_id, predecessor)| (successor_id.to_string(), predecessor))
+            .collect(),
+        Err(error) => {
+            tracing::warn!(%project_id, %error, "failed to load replaced root entries");
+            Vec::new()
+        }
+    }
+}
+
 impl ToolContributor for StatefulExtension {
     fn tools(
         &self,
@@ -510,6 +621,7 @@ impl ToolContributor for StatefulExtension {
             self.projects.clone(),
             self.event_sink.clone(),
             self.visible_root.clone(),
+            self.user_messages.clone(),
         )
     }
 }
@@ -530,6 +642,7 @@ pub fn install<C: Sync>(
         attribution: attribution::StatefulAttributionTracker::default(),
         visible_root: visible_root::VisibleRootRegistry::default(),
         run_activity: checkpoint::RunActivityRegistry::default(),
+        user_messages: user_messages::UserMessageRegistry::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());
@@ -542,3 +655,7 @@ pub fn install<C: Sync>(
 #[cfg(test)]
 #[path = "freshness_tests.rs"]
 mod freshness_tests;
+
+#[cfg(test)]
+#[path = "packet_budget_tests.rs"]
+mod packet_budget_tests;

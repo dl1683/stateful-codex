@@ -1081,6 +1081,18 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
     },
 
+    /// Run `/memory` (list, page, add, forget or correct project memory) for the thread.
+    StatefulMemory {
+        thread_id: Option<ThreadId>,
+        args: String,
+    },
+
+    /// The result of a `/memory` command, shown only while its thread is the active one.
+    StatefulMemoryResult {
+        thread_id: ThreadId,
+        cell: Box<dyn HistoryCell>,
+    },
+
     McpLoginStarted {
         request_id: String,
         result: Result<McpServerOauthLoginResponse, String>,

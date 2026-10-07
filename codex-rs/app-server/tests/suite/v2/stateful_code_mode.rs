@@ -2,10 +2,13 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ContextMapRefreshParams;
+use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ObligationListParams;
 use codex_app_server_protocol::ObligationListResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::StatefulRunBudget;
 use codex_app_server_protocol::StatefulRunStartParams;
 use codex_app_server_protocol::StatefulRunStartResponse;
@@ -14,6 +17,7 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -114,15 +118,17 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
         .unwrap_or_default();
     let tool_name = |tool: &Value| tool["name"].as_str().unwrap_or_default().to_string();
     let top_level = tools.iter().map(tool_name).collect::<Vec<_>>();
+    // This test model has no tool search, so the deferred Stateful tools fall back to
+    // direct exposure instead of becoming unreachable.
     for direct in [
         "obligation_update",
         "stateful_run_update",
         "stateful_run_read",
-        "blackboard_record",
         "blackboard_record_batch",
         "blackboard_relate",
         "blackboard_update_batch",
         "steering_reconcile",
+        "conversation_read",
     ] {
         assert!(
             top_level.iter().any(|name| name == direct),
@@ -156,6 +162,121 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
             .map(|obligation| obligation.packet.learning.clone())
             .collect::<Vec<_>>(),
         vec![vec![quoted_learning.to_string()]]
+    );
+    Ok(())
+}
+
+/// Code mode receives evidence_read's typed result, so the line-numbered content a
+/// script prints must carry the same absolute labels and counters as a direct call.
+#[tokio::test]
+async fn code_mode_evidence_read_returns_line_numbered_source() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    let source = "\"\"\"Amount parsing used by the importers.\"\"\"\n\n\ndef parse_amount(text):\n    return int(text)\n";
+    std::fs::write(project_root.path().join("amounts.py"), source)?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .enable_feature(Feature::CodeModeOnly)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Code mode evidence".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: None,
+                idempotency_key: "code-mode-evidence-project".to_string(),
+            },
+        })
+        .await?;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: project.project.id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let thread = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project.project.id),
+            ..Default::default()
+        })
+        .await?;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_response_created("evidence-response"),
+                responses::ev_custom_tool_call(
+                    "evidence-exec",
+                    "exec",
+                    r#"
+const r = await tools.evidence_read({ relativePath: "amounts.py", lineRange: { start: 2, end: 4 } });
+text(JSON.stringify({
+  contentFormat: r.contentFormat,
+  content: r.content,
+  bytesReturned: r.bytesReturned,
+  firstLine: r.firstLine,
+  lastLine: r.lastLine,
+  lastLinePartial: r.lastLinePartial,
+  truncated: r.truncated,
+  hasReceipt: r.blackboardEvidence !== null,
+}));
+"#,
+                ),
+                responses::ev_completed("evidence-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done-message", "Done"),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.thread.id,
+            input: vec![UserInput::Text {
+                text: "Where is parse_amount defined?".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 2);
+    let output = requests[1].custom_tool_call_output("evidence-exec");
+    let printed = output["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item["text"].as_str())
+        .find_map(|text| serde_json::from_str::<Value>(text).ok())
+        .unwrap_or_else(|| panic!("the script should print the evidence result: {output}"));
+    assert_eq!(
+        printed,
+        json!({
+            "contentFormat": "lineNumbered",
+            "content": "L2: \nL3: \nL4: def parse_amount(text):\n",
+            "bytesReturned": "\n\ndef parse_amount(text):\n".len(),
+            "firstLine": 2,
+            "lastLine": 4,
+            "lastLinePartial": false,
+            "truncated": false,
+            "hasReceipt": true,
+        })
     );
     Ok(())
 }

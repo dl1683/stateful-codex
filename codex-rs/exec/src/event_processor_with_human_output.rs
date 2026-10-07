@@ -38,6 +38,8 @@ pub(crate) struct EventProcessorWithHumanOutput {
     final_message_rendered: bool,
     emit_final_message_on_shutdown: bool,
     stateful_attribution: StatefulAttributionAccumulator,
+    /// What project memory newly saved during this run, by kind, for the closing summary.
+    memory_saved: std::collections::BTreeMap<&'static str, usize>,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -63,6 +65,7 @@ impl EventProcessorWithHumanOutput {
             final_message_rendered: false,
             emit_final_message_on_shutdown: false,
             stateful_attribution: StatefulAttributionAccumulator::default(),
+            memory_saved: std::collections::BTreeMap::new(),
         }
     }
 
@@ -346,31 +349,77 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             ServerNotification::RawResponseCompleted(_)
             | ServerNotification::RawResponseItemCompleted(_)
             | ServerNotification::ContextCompacted(_) => CodexStatus::Running,
+            ServerNotification::StatefulKnowledgeGroupCaptured(notification) => {
+                let (receipts, summary) = crate::exec_events::group_receipts(&notification);
+                for receipt in receipts {
+                    if matches!(
+                        receipt.outcome,
+                        crate::exec_events::StatefulCaptureOutcome::Stored
+                    ) {
+                        *self
+                            .memory_saved
+                            .entry(receipt.category.label())
+                            .or_default() += 1;
+                    }
+                    eprintln!(
+                        "{} {}",
+                        "stateful:".style(self.cyan).style(self.bold),
+                        receipt.summary(),
+                    );
+                }
+                if let Some(summary) = summary {
+                    eprintln!(
+                        "{} {summary}",
+                        "stateful:".style(self.cyan).style(self.bold),
+                    );
+                }
+                CodexStatus::Running
+            }
+            ServerNotification::StatefulKnowledgeCaptured(notification) => {
+                let receipt = crate::exec_events::StatefulKnowledgeEvent::from(&notification);
+                if matches!(
+                    receipt.outcome,
+                    crate::exec_events::StatefulCaptureOutcome::Stored
+                ) {
+                    *self
+                        .memory_saved
+                        .entry(receipt.category.label())
+                        .or_default() += 1;
+                }
+                eprintln!(
+                    "{} {}",
+                    "stateful:".style(self.cyan).style(self.bold),
+                    receipt.summary(),
+                );
+                CodexStatus::Running
+            }
             ServerNotification::StatefulAttributionCompleted(notification) => {
                 let counters = &notification.counters;
-                let status = match notification.status {
-                    codex_app_server_protocol::StatefulAttributionStatus::Completed => "completed",
-                    codex_app_server_protocol::StatefulAttributionStatus::Failed => "failed",
-                    codex_app_server_protocol::StatefulAttributionStatus::Aborted => "aborted",
+                let lookups = counters.knowledge_query_calls
+                    + counters.route_query_calls
+                    + counters.evidence_read_calls
+                    + counters.steering_query_calls
+                    + counters.conversation_read_calls;
+                let plural = |count: u64, one: &str, many: &str| {
+                    format!("{count} {}", if count == 1 { one } else { many })
                 };
-                let writes = counters.blackboard_write_calls
-                    + counters.obligation_write_calls
-                    + counters.run_update_calls
-                    + counters.steering_write_calls;
+                // Plain words for a person; the measured counters stay in --json output.
+                let summary = match notification.status {
+                    codex_app_server_protocol::StatefulAttributionStatus::Completed => format!(
+                        "answered with {} from project memory and {}",
+                        plural(counters.root_entries_loaded, "item", "items"),
+                        plural(lookups, "memory lookup", "memory lookups"),
+                    ),
+                    codex_app_server_protocol::StatefulAttributionStatus::Failed => {
+                        "the turn failed; anything saved above was kept".to_string()
+                    }
+                    codex_app_server_protocol::StatefulAttributionStatus::Aborted => {
+                        "the turn was stopped".to_string()
+                    }
+                };
                 eprintln!(
-                    "{} {status} in {}ms · {} root entries · {}/{} routes current · {} stale · {} reads · {} writes · {} findings reused",
-                    "stateful:".style(self.cyan).style(self.bold),
-                    notification.duration_ms,
-                    counters.root_entries_loaded,
-                    counters.root_evidence_routes_current,
-                    counters.root_evidence_routes_checked,
-                    counters.root_evidence_routes_stale,
-                    counters.knowledge_query_calls
-                        + counters.route_query_calls
-                        + counters.evidence_read_calls
-                        + counters.steering_query_calls,
-                    writes,
-                    counters.material_findings_reused,
+                    "{} {summary}",
+                    "stateful:".style(self.cyan).style(self.bold)
                 );
                 self.stateful_attribution
                     .record_stateful_turn(&notification);
@@ -460,6 +509,20 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             && let Some(path) = self.last_message_path.as_deref()
         {
             handle_last_message(self.final_message.as_deref(), path);
+        }
+
+        // The run's memory changes, repeated after the work so they are not lost in it.
+        if !self.memory_saved.is_empty() {
+            let saved = self
+                .memory_saved
+                .iter()
+                .map(|(kind, count)| format!("{count} {kind}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!(
+                "{} saved {saved} this run",
+                "project memory:".style(self.cyan).style(self.bold),
+            );
         }
 
         let usage = self.stateful_attribution.usage();

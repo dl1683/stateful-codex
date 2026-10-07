@@ -117,10 +117,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringQueryTool {
         ToolName::plain(QUERY_TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::Deferred
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: QUERY_TOOL_NAME.to_string(),
-            description: "Read exact user steering and its acknowledgement/application state for the selected thread's active Stateful run. Current unresolved steering is already supplied in <stateful_run>; use this query only when that section says its view was omitted or shortened, or when historical reconciliation detail is needed.".to_string(),
+            description: "Read exact user steering and its reconciliation state for the active Stateful run. Unresolved steering is already in <stateful_run>; query only when that view is shortened or history is needed.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -328,15 +333,14 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringReconcileTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RECONCILE_TOOL_NAME.to_string(),
-            description: "Acknowledge exact user steering, atomically acknowledge and apply submitted steering through a guarded strategy revision, or reject it with a reason. Apply directly when the instruction can change strategy now; use acknowledge only when application must wait. Never silently drop steering.".to_string(),
+            description: "Apply user steering through a guarded strategy revision, acknowledge it when application must wait, or reject it with a reason. Never silently drop steering.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

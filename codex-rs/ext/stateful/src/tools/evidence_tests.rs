@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use codex_project_intelligence::EvidenceLineRange;
 use codex_project_intelligence::EvidenceReadLocator;
+use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
 use codex_project_intelligence::ProjectRelativePath;
@@ -9,9 +10,15 @@ use codex_state::SqliteConfig;
 use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
+use serde_json::json;
 use tempfile::TempDir;
 
+use super::EvidenceExtent;
 use super::EvidenceReadTool;
+use super::NumberedEvidence;
+use super::is_route_item_wrapper;
+use super::pack_evidence;
+use super::source_lines;
 use crate::services::ProjectIntelligenceServices;
 
 #[tokio::test]
@@ -70,4 +77,499 @@ async fn changed_source_is_incrementally_refreshed_and_reread_once() {
         .expect("reuse refreshed route");
     assert!(!source_refreshed);
     assert_eq!(unchanged.content, "Threshold: 60\n");
+}
+
+#[tokio::test]
+async fn failed_guarded_route_explains_recovery_without_refreshing() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    let source_path = project_root.path().join("policy.md");
+    std::fs::write(
+        &source_path,
+        "# Policy
+Threshold: 10
+",
+    )
+    .expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let context_map = services.context_map().await.expect("context map").clone();
+    ProjectIndexer::new(
+        services.hierarchy().await.expect("hierarchy").clone(),
+        context_map.clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![project_root.path().to_path_buf()],
+    })
+    .await
+    .expect("index source");
+    let relative_path = ProjectRelativePath::parse("policy.md").expect("relative path");
+    let hit = context_map
+        .file_hits_for_path("project-1", &relative_path)
+        .await
+        .expect("source lookup")
+        .into_iter()
+        .next()
+        .expect("indexed source");
+    let route = EvidenceRoute::from_hit(&hit).expect("file route");
+    std::fs::write(
+        &source_path,
+        "# Policy
+Threshold: 60
+",
+    )
+    .expect("change source");
+    let tool = EvidenceReadTool::new(
+        "project-1".to_string(),
+        "thread-1".to_string(),
+        services,
+        Arc::new(InMemoryThreadStore::default()),
+    );
+    let roots = vec![project_root.path().to_path_buf()];
+
+    let guarded = tool
+        .read_with_refresh(
+            roots.clone(),
+            EvidenceReadLocator::ContextMapRoute(route),
+            /*max_bytes*/ 1024,
+        )
+        .await
+        .map(|(read, _)| read.content)
+        .map_err(|error| error.to_string());
+    let (path_read, source_refreshed) = tool
+        .read_with_refresh(
+            roots,
+            EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path,
+                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
+            },
+            /*max_bytes*/ 1024,
+        )
+        .await
+        .expect("path read refreshes the changed file");
+
+    assert_eq!(
+        (guarded, path_read.content, source_refreshed),
+        (
+            Err("source bytes read do not match the indexed fingerprint; the source changed after indexing. Refresh the affected file; query again if you need the corresponding region.".to_string()),
+            "Threshold: 60
+".to_string(),
+            true,
+        )
+    );
+}
+
+/// A response shaped like the tool's own: labelled content, counters, and a
+/// receipt-sized field when the evidence is receipt-eligible.
+fn response(evidence: &NumberedEvidence) -> serde_json::Value {
+    json!({
+        "content": evidence.content,
+        "bytesReturned": evidence.source_bytes,
+        "firstLine": evidence.first_line,
+        "lastLine": evidence.last_line,
+        "lastLinePartial": evidence.last_line_partial,
+        "truncated": evidence.extent == EvidenceExtent::Truncated,
+        "blackboardEvidence": evidence.receipt_range().map(|_| "r".repeat(78)),
+    })
+}
+
+fn response_bytes(evidence: &NumberedEvidence) -> usize {
+    response(evidence).to_string().len()
+}
+
+/// Packs `content` as the tool does into `budget` serialized response bytes.
+fn pack(
+    content: &str,
+    first_line: Option<u64>,
+    read_extent: EvidenceExtent,
+    budget: usize,
+) -> Option<NumberedEvidence> {
+    let lines = source_lines(content, first_line, read_extent);
+    pack_evidence(&lines, read_extent, |evidence| {
+        response_bytes(evidence) <= budget
+    })
+}
+
+fn evidence(
+    content: &str,
+    source_bytes: usize,
+    lines: Option<(u64, u64)>,
+    last_line_partial: bool,
+    extent: EvidenceExtent,
+) -> NumberedEvidence {
+    NumberedEvidence {
+        content: content.to_string(),
+        source_bytes,
+        first_line: lines.map(|(first, _)| first),
+        last_line: lines.map(|(_, last)| last),
+        last_line_partial,
+        extent,
+    }
+}
+
+#[test]
+fn complete_read_numbers_every_line_and_preserves_blank_lines() {
+    let source = "\"\"\"Amount parsing used by the importers.\"\"\"\n\n\ndef parse_amount(text):\n";
+    let packed = pack(
+        source,
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        /*budget*/ 9_000,
+    )
+    .expect("fits");
+
+    assert_eq!(
+        packed,
+        evidence(
+            "L1: \"\"\"Amount parsing used by the importers.\"\"\"\nL2: \nL3: \nL4: def parse_amount(text):\n",
+            source.len(),
+            /*lines*/ Some((1, 4)),
+            /*last_line_partial*/ false,
+            EvidenceExtent::Complete,
+        )
+    );
+    assert_eq!(
+        packed.receipt_range(),
+        Some(EvidenceLineRange { start: 1, end: 4 })
+    );
+}
+
+#[test]
+fn region_reads_keep_absolute_line_numbers() {
+    let packed = pack(
+        "line 65\nline 66\n",
+        /*first_line*/ Some(65),
+        EvidenceExtent::Complete,
+        /*budget*/ 9_000,
+    );
+
+    assert_eq!(
+        packed,
+        Some(evidence(
+            "L65: line 65\nL66: line 66\n",
+            /*source_bytes*/ 16,
+            /*lines*/ Some((65, 66)),
+            /*last_line_partial*/ false,
+            EvidenceExtent::Complete,
+        ))
+    );
+}
+
+#[test]
+fn crlf_and_missing_final_newline_do_not_invent_lines() {
+    let packed = pack(
+        "first\r\nlast",
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        /*budget*/ 9_000,
+    );
+
+    assert_eq!(
+        packed,
+        Some(evidence(
+            "L1: first\r\nL2: last",
+            /*source_bytes*/ 11,
+            /*lines*/ Some((1, 2)),
+            /*last_line_partial*/ false,
+            EvidenceExtent::Complete,
+        ))
+    );
+}
+
+#[test]
+fn empty_read_has_no_lines_and_no_receipt() {
+    let packed = pack(
+        "",
+        /*first_line*/ None,
+        EvidenceExtent::Complete,
+        /*budget*/ 9_000,
+    )
+    .expect("fits");
+
+    assert_eq!(
+        packed,
+        evidence(
+            "",
+            /*source_bytes*/ 0,
+            /*lines*/ None,
+            /*last_line_partial*/ false,
+            EvidenceExtent::Complete,
+        )
+    );
+    assert_eq!(packed.receipt_range(), None);
+}
+
+#[test]
+fn source_byte_truncation_cuts_between_lines() {
+    let packed = pack(
+        "one\ntwo\nthr",
+        /*first_line*/ Some(3),
+        EvidenceExtent::Truncated,
+        /*budget*/ 9_000,
+    )
+    .expect("fits");
+
+    assert_eq!(
+        packed,
+        evidence(
+            "L3: one\nL4: two\n",
+            /*source_bytes*/ 8,
+            /*lines*/ Some((3, 4)),
+            /*last_line_partial*/ false,
+            EvidenceExtent::Truncated,
+        )
+    );
+    assert_eq!(packed.receipt_range(), None);
+}
+
+#[test]
+fn an_oversized_line_returns_a_marked_partial_prefix() {
+    let packed = pack(
+        "abcdef",
+        /*first_line*/ Some(7),
+        EvidenceExtent::Truncated,
+        /*budget*/ 9_000,
+    );
+
+    assert_eq!(
+        packed,
+        Some(evidence(
+            "L7: abcdef",
+            /*source_bytes*/ 6,
+            /*lines*/ Some((7, 7)),
+            /*last_line_partial*/ true,
+            EvidenceExtent::Truncated,
+        ))
+    );
+}
+
+#[test]
+fn response_budget_truncation_keeps_counters_truthful_and_withholds_receipt() {
+    let expected = evidence(
+        "L1: alpha\nL2: beta\n",
+        /*source_bytes*/ 11,
+        /*lines*/ Some((1, 2)),
+        /*last_line_partial*/ false,
+        EvidenceExtent::Truncated,
+    );
+
+    let packed = pack(
+        "alpha\nbeta\ngamma\ndelta\n",
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        response_bytes(&expected),
+    )
+    .expect("fits");
+
+    assert_eq!(packed, expected);
+    assert_eq!(packed.receipt_range(), None);
+}
+
+#[test]
+fn escape_heavy_oversized_line_is_cut_on_a_character_boundary() {
+    let source = format!("{}\nnext\n", "\"\\é".repeat(400));
+    let budget = 600;
+
+    let packed = pack(
+        &source,
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        budget,
+    )
+    .expect("fits");
+
+    assert!(response_bytes(&packed) <= budget);
+    let prefix = packed
+        .content
+        .strip_prefix("L1: ")
+        .expect("labelled first line");
+    assert!(source.starts_with(prefix));
+    assert!(!prefix.is_empty());
+    assert_eq!(
+        packed,
+        evidence(
+            &packed.content,
+            prefix.len(),
+            /*lines*/ Some((1, 1)),
+            /*last_line_partial*/ true,
+            EvidenceExtent::Truncated,
+        )
+    );
+}
+
+#[test]
+fn a_short_partial_line_is_returned_when_empty_metadata_would_not_fit() {
+    let partial = evidence(
+        "L1: a",
+        /*source_bytes*/ 1,
+        /*lines*/ Some((1, 1)),
+        /*last_line_partial*/ true,
+        EvidenceExtent::Truncated,
+    );
+    let empty = evidence(
+        "",
+        /*source_bytes*/ 0,
+        /*lines*/ None,
+        /*last_line_partial*/ false,
+        EvidenceExtent::Truncated,
+    );
+    let budget = response_bytes(&partial);
+    assert!(response_bytes(&empty) > budget);
+
+    let packed = pack(
+        "ab\n",
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        budget,
+    );
+
+    assert_eq!(packed, Some(partial));
+}
+
+#[test]
+fn metadata_that_cannot_fit_returns_nothing() {
+    assert_eq!(
+        pack(
+            "one\n",
+            /*first_line*/ Some(1),
+            EvidenceExtent::Complete,
+            /*budget*/ 10,
+        ),
+        None
+    );
+}
+
+#[test]
+fn a_cut_complete_line_never_returns_its_last_character() {
+    let partial = evidence(
+        "L1: ab",
+        /*source_bytes*/ 2,
+        /*lines*/ Some((1, 1)),
+        /*last_line_partial*/ true,
+        EvidenceExtent::Truncated,
+    );
+    let complete = evidence(
+        "L1: abé",
+        /*source_bytes*/ 4,
+        /*lines*/ Some((1, 1)),
+        /*last_line_partial*/ false,
+        EvidenceExtent::Complete,
+    );
+    assert!(response_bytes(&complete) > response_bytes(&partial) + 2);
+
+    let packed = pack(
+        "abé",
+        /*first_line*/ Some(1),
+        EvidenceExtent::Complete,
+        response_bytes(&complete) - 1,
+    );
+
+    assert_eq!(packed, Some(partial));
+}
+
+#[test]
+fn only_route_item_wrappers_get_the_wrapper_diagnostic() {
+    let route =
+        json!({"contextMapEntryId": "map-1", "sourceFingerprint": "sha256:00", "lineRange": null});
+    let cases = [
+        (
+            "named wrapper",
+            json!({"name": "cli", "evidenceRoute": route}),
+        ),
+        (
+            "whole item",
+            json!({"headline": "CLI", "source": {"relativePath": "cli.py"}, "evidenceRoute": route}),
+        ),
+        (
+            "nested item",
+            json!({"evidenceRoute": {"headline": "CLI", "evidenceRoute": route}}),
+        ),
+        (
+            "nested item, outer extra",
+            json!({"evidenceRoute": {"headline": "CLI", "evidenceRoute": route}, "extra": 1}),
+        ),
+        (
+            "nested item, inner extra",
+            json!({"evidenceRoute": {"extra": 1, "evidenceRoute": route}}),
+        ),
+        (
+            "wrapper, route extra",
+            json!({"name": "cli", "evidenceRoute": {"contextMapEntryId": "map-1", "sourceFingerprint": "sha256:00", "lineRange": null, "extra": 1}}),
+        ),
+        (
+            "nested item, range extra",
+            json!({"evidenceRoute": {"headline": "CLI", "evidenceRoute": {"contextMapEntryId": "map-1", "sourceFingerprint": "sha256:00", "lineRange": {"start": 1, "end": 2, "extra": 1}}}}),
+        ),
+        ("route only", json!({"evidenceRoute": route})),
+        (
+            "unrelated field",
+            json!({"evidenceRoute": route, "extra": 1}),
+        ),
+        (
+            "mixed fields",
+            json!({"name": "cli", "evidenceRoute": route, "extra": 1}),
+        ),
+        (
+            "path read",
+            json!({"relativePath": "cli.py", "name": "cli"}),
+        ),
+    ];
+    let observed = cases
+        .iter()
+        .map(|(case, arguments)| (*case, is_route_item_wrapper(&arguments.to_string())))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        observed,
+        vec![
+            ("named wrapper", true),
+            ("whole item", true),
+            ("nested item", true),
+            ("nested item, outer extra", false),
+            ("nested item, inner extra", false),
+            ("wrapper, route extra", false),
+            ("nested item, range extra", false),
+            ("route only", false),
+            ("unrelated field", false),
+            ("mixed fields", false),
+            ("path read", false),
+        ]
+    );
+}
+
+/// A project whose source map was never built is indexed on demand by the first read.
+#[tokio::test]
+async fn a_never_indexed_project_is_indexed_on_demand() {
+    let state_home = TempDir::new().expect("temporary state home");
+    let project_root = TempDir::new().expect("temporary project root");
+    std::fs::write(
+        project_root.path().join("proposal.md"),
+        "# Proposal\nCost — low\n",
+    )
+    .expect("write source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let tool = EvidenceReadTool::new(
+        "project-1".to_string(),
+        "thread-1".to_string(),
+        services,
+        Arc::new(InMemoryThreadStore::default()),
+    );
+    let (read, source_refreshed) = tool
+        .read_with_refresh(
+            vec![project_root.path().to_path_buf()],
+            EvidenceReadLocator::Source {
+                project_root: None,
+                relative_path: ProjectRelativePath::parse("proposal.md").expect("path"),
+                line_range: Some(EvidenceLineRange { start: 2, end: 2 }),
+            },
+            1024,
+        )
+        .await
+        .expect("indexed on demand and read");
+    assert_eq!(
+        (read.content.as_str(), source_refreshed),
+        ("Cost — low\n", true)
+    );
 }

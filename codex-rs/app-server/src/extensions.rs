@@ -46,6 +46,7 @@ use codex_stateful_extension::AutonomousContinuationOutcome;
 use codex_stateful_extension::AutonomousContinuationRequest;
 use codex_stateful_extension::AutonomousContinuationSink;
 use codex_stateful_extension::BlackboardEntityKind;
+use codex_stateful_extension::RunAdmissionFence;
 use codex_stateful_extension::StatefulEvent;
 use codex_stateful_extension::StatefulEventSink;
 use codex_stateful_runtime::NewStatefulTurnMeasurement;
@@ -75,6 +76,8 @@ pub(crate) struct ThreadExtensionDependencies {
     pub(crate) queue_service: Option<Arc<QueuedItemService>>,
     pub(crate) turn_start_admission: Option<Arc<dyn TurnStartAdmission>>,
     pub(crate) thread_store: Arc<dyn ThreadStore>,
+    /// Shared with `statefulRun/cancel` so no continuation starts after a cancel.
+    pub(crate) run_admission: RunAdmissionFence,
 }
 
 pub(crate) fn thread_extensions(
@@ -95,6 +98,7 @@ pub(crate) fn thread_extensions(
         queue_service,
         turn_start_admission,
         thread_store,
+        run_admission,
     } = dependencies;
     let stateful_sqlite = state_db.as_ref().map(|state_db| state_db.sqlite().clone());
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
@@ -138,6 +142,7 @@ pub(crate) fn thread_extensions(
         Some(AutonomousContinuation::new(
             format!("app-server-{}", ThreadId::new()),
             Arc::new(AppServerAutonomousContinuationSink { thread_manager }),
+            run_admission,
         )),
     );
     codex_web_search_extension::install(&mut builder, auth_manager.clone());
@@ -311,6 +316,60 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                 steering_id,
                 revision,
             }),
+            StatefulEvent::KnowledgeCaptured {
+                project_id,
+                thread_id,
+                turn_id,
+                entry_id,
+                revision,
+                category,
+                outcome,
+                text,
+            } => ServerNotification::StatefulKnowledgeCaptured(
+                codex_app_server_protocol::StatefulKnowledgeCapturedNotification {
+                    project_id,
+                    thread_id,
+                    turn_id,
+                    entry_id,
+                    revision,
+                    category: api_category(category),
+                    outcome: api_outcome(outcome),
+                    text,
+                },
+            ),
+            StatefulEvent::KnowledgeGroupCaptured(receipt) => {
+                ServerNotification::StatefulKnowledgeGroupCaptured(
+                    codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification {
+                        project_id: receipt.project_id,
+                        thread_id: receipt.thread_id,
+                        turn_id: receipt.turn_id,
+                        group_id: receipt.group_id,
+                        category: api_category(receipt.category),
+                        declared_count: receipt.declared_count,
+                        recognized: receipt.recognized,
+                        saved: receipt.saved,
+                        already_present: receipt.already_present,
+                        pending: receipt.pending,
+                        omitted: receipt.omitted,
+                        failed: receipt.failed,
+                        items: receipt
+                            .items
+                            .into_iter()
+                            .map(
+                                |item| codex_app_server_protocol::StatefulKnowledgeGroupItem {
+                                    entry_id: item.entry_id,
+                                    revision: item.revision,
+                                    category: api_category(item.category),
+                                    outcome: api_outcome(item.outcome),
+                                    text: item.text,
+                                },
+                            )
+                            .collect(),
+                        omitted_items: receipt.omitted_items,
+                        scope_title: receipt.scope_title,
+                    },
+                )
+            }
             StatefulEvent::AttributionCompleted { summary } => {
                 let notification = StatefulAttributionCompletedNotification {
                     project_id: summary.project_id,
@@ -348,6 +407,7 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                         route_query_calls: summary.counters.route_query_calls,
                         evidence_read_calls: summary.counters.evidence_read_calls,
                         steering_query_calls: summary.counters.steering_query_calls,
+                        conversation_read_calls: summary.counters.conversation_read_calls,
                         blackboard_write_calls: summary.counters.blackboard_write_calls,
                         context_refresh_calls: summary.counters.context_refresh_calls,
                         obligation_write_calls: summary.counters.obligation_write_calls,
@@ -397,6 +457,7 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                         route_query_calls: notification.counters.route_query_calls,
                         evidence_read_calls: notification.counters.evidence_read_calls,
                         steering_query_calls: notification.counters.steering_query_calls,
+                        conversation_read_calls: notification.counters.conversation_read_calls,
                         blackboard_write_calls: notification.counters.blackboard_write_calls,
                         context_refresh_calls: notification.counters.context_refresh_calls,
                         obligation_write_calls: notification.counters.obligation_write_calls,
@@ -629,6 +690,32 @@ impl ExtensionEventSink for AppServerExtensionEventSink {
             }
             send_thread_warning(&outgoing, &thread_state_manager, thread_id, message).await;
         });
+    }
+}
+
+fn api_category(
+    category: codex_stateful_extension::KnowledgeCategory,
+) -> codex_app_server_protocol::StatefulKnowledgeCategory {
+    use codex_app_server_protocol::StatefulKnowledgeCategory as Api;
+    use codex_stateful_extension::KnowledgeCategory;
+    match category {
+        KnowledgeCategory::Rule => Api::Rule,
+        KnowledgeCategory::PendingRule => Api::PendingRule,
+        KnowledgeCategory::Decision => Api::Decision,
+        KnowledgeCategory::Recipe => Api::Recipe,
+        KnowledgeCategory::Finding => Api::Finding,
+        KnowledgeCategory::Background => Api::Background,
+    }
+}
+
+fn api_outcome(
+    outcome: codex_stateful_extension::CaptureOutcome,
+) -> codex_app_server_protocol::StatefulCaptureOutcome {
+    use codex_app_server_protocol::StatefulCaptureOutcome as Api;
+    use codex_stateful_extension::CaptureOutcome;
+    match outcome {
+        CaptureOutcome::Stored => Api::Stored,
+        CaptureOutcome::AlreadyStored => Api::AlreadyStored,
     }
 }
 

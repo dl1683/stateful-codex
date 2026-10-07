@@ -59,10 +59,13 @@ fn allowed_while_pending(tool_name: &codex_extension_api::ToolName) -> bool {
                 | "request_user_input_async"
                 | "send_user_message_async"
                 | "blackboard_query"
+                | "memory_read"
                 | "context_map_query"
                 | "obligation_update"
                 | "stateful_run_read"
                 | "steering_query"
                 | "steering_reconcile"
+                // Discovery only: tools it loads are still checked here before they run.
+                | "tool_search"
         )
 }

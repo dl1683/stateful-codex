@@ -156,6 +156,9 @@ pub struct ProjectMoveResponse {}
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+/// Deletion is currently disabled and always fails with an invalid-request error
+/// without deleting anything: it requires a user-owned confirmation bound to the
+/// project and its revision, which the server does not provide yet.
 pub struct ProjectDeleteParams {
     pub project_id: String,
 }

@@ -56,6 +56,12 @@ pub struct RetainedUserMessage {
     /// Original assistant phase; absent in legacy checkpoints and non-message evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<codex_protocol::models::MessagePhase>,
+    /// Thread that delivered the original; absent in legacy records and unknown provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_thread_id: Option<codex_protocol::ThreadId>,
+    /// Host resolution of an assistant delivery; absent in legacy and user records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<crate::AssistantDeliveryClassification>,
 }
 
 /// Local facts use their acceptance counter; copied parent instructions use prefix order.

@@ -491,6 +491,7 @@ enabled = false
                     queue_service: None,
                     turn_start_admission: None,
                     thread_store: Arc::clone(&thread_store),
+                    run_admission: Default::default(),
                 }),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     good_config.codex_home.clone(),

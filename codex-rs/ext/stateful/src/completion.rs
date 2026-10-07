@@ -25,6 +25,9 @@ const MAX_FINAL_CHECKLIST_ITEMS: usize = 16;
 const MAX_FINAL_CHECKLIST_ITEM_BYTES: usize = 640;
 pub(crate) const MAX_MATERIAL_ROOT_FINDINGS: usize = 8;
 pub(crate) const MAX_MATERIAL_HISTORICAL_FINDINGS: usize = 8;
+/// Shared completion-disposition rule, rendered verbatim by the run update tool
+/// and the run world-state packet so the model never sees divergent guidance.
+pub(crate) const REUSABLE_LEARNING_RULE: &str = "Choose the completion disposition by what the run learned, not by whether files changed or the answer is short. Use noReusableLearning for an answer drawn from adequate existing project knowledge, a narrow source citation that adds no reusable understanding, or a trivial answer or cheap-to-recompute inventory. Reading sources can produce reusable learning even when no source files change: when an orientation establishes project purpose, module responsibilities and relationships (not a directory listing), or how to run the tests (stating whether that procedure is documented, executed successfully, or blocked), record the findings worth reusing and complete with durableLearning. Do not create duplicate entries or persist routine inventories merely to qualify for completion.";
 
 pub(crate) struct HistoricalFindingReference {
     pub(crate) entry_id: String,
@@ -39,6 +42,8 @@ pub(crate) struct CompletionRecord {
 
 pub(crate) struct CompletionRequest<'a> {
     pub(crate) project_id: &'a str,
+    /// The thread completing; scoped rules of other investigations are not in its root.
+    pub(crate) thread_id: &'a str,
     pub(crate) project_roots: &'a [PathBuf],
     pub(crate) result: &'a str,
     pub(crate) packet: &'a ObligationPacket,
@@ -69,6 +74,7 @@ pub(crate) async fn prepare_completion(
 ) -> Result<CompletionRecord, FunctionCallError> {
     let CompletionRequest {
         project_id,
+        thread_id,
         project_roots,
         result,
         packet,
@@ -108,6 +114,7 @@ pub(crate) async fn prepare_completion(
 
     let mut material = material_root_checklist(
         project_id,
+        thread_id,
         services,
         project_roots,
         root_revision,
@@ -171,22 +178,28 @@ pub(crate) async fn prepare_completion(
 
 async fn material_root_checklist(
     project_id: &str,
+    thread_id: &str,
     services: &ProjectIntelligenceServices,
     project_roots: &[PathBuf],
     expected_root_revision: u64,
     requested_references: &[String],
     visible_root: Option<&VisibleRoot>,
 ) -> Result<MaterialChecklist, FunctionCallError> {
-    let projection = services
-        .blackboard()
-        .await
-        .map_err(respond)?
+    let store = services.blackboard().await.map_err(respond)?;
+    let mut projection = store
         .root_projection(RootBlackboardQuery {
             project_id: project_id.to_string(),
             max_entries: 256,
         })
         .await
         .map_err(respond)?;
+    // Aliases are positions in the projection the packet showed, which never holds rules
+    // that are not in the user's own words, nor rules of an investigation this thread is not
+    // part of.
+    crate::root_blackboard::retain_applicable_rules(&mut projection);
+    crate::rule_scope::ScopeView::load(store, &projection, thread_id)
+        .await
+        .retain_applicable(&mut projection);
     if projection.revision != expected_root_revision {
         return Err(respond(format!(
             "root blackboard changed from revision {expected_root_revision} to {}; review the current root aliases before completing",

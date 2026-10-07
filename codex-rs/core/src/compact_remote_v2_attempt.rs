@@ -9,6 +9,7 @@ use crate::Prompt;
 use crate::client::ModelClientSession;
 use crate::compact::CompactionAnalyticsDetails;
 use crate::compact_remote_history::trim_function_call_history_to_fit_context_window;
+use crate::context_manager::ConversationPacketUpdate;
 use crate::responses_metadata::CompactionTurnMetadata;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -21,6 +22,7 @@ use tracing::info;
 
 pub(super) struct RemoteCompactV2Attempt {
     pub(super) input_goal_ids: HashSet<ResponseItemId>,
+    pub(super) conversation_packet: ConversationPacketUpdate,
     pub(super) trace_input_history: Option<Vec<ResponseItem>>,
     pub(super) prompt_input: Vec<ResponseItem>,
     pub(super) prompt_input_metadata: Vec<Option<CodexHarnessMetadata>>,
@@ -41,6 +43,8 @@ pub(super) async fn run_remote_compact_v2_attempt(
 ) -> CodexResult<RemoteCompactV2Attempt> {
     let turn_context = &step_context.turn;
     let mut history = sess.clone_history().await;
+    // Capture original deliveries before trimming, normalization or the trigger alter the input.
+    let conversation_packet = history.capture_conversation_packet(sess.thread_id());
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
     let base_instructions = sess.get_prompt_base_instructions().await;
     let (rewritten_outputs, estimated_deleted_tokens) =
@@ -128,6 +132,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     prompt_input.pop();
     Ok(RemoteCompactV2Attempt {
         input_goal_ids,
+        conversation_packet,
         trace_input_history,
         prompt_input,
         prompt_input_metadata,

@@ -10,7 +10,9 @@ use std::time::Instant;
 
 use codex_diagnostics::Gauge;
 use codex_extension_api::ThreadIdleCause;
+use futures::FutureExt;
 use futures::future::BoxFuture;
+use std::panic::AssertUnwindSafe;
 use tokio::select;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
@@ -18,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
 use tracing::Span;
+use tracing::error;
 use tracing::field;
 use tracing::info_span;
 use tracing::trace;
@@ -59,6 +62,7 @@ use codex_protocol::protocol::WarningEvent;
 use codex_thread_store::PersistContext;
 
 use codex_features::Feature;
+use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
 pub(crate) use compact::CompactTask;
@@ -324,9 +328,26 @@ impl Session {
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
             .await;
+        let user_input = input
+            .iter()
+            .filter_map(|item| match item {
+                TurnInput::UserInput {
+                    content, metadata, ..
+                } if metadata.origin == codex_history::UserInputOrigin::User => {
+                    Some(content.as_slice())
+                }
+                TurnInput::UserInput { .. }
+                | TurnInput::FunctionCallOutput(_)
+                | TurnInput::ResponseItem(_)
+                | TurnInput::InterAgentCommunication(_) => None,
+            })
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
         self.emit_turn_start_lifecycle(
             turn_context.as_ref(),
             Some(&token_usage_at_turn_start),
+            &user_input,
             codex_extension_api::TurnStartPhase::BeforeTaskRegistration,
         )
         .await;
@@ -365,15 +386,27 @@ impl Session {
         let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
         let task_future = async move {
             let ctx_for_finish = Arc::clone(&ctx);
-            let task_result = task_for_run
-                .run(
-                    Arc::clone(&session),
-                    ctx,
-                    task_input,
-                    task_cancellation_token.child_token(),
-                )
-                .instrument(trace_span!("session_task.run"))
-                .await;
+            let run_session = Arc::clone(&session);
+            let run_cancellation_token = task_cancellation_token.child_token();
+            // A panicking task must still end its turn: an escaped panic would skip
+            // `on_task_finished` and leave the turn (and any bound run) active forever.
+            let task_result = AssertUnwindSafe(async move {
+                task_for_run
+                    .run(run_session, ctx, task_input, run_cancellation_token)
+                    .instrument(trace_span!("session_task.run"))
+                    .await
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|payload| {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|message| (*message).to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic payload".to_string());
+                error!(%message, "turn task panicked; ending the turn");
+                Err(CodexErr::new(CodexErrorDetails::TaskPanicked(message)))
+            });
             let sess = Arc::clone(&session);
             // Private reviewers save their transcript together with the terminal event.
             // Errors and cancellation retain their existing save path.
@@ -650,6 +683,10 @@ impl Session {
         let turn_state = {
             let mut active = self.active_turn.lock().await;
             active.as_mut().and_then(|active_turn| {
+                // A finisher delayed by hooks must never take a newer turn's task.
+                if active_turn.task.as_ref()?.turn_context.sub_id != turn_context.sub_id {
+                    return None;
+                }
                 let task = active_turn.task.take()?;
                 task.handle.detach();
                 Some(Arc::clone(&active_turn.turn_state))

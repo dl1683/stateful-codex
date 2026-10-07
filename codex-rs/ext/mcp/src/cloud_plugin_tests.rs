@@ -155,6 +155,7 @@ async fn disabling_plugins_clears_cloud_catalog_and_skips_discovery() -> anyhow:
                     turn_id,
                     collaboration_mode: &mode,
                     token_usage_at_turn_start: None,
+                    user_input: &[],
                     session_store: &session,
                     thread_store: &thread,
                     turn_store: &ExtensionData::new(turn_id),

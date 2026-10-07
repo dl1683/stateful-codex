@@ -301,146 +301,138 @@ async fn model_cannot_complete_with_reusable_learning_absent_from_the_blackboard
     Ok(())
 }
 
-#[tokio::test]
-async fn model_completes_a_lookup_without_durable_learning_ceremony() -> Result<()> {
-    let responses_server = responses::start_mock_server().await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&responses_server.uri())
-        .enable_feature(Feature::Sqlite)
-        .write(codex_home.path())?;
-    let mut server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let project: ProjectCreateResponse = server
-        .request(|request_id| ClientRequest::ProjectCreate {
-            request_id,
-            params: ProjectCreateParams {
-                name: "Proportional completion".to_string(),
-                roots: Vec::new(),
-                metadata: None,
-                idempotency_key: "proportional-completion-project".to_string(),
-            },
-        })
-        .await?;
-    let thread = server
-        .start_thread(ThreadStartParams {
-            project_id: Some(project.project.id.clone()),
-            ..Default::default()
-        })
-        .await?;
-    let started: StatefulRunStartResponse = server
-        .request(|request_id| ClientRequest::StatefulRunStart {
-            request_id,
-            params: StatefulRunStartParams {
-                project_id: project.project.id,
-                thread_id: thread.thread.id.clone(),
-                goal: "Answer a lookup.".to_string(),
-                mode: StatefulWorkflowMode::Collaborative,
-                budget: StatefulRunBudget {
-                    max_continuations: 1,
-                    max_elapsed_seconds: 3_600,
-                },
-                idempotency_key: "proportional-completion-run".to_string(),
-            },
-        })
-        .await?;
+/// Runs one lookup turn in which the model makes the single `stateful_run_update` call
+/// built by `completion`, then answers. Returns the model requests' count, the tool output,
+/// the run status and result, and the number of obligations the run recorded.
+async fn lookup_turn_with_completion(
+    name: &str,
+    completion: impl FnOnce(u64) -> Value,
+) -> Result<(usize, String, StatefulRunStatus, Option<String>, usize)> {
+    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+        indexed_project(name).await?;
+    let (thread_id, run_id, run_revision) =
+        start_lookup_run(&mut server, &project_id, &format!("{name}-run")).await?;
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
             responses::sse(vec![
                 responses::ev_function_call(
-                    "mixed-disposition",
-                    "stateful_run_update",
-                    &json!({
-                        "expectedRevision": started.run.revision,
-                        "status": "completed",
-                        "completionDisposition": "noReusableLearning",
-                        "result": "The release gate is build C7-42.",
-                        "finalObligation": {"learning": ["The release gate is build C7-42."]}
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("mixed-disposition-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_function_call(
                     "lookup-complete",
                     "stateful_run_update",
-                    &json!({
-                        "expectedRevision": started.run.revision,
-                        "status": "completed",
-                        "completionDisposition": "noReusableLearning",
-                        "result": "The release gate is build C7-42."
-                    })
-                    .to_string(),
+                    &completion(run_revision).to_string(),
                 ),
                 responses::ev_completed("lookup-complete-response"),
             ]),
             responses::sse(vec![
-                responses::ev_assistant_message(
-                    "lookup-answer",
-                    "The release gate is build C7-42.",
-                ),
-                responses::ev_completed("lookup-answer-response"),
+                responses::ev_assistant_message("done", "The release gate is build C7-42."),
+                responses::ev_completed("done-response"),
             ]),
         ],
     )
     .await;
 
-    server
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.thread.id,
-            input: vec![UserInput::Text {
-                text: "What is the release gate?".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
+    run_lookup_turn(&mut server, &thread_id).await?;
 
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 3);
-    assert!(
-        requests[1]
-            .function_call_output("mixed-disposition")
-            .to_string()
-            .contains("noReusableLearning completes with the result only")
-    );
+    let output = requests
+        .last()
+        .and_then(|request| request.function_call_output_text("lookup-complete"))
+        .expect("completion output should be text");
     let read: StatefulRunReadResponse = server
         .request(|request_id| ClientRequest::StatefulRunRead {
             request_id,
             params: StatefulRunReadParams {
-                run_id: Some(started.run.id.clone()),
+                run_id: Some(run_id.clone()),
                 thread_id: None,
             },
         })
         .await?;
     let run = read.run.expect("run remains readable");
-    assert_eq!(
-        (run.status, run.result),
-        (
-            StatefulRunStatus::Completed,
-            Some("The release gate is build C7-42.".to_string())
-        )
-    );
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,
             params: ObligationListParams {
-                run_id: started.run.id,
+                run_id,
                 cursor: None,
                 limit: Some(10),
             },
         })
         .await?;
-    assert_eq!(obligations.data, Vec::new());
+    Ok((
+        requests.len(),
+        output,
+        run.status,
+        run.result,
+        obligations.data.len(),
+    ))
+}
+
+/// The documented lookup form completes on its first call: one tool request, then the
+/// final answer, with no repair round and no obligation.
+#[tokio::test]
+async fn model_completes_a_lookup_in_one_call_without_durable_learning_ceremony() -> Result<()> {
+    let (requests, output, status, result, obligations) =
+        lookup_turn_with_completion("lookup-one-call", |expected_revision| {
+            json!({
+                "expectedRevision": expected_revision,
+                "status": "completed",
+                "completionDisposition": "noReusableLearning",
+                "result": "The release gate is build C7-42."
+            })
+        })
+        .await?;
+
+    let output: Value = serde_json::from_str(&output)?;
+    assert_eq!(
+        (
+            requests,
+            output["status"].clone(),
+            output["submittedResult"].clone(),
+            status,
+            result,
+            obligations,
+        ),
+        (
+            2,
+            json!("completed"),
+            json!("The release gate is build C7-42."),
+            StatefulRunStatus::Completed,
+            Some("The release gate is build C7-42.".to_string()),
+            0,
+        )
+    );
+    Ok(())
+}
+
+/// A lookup completion that also carries a meaningful durable-only field is refused
+/// rather than silently ignoring or persisting that field.
+#[tokio::test]
+async fn model_lookup_completion_with_durable_fields_is_rejected() -> Result<()> {
+    let (requests, output, status, result, obligations) =
+        lookup_turn_with_completion("lookup-mixed-disposition", |expected_revision| {
+            json!({
+                "expectedRevision": expected_revision,
+                "status": "completed",
+                "completionDisposition": "noReusableLearning",
+                "result": "The release gate is build C7-42.",
+                "finalObligation": {"learning": ["The release gate is build C7-42."]}
+            })
+        })
+        .await?;
+
+    assert!(output.contains(
+        "noReusableLearning takes only expectedRevision, status, completionDisposition, and result"
+    ));
+    assert_eq!(
+        (requests, status, result, obligations),
+        (2, StatefulRunStatus::Running, None, 0)
+    );
     Ok(())
 }
 
 #[tokio::test]
 async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Result<()> {
-    let (output, status) = complete_lookup_after_recording(ProjectShape::Indexed).await?;
+    let (output, status) = complete_lookup_after_recording(RecordShape::Valid).await?;
     assert!(
         output.contains("agent-written project knowledge changed in this project during this run")
     );
@@ -450,22 +442,23 @@ async fn lookup_completion_is_refused_after_recording_project_knowledge() -> Res
 
 #[tokio::test]
 async fn lookup_completion_is_allowed_when_every_record_failed() -> Result<()> {
-    let (output, status) = complete_lookup_after_recording(ProjectShape::Unindexed).await?;
+    let (output, status) = complete_lookup_after_recording(RecordShape::Rejected).await?;
     assert!(output.contains(r#"\"status\":\"completed\""#), "{output}");
     assert_eq!(status, StatefulRunStatus::Completed);
     Ok(())
 }
 
 /// Whether the project has an indexed hierarchy, which blackboard records require.
-enum ProjectShape {
-    Indexed,
-    Unindexed,
+enum RecordShape {
+    Valid,
+    /// Claims source verification without evidence, so the store rejects it.
+    Rejected,
 }
 
 /// Records one finding, then attempts a `noReusableLearning` completion. Returns the
 /// completion tool output and the run status afterwards.
 async fn complete_lookup_after_recording(
-    shape: ProjectShape,
+    shape: RecordShape,
 ) -> Result<(String, StatefulRunStatus)> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
@@ -477,12 +470,13 @@ async fn complete_lookup_after_recording(
         .with_codex_home(codex_home.path())
         .build_initialized()
         .await?;
-    let roots = match shape {
-        ProjectShape::Indexed => vec![ProjectRoot {
-            path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
-                .expect("temporary project root should be absolute"),
-        }],
-        ProjectShape::Unindexed => Vec::new(),
+    let roots = vec![ProjectRoot {
+        path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+            .expect("temporary project root should be absolute"),
+    }];
+    let verification = match shape {
+        RecordShape::Valid => "unverified",
+        RecordShape::Rejected => "sourceVerified",
     };
     let project: ProjectCreateResponse = server
         .request(|request_id| ClientRequest::ProjectCreate {
@@ -495,16 +489,14 @@ async fn complete_lookup_after_recording(
             },
         })
         .await?;
-    if let ProjectShape::Indexed = shape {
-        server
-            .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
-                request_id,
-                params: ContextMapRefreshParams {
-                    project_id: project.project.id.clone(),
-                },
-            })
-            .await?;
-    }
+    server
+        .request::<ContextMapRefreshResponse>(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: project.project.id.clone(),
+            },
+        })
+        .await?;
     let thread = server
         .start_thread(ThreadStartParams {
             project_id: Some(project.project.id.clone()),
@@ -540,7 +532,7 @@ async fn complete_lookup_after_recording(
                         "content": "The release gate is build C7-42.",
                         "importance": "high",
                         "confidenceBasisPoints": 9000,
-                        "verification": "unverified",
+                        "verification": verification,
                         "rootPromotion": "candidate"
                     }]})
                     .to_string(),

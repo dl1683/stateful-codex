@@ -124,17 +124,6 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
     assert!(requests[1].body_contains_text(
         "do not repeat completed work or reopen unchanged host-audited sourceVerified evidence"
     ));
-    assert!(requests[3].body_contains_text("Recent completed project outcomes"));
-    assert!(
-        requests[3].body_contains_text(
-            "The unattended investigation reached its evidence-grounded result."
-        )
-    );
-    assert!(requests[3].body_contains_text("The run can now complete without user intervention."));
-    assert!(
-        requests[3].body_contains_text("Uncertainty: The external dependency remains uncertain.")
-    );
-    assert!(requests[3].body_contains_text("Blocker: The signed approval is still unavailable."));
     Ok(())
 }
 

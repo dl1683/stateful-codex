@@ -2464,6 +2464,7 @@ async fn reconstruct_history_uses_replacement_history_verbatim() {
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     })];
 
     let reconstructed = session
@@ -2628,6 +2629,8 @@ async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
         text: "May I publish?".to_owned(),
         complete: true,
         phase: None,
+        origin_thread_id: None,
+        classification: None,
     };
     let (recording, _) = session.record_delivered_assistant_message(message.clone());
     let communication = InterAgentCommunication::new(
@@ -2737,6 +2740,144 @@ async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
         })
         .collect::<Vec<_>>();
     assert_eq!(messages, vec![message]);
+}
+
+#[tokio::test]
+async fn recorded_deliveries_stamp_their_origin_thread_and_keep_copied_provenance() {
+    let (mut session, turn_context) = make_session_and_context().await;
+    let rollout_path = attach_thread_persistence(&mut session).await;
+    let parent_thread_id = ThreadId::new();
+    let message = |role: &str, text: &str| ResponseItem::Message {
+        id: None,
+        role: role.to_owned(),
+        content: vec![ContentItem::InputText {
+            text: text.to_owned(),
+        }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    };
+    session
+        .record_annotated_conversation_items(
+            &turn_context,
+            turn_context.model_info(),
+            vec![
+                ResponseItemEnvelope::new(message("user", "local request")),
+                ResponseItemEnvelope::new(message("assistant", "local answer")),
+                ResponseItemEnvelope {
+                    item: message("user", "copied parent request"),
+                    metadata: Some(CodexHarnessMetadata {
+                        inherited_user_message: true,
+                        ..Default::default()
+                    }),
+                },
+                ResponseItemEnvelope {
+                    item: message("assistant", "forked answer"),
+                    metadata: Some(CodexHarnessMetadata {
+                        conversation_origin_thread_id: Some(parent_thread_id),
+                        ..Default::default()
+                    }),
+                },
+            ],
+        )
+        .await;
+    session.flush_rollout().await.expect("rollout flushed");
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let origins = resumed
+        .history
+        .iter()
+        .filter_map(|item| match item {
+            RolloutItem::ResponseItem(ResponseItemEnvelope {
+                item: ResponseItem::Message { content, .. },
+                metadata,
+            }) => Some((
+                crate::compact::content_items_to_text(content).unwrap_or_default(),
+                metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.conversation_origin_thread_id),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let local = Some(session.thread_id());
+    assert_eq!(
+        origins,
+        vec![
+            ("local request".to_owned(), local),
+            ("local answer".to_owned(), local),
+            ("copied parent request".to_owned(), None),
+            ("forked answer".to_owned(), Some(parent_thread_id)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn compaction_persists_the_installed_packet_and_guardian_snapshots_carry_it() {
+    let (mut session, turn_context) = make_session_and_context().await;
+    let rollout_path = attach_thread_persistence(&mut session).await;
+    // An explicit phase needs no completion to classify the delivery.
+    let mut answer = assistant_message("Done: 3 files");
+    if let ResponseItem::Message { phase, .. } = &mut answer {
+        *phase = Some(codex_protocol::models::MessagePhase::FinalAnswer);
+    }
+    session
+        .record_conversation_items(&turn_context, turn_context.model_info(), &[answer])
+        .await;
+    let capture = session
+        .clone_history()
+        .await
+        .capture_conversation_packet(session.thread_id());
+    let (window_number, window_ids) = session.advance_auto_compact_window().await;
+    session
+        .replace_compacted_history(
+            Vec::new(),
+            /*reference_context_item*/ None,
+            /*world_state_baseline*/ None,
+            CompactedHistoryMetadata {
+                input_goal_ids: Default::default(),
+                message: String::new(),
+                window_number,
+                window_ids,
+                compaction_response_id: None,
+                compaction_model_hash: None,
+                reviewer_compaction_hash: None,
+                conversation_packet: capture,
+            },
+        )
+        .await;
+    session.flush_rollout().await.expect("rollout flushed");
+
+    let live = session
+        .clone_history()
+        .await
+        .conversation_packet()
+        .cloned()
+        .expect("installed packet");
+    let texts = live
+        .records()
+        .iter()
+        .map(codex_history::ConversationPacketRecord::text);
+    assert_eq!(texts.collect::<Vec<_>>(), vec!["Done: 3 files"]);
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let persisted = resumed.history.iter().find_map(|item| match item {
+        RolloutItem::Compacted(compacted) => compacted.conversation_packet.clone(),
+        _ => None,
+    });
+    assert_eq!(persisted.as_ref(), Some(live.as_ref()));
+    let snapshot = session.guardian_fork_history().await;
+    let Some(RolloutItem::Compacted(checkpoint)) = snapshot.first() else {
+        panic!("guardian snapshot starts with a checkpoint");
+    };
+    assert_eq!(checkpoint.conversation_packet.as_ref(), Some(live.as_ref()));
 }
 
 #[tokio::test]
@@ -3402,6 +3543,7 @@ fn latest_token_usage_record_stops_at_compaction_checkpoint() {
             compaction_response_id: None,
             latest_token_usage_record,
             resume_metadata: None,
+            conversation_packet: None,
         })
     };
 
@@ -3441,13 +3583,30 @@ async fn recompute_token_usage_uses_session_base_instructions() {
         .await;
 
     let history = session.clone_history().await;
-    let session_base_instructions = BaseInstructions {
-        text: override_instructions,
-        provenance: None,
-    };
+    // Budgets count the request copy, which carries the recall policy exactly once.
+    let session_base_instructions = session.get_prompt_base_instructions().await;
+    assert_eq!(
+        session_base_instructions.text,
+        crate::context::ConversationRecallPolicy::decorate(&override_instructions)
+    );
     let expected_tokens = history
         .estimate_token_count_with_base_instructions(&session_base_instructions)
         .expect("estimate with session base instructions");
+    // Independently: history items plus one byte-estimated copy of the decorated instructions.
+    let items_only = history
+        .raw_items()
+        .map(crate::context_manager::estimate_item_token_count)
+        .fold(0i64, i64::saturating_add);
+    let instruction_tokens = i64::try_from(session_base_instructions.text.len().div_ceil(4))
+        .expect("instruction tokens");
+    assert_eq!(expected_tokens, items_only + instruction_tokens);
+    assert_eq!(
+        session_base_instructions
+            .text
+            .matches("<conversation_recall_policy>")
+            .count(),
+        1
+    );
     let model_estimated_tokens = history
         .estimate_token_count(&turn_context)
         .expect("estimate with model instructions");
@@ -5883,6 +6042,7 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
+                conversation_packet: crate::context_manager::ConversationPacketUpdate::CarryForward,
             },
         ),
     ));
@@ -6017,6 +6177,7 @@ async fn mcp_attribution_checkpoints_cover_batch_prefixes_compaction_and_restore
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
+                conversation_packet: crate::context_manager::ConversationPacketUpdate::CarryForward,
             },
         )
         .await;
@@ -6167,6 +6328,8 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
                     compaction_response_id: None,
                     compaction_model_hash: None,
                     reviewer_compaction_hash: None,
+                    conversation_packet:
+                        crate::context_manager::ConversationPacketUpdate::CarryForward,
                 },
             )
             .await;
@@ -11341,6 +11504,36 @@ async fn build_initial_context_prepends_model_switch_message() {
 }
 
 #[tokio::test]
+async fn recall_policy_does_not_make_inherited_model_instructions_look_like_a_model_switch() {
+    let (session, turn_context) = make_session_and_context().await;
+    let turn_context = Arc::new(turn_context);
+    let model_instructions =
+        codex_prompts::render_model_instructions(turn_context.model_info().as_ref());
+    let has_model_switch = |context: &[ResponseItem]| {
+        context.iter().any(|item| {
+            matches!(item, ResponseItem::Message { content, .. }
+                if content.iter().any(|content| matches!(content,
+                    ContentItem::InputText { text } if text.contains("<model_switch>"))))
+        })
+    };
+    // Instructions inherited from another model's slug are a switch only if they differ.
+    for (base_instructions, expected_switch) in [
+        (model_instructions, false),
+        ("Instructions written for another model.".to_string(), true),
+    ] {
+        {
+            let mut state = session.state.lock().await;
+            state.session_configuration.base_instructions = base_instructions;
+            state.base_instructions_provenance = Some(BaseInstructionsProvenance::Model {
+                model: "another-model".to_string(),
+            });
+        }
+        let initial_context = build_initial_context(&session, &turn_context).await;
+        assert_eq!(has_model_switch(&initial_context), expected_switch);
+    }
+}
+
+#[tokio::test]
 async fn record_context_updates_and_set_reference_context_item_persists_full_reinjection_to_rollout()
  {
     let (mut session, previous_context) = make_session_and_context().await;
@@ -13091,6 +13284,7 @@ async fn sample_rollout(
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     }));
 
     let user2 = user_message("second user");
@@ -13126,6 +13320,7 @@ async fn sample_rollout(
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     }));
 
     let user3 = user_message("third user");

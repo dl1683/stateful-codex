@@ -12,6 +12,9 @@ use std::task::Poll;
 
 use crate::context::ContextualUserFragment;
 use crate::context::UserGoalUpdate;
+use crate::context_manager::AssistantDeliveryCandidate;
+use crate::context_manager::ResponseCompletion;
+use crate::context_manager::classify_completed_response;
 use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
 use codex_history::RetainedContextEvent;
@@ -98,6 +101,7 @@ impl Session {
             item,
             metadata: Some(CodexHarnessMetadata {
                 user_input_order: Some(user_input_order),
+                conversation_origin_thread_id: Some(self.thread_id()),
                 ..Default::default()
             }),
         };
@@ -172,6 +176,31 @@ impl Session {
         }
     }
 
+    /// The recorded pending delivery for a finalized phase-less assistant message.
+    pub(crate) async fn assistant_delivery_candidate(
+        &self,
+        message_id: &str,
+        text: String,
+    ) -> Option<AssistantDeliveryCandidate> {
+        self.state
+            .lock()
+            .await
+            .history
+            .assistant_delivery_candidate(message_id, text)
+    }
+
+    /// Persists the resolution of a successfully completed response's deliveries before any
+    /// later compaction can capture them.
+    pub(crate) async fn classify_assistant_deliveries(
+        &self,
+        candidates: Vec<AssistantDeliveryCandidate>,
+        completion: ResponseCompletion,
+    ) {
+        for event in classify_completed_response(candidates, completion) {
+            self.record_retained_context(event).await;
+        }
+    }
+
     pub(crate) fn track_code_mode_message(&self) -> Option<TaskTrackerToken> {
         let tasks = self
             .code_mode_message_tasks
@@ -197,8 +226,10 @@ impl Session {
     /// Starts recording confirmed delivery synchronously while the tool's admission is held.
     pub(crate) fn record_delivered_assistant_message(
         self: &Arc<Self>,
-        message: RetainedUserMessage,
+        mut message: RetainedUserMessage,
     ) -> (JoinHandle<()>, watch::Receiver<()>) {
+        // This thread confirmed the delivery; replayed events keep their recorded origin.
+        message.origin_thread_id.get_or_insert(self.thread_id());
         let session = Arc::clone(self);
         let persistence_session = Arc::clone(self);
         let (recorded, recording) = watch::channel(());

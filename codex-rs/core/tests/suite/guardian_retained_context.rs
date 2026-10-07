@@ -563,6 +563,7 @@ async fn retained_instructions_keep_identity_across_compaction_and_resume(
         .filter_map(|(_, entry)| retained.source(entry))
         .map(|source| (source.id.message_id, source.revision))
         .collect::<std::collections::HashMap<_, _>>();
+    let origin_thread_id = thread.startup_metadata().thread_id.to_string();
     // Shared order: initial input, ordinary question, first tool call, steer, first
     // answer, second tool call, second answer. Recording the queued steer later must not move it.
     let user_messages = [(0, initial.as_str()), (3, STEER)]
@@ -588,6 +589,7 @@ async fn retained_instructions_keep_identity_across_compaction_and_resume(
                 "message_id": message_id.as_str(), "revision": revisions[message_id.as_str()],
                 "text": codex_guardian_context::truncate_text(text, /*max_tokens*/ 900),
                 "complete": index != 0 || matches!(instruction_size, InstructionSize::Normal),
+                "origin_thread_id": origin_thread_id,
             })
         })
         .collect::<Vec<_>>();
@@ -605,7 +607,9 @@ async fn retained_instructions_keep_identity_across_compaction_and_resume(
         "user_messages": user_messages, "user_messages_incomplete": false,
         "assistant_messages": [{"order": 1, "turn_id": answers[0].turn_id,
             "message_id": "ordinary-question", "revision": revisions["ordinary-question"],
-            "text": QUESTION, "complete": true}],
+            "text": QUESTION, "complete": true, "origin_thread_id": origin_thread_id,
+            // A phase-less question before a tool call is resolved as commentary.
+            "classification": "commentary"}],
         "assistant_messages_incomplete": false,
         "verified_answers": ordered_answers, "incomplete": false, "next_order": next_order,
     });

@@ -1434,13 +1434,16 @@ async fn thread_start_omits_empty_instruction_overrides_from_model_request() -> 
         .filter_map(|content| content.get("text").and_then(serde_json::Value::as_str))
         .filter(|text| text.is_empty())
         .collect::<Vec<_>>();
+    // An empty base override still carries the host recall policy, and nothing else.
     assert_eq!(
         json!({
-            "hasInstructions": request_body.get("instructions").is_some(),
+            "baseInstructions": request_body["instructions"]
+                .as_str()
+                .map(responses::strip_recall_policy),
             "emptyDeveloperInputTexts": empty_developer_input_texts,
         }),
         json!({
-            "hasInstructions": false,
+            "baseInstructions": "",
             "emptyDeveloperInputTexts": [],
         })
     );

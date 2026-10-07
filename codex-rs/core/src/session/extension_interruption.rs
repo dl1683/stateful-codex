@@ -19,6 +19,30 @@ use tokio::sync::oneshot::error::TryRecvError;
 mod tests;
 
 impl CodexThread {
+    /// Returns the ID of the turn whose task is currently running, if any.
+    pub async fn active_turn_id(&self) -> Option<String> {
+        let active = self.session.active_turn.lock().await;
+        let task = active.as_ref()?.task.as_ref()?;
+        Some(task.turn_context.sub_id.clone())
+    }
+
+    /// Interrupts exactly the named turn if it is still the active one.
+    ///
+    /// Unlike [`Op::Interrupt`], a newer turn that replaced `turn_id` is never touched.
+    /// Returns whether the named turn was interrupted.
+    pub async fn interrupt_turn(&self, turn_id: &str) -> bool {
+        let interrupted = self
+            .session
+            .abort_turn_if_active(turn_id, TurnAbortReason::Interrupted, /*error*/ None)
+            .await;
+        if interrupted {
+            self.session
+                .emit_thread_idle_lifecycle_if_idle(ThreadIdleCause::Interrupted)
+                .await;
+        }
+        interrupted
+    }
+
     /// Interrupts the named active turn unless it has queued input.
     /// Returns the decision before joining cancellation, so tool callbacks can await it.
     /// Like [`Op::Interrupt`], this does not notify idle contributors; the caller owns wakeup.

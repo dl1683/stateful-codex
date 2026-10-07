@@ -334,8 +334,7 @@ async fn unchecked_user_confirmed_evidence_replaces_the_current_packet() -> Resu
 }
 
 #[tokio::test]
-async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_history() -> Result<()>
-{
+async fn fresh_thread_receives_the_exact_earlier_conversation_once() -> Result<()> {
     let responses = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses.uri())
@@ -381,7 +380,7 @@ async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_his
             run_id.clone(),
             NewStatefulRun {
                 project_id: created.project.id.clone(),
-                thread_ids: vec![first.thread.id],
+                thread_ids: vec![first.thread.id.clone()],
                 goal: "Determine the deployment gate.".to_string(),
                 mode: WorkflowMode::Collaborative,
                 budget: RunBudget {
@@ -427,18 +426,157 @@ async fn completed_project_outcome_crosses_a_fresh_thread_without_transcript_his
         })
         .await?;
     run_turn(&mut server, &second.thread.id).await?;
+    run_turn(&mut server, &second.thread.id).await?;
     let requests = responses.received_requests().await.unwrap_or_default();
-    let body = requests
+    let bodies = requests
         .iter()
-        .rev()
-        .find(|request| request.url.path().ends_with("/responses"))
-        .expect("fresh-thread model request should be recorded")
-        .body_json::<serde_json::Value>()?
-        .to_string();
-    assert!(body.contains("<stateful_project_outcomes>"));
-    assert!(body.contains("The deployment gate is green only after checksum verification."));
-    assert!(body.contains("Checksum verification is the decisive deployment condition."));
-    assert!(!body.contains("FIRST_THREAD_PRIVATE_TRANSCRIPT_MARKER"));
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .map(|request| {
+            request
+                .body_json::<serde_json::Value>()
+                .map(|body| body.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let [.., fresh, follow_up] = bodies.as_slice() else {
+        panic!("both fresh-thread model requests should be recorded");
+    };
+    // The earlier thread's exact request and final answer reach the fresh thread.
+    assert!(fresh.contains("<stateful_continuity>"));
+    assert!(fresh.contains("FIRST_THREAD_PRIVATE_TRANSCRIPT_MARKER"));
+    assert!(fresh.contains(&first.thread.id));
+    assert!(fresh.contains("Answer: \\\"Done\\\""));
+    assert!(!fresh.contains("<stateful_project_outcomes>"));
+    // The record is rendered once per context window: the next request holds the same single
+    // record in its history instead of a second insertion.
+    assert_eq!(follow_up.matches("<stateful_continuity>").count(), 1);
+    // A fresh window's Stateful developer content stays within the 12 KiB window budget.
+    let fresh_request = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .nth_back(1)
+        .expect("fresh request")
+        .body_json::<serde_json::Value>()?;
+    let stateful_bytes = fresh_request["input"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["role"] == "developer")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|content| content["text"].as_str())
+        .filter(|text| text.trim_start().starts_with("<stateful"))
+        .map(str::len)
+        .sum::<usize>();
+    assert!(stateful_bytes <= 12 * 1024, "{stateful_bytes} bytes");
+    Ok(())
+}
+
+/// The latest-run line follows the recalled threads: a run whose bound turn is in an
+/// archived thread no longer contributes its strategy to a fresh thread.
+#[tokio::test]
+async fn archiving_a_thread_removes_its_run_from_recall() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Archived recall".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "archived-recall-project".to_string(),
+            },
+        })
+        .await?;
+    let project_id = created.project.id;
+    let worked = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    let store =
+        StatefulRunStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs())).await?;
+    let run_id = StatefulRunId::parse("archived-recall-run")?;
+    let run = store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: project_id.clone(),
+                thread_ids: vec![worked.clone()],
+                goal: "Plan the migration.".to_string(),
+                mode: WorkflowMode::Collaborative,
+                budget: RunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 3_600,
+                },
+            },
+        )
+        .await?;
+    store
+        .update_run(
+            &run_id,
+            StatefulRunUpdate {
+                expected_revision: run.revision,
+                status: StatefulRunStatus::Running,
+                strategy: Some("ARCHIVED_STRATEGY_MARKER migrate the schema first.".to_string()),
+                result: None,
+            },
+        )
+        .await?;
+    run_turn(&mut server, &worked).await?;
+
+    let fresh_body = |server_requests: &[wiremock::Request]| -> Result<String> {
+        Ok(server_requests
+            .iter()
+            .rev()
+            .find(|request| request.url.path().ends_with("/responses"))
+            .expect("a model request should be recorded")
+            .body_json::<serde_json::Value>()?
+            .to_string())
+    };
+    let before = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id.clone()),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut server, &before).await?;
+    let body = fresh_body(&responses.received_requests().await.unwrap_or_default())?;
+    assert!(body.contains("ARCHIVED_STRATEGY_MARKER"));
+    assert!(body.contains("archived-recall-run"));
+
+    let _: codex_app_server_protocol::ThreadArchiveResponse = server
+        .request(|request_id| ClientRequest::ThreadArchive {
+            request_id,
+            params: codex_app_server_protocol::ThreadArchiveParams {
+                thread_id: worked.clone(),
+            },
+        })
+        .await?;
+    let after = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(project_id),
+            ..Default::default()
+        })
+        .await?
+        .thread
+        .id;
+    run_turn(&mut server, &after).await?;
+    let body = fresh_body(&responses.received_requests().await.unwrap_or_default())?;
+    assert!(!body.contains("ARCHIVED_STRATEGY_MARKER"));
+    assert!(!body.contains(&worked));
     Ok(())
 }
 
@@ -520,9 +658,7 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
     assert!(requests[0].body_contains_text("context_map_query"));
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
     assert!(requests[0].body_contains_text("README.md (current)"));
-    assert!(
-        requests[0].body_contains_text("compare only those candidates against the requested scope")
-    );
+    assert!(requests[0].body_contains_text("check only what the task depends on"));
     let blackboard_output = requests[1]
         .function_call_output("blackboard-call")
         .to_string();
@@ -568,10 +704,8 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
     .await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
-    std::fs::write(
-        project_root.path().join("decision.md"),
-        "preamble\ndecisive clause\ncontrolling number: 42\nunrelated appendix\n",
-    )?;
+    let source = "preamble\ndecisive clause\ncontrolling number: 42\nunrelated appendix\n";
+    std::fs::write(project_root.path().join("decision.md"), source)?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -602,6 +736,7 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
         })
         .await?;
     assert_eq!(refreshed.files_indexed, 1);
+    let project_id = created.project.id.clone();
     let started = server
         .start_thread(ThreadStartParams {
             project_id: Some(created.project.id),
@@ -619,19 +754,174 @@ async fn model_reads_only_a_fingerprint_verified_source_region() -> Result<()> {
             .function_call_output_text("evidence-call")
             .expect("evidence output should be text"),
     )?;
+    let receipt_id = output["blackboardEvidence"]["readReceiptId"]
+        .as_str()
+        .expect("a complete read carries a receipt");
+    assert!(receipt_id.starts_with("stateful-read-"));
     assert_eq!(
-        output["content"],
-        "decisive clause\ncontrolling number: 42\n"
+        output,
+        json!({
+            "projectId": project_id,
+            "contextMapEntryId": output["contextMapEntryId"],
+            "sourceFingerprint": format!("sha256:{:x}", Sha256::digest(source)),
+            "source": {
+                "projectRoot": output["source"]["projectRoot"],
+                "relativePath": "decision.md",
+            },
+            "contentFormat": "lineNumbered",
+            "content": "L2: decisive clause\nL3: controlling number: 42\n",
+            "bytesReturned": "decisive clause\ncontrolling number: 42\n".len(),
+            "totalBytes": source.len(),
+            "totalLines": 4,
+            "firstLine": 2,
+            "lastLine": 3,
+            "lastLinePartial": false,
+            "truncated": false,
+            "maxBytesApplied": 12_288,
+            "maxBytesClamped": true,
+            "sourceRefreshed": false,
+            "blackboardEvidence": {"readReceiptId": receipt_id},
+            "revision": output["revision"],
+        })
     );
-    assert_eq!(output["firstLine"], 2);
-    assert_eq!(output["lastLine"], 3);
-    assert_eq!(output["truncated"], false);
-    assert_eq!(output["maxBytesApplied"], 12_288);
-    assert_eq!(output["maxBytesClamped"], true);
-    assert!(
-        output["blackboardEvidence"]["readReceiptId"]
-            .as_str()
-            .is_some_and(|receipt_id| receipt_id.starts_with("stateful-read-"))
+    Ok(())
+}
+
+/// Both cuts end between labelled lines: a small maxBytes cuts the source read, and a
+/// read larger than the response budget is cut while packing. Neither may carry a
+/// receipt, and every counter must describe exactly the emitted lines.
+#[tokio::test]
+async fn model_truncated_evidence_reads_cut_between_lines_without_receipts() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let response_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "source-cut",
+                    "evidence_read",
+                    &json!({"relativePath": "ledger.txt", "maxBytes": 70}).to_string(),
+                ),
+                responses::ev_completed("source-cut-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "response-cut",
+                    "evidence_read",
+                    &json!({"relativePath": "ledger.txt", "maxBytes": 12_288}).to_string(),
+                ),
+                responses::ev_completed("response-cut-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("done-message", "Done"),
+                responses::ev_completed("done-response"),
+            ]),
+        ],
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    let lines = (1..=400)
+        .map(|line| format!("line {line:03} {}\n", "x".repeat(20)))
+        .collect::<Vec<_>>();
+    std::fs::write(project_root.path().join("ledger.txt"), lines.concat())?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let created: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Truncated evidence project".to_string(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "stateful-truncated-evidence-project".to_string(),
+            },
+        })
+        .await?;
+    let refreshed: ContextMapRefreshResponse = server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: ContextMapRefreshParams {
+                project_id: created.project.id.clone(),
+            },
+        })
+        .await?;
+    assert_eq!(refreshed.files_indexed, 1);
+    let started = server
+        .start_thread(ThreadStartParams {
+            project_id: Some(created.project.id),
+            ..Default::default()
+        })
+        .await?;
+
+    run_turn(&mut server, &started.thread.id).await?;
+
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 3);
+    let labelled = |first: usize, last: usize| {
+        (first..=last)
+            .map(|line| format!("L{line}: {}", lines[line - 1]))
+            .collect::<String>()
+    };
+    let source_bytes = |first: usize, last: usize| lines[first - 1..last].concat().len();
+    let summary = |output: &serde_json::Value| {
+        json!({
+            "content": output["content"],
+            "bytesReturned": output["bytesReturned"],
+            "firstLine": output["firstLine"],
+            "lastLine": output["lastLine"],
+            "lastLinePartial": output["lastLinePartial"],
+            "truncated": output["truncated"],
+            "blackboardEvidence": output["blackboardEvidence"],
+        })
+    };
+
+    let source_cut_text = requests[1]
+        .function_call_output_text("source-cut")
+        .expect("source-cut output should be text");
+    let source_cut: serde_json::Value = serde_json::from_str(&source_cut_text)?;
+    assert_eq!(
+        summary(&source_cut),
+        json!({
+            "content": labelled(1, 2),
+            "bytesReturned": source_bytes(1, 2),
+            "firstLine": 1,
+            "lastLine": 2,
+            "lastLinePartial": false,
+            "truncated": true,
+            "blackboardEvidence": null,
+        })
+    );
+
+    let response_cut_text = requests[2]
+        .function_call_output_text("response-cut")
+        .expect("response-cut output should be text");
+    assert!(response_cut_text.len() <= 9_000);
+    let response_cut: serde_json::Value = serde_json::from_str(&response_cut_text)?;
+    let last_line = response_cut["lastLine"]
+        .as_u64()
+        .and_then(|line| usize::try_from(line).ok())
+        .expect("a response-budget cut still returns whole lines");
+    assert!(last_line < 400);
+    assert_eq!(
+        summary(&response_cut),
+        json!({
+            "content": labelled(1, last_line),
+            "bytesReturned": source_bytes(1, last_line),
+            "firstLine": 1,
+            "lastLine": last_line,
+            "lastLinePartial": false,
+            "truncated": true,
+            "blackboardEvidence": null,
+        })
     );
     Ok(())
 }
@@ -1122,8 +1412,6 @@ async fn model_can_reuse_file_learning_from_a_child_region_without_rereading() -
     let requests = response_log.requests();
     assert_eq!(requests.len(), 4);
     assert!(requests[0].body_contains_text("blackboard_record_batch"));
-    assert!(requests[0].body_contains_text("blackboard_relate"));
-    assert!(requests[0].body_contains_text("context_map_refresh"));
     assert!(requests[0].body_contains_text("readReceiptId"));
     let batch_output: serde_json::Value = serde_json::from_str(
         &requests[1]
@@ -1216,17 +1504,18 @@ async fn assert_latest_request_has_project(
     assert!(body.contains("Decisive Evidence Project"));
     assert!(body.contains("A decisive project fact survives every thread view."));
     assert!(body.contains("verification=unverified"));
-    assert!(body.contains("Reuse these entries without routine rereading"));
+    assert!(body.contains("continue from it instead of rediscovering it"));
     Ok(())
 }
 
-async fn seed_root_blackboard(codex_home: &std::path::Path, project_id: &str) -> Result<()> {
-    let sqlite = SqliteConfig::new_for_testing(codex_home.abs());
-    let hierarchy = HierarchyStore::open(&sqlite).await?;
-    let project_node_id = HierarchyNodeId::parse(format!("project-node-{project_id}"))?;
-    hierarchy
+pub(super) async fn seed_root_blackboard(
+    codex_home: &std::path::Path,
+    project_id: &str,
+) -> Result<()> {
+    HierarchyStore::open(&SqliteConfig::new_for_testing(codex_home.abs()))
+        .await?
         .create_node(
-            project_node_id.clone(),
+            HierarchyNodeId::parse(format!("project-node-{project_id}"))?,
             NewHierarchyNode {
                 project_id: project_id.to_string(),
                 parent_id: None,
@@ -1238,15 +1527,31 @@ async fn seed_root_blackboard(codex_home: &std::path::Path, project_id: &str) ->
             },
         )
         .await?;
-    BlackboardStore::open(&sqlite)
+    promote_root_fact(
+        codex_home,
+        project_id,
+        &format!("project-fact-{project_id}"),
+        "A decisive project fact survives every thread view.",
+    )
+    .await
+}
+
+/// Adds a promoted, unverified root fact to a project seeded by `seed_root_blackboard`.
+pub(super) async fn promote_root_fact(
+    codex_home: &std::path::Path,
+    project_id: &str,
+    entry_id: &str,
+    content: &str,
+) -> Result<()> {
+    BlackboardStore::open(&SqliteConfig::new_for_testing(codex_home.abs()))
         .await?
         .create_entry(
-            BlackboardEntryId::parse(format!("project-fact-{project_id}"))?,
+            BlackboardEntryId::parse(entry_id)?,
             NewBlackboardEntry {
                 project_id: project_id.to_string(),
-                node_id: project_node_id,
+                node_id: HierarchyNodeId::parse(format!("project-node-{project_id}"))?,
                 kind: BlackboardKind::Fact,
-                content: "A decisive project fact survives every thread view.".to_string(),
+                content: content.to_string(),
                 structured_value: None,
                 confidence: ConfidenceScore::from_basis_points(8_500)?,
                 verification: BlackboardVerification::Unverified,

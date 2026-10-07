@@ -76,6 +76,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         attribution: Default::default(),
         visible_root: Default::default(),
         run_activity: Default::default(),
+        user_messages: Default::default(),
     };
     let project = StoredProject {
         id: "project-1".to_string(),
@@ -91,7 +92,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
     };
     let turn_store = ExtensionData::new("turn-2");
     let empty_status = extension
-        .root_blackboard(&project, "turn-1", &turn_store)
+        .root_blackboard(&project, "thread-1", "turn-1", &turn_store)
         .await;
     let RootBlackboardStatus::Available(_) = &empty_status else {
         panic!("root blackboard should be available");
@@ -131,7 +132,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         .await
         .expect("create promoted knowledge");
     let promoted_status = extension
-        .root_blackboard(&project, "turn-1", &turn_store)
+        .root_blackboard(&project, "thread-1", "turn-1", &turn_store)
         .await;
     let RootBlackboardStatus::Available(_) = &promoted_status else {
         panic!("root blackboard should be available");
@@ -145,7 +146,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         .get::<crate::source_freshness::EvidenceAudit>()
         .expect("cached evidence audit");
     let unchanged_status = extension
-        .root_blackboard(&project, "turn-1", &turn_store)
+        .root_blackboard(&project, "thread-1", "turn-1", &turn_store)
         .await;
     let RootBlackboardStatus::Available(_) = &unchanged_status else {
         panic!("unchanged root blackboard should be available");
@@ -157,7 +158,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
 
     std::fs::write(&source_path, "# Policy\nThreshold: 06\n").expect("replace source");
     let changed_status = extension
-        .root_blackboard(&project, "turn-1", &turn_store)
+        .root_blackboard(&project, "thread-1", "turn-1", &turn_store)
         .await;
     let RootBlackboardStatus::Available(_) = &changed_status else {
         panic!("root blackboard should be available");

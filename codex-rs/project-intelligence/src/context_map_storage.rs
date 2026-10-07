@@ -56,7 +56,7 @@ struct SearchCandidate {
 
 #[derive(Clone)]
 pub struct ContextMapStore {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl ContextMapStore {
@@ -157,10 +157,10 @@ impl ContextMapStore {
             transaction.commit().await?;
             return Ok(None);
         };
+        // Inequality proves only that the supplied fingerprint is not this entry's;
+        // it may be mistyped, mispaired, or obsolete, so it is not reported as staleness.
         if &hit.entry.value.source_fingerprint != expected_fingerprint {
-            return Err(ContextMapStoreError::SourceNotCurrent(
-                ContextMapFreshness::Stale,
-            ));
+            return Err(ContextMapStoreError::FingerprintMismatch(id.to_string()));
         }
         if hit.source.region_anchor.is_some() {
             let current: i64 = sqlx::query_scalar(
@@ -180,9 +180,28 @@ impl ContextMapStore {
             .fetch_one(&mut *transaction)
             .await?;
             if current != 1 {
-                return Err(ContextMapStoreError::SourceNotCurrent(
-                    ContextMapFreshness::Stale,
-                ));
+                // Only a missing parent file makes the source unavailable; a retired or
+                // re-fingerprinted region under a present file is stale.
+                let parent_lifecycle: Option<String> = sqlx::query_scalar(
+                    "SELECT parent.lifecycle
+                     FROM context_map_entries AS entry
+                     JOIN hierarchy_nodes AS node ON node.id = entry.node_id
+                     JOIN hierarchy_nodes AS parent
+                       ON parent.id = node.parent_id AND parent.project_id = node.project_id
+                     WHERE entry.project_id = ? AND entry.id = ?",
+                )
+                .bind(project_id)
+                .bind(id.as_str())
+                .fetch_optional(&mut *transaction)
+                .await?;
+                let freshness = if parent_lifecycle.as_deref()
+                    == Some(crate::storage::lifecycle_name(NodeLifecycle::Missing))
+                {
+                    ContextMapFreshness::SourceUnavailable
+                } else {
+                    ContextMapFreshness::Stale
+                };
+                return Err(ContextMapStoreError::SourceNotCurrent(freshness));
             }
         }
         transaction.commit().await?;
@@ -757,6 +776,8 @@ pub enum ContextMapStoreError {
     SourceNotCurrent(ContextMapFreshness),
     #[error("context-map entry not found: {0}")]
     EntryNotFound(String),
+    #[error("supplied source fingerprint does not match context-map entry {0}")]
+    FingerprintMismatch(String),
     #[error("context-map entry ID was already used for different content: {0}")]
     EntryIdentityConflict(String),
     #[error("context-map routing-term position overflow")]

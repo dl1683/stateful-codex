@@ -3482,6 +3482,7 @@ dependencies = [
  "codex-utils-pty",
  "futures",
  "gix",
+ "libc",
  "once_cell",
  "pretty_assertions",
  "regex",
@@ -4659,11 +4660,14 @@ name = "codex-stateful-extension"
 version = "0.159.2"
 dependencies = [
  "codex-extension-api",
+ "codex-git-utils",
  "codex-project-intelligence",
+ "codex-protocol",
  "codex-state",
  "codex-stateful-runtime",
  "codex-thread-store",
  "codex-utils-absolute-path",
+ "codex-utils-output-truncation",
  "codex-utils-string",
  "pretty_assertions",
  "serde",

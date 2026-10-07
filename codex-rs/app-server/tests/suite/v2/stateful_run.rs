@@ -792,10 +792,8 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     let requests = response_log.requests();
     assert_eq!(requests.len(), 5);
     assert!(requests[0].body_contains_text("<stateful_run>"));
-    assert!(requests[0].body_contains_text(
-        "do not turn one criterion or decision dimension into an overall project determination"
-    ));
-    assert!(requests[0].body_contains_text("removes the active-run binding"));
+    assert!(requests[0].body_contains_text("check only what the task depends on"));
+    assert!(requests[0].body_contains_text("completed only after all other durable writes"));
     assert!(requests[0].body_contains_text("final Stateful mutation"));
     assert!(requests[0].body_contains_text("rootRevision"));
     assert!(
@@ -953,8 +951,6 @@ async fn model_cannot_persist_final_packet_as_intermediate_obligation() -> Resul
 
     let requests = response_log.requests();
     assert_eq!(requests.len(), 2);
-    assert!(requests[0].body_contains_text("meaningful semantic content"));
-    assert!(requests[0].body_contains_text("requestedJudgment"));
     assert!(
         requests[1]
             .body_contains_text("intermediate obligation_update requires meaningful learning")

@@ -17173,6 +17173,46 @@
           "properties": {
             "method": {
               "enum": [
+                "statefulKnowledge/captured"
+              ],
+              "title": "StatefulKnowledge/capturedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/StatefulKnowledgeCapturedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "StatefulKnowledge/capturedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "statefulKnowledge/groupCaptured"
+              ],
+              "title": "StatefulKnowledge/groupCapturedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/StatefulKnowledgeGroupCapturedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "StatefulKnowledge/groupCapturedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/project/updated"
               ],
               "title": "Thread/project/updatedNotificationMethod",
@@ -19138,6 +19178,11 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "conversationReadCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "evidenceReadCalls": {
           "format": "uint64",
           "minimum": 0.0,
@@ -19237,6 +19282,7 @@
       "required": [
         "blackboardWriteCalls",
         "contextRefreshCalls",
+        "conversationReadCalls",
         "evidenceReadCalls",
         "failedStatefulToolCalls",
         "knowledgeQueryCalls",
@@ -19266,6 +19312,230 @@
         "aborted"
       ],
       "type": "string"
+    },
+    "StatefulCaptureOutcome": {
+      "enum": [
+        "stored",
+        "alreadyStored"
+      ],
+      "type": "string"
+    },
+    "StatefulKnowledgeCapturedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Receipt for one knowledge entry stored (or already stored) during a Stateful turn.",
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/definitions/StatefulCaptureOutcome"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "text": {
+          "description": "The entry's content, at most 240 bytes.",
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "entryId",
+        "outcome",
+        "projectId",
+        "revision",
+        "text",
+        "threadId",
+        "turnId"
+      ],
+      "title": "StatefulKnowledgeCapturedNotification",
+      "type": "object"
+    },
+    "StatefulKnowledgeCategory": {
+      "description": "What a knowledge receipt says was saved.",
+      "oneOf": [
+        {
+          "enum": [
+            "decision",
+            "finding"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A standing rule in the user's own words.",
+          "enum": [
+            "rule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Marked as standing but limited to a task; kept for inspection, never applied.",
+          "enum": [
+            "pendingRule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "How to build, test or run the project here.",
+          "enum": [
+            "recipe"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "What the user said about themselves or the whole work, in their words.",
+          "enum": [
+            "background"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "StatefulKnowledgeGroupCapturedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "The committed outcome of one capture (all the rules one message marked), counted: sent once after every unit was stored or refused, so it never claims more than was saved.",
+      "properties": {
+        "alreadyPresent": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "declaredCount": {
+          "description": "A count the user's words declared (\"Two standing rules\"), when they did.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failed": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "items": {
+          "description": "Saved, kept and already-saved units in the order written.",
+          "items": {
+            "$ref": "#/definitions/StatefulKnowledgeGroupItem"
+          },
+          "type": "array"
+        },
+        "omitted": {
+          "description": "Recognized but too long to keep whole; not saved.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "omittedItems": {
+          "description": "Openings of omitted units.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pending": {
+          "description": "Saved but not applied (limited to a task).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "recognized": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "saved": {
+          "description": "Saved and applied.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "scopeTitle": {
+          "description": "The investigation these rules are limited to, in the user's words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alreadyPresent",
+        "category",
+        "failed",
+        "groupId",
+        "items",
+        "omitted",
+        "omittedItems",
+        "pending",
+        "projectId",
+        "recognized",
+        "saved",
+        "threadId",
+        "turnId"
+      ],
+      "title": "StatefulKnowledgeGroupCapturedNotification",
+      "type": "object"
+    },
+    "StatefulKnowledgeGroupItem": {
+      "description": "One saved unit of a counted group receipt.",
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/definitions/StatefulCaptureOutcome"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "text": {
+          "description": "The entry's content, at most 240 bytes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "entryId",
+        "outcome",
+        "revision",
+        "text"
+      ],
+      "type": "object"
     },
     "StatefulMeasurementSummary": {
       "description": "Exact totals over a bounded newest-first window of project measurements.\n\nToken counts are exposed without estimating monetary cost because the persisted records do not contain authoritative provider pricing, units, or currency.",
@@ -19369,6 +19639,186 @@
         "turnsWithTokenUsage"
       ],
       "type": "object"
+    },
+    "StatefulMemoryAddKind": {
+      "description": "What the user adds to project memory.",
+      "oneOf": [
+        {
+          "description": "A rule in the user's words, applied to new work within its scope.",
+          "enum": [
+            "rule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Something about the user or the whole work.",
+          "enum": [
+            "background"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A decision, with its reason when given.",
+          "enum": [
+            "decision"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Anything else worth keeping.",
+          "enum": [
+            "note"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "StatefulMemoryAddOutcome": {
+      "description": "What an addition did.",
+      "oneOf": [
+        {
+          "description": "A new entry was stored, or kept words now apply.",
+          "enum": [
+            "added"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The same words were already current; nothing changed.",
+          "enum": [
+            "alreadyPresent"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This action was already carried out; its entry is returned unchanged.",
+          "enum": [
+            "alreadyDone"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "StatefulMemoryItem": {
+      "description": "One current entry of project memory.",
+      "properties": {
+        "content": {
+          "description": "At most 2,000 bytes; `contentTruncated` says whether more exists.",
+          "type": "string"
+        },
+        "contentTruncated": {
+          "type": "boolean"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/BlackboardKind"
+        },
+        "replaces": {
+          "description": "What this entry replaced, newest first, at most three.",
+          "items": {
+            "$ref": "#/definitions/StatefulMemoryReplaced"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "section": {
+          "$ref": "#/definitions/StatefulMemorySection"
+        },
+        "source": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BlackboardProvenanceKind"
+            }
+          ],
+          "description": "Who wrote this text."
+        },
+        "updatedAt": {
+          "description": "Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "contentTruncated",
+        "entryId",
+        "kind",
+        "replaces",
+        "revision",
+        "section",
+        "source",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "StatefulMemoryReplaced": {
+      "description": "An earlier entry that a memory item replaced.",
+      "properties": {
+        "content": {
+          "description": "At most 240 bytes.",
+          "type": "string"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "replacedAt": {
+          "description": "Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "entryId",
+        "replacedAt"
+      ],
+      "type": "object"
+    },
+    "StatefulMemorySection": {
+      "description": "Where a memory item belongs, matching what new work applies.",
+      "oneOf": [
+        {
+          "enum": [
+            "decision",
+            "knowledge"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The user's standing rule in their own words; applied to new work.",
+          "enum": [
+            "userRule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The user's rule limited to a task; kept, never applied.",
+          "enum": [
+            "pendingRule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A rule not in the user's own words; never applied.",
+          "enum": [
+            "unverifiedRule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "What the user said about themselves or the whole work, in their own words. Sent only to clients that ask for it with `backgroundSection`.",
+          "enum": [
+            "background"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "StatefulObligation": {
       "properties": {

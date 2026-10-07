@@ -145,12 +145,17 @@ async fn responses_lite_uses_input_items_for_instructions_and_tools() -> Result<
             "role": "developer",
             "content": [{
                 "type": "input_text",
-                "text": "test instructions",
+                "text": input[1]["content"][0]["text"],
             }],
             "internal_chat_message_metadata_passthrough": {
                 "content_item_kinds": ["model.base_instructions"],
             },
         })
+    );
+    let instructions = input[1]["content"][0]["text"].as_str().unwrap_or_default();
+    assert_eq!(
+        responses::strip_recall_policy(instructions),
+        "test instructions"
     );
 
     let tools = additional_tools(&body)?;

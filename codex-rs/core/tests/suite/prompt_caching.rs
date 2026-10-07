@@ -32,6 +32,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::responses::strip_metadata_from_json;
+use core_test_support::responses::strip_recall_policy;
 use core_test_support::responses::strip_response_item_ids_from_json;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
@@ -279,11 +280,17 @@ async fn prompt_tools_are_consistent_across_requests(
     ]);
     let body0 = req1.single_request().body_json();
 
-    assert_eq!(body0["instructions"], serde_json::json!(base_instructions),);
+    assert_eq!(
+        strip_recall_policy(body0["instructions"].as_str().unwrap()),
+        base_instructions
+    );
     assert_tool_names(&body0, &expected_tools_names);
 
     let body1 = req2.single_request().body_json();
-    assert_eq!(body1["instructions"], serde_json::json!(base_instructions),);
+    assert_eq!(
+        strip_recall_policy(body1["instructions"].as_str().unwrap()),
+        base_instructions
+    );
     assert_tool_names(&body1, &expected_tools_names);
 
     for request in [&req1, &req2] {

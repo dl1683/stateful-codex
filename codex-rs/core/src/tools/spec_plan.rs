@@ -1490,6 +1490,7 @@ fn append_extension_tool_executors(
 ) -> Option<ToolName> {
     let standalone_web_search_enabled = standalone_web_search_enabled(turn_context, model_info);
     let web_search_mode_on = turn_context.config.web_search_mode.value() != WebSearchMode::Disabled;
+    let search_available = search_tool_enabled(turn_context, model_info);
     let mut standalone_web_search_tool = None;
 
     for executor in executors {
@@ -1504,7 +1505,14 @@ fn append_extension_tool_executors(
             continue;
         }
         let runtime = Arc::new(ExtensionToolAdapter::new(executor));
-        if registry.register_external(runtime) && is_standalone_web_search {
+        // Without tool search a deferred extension tool could never be loaded, so it is
+        // exposed directly instead.
+        let exposure = match runtime.exposure() {
+            ToolExposure::Deferred if !search_available => ToolExposure::Direct,
+            ToolExposure::DeferredModelOnly if !search_available => ToolExposure::DirectModelOnly,
+            exposure => exposure,
+        };
+        if registry.register_external_with_exposure(runtime, exposure) && is_standalone_web_search {
             standalone_web_search_tool = Some(tool_name);
         }
     }

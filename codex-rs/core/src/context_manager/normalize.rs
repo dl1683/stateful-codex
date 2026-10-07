@@ -12,12 +12,17 @@ use uuid::Uuid;
 
 use crate::context::ContextualUserFragment;
 use crate::context::UnsupportedMedia;
-use crate::util::error_or_panic;
 use tracing::info;
+use tracing::warn;
 
 // Changing this value would change model-visible IDs and invalidate prompt caches.
 const SYNTHETIC_OUTPUT_ID_NAMESPACE: Uuid = Uuid::from_u128(0x90d38d3e_6a5b_4d52_bfe2_2f1e634bfac4);
 
+/// Repairs the prompt projection so every surviving call has an output.
+///
+/// A thread can legitimately end mid tool call (hard kill, fork of a live turn,
+/// cancellation), so a dangling call is recoverable: it gets a deterministic
+/// "aborted" output immediately after it. Persisted history is never rewritten.
 pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>) {
     let mut function_output_ids = HashSet::new();
     let mut tool_search_output_ids = HashSet::new();
@@ -69,8 +74,9 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>)
             ResponseItem::ToolSearchCall {
                 id,
                 call_id: Some(call_id),
+                execution,
                 ..
-            } if !tool_search_output_ids.contains(call_id.as_str()) => {
+            } if execution != "server" && !tool_search_output_ids.contains(call_id.as_str()) => {
                 info!("Tool search output is missing for call id: {call_id}");
                 missing_outputs_to_insert.push((
                     idx,
@@ -87,9 +93,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>)
             ResponseItem::CustomToolCall { id, call_id, .. }
                 if !custom_tool_output_ids.contains(call_id.as_str()) =>
             {
-                error_or_panic(format!(
-                    "Custom tool call output is missing for call id: {call_id}"
-                ));
+                warn!("Custom tool call output is missing for call id: {call_id}");
                 missing_outputs_to_insert.push((
                     idx,
                     ResponseItemEnvelope::new(ResponseItem::CustomToolCallOutput {
@@ -107,9 +111,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>)
                 call_id: Some(call_id),
                 ..
             } if !function_output_ids.contains(call_id.as_str()) => {
-                error_or_panic(format!(
-                    "Local shell call output is missing for call id: {call_id}"
-                ));
+                warn!("Local shell call output is missing for call id: {call_id}");
                 missing_outputs_to_insert.push((
                     idx,
                     ResponseItemEnvelope::new(ResponseItem::FunctionCallOutput {
@@ -185,17 +187,13 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
                 call_id: Some(call_id),
                 ..
             } if !function_call_ids.contains(call_id.as_str()) => {
-                error_or_panic(format!(
-                    "Orphan function call output for call id: {call_id}"
-                ));
+                warn!("Orphan function call output for call id: {call_id}");
                 orphan_positions.push(position);
             }
             ResponseItem::CustomToolCallOutput { call_id, .. }
                 if !custom_tool_call_ids.contains(call_id.as_str()) =>
             {
-                error_or_panic(format!(
-                    "Orphan custom tool call output for call id: {call_id}"
-                ));
+                warn!("Orphan custom tool call output for call id: {call_id}");
                 orphan_positions.push(position);
             }
             ResponseItem::ToolSearchOutput {
@@ -203,7 +201,7 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
                 execution,
                 ..
             } if execution != "server" && !tool_search_call_ids.contains(call_id.as_str()) => {
-                error_or_panic(format!("Orphan tool search output for call id: {call_id}"));
+                warn!("Orphan tool search output for call id: {call_id}");
                 orphan_positions.push(position);
             }
             _ => {}

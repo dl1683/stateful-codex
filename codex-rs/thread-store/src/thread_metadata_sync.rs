@@ -675,6 +675,7 @@ mod tests {
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         });
 
         let first = sync

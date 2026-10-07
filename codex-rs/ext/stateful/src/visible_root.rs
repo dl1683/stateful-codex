@@ -9,6 +9,9 @@ use std::sync::PoisonError;
 #[derive(Clone, Default)]
 pub(crate) struct VisibleRootRegistry {
     threads: Arc<Mutex<HashMap<String, VisibleRoot>>>,
+    /// The last record cleared per thread, kept only to verify that a repeated write
+    /// names what an earlier call resolved; never used to resolve new references.
+    cleared: Arc<Mutex<HashMap<String, VisibleRoot>>>,
 }
 
 impl VisibleRootRegistry {
@@ -33,10 +36,26 @@ impl VisibleRootRegistry {
     }
 
     pub(crate) fn clear(&self, thread_id: &str) {
-        self.threads
+        let removed = self
+            .threads
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(thread_id);
+        if let Some(removed) = removed {
+            self.cleared
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(thread_id.to_string(), removed);
+        }
+    }
+
+    /// The record that was cleared most recently for `thread_id`, if any.
+    pub(crate) fn last_cleared(&self, thread_id: &str) -> Option<VisibleRoot> {
+        self.cleared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(thread_id)
+            .cloned()
     }
 
     pub(crate) fn get(&self, thread_id: &str) -> Option<VisibleRoot> {
@@ -66,6 +85,14 @@ impl VisibleRoot {
 
     pub(crate) fn insert(&mut self, entry_id: String, alias: String, revision: u64) {
         self.entries.insert(entry_id, (alias, revision));
+    }
+
+    /// The entry and revision shown in full under `alias`, if this packet showed one.
+    pub(crate) fn entry_for_alias(&self, alias: &str) -> Option<(&str, u64)> {
+        self.entries
+            .iter()
+            .find(|(_, (shown_alias, _))| shown_alias == alias)
+            .map(|(entry_id, (_, revision))| (entry_id.as_str(), *revision))
     }
 
     /// Returns the alias only when this exact entry revision was shown in full.

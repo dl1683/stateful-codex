@@ -128,15 +128,14 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Record an intermediate compact semantic update for the selected thread's active Stateful run when learning, strategy, uncertainty, blockers, or next work meaningfully changes and substantive work still remains. Explain significance; do not narrate routine tool activity. Every packet needs both meaningful semantic content and substantive remaining work in next, a blocker, or requested user judgment. Summarizing, synthesizing, or comparing already-reviewed evidence solely to prepare the current answer is final reasoning, not remaining work. A genuinely new cross-source conclusion, resolved contradiction, or changed strategy may be intermediate progress when additional investigation or execution still follows. When the work is ready to complete, put the final packet directly in stateful_run_update instead of spending a separate model turn here.".to_string(),
+            description: "Record an intermediate semantic update of the active Stateful run when learning, strategy, uncertainty, blockers, or next work materially change and work remains. Explain significance, not activity; include remaining work in next, a blocker, or a requested user judgment. At completion, put the final packet in stateful_run_update instead.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

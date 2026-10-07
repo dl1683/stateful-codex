@@ -1,0 +1,8 @@
+---
+source: tui/src/stateful_memory_tests.rs
+expression: "lines.join(\"\n\")"
+---
+• Saved your rule: "never run git commit or anything else that rewrites history - I review and commit everything myself." · /memory to review
+• Saved your rule 2 from this message: "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step." · /memory to review
+• Saved your rule: "Never run git commit: I review and commit everything myself, every time." · /memory to review
+• Saved your rule: "Some ground rules for this whole investigation, which may take a few days: Do NOT change any code until we have agreed…" · /memory to review

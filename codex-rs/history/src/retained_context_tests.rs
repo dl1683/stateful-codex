@@ -1,4 +1,5 @@
 use super::*;
+use crate::AssistantDeliveryClassification;
 use crate::CodexHarnessMetadata;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -27,6 +28,8 @@ fn delivered_message(id: &str, text: &str, acceptance_order: u64) -> RetainedCon
             text: text.to_owned(),
             complete: true,
             phase: None,
+            origin_thread_id: None,
+            classification: None,
         },
         acceptance_order,
     }
@@ -41,11 +44,13 @@ fn retained_evidence_preserves_order_through_recovery_checkpoint_and_rollback() 
     context.record_user_message(
         RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "revocation-turn".to_owned(),
             message_id: Some("revocation".to_owned()),
             text: String::new(),
             complete: false,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );
@@ -150,11 +155,13 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
         restored.record_user_message(
             RetainedUserMessage {
                 phase: None,
+                origin_thread_id: None,
                 origin: crate::UserInputOrigin::User,
                 turn_id: "later-turn".to_owned(),
                 message_id: Some(format!("message-{index}")),
                 text: "Keep the repository private.".to_owned(),
                 complete: true,
+                classification: None,
             },
             RetainedInputSource::Local(None),
         );
@@ -171,11 +178,13 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
     restored.record_user_message(
         RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "earlier-turn".to_owned(),
             message_id: Some("delayed-message".to_owned()),
             text: "An older queued instruction.".to_owned(),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(Some(0)),
     );
@@ -186,11 +195,13 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
     restored.record_user_message(
         RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "oversized-turn".to_owned(),
             message_id: Some("oversized-message".to_owned()),
             text: "restriction ".repeat(MAX_RECORD_BYTES),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );
@@ -237,6 +248,8 @@ fn retained_families_enforce_storage_limits_without_changing_snapshots() {
             text: String::new(),
             complete: false,
             phase: None,
+            origin_thread_id: None,
+            classification: None,
         }
     );
     // Once the omission marker is set, another confirmed delivery still needs
@@ -253,11 +266,13 @@ fn recovered_excerpts_obey_record_and_family_limits() {
         context.record_user_message(
             RetainedUserMessage {
                 phase: None,
+                origin_thread_id: None,
                 origin: crate::UserInputOrigin::User,
                 turn_id: "turn-1".to_owned(),
                 message_id: Some(format!("message-{index}")),
                 text: String::new(),
                 complete: false,
+                classification: None,
             },
             RetainedInputSource::Local(None),
         );
@@ -353,11 +368,13 @@ fn accepted_order_survives_delayed_recording_and_checkpoint_replay() {
     context.record(&event);
     let instruction = RetainedUserMessage {
         phase: None,
+        origin_thread_id: None,
         origin: crate::UserInputOrigin::User,
         turn_id: "turn-1".to_owned(),
         message_id: Some("steer".to_owned()),
         text: "Keep the repository private.".to_owned(),
         complete: true,
+        classification: None,
     };
     // Assistant delivery after accepted steering must not move the steering past it.
     let assistant_order = context.reserve_order();
@@ -444,11 +461,13 @@ fn adopted_instructions_preserve_local_order_and_rollback_scope() {
     for index in 0..2 {
         let message = RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: crate::UserInputOrigin::User,
             turn_id: "parent-turn".to_owned(),
             message_id: Some(format!("parent-{index}")),
             text: format!("Parent instruction {index}"),
             complete: true,
+            classification: None,
         };
         context.record_user_message(message.clone(), RetainedInputSource::Inherited);
         context.record_user_message(message.clone(), RetainedInputSource::Inherited);
@@ -495,4 +514,36 @@ fn adopted_instructions_preserve_local_order_and_rollback_scope() {
     expected.user_messages.pop_back();
     expected.assistant_messages.pop_back();
     assert_eq!(restored, expected);
+}
+
+#[test]
+fn resolving_a_delivery_keeps_its_source_while_changed_text_mints_a_new_one() {
+    let classified = |text: &str, classification| {
+        let mut event = delivered_message("answer", text, 3);
+        let RetainedContextEvent::DeliveredAssistantMessage { message, .. } = &mut event else {
+            unreachable!("delivered message constructed above");
+        };
+        message.classification = Some(classification);
+        event
+    };
+    let source = |context: &RetainedContext| {
+        let (_, entry) = context.ordered_entries().next().expect("retained answer");
+        context.source(entry).expect("answer source")
+    };
+    let mut context = RetainedContext::default();
+    assert!(context.record(&classified("42", AssistantDeliveryClassification::Pending)));
+    let pending = source(&context);
+
+    assert!(context.record(&classified("42", AssistantDeliveryClassification::Final)));
+    assert_eq!(source(&context), pending);
+    assert!(!context.record(&classified("42", AssistantDeliveryClassification::Final)));
+
+    assert!(context.record(&classified(
+        "Answer: 42",
+        AssistantDeliveryClassification::Final
+    )));
+    let rewritten = source(&context);
+    assert_eq!(rewritten.id, pending.id);
+    assert_ne!(rewritten.revision, pending.revision);
+    assert_eq!(context.ordered_entries().count(), 1);
 }

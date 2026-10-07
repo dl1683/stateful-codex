@@ -12,7 +12,6 @@ use codex_app_server_protocol::ProjectChangedNotification;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectDeleteParams;
-use codex_app_server_protocol::ProjectDeleteResponse;
 use codex_app_server_protocol::ProjectImportParams;
 use codex_app_server_protocol::ProjectImportResponse;
 use codex_app_server_protocol::ProjectListParams;
@@ -566,41 +565,22 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
             .collect::<Vec<_>>(),
         vec!["Second", "Renamed"]
     );
-    let moved_second = reordered.data[0].clone();
 
     server.clear_message_buffer();
-    let deleted_project_id = created.project.id.clone();
-    let _: ProjectDeleteResponse = server
-        .request(|request_id| ClientRequest::ProjectDelete {
-            request_id,
-            params: ProjectDeleteParams {
-                project_id: deleted_project_id.clone(),
-            },
-        })
+    let delete_id = server
+        .send_raw_request(
+            "project/delete",
+            Some(serde_json::to_value(ProjectDeleteParams {
+                project_id: created.project.id.clone(),
+            })?),
+        )
         .await?;
-    let deleted_notification: ProjectChangedNotification =
-        server.read_notification("project/changed").await?;
-    assert_eq!(deleted_notification.project_id, deleted_project_id);
-    assert_eq!(deleted_notification.change_type, ProjectChangeType::Deleted);
-    let unassigned_notification: ThreadProjectUpdatedNotification =
-        server.read_notification("thread/project/updated").await?;
-    assert_eq!(
-        unassigned_notification,
-        ThreadProjectUpdatedNotification {
-            thread_id: started.thread.id.clone(),
-            project_id: None,
-        }
-    );
-    let read_id = server
-        .send_project_read_request(ProjectReadParams {
-            project_id: deleted_project_id,
-        })
+    let delete_error = server
+        .read_stream_until_error_message(RequestId::Integer(delete_id))
         .await?;
-    let read_error = server
-        .read_stream_until_error_message(RequestId::Integer(read_id))
-        .await?;
-    assert_eq!(read_error.error.code, -32602);
-    let remaining_projects: ProjectListResponse = server
+    assert_eq!(delete_error.error.code, -32600);
+    assert!(delete_error.error.message.contains("nothing was deleted"));
+    let after_refused_delete: ProjectListResponse = server
         .request(|request_id| ClientRequest::ProjectList {
             request_id,
             params: ProjectListParams {
@@ -611,122 +591,8 @@ async fn projects_persist_and_assign_threads() -> Result<()> {
             },
         })
         .await?;
-    assert_eq!(remaining_projects.data, vec![moved_second]);
-    let unassigned_after_delete: ThreadListResponse = server
-        .request(|request_id| ClientRequest::ThreadList {
-            request_id,
-            params: ThreadListParams {
-                originators: None,
-                cursor: None,
-                limit: Some(10),
-                sort_key: None,
-                sort_direction: None,
-                model_providers: Some(Vec::new()),
-                source_kinds: Some(Vec::new()),
-                archived: None,
-                section_id: None,
-                project_id: Some(None),
-                cwd: None,
-                use_state_db_only: true,
-                search_term: None,
-                parent_thread_id: None,
-                ancestor_thread_id: None,
-            },
-        })
-        .await?;
-    assert_eq!(unassigned_after_delete.data.len(), 1);
-    assert_eq!(unassigned_after_delete.data[0].id, started.thread.id);
+    assert_eq!(after_refused_delete.data, reordered.data);
     assert!(codex_home.path().exists());
-    Ok(())
-}
-
-#[tokio::test]
-async fn deleted_project_is_dropped_before_first_durable_thread_persistence() -> Result<()> {
-    let responses = create_mock_responses_server_repeating_assistant("Done").await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&responses.uri())
-        .enable_feature(Feature::Sqlite)
-        .write(codex_home.path())?;
-    let mut server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-
-    let project: ProjectCreateResponse = server
-        .request(|request_id| ClientRequest::ProjectCreate {
-            request_id,
-            params: ProjectCreateParams {
-                name: "Pending".to_string(),
-                roots: Vec::new(),
-                metadata: None,
-                idempotency_key: "deleted-before-persistence".to_string(),
-            },
-        })
-        .await?;
-    server.clear_message_buffer();
-    let started = server
-        .start_thread(ThreadStartParams {
-            project_id: Some(project.project.id.clone()),
-            ..Default::default()
-        })
-        .await?;
-    let _: serde_json::Value = server.read_notification("thread/started").await?;
-
-    server.clear_message_buffer();
-    let _: ProjectDeleteResponse = server
-        .request(|request_id| ClientRequest::ProjectDelete {
-            request_id,
-            params: ProjectDeleteParams {
-                project_id: project.project.id.clone(),
-            },
-        })
-        .await?;
-    let _: ProjectChangedNotification = server.read_notification("project/changed").await?;
-    let read_after_delete: ThreadReadResponse = server
-        .request(|request_id| ClientRequest::ThreadRead {
-            request_id,
-            params: ThreadReadParams {
-                thread_id: started.thread.id.clone(),
-                include_turns: false,
-            },
-        })
-        .await?;
-    assert_eq!(read_after_delete.thread.project_id, None);
-    server
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: started.thread.id.clone(),
-            input: vec![UserInput::Text {
-                text: "persist after project deletion".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-
-    let unassigned: ThreadListResponse = server
-        .request(|request_id| ClientRequest::ThreadList {
-            request_id,
-            params: ThreadListParams {
-                originators: None,
-                cursor: None,
-                limit: Some(10),
-                sort_key: None,
-                sort_direction: None,
-                model_providers: Some(Vec::new()),
-                source_kinds: Some(Vec::new()),
-                archived: None,
-                section_id: None,
-                project_id: Some(None),
-                cwd: None,
-                use_state_db_only: true,
-                search_term: None,
-                parent_thread_id: None,
-                ancestor_thread_id: None,
-            },
-        })
-        .await?;
-    assert_eq!(unassigned.data.len(), 1);
-    assert_eq!(unassigned.data[0].id, started.thread.id);
     Ok(())
 }
 

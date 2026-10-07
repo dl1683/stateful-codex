@@ -280,6 +280,8 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
                 text: "May I deploy staging?".to_owned(),
                 complete,
                 phase: None,
+                origin_thread_id: Some(codex_protocol::ThreadId::from_u128(3)),
+                classification: None,
             },
             acceptance_order: 7,
         };
@@ -317,6 +319,8 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
                 text: text.clone(),
                 complete: true,
                 phase: None,
+                origin_thread_id: None,
+                classification: None,
             },
             RetainedInputSource::Local(metadata.user_input_order),
         );
@@ -338,6 +342,110 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
         };
         assert_eq!(restored, original);
     }
+    Ok(())
+}
+
+#[test]
+fn delivered_assistant_rollout_preserves_classification_and_original_phase() -> Result<()> {
+    use codex_protocol::models::MessagePhase;
+
+    for (phase, classification) in [
+        (Some(MessagePhase::FinalAnswer), None),
+        (Some(MessagePhase::Commentary), None),
+        (None, Some(AssistantDeliveryClassification::Pending)),
+        (None, Some(AssistantDeliveryClassification::Commentary)),
+        (None, Some(AssistantDeliveryClassification::Final)),
+    ] {
+        let original = RetainedContextEvent::DeliveredAssistantMessage {
+            message: RetainedUserMessage {
+                origin: crate::UserInputOrigin::User,
+                turn_id: "turn".to_owned(),
+                message_id: Some("message".to_owned()),
+                text: "The answer is 42.".to_owned(),
+                complete: true,
+                phase: phase.clone(),
+                origin_thread_id: Some(codex_protocol::ThreadId::from_u128(3)),
+                classification,
+            },
+            acceptance_order: 4,
+        };
+        let wire = serde_json::to_value(RolloutItem::RetainedContext(original.clone()))?;
+        // Earlier readers still receive an unphased compatibility message.
+        assert_eq!(wire["payload"]["phase"], serde_json::Value::Null);
+        assert_eq!(
+            wire["metadata"]["original_phase"],
+            serde_json::to_value(&phase)?
+        );
+        assert_eq!(
+            wire["metadata"]["assistant_delivery_classification"],
+            serde_json::to_value(classification)?
+        );
+        let RolloutItem::RetainedContext(restored) = serde_json::from_value(wire)? else {
+            panic!("new readers need the model-invisible delivery event");
+        };
+        assert_eq!(restored, original);
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_delivered_assistant_rollout_decodes_without_classification() -> Result<()> {
+    let legacy = json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "id": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "The answer is 42."}],
+            "internal_chat_message_metadata_passthrough": {"turn_id": "turn"},
+        },
+        "metadata": {
+            "client_authored": false,
+            "delivered_assistant_message": "codex:code-mode-delivery:v1:complete",
+            "user_input_order": 4,
+        },
+    });
+    let RolloutItem::RetainedContext(restored) = serde_json::from_value(legacy)? else {
+        panic!("legacy deliveries remain model-invisible delivery events");
+    };
+    assert_eq!(
+        restored,
+        RetainedContextEvent::DeliveredAssistantMessage {
+            message: RetainedUserMessage {
+                origin: crate::UserInputOrigin::User,
+                turn_id: "turn".to_owned(),
+                message_id: Some("message".to_owned()),
+                text: "The answer is 42.".to_owned(),
+                complete: true,
+                phase: None,
+                origin_thread_id: None,
+                classification: None,
+            },
+            acceptance_order: 4,
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn response_item_metadata_round_trips_assistant_delivery_classification() -> Result<()> {
+    let envelope = ResponseItemEnvelope {
+        item: response_message("assistant"),
+        metadata: Some(CodexHarnessMetadata {
+            assistant_delivery_classification: Some(AssistantDeliveryClassification::Final),
+            user_input_order: Some(2),
+            ..Default::default()
+        }),
+    };
+    let wire = serde_json::to_value(RolloutItem::ResponseItem(envelope.clone()))?;
+    assert_eq!(
+        wire["metadata"]["assistant_delivery_classification"],
+        json!("final")
+    );
+    let RolloutItem::ResponseItem(restored) = serde_json::from_value(wire)? else {
+        panic!("expected response item");
+    };
+    assert_eq!(restored, envelope);
     Ok(())
 }
 
@@ -538,6 +646,7 @@ fn compacted_replacement_history_stores_metadata_in_an_aligned_sidecar() -> Resu
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     };
 
     let serialized = serde_json::to_value(item)?;
@@ -595,6 +704,7 @@ fn compacted_resume_metadata_presence_round_trips_empty_values() -> Result<()> {
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: Some(resume_metadata.clone()),
+        conversation_packet: None,
     };
 
     let serialized = serde_json::to_value(&item)?;
@@ -692,6 +802,7 @@ fn compacted_metadata_remains_compatible_with_legacy_response_item_readers() -> 
             last_started_turn_id: Some("turn-1".to_string()),
             previous_turn_settings: None,
         }),
+        conversation_packet: None,
     }))?;
 
     let restored: RolloutItem = serde_json::from_value(compacted_line.clone())?;
@@ -901,6 +1012,7 @@ fn compacted_item_serializes_window_number_and_id() -> Result<()> {
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     };
 
     assert_eq!(
@@ -941,6 +1053,7 @@ fn compacted_item_migrates_legacy_numeric_window_id() -> Result<()> {
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }
     );
     Ok(())

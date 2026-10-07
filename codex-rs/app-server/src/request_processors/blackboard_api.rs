@@ -117,7 +117,7 @@ pub(super) fn api_relation(relation: BlackboardRelation) -> ApiRelation {
     }
 }
 
-fn api_kind(value: BlackboardKind) -> ApiKind {
+pub(super) fn api_kind(value: BlackboardKind) -> ApiKind {
     match value {
         BlackboardKind::Instruction => ApiKind::Instruction,
         BlackboardKind::Fact => ApiKind::Fact,
@@ -171,13 +171,17 @@ fn api_entry_state(value: BlackboardEntryState) -> ApiEntryState {
 
 fn api_provenance(value: BlackboardProvenance) -> ApiProvenance {
     ApiProvenance {
-        kind: match value.kind {
-            BlackboardProvenanceKind::User => ApiProvenanceKind::User,
-            BlackboardProvenanceKind::Agent => ApiProvenanceKind::Agent,
-            BlackboardProvenanceKind::Maintenance => ApiProvenanceKind::Maintenance,
-            BlackboardProvenanceKind::Import => ApiProvenanceKind::Import,
-        },
+        kind: api_provenance_kind(value.kind),
         source_id: value.source_id,
+    }
+}
+
+pub(super) fn api_provenance_kind(value: BlackboardProvenanceKind) -> ApiProvenanceKind {
+    match value {
+        BlackboardProvenanceKind::User => ApiProvenanceKind::User,
+        BlackboardProvenanceKind::Agent => ApiProvenanceKind::Agent,
+        BlackboardProvenanceKind::Maintenance => ApiProvenanceKind::Maintenance,
+        BlackboardProvenanceKind::Import => ApiProvenanceKind::Import,
     }
 }
 
@@ -219,16 +223,32 @@ pub(super) fn internal_evidence(
         .collect()
 }
 
-pub(super) fn internal_provenance(value: ApiProvenance) -> BlackboardProvenance {
-    BlackboardProvenance {
-        kind: match value.kind {
-            ApiProvenanceKind::User => BlackboardProvenanceKind::User,
-            ApiProvenanceKind::Agent => BlackboardProvenanceKind::Agent,
-            ApiProvenanceKind::Maintenance => BlackboardProvenanceKind::Maintenance,
-            ApiProvenanceKind::Import => BlackboardProvenanceKind::Import,
-        },
+/// Converts client-declared provenance for a generic write.
+///
+/// User and maintenance authority are host-derived: only host paths such as
+/// `blackboard/confirm` may stamp them, so a client that declares either is refused.
+pub(super) fn client_provenance(
+    method: &str,
+    value: ApiProvenance,
+) -> Result<BlackboardProvenance, JSONRPCErrorError> {
+    let kind = match value.kind {
+        ApiProvenanceKind::Agent => BlackboardProvenanceKind::Agent,
+        ApiProvenanceKind::Import => BlackboardProvenanceKind::Import,
+        ApiProvenanceKind::User => {
+            return Err(invalid_params(format!(
+                "{method} cannot declare user provenance; user authority is host-derived (use blackboard/confirm for a user action)"
+            )));
+        }
+        ApiProvenanceKind::Maintenance => {
+            return Err(invalid_params(format!(
+                "{method} cannot declare maintenance provenance; maintenance authority is host-derived"
+            )));
+        }
+    };
+    Ok(BlackboardProvenance {
+        kind,
         source_id: value.source_id,
-    }
+    })
 }
 
 pub(super) fn internal_premises(

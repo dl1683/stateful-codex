@@ -1489,6 +1489,15 @@ impl Session {
 
     /// Render the request copy without changing instructions persisted or inherited by forks.
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
+        let instructions = self.prompt_base_instructions_before_policy().await;
+        BaseInstructions {
+            text: crate::context::ConversationRecallPolicy::decorate(&instructions.text),
+            ..instructions
+        }
+    }
+
+    /// The request copy before host policy decoration, for comparing with model instructions.
+    pub(crate) async fn prompt_base_instructions_before_policy(&self) -> BaseInstructions {
         let config = self.get_config().await;
         let instructions = self.get_base_instructions().await;
         if !config.update_plan_enabled
@@ -1787,7 +1796,7 @@ impl Session {
             AutoCompactTokenLimitScope::BodyAfterPrefix
         ) {
             let history = self.clone_history().await;
-            let base_instructions = self.get_base_instructions().await;
+            let base_instructions = self.get_prompt_base_instructions().await;
             history.estimate_token_count_with_base_instructions(&base_instructions)
         } else {
             None
@@ -3563,13 +3572,23 @@ impl Session {
                     });
                     // Preserve input acceptance and source-message start order.
                     // Synthetic messages still receive their order here.
-                    envelope
-                        .metadata
-                        .get_or_insert_default()
-                        .user_input_order
-                        .get_or_insert_with(|| {
-                            message_order.unwrap_or_else(|| state.history.reserve_input_order())
-                        });
+                    let metadata = envelope.metadata.get_or_insert_default();
+                    metadata.user_input_order.get_or_insert_with(|| {
+                        message_order.unwrap_or_else(|| state.history.reserve_input_order())
+                    });
+                    // Only its completed response can resolve a phase-less delivery.
+                    if matches!(&envelope.item, ResponseItem::Message { role, phase: None, .. } if role == "assistant")
+                    {
+                        metadata
+                            .assistant_delivery_classification
+                            .get_or_insert(codex_history::AssistantDeliveryClassification::Pending);
+                    }
+                    // Copied parent context keeps its own provenance, or none.
+                    if !metadata.inherited_user_message {
+                        metadata
+                            .conversation_origin_thread_id
+                            .get_or_insert(self.thread_id());
+                    }
                 }
             }
             state
@@ -4095,6 +4114,10 @@ impl Session {
                     .cloned(),
             );
             let replacement_history = items.clone();
+            // Checked before replacement, which may itself advance the reset generation.
+            let conversation_packet = state
+                .history
+                .update_conversation_packet(metadata.conversation_packet);
             state.replace_annotated_history(
                 items,
                 reference_context_item.clone(),
@@ -4127,6 +4150,7 @@ impl Session {
                     last_started_turn_id: state.last_started_turn_id.clone(),
                     previous_turn_settings: state.previous_turn_settings(),
                 }),
+                conversation_packet: conversation_packet.as_deref().cloned(),
             }
         };
 
@@ -4592,6 +4616,7 @@ impl Session {
                 compaction_response_id: None,
                 compaction_model_hash: None,
                 reviewer_compaction_hash: None,
+                conversation_packet: crate::context_manager::ConversationPacketUpdate::CarryForward,
             },
         )
         .await;
@@ -4794,7 +4819,7 @@ impl Session {
 
     pub(crate) async fn recompute_token_usage(&self, turn_context: &TurnContext) {
         let history = self.clone_history().await;
-        let base_instructions = self.get_base_instructions().await;
+        let base_instructions = self.get_prompt_base_instructions().await;
         let Some(estimated_total_tokens) =
             history.estimate_token_count_with_base_instructions(&base_instructions)
         else {

@@ -173,7 +173,7 @@ impl StatefulRunUpdateTool {
                 || final_obligation.is_some()
             {
                 return Err(FunctionCallError::RespondToModel(
-                    "completionDisposition noReusableLearning completes with the result only; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
+                    "completionDisposition noReusableLearning takes only expectedRevision, status, completionDisposition, and result; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
                 ));
             }
             let knowledge_changed = fence
@@ -259,6 +259,7 @@ impl StatefulRunUpdateTool {
                 &self.services,
                 CompletionRequest {
                     project_id: &self.project_id,
+                    thread_id: &self.thread_id,
                     project_roots: &project_roots,
                     result,
                     packet: &final_obligation,
@@ -412,24 +413,28 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     }
 
     fn spec(&self) -> ToolSpec {
+        let mut final_obligation = super::obligation::obligation_packet_schema();
+        final_obligation["description"] = json!(
+            "durableLearning only: the material conclusions, implications, uncertainties and blockers."
+        );
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: format!("Completion is proportional: use noReusableLearning for a lookup or read-only citation answer unless it produced a distinct finding likely to improve future project work; never create, revise, relate, or promote blackboard knowledge merely to qualify for durableLearning. Persist a meaningful strategy/status change or final evidence-grounded result for the selected thread's active Stateful run. expectedRevision is the current run revision, while rootRevision is the separate project intelligence revision. Completed records finalObligation and the terminal result together in one atomic storage transaction: finish every blackboard, relationship, steering, and verification operation first; select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority current E aliases and at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact historical entry revisions directly material to the outcome; then supply completionIdempotencyKey, finalObligation, and the result in this single final Stateful mutation. If finalObligation.learning contains reusable project knowledge, completion requires at least one selected current or historical blackboard finding so that learning cannot disappear when the bounded recent-outcome window advances. Completion is rejected while any user steering remains submitted or acknowledged. Full source fingerprints in result or finalObligation must belong to a selected current or historical finding; the host renders selected evidence identifiers into the durable completion basis. The tool rejects changed run or root revisions before persistence and appends the selected findings and bounded final-obligation conclusions to the durable result. This cannot bypass a pending Socratic run or perform user-owned pause/cancel controls."),
+            description: format!("Change the active Stateful run's strategy or status, or complete it. noReusableLearning completion (answer from existing knowledge, a narrow citation, or cheap to recompute): exactly expectedRevision, status completed, completionDisposition noReusableLearning, result. durableLearning completion (default), after every other durable write: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, materialRootFindings (at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases; optionally {MAX_MATERIAL_HISTORICAL_FINDINGS} materialHistoricalFindings), selecting a finding that preserves any finalObligation.learning. Rejected while steering is unresolved or a revision changed. Cannot begin a pending Socratic run, pause, or cancel."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "expectedRevision": {"type": "integer", "minimum": 1, "description": "Copy the Run revision from the Stateful run World State. This is not the project intelligence revision used by rootRevision."},
-                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "Use completed only after all other durable writes are finished; the same call must carry the final semantic obligation and removes the active-run binding."},
+                    "expectedRevision": {"type": "integer", "minimum": 1, "description": "The run revision from <stateful_run>, not rootRevision."},
+                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "completed only after all other durable writes."},
                     "strategy": {"type": "string"},
-                    "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative after all durable writes and verification. The tool appends the structured completion basis."},
-                    "rootRevision": {"type": "integer", "minimum": 0, "description": "Required for completed. Copy the project intelligence revision shown with the current root blackboard; completion fails before mutation if it changed."},
-                    "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": format!("Required for completed. Select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases shown at rootRevision that are directly material to the requested outcome. If finalObligation.learning is non-empty, this or materialHistoricalFindings must identify at least one reusable blackboard finding. Use [] only when the run produced no reusable project learning.")},
-                    "materialHistoricalFindings": {"type": "array", "items": {"type": "object", "properties": {"entryId": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}}, "required": ["entryId", "revision"], "additionalProperties": false}, "maxItems": MAX_MATERIAL_HISTORICAL_FINDINGS, "description": format!("Optional for completed. Select at most {MAX_MATERIAL_HISTORICAL_FINDINGS} exact superseded or tombstoned entry IDs and revisions returned by blackboard_query or copy historicalFinding from a successful blackboard_update_batch lifecycle result. Use the latest returned revision; do not query the same entry again. The host renders stored source fingerprints; do not copy opaque fingerprints manually.")},
-                    "completionIdempotencyKey": {"type": "string", "description": "Required for completed. Reuse only when retrying this identical final obligation and terminal result."},
-                    "finalObligation": super::obligation::obligation_packet_schema(),
-                    "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning. With status completed, use noReusableLearning and provide only result when the run produced no distinct finding likely to improve future project work. This is normally the right disposition for a lookup or read-only citation answer from existing project state or source material."}
+                    "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative."},
+                    "rootRevision": {"type": "integer", "minimum": 0, "description": "durableLearning only; the root blackboard's project intelligence revision."},
+                    "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": "durableLearning only; [] only when nothing reusable was learned."},
+                    "materialHistoricalFindings": {"type": "array", "items": {"type": "object", "properties": {"entryId": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}}, "required": ["entryId", "revision"], "additionalProperties": false}, "maxItems": MAX_MATERIAL_HISTORICAL_FINDINGS, "description": "durableLearning only; e.g. historicalFinding from blackboard_update_batch."},
+                    "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
+                    "finalObligation": final_obligation,
+                    "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false
@@ -463,3 +468,7 @@ fn status_name(status: StatefulRunStatus) -> &'static str {
     }
 }
 use std::sync::Arc;
+
+#[cfg(test)]
+#[path = "run_tests.rs"]
+mod tests;

@@ -31,6 +31,7 @@ pub struct StatefulAttributionCounters {
     pub route_query_calls: u64,
     pub evidence_read_calls: u64,
     pub steering_query_calls: u64,
+    pub conversation_read_calls: u64,
     pub blackboard_write_calls: u64,
     pub context_refresh_calls: u64,
     pub obligation_write_calls: u64,
@@ -218,6 +219,9 @@ impl StatefulMeasurementSummary {
             total.steering_query_calls = total
                 .steering_query_calls
                 .saturating_add(counters.steering_query_calls);
+            total.conversation_read_calls = total
+                .conversation_read_calls
+                .saturating_add(counters.conversation_read_calls);
             total.blackboard_write_calls = total
                 .blackboard_write_calls
                 .saturating_add(counters.blackboard_write_calls);

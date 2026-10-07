@@ -34,7 +34,6 @@ use codex_app_server_protocol::McpServerToolCallParams;
 use codex_app_server_protocol::McpServerToolCallResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
-use codex_app_server_protocol::ProjectDeleteParams;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadArchiveParams;
@@ -764,14 +763,12 @@ async fn metadata_and_mcp_requests_complete_while_unrelated_resume_loads_config(
 #[derive(Clone, Copy)]
 enum ResumeMutation {
     GitMetadata,
-    ProjectDeletion,
     Archive,
     Delete,
     DuplicateResume,
 }
 
 #[test_case(ResumeMutation::GitMetadata; "git_metadata_and_project_assignment")]
-#[test_case(ResumeMutation::ProjectDeletion; "project_deletion")]
 #[test_case(ResumeMutation::Archive; "archive")]
 #[test_case(ResumeMutation::Delete; "delete")]
 #[test_case(ResumeMutation::DuplicateResume; "duplicate_resume")]
@@ -808,10 +805,7 @@ async fn resume_revalidates_persisted_thread_after_config_load(
     let mut client =
         start_resource_in_process_client(codex_home.path(), blocked_resume.clone()).await?;
     let sender = client.sender();
-    let project_id = if matches!(
-        mutation,
-        ResumeMutation::GitMetadata | ResumeMutation::ProjectDeletion
-    ) {
+    let project_id = if matches!(mutation, ResumeMutation::GitMetadata) {
         let created: ProjectCreateResponse = serde_json::from_value(
             sender
                 .request(ClientRequest::ProjectCreate {
@@ -830,20 +824,6 @@ async fn resume_revalidates_persisted_thread_after_config_load(
     } else {
         None
     };
-    if matches!(mutation, ResumeMutation::ProjectDeletion) {
-        sender
-            .request(ClientRequest::ThreadMetadataUpdate {
-                request_id: RequestId::Integer(101),
-                params: ThreadMetadataUpdateParams {
-                    thread_id: thread_id.clone(),
-                    project_id: project_id.clone(),
-                    daybreak_enabled: None,
-                    git_info: None,
-                },
-            })
-            .await?
-            .expect("assign project before resume");
-    }
     let mut resume = pin!(sender.request(ClientRequest::ThreadResume {
         request_id: RequestId::Integer(1),
         params: ThreadResumeParams {
@@ -868,12 +848,6 @@ async fn resume_revalidates_persisted_thread_after_config_load(
                     branch: Some(Some("feature/updated-during-resume".to_string())),
                     origin_url: None,
                 }),
-            },
-        },
-        ResumeMutation::ProjectDeletion => ClientRequest::ProjectDelete {
-            request_id: RequestId::Integer(2),
-            params: ProjectDeleteParams {
-                project_id: project_id.clone().expect("project to delete"),
             },
         },
         ResumeMutation::Archive => ClientRequest::ThreadArchive {
@@ -918,7 +892,7 @@ async fn resume_revalidates_persisted_thread_after_config_load(
     };
     let resume_config_loads = blocked_resume.matching_loads.load(Ordering::Relaxed);
     let turn_result = match mutation {
-        ResumeMutation::GitMetadata | ResumeMutation::ProjectDeletion => {
+        ResumeMutation::GitMetadata => {
             complete_in_process_turn(&mut client, RequestId::Integer(3), &thread_id).await
         }
         ResumeMutation::Archive | ResumeMutation::Delete | ResumeMutation::DuplicateResume => {
@@ -945,28 +919,23 @@ async fn resume_revalidates_persisted_thread_after_config_load(
         ThreadLoadedListResponse {
             data: match mutation {
                 ResumeMutation::Archive | ResumeMutation::Delete => Vec::new(),
-                ResumeMutation::GitMetadata
-                | ResumeMutation::ProjectDeletion
-                | ResumeMutation::DuplicateResume => vec![thread_id.clone()],
+                ResumeMutation::GitMetadata | ResumeMutation::DuplicateResume => {
+                    vec![thread_id.clone()]
+                }
             },
             next_cursor: None,
         }
     );
     match mutation {
-        ResumeMutation::GitMetadata | ResumeMutation::ProjectDeletion => {
+        ResumeMutation::GitMetadata => {
             let resumed: ThreadResumeResponse =
                 serde_json::from_value(resumed.expect("resume updated thread"))?;
-            let expected_git_info =
-                matches!(mutation, ResumeMutation::GitMetadata).then(|| GitInfo {
-                    sha: None,
-                    branch: Some("feature/updated-during-resume".to_string()),
-                    origin_url: None,
-                });
-            let expected_project_id = if matches!(mutation, ResumeMutation::GitMetadata) {
-                project_id
-            } else {
-                None
-            };
+            let expected_git_info = Some(GitInfo {
+                sha: None,
+                branch: Some("feature/updated-during-resume".to_string()),
+                origin_url: None,
+            });
+            let expected_project_id = project_id;
             assert_eq!(
                 (resumed.thread.git_info, resumed.thread.project_id),
                 (expected_git_info.clone(), expected_project_id.clone())
@@ -1190,7 +1159,7 @@ impl ThreadConfigLoader for BlockedResumeConfig {
     }
 }
 
-async fn start_resource_in_process_client(
+pub(super) async fn start_resource_in_process_client(
     codex_home: &Path,
     thread_config_loader: Arc<dyn ThreadConfigLoader>,
 ) -> Result<in_process::InProcessClientHandle> {

@@ -176,6 +176,7 @@ async fn start_registered_turn(
                 turn_id,
                 collaboration_mode: &mode,
                 token_usage_at_turn_start: None,
+                user_input: &[],
                 session_store,
                 thread_store,
                 turn_store: &turn_store,

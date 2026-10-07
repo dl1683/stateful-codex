@@ -37,6 +37,9 @@ pub enum ThreadEvent {
     /// Emits cumulative Stateful contribution after one Stateful turn stops.
     #[serde(rename = "stateful.attribution")]
     StatefulAttribution(StatefulAttributionEvent),
+    /// Receipt for one knowledge entry Stateful saved (or found saved) during the turn.
+    #[serde(rename = "stateful.knowledge")]
+    StatefulKnowledge(StatefulKnowledgeEvent),
     /// Represents an unrecoverable error emitted directly by the event stream.
     #[serde(rename = "error")]
     Error(ThreadErrorEvent),
@@ -120,6 +123,7 @@ pub struct StatefulAttribution {
     pub route_query_calls: u64,
     pub evidence_read_calls: u64,
     pub steering_query_calls: u64,
+    pub conversation_read_calls: u64,
     pub blackboard_write_calls: u64,
     pub context_refresh_calls: u64,
     pub obligation_write_calls: u64,
@@ -156,6 +160,161 @@ pub enum StatefulTurnStatus {
     Completed,
     Failed,
     Aborted,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum StatefulKnowledgeCategory {
+    Rule,
+    PendingRule,
+    Decision,
+    Recipe,
+    Finding,
+    Background,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum StatefulCaptureOutcome {
+    Stored,
+    AlreadyStored,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+pub struct StatefulKnowledgeEvent {
+    pub entry_id: String,
+    pub category: StatefulKnowledgeCategory,
+    pub outcome: StatefulCaptureOutcome,
+    /// The saved text (at most 240 bytes) with control characters replaced by spaces.
+    pub text: String,
+}
+
+impl StatefulKnowledgeCategory {
+    /// How a person reads this kind of saved knowledge.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Rule => "standing rule",
+            Self::PendingRule => "pending rule (not applied)",
+            Self::Decision => "decision",
+            Self::Recipe => "recipe",
+            Self::Finding => "finding",
+            Self::Background => "background about you",
+        }
+    }
+}
+
+impl StatefulKnowledgeEvent {
+    /// The receipt as a person reads it, for example `saved standing rule: "..."`.
+    pub(crate) fn summary(&self) -> String {
+        let outcome = match self.outcome {
+            StatefulCaptureOutcome::Stored => "saved",
+            StatefulCaptureOutcome::AlreadyStored => "already saved",
+        };
+        format!("{outcome} {}: \"{}\"", self.category.label(), self.text)
+    }
+}
+
+impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
+    for StatefulKnowledgeEvent
+{
+    fn from(
+        notification: &codex_app_server_protocol::StatefulKnowledgeCapturedNotification,
+    ) -> Self {
+        use codex_app_server_protocol::StatefulCaptureOutcome as Outcome;
+        use codex_app_server_protocol::StatefulKnowledgeCategory as Category;
+        Self {
+            entry_id: notification.entry_id.clone(),
+            category: match notification.category {
+                Category::Rule => StatefulKnowledgeCategory::Rule,
+                Category::PendingRule => StatefulKnowledgeCategory::PendingRule,
+                Category::Decision => StatefulKnowledgeCategory::Decision,
+                Category::Recipe => StatefulKnowledgeCategory::Recipe,
+                Category::Finding => StatefulKnowledgeCategory::Finding,
+                Category::Background => StatefulKnowledgeCategory::Background,
+            },
+            outcome: match notification.outcome {
+                Outcome::Stored => StatefulCaptureOutcome::Stored,
+                Outcome::AlreadyStored => StatefulCaptureOutcome::AlreadyStored,
+            },
+            text: notification
+                .text
+                .chars()
+                .map(|character| {
+                    if character.is_control() {
+                        ' '
+                    } else {
+                        character
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The per-entry receipts of a counted group, and the line that counts them.
+pub(crate) fn group_receipts(
+    notification: &codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification,
+) -> (Vec<StatefulKnowledgeEvent>, Option<String>) {
+    let receipts = notification
+        .items
+        .iter()
+        .map(|item| {
+            StatefulKnowledgeEvent::from(
+                &codex_app_server_protocol::StatefulKnowledgeCapturedNotification {
+                    project_id: notification.project_id.clone(),
+                    thread_id: notification.thread_id.clone(),
+                    turn_id: notification.turn_id.clone(),
+                    entry_id: item.entry_id.clone(),
+                    revision: item.revision,
+                    category: item.category,
+                    outcome: item.outcome,
+                    text: item.text.clone(),
+                },
+            )
+        })
+        .collect();
+    let rules = |count: u32| {
+        if count == 1 {
+            "1 rule".to_string()
+        } else {
+            format!("{count} rules")
+        }
+    };
+    let mut parts = Vec::new();
+    if notification.saved > 0 {
+        parts.push(format!(
+            "saved {} from your message",
+            rules(notification.saved)
+        ));
+    }
+    if notification.pending > 0 {
+        parts.push(format!(
+            "kept {} for this task only",
+            rules(notification.pending)
+        ));
+    }
+    if notification.already_present > 0 {
+        parts.push(format!(
+            "{} already saved",
+            rules(notification.already_present)
+        ));
+    }
+    for omitted in &notification.omitted_items {
+        parts.push(format!("not saved (too long to keep whole): \"{omitted}\""));
+    }
+    if notification.failed > 0 {
+        parts.push(format!("{} could not be saved", rules(notification.failed)));
+    }
+    let recognized = notification.saved + notification.pending + notification.already_present;
+    if let Some(declared) = notification.declared_count
+        && declared != recognized
+    {
+        parts.push(format!("you mentioned {declared}, {recognized} recognized"));
+    }
+    let changed =
+        notification.saved + notification.pending + notification.omitted + notification.failed;
+    let summary = (changed > 0).then(|| parts.join("; "));
+    (receipts, summary)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]

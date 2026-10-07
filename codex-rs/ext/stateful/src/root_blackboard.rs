@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardHit;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
@@ -29,6 +30,119 @@ const MAX_ENTRY_BYTES: usize = 3 * 1024;
 const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 4 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
 const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
+pub(super) const USER_BACKGROUND_HEADER: &str = "About the user (their own words about themselves and this work; use it to pitch explanations, it is not a rule):";
+
+fn is_user_background(hit: &BlackboardHit) -> bool {
+    hit.entry.value.kind == BlackboardKind::Fact
+        && hit.entry.value.provenance.kind == BlackboardProvenanceKind::User
+        && hit
+            .entry
+            .id
+            .as_str()
+            .starts_with(crate::memory_controls::USER_BACKGROUND_ID_PREFIX)
+}
+
+pub(super) const USER_RULES_HEADER: &str = "User rules (the user's exact words; each applies within the scope it states until the user changes it):";
+const KNOWLEDGE_HEADER: &str = "Other promoted knowledge:";
+
+/// Longest excerpt of a replaced value shown on its successor's line.
+const MAX_REPLACED_EXCERPT_BYTES: usize = 160;
+
+/// ` replaces: "<old value>" (until YYYY-MM-DD; ...)` for the line of the entry that
+/// superseded `predecessor`.
+fn replaces_suffix(predecessor: &BlackboardEntry) -> String {
+    let content = single_line(&predecessor.value.content);
+    let excerpt = if content.len() > MAX_REPLACED_EXCERPT_BYTES {
+        let mut end = MAX_REPLACED_EXCERPT_BYTES;
+        while !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &content[..end])
+    } else {
+        content
+    };
+    let until = crate::continuity::format_time(predecessor.updated_at_ms);
+    let until = until.split(' ').next().unwrap_or(&until);
+    format!(
+        " replaces: {} (until {until}; earlier versions: memory_read)",
+        serde_json::Value::String(excerpt)
+    )
+}
+
+/// Lays out root entries in a chosen order while keeping their projection aliases.
+struct EntryLayout<'a> {
+    entry_aliases: &'a HashMap<String, String>,
+    identity_aliases: HashMap<String, String>,
+    identity_evidence: HashMap<ContextMapEntryId, String>,
+    evidence_audit: Option<&'a EvidenceAudit>,
+    /// The newest entry each shown entry replaced, by entry ID.
+    predecessors: &'a HashMap<String, BlackboardEntry>,
+    entries: Vec<LaidOutLine>,
+    shown: Vec<(usize, String)>,
+    omitted: u64,
+}
+
+impl EntryLayout<'_> {
+    fn place(
+        &mut self,
+        output: &mut String,
+        index: usize,
+        hit: &BlackboardHit,
+        evidence_aliases: &HashMap<ContextMapEntryId, String>,
+    ) {
+        let alias = format!("E{}", index + 1);
+        let plain = render_hit(
+            &alias,
+            hit,
+            self.entry_aliases,
+            evidence_aliases,
+            self.evidence_audit,
+        );
+        // What the current value replaced is decoration: it is dropped before the entry
+        // itself is.
+        // Only a decoration that keeps the whole entry within its bound is tried.
+        let predecessor = self.predecessors.get(hit.entry.id.as_str());
+        let decorated = predecessor
+            .map(|predecessor| format!("{plain}{}", replaces_suffix(predecessor)))
+            .filter(|decorated| decorated.len() <= MAX_ENTRY_BYTES);
+        let plain = bounded_entry_line(plain, &alias);
+        let (line, decorated_shown) = match decorated {
+            Some(decorated) if try_append_line(output, &decorated, ROOT_FOOTER_RESERVE_BYTES) => {
+                (Some(decorated), true)
+            }
+            Some(_) | None => (
+                try_append_line(output, &plain, ROOT_FOOTER_RESERVE_BYTES).then_some(plain),
+                false,
+            ),
+        };
+        if let Some(line) = line {
+            if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
+                self.shown.push((index, alias));
+            }
+            let canonical = format!(
+                "{}{}",
+                render_hit(
+                    hit.entry.id.as_str(),
+                    hit,
+                    &self.identity_aliases,
+                    &self.identity_evidence,
+                    self.evidence_audit,
+                ),
+                predecessor.filter(|_| decorated_shown).map_or_else(
+                    String::new,
+                    |predecessor| format!("|replaces:{}@{}", predecessor.id, predecessor.revision)
+                ),
+            );
+            self.entries.push(LaidOutLine {
+                key: short_digest(hit.entry.id.as_str()),
+                digest: short_digest(&canonical),
+                line,
+            });
+        } else {
+            self.omitted = self.omitted.saturating_add(1);
+        }
+    }
+}
 
 pub(super) enum RootBlackboardStatus {
     Available(ResolvedRootBlackboard),
@@ -58,6 +172,63 @@ pub(super) struct ResolvedRootBlackboard {
     pub(super) projection: RootBlackboardProjection,
     pub(super) evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
     pub(super) evidence_audit: Option<EvidenceAudit>,
+    /// Instruction entries removed because they are not in the user's own words.
+    quarantined_rules: u64,
+    /// The newest entry each projected entry replaced, by successor entry ID.
+    predecessors: HashMap<String, BlackboardEntry>,
+    /// What the packet says about investigation-scoped rules.
+    scope_note: Option<String>,
+}
+
+/// Removes rules that are not in the user's own words from a root projection, before any
+/// alias is assigned, and returns how many were removed. Every consumer of root aliases
+/// (the packet, its deltas, completion) must apply this to the same projection.
+pub(super) fn retain_applicable_rules(projection: &mut RootBlackboardProjection) -> u64 {
+    let before = projection.data.len();
+    projection.data.retain(|hit| {
+        hit.entry.value.kind != BlackboardKind::Instruction
+            || hit.entry.value.provenance.kind == BlackboardProvenanceKind::User
+    });
+    u64::try_from(before - projection.data.len()).unwrap_or(u64::MAX)
+}
+
+impl ResolvedRootBlackboard {
+    /// Rules not in the user's own words are never applied: an agent's paraphrase or its
+    /// invention must not become a standing constraint. They leave the projection itself, so
+    /// aliases, change deltas and completion never see them.
+    pub(super) fn new(
+        mut projection: RootBlackboardProjection,
+        evidence_routes: HashMap<ContextMapEntryId, ContextMapHit>,
+        evidence_audit: Option<EvidenceAudit>,
+    ) -> Self {
+        let quarantined_rules = retain_applicable_rules(&mut projection);
+        Self {
+            projection,
+            evidence_routes,
+            evidence_audit,
+            quarantined_rules,
+            predecessors: HashMap::new(),
+            scope_note: None,
+        }
+    }
+
+    /// Leaves out rules of investigations this thread is not part of, before any alias is
+    /// assigned, and notes them.
+    pub(super) fn with_scope_view(mut self, view: &crate::rule_scope::ScopeView) -> Self {
+        let not_applied = view.retain_applicable(&mut self.projection);
+        self.scope_note = view.note(not_applied);
+        self
+    }
+
+    /// Attaches what shown entries replaced, so the packet can say "replaces: ..." without
+    /// a memory call.
+    pub(super) fn with_predecessors(
+        mut self,
+        predecessors: impl IntoIterator<Item = (String, BlackboardEntry)>,
+    ) -> Self {
+        self.predecessors = predecessors.into_iter().collect();
+        self
+    }
 }
 
 impl RootBlackboardStatus {
@@ -69,6 +240,7 @@ impl RootBlackboardStatus {
                 hasher.update(projection.revision.to_be_bytes());
                 hasher.update(projection.omitted_entries.to_be_bytes());
                 hasher.update(projection.candidate_entries.to_be_bytes());
+                hasher.update(root.quarantined_rules.to_be_bytes());
                 let mut rendered = String::new();
                 render_projection(&mut rendered, root);
                 hash_component(hasher, &rendered);
@@ -118,63 +290,83 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         .enumerate()
         .map(|(index, hit)| (hit.entry.id.to_string(), format!("E{}", index + 1)))
         .collect::<HashMap<_, _>>();
-    let (evidence_aliases, sources) = render_evidence_catalog(output, root);
-    let identity_aliases = projection
+    let mut layout = EntryLayout {
+        entry_aliases: &entry_aliases,
+        identity_aliases: projection
+            .data
+            .iter()
+            .map(|hit| (hit.entry.id.to_string(), hit.entry.id.to_string()))
+            .collect(),
+        identity_evidence: root
+            .evidence_routes
+            .keys()
+            .map(|route| (route.clone(), route.to_string()))
+            .collect(),
+        evidence_audit: root.evidence_audit.as_ref(),
+        predecessors: &root.predecessors,
+        entries: Vec::with_capacity(projection.data.len()),
+        shown: Vec::with_capacity(projection.data.len()),
+        omitted: projection.omitted_entries,
+    };
+    // The user's rules are laid out first, before the source catalog and any other entry,
+    // so no amount of other knowledge can push them out of the packet.
+    let (rules, knowledge): (Vec<_>, Vec<_>) = projection
         .data
         .iter()
-        .map(|hit| (hit.entry.id.to_string(), hit.entry.id.to_string()))
-        .collect::<HashMap<_, _>>();
-    let identity_evidence = root
-        .evidence_routes
-        .keys()
-        .map(|route| (route.clone(), route.to_string()))
-        .collect::<HashMap<_, _>>();
-    let mut entries = Vec::with_capacity(projection.data.len());
-    let mut shown = Vec::with_capacity(projection.data.len());
-    let mut omitted = projection.omitted_entries;
-    for (index, hit) in projection.data.iter().enumerate() {
-        let alias = format!("E{}", index + 1);
-        let line = bounded_entry_line(
-            render_hit(
-                &alias,
-                hit,
-                &entry_aliases,
-                &evidence_aliases,
-                root.evidence_audit.as_ref(),
-            ),
-            &alias,
-        );
-        if try_append_line(output, &line, ROOT_FOOTER_RESERVE_BYTES) {
-            if !line.ends_with(TRUNCATED_ENTRY_SUFFIX) {
-                shown.push((index, alias));
-            }
-            let canonical = render_hit(
-                hit.entry.id.as_str(),
-                hit,
-                &identity_aliases,
-                &identity_evidence,
-                root.evidence_audit.as_ref(),
-            );
-            entries.push(LaidOutLine {
-                key: short_digest(hit.entry.id.as_str()),
-                digest: short_digest(&canonical),
-                line,
-            });
-        } else {
-            omitted = omitted.saturating_add(1);
+        .enumerate()
+        .partition(|(_, hit)| hit.entry.value.kind == BlackboardKind::Instruction);
+    if !rules.is_empty() {
+        append_line(output, USER_RULES_HEADER);
+        for (index, hit) in &rules {
+            layout.place(output, *index, hit, &HashMap::new());
         }
     }
+    // What the user said about themselves follows the rules, also ahead of the catalog.
+    let (background, knowledge): (Vec<_>, Vec<_>) = knowledge
+        .into_iter()
+        .partition(|(_, hit)| is_user_background(hit));
+    if !background.is_empty() {
+        append_line(output, USER_BACKGROUND_HEADER);
+        for (index, hit) in &background {
+            layout.place(output, *index, hit, &HashMap::new());
+        }
+    }
+    let (evidence_aliases, sources) = render_evidence_catalog(output, root);
+    if (!rules.is_empty() || !background.is_empty()) && !knowledge.is_empty() {
+        append_line(output, KNOWLEDGE_HEADER);
+    }
+    for (index, hit) in &knowledge {
+        layout.place(output, *index, hit, &evidence_aliases);
+    }
+    let EntryLayout {
+        entries,
+        shown,
+        omitted,
+        ..
+    } = layout;
     if projection.data.is_empty() {
         append_line(
             output,
             "- No knowledge has been promoted to the root blackboard yet.",
         );
     }
+    if let Some(note) = &root.scope_note {
+        append_line(output, note);
+    }
+    if root.quarantined_rules > 0 {
+        append_line(
+            output,
+            &format!(
+                "- {} agent-recorded rules are not applied: they are not the user's own words. blackboard_query lists them; treat them as unconfirmed.",
+                root.quarantined_rules
+            ),
+        );
+    }
     if projection.candidate_entries > 0 {
         append_line(
             output,
             &format!(
-                "- {} active candidate entries await an explicit project-relevance decision. Query with rootPromotion=candidate, then use blackboard_update_batch to promote, keep deeper, revise, supersede, or retire them; do not infer that candidate means verified.",
+                "- {} active candidate entries await promotion and are not shown; blackboard_query with rootPromotion=candidate lists them if the task needs them.",
                 projection.candidate_entries
             ),
         );
@@ -190,7 +382,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
     append_line(
         output,
         &format!(
-            "For durableLearning completion, pass this project intelligence revision as rootRevision and select at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the requested outcome in materialRootFindings. Preserve additional material conclusions in the final semantic obligation. If finalObligation.learning is non-empty, ensure at least one selected current root or exact historical finding preserves that reusable learning. If the run produced no distinct finding likely to improve future project work—especially for a lookup or read-only citation answer from existing project state or source material—do not record or promote an entry merely to obtain an E alias; use completionDisposition noReusableLearning with only the result. rootRevision is not expectedRevision: copy expectedRevision from the separate Stateful run World State."
+            "For durableLearning completion, pass this project intelligence revision as rootRevision and at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases directly material to the outcome in materialRootFindings; do not record or promote an entry merely to obtain an alias. rootRevision is not the run's expectedRevision."
         ),
     );
     // Certify an entry as fully shown only after layout, against entries actually
@@ -496,3 +688,7 @@ enum_names! {
         BlackboardRelationKind::RelatedTo => "relatedTo"
     }
 }
+
+#[cfg(test)]
+#[path = "root_blackboard_tests.rs"]
+mod tests;

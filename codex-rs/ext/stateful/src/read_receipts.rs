@@ -8,6 +8,10 @@ use sha2::Digest;
 use sha2::Sha256;
 
 const MAX_READ_RECEIPTS: usize = 1_024;
+const READ_RECEIPT_ID_PREFIX: &str = "stateful-read-";
+/// Length of every issued receipt id: the prefix plus a hex SHA-256 digest. Callers
+/// size responses with it before deciding whether a receipt can be issued.
+pub(super) const READ_RECEIPT_ID_BYTES: usize = READ_RECEIPT_ID_PREFIX.len() + 64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct EvidenceReadReceipt {
@@ -57,7 +61,8 @@ impl EvidenceReadReceipts {
         hasher.update(evidence.context_map_entry_id.as_str().as_bytes());
         hasher.update([0]);
         hasher.update(evidence.source_fingerprint.as_str().as_bytes());
-        let receipt_id = format!("stateful-read-{:x}", hasher.finalize());
+        let receipt_id = format!("{READ_RECEIPT_ID_PREFIX}{:x}", hasher.finalize());
+        debug_assert_eq!(receipt_id.len(), READ_RECEIPT_ID_BYTES);
 
         while state.receipts.len() >= MAX_READ_RECEIPTS {
             let Some(expired_id) = state.insertion_order.pop_front() else {

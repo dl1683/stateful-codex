@@ -17,6 +17,7 @@ use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
+use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardStructuredValue;
 use codex_project_intelligence::BlackboardVerification;
 use codex_project_intelligence::ConfidenceScore;
@@ -45,6 +46,11 @@ use super::worst_receipt_error;
 
 const UPDATE_TOOL_NAME: &str = "blackboard_update_batch";
 const MAX_MUTATIONS: usize = 24;
+/// Host-written disclosure attached to every successful retire or supersede result.
+///
+/// Retiring only hides an entry from active channels; it is not a forget or delete
+/// capability, and the model must not report it as one.
+const RETENTION_DISCLOSURE: &str = "Hidden from active blackboard search and the root only. This is not forgetting or deletion: prior revisions, historical search, run goals and results, obligation packets, and prior-run outcomes injected into later sessions may still contain this content. Do not tell the user it was forgotten, removed, or deleted; tell them what still remains.";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -98,6 +104,23 @@ impl MutationArguments {
             | Self::Revise { entry_id, .. }
             | Self::Supersede { entry_id, .. }
             | Self::Retire { entry_id, .. } => entry_id,
+        }
+    }
+
+    fn expected_revision(&self) -> u64 {
+        match self {
+            Self::SetRootPromotion {
+                expected_revision, ..
+            }
+            | Self::Revise {
+                expected_revision, ..
+            }
+            | Self::Supersede {
+                expected_revision, ..
+            }
+            | Self::Retire {
+                expected_revision, ..
+            } => *expected_revision,
         }
     }
 
@@ -174,6 +197,7 @@ impl BlackboardUpdateTool {
                             "rootPromotion": "x".repeat(16),
                             "updated": false,
                             "historicalFinding": {"entryId": entry_id, "revision": u64::MAX},
+                            "retention": RETENTION_DISCLOSURE,
                             "error": worst_receipt_error(),
                         })
                     })
@@ -256,6 +280,23 @@ impl BlackboardUpdateTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel(format!("blackboard entry not found: {id}"))
             })?;
+        // Policy checks below must judge the revision this mutation replaces.
+        if current.revision != mutation.expected_revision() {
+            return Err(respond(BlackboardStoreError::RevisionConflict {
+                expected: mutation.expected_revision(),
+                actual: current.revision,
+            }));
+        }
+        // A user rule is the user's own words: an agent may change its promotion or retire or
+        // supersede it, but never rewrite it, and promotion keeps the user's provenance.
+        let user_rule = current.value.kind == BlackboardKind::Instruction
+            && current.value.provenance.kind == BlackboardProvenanceKind::User;
+        let original = (
+            current.value.kind,
+            current.value.content.clone(),
+            current.value.provenance.clone(),
+        );
+        let current_promotion = current.value.root_promotion;
         let mut update = BlackboardEntryUpdate {
             expected_revision: current.revision,
             kind: current.value.kind,
@@ -332,6 +373,16 @@ impl BlackboardUpdateTool {
                         .as_ref()
                         .is_some_and(|value| Some(value) != update.structured_value.as_ref())
                     || (clear_structured_value && update.structured_value.is_some());
+                if user_rule && source_meaning_changed {
+                    return Err(respond(
+                        "a user rule keeps the user's exact words; record the new wording with userQuote and supersede this entry",
+                    ));
+                }
+                if !user_rule && kind == Some(BlackboardKind::Instruction) {
+                    return Err(respond(
+                        "a rule must be the user's own words; record it as kind instruction with userQuote",
+                    ));
+                }
                 let revised_verification = verification.unwrap_or(update.verification);
                 if revised_verification == BlackboardVerification::UserConfirmed
                     && (source_meaning_changed || evidence.is_some() || premises.is_some())
@@ -389,8 +440,22 @@ impl BlackboardUpdateTool {
             } => {
                 update.expected_revision = expected_revision;
                 update.state = BlackboardEntryState::Superseded;
-                update.superseded_by =
-                    Some(BlackboardEntryId::parse(successor_entry_id).map_err(respond)?);
+                let successor_id = BlackboardEntryId::parse(successor_entry_id).map_err(respond)?;
+                if user_rule {
+                    let successor = store
+                        .get_entry(&self.project_id, &successor_id)
+                        .await
+                        .map_err(respond)?;
+                    if !successor.is_some_and(|successor| {
+                        successor.value.kind == BlackboardKind::Instruction
+                            && successor.value.provenance.kind == BlackboardProvenanceKind::User
+                    }) {
+                        return Err(respond(
+                            "a user rule can be replaced only by the user's new rule in their own words",
+                        ));
+                    }
+                }
+                update.superseded_by = Some(successor_id);
             }
             MutationArguments::Retire {
                 expected_revision, ..
@@ -398,6 +463,20 @@ impl BlackboardUpdateTool {
                 update.expected_revision = expected_revision;
                 update.state = BlackboardEntryState::Tombstoned;
             }
+        }
+        if user_rule
+            && current_promotion != RootPromotion::Promoted
+            && update.root_promotion == RootPromotion::Promoted
+            && update.state == BlackboardEntryState::Active
+        {
+            return Err(respond(
+                "a pending user rule applies only after the user states it as standing; it cannot be promoted",
+            ));
+        }
+        // Promotion, supersession and retirement do not change who wrote the text; only a
+        // revision of the text itself is the agent's.
+        if update.kind == original.0 && update.content == original.1 {
+            update.provenance = original.2;
         }
         let entry = store
             .update_entry(&self.project_id, &id, update)
@@ -421,16 +500,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing blackboard knowledge. Use setRootPromotion when a candidate has durable project-wide relevance; promotion does not make uncertain knowledge verified. Use revise when meaning, confidence, verification, importance, direct evidence, or exact premise revisions change. Premises are live-checked semantic provenance and never confer sourceVerified; pass an empty premises array only to deliberately clear them. Changing source-verified meaning requires fresh evidence_read receipts; metadata-only changes do not. userConfirmed is host-issued from an explicit user action and cannot be selected here; changing confirmed meaning or its support requires a new user action or an explicit downgrade. Use supersede when a newer active entry replaces an older conclusion, and retire only for obsolete knowledge with no successor. A successful supersede or retire result includes historicalFinding at the new revision; if that history is material to completion, copy it unchanged into materialHistoricalFindings instead of querying it again. Each entry may appear once and each result succeeds or fails independently."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing entries, each independent. setRootPromotion: promote a project-wide candidate (not verification). revise: change content, confidence, verification, importance, evidence, or premises (empty array clears); changing source-verified meaning needs fresh evidence_read receipts. supersede: a newer entry replaces an older one, including a \"current\" value that is no longer current. retire: obsolete with no successor. Nothing forgets or deletes: history, run results and conversation keep the text; if the user asks to forget, say so and state what remains. Copy a returned historicalFinding into materialHistoricalFindings when material to completion."
             ),
             strict: false,
             defer_loading: None,
@@ -475,6 +553,7 @@ fn successful_update_result(
             "entryId": entry.id.to_string(),
             "revision": entry.revision,
         });
+        result["retention"] = json!(RETENTION_DISCLOSURE);
     }
     result
 }
@@ -494,7 +573,7 @@ fn update_schema() -> serde_json::Value {
     revise_properties["verification"] = json!({
         "type": "string",
         "enum": ["unverified", "sourceVerified", "disputed", "stale"],
-        "description": "sourceVerified records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool."
+        "description": "sourceVerified only with evidence receipts; userConfirmed is host-issued and unavailable here."
     });
     revise_properties["importance"] =
         json!({"type": "string", "enum": ["critical", "high", "normal", "low"]});

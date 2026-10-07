@@ -1,0 +1,253 @@
+use codex_app_server_protocol::BlackboardKind;
+use codex_app_server_protocol::BlackboardProvenanceKind;
+use codex_app_server_protocol::StatefulCaptureOutcome;
+use codex_app_server_protocol::StatefulKnowledgeCapturedNotification;
+use codex_app_server_protocol::StatefulKnowledgeCategory;
+use codex_app_server_protocol::StatefulMemoryItem;
+use codex_app_server_protocol::StatefulMemoryReplaced;
+use codex_app_server_protocol::StatefulMemorySection;
+use codex_app_server_protocol::StatefulRun;
+use codex_app_server_protocol::StatefulRunBudget;
+use codex_app_server_protocol::StatefulRunStatus;
+use codex_app_server_protocol::StatefulWorkflowMode;
+use pretty_assertions::assert_eq;
+
+use super::Footer;
+use super::ReceiptTally;
+use super::memory_lines;
+use crate::history_cell::HistoryCell;
+
+fn render(lines: Vec<ratatui::text::Line<'static>>) -> String {
+    lines
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn item(
+    entry_id: &str,
+    section: StatefulMemorySection,
+    kind: BlackboardKind,
+    content: &str,
+) -> StatefulMemoryItem {
+    StatefulMemoryItem {
+        entry_id: entry_id.to_string(),
+        revision: 1,
+        section,
+        kind,
+        content: content.to_string(),
+        content_truncated: false,
+        source: BlackboardProvenanceKind::User,
+        updated_at: 1_790_000_000,
+        replaces: Vec::new(),
+    }
+}
+
+#[test]
+fn memory_listing_numbers_entries_by_section_and_names_the_open_run() {
+    let mut decision = item(
+        "decision",
+        StatefulMemorySection::Decision,
+        BlackboardKind::Decision,
+        "Months use the symbol mth.",
+    );
+    decision.replaces = vec![StatefulMemoryReplaced {
+        entry_id: "old".to_string(),
+        content: "Months use the symbol mo.".to_string(),
+        replaced_at: 1_789_000_000,
+    }];
+    let items = vec![
+        item(
+            "rule",
+            StatefulMemorySection::UserRule,
+            BlackboardKind::Instruction,
+            "From now on, never run the whole test suite.",
+        ),
+        item(
+            "pending",
+            StatefulMemorySection::PendingRule,
+            BlackboardKind::Instruction,
+            "Don't modify any files today.",
+        ),
+        item(
+            "background",
+            StatefulMemorySection::Background,
+            BlackboardKind::Fact,
+            "I'm a backend developer, mostly Go for the last six years.",
+        ),
+        decision,
+    ];
+    let run = StatefulRun {
+        id: "run-1".to_string(),
+        project_id: "project-1".to_string(),
+        thread_ids: vec!["thread-1".to_string()],
+        goal: "Keep the formatter tidy".to_string(),
+        mode: StatefulWorkflowMode::Collaborative,
+        budget: StatefulRunBudget {
+            max_continuations: 1,
+            max_elapsed_seconds: 60,
+        },
+        continuations_used: 0,
+        status: StatefulRunStatus::Running,
+        strategy: None,
+        strategy_revision: 0,
+        result: None,
+        revision: 1,
+        created_at: 1,
+        updated_at: 1,
+    };
+    insta::assert_snapshot!(
+        "memory_listing",
+        render(memory_lines(
+            &items
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| (index + 1, item))
+                .collect::<Vec<_>>(),
+            Footer::More,
+            Some(&run)
+        ))
+    );
+    assert_eq!(
+        render(memory_lines(&[], Footer::Complete, /*run*/ None)),
+        "Project memory\n  Nothing saved yet."
+    );
+}
+
+#[test]
+fn receipts_name_what_was_saved_and_repeats_say_nothing() {
+    let notification = |category, outcome| StatefulKnowledgeCapturedNotification {
+        project_id: "project-1".to_string(),
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        entry_id: "entry-1".to_string(),
+        revision: 1,
+        category,
+        outcome,
+        text: "From now on, never run the whole test suite.".to_string(),
+    };
+    let saved = ReceiptTally::default()
+        .receipt_cell(&notification(
+            StatefulKnowledgeCategory::Rule,
+            StatefulCaptureOutcome::Stored,
+        ))
+        .map(|cell| render(cell.display_lines(/*width*/ 100)));
+    let pending = ReceiptTally::default()
+        .receipt_cell(&notification(
+            StatefulKnowledgeCategory::PendingRule,
+            StatefulCaptureOutcome::Stored,
+        ))
+        .map(|cell| render(cell.display_lines(/*width*/ 100)));
+    let repeated = ReceiptTally::default()
+        .receipt_cell(&notification(
+            StatefulKnowledgeCategory::Rule,
+            StatefulCaptureOutcome::AlreadyStored,
+        ))
+        .is_none();
+    insta::assert_snapshot!(
+        "memory_receipts",
+        format!(
+            "{}\n{}",
+            saved.unwrap_or_default(),
+            pending.unwrap_or_default()
+        )
+    );
+    assert!(repeated);
+}
+
+/// tui8: two rules from one message give two receipts, numbered, each showing its own rule
+/// rather than the framing both share; a rule that merely contains a colon keeps its words.
+#[test]
+fn rule_receipts_are_numbered_and_show_the_rule_after_its_framing() {
+    let mut tally = ReceiptTally::default();
+    let mut receipt = |turn_id: &str, text: &str| {
+        tally
+            .receipt_cell(&StatefulKnowledgeCapturedNotification {
+                project_id: "project-1".to_string(),
+                thread_id: "thread-1".to_string(),
+                turn_id: turn_id.to_string(),
+                entry_id: "entry-1".to_string(),
+                revision: 1,
+                category: StatefulKnowledgeCategory::Rule,
+                outcome: StatefulCaptureOutcome::Stored,
+                text: text.to_string(),
+            })
+            .map(|cell| render(cell.display_lines(/*width*/ 200)))
+            .unwrap_or_default()
+    };
+    let lines = [
+        receipt(
+            "turn-1",
+            "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself.",
+        ),
+        receipt(
+            "turn-1",
+            "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.",
+        ),
+        receipt(
+            "turn-2",
+            "Never run git commit: I review and commit everything myself, every time.",
+        ),
+        // Scoped framing is part of the rule; a long preview ends at a word boundary.
+        receipt(
+            "turn-3",
+            "Some ground rules for this whole investigation, which may take a few days: Do NOT change any code until we have agreed on the root cause.",
+        ),
+    ];
+    insta::assert_snapshot!(
+        "memory_rule_receipts_skip_framing",
+        lines.join(
+            "
+"
+        )
+    );
+}
+
+/// tui8: one counted receipt for the two rules of the opening message, with an
+/// already-saved one, an omitted one and a declared count that does not match.
+#[test]
+fn group_receipts_count_what_was_committed() {
+    use codex_app_server_protocol::StatefulKnowledgeGroupCapturedNotification;
+    use codex_app_server_protocol::StatefulKnowledgeGroupItem;
+    let item = |text: &str, outcome| StatefulKnowledgeGroupItem {
+        entry_id: "entry".to_string(),
+        revision: 1,
+        category: StatefulKnowledgeCategory::Rule,
+        outcome,
+        text: text.to_string(),
+    };
+    let notification = StatefulKnowledgeGroupCapturedNotification {
+        project_id: "project-1".to_string(),
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        group_id: "group-1".to_string(),
+        category: StatefulKnowledgeCategory::Rule,
+        declared_count: Some(4),
+        recognized: 4,
+        saved: 2,
+        already_present: 1,
+        pending: 0,
+        omitted: 1,
+        failed: 0,
+        items: vec![
+            item(
+                "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself.",
+                StatefulCaptureOutcome::Stored,
+            ),
+            item(
+                "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.",
+                StatefulCaptureOutcome::Stored,
+            ),
+            item("Never touch docs/.", StatefulCaptureOutcome::AlreadyStored),
+        ],
+        omitted_items: vec!["From now on, never touch xxxxxxxx...".to_string()],
+        scope_title: None,
+    };
+    insta::assert_snapshot!(
+        "memory_group_receipt",
+        super::group_receipt_cell(&notification)
+            .map(|cell| render(cell.display_lines(/*width*/ 200)))
+            .unwrap_or_default()
+    );
+}

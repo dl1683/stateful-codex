@@ -353,6 +353,12 @@ impl BlackboardQueryTool {
 }
 
 impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
+    fn exposure(&self) -> codex_extension_api::ToolExposure {
+        // memory_read is the first recall; this detailed query stays discoverable and
+        // callable from nested code mode.
+        codex_extension_api::ToolExposure::Deferred
+    }
+
     fn tool_name(&self) -> ToolName {
         ToolName::plain(TOOL_NAME)
     }
@@ -360,7 +366,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query accumulated project understanding when the root blackboard lacks needed detail or when the root reports pending candidates. Source-linked results and their transitive sourceVerified premises are byte-checked against the selected project without mutating project state. Reuse knowledge only when evidenceFreshness and premiseFreshness are current or notApplicable and effectiveVerification has the required authority. Active knowledge is the default. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to enumerate both direct citations and current conclusions connected through exact revision-pinned premises. Semantic dependencies that were never recorded remain undiscoverable. Affected-source pages omit evidence locators and navigational relations to stay resumable within the response budget, but retain premise references and freshness. Inspect every page before mutating project intelligence, then deliberately revise or supersede affected knowledge; retaining source-verified meaning requires fresh supporting receipts, while leaving stale knowledge unchanged is not repair. The host reports mechanical dependency and freshness only and never infers semantic invalidation. The first page returns projectRevision. If truncated=true, repeat the same query with that revision as expectedProjectRevision and nextAfterEntryId copied into afterEntryId; if the project revision changes, restart from the first page. Use entryScope=historical only when reconstructing prior conclusions, failures, or superseded evidence; lifecycle state and successor identity are returned explicitly. Prefer a focused text query and the smallest useful limit; use rootPromotion=candidate to review pending root-promotion decisions, and omit text only when intentionally enumerating a bounded set.".to_string(),
+            description: "Query project knowledge the root packet lacks, or pending root candidates (rootPromotion=candidate). Reuse an entry only when evidenceFreshness and premiseFreshness are current or notApplicable and effectiveVerification has the authority the answer needs. entryScope=historical includes superseded entries. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to find knowledge resting on that source, then revise or supersede it. If truncated=true, repeat with expectedProjectRevision and afterEntryId from the result.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -370,11 +376,11 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
                     "withinNodeId": {"type": "string", "description": "Optional hierarchy node whose subtree bounds the query."},
                     "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"], "description": "Optional lifecycle filter. Use candidate to review pending root-promotion decisions."},
                     "entryScope": {"type": "string", "enum": ["active", "historical", "all"], "description": "Entry lifecycle scope. Defaults to active; historical returns superseded and tombstoned entries."},
-                    "evidenceContextMapEntryIds": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}, "description": "Exact contextMapEntryId values returned by evidence_read. Each ID expands to the source file and all its file or region routes. Combine only with entryScope, expectedProjectRevision, afterEntryId, and limit."},
-                    "expectedProjectRevision": {"type": "integer", "minimum": 0, "description": "For continuation pages, copy projectRevision from the first affected-source page. Omit on the first page; a mismatch fails closed and requires restarting enumeration."},
-                    "afterEntryId": {"type": "string", "description": "Continuation returned as nextAfterEntryId by an affected-source query. Requires evidenceContextMapEntryIds; copy it unchanged."},
+                    "evidenceContextMapEntryIds": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}, "description": "contextMapEntryId values from evidence_read; finds entries citing that source. Combine only with entryScope, expectedProjectRevision, afterEntryId, limit."},
+                    "expectedProjectRevision": {"type": "integer", "minimum": 0, "description": "Continuation pages only: projectRevision from the first page."},
+                    "afterEntryId": {"type": "string", "description": "nextAfterEntryId from the previous page."},
                     "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Maximum records to return. Use the smallest useful value."},
-                    "detail": {"type": "string", "enum": ["compact", "full"], "description": "Defaults to compact: an entry already shown in full in the root packet at the same revision returns its rootAlias and freshness instead of repeating its content, evidence, and relations. Use full only when you need those fields verbatim."}
+                    "detail": {"type": "string", "enum": ["compact", "full"], "description": "compact (default) returns only rootAlias and freshness for entries already shown in the root packet; full repeats them."}
                 },
                 "additionalProperties": false
             }))

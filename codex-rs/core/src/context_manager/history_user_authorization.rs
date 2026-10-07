@@ -57,11 +57,13 @@ impl ContextManager {
                 let text = guardian_truncate_text(&text, GUARDIAN_MAX_ROOT_MESSAGE_TOKENS).0;
                 Some(RetainedUserMessage {
                     phase: None,
+                    origin_thread_id: None,
                     origin: codex_history::UserInputOrigin::from_message(item),
                     turn_id: item.turn_id().unwrap_or_default().to_owned(),
                     message_id: item.id().map(|id| id.as_str().to_owned()),
                     text,
                     complete: false,
+                    classification: None,
                 })
             })
     }
@@ -128,11 +130,16 @@ impl ContextManager {
             Arc::make_mut(&mut self.retained_context).record_assistant_message(
                 RetainedUserMessage {
                     phase: None,
+                    origin_thread_id: call
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.conversation_origin_thread_id),
                     origin: codex_history::UserInputOrigin::User,
                     turn_id: call.item.turn_id().unwrap_or_default().to_owned(),
                     message_id: call.item.id().map(|id| id.as_str().to_owned()),
                     text: text.clone(),
                     complete: true,
+                    classification: None,
                 },
                 source,
             );
@@ -190,11 +197,15 @@ impl ContextManager {
             complete &= !truncated;
             let message = RetainedUserMessage {
                 phase: phase.clone(),
+                origin_thread_id: metadata
+                    .and_then(|metadata| metadata.conversation_origin_thread_id),
                 origin: codex_history::UserInputOrigin::from_message(item),
                 turn_id: item.turn_id().unwrap_or_default().to_owned(),
                 message_id: item.id().map(|id| id.as_str().to_owned()),
                 text,
                 complete,
+                classification: metadata
+                    .and_then(|metadata| metadata.assistant_delivery_classification),
             };
             let retained = Arc::make_mut(&mut self.retained_context);
             captured = if is_assistant {

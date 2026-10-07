@@ -68,6 +68,7 @@ export type StatefulAttribution = {
   route_query_calls: number;
   evidence_read_calls: number;
   steering_query_calls: number;
+  conversation_read_calls: number;
   blackboard_write_calls: number;
   context_refresh_calls: number;
   obligation_write_calls: number;
@@ -121,6 +122,16 @@ export type TurnFailedEvent = {
   stateful_attribution?: StatefulAttribution;
 };
 
+/** Receipt for one knowledge entry Stateful saved (or found saved) during the turn. */
+export type StatefulKnowledgeEvent = {
+  type: "stateful.knowledge";
+  entry_id: string;
+  category: "rule" | "pending_rule" | "decision" | "recipe" | "finding" | "background";
+  outcome: "stored" | "already_stored";
+  /** The saved text, at most 240 bytes. */
+  text: string;
+};
+
 /** Emits cumulative Stateful contribution after a Stateful turn stops. */
 export type StatefulAttributionEvent = {
   type: "stateful.attribution";
@@ -168,4 +179,5 @@ export type ThreadEvent =
   | ItemUpdatedEvent
   | ItemCompletedEvent
   | StatefulAttributionEvent
+  | StatefulKnowledgeEvent
   | ThreadErrorEvent;

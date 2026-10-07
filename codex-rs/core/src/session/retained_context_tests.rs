@@ -17,6 +17,8 @@ fn delivered_message() -> RetainedUserMessage {
         text: "May I publish?".to_owned(),
         complete: true,
         phase: None,
+        origin_thread_id: None,
+        classification: None,
     }
 }
 
@@ -70,7 +72,11 @@ async fn shutdown_retains_an_admitted_delivery_until_persistence_finishes() {
     })
     .await
     .expect("live admission does not wait for the checkpoint");
-    assert_eq!(live_messages, vec![message]);
+    let delivered = RetainedUserMessage {
+        origin_thread_id: Some(session.thread_id()),
+        ..message
+    };
+    assert_eq!(live_messages, vec![delivered]);
     assert!(futures::poll!(shutdown.as_mut()).is_pending());
     assert!(!completion.has_changed().expect("recording remains open"));
 

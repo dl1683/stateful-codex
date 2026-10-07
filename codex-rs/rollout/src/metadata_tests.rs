@@ -329,6 +329,7 @@ fn builder_from_items_falls_back_to_filename() {
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,
+        conversation_packet: None,
     })];
 
     let builder = builder_from_items(items.as_slice(), path.as_path()).expect("builder");

@@ -74,17 +74,19 @@ fn available_at_revision(
     ProjectIntelligenceStatus::Available {
         project: Box::new(project),
         last_refresh: None,
-        root_blackboard: Box::new(RootBlackboardStatus::Available(ResolvedRootBlackboard {
-            projection: RootBlackboardProjection {
-                project_id,
-                revision,
-                data: Vec::new(),
-                omitted_entries: 0,
-                candidate_entries,
-            },
-            evidence_routes: Default::default(),
-            evidence_audit: None,
-        })),
+        root_blackboard: Box::new(RootBlackboardStatus::Available(
+            ResolvedRootBlackboard::new(
+                RootBlackboardProjection {
+                    project_id,
+                    revision,
+                    data: Vec::new(),
+                    omitted_entries: 0,
+                    candidate_entries,
+                },
+                Default::default(),
+                None,
+            ),
+        )),
     }
 }
 
@@ -158,63 +160,24 @@ fn renders_selected_project_as_bounded_typed_world_state() {
     assert!(
         rendered
             .body()
-            .contains("the host rechecked that the cited source bytes still match")
+            .contains("had their cited source bytes rechecked this turn")
     );
-    assert!(
-        rendered
-            .body()
-            .contains("It did not prove that those bytes entail the entry")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("Reuse these entries without routine rereading")
-    );
-    assert!(rendered.body().contains(
-        "compare only those candidates against the requested scope and evidence endpoint"
-    ));
-    assert!(
-        rendered
-            .body()
-            .contains("do not turn one criterion or decision dimension")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("search by every known filename, or reread the corpus")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("do not persist cheap-to-recompute inventories")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("Preserve decision-changing contrasts, exact values, qualifiers")
-    );
+    for phrase in [
+        "continue from it instead of rediscovering it",
+        "do not query or reread merely to confirm what is shown",
+        "Routine memory writes are optional",
+        "check its decisive source",
+        "must select a recorded finding that preserves it",
+        "hard-won facts with exact values and scope",
+        "Do not read sources only to obtain evidence receipts",
+        "No knowledge has been promoted to the root blackboard yet",
+        "2 active candidate entries await promotion and are not shown",
+        "at most 8 E aliases directly material to the outcome",
+        "rootRevision is not the run's expectedRevision",
+    ] {
+        assert!(rendered.body().contains(phrase), "missing {phrase:?}");
+    }
     assert!(!rendered.body().contains("established premises"));
-    assert!(rendered.body().contains("bounded batch tool"));
-    assert!(
-        rendered
-            .body()
-            .contains("No knowledge has been promoted to the root blackboard yet")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("2 active candidate entries await an explicit project-relevance decision")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("select at most 8 highest-priority E aliases")
-    );
-    assert!(
-        rendered
-            .body()
-            .contains("rootRevision is not expectedRevision")
-    );
     assert!(rendered.body().len() <= MAX_BODY_BYTES);
     assert_fragment_bounded(&rendered);
 }
@@ -382,7 +345,7 @@ fn rewritten_status_line_replaces_the_status_block() {
     assert!(
         rendered
             .body()
-            .contains("3 active candidate entries await an explicit project-relevance decision")
+            .contains("3 active candidate entries await promotion and are not shown")
     );
 }
 

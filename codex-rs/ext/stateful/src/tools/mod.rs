@@ -1,10 +1,13 @@
 mod blackboard;
 mod blackboard_evidence;
 mod blackboard_premises;
+mod blackboard_supersede;
 mod blackboard_update;
 mod blackboard_write;
 mod context_map;
+mod conversation_read;
 mod evidence;
+mod memory_read;
 mod obligation;
 mod run;
 mod run_read;
@@ -38,6 +41,7 @@ pub(super) fn project_intelligence_tools(
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
+    user_messages: crate::user_messages::UserMessageRegistry,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
         Arc::new(blackboard::BlackboardQueryTool::new(
@@ -47,19 +51,14 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
             visible_root.clone(),
         )),
-        Arc::new(blackboard_write::BlackboardRecordTool::new(
-            project_id.clone(),
-            thread_id.clone(),
-            services.clone(),
-            projects.clone(),
-            event_sink.clone(),
-        )),
         Arc::new(blackboard_write::BlackboardBatchRecordTool::new(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
             projects.clone(),
             event_sink.clone(),
+            user_messages,
+            visible_root.clone(),
         )),
         Arc::new(blackboard_update::BlackboardUpdateTool::new(
             project_id.clone(),
@@ -72,6 +71,15 @@ pub(super) fn project_intelligence_tools(
             project_id.clone(),
             services.clone(),
             event_sink.clone(),
+        )),
+        Arc::new(conversation_read::ConversationReadTool::new(
+            project_id.clone(),
+            projects.clone(),
+        )),
+        Arc::new(memory_read::MemoryReadTool::new(
+            project_id.clone(),
+            services.clone(),
+            projects.clone(),
         )),
         Arc::new(context_map::ContextMapQueryTool::new(
             project_id.clone(),
@@ -233,3 +241,7 @@ async fn thread_run(
 fn respond(error: impl std::fmt::Display) -> FunctionCallError {
     FunctionCallError::RespondToModel(error.to_string())
 }
+
+#[cfg(test)]
+#[path = "roster_budget_tests.rs"]
+mod roster_budget_tests;

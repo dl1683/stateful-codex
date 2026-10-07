@@ -14,10 +14,13 @@ workspace = true
 
 [dependencies]
 codex-extension-api = { workspace = true }
+codex-git-utils = { workspace = true }
 codex-project-intelligence = { workspace = true }
+codex-protocol = { workspace = true }
 codex-state = { workspace = true }
 codex-stateful-runtime = { workspace = true }
 codex-thread-store = { workspace = true }
+codex-utils-absolute-path = { workspace = true }
 codex-utils-string = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -26,7 +29,7 @@ tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-codex-utils-absolute-path = { workspace = true }
+codex-utils-output-truncation = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

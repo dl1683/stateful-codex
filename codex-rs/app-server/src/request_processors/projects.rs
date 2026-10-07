@@ -9,7 +9,6 @@ use codex_app_server_protocol::ProjectChangedNotification;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectDeleteParams;
-use codex_app_server_protocol::ProjectDeleteResponse;
 use codex_app_server_protocol::ProjectImportParams;
 use codex_app_server_protocol::ProjectImportResponse;
 use codex_app_server_protocol::ProjectListParams;
@@ -43,6 +42,7 @@ use super::thread_processor::THREAD_LIST_DEFAULT_LIMIT;
 use super::thread_processor::THREAD_LIST_MAX_LIMIT;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_params;
+use crate::error_code::invalid_request;
 use crate::error_code::method_not_found;
 use crate::outgoing_message::OutgoingMessageSender;
 
@@ -221,22 +221,16 @@ impl ProjectRequestProcessor {
         Ok(Some(ProjectMoveResponse {}.into()))
     }
 
+    /// Refuses every deletion until a user-owned confirmation path bound to the
+    /// project and its revision exists; a local client call alone is not consent.
     pub(crate) async fn project_delete(
         &self,
         params: ProjectDeleteParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
-        let deleted = self
-            .thread_store
-            .delete_project(params.project_id.clone())
-            .await
-            .map_err(|error| project_store_error("project/delete", error))?
-            .ok_or_else(|| invalid_params(format!("project not found: {}", params.project_id)))?;
-        self.notify_project_changed(&params.project_id, ProjectChangeType::Deleted)
-            .await;
-        self.notify_thread_projects(deleted.affected_active_thread_ids, /*project_id*/ None)
-            .await;
-        Ok(Some(ProjectDeleteResponse {}.into()))
+        Err(invalid_request(format!(
+            "project/delete is disabled: deleting project {} requires a user-owned confirmation bound to the project and its revision, which is not available yet; nothing was deleted",
+            params.project_id
+        )))
     }
 
     async fn create_project(

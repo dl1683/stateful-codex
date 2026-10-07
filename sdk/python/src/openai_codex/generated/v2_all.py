@@ -5193,6 +5193,7 @@ class StatefulAttributionCounters(BaseModel):
     )
     blackboard_write_calls: Annotated[int, Field(alias="blackboardWriteCalls", ge=0)]
     context_refresh_calls: Annotated[int, Field(alias="contextRefreshCalls", ge=0)]
+    conversation_read_calls: Annotated[int, Field(alias="conversationReadCalls", ge=0)]
     evidence_read_calls: Annotated[int, Field(alias="evidenceReadCalls", ge=0)]
     failed_stateful_tool_calls: Annotated[int, Field(alias="failedStatefulToolCalls", ge=0)]
     knowledge_query_calls: Annotated[int, Field(alias="knowledgeQueryCalls", ge=0)]
@@ -5220,6 +5221,98 @@ class StatefulAttributionStatus(Enum):
     completed = "completed"
     failed = "failed"
     aborted = "aborted"
+
+
+class StatefulCaptureOutcome(Enum):
+    stored = "stored"
+    already_stored = "alreadyStored"
+
+
+class StatefulKnowledgeCategoryValue(Enum):
+    decision = "decision"
+    finding = "finding"
+
+
+class StatefulKnowledgeCategory(
+    RootModel[
+        StatefulKnowledgeCategoryValue
+        | Literal["rule"]
+        | Literal["pendingRule"]
+        | Literal["recipe"]
+        | Literal["background"]
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        StatefulKnowledgeCategoryValue
+        | Literal["rule"]
+        | Literal["pendingRule"]
+        | Literal["recipe"]
+        | Literal["background"],
+        Field(description="What a knowledge receipt says was saved."),
+    ]
+
+
+class StatefulKnowledgeGroupItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    category: StatefulKnowledgeCategory
+    entry_id: Annotated[str, Field(alias="entryId")]
+    outcome: StatefulCaptureOutcome
+    revision: Annotated[int, Field(ge=0)]
+    text: Annotated[str, Field(description="The entry's content, at most 240 bytes.")]
+
+
+class StatefulMemoryAddKind(Enum):
+    rule = "rule"
+    background = "background"
+    decision = "decision"
+    note = "note"
+
+
+class StatefulMemoryAddOutcome(Enum):
+    added = "added"
+    already_present = "alreadyPresent"
+    already_done = "alreadyDone"
+
+
+class StatefulMemoryReplaced(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    content: Annotated[str, Field(description="At most 240 bytes.")]
+    entry_id: Annotated[str, Field(alias="entryId")]
+    replaced_at: Annotated[int, Field(alias="replacedAt", description="Unix seconds.")]
+
+
+class StatefulMemorySectionValue(Enum):
+    decision = "decision"
+    knowledge = "knowledge"
+
+
+class StatefulMemorySection(
+    RootModel[
+        StatefulMemorySectionValue
+        | Literal["userRule"]
+        | Literal["pendingRule"]
+        | Literal["unverifiedRule"]
+        | Literal["background"]
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        StatefulMemorySectionValue
+        | Literal["userRule"]
+        | Literal["pendingRule"]
+        | Literal["unverifiedRule"]
+        | Literal["background"],
+        Field(description="Where a memory item belongs, matching what new work applies."),
+    ]
 
 
 class StatefulObligationPacket(BaseModel):
@@ -10219,6 +10312,61 @@ class StatefulAttributionCompletedNotification(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class StatefulKnowledgeCapturedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    category: StatefulKnowledgeCategory
+    entry_id: Annotated[str, Field(alias="entryId")]
+    outcome: StatefulCaptureOutcome
+    project_id: Annotated[str, Field(alias="projectId")]
+    revision: Annotated[int, Field(ge=0)]
+    text: Annotated[str, Field(description="The entry's content, at most 240 bytes.")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
+class StatefulKnowledgeGroupCapturedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    already_present: Annotated[int, Field(alias="alreadyPresent", ge=0)]
+    category: StatefulKnowledgeCategory
+    declared_count: Annotated[
+        int | None,
+        Field(
+            alias="declaredCount",
+            description='A count the user\'s words declared ("Two standing rules"), when they did.',
+            ge=0,
+        ),
+    ] = None
+    failed: Annotated[int, Field(ge=0)]
+    group_id: Annotated[str, Field(alias="groupId")]
+    items: Annotated[
+        list[StatefulKnowledgeGroupItem],
+        Field(description="Saved, kept and already-saved units in the order written."),
+    ]
+    omitted: Annotated[
+        int, Field(description="Recognized but too long to keep whole; not saved.", ge=0)
+    ]
+    omitted_items: Annotated[
+        list[str], Field(alias="omittedItems", description="Openings of omitted units.")
+    ]
+    pending: Annotated[int, Field(description="Saved but not applied (limited to a task).", ge=0)]
+    project_id: Annotated[str, Field(alias="projectId")]
+    recognized: Annotated[int, Field(ge=0)]
+    saved: Annotated[int, Field(description="Saved and applied.", ge=0)]
+    scope_title: Annotated[
+        str | None,
+        Field(
+            alias="scopeTitle",
+            description="The investigation these rules are limited to, in the user's words.",
+        ),
+    ] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class StatefulMeasurementSummary(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10244,6 +10392,26 @@ class StatefulMeasurementSummary(BaseModel):
     token_usage: Annotated[TokenUsageBreakdown | None, Field(alias="tokenUsage")] = None
     trajectory: TurnTrajectory | None = None
     turns_with_token_usage: Annotated[int, Field(alias="turnsWithTokenUsage", ge=0)]
+
+
+class StatefulMemoryItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    content: Annotated[
+        str, Field(description="At most 2,000 bytes; `contentTruncated` says whether more exists.")
+    ]
+    content_truncated: Annotated[bool, Field(alias="contentTruncated")]
+    entry_id: Annotated[str, Field(alias="entryId")]
+    kind: BlackboardKind
+    replaces: Annotated[
+        list[StatefulMemoryReplaced],
+        Field(description="What this entry replaced, newest first, at most three."),
+    ]
+    revision: Annotated[int, Field(ge=0)]
+    section: StatefulMemorySection
+    source: Annotated[BlackboardProvenanceKind, Field(description="Who wrote this text.")]
+    updated_at: Annotated[int, Field(alias="updatedAt", description="Unix seconds.")]
 
 
 class StatefulObligation(BaseModel):
@@ -11826,6 +11994,42 @@ class StatefulAttributionCompletedServerNotification(BaseModel):
         Field(title="StatefulAttribution/completedNotificationMethod"),
     ]
     params: StatefulAttributionCompletedNotification
+
+
+class StatefulKnowledgeCapturedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["statefulKnowledge/captured"],
+        Field(title="StatefulKnowledge/capturedNotificationMethod"),
+    ]
+    params: StatefulKnowledgeCapturedNotification
+
+
+class StatefulKnowledgeGroupCapturedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["statefulKnowledge/groupCaptured"],
+        Field(title="StatefulKnowledge/groupCapturedNotificationMethod"),
+    ]
+    params: StatefulKnowledgeGroupCapturedNotification
 
 
 class ThreadSettingsUpdatedServerNotification(BaseModel):
@@ -13598,6 +13802,8 @@ class ServerNotification(
         | SteeringUpdatedServerNotification
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
+        | StatefulKnowledgeCapturedServerNotification
+        | StatefulKnowledgeGroupCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
@@ -13694,6 +13900,8 @@ class ServerNotification(
         | SteeringUpdatedServerNotification
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
+        | StatefulKnowledgeCapturedServerNotification
+        | StatefulKnowledgeGroupCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification

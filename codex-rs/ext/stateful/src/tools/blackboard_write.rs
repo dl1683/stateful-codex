@@ -32,7 +32,21 @@ use serde_json::json;
 use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
+use crate::events::CaptureOutcome;
+use crate::events::KnowledgeCategory;
+use crate::events::receipt_text;
 use crate::services::ProjectIntelligenceServices;
+
+use crate::rule_capture::RulePlacement;
+use crate::rule_capture::RuleSource;
+use crate::rule_capture::store_user_rule;
+use crate::rule_units::rule_for_clause;
+use crate::user_messages::UserMessageRegistry;
+use crate::user_rules::MAX_RULE_BYTES;
+use crate::user_rules::RuleStanding;
+use crate::user_rules::reports_speech;
+
+use crate::visible_root::VisibleRootRegistry;
 
 use super::blackboard_evidence::EvidenceArguments;
 use super::blackboard_evidence::evidence_schema;
@@ -40,6 +54,10 @@ use super::blackboard_evidence::resolve_evidence;
 use super::blackboard_premises::PremiseArguments;
 use super::blackboard_premises::premise_schema;
 use super::blackboard_premises::resolve_premises;
+use super::blackboard_supersede::SupersedeReference;
+use super::blackboard_supersede::committed_succession;
+use super::blackboard_supersede::resolve_superseded;
+use super::blackboard_supersede::supersedes_schema;
 use super::bounded_json_output;
 use super::parse_arguments;
 use super::preflight_receipts;
@@ -48,7 +66,6 @@ use super::stable_id;
 use super::worst_identifier;
 use super::worst_receipt_error;
 
-const RECORD_TOOL_NAME: &str = "blackboard_record";
 const BATCH_RECORD_TOOL_NAME: &str = "blackboard_record_batch";
 const RELATE_TOOL_NAME: &str = "blackboard_relate";
 const MAX_BATCH_RECORDS: usize = 24;
@@ -70,6 +87,20 @@ struct RecordArguments {
     evidence: Vec<EvidenceArguments>,
     #[serde(default)]
     premises: Vec<PremiseArguments>,
+    /// For kind instruction: the user's exact words for one rule.
+    user_quote: Option<String>,
+    /// For kind instruction: whether the rule outlives the current task.
+    rule_scope: Option<RuleScope>,
+    /// Current entries this record replaces.
+    #[serde(default)]
+    supersedes: Vec<SupersedeReference>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum RuleScope {
+    Standing,
+    Task,
 }
 
 #[derive(Deserialize)]
@@ -91,21 +122,26 @@ struct BatchRecordArguments {
     relations: Vec<BatchRelationArguments>,
 }
 
-pub(super) struct BlackboardRecordTool {
+/// Validates and persists one record for the batch tool.
+struct BlackboardRecorder {
     project_id: String,
     thread_id: String,
     services: ProjectIntelligenceServices,
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
+    user_messages: UserMessageRegistry,
+    visible_root: VisibleRootRegistry,
 }
 
-impl BlackboardRecordTool {
-    pub(super) fn new(
+impl BlackboardRecorder {
+    fn new(
         project_id: String,
         thread_id: String,
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
+        user_messages: UserMessageRegistry,
+        visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
             project_id,
@@ -113,35 +149,108 @@ impl BlackboardRecordTool {
             services,
             projects,
             event_sink,
+            user_messages,
+            visible_root,
         }
     }
 
-    async fn handle_call(
+    /// Stores a rule only as the user wrote it: the whole sentence of a recorded human
+    /// message of this thread that contains `userQuote`. Earlier turns are not searched
+    /// (their stored summaries carry no input origin). Task-limited directions and relayed
+    /// advice are not stored, whatever scope the caller claims.
+    async fn record_instruction(
         &self,
-        call: ToolCall<'_>,
-    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: RecordArguments = parse_arguments(&call)?;
-        let project_roots = if arguments.evidence.is_empty() && arguments.premises.is_empty() {
-            Vec::new()
-        } else {
-            self.project_roots().await?
+        receipt_turn_id: &str,
+        user_quote: Option<String>,
+        rule_scope: Option<RuleScope>,
+    ) -> Result<BlackboardEntry, FunctionCallError> {
+        let (Some(quote), Some(scope)) = (user_quote, rule_scope) else {
+            return Err(respond(
+                "kind instruction needs userQuote (the user's exact words for one rule) and ruleScope (standing or task)",
+            ));
         };
-        let entry = self
-            .record(arguments, &call.call_id, &project_roots)
-            .await?;
-        bounded_json_output(
-            &call,
-            json!({
-                "entryId": entry.id.to_string(),
-                "revision": entry.revision,
-                "recorded": true,
-            }),
+        if matches!(scope, RuleScope::Task) {
+            return Err(respond(
+                "nothing written: a task-limited direction applies in this conversation only",
+            ));
+        }
+        let (message, clause) = self
+            .user_messages
+            .find(&self.thread_id, &self.project_id, &quote)
+            .ok_or_else(|| {
+                respond(
+                    "userQuote is not inside exactly one complete sentence of a user message recorded in this thread",
+                )
+            })?;
+        if crate::user_rules::asks_about_rules(&clause) {
+            return Err(respond(
+                "nothing written: that sentence asks about rules; it does not state one",
+            ));
+        }
+        let relayed = respond(
+            "nothing written: that sentence relays someone else's words, not the user's rule",
+        );
+        if reports_speech(&clause)
+            || crate::quotation::Quotations::new(&message.text).relays_clause(&clause)
+        {
+            return Err(relayed);
+        }
+        // The rule is the whole unit holding the quote (a list item with its header's scope),
+        // exactly as host capture stores it, so both paths share one wording and identity.
+        let rule = rule_for_clause(&message.text, &clause).ok_or(relayed)?;
+        if rule.clause.standing == RuleStanding::Pending {
+            return Err(respond(
+                "nothing written: the user limited that sentence to the current task",
+            ));
+        }
+        let (thread_id, turn_id, stated_at_ms) = (
+            self.thread_id.clone(),
+            message.turn_id,
+            message.received_at_ms,
+        );
+        if rule.clause.text.len() > MAX_RULE_BYTES {
+            return Err(respond(format!(
+                "the rule holding userQuote exceeds {MAX_RULE_BYTES} bytes; quote a shorter complete rule"
+            )));
+        }
+        store_user_rule(
+            &self.services,
+            self.event_sink.as_deref(),
+            &self.project_id,
+            RuleSource {
+                thread_id: &thread_id,
+                turn_id: &turn_id,
+                receipt_turn_id,
+                stated_at_ms,
+                // A rule of an investigation keeps the scope host capture gave the same message.
+                placement: RulePlacement {
+                    scope_id: rule.scope.as_ref().map(|hint| {
+                        crate::rule_group::scope_id_for(
+                            &self.project_id,
+                            &thread_id,
+                            &turn_id,
+                            &hint.title,
+                        )
+                    }),
+                    end_condition: rule
+                        .scope
+                        .as_ref()
+                        .and_then(|hint| hint.end_condition.clone()),
+                    ..RulePlacement::project(codex_project_intelligence::ChangeOrigin::ModelTool)
+                },
+            },
+            &rule.clause.text,
+            RuleStanding::Standing,
         )
+        .await
+        .map(|captured| captured.entry)
+        .map_err(respond)
     }
 
     async fn record(
         &self,
         arguments: RecordArguments,
+        turn_id: &str,
         source_id: &str,
         project_roots: &[std::path::PathBuf],
     ) -> Result<BlackboardEntry, FunctionCallError> {
@@ -157,11 +266,29 @@ impl BlackboardRecordTool {
             root_promotion,
             evidence,
             premises,
+            user_quote,
+            rule_scope,
+            supersedes,
         } = arguments;
         if verification == BlackboardVerification::UserConfirmed {
             return Err(FunctionCallError::RespondToModel(
                 "userConfirmed is issued only from a host-observed user action and cannot be selected by the model"
                     .to_string(),
+            ));
+        }
+        if kind == BlackboardKind::Instruction {
+            if !supersedes.is_empty() {
+                return Err(respond(
+                    "a changed user rule replaces the old one with blackboard_update_batch supersede once the user has stated it",
+                ));
+            }
+            return self
+                .record_instruction(turn_id, user_quote, rule_scope)
+                .await;
+        }
+        if user_quote.is_some() || rule_scope.is_some() {
+            return Err(respond(
+                "userQuote and ruleScope apply to kind instruction only",
             ));
         }
         let (evidence, inferred_node_id) = resolve_evidence(
@@ -178,54 +305,77 @@ impl BlackboardRecordTool {
             Some(node_id) => HierarchyNodeId::parse(node_id).map_err(respond)?,
             None => match inferred_node_id {
                 Some(node_id) => node_id,
-                None => {
-                    self.services
-                        .hierarchy()
-                        .await
-                        .map_err(respond)?
-                        .project_node(&self.project_id)
-                        .await
-                        .map_err(respond)?
-                        .ok_or_else(|| {
-                            FunctionCallError::RespondToModel(
-                                "project hierarchy is empty; refresh the context map first"
-                                    .to_string(),
-                            )
-                        })?
-                        .id
-                }
+                None => self.project_node_id().await?,
             },
         };
         let id = BlackboardEntryId::parse(stable_id("entry", &self.project_id, &idempotency_key))
             .map_err(respond)?;
-        let entry = self
-            .services
-            .blackboard()
-            .await
-            .map_err(respond)?
-            .create_entry(
-                id,
-                NewBlackboardEntry {
-                    project_id: self.project_id.clone(),
-                    node_id,
-                    kind,
-                    content,
-                    structured_value,
-                    confidence: ConfidenceScore::from_basis_points(confidence_basis_points)
-                        .map_err(respond)?,
-                    verification,
-                    importance,
-                    root_promotion,
-                    evidence,
-                    premises,
-                    provenance: BlackboardProvenance {
-                        kind: BlackboardProvenanceKind::Agent,
-                        source_id: source_id.to_string(),
-                    },
-                },
+        let value = NewBlackboardEntry {
+            project_id: self.project_id.clone(),
+            node_id,
+            kind,
+            content,
+            structured_value,
+            confidence: ConfidenceScore::from_basis_points(confidence_basis_points)
+                .map_err(respond)?,
+            verification,
+            importance,
+            root_promotion,
+            evidence,
+            premises,
+            provenance: BlackboardProvenance {
+                kind: BlackboardProvenanceKind::Agent,
+                source_id: source_id.to_string(),
+            },
+        };
+        let store = self.services.blackboard().await.map_err(respond)?;
+        let retried = if supersedes.is_empty() {
+            None
+        } else {
+            // A repeated record whose replacement already committed returns it; the entries
+            // it replaced are no longer current, so the first-write checks would refuse it.
+            committed_succession(
+                store,
+                &self.visible_root,
+                &self.project_id,
+                &self.thread_id,
+                &id,
+                &value,
+                &supersedes,
             )
-            .await
-            .map_err(respond)?;
+            .await?
+        };
+        let entry = if let Some(existing) = retried {
+            existing
+        } else if supersedes.is_empty() {
+            store.create_entry(id, value).await.map_err(respond)?
+        } else {
+            // The new entry and the end of the entries it replaces commit together.
+            let replaced = resolve_superseded(
+                store,
+                &self.visible_root,
+                &self.project_id,
+                &self.thread_id,
+                /*successor_is_user_rule*/ false,
+                supersedes,
+            )
+            .await?;
+            let succession = store
+                .create_successor(id, value, replaced)
+                .await
+                .map_err(respond)?;
+            if let Some(event_sink) = &self.event_sink {
+                for superseded in &succession.superseded {
+                    event_sink.emit(StatefulEvent::BlackboardUpdated {
+                        project_id: superseded.value.project_id.clone(),
+                        entity_kind: BlackboardEntityKind::Entry,
+                        entity_id: superseded.id.to_string(),
+                        revision: superseded.revision,
+                    });
+                }
+            }
+            succession.successor
+        };
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::BlackboardUpdated {
                 project_id: entry.value.project_id.clone(),
@@ -233,8 +383,41 @@ impl BlackboardRecordTool {
                 entity_id: entry.id.to_string(),
                 revision: entry.revision,
             });
+            event_sink.emit(StatefulEvent::KnowledgeCaptured {
+                project_id: entry.value.project_id.clone(),
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.to_string(),
+                entry_id: entry.id.to_string(),
+                revision: entry.revision,
+                category: match entry.value.kind {
+                    BlackboardKind::Decision => KnowledgeCategory::Decision,
+                    BlackboardKind::Fact if entry.value.content.starts_with("Recipe:") => {
+                        KnowledgeCategory::Recipe
+                    }
+                    BlackboardKind::Instruction => KnowledgeCategory::Rule,
+                    BlackboardKind::Fact
+                    | BlackboardKind::Claim
+                    | BlackboardKind::Number
+                    | BlackboardKind::Strategy
+                    | BlackboardKind::Question
+                    | BlackboardKind::Contradiction
+                    | BlackboardKind::Failure
+                    | BlackboardKind::RejectedApproach
+                    | BlackboardKind::Signal
+                    | BlackboardKind::Note => KnowledgeCategory::Finding,
+                },
+                outcome: CaptureOutcome::Stored,
+                text: receipt_text(&entry.value.content),
+            });
         }
         Ok(entry)
+    }
+
+    async fn project_node_id(&self) -> Result<HierarchyNodeId, FunctionCallError> {
+        self.services
+            .project_node_id(&self.project_id)
+            .await
+            .map_err(FunctionCallError::RespondToModel)
     }
 
     async fn project_roots(&self) -> Result<Vec<std::path::PathBuf>, FunctionCallError> {
@@ -255,43 +438,8 @@ impl BlackboardRecordTool {
     }
 }
 
-impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRecordTool {
-    fn tool_name(&self) -> ToolName {
-        ToolName::plain(RECORD_TOOL_NAME)
-    }
-
-    fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
-    }
-
-    fn spec(&self) -> ToolSpec {
-        ToolSpec::Function(ResponsesApiTool {
-            name: RECORD_TOOL_NAME.to_string(),
-            description: "Persist one new item of materially reusable project understanding after examining evidence. A lookup or read-only citation answer is not record-worthy merely because it was requested; record it only if it is a distinct finding likely to improve future project work. Prefer blackboard_record_batch when committing two or more coherent findings. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals; do not compress an entry to only what supports the immediate answer. Do not record routine progress, cheap-to-recompute inventories, or knowledge already represented adequately. sourceVerified requires host-issued read receipts and records that the model reviewed those exact source bytes as support; it does not mean the host proved the inference. When a new conclusion semantically depends on trusted blackboard knowledge, pin each exact entryId and revision in premises; premises are checked live, do not count as direct evidence, and do not confer sourceVerified. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool. Copy each non-null blackboardEvidence object returned by evidence_read unchanged into evidence. A shell result or route locator alone is not evidence. When nodeId is omitted, single-source evidence is attached to that file automatically and cross-source knowledge remains project-wide. Reuse idempotencyKey only for an identical retry.".to_string(),
-            strict: false,
-            defer_loading: None,
-            parameters: parse_tool_input_schema(&record_schema())
-            .unwrap_or_else(|error| unreachable!("invalid static blackboard record schema: {error}")),
-            output_schema: None,
-        })
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        false
-    }
-
-    fn handle<'a>(&'a self, call: ToolCall<'call>) -> codex_extension_api::ToolExecutorFuture<'a>
-    where
-        'call: 'a,
-    {
-        Box::pin(self.handle_call(call))
-    }
-}
-
 pub(super) struct BlackboardBatchRecordTool {
-    recorder: BlackboardRecordTool,
+    recorder: BlackboardRecorder,
     relator: BlackboardRelateTool,
 }
 
@@ -302,14 +450,18 @@ impl BlackboardBatchRecordTool {
         services: ProjectIntelligenceServices,
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
+        user_messages: UserMessageRegistry,
+        visible_root: VisibleRootRegistry,
     ) -> Self {
         Self {
-            recorder: BlackboardRecordTool::new(
+            recorder: BlackboardRecorder::new(
                 project_id.clone(),
                 thread_id,
                 services.clone(),
                 projects,
                 event_sink.clone(),
+                user_messages,
+                visible_root,
             ),
             relator: BlackboardRelateTool::new(project_id, services, event_sink),
         }
@@ -384,7 +536,7 @@ impl BlackboardBatchRecordTool {
             let record_key = record.idempotency_key.clone();
             match self
                 .recorder
-                .record(record, &call.call_id, &project_roots)
+                .record(record, &call.turn_id, &call.call_id, &project_roots)
                 .await
             {
                 Ok(entry) => {
@@ -490,7 +642,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} coherent, materially reusable findings and up to {MAX_BATCH_RELATIONS} navigational relationships in one bounded call. A lookup or read-only citation answer is not record-worthy merely because it was requested; record it only if it is a distinct finding likely to improve future project work. Preserve decision-changing contrasts, exact values, qualifiers, scope or authority boundaries, and supersession signals instead of compressing the batch to the immediate answer. Pin an existing trusted entry's exact revision in premises when a finding semantically depends on it; do not substitute an unversioned dependsOn relation. Relations reference record idempotencyKey values from this same call through fromRecordKey and toRecordKey, avoiding opaque entry-ID copying. Each item is independently idempotent and returns its own success or error, so do not retry successful items. Prefer this after one evidence-review pass."
+                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. The host stores rules the user marks as standing; record another user rule as kind instruction with userQuote and ruleScope, one per record. sourceVerified needs evidence copied from evidence_read. Items are idempotent."
             ),
             strict: false,
             defer_loading: None,
@@ -542,11 +694,14 @@ fn record_schema() -> serde_json::Value {
             "content": {"type": "string"},
             "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false},
             "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
-            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "Use sourceVerified only with current context-map evidence links. It records source-linked model verification, not host proof of the entry's inference, scope, authority, completeness, or lack of supersession. userConfirmed is host-issued from an explicit user action and is unavailable to this model tool."},
+            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "sourceVerified only with evidence receipts; userConfirmed is host-issued and unavailable here."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
             "evidence": evidence_schema(),
-            "premises": premise_schema()
+            "premises": premise_schema(),
+            "userQuote": {"type": "string"},
+            "ruleScope": {"type": "string", "enum": ["standing", "task"]},
+            "supersedes": supersedes_schema()
         },
         "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false
@@ -671,15 +826,14 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardRelateTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        // Prose-bearing mutations stay out of nested code mode: model-written JS
-        // string literals break on quotes inside long semantic fields.
-        ToolExposure::DirectModelOnly
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: RELATE_TOOL_NAME.to_string(),
-            description: "Persist a meaningful relationship between two blackboard entries. Use contradictions for genuinely incompatible findings, not mere differences.".to_string(),
+            description: "Persist a relationship between two blackboard entries; contradicts means incompatible findings.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

@@ -139,7 +139,16 @@ macro_rules! run_control_response {
 
 run_control_response!(StatefulRunPauseResponse);
 run_control_response!(StatefulRunResumeResponse);
-run_control_response!(StatefulRunCancelResponse);
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulRunCancelResponse {
+    pub run: StatefulRun,
+    /// Turns of this run that were active in this app-server and were interrupted.
+    /// A run turn executing in another process is not interrupted; it stops being
+    /// continued because the run is no longer running.
+    pub interrupted_turn_ids: Vec<String>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
@@ -368,6 +377,8 @@ pub struct StatefulAttributionCounters {
     #[ts(type = "number")]
     pub steering_query_calls: u64,
     #[ts(type = "number")]
+    pub conversation_read_calls: u64,
+    #[ts(type = "number")]
     pub blackboard_write_calls: u64,
     #[ts(type = "number")]
     pub context_refresh_calls: u64,
@@ -485,6 +496,92 @@ pub struct StatefulMeasurementSummary {
 #[ts(export_to = "v2/")]
 pub struct StatefulMeasurementSummaryResponse {
     pub summary: StatefulMeasurementSummary,
+}
+
+/// What a knowledge receipt says was saved.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulKnowledgeCategory {
+    /// A standing rule in the user's own words.
+    Rule,
+    /// Marked as standing but limited to a task; kept for inspection, never applied.
+    PendingRule,
+    Decision,
+    /// How to build, test or run the project here.
+    Recipe,
+    Finding,
+    /// What the user said about themselves or the whole work, in their words.
+    Background,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulCaptureOutcome {
+    Stored,
+    AlreadyStored,
+}
+
+/// Receipt for one knowledge entry stored (or already stored) during a Stateful turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulKnowledgeCapturedNotification {
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub entry_id: String,
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub category: StatefulKnowledgeCategory,
+    pub outcome: StatefulCaptureOutcome,
+    /// The entry's content, at most 240 bytes.
+    pub text: String,
+}
+
+/// One saved unit of a counted group receipt.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulKnowledgeGroupItem {
+    pub entry_id: String,
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub category: StatefulKnowledgeCategory,
+    pub outcome: StatefulCaptureOutcome,
+    /// The entry's content, at most 240 bytes.
+    pub text: String,
+}
+
+/// The committed outcome of one capture (all the rules one message marked), counted: sent
+/// once after every unit was stored or refused, so it never claims more than was saved.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulKnowledgeGroupCapturedNotification {
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub group_id: String,
+    pub category: StatefulKnowledgeCategory,
+    /// A count the user's words declared ("Two standing rules"), when they did.
+    pub declared_count: Option<u32>,
+    pub recognized: u32,
+    /// Saved and applied.
+    pub saved: u32,
+    pub already_present: u32,
+    /// Saved but not applied (limited to a task).
+    pub pending: u32,
+    /// Recognized but too long to keep whole; not saved.
+    pub omitted: u32,
+    pub failed: u32,
+    /// Saved, kept and already-saved units in the order written.
+    pub items: Vec<StatefulKnowledgeGroupItem>,
+    /// Openings of omitted units.
+    pub omitted_items: Vec<String>,
+    /// The investigation these rules are limited to, in the user's words.
+    pub scope_title: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

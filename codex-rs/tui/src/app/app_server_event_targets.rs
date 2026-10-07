@@ -89,6 +89,12 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::StatefulAttributionCompleted(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::StatefulKnowledgeCaptured(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::StatefulKnowledgeGroupCaptured(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::TurnTrajectoryUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }

@@ -14,8 +14,11 @@ use codex_app_server_protocol::ProjectReadResponse;
 use codex_app_server_protocol::ProjectRoot;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::StatefulRunBudget;
+use codex_app_server_protocol::StatefulRunReadParams;
+use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_app_server_protocol::StatefulRunStartParams;
 use codex_app_server_protocol::StatefulRunStartResponse;
+use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -115,6 +118,86 @@ pub async fn start_stateful_run(
             source,
         })?;
     Ok(())
+}
+
+/// Starts a run for a resumed thread, or refuses when the thread still has an open run,
+/// naming the run and the control that continues or changes it. A resumed turn is never
+/// announced as joining a run: the host binds turns to the open run when they start.
+pub async fn start_stateful_run_on_resumed_thread(
+    request_handle: &AppServerRequestHandle,
+    startup: &PreparedStatefulStartup,
+    thread_id: &str,
+) -> Result<(), StatefulStartupError> {
+    let read: StatefulRunReadResponse = request_handle
+        .request_typed(ClientRequest::StatefulRunRead {
+            request_id: RequestId::String(format!(
+                "stateful-run-read-{thread_id}-{}",
+                startup.idempotency_key
+            )),
+            params: StatefulRunReadParams {
+                run_id: None,
+                thread_id: Some(thread_id.to_string()),
+            },
+        })
+        .await
+        .map_err(|source| StatefulStartupError::Request {
+            operation: "read the thread's Stateful run",
+            source,
+        })?;
+    let Some(run) = read.run else {
+        return start_stateful_run(request_handle, startup, thread_id).await;
+    };
+    let guidance = if run.project_id != startup.project_id {
+        "it belongs to another project; resume the thread without --stateful".to_string()
+    } else if run.mode != startup.mode {
+        format!(
+            "it runs in {} mode; change its mode or cancel it in the web workspace, or resume without --stateful",
+            mode_name(run.mode)
+        )
+    } else {
+        match run.status {
+            StatefulRunStatus::Running => {
+                "resume the thread without --stateful; the host joins each new turn to the open run"
+                    .to_string()
+            }
+            StatefulRunStatus::Pending => {
+                "it is waiting to begin; begin it from the web workspace".to_string()
+            }
+            StatefulRunStatus::Paused | StatefulRunStatus::Blocked => {
+                "resume or cancel it from the web workspace run controls".to_string()
+            }
+            StatefulRunStatus::Completed
+            | StatefulRunStatus::Cancelled
+            | StatefulRunStatus::Failed => {
+                return start_stateful_run(request_handle, startup, thread_id).await;
+            }
+        }
+    };
+    Err(StatefulStartupError::OpenRun {
+        run_id: run.id,
+        status: status_name(run.status),
+        guidance,
+    })
+}
+
+fn mode_name(mode: StatefulWorkflowMode) -> &'static str {
+    match mode {
+        StatefulWorkflowMode::Autonomous => "autonomous",
+        StatefulWorkflowMode::Collaborative => "collaborative",
+        StatefulWorkflowMode::Socratic => "socratic",
+    }
+}
+
+fn status_name(status: StatefulRunStatus) -> &'static str {
+    match status {
+        StatefulRunStatus::Pending => "pending",
+        StatefulRunStatus::Running => "running",
+        StatefulRunStatus::Paused => "paused",
+        StatefulRunStatus::Completed => "completed",
+        StatefulRunStatus::Cancelled => "cancelled",
+        StatefulRunStatus::Blocked => "blocked",
+        StatefulRunStatus::Failed => "failed",
+    }
 }
 
 fn new_run_idempotency_key() -> String {
@@ -251,6 +334,12 @@ pub enum StatefulStartupError {
         "multiple Stateful projects use {root}: {project_ids}. Select one with --stateful-project"
     )]
     MultipleProjects { root: String, project_ids: String },
+    #[error("this thread already has an open Stateful run {run_id} ({status}): {guidance}")]
+    OpenRun {
+        run_id: String,
+        status: &'static str,
+        guidance: String,
+    },
     #[error("failed to {operation}: {source}")]
     Request {
         operation: &'static str,

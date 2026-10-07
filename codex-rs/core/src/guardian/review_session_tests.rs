@@ -92,6 +92,7 @@ async fn run_review_preserves_evidence_during_parent_compaction() {
                 compaction_response_id: None,
                 compaction_model_hash: Some("matching".to_owned()),
                 reviewer_compaction_hash: Some("matching".to_owned()),
+                conversation_packet: crate::context_manager::ConversationPacketUpdate::CarryForward,
             },
         )
         .await;

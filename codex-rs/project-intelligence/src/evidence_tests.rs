@@ -195,7 +195,12 @@ async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
         })
         .await
         .expect("refresh shifted source");
-    assert!(reader.read(request).await.is_err());
+    // Reindexing rebinds the entry to the new bytes, so the old route is obsolete and
+    // fails its fingerprint guard; it is never silently moved to new coordinates.
+    assert!(matches!(
+        reader.read(request).await,
+        Err(EvidenceReadError::RouteFingerprintMismatch)
+    ));
 
     let current_hit = context_map
         .query(crate::ContextMapQuery {
@@ -222,4 +227,262 @@ async fn guarded_region_route_rejects_shifted_coordinates_until_requeried() {
         .expect("requeried route should read");
     assert!(current.content.ends_with("decisive_route_fact"));
     assert_eq!(current.last_line, Some(71));
+}
+
+#[tokio::test]
+async fn guarded_route_failures_name_their_actual_cause() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    std::fs::write(
+        root.path().join("a.txt"),
+        "alpha
+",
+    )
+    .expect("write fixture");
+    std::fs::write(
+        root.path().join("b.txt"),
+        "beta
+",
+    )
+    .expect("write fixture");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    ProjectIndexer::new(
+        HierarchyStore::open(&sqlite).await.expect("hierarchy"),
+        context_map.clone(),
+    )
+    .refresh(ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    })
+    .await
+    .expect("index project");
+    let mut routes = Vec::new();
+    for path in ["a.txt", "b.txt"] {
+        let hit = context_map
+            .file_hits_for_path(
+                "project-1",
+                &ProjectRelativePath::parse(path).expect("relative path"),
+            )
+            .await
+            .expect("source lookup")
+            .into_iter()
+            .next()
+            .expect("indexed source");
+        routes.push(EvidenceRoute::from_hit(&hit).expect("file route"));
+    }
+    let (a, b) = (routes[0].clone(), routes[1].clone());
+    let reader = EvidenceReader::new(context_map);
+    let read = |project_id: &str, route: EvidenceRoute| {
+        reader.read(EvidenceReadRequest {
+            project_id: project_id.to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route),
+            max_bytes: 64,
+        })
+    };
+    let outcome = |result: Result<EvidenceReadResult, EvidenceReadError>| match result {
+        Ok(read) => format!("read {:?}", read.content),
+        Err(error) => format!("{error:?}"),
+    };
+
+    let mut observed = vec![
+        ("current", outcome(read("project-1", a.clone()).await)),
+        (
+            "unknown id",
+            outcome(
+                read(
+                    "project-1",
+                    EvidenceRoute {
+                        context_map_entry_id: ContextMapEntryId::parse("missing-route")
+                            .expect("valid entry ID"),
+                        ..a.clone()
+                    },
+                )
+                .await,
+            ),
+        ),
+        ("wrong project", outcome(read("project-2", a.clone()).await)),
+        (
+            "altered fingerprint",
+            outcome(
+                read(
+                    "project-1",
+                    EvidenceRoute {
+                        source_fingerprint: SourceFingerprint::parse(format!(
+                            "sha256:{}",
+                            "0".repeat(/*n*/ 64)
+                        ))
+                        .expect("valid fingerprint"),
+                        ..a.clone()
+                    },
+                )
+                .await,
+            ),
+        ),
+        (
+            "mispaired fingerprint",
+            outcome(
+                read(
+                    "project-1",
+                    EvidenceRoute {
+                        source_fingerprint: b.source_fingerprint.clone(),
+                        ..a.clone()
+                    },
+                )
+                .await,
+            ),
+        ),
+        (
+            "altered range",
+            outcome(
+                read(
+                    "project-1",
+                    EvidenceRoute {
+                        line_range: Some(EvidenceLineRange { start: 1, end: 1 }),
+                        ..a.clone()
+                    },
+                )
+                .await,
+            ),
+        ),
+    ];
+    std::fs::write(
+        root.path().join("a.txt"),
+        "changed
+",
+    )
+    .expect("change source");
+    std::fs::remove_file(root.path().join("b.txt")).expect("remove source");
+    observed.push(("changed bytes", outcome(read("project-1", a).await)));
+    observed.push(("removed source", outcome(read("project-1", b).await)));
+
+    assert_eq!(
+        observed,
+        vec![
+            ("current", r#"read "alpha\n""#.to_string()),
+            ("unknown id", "RouteNotFound(\"missing-route\")".to_string()),
+            (
+                "wrong project",
+                format!(
+                    "RouteNotFound({:?})",
+                    routes[0].context_map_entry_id.to_string()
+                )
+            ),
+            (
+                "altered fingerprint",
+                "RouteFingerprintMismatch".to_string()
+            ),
+            (
+                "mispaired fingerprint",
+                "RouteFingerprintMismatch".to_string()
+            ),
+            ("altered range", "RouteChanged".to_string()),
+            ("changed bytes", "SourceChanged".to_string()),
+            (
+                "removed source",
+                "SourceNotCurrent(SourceUnavailable)".to_string()
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn region_route_reports_stale_index_separately_from_a_removed_file() {
+    let home = TempDir::new().expect("temporary state home");
+    let root = TempDir::new().expect("temporary project root");
+    let source = (1..=70)
+        .map(|line| format!("region_fact line {line}\n"))
+        .collect::<String>();
+    std::fs::write(root.path().join("facts.txt"), source).expect("write fixture");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let hierarchy = HierarchyStore::open(&sqlite).await.expect("hierarchy");
+    let context_map = ContextMapStore::open(&sqlite).await.expect("context map");
+    let indexer = ProjectIndexer::new(hierarchy.clone(), context_map.clone());
+    let index = ProjectIndexRequest {
+        project_id: "project-1".to_string(),
+        roots: vec![root.path().to_path_buf()],
+    };
+    indexer.refresh(index.clone()).await.expect("index project");
+    let region_route = || async {
+        context_map
+            .query(crate::ContextMapQuery {
+                project_id: "project-1".to_string(),
+                text: "region_fact".to_string(),
+                max_results: 10,
+            })
+            .await
+            .expect("query route")
+            .data
+            .into_iter()
+            .filter_map(|hit| Some((EvidenceRoute::from_hit(&hit).ok()?, hit)))
+            .filter(|(route, _)| route.line_range.is_some())
+            .max_by_key(|(route, _)| route.line_range.map(|range| range.end))
+            .expect("indexed region")
+    };
+    let (route, region) = region_route().await;
+    let reader = EvidenceReader::new(context_map.clone());
+    let read = |route: EvidenceRoute| {
+        reader.read(EvidenceReadRequest {
+            project_id: "project-1".to_string(),
+            project_roots: vec![root.path().to_path_buf()],
+            locator: EvidenceReadLocator::ContextMapRoute(route),
+            max_bytes: 64,
+        })
+    };
+
+    // The parent file advances while the region entry keeps the issued fingerprint.
+    let region_node = hierarchy
+        .get_node("project-1", &region.entry.value.node_id)
+        .await
+        .expect("region node lookup")
+        .expect("region node");
+    let file_id = region_node.value.parent_id.expect("region parent");
+    let file = hierarchy
+        .get_node("project-1", &file_id)
+        .await
+        .expect("file node lookup")
+        .expect("file node");
+    hierarchy
+        .update_source_state(
+            "project-1",
+            &file_id,
+            crate::HierarchySourceUpdate {
+                expected_revision: file.revision,
+                lifecycle: crate::NodeLifecycle::Active,
+                source_fingerprint: Some(
+                    SourceFingerprint::parse(format!("sha256:{}", "1".repeat(/*n*/ 64)))
+                        .expect("valid fingerprint"),
+                ),
+            },
+        )
+        .await
+        .expect("advance parent state");
+    let stale = format!("{:?}", read(route.clone()).await.err());
+
+    // Shrinking the file retires its last region while the file stays present.
+    let shrunk = (1..=60)
+        .map(|line| format!("region_fact line {line}\n"))
+        .collect::<String>();
+    std::fs::write(root.path().join("facts.txt"), shrunk).expect("shrink source");
+    indexer
+        .refresh(index.clone())
+        .await
+        .expect("reindex shrunk project");
+    let retired = format!("{:?}", read(route).await.err());
+
+    // A current region route whose file is then removed reports an unavailable source.
+    let (current, _) = region_route().await;
+    std::fs::remove_file(root.path().join("facts.txt")).expect("remove source");
+    indexer.refresh(index).await.expect("reindex project");
+    let removed = format!("{:?}", read(current).await.err());
+
+    assert_eq!(
+        (stale, retired, removed),
+        (
+            "Some(SourceNotCurrent(Stale))".to_string(),
+            "Some(SourceNotCurrent(Stale))".to_string(),
+            "Some(SourceNotCurrent(SourceUnavailable))".to_string(),
+        )
+    );
 }

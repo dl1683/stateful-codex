@@ -15,15 +15,15 @@ Settings:
     
     User authorization and preferences persist across turns. Do not request permission again when the user h... any guidelines provided in skills or external files. [hash=911f91c92c72882c]
     
-    <OMITTED 155 LINES; ~4935 TOKENS; hash=5573869716192298>
-    
-    - Skill naming: If a plugin contributes skills, those skill entries are prefixed with plugin_name: in the Skills list.
-    - MCP naming: Plugin-provided MCP tools keep standard MCP identifiers such as mcp__server__tool; use tool provenance to tell which plugin they come from.
-    - Trigger rules: If the user explicitly names a plugin, prefer capabilities associated with that plugin for that turn.
+    <OMITTED 159 LINES; ~5033 TOKENS; hash=cce4ee786e3482fe>
     - Relationship to capabilities: Plugins are not invoked directly. Use their underlying skills, MCP tools, and app tools to help solve the task.
     - Relevance: Determine what a plugin can help with from explicit user mention or from the plugin-associa..., MCP tools, and apps exposed elsewhere in this turn. [hash=620459a4e7b590f0]
     - Missing/blocked: If the user requests a plugin that does not have relevant callable capabilities for t..., say so briefly and continue with the best fallback. [hash=746b0469a8f6cb3e]
     
+    
+    <conversation_recall_policy>
+    When asked what was said or reported earlier, use original conversation deliveries, including conversati...ization. Preserve these distinctions when compacting. [hash=0506f20ad4fdad31]
+    </conversation_recall_policy>
   model: "gpt-6-astra"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"

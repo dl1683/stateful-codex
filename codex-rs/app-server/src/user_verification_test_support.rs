@@ -103,7 +103,7 @@ impl native::UserVerificationProvider for BlockingProvider {
     }
 }
 
-pub(super) struct Harness {
+pub(crate) struct Harness {
     pub(super) processor: Arc<MessageProcessor>,
     pub(super) session: Arc<ConnectionSessionState>,
     pub(super) auth: Arc<AuthManager>,
@@ -116,7 +116,7 @@ pub(super) struct Harness {
 }
 
 impl Harness {
-    pub(super) async fn new(origin: ConnectionOrigin, supported: fn() -> bool) -> Result<Self> {
+    pub(crate) async fn new(origin: ConnectionOrigin, supported: fn() -> bool) -> Result<Self> {
         let home = tempfile::tempdir()?;
         write_auth(home.path(), "first")?;
         let config = Arc::new(
@@ -201,7 +201,7 @@ impl Harness {
         })
     }
 
-    pub(super) async fn send(&self, id: i64, method: &str, params: serde_json::Value) {
+    pub(crate) async fn send(&self, id: i64, method: &str, params: serde_json::Value) {
         self.processor
             .process_request(
                 ConnectionId(1),
@@ -217,7 +217,7 @@ impl Harness {
             .await;
     }
 
-    pub(super) async fn response(&mut self) -> OutgoingMessage {
+    pub(crate) async fn response(&mut self) -> OutgoingMessage {
         let envelope = timeout(Duration::from_secs(/*secs*/ 10), self.messages.recv())
             .await
             .expect("response deadline")
@@ -234,7 +234,7 @@ impl Harness {
         message
     }
 
-    pub(super) async fn initialize(&mut self, name: &str, opt_in: bool) {
+    pub(crate) async fn initialize(&mut self, name: &str, opt_in: bool) {
         self.send(/*id*/ 0, "initialize", json!({"clientInfo": {"name": name, "version": "1"}, "capabilities": {"experimentalApi": opt_in}})).await;
         assert!(matches!(
             self.response().await,
@@ -255,7 +255,7 @@ impl Harness {
         Ok(())
     }
 
-    pub(super) async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         self.provider
             .released
             .store(/*val*/ true, Ordering::Release);

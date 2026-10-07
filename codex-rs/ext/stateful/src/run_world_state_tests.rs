@@ -93,7 +93,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
-            .contains("completionDisposition noReusableLearning and only the result")
+            .contains("passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result")
     );
     assert!(
         rendered
@@ -152,7 +152,8 @@ fn run_world_state_discloses_omitted_detail() {
             .body()
             .contains("Call stateful_run_read with section=\"goal\" and follow nextCursor")
     );
-    assert!(rendered.body().contains("Semantic checkpoint: none due"));
+    // Collaborative runs carry no tool-call checkpoint nudges.
+    assert!(!rendered.body().contains("Semantic checkpoint"));
     assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
     assert_fragment_bounded(&rendered);
 }
@@ -562,12 +563,14 @@ fn unanswered_checkpoint_escalates_through_a_delta() {
     let status = |checkpoint_due: Option<u64>| {
         let mut status = run_with_obligation("obligation-1", vec!["Found the permit.".to_string()]);
         let RunWorldStateStatus::Available {
+            run,
             checkpoint_due: due,
             ..
         } = &mut status
         else {
             unreachable!("fixture is available");
         };
+        run.value.mode = WorkflowMode::Autonomous;
         *due = checkpoint_due;
         status
     };
@@ -583,4 +586,51 @@ fn unanswered_checkpoint_escalates_through_a_delta() {
         ("<stateful_run_update>", "</stateful_run_update>")
     );
     assert!(rendered.body().contains("Call obligation_update now"));
+}
+
+#[test]
+fn collaborative_checkpoint_epochs_do_not_emit_updates() {
+    let status = |checkpoint_due: Option<u64>| {
+        let mut status = run_with_obligation("obligation-1", vec!["Found the permit.".to_string()]);
+        let RunWorldStateStatus::Available {
+            checkpoint_due: due,
+            ..
+        } = &mut status
+        else {
+            unreachable!("fixture is available");
+        };
+        *due = checkpoint_due;
+        status
+    };
+    let before = run_world_state_section(status(None));
+    let after = run_world_state_section(status(Some(2)));
+
+    assert_eq!(
+        after.render_diff(PreviousWorldStateSection::Known(before.snapshot())),
+        None
+    );
+}
+
+/// The exact snapshot the previous build (4e9426f0bd) recorded for this fixture, whose
+/// Collaborative policy told the model to complete the run at the end of every turn.
+const PRE_POLICY_CHANGE_SNAPSHOT: &str = r#"{"fieldKeys":["This is the durable Stateful run selected by the user. Its mode, goal, and binding constraints are explicit; do not infer replacements.","Project ID","Run ID","Run revision","Run-update precondition","Strategy revision","Mode","Status","Mode obligation","Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. Complete once, as the final Stateful mutation","Goal"],"fields":["fb0e6575a670c8d1e3b5915d842897f1","ec2317830b07d7c9f282d368c025145f","94940dab6976735a579722d0306fc3f8","a01b52cf6457d0da0e50f4e4c2f0bbcc","02468ada597b916221638c598a1533bd","83f186cb17ba59a2aed6015da903c4ce","5c70a64017080ed126527e4619f98258","a1fab10431c833217fdedb0b32fc617b","8c18f40451efbec274033a1069f188dd","201db515dbafce96c4fbf460d9d63eb8","8ccf5da72cadcc3160c2520281b8a8ac"],"fingerprint":"4923394d9486cab5ea1b83b63840831ca0f2c3026a17bff7f0360a387d3bec27","obligation":"1d180498f7db3a82eb41e171b48fa7fe","runId":"run-1","steering":"c2acfe2f98a773bb34065067994ca31e"}"#;
+
+#[test]
+fn changed_collaborative_policy_replaces_a_retained_packet() {
+    let section = run_world_state_section(run_with_obligation(
+        "obligation-1",
+        vec!["Found the permit.".to_string()],
+    ));
+    let previous: serde_json::Value =
+        serde_json::from_str(PRE_POLICY_CHANGE_SNAPSHOT).expect("recorded snapshot parses");
+
+    let rendered = section
+        .render_diff(PreviousWorldStateSection::Known(&previous))
+        .expect("a changed policy renders");
+    assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
+    assert!(
+        rendered
+            .body()
+            .contains("stays open across the user's turns")
+    );
 }

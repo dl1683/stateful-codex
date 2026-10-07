@@ -129,11 +129,13 @@ impl LocalAgentControl {
                         order,
                         RetainedUserMessage {
                             phase: None,
+                            origin_thread_id: None,
                             origin: codex_history::UserInputOrigin::from_message(item),
                             turn_id: item.turn_id().unwrap_or_default().to_owned(),
                             message_id: item.id().map(|id| id.as_str().to_owned()),
                             text,
                             complete: false,
+                            classification: None,
                         },
                     ))
                 }),

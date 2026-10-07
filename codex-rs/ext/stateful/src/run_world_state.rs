@@ -11,14 +11,15 @@ use codex_stateful_runtime::WorkflowMode;
 use serde_json::Value;
 
 use crate::checkpoint::CHECKPOINT_TOOL_CALLS;
+use crate::completion::REUSABLE_LEARNING_RULE;
 use crate::limits::MAX_MODEL_ITEM_BYTES;
 use serde_json::json;
 use sha2::Digest;
 use sha2::Sha256;
 
 const WORLD_STATE_ID: &str = "stateful_run";
-const START_MARKER: &str = "<stateful_run>";
-const END_MARKER: &str = "</stateful_run>";
+pub(super) const START_MARKER: &str = "<stateful_run>";
+pub(super) const END_MARKER: &str = "</stateful_run>";
 const UPDATE_START_MARKER: &str = "<stateful_run_update>";
 const UPDATE_END_MARKER: &str = "</stateful_run_update>";
 /// Markers plus body stay within the 9,000-byte model item bound (one byte per token
@@ -34,6 +35,8 @@ const MAX_ESTIMATED_TOKENS: usize = 3 * 1024;
 const MAX_RENDERED_STEERING: usize = 5;
 const MAX_RENDERED_GOAL_BYTES: usize = 2 * 1024;
 const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
+const WRITE_TOOLS_ARE_DIRECT: &str = "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec.";
+const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across the user's turns and the host records every final answer, so do not complete it at the end of a turn. Complete it only when the user says the overall goal is done or asks to close it; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed, completionDisposition noReusableLearning and result when nothing reusable was learned; otherwise durableLearning with expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
 const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 
 pub(super) enum RunWorldStateStatus {
@@ -68,6 +71,8 @@ impl RunWorldStateStatus {
     fn fingerprint(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(b"codex-stateful-run-v1\0");
+        // A changed mode policy must reach runs whose earlier packet is retained in history.
+        hash(&mut hasher, COLLABORATIVE_COMPLETION);
         hash(&mut hasher, self.project_id());
         match self {
             Self::Available {
@@ -78,7 +83,13 @@ impl RunWorldStateStatus {
                 checkpoint_due,
             } => {
                 hash(&mut hasher, run.id.as_str());
-                hasher.update(checkpoint_due.unwrap_or_default().to_be_bytes());
+                // Collaborative runs render no checkpoint text, so an epoch change must not
+                // produce an otherwise empty update.
+                let rendered_checkpoint = match run.value.mode {
+                    WorkflowMode::Collaborative => None,
+                    WorkflowMode::Autonomous | WorkflowMode::Socratic => *checkpoint_due,
+                };
+                hasher.update(rendered_checkpoint.unwrap_or_default().to_be_bytes());
                 hasher.update(run.revision.to_be_bytes());
                 hasher.update(run.strategy_revision.to_be_bytes());
                 if let Some(obligation) = obligation {
@@ -96,7 +107,7 @@ impl RunWorldStateStatus {
         format!("{:x}", hasher.finalize())
     }
 
-    fn render(&self) -> String {
+    pub(super) fn render(&self) -> String {
         let mut output = String::with_capacity(MAX_BODY_BYTES);
         line(
             &mut output,
@@ -131,7 +142,9 @@ impl RunWorldStateStatus {
                 );
                 field(&mut output, "Mode", mode_name(run.value.mode));
                 field(&mut output, "Status", status_name(run.status));
-                if run.status == StatefulRunStatus::Running {
+                if run.status == StatefulRunStatus::Running
+                    && run.value.mode != WorkflowMode::Collaborative
+                {
                     // The counter is process-local and advisory: after a restart or a run
                     // switch it cannot know earlier calls, so the wording says exactly that.
                     // An unanswered checkpoint escalates, because a soft nudge alone is
@@ -187,10 +200,18 @@ impl RunWorldStateStatus {
                         "Mode obligation: the user explicitly transitioned this Socratic run to execution; follow the agreed strategy and surface unresolved assumptions.",
                     ),
                 }
-                line(
-                    &mut output,
-                    "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. Proportionality: a lookup or read-only citation answer from existing project state or source material does not warrant a blackboard write unless it uncovers a distinct finding likely to improve future project work; never write or promote knowledge merely to preserve the requested answer or qualify for completion. Stateful write tools (blackboard_record, blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. Completion: if no such reusable finding was produced, finish once with stateful_run_update using completionDisposition noReusableLearning and only the result. Otherwise, after all warranted durable writes, finish once with completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings. Completion must be the final Stateful mutation.",
-                );
+                match run.value.mode {
+                    WorkflowMode::Collaborative => line(
+                        &mut output,
+                        &format!("{WRITE_TOOLS_ARE_DIRECT} {COLLABORATIVE_COMPLETION}"),
+                    ),
+                    WorkflowMode::Autonomous | WorkflowMode::Socratic => line(
+                        &mut output,
+                        &format!(
+                            "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. {REUSABLE_LEARNING_RULE} {WRITE_TOOLS_ARE_DIRECT} Completion: if the run learned nothing reusable, finish once with stateful_run_update passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result. Otherwise, after recording the reusable findings and all other warranted durable writes, finish once with durableLearning: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings. Completion must be the final Stateful mutation."
+                        ),
+                    ),
+                }
                 append_segment(
                     &mut output,
                     MAX_OBLIGATION_BYTES,

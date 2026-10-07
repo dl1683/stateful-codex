@@ -9,8 +9,17 @@
 //! Oversized instructions keep an incomplete excerpt for bounded root review, including
 //! sources recovered from legacy Guardian checkpoints before their raw history is dropped.
 
+#[path = "history_assistant_delivery.rs"]
+mod assistant_delivery;
+#[path = "history_conversation_packet.rs"]
+mod conversation_packet;
 #[path = "history_user_authorization.rs"]
 mod user_authorization;
+
+pub(crate) use assistant_delivery::AssistantDeliveryCandidate;
+pub(crate) use assistant_delivery::ResponseCompletion;
+pub(crate) use assistant_delivery::classify_completed_response;
+pub(crate) use conversation_packet::ConversationPacketUpdate;
 
 use crate::context::ContextualUserFragment;
 use crate::context::ModelSwitchInstructions;
@@ -122,6 +131,8 @@ pub(crate) struct ContextManager {
     /// World-state comparison checkpoint. After compaction this may contain only
     /// extension metadata, with model-visible context still awaiting reinjection.
     world_state_baseline: Option<WorldStateSnapshot>,
+    /// Original deliveries installed by the latest capturing compaction checkpoint.
+    conversation_packet: Option<Arc<codex_history::ConversationPacket>>,
 }
 
 struct SharedConversationHistory {
@@ -246,6 +257,7 @@ impl ContextManager {
             ),
             reference_context_item: None,
             world_state_baseline: None,
+            conversation_packet: None,
         }
     }
 
@@ -292,7 +304,8 @@ impl ContextManager {
                 self.user_message_revision =
                     self.user_message_revision.saturating_add(/*rhs*/ 1);
             }
-            RetainedContextEvent::DeliveredAssistantMessage { .. } => {
+            RetainedContextEvent::DeliveredAssistantMessage { message, .. } => {
+                self.apply_assistant_delivery_classification(message);
                 self.guardian_review_context_revision = next_guardian_review_context_revision();
             }
         }
@@ -624,13 +637,17 @@ impl ContextManager {
     // This is a coarse lower bound, not a tokenizer-accurate count.
     pub(crate) fn estimate_token_count(&self, turn_context: &TurnContext) -> Option<i64> {
         let model_info = &turn_context.model_info();
+        // Requests carry the recall policy with the instructions; count it exactly once here.
         let base_instructions = BaseInstructions {
-            text: render_model_instructions(model_info),
+            text: crate::context::ConversationRecallPolicy::decorate(&render_model_instructions(
+                model_info,
+            )),
             provenance: None,
         };
         self.estimate_token_count_with_base_instructions(&base_instructions)
     }
 
+    /// `base_instructions` must be the request copy, which already includes host policy.
     pub(crate) fn estimate_token_count_with_base_instructions(
         &self,
         base_instructions: &BaseInstructions,
@@ -668,6 +685,7 @@ impl ContextManager {
 
     pub(crate) fn replace_annotated(&mut self, items: Vec<ResponseItemEnvelope>) {
         self.retained_context = Arc::default();
+        self.update_conversation_packet(ConversationPacketUpdate::Clear);
         self.user_message_revision = self.user_message_revision.saturating_add(1);
         if let Some(review_history) = &mut self.review_history {
             review_history.reset(

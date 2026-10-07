@@ -1,5 +1,6 @@
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
+import { applyWorkspaceEvent } from "./workspace-events.mjs";
 import { renderWorkspace } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
@@ -40,7 +41,7 @@ let refreshTimer;
 const refresh = createRefreshGate(refreshWorkspace);
 
 async function boot() {
-  subscribe(handleEvent);
+  subscribe(handleEvent, { threadId, projectId });
   try {
     await ensureRun();
     await refresh();
@@ -203,29 +204,9 @@ function render() {
 }
 
 function handleEvent(message) {
-  if (Object.hasOwn(message, "id") && message.method) {
-    state.pendingRequests = [
-      ...state.pendingRequests.filter((item) => item.id !== message.id),
-      message,
-    ];
-    render();
-    return;
-  }
-  if (message.method === "gateway/error") {
-    state.notice = message.params.message;
-    render();
-    return;
-  }
-  if (message.method === "item/agentMessage/delta") {
-    state.liveText += message.params.delta ?? "";
-    render();
-  }
-  if (message.method === "turn/started") state.liveText = "";
-  if (
-    /^(statefulRun|statefulAttribution|obligation|steering|blackboard|project|thread|turn)\//.test(
-      message.method,
-    )
-  ) {
+  const effect = applyWorkspaceEvent(state, message);
+  if (effect.render) render();
+  if (effect.refresh) {
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => refresh().catch(fail), 180);
   }
@@ -398,7 +379,7 @@ async function answerApproval(requestId, actionName) {
     (item) => String(item.id) === requestId,
   );
   if (!request) return;
-  await reply({
+  await reply(threadId, {
     id: request.id,
     result: { decision: actionName === "approve" ? "accept" : "decline" },
   });
@@ -420,7 +401,7 @@ async function answerUserRequest(form) {
       { answers: [data.get(question.id)?.toString() ?? ""] },
     ]),
   );
-  await reply({ id: request.id, result: { answers } });
+  await reply(threadId, { id: request.id, result: { answers } });
   state.pendingRequests = state.pendingRequests.filter(
     (item) => item.id !== request.id,
   );

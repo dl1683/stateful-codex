@@ -586,7 +586,8 @@ async fn run_review_on_session(
                         .iter()
                         .map(crate::context_manager::estimate_item_token_count)
                         .fold(0i64, i64::saturating_add);
-                    let base_instructions = review_session.session.get_base_instructions().await;
+                    let base_instructions =
+                        review_session.session.get_prompt_base_instructions().await;
                     let history_tokens = reviewer_history
                         .estimate_token_count_with_base_instructions(&base_instructions)
                         .unwrap_or(i64::MAX)

@@ -29,6 +29,102 @@ pub enum StatefulEvent {
     AttributionCompleted {
         summary: StatefulAttributionSummary,
     },
+    /// A knowledge entry stored during a turn, or found already stored, so clients can show
+    /// the user a receipt of what was saved.
+    KnowledgeCaptured {
+        project_id: String,
+        thread_id: String,
+        turn_id: String,
+        entry_id: String,
+        revision: u64,
+        category: KnowledgeCategory,
+        outcome: CaptureOutcome,
+        /// The entry's content, at most `MAX_RECEIPT_TEXT_BYTES` bytes.
+        text: String,
+    },
+    /// What one capture committed, counted: sent once after every unit of a message was
+    /// stored or refused, so a receipt never claims more than was saved.
+    KnowledgeGroupCaptured(GroupReceipt),
+}
+
+/// The committed outcome of one capture.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GroupReceipt {
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub group_id: String,
+    pub category: KnowledgeCategory,
+    /// A count the user's words declared ("Two standing rules"), when they did.
+    pub declared_count: Option<u32>,
+    pub recognized: u32,
+    /// Units now saved and applied.
+    pub saved: u32,
+    pub already_present: u32,
+    /// Units saved but not applied (limited to a task).
+    pub pending: u32,
+    /// Units recognized but not stored (too long to keep whole).
+    pub omitted: u32,
+    pub failed: u32,
+    /// Saved, pending and already-present units in the order written.
+    pub items: Vec<GroupReceiptItem>,
+    /// Openings of omitted units.
+    pub omitted_items: Vec<String>,
+    /// The investigation these rules are limited to, in the user's words.
+    pub scope_title: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GroupReceiptItem {
+    pub entry_id: String,
+    pub revision: u64,
+    pub category: KnowledgeCategory,
+    pub outcome: CaptureOutcome,
+    /// At most `MAX_RECEIPT_TEXT_BYTES` bytes.
+    pub text: String,
+}
+
+/// Longest content excerpt carried by a receipt.
+pub const MAX_RECEIPT_TEXT_BYTES: usize = 240;
+
+/// What a receipt says was saved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KnowledgeCategory {
+    /// A standing rule in the user's own words.
+    Rule,
+    /// A rule the user marked as standing but also limited to a task; kept, never applied.
+    PendingRule,
+    Decision,
+    /// How to build, test or run the project here.
+    Recipe,
+    Finding,
+    /// What the user said about themselves or the whole work, in their words.
+    Background,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CaptureOutcome {
+    Stored,
+    AlreadyStored,
+}
+
+/// The receipt excerpt of `content`, cut on a character boundary.
+pub(crate) fn receipt_text(content: &str) -> String {
+    if content.len() <= MAX_RECEIPT_TEXT_BYTES {
+        return content.to_string();
+    }
+    let mut end = MAX_RECEIPT_TEXT_BYTES - 3;
+    while !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    // End at a word boundary when one is near, so the receipt never stops mid-word.
+    let cut = &content[..end];
+    let cut = match cut.rfind(char::is_whitespace) {
+        Some(space) => cut[..space].trim_end(),
+        // One unbroken token (a long path) can only be cut inside it.
+        None => cut,
+    };
+    format!("{cut}...")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,3 +140,7 @@ pub enum BlackboardEntityKind {
 pub trait StatefulEventSink: Send + Sync {
     fn emit(&self, event: StatefulEvent);
 }
+
+#[cfg(test)]
+#[path = "events_tests.rs"]
+mod tests;

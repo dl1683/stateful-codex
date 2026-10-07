@@ -6,6 +6,7 @@ use codex_extension_api::FunctionCallError;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
@@ -19,6 +20,7 @@ use codex_project_intelligence::ContextMapQuery;
 use codex_project_intelligence::EvidenceRoute;
 use codex_project_intelligence::ProjectIndexRequest;
 use codex_project_intelligence::ProjectIndexer;
+use codex_project_intelligence::ProjectIndexerError;
 use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::json;
@@ -84,18 +86,60 @@ impl ContextMapQueryTool {
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel("selected project no longer exists".to_string())
             })?;
-        let result = self
-            .services
-            .context_map()
-            .await
-            .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?
-            .query(ContextMapQuery {
-                project_id: self.project_id.clone(),
-                text: query_text.clone(),
-                max_results: limit,
-            })
-            .await
-            .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+        let query = ContextMapQuery {
+            project_id: self.project_id.clone(),
+            text: query_text.clone(),
+            max_results: limit,
+        };
+        let context_map = self.services.context_map().await.map_err(respond)?;
+        let mut result = context_map.query(query.clone()).await.map_err(respond)?;
+        // A project that was never indexed has no entries at all; index it here rather than
+        // sending the model to discover and call the refresh tool first. Indexing is
+        // serialized in this process and rechecked under the lock, and a refresh superseded
+        // by another process is retried once so this query sees a completed publication.
+        let mut indexed_on_demand = false;
+        if result.data.is_empty()
+            && !context_map
+                .has_entries(&self.project_id)
+                .await
+                .map_err(respond)?
+        {
+            let index = self.services.on_demand_index(&self.project_id);
+            index
+                .get_or_try_init(|| async {
+                    if context_map
+                        .has_entries(&self.project_id)
+                        .await
+                        .map_err(respond)?
+                    {
+                        return Ok(());
+                    }
+                    let indexer = ProjectIndexer::new(
+                        self.services.hierarchy().await.map_err(respond)?.clone(),
+                        context_map.clone(),
+                    );
+                    let request = ProjectIndexRequest {
+                        project_id: self.project_id.clone(),
+                        roots: project
+                            .roots
+                            .iter()
+                            .map(|root| PathBuf::from(&root.path))
+                            .collect(),
+                    };
+                    match indexer.refresh(request.clone()).await {
+                        Ok(_) => {}
+                        Err(ProjectIndexerError::SupersededRefresh) => {
+                            indexer.refresh(request).await.map_err(respond)?;
+                        }
+                        Err(error) => return Err(respond(error)),
+                    }
+                    indexed_on_demand = true;
+                    Ok(())
+                })
+                .await?;
+            // Either this query indexed the project or a concurrent one did while it waited.
+            result = context_map.query(query).await.map_err(respond)?;
+        }
         let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let may_have_more = result.truncated;
         let hits = result.data;
@@ -124,6 +168,7 @@ impl ContextMapQueryTool {
             if !fits_response(
                 &json!({
                     "projectId": self.project_id,
+                    "indexedOnDemand": indexed_on_demand,
                     "data": &data,
                     "truncated": truncated,
                     "mayHaveMore": may_have_more,
@@ -140,6 +185,7 @@ impl ContextMapQueryTool {
             &call,
             json!({
                 "projectId": self.project_id,
+                "indexedOnDemand": indexed_on_demand,
                 "data": data,
                 "truncated": truncated,
                 "mayHaveMore": may_have_more,
@@ -165,7 +211,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Locate exact project files or anchored regions when project intelligence lacks required detail or a controlling scope, authority, or supersession boundary; reports stale/unchecked evidence or a conflict; exact source wording or format is needed; or the user requests fresh verification. Returned routes are byte-checked without mutating project state: freshness is the live observation and storedFreshness is the persisted index state. Headlines are bounded match-centered routing previews, not evidence. Pass a current evidenceRoute unchanged to evidence_read; it is bound to the returned source revision and exact range. For a stale route, pass refreshInput unchanged to evidence_read; it refreshes and reads that changed file once. Refresh only stale decisive sources and reuse adequate current knowledge without a confirming read. If a changed large file is truncated or a prior region moved, query again after refresh for a current exact route. When a route reports knownKnowledge, treat it as coverage only; use already-loaded root knowledge or query deeper blackboard knowledge before reading raw evidence.".to_string(),
+            description: "Locate project files or regions when knowledge lacks a needed detail, evidence is stale or conflicting, exact wording is needed, or the user asks for fresh verification. Headlines are previews, not evidence. Read a returned region with evidence_read {evidenceRoute: item.evidenceRoute}, current content with relativePath, and a stale route by passing refreshInput unchanged. knownKnowledge means recorded knowledge already covers the route.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -310,10 +356,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
         ToolName::plain(REFRESH_TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::Deferred
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: REFRESH_TOOL_NAME.to_string(),
-            description: "Refresh the selected project's filesystem hierarchy and source-routing index. Use when the context map is empty or project files changed. The result reports indexed files/regions and separate scan/publication milliseconds, plus a bounded source-route inventory; use those routes directly and query the context map only when the inventory is truncated or does not identify the needed source.".to_string(),
+            description: "Refresh the project's file hierarchy and source-routing index when it is empty or files changed. The result includes a bounded route inventory: pass {evidenceRoute: item.evidenceRoute} to evidence_read, or read current content by relativePath. A truncated inventory is not evidence that a file is absent.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

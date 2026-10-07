@@ -107,7 +107,8 @@ fn compute_replacements(
                 line_index = idx + 1;
             } else {
                 return Err(ApplyPatchError::ComputeReplacements(format!(
-                    "Failed to find context '{ctx_line}' in {path}"
+                    "Failed to find context '{ctx_line}' in {path}{}",
+                    nearest_region_hint(original_lines, std::slice::from_ref(ctx_line), line_index)
                 )));
             }
         }
@@ -208,9 +209,10 @@ fn compute_replacements(
             line_index = start_idx + pattern.len();
         } else {
             return Err(ApplyPatchError::ComputeReplacements(format!(
-                "Failed to find expected lines in {}:\n{}",
+                "Failed to find expected lines in {}:\n{}{}",
                 path,
                 chunk.old_lines.join("\n"),
+                nearest_region_hint(original_lines, &chunk.old_lines, line_index),
             )));
         }
     }
@@ -218,6 +220,62 @@ fn compute_replacements(
     replacements.sort_by_key(|(index, _, _)| *index);
 
     Ok(replacements)
+}
+
+const HINT_CONTEXT_LINES: usize = 2;
+const MAX_HINT_LINES: usize = 12;
+const MAX_HINT_LINE_BYTES: usize = 200;
+const MAX_HINT_BYTES: usize = 1_200;
+const RETRY_ADVICE: &str = "Re-read the lines around the change and retry with a smaller hunk; do not rewrite the whole file.";
+
+/// Bounded recovery advice for a hunk that did not match: the file region nearest to where
+/// the search failed, numbered, so a retry can stay narrow. The region is anchored on the
+/// pattern's most distinctive (longest trimmed) line, preferring its first occurrence at or
+/// after `search_start` and otherwise the closest one before it.
+fn nearest_region_hint(
+    original_lines: &[String],
+    pattern: &[String],
+    search_start: usize,
+) -> String {
+    let search_start = search_start.min(original_lines.len());
+    let anchor = pattern
+        .iter()
+        .enumerate()
+        .map(|(offset, line)| (offset, line.trim()))
+        .filter(|(_, line)| !line.is_empty())
+        .max_by_key(|(offset, line)| (line.len(), std::cmp::Reverse(*offset)));
+    let region_start = anchor.and_then(|(offset, anchor)| {
+        let matches = |index: &usize| original_lines[*index].trim() == anchor;
+        (search_start..original_lines.len())
+            .find(matches)
+            .or_else(|| (0..search_start).rev().find(matches))
+            .map(|index| index.saturating_sub(offset))
+    });
+    let Some(region_start) = region_start else {
+        return format!("\n\n{RETRY_ADVICE}");
+    };
+    let first = region_start.saturating_sub(HINT_CONTEXT_LINES);
+    let last = (region_start + pattern.len() + HINT_CONTEXT_LINES)
+        .min(original_lines.len())
+        .min(first + MAX_HINT_LINES);
+    let mut hint =
+        String::from("\n\nDiagnostic (the file was not changed). Nearest region of the file:");
+    for (index, line) in original_lines.iter().enumerate().take(last).skip(first) {
+        let text = line.trim_end_matches('\r');
+        let mut end = text.len().min(MAX_HINT_LINE_BYTES);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let ellipsis = if end < text.len() { "..." } else { "" };
+        let rendered = format!("\n{:>5}| {}{ellipsis}", index + 1, &text[..end]);
+        if hint.len() + rendered.len() > MAX_HINT_BYTES {
+            break;
+        }
+        hint.push_str(&rendered);
+    }
+    hint.push('\n');
+    hint.push_str(RETRY_ADVICE);
+    hint
 }
 
 /// Apply the `(start_index, old_len, new_lines)` replacements to `original_lines`,

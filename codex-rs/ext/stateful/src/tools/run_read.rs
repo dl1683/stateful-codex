@@ -349,7 +349,7 @@ impl StatefulRunReadTool {
 /// Serialized size grows with the page end for every page that carries a continuation
 /// cursor, so those ends are binary-searched over UTF-8 boundaries. The terminal page
 /// swaps the cursor for `null` and can be smaller, so it is checked on its own first.
-fn read_page(
+pub(super) fn read_page(
     text: &str,
     offset: usize,
     budget: usize,
@@ -401,13 +401,14 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunReadTool {
     }
 
     fn exposure(&self) -> ToolExposure {
-        ToolExposure::DirectModelOnly
+        // Specialized: discoverable through tool search instead of riding in every request.
+        ToolExposure::DeferredModelOnly
     }
 
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read the exact stored goal, strategy, or current semantic obligation (as JSON) of the selected thread's Stateful run, one bounded page at a time; or a completed run's submitted result or final obligation with the cursor its completion returned. Use it when <stateful_run> says a section was shortened, or when earlier detail may no longer be in context. Follow nextCursor until it is null to read the whole text.".to_string(),
+            description: "Read the exact stored goal, strategy, or current obligation of the selected thread's Stateful run, or a completed run's submitted result with the cursor its completion returned, one bounded page at a time; follow nextCursor until null.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

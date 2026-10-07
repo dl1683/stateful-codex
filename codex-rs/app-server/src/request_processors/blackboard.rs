@@ -41,11 +41,11 @@ use codex_stateful_extension::StatefulEventSink;
 use super::blackboard_api::api_entry;
 use super::blackboard_api::api_hit;
 use super::blackboard_api::api_relation;
+use super::blackboard_api::client_provenance;
 use super::blackboard_api::internal_evidence;
 use super::blackboard_api::internal_importance;
 use super::blackboard_api::internal_kind;
 use super::blackboard_api::internal_premises;
-use super::blackboard_api::internal_provenance;
 use super::blackboard_api::internal_relation_kind;
 use super::blackboard_api::internal_root_promotion;
 use super::blackboard_api::internal_state;
@@ -55,6 +55,9 @@ use crate::error_code::internal_error;
 use crate::error_code::invalid_params;
 use crate::error_code::method_not_found;
 
+#[path = "stateful_memory.rs"]
+mod stateful_memory;
+
 const DEFAULT_QUERY_LIMIT: u32 = 20;
 
 #[derive(Clone)]
@@ -63,6 +66,7 @@ pub(crate) struct BlackboardRequestProcessor {
     sqlite: Option<SqliteConfig>,
     store: Arc<OnceCell<BlackboardStore>>,
     hierarchy: Arc<OnceCell<HierarchyStore>>,
+    context_map: Arc<OnceCell<codex_project_intelligence::ContextMapStore>>,
     event_sink: Arc<dyn StatefulEventSink>,
 }
 
@@ -77,6 +81,7 @@ impl BlackboardRequestProcessor {
             sqlite,
             store: Arc::new(OnceCell::new()),
             hierarchy: Arc::new(OnceCell::new()),
+            context_map: Arc::new(OnceCell::new()),
             event_sink,
         }
     }
@@ -85,6 +90,7 @@ impl BlackboardRequestProcessor {
         &self,
         params: BlackboardUpsertParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let provenance = client_provenance("blackboard/upsert", params.provenance)?;
         self.require_project(&params.project_id).await?;
         match params.verification {
             ApiBlackboardVerification::SourceVerified => {
@@ -113,7 +119,6 @@ impl BlackboardRequestProcessor {
             });
         let evidence = internal_evidence(params.evidence)?;
         let premises = params.premises.map(internal_premises).transpose()?;
-        let provenance = internal_provenance(params.provenance);
         let store = self.store().await?;
         let entry = match params.expected_revision {
             None => {
@@ -167,27 +172,42 @@ impl BlackboardRequestProcessor {
                         "an existing entry cannot move to another node",
                     ));
                 }
-                let premises = match premises {
-                    Some(premises) => premises,
-                    None => {
-                        store
-                            .get_entry(&params.project_id, &entry_id)
-                            .await
-                            .map_err(blackboard_error)?
-                            .ok_or_else(|| {
-                                invalid_params(format!("blackboard entry not found: {entry_id}"))
-                            })?
-                            .value
-                            .premises
-                    }
-                };
+                let current = store
+                    .get_entry(&params.project_id, &entry_id)
+                    .await
+                    .map_err(blackboard_error)?
+                    .ok_or_else(|| {
+                        invalid_params(format!("blackboard entry not found: {entry_id}"))
+                    })?;
+                // Policy checks below must judge the revision this write replaces.
+                if current.revision != expected_revision {
+                    return Err(blackboard_error(BlackboardStoreError::RevisionConflict {
+                        expected: expected_revision,
+                        actual: current.revision,
+                    }));
+                }
+                let kind = internal_kind(params.kind);
+                // User-authored: written by a host user action or confirmed by one.
+                let user_authored = current.value.provenance.kind
+                    == BlackboardProvenanceKind::User
+                    || current.value.verification == BlackboardVerification::UserConfirmed;
+                if user_authored
+                    && (kind != current.value.kind
+                        || params.content != current.value.content
+                        || structured_value != current.value.structured_value)
+                {
+                    return Err(invalid_params(
+                        "blackboard/upsert cannot change the meaning of user-authored knowledge; only a user action can, or downgrade it first without changing kind, content, or structuredValue",
+                    ));
+                }
+                let premises = premises.unwrap_or(current.value.premises);
                 store
                     .update_entry(
                         &params.project_id,
                         &entry_id,
                         BlackboardEntryUpdate {
                             expected_revision,
-                            kind: internal_kind(params.kind),
+                            kind,
                             content: params.content,
                             structured_value,
                             confidence,
@@ -229,6 +249,7 @@ impl BlackboardRequestProcessor {
         &self,
         params: BlackboardRelateParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let provenance = client_provenance("blackboard/relate", params.provenance)?;
         self.require_project(&params.project_id).await?;
         let relation = self
             .store()
@@ -246,7 +267,7 @@ impl BlackboardRequestProcessor {
                     note: params.note,
                     confidence: ConfidenceScore::from_basis_points(params.confidence_basis_points)
                         .map_err(|error| invalid_params(error.to_string()))?,
-                    provenance: internal_provenance(params.provenance),
+                    provenance,
                 },
             )
             .await
@@ -280,6 +301,12 @@ impl BlackboardRequestProcessor {
             .await
             .map_err(blackboard_error)?
             .ok_or_else(|| invalid_params(format!("blackboard entry not found: {entry_id}")))?;
+        if current.revision != params.expected_revision {
+            return Err(blackboard_error(BlackboardStoreError::RevisionConflict {
+                expected: params.expected_revision,
+                actual: current.revision,
+            }));
+        }
         if current.state != BlackboardEntryState::Active {
             return Err(invalid_params(
                 "only active blackboard knowledge can be user-confirmed",
@@ -375,6 +402,18 @@ impl BlackboardRequestProcessor {
             .get_or_try_init(|| BlackboardStore::open(sqlite))
             .await
             .map_err(blackboard_error)
+    }
+
+    async fn context_map(
+        &self,
+    ) -> Result<&codex_project_intelligence::ContextMapStore, JSONRPCErrorError> {
+        let sqlite = self.sqlite.as_ref().ok_or_else(|| {
+            method_not_found("statefulMemory/add is unavailable without sqlite state")
+        })?;
+        self.context_map
+            .get_or_try_init(|| codex_project_intelligence::ContextMapStore::open(sqlite))
+            .await
+            .map_err(|error| internal_error(format!("failed to open the context map: {error}")))
     }
 
     async fn hierarchy(&self) -> Result<&HierarchyStore, JSONRPCErrorError> {

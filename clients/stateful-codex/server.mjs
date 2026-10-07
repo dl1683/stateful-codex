@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
+import { EventRouter } from "./event-router.mjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const publicRoot = resolve(here, "public");
 const host = "127.0.0.1";
@@ -24,7 +26,7 @@ class AppServerBridge {
   constructor() {
     this.nextId = 1;
     this.pending = new Map();
-    this.listeners = new Set();
+    this.router = new EventRouter({ replyToServer: (message) => this.send(message) });
     this.ready = this.start();
   }
 
@@ -73,13 +75,15 @@ class AppServerBridge {
     return promise;
   }
 
-  reply(message) {
-    this.send(message);
+  reply(envelope) {
+    return this.router.reply(envelope);
   }
 
-  subscribe(response) {
-    this.listeners.add(response);
-    return () => this.listeners.delete(response);
+  subscribe(response, scope) {
+    return this.router.subscribe(
+      { write: (message) => response.write(`data: ${JSON.stringify(message)}\n\n`) },
+      scope,
+    );
   }
 
   send(message) {
@@ -107,18 +111,14 @@ class AppServerBridge {
       }
       return;
     }
-    this.broadcast(message);
-  }
-
-  broadcast(message) {
-    const data = `data: ${JSON.stringify(message)}\n\n`;
-    for (const response of this.listeners) response.write(data);
+    this.router.route(message);
   }
 
   fail(error) {
     for (const request of this.pending.values()) request.reject(error);
     this.pending.clear();
-    this.broadcast({
+    this.router.clear();
+    this.router.route({
       method: "gateway/error",
       params: { message: error.message },
     });
@@ -186,11 +186,11 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/reply") {
       authorize(request);
-      const message = await readJson(request);
-      if (!Object.hasOwn(message, "id"))
+      const envelope = await readJson(request);
+      if (!Object.hasOwn(envelope.response ?? {}, "id"))
         throw new HttpError(400, "reply id is required");
-      bridge.reply(message);
-      return json(response, 202, { accepted: true });
+      const outcome = bridge.reply(envelope);
+      return json(response, outcome.accepted ? 202 : 409, outcome);
     }
     if (request.method === "GET") {
       await serveStatic(url.pathname, response);
@@ -221,7 +221,10 @@ function openEventStream(url, request, response) {
   response.write(
     `data: ${JSON.stringify({ method: "gateway/connected", params: {} })}\n\n`,
   );
-  const unsubscribe = bridge.subscribe(response);
+  const unsubscribe = bridge.subscribe(response, {
+    threadId: url.searchParams.get("thread"),
+    projectId: url.searchParams.get("project"),
+  });
   request.once("close", unsubscribe);
 }
 

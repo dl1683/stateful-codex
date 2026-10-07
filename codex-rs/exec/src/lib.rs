@@ -28,6 +28,7 @@ use codex_app_server_client::StatefulStartup;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_client::prepare_stateful_startup;
 use codex_app_server_client::start_stateful_run;
+use codex_app_server_client::start_stateful_run_on_resumed_thread;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -1778,7 +1779,7 @@ async fn start_stateful_run_for_existing_thread(
     let prepared = prepare_stateful_startup(&request_handle, &mut params, startup)
         .await
         .map_err(|error| error.to_string())?;
-    start_stateful_run(&request_handle, &prepared, thread_id)
+    start_stateful_run_on_resumed_thread(&request_handle, &prepared, thread_id)
         .await
         .map_err(|error| error.to_string())
 }
@@ -2084,6 +2085,12 @@ fn should_process_notification(
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }
         ServerNotification::StatefulAttributionCompleted(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
+        ServerNotification::StatefulKnowledgeCaptured(notification) => {
+            notification.thread_id == thread_id && notification.turn_id == turn_id
+        }
+        ServerNotification::StatefulKnowledgeGroupCaptured(notification) => {
             notification.thread_id == thread_id && notification.turn_id == turn_id
         }
         ServerNotification::TurnCompleted(notification) => {

@@ -1,0 +1,181 @@
+//! A changed decision replaces the old one (council slice 3): one current value in the
+//! packet, the old value shown as what it replaced, and a stale alias refused.
+
+use std::collections::BTreeMap;
+
+use anyhow::Result;
+use app_test_support::MockResponsesConfig;
+use app_test_support::TestAppServer;
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ProjectCreateParams;
+use codex_app_server_protocol::ProjectCreateResponse;
+use codex_app_server_protocol::ThreadStartParams;
+use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::UserInput;
+use codex_features::Feature;
+use core_test_support::responses;
+use pretty_assertions::assert_eq;
+use serde_json::Value;
+use serde_json::json;
+use tempfile::TempDir;
+
+const ONE: &str = "Default rate formatting uses ONE decimal place.";
+const TWO: &str = "Default rate formatting uses TWO decimal places; the requirement changed.";
+
+#[tokio::test]
+async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(codex_home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Decisions".to_string(),
+                roots: Vec::new(),
+                metadata: Some(BTreeMap::new()),
+                idempotency_key: "decisions-project".to_string(),
+            },
+        })
+        .await?;
+    let decision = |key: &str, content: &str, supersedes: Value| {
+        json!({"records": [{
+            "idempotencyKey": key,
+            "kind": "decision",
+            "content": content,
+            "confidenceBasisPoints": 9000,
+            "verification": "unverified",
+            "importance": "high",
+            "rootPromotion": "promoted",
+            "supersedes": supersedes
+        }]})
+    };
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            tool_call(
+                "record-one",
+                "blackboard_record_batch",
+                decision("one", ONE, json!([])),
+            ),
+            assistant("Recorded ONE."),
+            // In a fresh thread the packet shows ONE as E1; the user changes the decision.
+            // Reusing the plain ONE record's key with a replacement is not a retry.
+            tool_call(
+                "reuse-plain",
+                "blackboard_record_batch",
+                decision("one", ONE, json!([{"alias": "E1"}])),
+            ),
+            tool_call(
+                "stale-alias",
+                "blackboard_record_batch",
+                decision("stale", TWO, json!([{"alias": "E9"}])),
+            ),
+            tool_call(
+                "record-two",
+                "blackboard_record_batch",
+                decision("two", TWO, json!([{"alias": "E1"}])),
+            ),
+            // A repeated record whose succession already committed returns it.
+            tool_call(
+                "record-two-again",
+                "blackboard_record_batch",
+                decision("two", TWO, json!([{"alias": "E1"}])),
+            ),
+            assistant("Recorded TWO."),
+            assistant("TWO decimal places; it replaced ONE."),
+        ],
+    )
+    .await;
+    for prompt in [
+        "Default formatting must use ONE decimal place.",
+        "Requirement changed: default formatting must now use TWO decimal places.",
+        "What is our default decimal places setting and how did we arrive at it?",
+    ] {
+        let thread = server
+            .start_thread(ThreadStartParams {
+                project_id: Some(project.project.id.clone()),
+                ..Default::default()
+            })
+            .await?
+            .thread
+            .id;
+        run_turn(&mut server, &thread, prompt).await?;
+    }
+    let requests = log.requests();
+    let output = |call_id: &str| -> Result<Value> {
+        Ok(serde_json::from_str(
+            &requests
+                .iter()
+                .find_map(|request| request.function_call_output_text(call_id))
+                .expect("tool output"),
+        )?)
+    };
+    assert_eq!(
+        (
+            output("stale-alias")?["results"][0]["error"].clone(),
+            output("reuse-plain")?["results"][0]["recorded"].clone(),
+            output("record-two")?["results"][0]["recorded"].clone(),
+            output("record-two-again")?["results"][0]["entryId"].clone()
+                == output("record-two")?["results"][0]["entryId"].clone(),
+        ),
+        (
+            json!(
+                "E9 is not shown in full in this thread's current packet; pass entryId and revision from blackboard_query"
+            ),
+            json!(false),
+            json!(true),
+            true,
+        )
+    );
+    let fresh = requests
+        .last()
+        .expect("fresh request")
+        .body_json()
+        .to_string();
+    let entry_lines = fresh
+        .split("\\n")
+        .filter(|line| {
+            line.strip_prefix("- E")
+                .is_some_and(|rest| rest.starts_with(|character: char| character.is_ascii_digit()))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(entry_lines.len(), 1, "{entry_lines:?}");
+    assert!(entry_lines[0].contains(TWO));
+    assert!(entry_lines[0].contains(&format!("replaces: \\\"{ONE}\\\"")));
+    Ok(())
+}
+
+fn tool_call(call_id: &str, tool: &str, arguments: Value) -> String {
+    responses::sse(vec![
+        responses::ev_function_call(call_id, tool, &arguments.to_string()),
+        responses::ev_completed(&format!("{call_id}-response")),
+    ])
+}
+
+fn assistant(text: &str) -> String {
+    responses::sse(vec![
+        responses::ev_assistant_message("assistant-message", text),
+        responses::ev_completed("assistant-response"),
+    ])
+}
+
+async fn run_turn(server: &mut TestAppServer, thread_id: &str, text: &str) -> Result<()> {
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread_id.to_string(),
+            input: vec![UserInput::Text {
+                text: text.to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    Ok(())
+}

@@ -1,6 +1,7 @@
 use super::*;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::TurnItemContributor;
+use codex_history::AssistantDeliveryClassification;
 use codex_protocol::ResponseItemId;
 use codex_protocol::items::AgentMessageContent;
 use pretty_assertions::assert_eq;
@@ -67,6 +68,7 @@ async fn plan_mode_uses_contributed_turn_item_for_last_agent_message() {
     let turn_store = ExtensionData::new(turn_context.sub_id.clone());
     let mut state = PlanModeStreamState::new(&turn_context.sub_id);
     let mut last_agent_message = None;
+    let mut delivery_candidates = Vec::new();
     let item = assistant_output_text("original assistant text");
 
     let step_context = StepContext::for_test(Arc::new(turn_context));
@@ -78,6 +80,7 @@ async fn plan_mode_uses_contributed_turn_item_for_last_agent_message() {
         &mut state,
         /*previously_active_item*/ None,
         &mut last_agent_message,
+        &mut delivery_candidates,
     )
     .await;
 
@@ -85,6 +88,30 @@ async fn plan_mode_uses_contributed_turn_item_for_last_agent_message() {
     assert_eq!(
         last_agent_message.as_deref(),
         Some("plan contributed assistant text")
+    );
+
+    // The user saw contributed text, so the recorded provider text never claims finality.
+    session
+        .classify_assistant_deliveries(delivery_candidates, ResponseCompletion::Answered)
+        .await;
+    let state = session.state.lock().await;
+    let retained = state
+        .history
+        .retained_context()
+        .ordered_entries()
+        .filter_map(|(_, entry)| match entry {
+            codex_history::RetainedContextEntry::AssistantMessage(message) => {
+                Some((message.text.clone(), message.classification))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retained,
+        vec![(
+            "original assistant text".to_string(),
+            Some(AssistantDeliveryClassification::Pending)
+        )]
     );
 }
 

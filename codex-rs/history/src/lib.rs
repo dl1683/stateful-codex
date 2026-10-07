@@ -13,6 +13,30 @@ pub use compaction_resume_metadata::resume_multi_agent_version;
 mod compaction_checkpoint;
 pub use compaction_checkpoint::CompactionCheckpoint;
 
+mod assistant_delivery;
+pub use assistant_delivery::AssistantDeliveryClassification;
+
+mod conversation_packet;
+pub use conversation_packet::CONVERSATION_PACKET_VERSION;
+pub use conversation_packet::ConversationInputCoverage;
+pub use conversation_packet::ConversationPacket;
+pub use conversation_packet::ConversationPacketBoundary;
+pub use conversation_packet::ConversationPacketBudget;
+pub use conversation_packet::ConversationPacketCoverage;
+pub use conversation_packet::ConversationPacketError;
+pub use conversation_packet::ConversationPacketInput;
+pub use conversation_packet::ConversationPacketRecord;
+pub use conversation_packet::ConversationPacketSize;
+pub use conversation_packet::ConversationRecordKind;
+pub use conversation_packet::MAX_PACKET_CANDIDATE_BYTES;
+pub use conversation_packet::MAX_PACKET_CANDIDATES;
+pub use conversation_packet::pack_conversation_packet;
+
+mod conversation_packet_source;
+pub use conversation_packet_source::ConversationPacketSource;
+pub use conversation_packet_source::HistoryContinuity;
+pub use conversation_packet_source::assemble_conversation_packet;
+
 use std::borrow::Borrow;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -104,6 +128,11 @@ pub struct CodexHarnessMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_input_order: Option<u64>,
 
+    /// Thread that originally accepted or delivered this message. Host-owned provenance that
+    /// copies and replays keep unchanged; absent on legacy records and copied parent context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_origin_thread_id: Option<ThreadId>,
+
     /// Output generated for compaction is not an original user-visible assistant message.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compaction_output: bool,
@@ -124,6 +153,14 @@ pub struct CodexHarnessMetadata {
     /// Sender context captured by the host when this task message was accepted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_user_messages: Option<Box<SenderUserMessages>>,
+
+    /// Host resolution of an assistant delivery; absent on legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_delivery_classification: Option<AssistantDeliveryClassification>,
+
+    /// Original phase of a confirmed delivery whose compatibility item omits its phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_phase: Option<codex_protocol::models::MessagePhase>,
 }
 
 fn deserialize_mcp_attribution_checkpoint<'de, D>(
@@ -292,6 +329,9 @@ pub struct CompactedItem {
     /// Resume metadata for values not represented by the companion rollout records.
     /// Presence distinguishes explicitly persisted values from legacy fallback reconstruction.
     pub resume_metadata: Option<CompactionResumeMetadata>,
+    /// Original conversation deliveries retained at this compaction boundary. This is host data,
+    /// not provider input; it must be validated before it is trusted or rendered.
+    pub conversation_packet: Option<ConversationPacket>,
 }
 
 impl Serialize for CompactedItem {

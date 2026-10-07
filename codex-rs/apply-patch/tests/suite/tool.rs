@@ -99,7 +99,7 @@ fn test_apply_patch_cli_rejects_overlapping_end_of_file_chunks() -> anyhow::Resu
     run_apply_patch_in_dir(tmp.path(), patch)?
         .failure()
         .stderr(format!(
-            "Failed to find expected lines in {}:\none\n",
+            "Failed to find expected lines in {}:\none\n\nDiagnostic (the file was not changed). Nearest region of the file:\n    1| one\nRe-read the lines around the change and retry with a smaller hunk; do not rewrite the whole file.\n",
             expected_target_path.display()
         ));
 
@@ -267,7 +267,7 @@ fn test_apply_patch_cli_reports_missing_context() -> anyhow::Result<()> {
         .assert()
         .failure()
         .stderr(format!(
-            "Failed to find expected lines in {}:\nmissing\n",
+            "Failed to find expected lines in {}:\nmissing\n\nRe-read the lines around the change and retry with a smaller hunk; do not rewrite the whole file.\n",
             expected_target_path.display()
         ));
     assert_eq!(fs::read_to_string(&target_path)?, "line1\nline2\n");

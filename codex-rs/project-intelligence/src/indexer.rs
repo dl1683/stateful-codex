@@ -80,6 +80,30 @@ impl ProjectIndexer {
         }
     }
 
+    /// Creates the project's root hierarchy node without scanning any source, so knowledge
+    /// can be recorded before the first refresh. Refreshes create the same node, so this is
+    /// idempotent with them.
+    pub async fn ensure_project_node(
+        &self,
+        project_id: &str,
+    ) -> Result<HierarchyNode, ProjectIndexerError> {
+        Ok(self
+            .hierarchy
+            .create_node(
+                stable_id("project", &[project_id])?,
+                NewHierarchyNode {
+                    project_id: project_id.to_string(),
+                    parent_id: None,
+                    kind: NodeKind::Project,
+                    project_root: None,
+                    relative_path: ProjectRelativePath::root(),
+                    region_anchor: None,
+                    source_fingerprint: None,
+                },
+            )
+            .await?)
+    }
+
     pub async fn refresh(
         &self,
         request: ProjectIndexRequest,

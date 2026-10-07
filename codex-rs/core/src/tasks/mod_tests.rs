@@ -19,6 +19,7 @@ use codex_otel::TURN_TOOL_CALL_METRIC;
 use codex_otel::TURN_UNIFIED_EXEC_RUNNING_PROCESSES_METRIC;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
+use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TokenUsage;
 use opentelemetry::KeyValue;
@@ -51,6 +52,37 @@ impl SessionTask for PendingTask {
         _cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
         std::future::pending().await
+    }
+}
+
+/// Panics on its first run and completes on later runs.
+struct PanicOnceTask {
+    panicked: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SessionTask for PanicOnceTask {
+    fn kind(&self) -> TaskKind {
+        TaskKind::Regular
+    }
+
+    fn span_name(&self) -> &'static str {
+        "session_task.panic_once"
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        _session: Arc<Session>,
+        _turn_context: Arc<TurnContext>,
+        _input: Vec<TurnInput>,
+        _cancellation_token: CancellationToken,
+    ) -> SessionTaskResult {
+        if !self
+            .panicked
+            .swap(/*val*/ true, std::sync::atomic::Ordering::SeqCst)
+        {
+            panic!("injected task failure");
+        }
+        Ok(None)
     }
 }
 
@@ -478,4 +510,67 @@ fn emit_compact_metric_records_auto_local() {
             ("type".to_string(), "local".to_string()),
         ])
     );
+}
+
+/// The next finished turn: its error events, then the completed turn's ID and terminal error.
+async fn next_turn_outcome(
+    receiver: &async_channel::Receiver<codex_protocol::protocol::Event>,
+) -> (Vec<String>, String, Option<String>) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let mut errors = Vec::new();
+        loop {
+            match receiver.recv().await.expect("event").msg {
+                EventMsg::Error(error) => errors.push(error.message),
+                EventMsg::TurnComplete(complete) => {
+                    return (
+                        errors,
+                        complete.turn_id,
+                        complete.error.map(|error| error.message),
+                    );
+                }
+                EventMsg::TurnAborted(aborted) => panic!("turn was aborted: {aborted:?}"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the turn should finish")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn panicking_task_ends_its_turn_and_the_session_stays_usable() {
+    let (session, turn_context, receiver) = make_session_and_context_with_rx().await;
+    let panicked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    session
+        .spawn_task(
+            Arc::clone(&turn_context),
+            Vec::new(),
+            PanicOnceTask {
+                panicked: Arc::clone(&panicked),
+            },
+        )
+        .await;
+    let failed = next_turn_outcome(&receiver).await;
+    let next_turn = session.new_default_turn().await;
+    session
+        .spawn_task(
+            Arc::clone(&next_turn),
+            Vec::new(),
+            PanicOnceTask { panicked },
+        )
+        .await;
+    let reused = next_turn_outcome(&receiver).await;
+    let panic_message = "turn task panicked: injected task failure".to_string();
+    assert_eq!(
+        (failed, reused),
+        (
+            (
+                vec![panic_message.clone()],
+                turn_context.sub_id.clone(),
+                Some(panic_message),
+            ),
+            (Vec::new(), next_turn.sub_id.clone(), None),
+        )
+    );
+    assert!(session.active_turn.lock().await.is_none());
 }

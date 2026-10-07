@@ -55,11 +55,13 @@ fn changing_attestations_preserves_history_before_the_current_action() {
     retained.record_user_message(
         RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: codex_history::UserInputOrigin::User,
             turn_id: "turn-1".to_owned(),
             message_id: None,
             text: instruction.to_owned(),
             complete: true,
+            classification: None,
         },
         RetainedInputSource::Local(None),
     );

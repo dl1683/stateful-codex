@@ -1273,6 +1273,7 @@ async fn record_initial_history_resumed_rollback_drops_incomplete_user_turn_comp
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
             codex_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
@@ -1340,6 +1341,7 @@ async fn record_initial_history_requires_surviving_full_snapshot_without_user_tu
                 compaction_response_id: None,
                 latest_token_usage_record: None,
                 resume_metadata: None,
+                conversation_packet: None,
             }),
         ],
     };
@@ -1378,6 +1380,7 @@ async fn record_initial_history_resumed_does_not_seed_reference_context_item_aft
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
     ];
 
@@ -1454,6 +1457,7 @@ async fn reconstruct_history_prefers_compacted_window_over_session_meta() {
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
     ];
 
@@ -1495,6 +1499,7 @@ async fn reconstruct_history_replays_world_state_from_latest_compaction_window()
                 compaction_response_id: None,
                 latest_token_usage_record: None,
                 resume_metadata: None,
+                conversation_packet: None,
             }),
             RolloutItem::WorldState(WorldStateItem::full(object!({
                 "environment": {"status": "starting", "cwd": "/workspace"}
@@ -1587,6 +1592,7 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
                             realtime_active: Some(false),
                         }),
                     }),
+                    conversation_packet: None,
                 }),
                 RolloutItem::WorldState(WorldStateItem::full(object!({
                     "environment": {"window": window_number, "status": "starting"}
@@ -1766,6 +1772,7 @@ async fn reconstruct_history_preserves_legacy_compaction_count_with_session_meta
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
     ];
 
@@ -1798,11 +1805,13 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
     retained.record_user_message(
         codex_history::RetainedUserMessage {
             phase: None,
+            origin_thread_id: None,
             origin: codex_history::UserInputOrigin::User,
             turn_id: String::new(),
             message_id: None,
             text: "before compact".to_owned(),
             complete: false,
+            classification: None,
         },
         codex_history::RetainedInputSource::Local(None),
     );
@@ -1824,6 +1833,7 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
     ];
 
@@ -1866,6 +1876,7 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_clear
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
         RolloutItem::EventMsg(EventMsg::TurnStarted(
             codex_protocol::protocol::TurnStartedEvent {
@@ -1979,6 +1990,7 @@ async fn record_initial_history_resumed_turn_context_after_compaction_reestablis
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
         RolloutItem::TurnContext(previous_context_item),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
@@ -2160,6 +2172,7 @@ async fn record_initial_history_resumed_aborted_turn_without_id_clears_active_tu
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
     ];
 
@@ -2431,6 +2444,7 @@ async fn record_initial_history_resumed_trailing_incomplete_turn_compaction_clea
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
     ];
 
@@ -2619,6 +2633,7 @@ async fn record_initial_history_resumed_replaced_incomplete_compacted_turn_clear
             compaction_response_id: None,
             latest_token_usage_record: None,
             resume_metadata: None,
+            conversation_packet: None,
         }),
         // A newer TurnStarted replaces the incomplete compacted turn without a matching
         // completion/abort for the old one.

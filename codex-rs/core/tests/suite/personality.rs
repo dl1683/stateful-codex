@@ -181,11 +181,8 @@ async fn config_personality_none_preserves_explicit_base_instructions(
     wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
-    let body = request.body_json();
-    // Responses requests omit the instructions field for an explicit empty override.
-    let expected_instructions = (!custom_instructions.is_empty())
-        .then(|| serde_json::Value::String(custom_instructions.to_string()));
-    assert_eq!(body.get("instructions"), expected_instructions.as_ref());
+    // An explicit empty override still carries the host recall policy.
+    assert_eq!(request.instructions_text(), custom_instructions);
     assert!(!request.body_contains_text(BUNDLED_FRIENDLY_TEMPLATE));
 
     Ok(())

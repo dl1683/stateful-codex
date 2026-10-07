@@ -4097,6 +4097,11 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "conversationReadCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "evidenceReadCalls": {
           "format": "uint64",
           "minimum": 0.0,
@@ -4196,6 +4201,7 @@
       "required": [
         "blackboardWriteCalls",
         "contextRefreshCalls",
+        "conversationReadCalls",
         "evidenceReadCalls",
         "failedStatefulToolCalls",
         "knowledgeQueryCalls",
@@ -4225,6 +4231,226 @@
         "aborted"
       ],
       "type": "string"
+    },
+    "StatefulCaptureOutcome": {
+      "enum": [
+        "stored",
+        "alreadyStored"
+      ],
+      "type": "string"
+    },
+    "StatefulKnowledgeCapturedNotification": {
+      "description": "Receipt for one knowledge entry stored (or already stored) during a Stateful turn.",
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/definitions/StatefulCaptureOutcome"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "text": {
+          "description": "The entry's content, at most 240 bytes.",
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "entryId",
+        "outcome",
+        "projectId",
+        "revision",
+        "text",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "StatefulKnowledgeCategory": {
+      "description": "What a knowledge receipt says was saved.",
+      "oneOf": [
+        {
+          "enum": [
+            "decision",
+            "finding"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A standing rule in the user's own words.",
+          "enum": [
+            "rule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Marked as standing but limited to a task; kept for inspection, never applied.",
+          "enum": [
+            "pendingRule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "How to build, test or run the project here.",
+          "enum": [
+            "recipe"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "What the user said about themselves or the whole work, in their words.",
+          "enum": [
+            "background"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "StatefulKnowledgeGroupCapturedNotification": {
+      "description": "The committed outcome of one capture (all the rules one message marked), counted: sent once after every unit was stored or refused, so it never claims more than was saved.",
+      "properties": {
+        "alreadyPresent": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "declaredCount": {
+          "description": "A count the user's words declared (\"Two standing rules\"), when they did.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failed": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "items": {
+          "description": "Saved, kept and already-saved units in the order written.",
+          "items": {
+            "$ref": "#/definitions/StatefulKnowledgeGroupItem"
+          },
+          "type": "array"
+        },
+        "omitted": {
+          "description": "Recognized but too long to keep whole; not saved.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "omittedItems": {
+          "description": "Openings of omitted units.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pending": {
+          "description": "Saved but not applied (limited to a task).",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "recognized": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "saved": {
+          "description": "Saved and applied.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "scopeTitle": {
+          "description": "The investigation these rules are limited to, in the user's words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alreadyPresent",
+        "category",
+        "failed",
+        "groupId",
+        "items",
+        "omitted",
+        "omittedItems",
+        "pending",
+        "projectId",
+        "recognized",
+        "saved",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "StatefulKnowledgeGroupItem": {
+      "description": "One saved unit of a counted group receipt.",
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/StatefulKnowledgeCategory"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/definitions/StatefulCaptureOutcome"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "text": {
+          "description": "The entry's content, at most 240 bytes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "entryId",
+        "outcome",
+        "revision",
+        "text"
+      ],
+      "type": "object"
     },
     "StatefulRunUpdatedNotification": {
       "properties": {
@@ -7779,6 +8005,46 @@
         "params"
       ],
       "title": "StatefulAttribution/completedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "statefulKnowledge/captured"
+          ],
+          "title": "StatefulKnowledge/capturedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/StatefulKnowledgeCapturedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "StatefulKnowledge/capturedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "statefulKnowledge/groupCaptured"
+          ],
+          "title": "StatefulKnowledge/groupCapturedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/StatefulKnowledgeGroupCapturedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "StatefulKnowledge/groupCapturedNotification",
       "type": "object"
     },
     {

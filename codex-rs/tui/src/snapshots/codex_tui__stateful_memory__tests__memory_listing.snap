@@ -1,0 +1,22 @@
+---
+source: tui/src/stateful_memory_tests.rs
+expression: "render(memory_lines(&items.into_iter().enumerate().map(|(index, item)|\n(index + 1, item)).collect::<Vec<_>>(), Footer::More, Some(&run)))"
+---
+Project memory
+  Collaborative run open · it stays open between answers and after you quit
+
+Your rules (applied to all work)
+  1. From now on, never run the whole test suite.
+
+Task-limited rules (kept, not applied)
+  2. Don't modify any files today.
+
+About you (your words)
+  3. I'm a backend developer, mostly Go for the last six years.
+
+Decisions
+  4. Months use the symbol mth.
+     replaces: "Months use the symbol mo."
+  More entries follow: /memory more
+
+  /memory add · /memory forget <number> · /memory correct <number> <new text> · /memory help · no model turn is used

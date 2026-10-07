@@ -48,6 +48,9 @@ pub struct BlackboardUpsertParams {
     pub evidence: Vec<BlackboardEvidenceLink>,
     #[ts(optional = nullable)]
     pub premises: Option<Vec<BlackboardPremiseLink>>,
+    /// Declared actor for this generic write: `agent` or `import`. User and
+    /// maintenance authority are host-derived and are rejected here; a user
+    /// confirmation goes through `blackboard/confirm`.
     pub provenance: BlackboardProvenance,
     #[ts(optional = nullable)]
     pub state: Option<BlackboardEntryState>,
@@ -96,6 +99,9 @@ pub struct BlackboardRelateParams {
     #[ts(optional = nullable)]
     pub note: Option<String>,
     pub confidence_basis_points: u16,
+    /// Declared actor for this generic write: `agent` or `import`. User and
+    /// maintenance authority are host-derived and are rejected here; a user
+    /// confirmation goes through `blackboard/confirm`.
     pub provenance: BlackboardProvenance,
 }
 

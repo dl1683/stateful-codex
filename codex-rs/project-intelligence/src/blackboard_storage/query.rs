@@ -366,7 +366,22 @@ impl BlackboardStore {
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
              WHERE entry.project_id = ? AND revision.state = 'active'
                AND revision.root_promotion = 'promoted'
-             ORDER BY CASE revision.importance
+             ORDER BY CASE WHEN revision.kind = 'instruction'
+                     AND revision.provenance_kind = 'user' THEN 0
+                 WHEN revision.provenance_kind = 'user' THEN 1 ELSE 2 END,
+                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                     THEN (SELECT context.source_sequence FROM knowledge_context AS context
+                           WHERE context.entry_id = entry.id
+                           ORDER BY context.revision DESC LIMIT 1) END,
+                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                     THEN (SELECT context.unit_ordinal FROM knowledge_context AS context
+                           WHERE context.entry_id = entry.id
+                           ORDER BY context.revision DESC LIMIT 1) END,
+                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                     THEN entry.created_at_ms END,
+                 CASE WHEN revision.kind = 'instruction' AND revision.provenance_kind = 'user'
+                     THEN entry.rowid END,
+                 CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                  WHEN 'normal' THEN 2 ELSE 3 END, entry.id
              LIMIT ?",
