@@ -253,6 +253,31 @@ pub(super) async fn list_rollout_threads(
     sort_key: codex_rollout::ThreadSortKey,
     sort_direction: codex_rollout::SortDirection,
 ) -> ThreadStoreResult<codex_rollout::ThreadsPage> {
+    if let Some(project_id) = params.project_id.as_deref()
+        && params.relation_filter.is_none()
+        && params.section.is_none()
+        && !params.use_state_db_only
+    {
+        return RolloutRecorder::list_threads_with_project_filter(
+            state_db,
+            config,
+            params.page_size,
+            cursor,
+            sort_key,
+            sort_direction,
+            params.allowed_sources.as_slice(),
+            params.model_providers.as_deref(),
+            params.cwd_filters.as_deref(),
+            default_model_provider_id,
+            project_id,
+            params.search_term.as_deref(),
+        )
+        .await
+        .map_err(|err| ThreadStoreError::Internal {
+            message: format!("failed to list threads: {err}"),
+        });
+    }
+
     if params.relation_filter.is_some() || params.section.is_some() || params.project_id.is_some() {
         let relation_filter = params
             .relation_filter

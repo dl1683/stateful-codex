@@ -61,3 +61,31 @@ test("setup requires the cached Codex ChatGPT login", () => {
   assert.match(actual, /Run codex login in a terminal/);
   assert.match(actual, /<button class="primary" type="submit" disabled>/);
 });
+
+test("setup shows thread loading errors without hiding the picker", () => {
+  const actual = renderSetup({
+    busy: false,
+    error: "Unable to load project threads: state DB unavailable",
+    account: { type: "chatgpt" },
+    projects: [
+      {
+        id: "project-1",
+        name: "Deep investigation",
+        roots: [{ path: "C:/work/investigation" }],
+      },
+    ],
+    threads: [],
+    projectId: "project-1",
+    projectName: "",
+    rootPath: "",
+    threadAction: "continue",
+    threadId: "",
+    mode: "collaborative",
+    goal: "Resolve the central contradiction.",
+    maxContinuations: 24,
+    maxElapsedSeconds: 14400,
+  });
+
+  assert.match(actual, /Unable to load project threads: state DB unavailable/);
+  assert.match(actual, /Select a project thread/);
+});

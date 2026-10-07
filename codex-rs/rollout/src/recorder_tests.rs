@@ -1241,6 +1241,104 @@ async fn list_threads_db_disabled_does_not_skip_paginated_items() -> std::io::Re
 }
 
 #[tokio::test]
+async fn project_filtered_listing_falls_back_while_state_db_backfill_runs() -> anyhow::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let config = test_config(home.path());
+    let unrelated_id = Uuid::from_u128(9012);
+    let middle_project_id = Uuid::from_u128(9013);
+    let oldest_project_id = Uuid::from_u128(9014);
+    write_session_file(home.path(), "2025-01-03T12-02-00", unrelated_id, 0, None)?;
+    let middle_path = write_session_file(
+        home.path(),
+        "2025-01-03T12-01-00",
+        middle_project_id,
+        0,
+        None,
+    )?;
+    let oldest_path = write_session_file(
+        home.path(),
+        "2025-01-03T12-00-00",
+        oldest_project_id,
+        0,
+        None,
+    )?;
+    let runtime =
+        codex_state::StateRuntime::init(config.sqlite.clone(), config.model_provider_id.clone())
+            .await?;
+
+    for path in [&middle_path, &oldest_path] {
+        let metadata = metadata::extract_metadata_from_rollout(path, &config.model_provider_id)
+            .await?
+            .metadata;
+        runtime.upsert_thread(&metadata).await?;
+    }
+    let project = runtime
+        .create_project(
+            "Project".to_string(),
+            vec![codex_state::ProjectRoot {
+                path: home.path().display().to_string(),
+            }],
+            BTreeMap::new(),
+            &[middle_project_id.to_string(), oldest_project_id.to_string()],
+            "test:project-filtered-listing",
+        )
+        .await?
+        .project;
+    runtime.mark_backfill_running().await?;
+
+    let page = RolloutRecorder::list_threads_with_project_filter(
+        Some(runtime.clone()),
+        &config,
+        /*page_size*/ 1,
+        /*cursor*/ None,
+        ThreadSortKey::CreatedAt,
+        SortDirection::Desc,
+        &[],
+        /*model_providers*/ None,
+        /*cwd_filters*/ None,
+        config.model_provider_id.as_str(),
+        project.id.as_str(),
+        /*search_term*/ None,
+    )
+    .await?;
+    assert_eq!(
+        page.items
+            .iter()
+            .filter_map(|item| item.thread_id)
+            .collect::<Vec<_>>(),
+        vec![ThreadId::from_string(&middle_project_id.to_string())?]
+    );
+    let next_cursor = page.next_cursor.clone().expect("project cursor");
+
+    let next_page = RolloutRecorder::list_threads_with_project_filter(
+        Some(runtime),
+        &config,
+        /*page_size*/ 1,
+        Some(&next_cursor),
+        ThreadSortKey::CreatedAt,
+        SortDirection::Desc,
+        &[],
+        /*model_providers*/ None,
+        /*cwd_filters*/ None,
+        config.model_provider_id.as_str(),
+        project.id.as_str(),
+        /*search_term*/ None,
+    )
+    .await?;
+    assert_eq!(
+        next_page
+            .items
+            .iter()
+            .filter_map(|item| item.thread_id)
+            .collect::<Vec<_>>(),
+        vec![ThreadId::from_string(&oldest_project_id.to_string())?]
+    );
+    assert_eq!(next_page.next_cursor, None);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
 -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");

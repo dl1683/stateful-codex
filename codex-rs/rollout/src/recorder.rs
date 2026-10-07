@@ -390,6 +390,43 @@ impl RolloutRecorder {
             default_provider,
             ThreadListArchiveFilter::Active,
             ThreadListRepairMode::ScanAndRepair,
+            /*project_id*/ None,
+            search_term,
+        )
+        .await
+    }
+
+    /// List active threads assigned to a project, falling back to rollout files while the state
+    /// database is unavailable.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_threads_with_project_filter(
+        state_db_ctx: Option<StateDbHandle>,
+        config: &impl RolloutConfigView,
+        page_size: usize,
+        cursor: Option<&Cursor>,
+        sort_key: ThreadSortKey,
+        sort_direction: SortDirection,
+        allowed_sources: &[SessionSource],
+        model_providers: Option<&[String]>,
+        cwd_filters: Option<&[PathBuf]>,
+        default_provider: &str,
+        project_id: &str,
+        search_term: Option<&str>,
+    ) -> std::io::Result<ThreadsPage> {
+        Self::list_threads_with_db_fallback(
+            state_db_ctx,
+            config,
+            page_size,
+            cursor,
+            sort_key,
+            sort_direction,
+            allowed_sources,
+            model_providers,
+            cwd_filters,
+            default_provider,
+            ThreadListArchiveFilter::Active,
+            ThreadListRepairMode::ScanAndRepair,
+            Some(project_id),
             search_term,
         )
         .await
@@ -422,6 +459,7 @@ impl RolloutRecorder {
             default_provider,
             ThreadListArchiveFilter::Active,
             ThreadListRepairMode::StateDbOnly,
+            /*project_id*/ None,
             search_term,
         )
         .await
@@ -455,6 +493,7 @@ impl RolloutRecorder {
             default_provider,
             ThreadListArchiveFilter::Archived,
             ThreadListRepairMode::ScanAndRepair,
+            /*project_id*/ None,
             search_term,
         )
         .await
@@ -487,6 +526,7 @@ impl RolloutRecorder {
             default_provider,
             ThreadListArchiveFilter::Archived,
             ThreadListRepairMode::StateDbOnly,
+            /*project_id*/ None,
             search_term,
         )
         .await
@@ -506,6 +546,7 @@ impl RolloutRecorder {
         default_provider: &str,
         archive_filter: ThreadListArchiveFilter,
         repair_mode: ThreadListRepairMode,
+        project_id: Option<&str>,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
         let codex_home = config.codex_home();
@@ -532,7 +573,7 @@ impl RolloutRecorder {
                 /*relation_filter*/ None,
                 archived,
                 /*section*/ None,
-                /*project_id*/ None,
+                project_id.map(Some),
                 search_term,
             )
             .await
@@ -543,6 +584,7 @@ impl RolloutRecorder {
         let listing_has_metadata_filters = !allowed_sources.is_empty()
             || model_providers.is_some()
             || cwd_filters.is_some()
+            || project_id.is_some()
             || search_term.is_some();
         // Filesystem-first listing intentionally overfetches so we can repair stale/missing
         // SQLite rows before returning the scan page for filtered listings or the DB page for
@@ -643,7 +685,7 @@ impl RolloutRecorder {
             /*relation_filter*/ None,
             archived,
             /*section*/ None,
-            /*project_id*/ None,
+            project_id.map(Some),
             search_term,
         )
         .await;
@@ -674,7 +716,7 @@ impl RolloutRecorder {
                     /*relation_filter*/ None,
                     archived,
                     /*section*/ None,
-                    /*project_id*/ None,
+                    project_id.map(Some),
                     search_term,
                 )
                 .await
@@ -716,7 +758,7 @@ impl RolloutRecorder {
                         /*relation_filter*/ None,
                         archived,
                         /*section*/ None,
-                        /*project_id*/ None,
+                        project_id.map(Some),
                         search_term,
                     )
                     .await
@@ -738,6 +780,24 @@ impl RolloutRecorder {
                 .await);
             }
             return Ok(db_page.into());
+        }
+        if let Some(project_id) = project_id {
+            return list_threads_from_files_filtered_by_project(
+                state_db_ctx.as_deref(),
+                codex_home,
+                page_size,
+                cursor,
+                sort_key,
+                sort_direction,
+                allowed_sources,
+                model_providers,
+                cwd_filters,
+                default_provider,
+                archived,
+                project_id,
+                search_term,
+            )
+            .await;
         }
         if listing_has_metadata_filters {
             let page = page_from_filesystem_scan(fs_page, sort_direction, page_size, sort_key);
@@ -1343,6 +1403,105 @@ async fn fill_missing_thread_item_metadata_from_state_db(
     }
 
     page
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn list_threads_from_files_filtered_by_project(
+    state_db_ctx: Option<&StateRuntime>,
+    codex_home: &Path,
+    page_size: usize,
+    cursor: Option<&Cursor>,
+    sort_key: ThreadSortKey,
+    sort_direction: SortDirection,
+    allowed_sources: &[SessionSource],
+    model_providers: Option<&[String]>,
+    cwd_filters: Option<&[PathBuf]>,
+    default_provider: &str,
+    archived: bool,
+    project_id: &str,
+    search_term: Option<&str>,
+) -> std::io::Result<ThreadsPage> {
+    if page_size == 0 {
+        return Ok(ThreadsPage::default());
+    }
+
+    let scan_page_size = page_size.saturating_mul(2).max(1);
+    let mut scan_cursor = cursor.cloned();
+    let mut items = Vec::with_capacity(page_size);
+    let mut num_scanned_files = 0;
+    let mut reached_scan_cap = false;
+
+    loop {
+        let page = match sort_direction {
+            SortDirection::Asc => {
+                list_threads_from_files_asc(
+                    codex_home,
+                    scan_page_size,
+                    scan_cursor.as_ref(),
+                    sort_key,
+                    allowed_sources,
+                    model_providers,
+                    cwd_filters,
+                    default_provider,
+                    archived,
+                    search_term,
+                )
+                .await?
+            }
+            SortDirection::Desc => {
+                list_threads_from_files_desc(
+                    codex_home,
+                    scan_page_size,
+                    scan_cursor.as_ref(),
+                    sort_key,
+                    allowed_sources,
+                    model_providers,
+                    cwd_filters,
+                    default_provider,
+                    archived,
+                    search_term,
+                )
+                .await?
+            }
+        };
+        let next_scan_cursor = page.next_cursor.clone();
+        num_scanned_files = num_scanned_files.saturating_add(page.num_scanned_files);
+        reached_scan_cap |= page.reached_scan_cap;
+        let page = fill_missing_thread_item_metadata_from_state_db(state_db_ctx, page).await;
+
+        for item in page.items {
+            if item.project_id.as_deref() != Some(project_id) {
+                continue;
+            }
+            items.push(item);
+            if items.len() == page_size {
+                let next_cursor = next_scan_cursor
+                    .is_some()
+                    .then(|| {
+                        items
+                            .last()
+                            .and_then(|item| cursor_from_thread_item(item, sort_key))
+                    })
+                    .flatten();
+                return Ok(ThreadsPage {
+                    items,
+                    next_cursor,
+                    num_scanned_files,
+                    reached_scan_cap,
+                });
+            }
+        }
+
+        let Some(next_scan_cursor) = next_scan_cursor else {
+            return Ok(ThreadsPage {
+                items,
+                next_cursor: None,
+                num_scanned_files,
+                reached_scan_cap,
+            });
+        };
+        scan_cursor = Some(next_scan_cursor);
+    }
 }
 
 fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadItem) {

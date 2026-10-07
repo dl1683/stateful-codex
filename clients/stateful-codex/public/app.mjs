@@ -97,14 +97,18 @@ async function loadThreads() {
   state.threads = [];
   state.threadId = "";
   if (state.projectId === "new") return;
-  const response = await rpc("thread/list", {
-    projectId: state.projectId,
-    limit: 100,
-    sortKey: "recency_at",
-    sortDirection: "desc",
-    archived: false,
-  });
-  state.threads = response.data;
+  try {
+    const response = await rpc("thread/list", {
+      projectId: state.projectId,
+      limit: 100,
+      sortKey: "recency_at",
+      sortDirection: "desc",
+      archived: false,
+    });
+    state.threads = response.data;
+  } catch (error) {
+    state.error = `Unable to load project threads: ${error.message}`;
+  }
 }
 
 async function openWorkspace() {
