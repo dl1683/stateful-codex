@@ -1,9 +1,4 @@
-//! Exact capture of the user's rules (council slice 2): the host stores rules the user marks
-//! as standing in their own words, the model can add other rules only by quoting the user,
-//! one-off directions and invented preferences never become rules, and a fresh thread's
-//! packet leads with the user's exact words.
-
-use std::collections::BTreeMap;
+//! Public safety guards for retained attributed, nonbinding notes.
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
@@ -11,9 +6,6 @@ use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
-use codex_app_server_protocol::StatefulCaptureOutcome;
-use codex_app_server_protocol::StatefulKnowledgeCapturedNotification;
-use codex_app_server_protocol::StatefulKnowledgeCategory;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
@@ -24,13 +16,8 @@ use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
-/// The tui7 opening message: three rules in prose, an unmarked environment rule, and a
-/// one-off restriction for the orientation.
-const OPENING: &str = "Morning! Before writing anything I'd like you to get oriented. A couple of ways I like to work, so you know: I review and commit everything myself, so please never run git commit or anything that rewrites history. Also, don't run the whole test suite every time - just run the test file(s) relevant to what you changed. The test env is the venv one level up (../venv). No code changes yet, just the exploration and the plan. Oh, and one more thing: end each of your replies with a single line starting with 'Next:' that says the one concrete next step you'd take.";
-
 #[path = "stateful_authority_repair_tests.rs"]
 mod repair_tests;
-
 
 fn tool_call(call_id: &str, tool: &str, arguments: Value) -> String {
     responses::sse(vec![

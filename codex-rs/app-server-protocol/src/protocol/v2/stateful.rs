@@ -503,16 +503,10 @@ pub struct StatefulMeasurementSummaryResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
 pub enum StatefulKnowledgeCategory {
-    /// A standing rule in the user's own words.
-    Rule,
-    /// Marked as standing but limited to a task; kept for inspection, never applied.
-    PendingRule,
     Decision,
     /// How to build, test or run the project here.
     Recipe,
     Finding,
-    /// What the user said about themselves or the whole work, in their words.
-    Background,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]

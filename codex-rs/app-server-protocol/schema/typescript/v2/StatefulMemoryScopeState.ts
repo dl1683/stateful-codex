@@ -5,4 +5,4 @@
 /**
  * The retained investigation scope as observed during review, without asserting application.
  */
-export type StatefulMemoryScopeState = "open" | "notBoundHere" | "ended" | "unknown";
+export type StatefulMemoryScopeState = "unsupported" | "open" | "notBoundHere" | "ended" | "unknown";

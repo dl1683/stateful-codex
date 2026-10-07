@@ -98,7 +98,6 @@ impl ChatWidget {
         let mut widget = Self {
             empty_state_animation: std::cell::RefCell::new(empty_state_animation),
             cyber_policy_notice: Default::default(),
-            memory_receipts: Default::default(),
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
             codex_op_target,

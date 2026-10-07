@@ -4,11 +4,10 @@ expression: render(help.display_lines(180))
 ---
 /memory - list what this project remembers (no model turn)
 /memory next - show the next entries of a long list (/memory refresh lists again)
-/memory add rule <text> - add a rule in your words; rule for <scope>: <text> limits it
+/memory add rule <text> - add a rule in your words
 /memory add about-me <text> - add something about you
 /memory add decision <choice> because <reason> - add a decision with its reason
 /memory add note <text> - add anything else worth keeping
 /memory correct <ID@REV> <text> - replace an entry with your words
 /memory forget <ID@REV> - stop using an entry (it stays in history)
-/memory investigations - list investigations; /memory join <scope-ID>, /memory end <scope-ID>, /memory leave
 List numbers are display conveniences; mutations require explicit IDs. Outside the TUI: codex memory --help

@@ -1,5 +1,6 @@
 //! Project-scoped Stateful Codex integration.
 
+mod attributed_text;
 mod attribution;
 mod autonomy;
 mod checkout;
@@ -24,7 +25,6 @@ mod services;
 mod socratic;
 mod source_freshness;
 mod tools;
-mod attributed_text;
 mod visible_root;
 mod world_state;
 

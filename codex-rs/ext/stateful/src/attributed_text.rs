@@ -99,7 +99,6 @@ pub(crate) fn reads_as_instruction(normalized: &str) -> bool {
         .any(|lead| body.starts_with(&format!("{lead} ")))
 }
 
-
 pub(crate) fn has_standing_marker(normalized: &str) -> bool {
     let body = strip_list_marker(normalized);
     if body.starts_with("never mind") {
@@ -120,7 +119,6 @@ pub(crate) fn has_standing_marker(normalized: &str) -> bool {
         || has_phrase(normalized, INVESTIGATION_PHRASES)
         || (has_phrase(normalized, DURATION_PHRASES) && !describes_the_user(body))
 }
-
 
 fn describes_the_user(body: &str) -> bool {
     let first_person = [
@@ -144,7 +142,6 @@ fn describes_the_user(body: &str) -> bool {
     first_person && !directs
 }
 
-
 pub(crate) fn strip_list_marker(normalized: &str) -> &str {
     match normalized.split_once(' ') {
         Some((first, rest))
@@ -160,14 +157,12 @@ pub(crate) fn strip_list_marker(normalized: &str) -> &str {
     }
 }
 
-
 pub(crate) fn has_phrase(normalized: &str, phrases: &[&str]) -> bool {
     let padded = format!(" {normalized} ");
     phrases
         .iter()
         .any(|phrase| padded.contains(&format!(" {phrase} ")))
 }
-
 
 pub(crate) fn normalize(text: &str) -> String {
     text.chars()
@@ -183,4 +178,3 @@ pub(crate) fn normalize(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-

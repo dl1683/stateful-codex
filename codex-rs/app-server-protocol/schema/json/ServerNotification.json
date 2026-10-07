@@ -4293,30 +4293,9 @@
           "type": "string"
         },
         {
-          "description": "A standing rule in the user's own words.",
-          "enum": [
-            "rule"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Marked as standing but limited to a task; kept for inspection, never applied.",
-          "enum": [
-            "pendingRule"
-          ],
-          "type": "string"
-        },
-        {
           "description": "How to build, test or run the project here.",
           "enum": [
             "recipe"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "What the user said about themselves or the whole work, in their words.",
-          "enum": [
-            "background"
           ],
           "type": "string"
         }

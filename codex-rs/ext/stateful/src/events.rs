@@ -50,16 +50,10 @@ pub const MAX_RECEIPT_TEXT_BYTES: usize = 240;
 /// What a receipt says was saved.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KnowledgeCategory {
-    /// A standing rule in the user's own words.
-    Rule,
-    /// A rule the user marked as standing but also limited to a task; kept, never applied.
-    PendingRule,
     Decision,
     /// How to build, test or run the project here.
     Recipe,
     Finding,
-    /// What the user said about themselves or the whole work, in their words.
-    Background,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

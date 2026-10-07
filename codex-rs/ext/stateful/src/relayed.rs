@@ -30,11 +30,11 @@ use sha2::Sha256;
 use crate::BlackboardEntityKind;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
-use crate::quotation::Quotations;
-use crate::services::ProjectIntelligenceServices;
 use crate::attributed_text::has_standing_marker;
 use crate::attributed_text::normalize;
 use crate::attributed_text::reads_as_instruction;
+use crate::quotation::Quotations;
+use crate::services::ProjectIntelligenceServices;
 
 pub(crate) const WORLD_STATE_ID: &str = "stateful_relayed_words";
 pub(crate) const START_MARKER: &str = "<stateful_relayed_words>";

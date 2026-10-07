@@ -37,7 +37,7 @@ authority: StatefulMemoryAuthority | null,
  */
 scopeTitle: string | null,
 /**
- * Scope state observed for this thread; absent for project-wide entries.
+ * Historical scope disposition; unsupported scopes are held back in every thread.
  */
 scopeState: StatefulMemoryScopeState | null,
 /**

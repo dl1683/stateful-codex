@@ -46,7 +46,7 @@ pub enum MemoryAction {
         /// rule, about-me, decision or note.
         #[arg(value_parser = parse_kind)]
         kind: StatefulMemoryAddKind,
-        /// For a rule: where it applies, in your words ("this investigation, until we agree").
+        /// Legacy rule scope; scoped additions are unsupported and will be refused.
         #[arg(long)]
         scope: Option<String>,
         /// For a decision: why it was made.
@@ -293,6 +293,7 @@ mod tests;
 fn scope_state(state: Option<codex_app_server_protocol::StatefulMemoryScopeState>) -> &'static str {
     use codex_app_server_protocol::StatefulMemoryScopeState;
     match state {
+        Some(StatefulMemoryScopeState::Unsupported) => "unsupported; held back",
         Some(StatefulMemoryScopeState::Open) => "open, bound here",
         Some(StatefulMemoryScopeState::NotBoundHere) => "not bound here",
         Some(StatefulMemoryScopeState::Ended) => "ended",

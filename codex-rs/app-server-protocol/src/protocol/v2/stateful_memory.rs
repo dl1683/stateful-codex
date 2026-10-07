@@ -61,7 +61,7 @@ pub struct StatefulMemoryItem {
     pub authority: Option<StatefulMemoryAuthority>,
     /// The investigation a rule is limited to, in the user's words.
     pub scope_title: Option<String>,
-    /// Scope state observed for this thread; absent for project-wide entries.
+    /// Historical scope disposition; unsupported scopes are held back in every thread.
     pub scope_state: Option<StatefulMemoryScopeState>,
     /// Whose words a relayed note keeps, as the user named them.
     pub attributed_to: Option<String>,
@@ -164,7 +164,7 @@ pub struct StatefulMemoryCorrectResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
 pub enum StatefulMemoryAddKind {
-    /// A rule in the user's words, applied to new work within its scope.
+    /// An unscoped rule in the user's words, applied to new project work.
     Rule,
     /// Something about the user or the whole work.
     Background,
@@ -184,8 +184,7 @@ pub struct StatefulMemoryAddParams {
     pub expected_project_id: String,
     pub kind: StatefulMemoryAddKind,
     pub content: String,
-    /// For a rule: where it applies, in the user's words ("this whole investigation, until
-    /// we agree on the root cause"); absent means the whole project.
+    /// Legacy field: any supplied rule scope is refused. Omit for an unscoped addition.
     #[ts(optional = nullable)]
     pub scope: Option<String>,
     /// For a decision: why it was made.
@@ -220,22 +219,22 @@ pub struct StatefulMemoryAddResponse {
     pub outcome: StatefulMemoryAddOutcome,
 }
 
-/// What the user does with the investigations rules can be limited to.
+/// Legacy actions decoded solely to return an explicit unsupported error.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
 pub enum StatefulMemoryScopeAction {
-    /// List the project's investigations and which one this thread continues.
+    /// Former list action; unsupported.
     List,
-    /// This thread continues the named investigation; its rules apply here.
+    /// Former join action; unsupported.
     Join,
-    /// This thread no longer continues any investigation.
+    /// Former leave action; unsupported.
     Leave,
-    /// End the named investigation; its rules stop applying everywhere (kept in history).
+    /// Former end action; unsupported.
     End,
 }
 
-/// Lists, joins, leaves or ends an investigation for a thread, with no model turn.
+/// Legacy scope request. Every action is refused; no collection is returned.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -249,34 +248,20 @@ pub struct StatefulMemoryScopeParams {
     pub scope_id: Option<String>,
 }
 
-/// One investigation rules can be limited to.
+/// Legacy RPC response marker needed by the request registry. This method always returns
+/// an unsupported error; there is no successful collection response.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct StatefulMemoryScope {
-    pub scope_id: String,
-    /// The user's words naming it.
-    pub title: String,
-    pub open: bool,
-    /// When its rules stop applying, in the user's words.
-    pub end_condition: Option<String>,
-    /// Whether this thread continues it.
-    pub this_thread: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct StatefulMemoryScopeResponse {
-    /// The project's investigations after the action, newest first.
-    pub scopes: Vec<StatefulMemoryScope>,
-}
+pub struct StatefulMemoryScopeResponse {}
 
 /// The retained investigation scope as observed during review, without asserting application.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
 pub enum StatefulMemoryScopeState {
+    /// Historical scoped entry: application is unsupported and always held back.
+    Unsupported,
     Open,
     NotBoundHere,
     Ended,

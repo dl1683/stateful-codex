@@ -129,7 +129,6 @@ pub(super) async fn resolve_superseded(
     visible_root: &VisibleRootRegistry,
     project_id: &str,
     thread_id: &str,
-    successor_is_user_rule: bool,
     references: Vec<SupersedeReference>,
 ) -> Result<Vec<SupersededEntry>, FunctionCallError> {
     if references.len() > MAX_SUPERSEDED_ENTRIES {
@@ -180,7 +179,6 @@ pub(super) async fn resolve_superseded(
         }
         if current.value.kind == BlackboardKind::Instruction
             && current.value.provenance.kind == BlackboardProvenanceKind::User
-            && !successor_is_user_rule
         {
             return Err(respond(
                 "a user rule can be replaced only by the user's new rule in their own words",

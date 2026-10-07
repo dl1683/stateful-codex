@@ -1,8 +1,5 @@
 use codex_app_server_protocol::BlackboardKind;
 use codex_app_server_protocol::BlackboardProvenanceKind;
-use codex_app_server_protocol::StatefulCaptureOutcome;
-use codex_app_server_protocol::StatefulKnowledgeCapturedNotification;
-use codex_app_server_protocol::StatefulKnowledgeCategory;
 use codex_app_server_protocol::StatefulMemoryItem;
 use codex_app_server_protocol::StatefulMemoryReplaced;
 use codex_app_server_protocol::StatefulMemorySection;
@@ -13,7 +10,6 @@ use codex_app_server_protocol::StatefulWorkflowMode;
 use pretty_assertions::assert_eq;
 
 use super::Footer;
-use super::ReceiptTally;
 use super::memory_lines;
 use crate::history_cell::HistoryCell;
 
@@ -43,33 +39,6 @@ fn memory_shortened_text_and_scope_states_are_explicit() {
     insta::assert_snapshot!(
         "memory_shortened_scopes",
         render(memory_lines(&items, Footer::Complete, /*run*/ None))
-    );
-}
-
-#[test]
-fn leave_acknowledgement_uses_the_committed_scope_snapshot() {
-    use codex_app_server_protocol::StatefulMemoryScope;
-    use codex_app_server_protocol::StatefulMemoryScopeAction;
-    use codex_app_server_protocol::StatefulMemoryScopeResponse;
-    let response = StatefulMemoryScopeResponse {
-        scopes: vec![StatefulMemoryScope {
-            scope_id: "rejoined".to_string(),
-            title: "Parser investigation".to_string(),
-            open: true,
-            end_condition: None,
-            this_thread: true,
-        }],
-    };
-    insta::assert_snapshot!(
-        "memory_leave_rejoined",
-        render(super::scope_lines(
-            &response,
-            crate::stateful_memory_commands::scope_acknowledgement(
-                &response,
-                StatefulMemoryScopeAction::Leave,
-                /*scope_id*/ None
-            )
-        ))
     );
 }
 
@@ -176,97 +145,7 @@ fn memory_listing_numbers_entries_by_section_and_names_the_open_run() {
 }
 
 #[test]
-fn receipts_name_what_was_saved_and_repeats_say_nothing() {
-    let notification = |category, outcome| StatefulKnowledgeCapturedNotification {
-        project_id: "project-1".to_string(),
-        thread_id: "thread-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        entry_id: "entry-1".to_string(),
-        revision: 1,
-        category,
-        outcome,
-        text: "From now on, never run the whole test suite.".to_string(),
-    };
-    let saved = ReceiptTally::default()
-        .receipt_cell(&notification(
-            StatefulKnowledgeCategory::Rule,
-            StatefulCaptureOutcome::Stored,
-        ))
-        .map(|cell| render(cell.display_lines(/*width*/ 100)));
-    let pending = ReceiptTally::default()
-        .receipt_cell(&notification(
-            StatefulKnowledgeCategory::PendingRule,
-            StatefulCaptureOutcome::Stored,
-        ))
-        .map(|cell| render(cell.display_lines(/*width*/ 100)));
-    let repeated = ReceiptTally::default()
-        .receipt_cell(&notification(
-            StatefulKnowledgeCategory::Rule,
-            StatefulCaptureOutcome::AlreadyStored,
-        ))
-        .is_none();
-    insta::assert_snapshot!(
-        "memory_receipts",
-        format!(
-            "{}\n{}",
-            saved.unwrap_or_default(),
-            pending.unwrap_or_default()
-        )
-    );
-    assert!(repeated);
-}
-
-/// tui8: two rules from one message give two receipts, numbered, each showing its own rule
-/// rather than the framing both share; a rule that merely contains a colon keeps its words.
-#[test]
-fn rule_receipts_are_numbered_and_show_the_rule_after_its_framing() {
-    let mut tally = ReceiptTally::default();
-    let mut receipt = |turn_id: &str, text: &str| {
-        tally
-            .receipt_cell(&StatefulKnowledgeCapturedNotification {
-                project_id: "project-1".to_string(),
-                thread_id: "thread-1".to_string(),
-                turn_id: turn_id.to_string(),
-                entry_id: "entry-1".to_string(),
-                revision: 1,
-                category: StatefulKnowledgeCategory::Rule,
-                outcome: StatefulCaptureOutcome::Stored,
-                text: text.to_string(),
-            })
-            .map(|cell| render(cell.display_lines(/*width*/ 200)))
-            .unwrap_or_default()
-    };
-    let lines = [
-        receipt(
-            "turn-1",
-            "Two standing rules for all our work here: never run git commit or anything else that rewrites history - I review and commit everything myself.",
-        ),
-        receipt(
-            "turn-1",
-            "And always end each of your replies with a single line starting with 'Next:' that names the one concrete next step.",
-        ),
-        receipt(
-            "turn-2",
-            "Never run git commit: I review and commit everything myself, every time.",
-        ),
-        // Scoped framing is part of the rule; a long preview ends at a word boundary.
-        receipt(
-            "turn-3",
-            "Some ground rules for this whole investigation, which may take a few days: Do NOT change any code until we have agreed on the root cause.",
-        ),
-    ];
-    insta::assert_snapshot!(
-        "memory_rule_receipts_skip_framing",
-        lines.join(
-            "
-"
-        )
-    );
-}
-
-
-#[test]
-fn memory_help_and_investigations_show_explicit_targets() {
+fn memory_help_shows_explicit_targets() {
     let help = crate::history_cell::PlainHistoryCell::new(
         crate::stateful_memory_commands::HELP
             .iter()
@@ -274,17 +153,4 @@ fn memory_help_and_investigations_show_explicit_targets() {
             .collect(),
     );
     insta::assert_snapshot!("memory_help", render(help.display_lines(/*width*/ 180)));
-    let response = codex_app_server_protocol::StatefulMemoryScopeResponse {
-        scopes: vec![codex_app_server_protocol::StatefulMemoryScope {
-            scope_id: "scope-parser".to_string(),
-            title: "Parser investigation".to_string(),
-            open: true,
-            this_thread: true,
-            end_condition: Some("until we agree on the root cause".to_string()),
-        }],
-    };
-    insta::assert_snapshot!(
-        "memory_investigations",
-        render(super::scope_lines(&response, /*done*/ None))
-    );
 }

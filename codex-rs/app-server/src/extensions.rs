@@ -666,12 +666,9 @@ fn api_category(
     use codex_app_server_protocol::StatefulKnowledgeCategory as Api;
     use codex_stateful_extension::KnowledgeCategory;
     match category {
-        KnowledgeCategory::Rule => Api::Rule,
-        KnowledgeCategory::PendingRule => Api::PendingRule,
         KnowledgeCategory::Decision => Api::Decision,
         KnowledgeCategory::Recipe => Api::Recipe,
         KnowledgeCategory::Finding => Api::Finding,
-        KnowledgeCategory::Background => Api::Background,
     }
 }
 

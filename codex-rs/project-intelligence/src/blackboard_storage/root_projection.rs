@@ -1,7 +1,5 @@
-//! The root projection: the bounded set of promoted entries a packet shows, optionally as it
-//! applies in one thread. Applicability is decided in SQL before the bound, in one read
-//! transaction with the thread's binding and the project's investigations, so a projection,
-//! its counts and the investigations that explain it always come from one snapshot.
+//! Bounded root projection and historical quarantine counts from one read snapshot.
+//! Existing SQL eligibility runs before LIMIT; historical bindings never admit scoped words.
 
 use sqlx::FromRow;
 
@@ -12,10 +10,8 @@ use crate::ThreadScopes;
 use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::query::load_hit;
-use super::scopes::IN_OTHER_OPEN_SCOPE;
 use super::scopes::LEGACY_LIMITED_RULE;
 use super::scopes::OUTSIDE_THREAD_SCOPE;
-use super::scopes::thread_scopes_on;
 
 // Apply authority/category eligibility before either counts or LIMIT, using the latest
 // meaning visible at this entry revision. Legacy user instructions remain source-backed.
@@ -43,34 +39,27 @@ impl BlackboardStore {
         &self,
         query: RootBlackboardQuery,
     ) -> Result<RootBlackboardProjection, BlackboardStoreError> {
-        Ok(self.root_projection_in(query, /*thread_id*/ None).await?.0)
+        Ok(self.root_projection_in(query).await?.0)
     }
 
-    /// The root projection as it applies in `thread_id`: an entry limited to an investigation
-    /// is left out unless the thread continues that investigation while it is open. The
-    /// projection, the thread's binding and the project's investigations come from one
-    /// snapshot, so the aliases a packet assigns never mix two states.
+    /// The bounded root with historical scope quarantine counts. Historical bindings never
+    /// grant application; every scoped entry is held back before LIMIT.
     pub async fn root_projection_for_thread(
         &self,
         query: RootBlackboardQuery,
-        thread_id: &str,
+        _thread_id: &str,
     ) -> Result<(RootBlackboardProjection, ThreadScopes), BlackboardStoreError> {
-        let (projection, scopes) = self.root_projection_in(query, Some(thread_id)).await?;
-        Ok((projection, scopes.unwrap_or_default()))
+        let (projection, scopes) = self.root_projection_in(query).await?;
+        Ok((projection, scopes))
     }
 
     async fn root_projection_in(
         &self,
         query: RootBlackboardQuery,
-        thread_id: Option<&str>,
-    ) -> Result<(RootBlackboardProjection, Option<ThreadScopes>), BlackboardStoreError> {
+    ) -> Result<(RootBlackboardProjection, ThreadScopes), BlackboardStoreError> {
         query.validate()?;
         let mut transaction = self.pool.begin().await?;
-        let scoped = if thread_id.is_some() {
-            format!("{OUTSIDE_THREAD_SCOPE} AND NOT ({LEGACY_LIMITED_RULE})")
-        } else {
-            format!(" AND NOT ({LEGACY_LIMITED_RULE})")
-        };
+        let scoped = format!("{OUTSIDE_THREAD_SCOPE} AND NOT ({LEGACY_LIMITED_RULE})");
         let outside = format!("{ROOT_ELIGIBILITY}{scoped}");
         let mut counts = sqlx::query_as::<_, RootEntryCounts>(
             sqlx::AssertSqlSafe(format!("SELECT
@@ -86,8 +75,7 @@ impl BlackboardStore {
         .bind(&query.project_id)
         .fetch_one(&mut *transaction)
         .await?;
-        let mut scopes = None;
-        if let Some(thread_id) = thread_id {
+        let scopes = {
             let applicable = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*)
                  FROM blackboard_entries AS entry
@@ -97,19 +85,7 @@ impl BlackboardStore {
                    AND revision.root_promotion = 'promoted'{outside}"
             )))
             .bind(&query.project_id)
-            .bind(thread_id)
-            .fetch_one(&mut *transaction)
-            .await?;
-            let elsewhere = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
-                "SELECT COUNT(*)
-                 FROM blackboard_entries AS entry
-                 JOIN blackboard_entry_revisions AS revision
-                   ON revision.entry_id = entry.id AND revision.revision = entry.revision
-                 WHERE entry.project_id = ? AND revision.state = 'active'
-                   AND revision.root_promotion = 'promoted'{IN_OTHER_OPEN_SCOPE}"
-            )))
-            .bind(&query.project_id)
-            .bind(thread_id)
+            .bind(/*value*/ Option::<&str>::None)
             .fetch_one(&mut *transaction)
             .await?;
             let legacy = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
@@ -123,18 +99,15 @@ impl BlackboardStore {
             .bind(&query.project_id)
             .fetch_one(&mut *transaction)
             .await?;
-            let (bound, all) =
-                thread_scopes_on(&mut transaction, &query.project_id, thread_id).await?;
             let count =
                 |value: i64| u64::try_from(value).map_err(|_| BlackboardStoreError::CountOverflow);
-            scopes = Some(ThreadScopes {
-                bound,
-                scopes: all,
-                scoped_elsewhere: count(elsewhere)?,
+            let scopes = ThreadScopes {
+                scoped_held_back: count(counts.promoted.saturating_sub(applicable))?,
                 legacy_held_back: count(legacy)?,
-            });
+            };
             counts.promoted = applicable;
-        }
+            scopes
+        };
         let list = format!(
             "SELECT entry.id
              FROM blackboard_entries AS entry
@@ -164,9 +137,7 @@ impl BlackboardStore {
         );
         let mut entry_ids =
             sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(list)).bind(&query.project_id);
-        if let Some(thread_id) = thread_id {
-            entry_ids = entry_ids.bind(thread_id);
-        }
+        entry_ids = entry_ids.bind(/*value*/ Option::<&str>::None);
         let entry_ids = entry_ids
             .bind(i64::from(query.max_entries))
             .fetch_all(&mut *transaction)

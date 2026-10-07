@@ -4312,7 +4312,7 @@
       "description": "What the user adds to project memory.",
       "oneOf": [
         {
-          "description": "A rule in the user's words, applied to new work within its scope.",
+          "description": "An unscoped rule in the user's words, applied to new project work.",
           "enum": [
             "rule"
           ],
@@ -4342,31 +4342,31 @@
       ]
     },
     "StatefulMemoryScopeAction": {
-      "description": "What the user does with the investigations rules can be limited to.",
+      "description": "Legacy actions decoded solely to return an explicit unsupported error.",
       "oneOf": [
         {
-          "description": "List the project's investigations and which one this thread continues.",
+          "description": "Former list action; unsupported.",
           "enum": [
             "list"
           ],
           "type": "string"
         },
         {
-          "description": "This thread continues the named investigation; its rules apply here.",
+          "description": "Former join action; unsupported.",
           "enum": [
             "join"
           ],
           "type": "string"
         },
         {
-          "description": "This thread no longer continues any investigation.",
+          "description": "Former leave action; unsupported.",
           "enum": [
             "leave"
           ],
           "type": "string"
         },
         {
-          "description": "End the named investigation; its rules stop applying everywhere (kept in history).",
+          "description": "Former end action; unsupported.",
           "enum": [
             "end"
           ],

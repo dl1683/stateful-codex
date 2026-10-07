@@ -36,9 +36,7 @@ const MAX_GENERATIONS: u32 = 64;
 /// What the user is adding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MemoryAddition {
-    /// A rule in the user's words. With a scope naming the open investigation the thread
-    /// continues (its ID, its title, or "this investigation") the rule is limited to it and
-    /// ends with it; any other scope is refused rather than applied to all work.
+    /// An unscoped rule. A legacy request supplying scope is refused.
     Rule { scope: Option<String> },
     /// Something about the user or the whole work.
     Background,
@@ -70,6 +68,12 @@ pub async fn add_entry(
     addition: MemoryAddition,
     content: &str,
 ) -> Result<(BlackboardEntry, AddOutcome), MemoryControlError> {
+    if matches!(&addition, MemoryAddition::Rule { scope: Some(_) }) {
+        return Err(MemoryControlError::Refused(
+            "investigations and scoped memory additions are unsupported; nothing was added"
+                .to_string(),
+        ));
+    }
     let action_id = actor
         .action_id
         .as_deref()
@@ -84,8 +88,6 @@ pub async fn add_entry(
             .map(str::to_string)
     };
     let text = match &addition {
-        // A scoped rule keeps the user's words; its investigation is recorded with it (and
-        // shown by its title), not written into them.
         MemoryAddition::Rule { .. } => content.to_string(),
         MemoryAddition::Decision { reason } => match non_empty(reason) {
             Some(reason) => format!("{content} Reason: {reason}"),
@@ -95,7 +97,7 @@ pub async fn add_entry(
     };
     if content.is_empty() || text.len() > MAX_CORRECTION_BYTES {
         return Err(MemoryControlError::Refused(format!(
-            "the text (with its scope or reason) must be 1-{MAX_CORRECTION_BYTES} bytes"
+            "the text (with its reason) must be 1-{MAX_CORRECTION_BYTES} bytes"
         )));
     }
     let (kind, category) = match addition {
@@ -106,78 +108,7 @@ pub async fn add_entry(
     };
     // The complete request, so a retry is recognized by what was asked, not by stored text
     // that two different requests can share.
-    let fingerprint = request_fingerprint(&addition, content, actor.thread_id.as_deref());
-    // A retried action returns what it did; the same identity for anything else (other
-    // words, another kind, a different reason or scope) is refused.
-    // Scoped replay must precede current binding validation: the investigation may have
-    // ended since the action committed. Unscoped writes let the transaction arbitrate
-    // action identity, including sequential retries and competing writers.
-    if matches!(&addition, MemoryAddition::Rule { scope: Some(scope) } if !scope.trim().is_empty())
-        && let Some(done) = store.change_for_action(project_id, action_id).await?
-    {
-        if done.record.group_id.as_deref() != Some(fingerprint.as_str()) {
-            return Err(MemoryControlError::Refused(
-                "this action already added something else; nothing was added".to_string(),
-            ));
-        }
-        let entry_id = done
-            .entry_id
-            .as_deref()
-            .and_then(|id| BlackboardEntryId::parse(id).ok());
-        let entry = match entry_id {
-            Some(id) => store.get_entry(project_id, &id).await?,
-            None => None,
-        };
-        // The request matches the recorded one, so its recorded result is returned as it is
-        // stored now (the words of an "already present" entry may differ in spacing).
-        return entry
-            .map(|entry| (entry, AddOutcome::AlreadyDone))
-            .ok_or_else(|| {
-                MemoryControlError::Refused(
-                    "the entry this action made is no longer readable; nothing was added"
-                        .to_string(),
-                )
-            });
-    }
-    // A scoped rule belongs to the open investigation this thread continues, named by its ID
-    // or its title, or as "this investigation"; it ends with that investigation.
-    let scope_id = match &addition {
-        MemoryAddition::Rule { scope } if let Some(named) = non_empty(scope) => {
-            let thread_id = actor.thread_id.as_deref().ok_or_else(|| {
-                MemoryControlError::Refused(
-                    "a rule limited to an investigation needs the thread that continues it"
-                        .to_string(),
-                )
-            })?;
-            let bound = store
-                .thread_scope(project_id, thread_id)
-                .await?
-                .filter(|scope| scope.state == codex_project_intelligence::ScopeState::Open)
-                .ok_or_else(|| {
-                    MemoryControlError::Refused(
-                        "this thread continues no open investigation; join one (/memory investigations) or add the rule without a scope".to_string(),
-                    )
-                })?;
-            let normalized = crate::attributed_text::normalize(&named);
-            let names_it = named == bound.scope_id
-                || normalized == crate::attributed_text::normalize(&bound.title)
-                || CURRENT_INVESTIGATION.contains(&normalized.as_str());
-            if !names_it {
-                return Err(MemoryControlError::Refused(format!(
-                    "that scope does not name the investigation this thread continues ({}); use its ID from /memory investigations or say \"this investigation\"",
-                    bound.title
-                )));
-            }
-            if normalized.split(' ').any(|word| word == "until") {
-                return Err(MemoryControlError::Refused(
-                    "a rule added directly ends with its investigation; leave out the ending"
-                        .to_string(),
-                ));
-            }
-            Some(bound.scope_id)
-        }
-        _ => None,
-    };
+    let fingerprint = request_fingerprint(&addition, content);
     let source_id = format!("memory-add:{action_id}");
     let confidence = ConfidenceScore::from_basis_points(10_000)
         .map_err(|error| MemoryControlError::Refused(error.to_string()))?;
@@ -204,10 +135,10 @@ pub async fn add_entry(
         // next generation.
         MemoryAddition::Rule { .. } => (0..MAX_GENERATIONS)
             .filter_map(|generation| {
-                user_rule_entry_id(project_id, scope_id.as_deref(), &text, generation)
+                user_rule_entry_id(project_id, /*scope_id*/ None, &text, generation)
             })
             .collect(),
-        // Background keeps the identity host capture gives the same words.
+        // Preserve historical identity for the same background words.
         MemoryAddition::Background => {
             let id = digest_id(USER_BACKGROUND_ID_PREFIX, project_id, &text)?;
             (0..MAX_GENERATIONS)
@@ -236,7 +167,6 @@ pub async fn add_entry(
                     candidates,
                     value,
                     context: KnowledgeContext {
-                        scope_id,
                         ..KnowledgeContext::new(category, KnowledgeAuthority::HumanDirect)
                     },
                     change,
@@ -296,24 +226,11 @@ pub async fn add_entry(
     }
 }
 
-/// Ways to name the investigation the thread continues without its title or ID.
-const CURRENT_INVESTIGATION: &[&str] = &[
-    "this investigation",
-    "this whole investigation",
-    "the current investigation",
-    "for this investigation",
-    "for this whole investigation",
-];
-
 /// The journal's record of a direct addition's complete request (kind, words, reason,
 /// scope), kept in the change's group field, which direct additions do not otherwise use.
-fn request_fingerprint(
-    addition: &MemoryAddition,
-    content: &str,
-    thread_id: Option<&str>,
-) -> String {
+fn request_fingerprint(addition: &MemoryAddition, content: &str) -> String {
     let (kind, extra) = match addition {
-        MemoryAddition::Rule { scope } => ("rule", scope.as_deref()),
+        MemoryAddition::Rule { .. } => ("rule", None),
         MemoryAddition::Background => ("background", None),
         MemoryAddition::Decision { reason } => ("decision", reason.as_deref()),
         MemoryAddition::Note => ("note", None),
@@ -324,10 +241,6 @@ fn request_fingerprint(
         hasher.update([0]);
     }
     hasher.update([u8::from(extra.is_some())]);
-    // A scope such as "this investigation" means the one the requesting thread continues.
-    if matches!(addition, MemoryAddition::Rule { scope: Some(_) }) {
-        hasher.update(thread_id.unwrap_or_default().as_bytes());
-    }
     format!("add-request-{:x}", hasher.finalize())
 }
 

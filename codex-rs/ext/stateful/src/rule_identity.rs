@@ -31,4 +31,3 @@ pub(crate) fn user_rule_entry_id(
     };
     BlackboardEntryId::parse(id).ok()
 }
-

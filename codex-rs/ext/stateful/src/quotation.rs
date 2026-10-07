@@ -42,14 +42,6 @@ struct Span {
     code: bool,
 }
 
-/// Subjects that make a speech verb the user's own activity ("I wrote our Go backend").
-const FIRST_PERSON_SUBJECTS: &[&str] = &["i", "we"];
-/// Words that may stand between a subject and its verb ("I also wrote", "we then said") or
-/// join a second verb to the sentence's subject ("I'm a developer and wrote ...").
-const VERB_LINKS: &[&str] = &["and", "also", "then", "have", "had", "ve", "m", "just"];
-/// Words that open a sentence without being its subject.
-const SENTENCE_OPENERS: &[&str] = &["also", "and", "so", "oh", "fyi", "but", "well", "btw"];
-
 /// Words that open a sentence referring back to the quotation before it.
 const BACK_REFERENCES: &[&str] = &[
     "that", "this", "those", "these", "which", "so", "she", "he", "they", "it",
@@ -60,8 +52,6 @@ const BACK_REFERENCES: &[&str] = &[
 struct Sentence {
     /// Byte offset just past its end.
     end: usize,
-    /// A speech verb of someone else appears in it outside every quotation.
-    reports_speech: bool,
     /// Any speech verb appears in it, the user's own included ("I wrote last week: ..."):
     /// a quotation it introduces is reported words, not a statement made now.
     quotes_speech: bool,
@@ -82,7 +72,7 @@ pub(crate) struct Quotations<'a> {
 
 impl<'a> Quotations<'a> {
     pub(crate) fn new(text: &'a str) -> Self {
-        let (spans, _) = spans(text);
+        let spans = spans(text);
         let sentences = sentences(text, &spans);
         let attributed = spans
             .iter()
@@ -101,9 +91,9 @@ impl<'a> Quotations<'a> {
                 // A quoted instruction ("\"From now on, never commit.\"") is someone's
                 // words even unattributed; a quoted term ('Next:') is not.
                 let instruction = !span.code
-                    && crate::attributed_text::reads_as_instruction(&crate::attributed_text::normalize(
-                        &text[span.open..span.close],
-                    ));
+                    && crate::attributed_text::reads_as_instruction(
+                        &crate::attributed_text::normalize(&text[span.open..span.close]),
+                    );
                 own || introduced || referred_back || instruction
             })
             .collect();
@@ -113,7 +103,6 @@ impl<'a> Quotations<'a> {
             attributed,
         }
     }
-
 
     /// Quotations attributed to someone else (not code), each with the sentence that
     /// attributes it.
@@ -150,7 +139,6 @@ impl<'a> Quotations<'a> {
             })
             .collect()
     }
-
 }
 
 /// Splits `text` into sentences without splitting a quotation: a sentence ends at a newline,
@@ -197,9 +185,6 @@ fn sentences(text: &str, spans: &[Span]) -> Vec<Sentence> {
             .collect::<Vec<_>>();
         sentences.push(Sentence {
             end,
-            reports_speech: words.iter().enumerate().any(|(index, word)| {
-                SPEECH_VERBS.contains(&word.as_str()) && !users_own_verb(&words, index)
-            }),
             quotes_speech: words
                 .iter()
                 .any(|word| SPEECH_VERBS.contains(&word.as_str())),
@@ -211,32 +196,6 @@ fn sentences(text: &str, spans: &[Span]) -> Vec<Sentence> {
         start = end;
     }
     sentences
-}
-
-/// Whether the speech verb at `index` belongs to the user: its subject, directly or through
-/// linking words ("I also wrote"), is first person, or it is joined ("and wrote") to a
-/// sentence whose subject is first person.
-fn users_own_verb(words: &[String], index: usize) -> bool {
-    let mut position = index;
-    while let Some(previous) = position.checked_sub(1) {
-        let word = words[previous].as_str();
-        if FIRST_PERSON_SUBJECTS.contains(&word) {
-            return true;
-        }
-        if !VERB_LINKS.contains(&word) {
-            break;
-        }
-        if word == "and" {
-            // A second verb shares the sentence's subject.
-            let subject = words
-                .iter()
-                .find(|word| !SENTENCE_OPENERS.contains(&word.as_str()));
-            return subject
-                .is_some_and(|subject| FIRST_PERSON_SUBJECTS.contains(&subject.as_str()));
-        }
-        position = previous;
-    }
-    false
 }
 
 /// `text[start..end]` with each quotation replaced by a space.
@@ -299,7 +258,7 @@ fn code_spans(text: &str) -> Vec<Span> {
     spans
 }
 
-fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
+fn spans(text: &str) -> Vec<Span> {
     let code = code_spans(text);
     let in_code = |offset: usize| {
         code.iter()
@@ -355,18 +314,13 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
             }
         }
     }
-    let ambiguous_from = match open {
-        Some((start, '"' | '\u{201c}' | '\u{ab}')) => {
-            quotes.push(Span {
-                open: start,
-                close: text.len(),
-                code: false,
-            });
-            None
-        }
-        Some((start, _)) => Some(start),
-        None => None,
-    };
+    if let Some((start, '"' | '\u{201c}' | '\u{ab}')) = open {
+        quotes.push(Span {
+            open: start,
+            close: text.len(),
+            code: false,
+        });
+    }
     // Code inside a quotation belongs to the quotation; spans stay disjoint and sorted.
     let kept_code = code
         .into_iter()
@@ -379,6 +333,5 @@ fn spans(text: &str) -> (Vec<Span>, Option<usize>) {
     let mut spans = quotes;
     spans.extend(kept_code);
     spans.sort_by_key(|span| span.open);
-    (spans, ambiguous_from)
+    spans
 }
-

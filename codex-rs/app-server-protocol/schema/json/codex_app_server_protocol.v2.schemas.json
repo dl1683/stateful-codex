@@ -19356,30 +19356,9 @@
           "type": "string"
         },
         {
-          "description": "A standing rule in the user's own words.",
-          "enum": [
-            "rule"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Marked as standing but limited to a task; kept for inspection, never applied.",
-          "enum": [
-            "pendingRule"
-          ],
-          "type": "string"
-        },
-        {
           "description": "How to build, test or run the project here.",
           "enum": [
             "recipe"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "What the user said about themselves or the whole work, in their words.",
-          "enum": [
-            "background"
           ],
           "type": "string"
         }
@@ -19492,7 +19471,7 @@
       "description": "What the user adds to project memory.",
       "oneOf": [
         {
-          "description": "A rule in the user's words, applied to new work within its scope.",
+          "description": "An unscoped rule in the user's words, applied to new project work.",
           "enum": [
             "rule"
           ],
@@ -19641,7 +19620,7 @@
               "type": "null"
             }
           ],
-          "description": "Scope state observed for this thread; absent for project-wide entries."
+          "description": "Historical scope disposition; unsupported scopes are held back in every thread."
         },
         "scopeTitle": {
           "description": "The investigation a rule is limited to, in the user's words.",
@@ -19703,65 +19682,32 @@
       ],
       "type": "object"
     },
-    "StatefulMemoryScope": {
-      "description": "One investigation rules can be limited to.",
-      "properties": {
-        "endCondition": {
-          "description": "When its rules stop applying, in the user's words.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "open": {
-          "type": "boolean"
-        },
-        "scopeId": {
-          "type": "string"
-        },
-        "thisThread": {
-          "description": "Whether this thread continues it.",
-          "type": "boolean"
-        },
-        "title": {
-          "description": "The user's words naming it.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "open",
-        "scopeId",
-        "thisThread",
-        "title"
-      ],
-      "type": "object"
-    },
     "StatefulMemoryScopeAction": {
-      "description": "What the user does with the investigations rules can be limited to.",
+      "description": "Legacy actions decoded solely to return an explicit unsupported error.",
       "oneOf": [
         {
-          "description": "List the project's investigations and which one this thread continues.",
+          "description": "Former list action; unsupported.",
           "enum": [
             "list"
           ],
           "type": "string"
         },
         {
-          "description": "This thread continues the named investigation; its rules apply here.",
+          "description": "Former join action; unsupported.",
           "enum": [
             "join"
           ],
           "type": "string"
         },
         {
-          "description": "This thread no longer continues any investigation.",
+          "description": "Former leave action; unsupported.",
           "enum": [
             "leave"
           ],
           "type": "string"
         },
         {
-          "description": "End the named investigation; its rules stop applying everywhere (kept in history).",
+          "description": "Former end action; unsupported.",
           "enum": [
             "end"
           ],
@@ -19771,13 +19717,24 @@
     },
     "StatefulMemoryScopeState": {
       "description": "The retained investigation scope as observed during review, without asserting application.",
-      "enum": [
-        "open",
-        "notBoundHere",
-        "ended",
-        "unknown"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "open",
+            "notBoundHere",
+            "ended",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Historical scoped entry: application is unsupported and always held back.",
+          "enum": [
+            "unsupported"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "StatefulMemorySection": {
       "description": "Retained memory categories. These sections do not assert current applicability.",

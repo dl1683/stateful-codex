@@ -1,7 +1,8 @@
 //! `/memory` commands: list, page, add, forget and correct project memory with no model turn.
 //!
-//! List numbers are display conveniences. Mutations carry explicit entry IDs/revisions or
-//! scope IDs and never resolve a number from an asynchronously refreshed list. Every result names the thread and listing it belongs to, so a reply
+//! List numbers are display conveniences. Mutations carry explicit entry IDs/revisions and
+//! never resolve a number from an asynchronously refreshed list. Every result names the
+//! thread and listing it belongs to, so a reply
 //! that arrives after the user switched threads, or after a newer listing, changes nothing it
 //! does not own.
 
@@ -22,9 +23,6 @@ use codex_app_server_protocol::StatefulMemoryForgetResponse;
 use codex_app_server_protocol::StatefulMemoryItem;
 use codex_app_server_protocol::StatefulMemoryReadParams;
 use codex_app_server_protocol::StatefulMemoryReadResponse;
-use codex_app_server_protocol::StatefulMemoryScopeAction;
-use codex_app_server_protocol::StatefulMemoryScopeParams;
-use codex_app_server_protocol::StatefulMemoryScopeResponse;
 use codex_app_server_protocol::StatefulRun;
 use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
@@ -43,7 +41,7 @@ use crate::stateful_memory::section_rank;
 
 /// Entries one page shows.
 const PAGE_SIZE: u32 = 50;
-const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory investigations, /memory help";
+const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory help";
 
 /// What the user asked `/memory` to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,14 +49,6 @@ pub(crate) enum MemoryCommand {
     List,
     More,
     Help,
-    /// The project's investigations, numbered.
-    Investigations,
-    /// This thread continues the explicitly named investigation.
-    Join(String),
-    /// End the explicitly named investigation.
-    End(String),
-    /// This thread no longer continues an investigation.
-    Leave,
     Add(Addition),
     Forget(EntryTarget),
     Correct(EntryTarget, String),
@@ -69,8 +59,6 @@ pub(crate) enum MemoryCommand {
 pub(crate) struct Addition {
     pub(crate) kind: StatefulMemoryAddKind,
     pub(crate) content: String,
-    /// A rule's scope ("for this investigation, until we agree:").
-    pub(crate) scope: Option<String>,
     /// A decision's reason ("... because ...").
     pub(crate) reason: Option<String>,
 }
@@ -87,26 +75,12 @@ pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
         "more" | "next" if rest.is_empty() => return Ok(MemoryCommand::More),
         "refresh" | "list" if rest.is_empty() => return Ok(MemoryCommand::List),
         "help" if rest.is_empty() => return Ok(MemoryCommand::Help),
-        "investigations" if rest.is_empty() => return Ok(MemoryCommand::Investigations),
-        "leave" if rest.is_empty() => return Ok(MemoryCommand::Leave),
         "add" => return parse_addition(rest).map(MemoryCommand::Add),
         _ => {}
     }
     let (target, text) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     match verb.to_ascii_lowercase().as_str() {
         "forget" if text.trim().is_empty() => Ok(MemoryCommand::Forget(entry_target(target)?)),
-        "join"
-            if text.trim().is_empty()
-                && (!target.is_empty() && !target.chars().all(|ch| ch.is_ascii_digit())) =>
-        {
-            Ok(MemoryCommand::Join(target.to_string()))
-        }
-        "end"
-            if text.trim().is_empty()
-                && (!target.is_empty() && !target.chars().all(|ch| ch.is_ascii_digit())) =>
-        {
-            Ok(MemoryCommand::End(target.to_string()))
-        }
         "correct" if !text.trim().is_empty() => Ok(MemoryCommand::Correct(
             entry_target(target)?,
             text.trim().to_string(),
@@ -138,50 +112,53 @@ fn entry_target(value: &str) -> Result<EntryTarget, String> {
     })
 }
 
-/// `rule [for <scope>:] <text>`, `about <text>`, `decision <choice> [because <reason>]`,
+/// `rule <text>`, `about <text>`, `decision <choice> [because <reason>]`,
 /// `note <text>`.
 fn parse_addition(rest: &str) -> Result<Addition, String> {
-    const ADD_USAGE: &str = "Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about-me <text>, /memory add decision <choice> because <reason>, /memory add note <text>";
+    const ADD_USAGE: &str = "Usage: /memory add rule <text>, /memory add about-me <text>, /memory add decision <choice> because <reason>, /memory add note <text>";
     let (kind, text) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     let text = text.trim();
     if text.is_empty() {
         return Err(ADD_USAGE.to_string());
     }
-    let addition = |kind, content: &str, scope: Option<&str>, reason: Option<&str>| Addition {
+    let addition = |kind, content: &str, reason: Option<&str>| Addition {
         kind,
         content: content.trim().to_string(),
-        scope: scope.map(|scope| scope.trim().to_string()),
         reason: reason.map(|reason| reason.trim().to_string()),
     };
     match kind.to_ascii_lowercase().as_str() {
         "rule" => {
-            let (first, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+            let (first, _) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
             if first.to_lowercase().starts_with("for:") {
                 return Err(ADD_USAGE.to_string());
             }
-            Ok(if first.eq_ignore_ascii_case("for") {
-                let (scope, rule) = rest.split_once(':').ok_or_else(|| ADD_USAGE.to_string())?;
-                if scope.trim().is_empty() || rule.trim().is_empty() {
-                    return Err(ADD_USAGE.to_string());
-                }
-                addition(StatefulMemoryAddKind::Rule, rule, Some(scope), None)
-            } else {
-                addition(StatefulMemoryAddKind::Rule, text, None, None)
-            })
+            if first.eq_ignore_ascii_case("for") {
+                return Err("Scoped rules are unsupported; nothing was added.".to_string());
+            }
+            Ok(addition(
+                StatefulMemoryAddKind::Rule,
+                text,
+                /*reason*/ None,
+            ))
         }
-        "about" | "about-me" | "background" | "me" => Ok(addition(
-            StatefulMemoryAddKind::Background,
-            text,
-            None,
-            None,
-        )),
+        "about" | "about-me" | "background" | "me" => {
+            Ok(addition(
+                StatefulMemoryAddKind::Background,
+                text,
+                /*reason*/ None,
+            ))
+        }
         "decision" => Ok(match text.split_once(" because ") {
             Some((choice, reason)) => {
-                addition(StatefulMemoryAddKind::Decision, choice, None, Some(reason))
+                addition(StatefulMemoryAddKind::Decision, choice, Some(reason))
             }
-            None => addition(StatefulMemoryAddKind::Decision, text, None, None),
+            None => addition(StatefulMemoryAddKind::Decision, text, /*reason*/ None),
         }),
-        "note" => Ok(addition(StatefulMemoryAddKind::Note, text, None, None)),
+        "note" => Ok(addition(
+            StatefulMemoryAddKind::Note,
+            text,
+            /*reason*/ None,
+        )),
         _ => Err(ADD_USAGE.to_string()),
     }
 }
@@ -190,13 +167,12 @@ fn parse_addition(rest: &str) -> Result<Addition, String> {
 pub(crate) const HELP: &[&str] = &[
     "/memory - list what this project remembers (no model turn)",
     "/memory next - show the next entries of a long list (/memory refresh lists again)",
-    "/memory add rule <text> - add a rule in your words; rule for <scope>: <text> limits it",
+    "/memory add rule <text> - add a rule in your words",
     "/memory add about-me <text> - add something about you",
     "/memory add decision <choice> because <reason> - add a decision with its reason",
     "/memory add note <text> - add anything else worth keeping",
     "/memory correct <ID@REV> <text> - replace an entry with your words",
     "/memory forget <ID@REV> - stop using an entry (it stays in history)",
-    "/memory investigations - list investigations; /memory join <scope-ID>, /memory end <scope-ID>, /memory leave",
     "List numbers are display conveniences; mutations require explicit IDs. Outside the TUI: codex memory --help",
 ];
 
@@ -235,8 +211,6 @@ impl Listing {
 pub(crate) struct MemoryListing {
     shown: Arc<Mutex<Option<Listing>>>,
     next_generation: Arc<Mutex<u64>>,
-    /// The last investigations listing: its generation and thread.
-    investigations: Arc<Mutex<Option<(u64, String)>>>,
     /// The entry listing generation last put on screen, by thread.
     displayed: Arc<Mutex<Option<(String, u64)>>>,
 }
@@ -292,12 +266,7 @@ impl MemoryListing {
         generation.is_none_or(|generation| {
             self.lock().as_ref().is_some_and(|listing| {
                 listing.thread_id == thread_id && listing.generation == generation
-            }) || self
-                .investigations
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .is_some_and(|(shown, thread)| *shown == generation && thread == thread_id)
+            })
         })
     }
 
@@ -393,46 +362,6 @@ pub(crate) fn run(
         let (result, listing_generation) = match command {
             MemoryCommand::List => shows(list(&request, &listing, operation).await),
             MemoryCommand::More => shows(more(&request, &listing, operation).await),
-            MemoryCommand::Investigations => shows(
-                investigations(
-                    &request,
-                    &listing,
-                    StatefulMemoryScopeAction::List,
-                    None,
-                    operation,
-                )
-                .await,
-            ),
-            MemoryCommand::Leave => shows(
-                investigations(
-                    &request,
-                    &listing,
-                    StatefulMemoryScopeAction::Leave,
-                    None,
-                    operation,
-                )
-                .await,
-            ),
-            MemoryCommand::Join(scope_id) => shows(
-                investigations(
-                    &request,
-                    &listing,
-                    StatefulMemoryScopeAction::Join,
-                    Some(scope_id),
-                    operation,
-                )
-                .await,
-            ),
-            MemoryCommand::End(scope_id) => shows(
-                investigations(
-                    &request,
-                    &listing,
-                    StatefulMemoryScopeAction::End,
-                    Some(scope_id),
-                    operation,
-                )
-                .await,
-            ),
             command => (other(&request, command).await, None),
         };
         insert(result.unwrap_or_else(new_error_event), listing_generation);
@@ -448,12 +377,7 @@ async fn other(request: &Requests<'_>, command: MemoryCommand) -> Result<PlainHi
         MemoryCommand::Add(addition) => add(request, addition).await,
         MemoryCommand::Forget(target) => forget(request, target).await,
         MemoryCommand::Correct(target, text) => correct(request, target, text).await,
-        MemoryCommand::List
-        | MemoryCommand::More
-        | MemoryCommand::Investigations
-        | MemoryCommand::Leave
-        | MemoryCommand::Join(_)
-        | MemoryCommand::End(_) => Err(USAGE.to_string()),
+        MemoryCommand::List | MemoryCommand::More => Err(USAGE.to_string()),
     }
 }
 
@@ -591,7 +515,7 @@ async fn add(request: &Requests<'_>, addition: Addition) -> Result<PlainHistoryC
                 thread_id: request.thread_id.to_string(),
                 kind: addition.kind,
                 content: addition.content,
-                scope: addition.scope,
+                scope: None,
                 reason: addition.reason,
                 client_action_id: uuid::Uuid::new_v4().to_string(),
                 background_section: true,
@@ -668,103 +592,6 @@ async fn correct(
     ))
 }
 
-/// Lists or controls the explicitly named scope, then displays a fresh snapshot.
-async fn investigations(
-    request: &Requests<'_>,
-    listing: &MemoryListing,
-    action: StatefulMemoryScopeAction,
-    scope_id: Option<String>,
-    generation: u64,
-) -> Result<(PlainHistoryCell, u64), String> {
-    let response: StatefulMemoryScopeResponse = request
-        .handle
-        .request_typed(ClientRequest::StatefulMemoryScope {
-            request_id: request_id("scope"),
-            params: StatefulMemoryScopeParams {
-                expected_project_id: request.project_id.to_string(),
-                thread_id: request.thread_id.to_string(),
-                action,
-                scope_id: scope_id.clone(),
-            },
-        })
-        .await
-        .map_err(|error| format!("Nothing changed: {error}"))?;
-    // Only the newest investigations snapshot is displayed; every control already names
-    // its explicit scope ID before awaiting this response.
-    {
-        let latest = listing
-            .next_generation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *latest != generation {
-            return Err(
-                "A newer /memory command replaced this snapshot; run /memory to refresh."
-                    .to_string(),
-            );
-        }
-        let mut shown = listing
-            .investigations
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if shown
-            .as_ref()
-            .is_some_and(|(shown_generation, _)| *shown_generation > generation)
-        {
-            let done = match action {
-                StatefulMemoryScopeAction::List => "",
-                StatefulMemoryScopeAction::Join => "Joined. ",
-                StatefulMemoryScopeAction::Leave => "Left. ",
-                StatefulMemoryScopeAction::End => "Ended. ",
-            };
-            return Err(format!(
-                "{done}A newer investigations list replaced this one; use its explicit IDs."
-            ));
-        }
-        *shown = Some((generation, request.thread_id.to_string()));
-    }
-    let done = scope_acknowledgement(&response, action, scope_id.as_deref());
-    let lines = crate::stateful_memory::scope_lines(&response, done);
-    Ok((PlainHistoryCell::new(lines), generation))
-}
-
-pub(crate) fn scope_acknowledgement(
-    response: &StatefulMemoryScopeResponse,
-    action: StatefulMemoryScopeAction,
-    scope_id: Option<&str>,
-) -> Option<&'static str> {
-    match action {
-        StatefulMemoryScopeAction::List => None,
-        StatefulMemoryScopeAction::Join => {
-            if response.scopes.iter().any(|scope| {
-                scope.open && scope.this_thread && Some(scope.scope_id.as_str()) == scope_id
-            }) {
-                Some("Joined the named open investigation in this snapshot.")
-            } else {
-                Some(
-                    "The investigation is no longer open and bound here; see the current snapshot below.",
-                )
-            }
-        }
-        StatefulMemoryScopeAction::Leave => {
-            if response
-                .scopes
-                .iter()
-                .any(|scope| scope.open && scope.this_thread)
-            {
-                Some(
-                    "Left the previous investigation. This snapshot has a current binding; see below.",
-                )
-            } else {
-                Some("Left the investigation. This snapshot has no current binding.")
-            }
-        }
-        StatefulMemoryScopeAction::End => {
-            Some("Investigation ended: its rules no longer apply (they stay in history).")
-        }
-    }
-}
-
-/// The rows of `listing` numbered from `first` on.
 fn numbered(listing: &Listing, first: usize) -> Vec<(usize, StatefulMemoryItem)> {
     listing
         .slots

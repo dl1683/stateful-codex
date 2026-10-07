@@ -126,7 +126,7 @@ export type TurnFailedEvent = {
 export type StatefulKnowledgeEvent = {
   type: "stateful.knowledge";
   entry_id: string;
-  category: "rule" | "pending_rule" | "decision" | "recipe" | "finding" | "background";
+  category: "decision" | "recipe" | "finding";
   outcome: "stored" | "already_stored";
   /** The saved text, at most 240 bytes. */
   text: string;

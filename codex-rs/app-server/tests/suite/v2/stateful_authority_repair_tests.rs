@@ -130,29 +130,37 @@ async fn delegated_document_retains_source_and_target_without_general_rule_promo
             },
         })
         .await?;
-    let thread = server
-        .start_thread(ThreadStartParams {
-            project_id: Some(project.project.id.clone()),
-            ..Default::default()
+    let thread =
+        super::super::stateful_memory::start_thread(&mut server, &project.project.id).await?;
+    let _: codex_app_server_protocol::StatefulMemoryAddResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryAdd {
+            request_id,
+            params: codex_app_server_protocol::StatefulMemoryAddParams {
+                thread_id: thread.clone(),
+                expected_project_id: project.project.id.clone(),
+                kind: codex_app_server_protocol::StatefulMemoryAddKind::Rule,
+                content: GENERAL.to_string(),
+                scope: None,
+                reason: None,
+                client_action_id: "direct-general-rule".to_string(),
+                background_section: true,
+            },
         })
-        .await?
-        .thread
-        .id;
-    let _: codex_app_server_protocol::StatefulMemoryAddResponse = server.request(|request_id| ClientRequest::StatefulMemoryAdd {
-        request_id,
-        params: codex_app_server_protocol::StatefulMemoryAddParams {
-            thread_id: thread.clone(), expected_project_id: project.project.id.clone(),
-            kind: codex_app_server_protocol::StatefulMemoryAddKind::Rule,
-            content: GENERAL.to_string(), scope: None, reason: None,
-            client_action_id: "direct-general-rule".to_string(), background_section: true,
-        },
-    }).await?;
-    let log = responses::mount_sse_sequence(&responses_server, vec![
-        tool_call("read-document", "evidence_read", json!({"relativePath":"lena-request.md"})),
-        assistant("Read Lena's request."),
-        assistant("Only the named artifact is delegated."),
-        assistant("Unrelated review."),
-    ]).await;
+        .await?;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            tool_call(
+                "read-document",
+                "evidence_read",
+                json!({"relativePath":"lena-request.md"}),
+            ),
+            assistant("Read Lena's request."),
+            assistant("Only the named artifact is delegated."),
+            assistant("Unrelated review."),
+        ],
+    )
+    .await;
     run_turn(
         &mut server,
         &thread,

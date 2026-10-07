@@ -545,7 +545,6 @@ async fn retire_is_refused_before_mutation_when_its_disclosure_cannot_be_returne
     assert_eq!(after, before);
 }
 
-
 /// Item 2 final review: a note keeping someone else's words is never promoted by the model,
 /// whatever its identity (a corrected successor no longer carries the relayed prefix).
 #[tokio::test]
@@ -634,7 +633,6 @@ async fn attributed_notes_are_never_promoted_by_meaning() {
         &crate::visible_root::VisibleRootRegistry::default(),
         PROJECT_ID,
         "thread-1",
-        /*successor_is_user_rule*/ false,
         vec![
             super::super::blackboard_supersede::SupersedeReference::Entry {
                 entry_id: note.id.to_string(),
@@ -665,5 +663,108 @@ async fn attributed_notes_are_never_promoted_by_meaning() {
             .await,
         ),
         (Err(refused.clone()), Err(refused))
+    );
+}
+
+#[tokio::test]
+async fn a_user_rule_is_superseded_only_by_a_user_rule() {
+    let (_temp_dir, tool, _entry_id, successor_id, project_root, _receipt_id) = fixture().await;
+    let node = tool
+        .services
+        .project_node_id(PROJECT_ID)
+        .await
+        .expect("node");
+    let store = tool.services.blackboard().await.expect("store");
+    let rule = crate::add_entry(
+        store,
+        &crate::MemoryActor {
+            thread_id: Some("thread-1".into()),
+            action_id: Some("guard-rule".into()),
+        },
+        PROJECT_ID,
+        node,
+        crate::MemoryAddition::Rule { scope: None },
+        "From now on, never run the whole test suite.",
+    )
+    .await
+    .expect("add")
+    .0;
+    let error = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "supersede",
+                "entryId": rule.id.to_string(),
+                "expectedRevision": rule.revision,
+                "successorEntryId": successor_id
+            })),
+            "turn-supersede-rule",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect_err("an agent finding cannot replace a user rule");
+    assert_eq!(
+        error.to_string(),
+        "a user rule can be replaced only by the user's new rule in their own words"
+    );
+}
+
+/// Superseding a user rule with the user's new rule keeps the old text attributed to the
+/// user, and so does retiring one.
+#[tokio::test]
+async fn lifecycle_changes_keep_the_texts_authorship() {
+    let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
+    let services = &tool.services;
+    let add = |action: &'static str, text: &'static str| async move {
+        let node = services.project_node_id(PROJECT_ID).await.expect("node");
+        let store = services.blackboard().await.expect("store");
+        crate::add_entry(
+            store,
+            &crate::MemoryActor {
+                thread_id: Some("thread-1".into()),
+                action_id: Some(action.into()),
+            },
+            PROJECT_ID,
+            node,
+            crate::MemoryAddition::Rule { scope: None },
+            text,
+        )
+        .await
+        .expect("add")
+        .0
+    };
+    let old = add("turn-1", "From now on, never run the whole test suite.").await;
+    let new = add("turn-2", "From now on, run only the affected tests.").await;
+    let other = add("turn-3", "From now on, never push.").await;
+    let superseded = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "supersede",
+                "entryId": old.id.to_string(),
+                "expectedRevision": old.revision,
+                "successorEntryId": new.id.to_string()
+            })),
+            "turn-4",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect("supersede");
+    let retired = tool
+        .apply_mutation(
+            mutation(json!({
+                "action": "retire",
+                "entryId": other.id.to_string(),
+                "expectedRevision": other.revision
+            })),
+            "turn-4",
+            std::slice::from_ref(&project_root),
+        )
+        .await
+        .expect("retire");
+    assert_eq!(
+        (
+            superseded.value.provenance.clone(),
+            retired.value.provenance
+        ),
+        (old.value.provenance, other.value.provenance)
     );
 }

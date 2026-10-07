@@ -159,7 +159,9 @@ impl BlackboardRecorder {
             ));
         }
         if kind == BlackboardKind::Instruction {
-            return Err(respond("user rules require an explicit statefulMemory add or correct action"));
+            return Err(respond(
+                "user rules require an explicit statefulMemory add or correct action",
+            ));
         }
         let provenance = BlackboardProvenance {
             kind: BlackboardProvenanceKind::Agent,
@@ -227,7 +229,6 @@ impl BlackboardRecorder {
                 &self.visible_root,
                 &self.project_id,
                 &self.thread_id,
-                /*successor_is_user_rule*/ false,
                 supersedes,
             )
             .await?;
@@ -265,8 +266,8 @@ impl BlackboardRecorder {
                     BlackboardKind::Fact if entry.value.content.starts_with("Recipe:") => {
                         KnowledgeCategory::Recipe
                     }
-                    BlackboardKind::Instruction => KnowledgeCategory::Rule,
-                    BlackboardKind::Fact
+                    BlackboardKind::Instruction
+                    | BlackboardKind::Fact
                     | BlackboardKind::Claim
                     | BlackboardKind::Number
                     | BlackboardKind::Strategy

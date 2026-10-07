@@ -165,12 +165,9 @@ pub enum StatefulTurnStatus {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum StatefulKnowledgeCategory {
-    Rule,
-    PendingRule,
     Decision,
     Recipe,
     Finding,
-    Background,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -193,18 +190,15 @@ impl StatefulKnowledgeCategory {
     /// How a person reads this kind of saved knowledge.
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Rule => "standing rule",
-            Self::PendingRule => "pending rule (not applied)",
             Self::Decision => "decision",
             Self::Recipe => "recipe",
             Self::Finding => "finding",
-            Self::Background => "background about you",
         }
     }
 }
 
 impl StatefulKnowledgeEvent {
-    /// The receipt as a person reads it, for example `saved standing rule: "..."`.
+    /// The receipt as a person reads it, for example `saved finding: "..."`.
     pub(crate) fn summary(&self) -> String {
         let outcome = match self.outcome {
             StatefulCaptureOutcome::Stored => "saved",
@@ -225,12 +219,9 @@ impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
         Self {
             entry_id: notification.entry_id.clone(),
             category: match notification.category {
-                Category::Rule => StatefulKnowledgeCategory::Rule,
-                Category::PendingRule => StatefulKnowledgeCategory::PendingRule,
                 Category::Decision => StatefulKnowledgeCategory::Decision,
                 Category::Recipe => StatefulKnowledgeCategory::Recipe,
                 Category::Finding => StatefulKnowledgeCategory::Finding,
-                Category::Background => StatefulKnowledgeCategory::Background,
             },
             outcome: match notification.outcome {
                 Outcome::Stored => StatefulCaptureOutcome::Stored,
@@ -250,7 +241,6 @@ impl From<&codex_app_server_protocol::StatefulKnowledgeCapturedNotification>
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 pub struct StatefulAttributionEvent {

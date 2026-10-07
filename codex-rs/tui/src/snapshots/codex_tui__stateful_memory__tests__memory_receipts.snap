@@ -1,6 +1,0 @@
----
-source: tui/src/stateful_memory_tests.rs
-expression: "format!(\"{}\\n{}\", saved.unwrap_or_default(), pending.unwrap_or_default())"
----
-• Saved your rule: "From now on, never run the whole test suite." · /memory to review
-• Saved a task-limited rule (not applied): "From now on, never run the whole test suite." · /memory to review

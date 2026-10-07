@@ -131,7 +131,6 @@ async fn unpersisted_binding_refuses_without_flushing_stale_metadata() -> Result
     Ok(())
 }
 
-
 #[tokio::test]
 async fn submitted_project_controls_refuse_after_same_thread_rebind_or_unlink() -> Result<()> {
     let (home, mut server, project, thread, _responses_server) = setup().await?;
@@ -195,63 +194,6 @@ async fn submitted_project_controls_refuse_after_same_thread_rebind_or_unlink() 
 }
 
 #[tokio::test]
-async fn scope_review_retains_words_and_reports_open_other_thread_ended_after_restart() -> Result<()>
-{
-    use codex_app_server_protocol::StatefulMemoryScopeState;
-    let (home, mut server, project, thread, responses_server) = setup().await?;
-    responses::mount_sse_once(
-        &responses_server,
-        responses::sse(vec![responses::ev_completed("done")]),
-    )
-    .await;
-    run_turn(
-        &mut server,
-        &thread,
-        "Some ground rules for this whole investigation:\n- Never push.",
-    )
-    .await?;
-    let open = read(&mut server, &thread, &project).await?;
-    let other = start_thread(&mut server, &project).await?;
-    let elsewhere = read(&mut server, &other, &project).await?;
-    let scopes = server
-        .send_request(
-            "statefulMemory/scope",
-            Some(json!({"threadId":thread,"expectedProjectId":project,"action":"list"})),
-        )
-        .await?;
-    let scopes: codex_app_server_protocol::StatefulMemoryScopeResponse =
-        server.read_response(scopes).await?;
-    let end = server.send_request("statefulMemory/scope", Some(json!({"threadId":thread,"expectedProjectId":project,"action":"end","scopeId":scopes.scopes[0].scope_id}))).await?;
-    let _: codex_app_server_protocol::StatefulMemoryScopeResponse =
-        server.read_response(end).await?;
-    let ended = read(&mut server, &thread, &project).await?;
-    assert!(server.shutdown_gracefully().await?.success());
-    server = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .build_initialized()
-        .await?;
-    let restarted = read(&mut server, &thread, &project).await?;
-    let mut expected_other = open.clone();
-    for item in &mut expected_other.data {
-        item.scope_state = Some(StatefulMemoryScopeState::NotBoundHere);
-    }
-    let mut expected_ended = open.clone();
-    for item in &mut expected_ended.data {
-        item.scope_state = Some(StatefulMemoryScopeState::Ended);
-    }
-    assert_eq!(
-        (open.data[0].scope_state, elsewhere, ended, restarted),
-        (
-            Some(StatefulMemoryScopeState::Open),
-            expected_other,
-            expected_ended.clone(),
-            expected_ended
-        )
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn shortened_model_entry_has_revision_pinned_exact_text_recovery() -> Result<()> {
     let (_home, mut server, project, thread, responses_server) = setup().await?;
     let words = format!(
@@ -308,5 +250,199 @@ async fn shortened_model_entry_has_revision_pinned_exact_text_recovery() -> Resu
         (json!(words), json!(true), json!(item.revision))
     );
     assert_eq!(log.requests().len(), 2);
+    Ok(())
+}
+
+/// The legacy public collection endpoint must refuse rather than return an empty complete list.
+#[tokio::test]
+async fn scope_collection_returns_an_explicit_unsupported_error() -> Result<()> {
+    let (_home, mut server, project, thread, _responses_server) = setup().await?;
+    let id = server
+        .send_request(
+            "statefulMemory/scope",
+            Some(json!({
+                "threadId": thread, "expectedProjectId": project, "action": "list"
+            })),
+        )
+        .await?;
+    let error = server
+        .read_stream_until_error_message(RequestId::Integer(id))
+        .await?;
+    assert_eq!(
+        error.error,
+        JSONRPCErrorError {
+            code: -32602,
+            message: "investigations and scope collection controls are unsupported; stored scoped entries remain history and are held back from application".to_string(),
+            data: None,
+        }
+    );
+    Ok(())
+}
+
+/// Large historical collections never enter the retained root/review/exact-read routes.
+/// A formerly bound open scope and ended scoped words remain history, held back everywhere.
+#[tokio::test]
+async fn large_scope_history_is_quarantined_and_retained_reads_stay_bounded() -> Result<()> {
+    use codex_project_intelligence::BlackboardEntryId;
+    use codex_project_intelligence::BlackboardStore;
+    use codex_project_intelligence::ChangeOperation;
+    use codex_project_intelligence::ChangeOrigin;
+    use codex_project_intelligence::ChangeRecord;
+    use codex_project_intelligence::KnowledgeAuthority;
+    use codex_project_intelligence::KnowledgeCategory;
+    use codex_project_intelligence::KnowledgeContext;
+    use codex_project_intelligence::RootBlackboardQuery;
+    let (home, mut server, project, thread, responses_server) = setup().await?;
+    let added: StatefulMemoryAddResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryAdd {
+            request_id,
+            params: StatefulMemoryAddParams {
+                expected_project_id: project.clone(),
+                thread_id: thread.clone(),
+                kind: StatefulMemoryAddKind::Rule,
+                content: "Always preserve exact reasons.".to_string(),
+                scope: None,
+                reason: None,
+                client_action_id: "unscoped-history-control".to_string(),
+                background_section: true,
+            },
+        })
+        .await?;
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let store = BlackboardStore::open(&sqlite).await?;
+    let unscoped = store
+        .get_entry(
+            &project,
+            &BlackboardEntryId::parse(added.item.entry_id.clone())?,
+        )
+        .await?
+        .expect("direct entry");
+    let pool = sqlite
+        .open_read_write_pool(&home.path().join("project_intelligence_1.sqlite"))
+        .await?;
+    // Seed historical rows only. Production SQL and migrations are unchanged.
+    sqlx::query("WITH RECURSIVE ord(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM ord WHERE n<4095) INSERT INTO knowledge_scopes (project_id,scope_id,kind,title,state,opened_source,ended_source,created_at_ms,updated_at_ms) SELECT ?, 'history-' || n, 'investigation', 'Historical investigation ' || n, CASE WHEN n=0 THEN 'open' ELSE 'ended' END, 'historical-source', CASE WHEN n=0 THEN NULL ELSE 'historical-end' END, n, n FROM ord")
+        .bind(&project).execute(&pool).await?;
+    sqlx::query("INSERT INTO knowledge_scope_bindings (project_id,thread_id,scope_id,bound_at_ms) VALUES (?,?,'history-0',1)")
+        .bind(&project).bind(&thread).execute(&pool).await?;
+    for ordinal in 0..300 {
+        let mut value = unscoped.value.clone();
+        value.content =
+            format!("Scoped history marker {ordinal}: preserve these exact historical words.");
+        store
+            .create_entry_with_context(
+                BlackboardEntryId::parse(format!("historical-rule-{ordinal}"))?,
+                value.clone(),
+                KnowledgeContext {
+                    scope_id: Some(format!("history-{ordinal}")),
+                    ..KnowledgeContext::new(
+                        KnowledgeCategory::Rule,
+                        KnowledgeAuthority::HumanDirect,
+                    )
+                },
+                ChangeRecord {
+                    operation: ChangeOperation::Saved,
+                    origin: ChangeOrigin::HostCapture,
+                    category: KnowledgeCategory::Rule,
+                    action_id: None,
+                    thread_id: Some(thread.clone()),
+                    turn_id: None,
+                    group_id: None,
+                    preview: value.content,
+                },
+            )
+            .await?;
+    }
+    let (root, quarantine) = store
+        .root_projection_for_thread(
+            RootBlackboardQuery {
+                project_id: project.clone(),
+                max_entries: 1,
+            },
+            &thread,
+        )
+        .await?;
+    assert_eq!(
+        (
+            root.data
+                .into_iter()
+                .map(|hit| hit.entry.id.to_string())
+                .collect::<Vec<_>>(),
+            root.omitted_entries,
+            quarantine.scoped_held_back,
+            quarantine.legacy_held_back
+        ),
+        (vec![added.item.entry_id.clone()], 0, 300, 0)
+    );
+    let root = store
+        .root_projection(RootBlackboardQuery {
+            project_id: project.clone(),
+            max_entries: 1,
+        })
+        .await?;
+    assert_eq!(
+        root.data
+            .iter()
+            .map(|hit| hit.entry.id.to_string())
+            .collect::<Vec<_>>(),
+        vec![added.item.entry_id]
+    );
+    let page = read(&mut server, &thread, &project).await?;
+    assert_eq!(page.data.len(), 50);
+    assert!(page.next_cursor.is_some());
+    assert!(
+        page.data
+            .iter()
+            .filter(|item| item.scope_title.is_some())
+            .all(|item| item.scope_state
+                == Some(codex_app_server_protocol::StatefulMemoryScopeState::Unsupported))
+    );
+    let exact_log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "historical-exact",
+                    "blackboard_query",
+                    &json!({"entryId":"historical-rule-299","expectedEntryRevision":1}).to_string(),
+                ),
+                responses::ev_completed("history-read"),
+            ]),
+            responses::sse(vec![responses::ev_completed("history-done")]),
+        ],
+    )
+    .await;
+    run_turn(
+        &mut server,
+        &thread,
+        "Read the exact historical entry, without applying it.",
+    )
+    .await?;
+    let requests = exact_log.requests();
+    let packet = requests[0].body_json().to_string();
+    assert!(packet.contains("300 historical scoped entries are held back"));
+    assert!(!packet.contains("Scoped history marker"));
+    let exact: serde_json::Value = serde_json::from_str(
+        &requests[1]
+            .function_call_output_text("historical-exact")
+            .expect("exact output"),
+    )?;
+    assert_eq!(
+        (
+            exact["content"].clone(),
+            exact["complete"].clone(),
+            exact["revision"].clone()
+        ),
+        (
+            json!("Scoped history marker 299: preserve these exact historical words."),
+            json!(true),
+            json!(1)
+        )
+    );
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_scopes WHERE project_id=?")
+        .bind(&project)
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(count, 4096);
     Ok(())
 }

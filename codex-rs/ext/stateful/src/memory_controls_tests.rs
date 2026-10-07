@@ -13,15 +13,14 @@ use super::MemorySection;
 use super::correct_entry;
 use super::forget_entry;
 use super::memory_section;
-use crate::services::ProjectIntelligenceServices;
 use crate::rule_identity::user_rule_entry_id;
+use crate::services::ProjectIntelligenceServices;
 
 const RULE: &str = "From now on, never run the whole test suite.";
 
 fn services(state_home: &TempDir) -> ProjectIntelligenceServices {
     ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()))
 }
-
 
 /// A corrected rule takes its new wording's identity and stays applied; the old wording
 /// keeps its authorship as history; a retry returns the same correction.
@@ -31,7 +30,20 @@ async fn correcting_a_rule_replaces_it_and_a_retry_is_idempotent() {
     let services = services(&state_home);
     let node_id = services.project_node_id("project-1").await.expect("node");
     let store = services.blackboard().await.expect("store");
-    let rule = crate::add_entry(store, &crate::MemoryActor { thread_id: Some("thread-1".into()), action_id: Some("add-rule".into()) }, "project-1", node_id, crate::MemoryAddition::Rule { scope: None }, RULE).await.expect("add").0;
+    let rule = crate::add_entry(
+        store,
+        &crate::MemoryActor {
+            thread_id: Some("thread-1".into()),
+            action_id: Some("add-rule".into()),
+        },
+        "project-1",
+        node_id,
+        crate::MemoryAddition::Rule { scope: None },
+        RULE,
+    )
+    .await
+    .expect("add")
+    .0;
     let corrected = "Never run the whole test suite; run the affected tests.";
     let first = correct_entry(
         store,
@@ -71,7 +83,13 @@ async fn correcting_a_rule_replaces_it_and_a_retry_is_idempotent() {
             matches!(stale, Err(MemoryControlError::Store(_))),
         ),
         (
-            user_rule_entry_id("project-1", /*scope_id*/ None, corrected, 0).expect("id"),
+            user_rule_entry_id(
+                "project-1",
+                /*scope_id*/ None,
+                corrected,
+                /*generation*/ 0
+            )
+            .expect("id"),
             MemorySection::UserRule,
             BlackboardEntryState::Superseded,
             rule.value.provenance.source_id.clone(),

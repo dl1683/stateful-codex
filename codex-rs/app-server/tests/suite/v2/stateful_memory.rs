@@ -72,7 +72,24 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
     )
     .await;
     let first = start_thread(&mut server, &project.project.id).await?;
-    run_turn(&mut server, &first, &format!("{SUITE_RULE} {NEXT_RULE}")).await?;
+    for (ordinal, content) in [SUITE_RULE, NEXT_RULE].into_iter().enumerate() {
+        let _: StatefulMemoryAddResponse = server
+            .request(|request_id| ClientRequest::StatefulMemoryAdd {
+                request_id,
+                params: StatefulMemoryAddParams {
+                    expected_project_id: project.project.id.clone(),
+                    thread_id: first.clone(),
+                    kind: StatefulMemoryAddKind::Rule,
+                    content: content.to_string(),
+                    scope: None,
+                    reason: None,
+                    client_action_id: format!("review-rule-{ordinal}"),
+                    background_section: true,
+                },
+            })
+            .await?;
+    }
+    run_turn(&mut server, &first, "Review the explicitly added rules.").await?;
 
     let read = |thread_id: String| {
         let project = project.clone();

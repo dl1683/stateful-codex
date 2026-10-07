@@ -294,16 +294,11 @@ string_enum!(MemberOutcome {
     NotRestored => "not_restored",
 });
 
-/// How investigations bear on one thread, read with the root projection it explains.
+/// Historical scoped and legacy rules held back from the root, from its read snapshot.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ThreadScopes {
-    /// The scope the thread is bound to, open or ended.
-    pub bound: Option<KnowledgeScope>,
-    /// All of the project's scopes, newest first.
-    pub scopes: Vec<KnowledgeScope>,
-    /// Promoted entries left out because they belong to an open investigation the thread does
-    /// not continue (entries of ended investigations are left out without a count).
-    pub scoped_elsewhere: u64,
-    /// Older rules naming a piece of work without a recorded scope, left out everywhere.
+    /// All promoted scoped entries, including ended investigations, excluded everywhere.
+    pub scoped_held_back: u64,
+    /// Older rules naming a piece of work without a recorded scope, excluded everywhere.
     pub legacy_held_back: u64,
 }

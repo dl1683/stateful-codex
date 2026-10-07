@@ -5233,24 +5233,12 @@ class StatefulKnowledgeCategoryValue(Enum):
     finding = "finding"
 
 
-class StatefulKnowledgeCategory(
-    RootModel[
-        StatefulKnowledgeCategoryValue
-        | Literal["rule"]
-        | Literal["pendingRule"]
-        | Literal["recipe"]
-        | Literal["background"]
-    ]
-):
+class StatefulKnowledgeCategory(RootModel[StatefulKnowledgeCategoryValue | Literal["recipe"]]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
     root: Annotated[
-        StatefulKnowledgeCategoryValue
-        | Literal["rule"]
-        | Literal["pendingRule"]
-        | Literal["recipe"]
-        | Literal["background"],
+        StatefulKnowledgeCategoryValue | Literal["recipe"],
         Field(description="What a knowledge receipt says was saved."),
     ]
 
@@ -5285,24 +5273,6 @@ class StatefulMemoryReplaced(BaseModel):
     replaced_at: Annotated[int, Field(alias="replacedAt", description="Unix seconds.")]
 
 
-class StatefulMemoryScope(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    end_condition: Annotated[
-        str | None,
-        Field(
-            alias="endCondition", description="When its rules stop applying, in the user's words."
-        ),
-    ] = None
-    open: bool
-    scope_id: Annotated[str, Field(alias="scopeId")]
-    this_thread: Annotated[
-        bool, Field(alias="thisThread", description="Whether this thread continues it.")
-    ]
-    title: Annotated[str, Field(description="The user's words naming it.")]
-
-
 class StatefulMemoryScopeAction(Enum):
     list = "list"
     join = "join"
@@ -5310,11 +5280,23 @@ class StatefulMemoryScopeAction(Enum):
     end = "end"
 
 
-class StatefulMemoryScopeState(Enum):
+class StatefulMemoryScopeStateValue(Enum):
     open = "open"
     not_bound_here = "notBoundHere"
     ended = "ended"
     unknown = "unknown"
+
+
+class StatefulMemoryScopeState(RootModel[StatefulMemoryScopeStateValue | Literal["unsupported"]]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        StatefulMemoryScopeStateValue | Literal["unsupported"],
+        Field(
+            description="The retained investigation scope as observed during review, without asserting application."
+        ),
+    ]
 
 
 class StatefulMemorySectionValue(Enum):
@@ -10416,7 +10398,7 @@ class StatefulMemoryItem(BaseModel):
         StatefulMemoryScopeState | None,
         Field(
             alias="scopeState",
-            description="Scope state observed for this thread; absent for project-wide entries.",
+            description="Historical scope disposition; unsupported scopes are held back in every thread.",
         ),
     ] = None
     scope_title: Annotated[

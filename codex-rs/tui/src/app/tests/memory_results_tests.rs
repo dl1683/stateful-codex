@@ -1,8 +1,6 @@
 use super::*;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
-use codex_app_server_protocol::StatefulMemoryReadParams;
-use codex_app_server_protocol::StatefulMemoryReadResponse;
 use codex_model_provider_info::ModelProviderInfo;
 use pretty_assertions::assert_eq;
 
@@ -44,8 +42,7 @@ async fn turn(server: &mut AppServerSession, thread: ThreadId, text: &str) -> Re
 }
 
 #[tokio::test]
-async fn memory_application_fences_generations_binding_and_client_and_refuses_bad_scopes()
--> Result<()> {
+async fn memory_application_fences_generations_binding_and_client() -> Result<()> {
     let (mut app, mut events, _) = make_test_app_with_channels().await;
     let home = tempdir()?;
     app.config.codex_home = home.path().abs();
@@ -53,14 +50,9 @@ async fn memory_application_fences_generations_binding_and_client_and_refuses_ba
     let model = core_test_support::responses::start_mock_server().await;
     let model_log = core_test_support::responses::mount_sse_sequence(
         &model,
-        vec![
-            core_test_support::responses::sse(vec![core_test_support::responses::ev_completed(
-                "preparation",
-            )]),
-            core_test_support::responses::sse(vec![core_test_support::responses::ev_completed(
-                "opening",
-            )]),
-        ],
+        vec![core_test_support::responses::sse(vec![
+            core_test_support::responses::ev_completed("preparation"),
+        ])],
     )
     .await;
     app_test_support::MockResponsesConfig::new(&model.uri())
@@ -109,21 +101,18 @@ async fn memory_application_fences_generations_binding_and_client_and_refuses_ba
     let _: codex_app_server_protocol::ThreadMetadataUpdateResponse = handle
         .request_typed(binding(project.project.id.clone()))
         .await?;
-    turn(
-        &mut server,
-        thread,
-        "Some ground rules for this whole investigation:\n- Never commit.",
-    )
-    .await?;
-    let initial: StatefulMemoryReadResponse = handle
+    let _: codex_app_server_protocol::StatefulMemoryAddResponse = handle
         .request_typed(
-            codex_app_server_protocol::ClientRequest::StatefulMemoryRead {
-                request_id: AppServerRequestId::String("initial".to_string()),
-                params: StatefulMemoryReadParams {
+            codex_app_server_protocol::ClientRequest::StatefulMemoryAdd {
+                request_id: AppServerRequestId::String("direct-rule".into()),
+                params: codex_app_server_protocol::StatefulMemoryAddParams {
                     thread_id: thread.to_string(),
                     expected_project_id: project.project.id.clone(),
-                    cursor: None,
-                    limit: None,
+                    kind: codex_app_server_protocol::StatefulMemoryAddKind::Rule,
+                    content: "Never commit.".into(),
+                    scope: None,
+                    reason: None,
+                    client_action_id: "direct-rule".into(),
                     background_section: true,
                 },
             },
@@ -154,73 +143,6 @@ async fn memory_application_fences_generations_binding_and_client_and_refuses_ba
         );
     }
     app.handle_event(&mut tui, &mut server, next).await?;
-    // Invalid scope-looking commands traverse dispatch but never write globally.
-    for args in [
-        "add rule for this investigation",
-        "add rule for :Do not push",
-        "add rule for this investigation:",
-        "add rule for:Never push",
-        "add rule for:this this investigation:Never push",
-    ] {
-        app.handle_event(&mut tui, &mut server, submit(args))
-            .await?;
-        let refusal = result(&mut events).await;
-        if let AppEvent::StatefulMemoryResult { cell, .. } = &refusal {
-            assert!(
-                cell.display_lines(/*width*/ 200)
-                    .iter()
-                    .any(|line| line.to_string().contains("Usage:"))
-            );
-        }
-        app.handle_event(&mut tui, &mut server, refusal).await?;
-    }
-    let empty: StatefulMemoryReadResponse = handle
-        .request_typed(
-            codex_app_server_protocol::ClientRequest::StatefulMemoryRead {
-                request_id: AppServerRequestId::String("after-refusal".to_string()),
-                params: StatefulMemoryReadParams {
-                    thread_id: thread.to_string(),
-                    expected_project_id: project.project.id.clone(),
-                    cursor: None,
-                    limit: None,
-                    background_section: true,
-                },
-            },
-        )
-        .await?;
-    assert_eq!(empty, initial);
-    for args in [
-        "add rule for this investigation:Never push",
-        "add rule for   this investigation : Never push",
-    ] {
-        app.handle_event(&mut tui, &mut server, submit(args))
-            .await?;
-        let scoped = result(&mut events).await;
-        if let AppEvent::StatefulMemoryResult { cell, .. } = &scoped {
-            assert!(
-                cell.display_lines(/*width*/ 200)
-                    .iter()
-                    .any(|line| line.to_string().contains("retained rule"))
-            );
-        }
-        app.handle_event(&mut tui, &mut server, scoped).await?;
-    }
-    let page: StatefulMemoryReadResponse = handle
-        .request_typed(
-            codex_app_server_protocol::ClientRequest::StatefulMemoryRead {
-                request_id: AppServerRequestId::String("after-scoped-add".to_string()),
-                params: StatefulMemoryReadParams {
-                    thread_id: thread.to_string(),
-                    expected_project_id: project.project.id.clone(),
-                    cursor: None,
-                    limit: None,
-                    background_section: true,
-                },
-            },
-        )
-        .await?;
-    assert_eq!(page.data.len(), 2);
-    assert!(page.data[0].scope_title.is_some());
     // Render an actual public retry refusal, including the client's RPC error envelope.
     let addition = codex_app_server_protocol::StatefulMemoryAddParams {
         thread_id: thread.to_string(),
@@ -281,6 +203,6 @@ async fn memory_application_fences_generations_binding_and_client_and_refuses_ba
     server.client_id = uuid::Uuid::new_v4();
     app.handle_event(&mut tui, &mut server, old_client).await?;
     assert_eq!(app.transcript_cells.len(), cells);
-    assert_eq!(model_log.requests().len(), 2);
+    assert_eq!(model_log.requests().len(), 1);
     Ok(())
 }

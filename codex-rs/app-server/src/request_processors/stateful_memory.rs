@@ -15,10 +15,7 @@ use codex_app_server_protocol::StatefulMemoryItem;
 use codex_app_server_protocol::StatefulMemoryReadParams;
 use codex_app_server_protocol::StatefulMemoryReadResponse;
 use codex_app_server_protocol::StatefulMemoryReplaced;
-use codex_app_server_protocol::StatefulMemoryScope;
-use codex_app_server_protocol::StatefulMemoryScopeAction;
 use codex_app_server_protocol::StatefulMemoryScopeParams;
-use codex_app_server_protocol::StatefulMemoryScopeResponse;
 use codex_app_server_protocol::StatefulMemorySection as ApiSection;
 use codex_project_intelligence::BlackboardEntry;
 use codex_project_intelligence::BlackboardEntryId;
@@ -91,15 +88,7 @@ impl BlackboardRequestProcessor {
             })?;
         let mut data = Vec::with_capacity(page.entries.len());
         for entry in page.entries {
-            data.push(
-                memory_item(
-                    store,
-                    entry,
-                    &params.thread_id,
-                    Sections::of(params.background_section),
-                )
-                .await?,
-            );
+            data.push(memory_item(store, entry, Sections::of(params.background_section)).await?);
         }
         let revision = page.revision;
         let next_cursor = page
@@ -180,7 +169,6 @@ impl BlackboardRequestProcessor {
                 item: memory_item(
                     store,
                     succession.successor,
-                    &params.thread_id,
                     Sections::of(params.background_section),
                 )
                 .await?,
@@ -255,13 +243,7 @@ impl BlackboardRequestProcessor {
         };
         Ok(Some(
             StatefulMemoryAddResponse {
-                item: memory_item(
-                    store,
-                    entry,
-                    &params.thread_id,
-                    Sections::of(params.background_section),
-                )
-                .await?,
+                item: memory_item(store, entry, Sections::of(params.background_section)).await?,
                 outcome,
             }
             .into(),
@@ -275,84 +257,9 @@ impl BlackboardRequestProcessor {
         let _admission = self
             .admit_memory(&params.thread_id, &params.expected_project_id)
             .await?;
-        let project_id = params.expected_project_id.clone();
-        let store = self.store().await?;
-        let named = || {
-            params
-                .scope_id
-                .clone()
-                .ok_or_else(|| invalid_params("scopeId names the investigation for join and end"))
-        };
-        match params.action {
-            StatefulMemoryScopeAction::List => {}
-            StatefulMemoryScopeAction::Join => {
-                let scope_id = named()?;
-                let scope = store
-                    .scope(&project_id, &scope_id)
-                    .await
-                    .map_err(blackboard_error)?
-                    .ok_or_else(|| invalid_params("no such investigation in this project"))?;
-                if scope.state != codex_project_intelligence::ScopeState::Open {
-                    return Err(invalid_params("that investigation has ended"));
-                }
-                store
-                    .bind_thread_scope(&project_id, &params.thread_id, &scope_id)
-                    .await
-                    .map_err(blackboard_error)?;
-            }
-            StatefulMemoryScopeAction::Leave => {
-                store
-                    .unbind_thread_scope(&project_id, &params.thread_id)
-                    .await
-                    .map_err(blackboard_error)?;
-            }
-            StatefulMemoryScopeAction::End => {
-                let scope_id = named()?;
-                let scope = store
-                    .scope(&project_id, &scope_id)
-                    .await
-                    .map_err(blackboard_error)?
-                    .ok_or_else(|| invalid_params("no such investigation in this project"))?;
-                let actor = codex_stateful_extension::MemoryActor {
-                    thread_id: Some(params.thread_id.clone()),
-                    action_id: None,
-                };
-                store
-                    .end_scope(
-                        &project_id,
-                        &scope_id,
-                        &format!("direct-control:{}", params.thread_id),
-                        &codex_project_intelligence::ChangeRecord {
-                            operation: codex_project_intelligence::ChangeOperation::ScopeEnded,
-                            origin: codex_project_intelligence::ChangeOrigin::DirectControl,
-                            category: codex_project_intelligence::KnowledgeCategory::Rule,
-                            action_id: actor.action_id,
-                            thread_id: actor.thread_id,
-                            turn_id: None,
-                            group_id: None,
-                            preview: scope.title,
-                        },
-                    )
-                    .await
-                    .map_err(blackboard_error)?;
-            }
-        }
-        let (bound_scope, scopes) = store
-            .thread_scopes(&project_id, &params.thread_id)
-            .await
-            .map_err(blackboard_error)?;
-        let bound = bound_scope.map(|scope| scope.scope_id);
-        let scopes = scopes
-            .into_iter()
-            .map(|scope| StatefulMemoryScope {
-                this_thread: bound.as_deref() == Some(scope.scope_id.as_str()),
-                open: scope.state == codex_project_intelligence::ScopeState::Open,
-                scope_id: scope.scope_id,
-                title: scope.title,
-                end_condition: scope.end_condition,
-            })
-            .collect();
-        Ok(Some(StatefulMemoryScopeResponse { scopes }.into()))
+        Err(invalid_params(
+            "investigations and scope collection controls are unsupported; stored scoped entries remain history and are held back from application",
+        ))
     }
 
     /// The project's root node, created when the project has none yet.
@@ -404,7 +311,6 @@ impl Sections {
 async fn memory_item(
     store: &BlackboardStore,
     entry: BlackboardEntry,
-    thread_id: &str,
     sections: Sections,
 ) -> Result<StatefulMemoryItem, JSONRPCErrorError> {
     let replaced = store
@@ -442,26 +348,14 @@ async fn memory_item(
     {
         Some(scope_id) => {
             use codex_app_server_protocol::StatefulMemoryScopeState;
-            let (bound, scopes) = store
-                .thread_scopes(&entry.value.project_id, thread_id)
+            let scope = store
+                .scope(&entry.value.project_id, scope_id)
                 .await
                 .map_err(blackboard_error)?;
-            match scopes.into_iter().find(|scope| scope.scope_id == scope_id) {
-                Some(scope) => {
-                    let state = if scope.state != codex_project_intelligence::ScopeState::Open {
-                        StatefulMemoryScopeState::Ended
-                    } else if bound
-                        .as_ref()
-                        .is_some_and(|scope| scope.scope_id == scope_id)
-                    {
-                        StatefulMemoryScopeState::Open
-                    } else {
-                        StatefulMemoryScopeState::NotBoundHere
-                    };
-                    (Some(scope.title), Some(state))
-                }
-                None => (None, Some(StatefulMemoryScopeState::Unknown)),
-            }
+            (
+                scope.map(|scope| scope.title),
+                Some(StatefulMemoryScopeState::Unsupported),
+            )
         }
         None => (None, None),
     };
