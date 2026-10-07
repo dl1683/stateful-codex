@@ -1,30 +1,12 @@
-use codex_app_server_protocol::BlackboardKind;
-use codex_app_server_protocol::BlackboardProvenanceKind;
 use codex_app_server_protocol::StatefulMemoryAddKind;
-use codex_app_server_protocol::StatefulMemoryItem;
-use codex_app_server_protocol::StatefulMemorySection;
 use pretty_assertions::assert_eq;
 
 use super::Addition;
-use super::Listing;
 use super::MemoryCommand;
 use super::USAGE;
-use super::numbered;
-use super::parse;
 
-fn item(entry_id: &str, section: StatefulMemorySection, content: &str) -> StatefulMemoryItem {
-    StatefulMemoryItem {
-        entry_id: entry_id.to_string(),
-        revision: 1,
-        section,
-        kind: BlackboardKind::Fact,
-        content: content.to_string(),
-        content_truncated: false,
-        source: BlackboardProvenanceKind::User,
-        updated_at: 1_790_000_000,
-        replaces: Vec::new(),
-    }
-}
+const ADD_USAGE: &str = "Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about-me <text>, /memory add decision <choice> because <reason>, /memory add note <text>";
+use super::parse;
 
 fn addition(
     kind: StatefulMemoryAddKind,
@@ -46,9 +28,15 @@ fn memory_arguments_parse_into_commands() {
         [
             "",
             "more",
+            "next",
+            "refresh",
+            "investigations",
+            "join scope-a",
+            "end scope-b",
+            "leave",
             "help",
-            "forget 2",
-            "correct 1 Run only the affected tests.",
+            "forget entry-a@2",
+            "correct entry-b@3 Run only the affected tests.",
             "add rule Never push to main.",
             "add rule for this investigation, until we agree: Do not change code.",
             "add about I'm a Go developer.",
@@ -63,10 +51,22 @@ fn memory_arguments_parse_into_commands() {
         [
             Ok(MemoryCommand::List),
             Ok(MemoryCommand::More),
+            Ok(MemoryCommand::More),
+            Ok(MemoryCommand::List),
+            Ok(MemoryCommand::Investigations),
+            Ok(MemoryCommand::Join("scope-a".to_string())),
+            Ok(MemoryCommand::End("scope-b".to_string())),
+            Ok(MemoryCommand::Leave),
             Ok(MemoryCommand::Help),
-            Ok(MemoryCommand::Forget(2)),
+            Ok(MemoryCommand::Forget(super::EntryTarget {
+                entry_id: "entry-a".to_string(),
+                revision: 2
+            })),
             Ok(MemoryCommand::Correct(
-                1,
+                super::EntryTarget {
+                    entry_id: "entry-b".to_string(),
+                    revision: 3
+                },
                 "Run only the affected tests.".to_string()
             )),
             Ok(addition(
@@ -78,7 +78,7 @@ fn memory_arguments_parse_into_commands() {
             Ok(addition(
                 StatefulMemoryAddKind::Rule,
                 "Do not change code.",
-                Some("For this investigation, until we agree"),
+                Some("this investigation, until we agree"),
                 None
             )),
             Ok(addition(
@@ -100,65 +100,41 @@ fn memory_arguments_parse_into_commands() {
                 None
             )),
             Err(USAGE.to_string()),
-            Err("Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about <text>, /memory add decision <choice> because <reason>, /memory add note <text>".to_string()),
-            Err("Usage: /memory add rule <text> (or: rule for <scope>: <text>), /memory add about <text>, /memory add decision <choice> because <reason>, /memory add note <text>".to_string()),
+            Err(ADD_USAGE.to_string()),
+            Err(ADD_USAGE.to_string()),
             Err(USAGE.to_string()),
         ]
     );
 }
 
-/// tui8: correcting one item and then forgetting another uses the numbers first shown;
-/// pages and additions append numbers; nothing renumbers.
 #[test]
-fn numbers_stay_put_through_changes_pages_and_additions() {
-    let mut listing = Listing {
-        thread_id: "thread-1".to_string(),
-        generation: 1,
-        slots: Vec::new(),
-        cursor: Some("next".to_string()),
-    };
-    listing.append(vec![
-        item(
-            "knowledge",
-            StatefulMemorySection::Knowledge,
-            "Orientation.",
-        ),
-        item("rule", StatefulMemorySection::UserRule, "Never commit."),
-        item("decision", StatefulMemorySection::Decision, "Use mth."),
-    ]);
-    // Correct item 1 (the rule, first in section order), then forget item 3.
-    let corrected = item(
-        "rule-2",
-        StatefulMemorySection::UserRule,
-        "Never commit or push.",
-    );
-    listing.update("rule", |slot| slot.item = corrected.clone());
-    listing.update("knowledge", |slot| slot.forgotten = true);
-    let page_numbers = listing.append(vec![item(
-        "later",
-        StatefulMemorySection::Knowledge,
-        "From page two.",
-    )]);
-    let shown = numbered(&listing, 1)
-        .into_iter()
-        .map(|(number, item)| (number, item.content))
-        .collect::<Vec<_>>();
+fn explicit_targets_survive_listing_refresh() {
+    let command = parse("correct original-entry@7 Preserve §3.2–§4 — α.").expect("target");
+    let listing = super::MemoryListing::default();
+    *listing.lock() = Some(super::Listing {
+        thread_id: "another-thread".to_string(),
+        generation: 99,
+        ..Default::default()
+    });
     assert_eq!(
-        (
-            shown,
-            page_numbers,
-            listing.current(3).map(|item| item.content.clone()),
-            listing.current(1).map(|item| item.content.clone()),
-        ),
-        (
-            vec![
-                (1, "Never commit or push.".to_string()),
-                (2, "Use mth.".to_string()),
-                (4, "From page two.".to_string()),
-            ],
-            vec![4],
-            Err("Item 3 was forgotten.".to_string()),
-            Ok("Never commit or push.".to_string()),
+        command,
+        MemoryCommand::Correct(
+            super::EntryTarget {
+                entry_id: "original-entry".to_string(),
+                revision: 7
+            },
+            "Preserve §3.2–§4 — α.".to_string()
         )
+    );
+}
+
+#[test]
+fn numeric_entry_identity_keeps_its_explicit_revision() {
+    assert_eq!(
+        parse("forget 1@3"),
+        Ok(MemoryCommand::Forget(super::EntryTarget {
+            entry_id: "1".to_string(),
+            revision: 3
+        }))
     );
 }

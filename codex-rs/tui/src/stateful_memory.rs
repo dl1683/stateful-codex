@@ -68,8 +68,29 @@ pub(crate) fn memory_lines(
         lines.push(Line::from(title.bold()));
         for (number, item) in numbered {
             lines.push(vec![format!("  {number}. ").dim(), item.content.clone().into()].into());
+            lines.push(
+                format!("     {}@{}", item.entry_id, item.revision)
+                    .dim()
+                    .into(),
+            );
             if let Some(replaced) = item.replaces.first() {
                 lines.push(vec!["     replaces: ".dim(), preview(&replaced.content).dim()].into());
+            }
+            if let Some(scope) = &item.scope_title {
+                lines.push(
+                    vec![
+                        "     only in the investigation: ".dim(),
+                        preview(scope).dim(),
+                    ]
+                    .into(),
+                );
+            }
+            if let Some(speaker) = &item.attributed_to {
+                lines.push(
+                    format!("     {speaker}'s words you passed on, not your rule")
+                        .dim()
+                        .into(),
+                );
             }
         }
     }
@@ -78,7 +99,12 @@ pub(crate) fn memory_lines(
     }
     lines.push(Line::from(""));
     lines.push(
-        "  /memory add · /memory forget <number> · /memory correct <number> <new text> · /memory help · no model turn is used"
+        "  List numbers are display conveniences. Use the shown ID@REV for changes."
+            .dim()
+            .into(),
+    );
+    lines.push(
+        "  /memory add · /memory forget <ID@REV> · /memory correct <ID@REV> <new text> · /memory help · no model turn is used"
             .dim()
             .into(),
     );
@@ -362,7 +388,7 @@ pub(crate) fn group_receipt_cell(
             .into(),
         );
     }
-    let recognized = notification.saved + notification.pending + notification.already_present;
+    let recognized = notification.recognized;
     if let Some(declared) = notification.declared_count
         && declared != recognized
     {
@@ -380,3 +406,41 @@ pub(crate) fn group_receipt_cell(
 #[cfg(test)]
 #[path = "stateful_memory_tests.rs"]
 mod tests;
+
+/// Investigation controls show explicit identities alongside read-only display numbers.
+pub(crate) fn scope_lines(
+    response: &codex_app_server_protocol::StatefulMemoryScopeResponse,
+    done: Option<&str>,
+) -> Vec<Line<'static>> {
+    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+    if let Some(done) = done {
+        lines.push(done.to_string().into());
+    }
+    if response.scopes.is_empty() {
+        lines.push(
+            "No investigations yet. Rules you give \"for this whole investigation\" start one."
+                .into(),
+        );
+    }
+    for (index, scope) in response.scopes.iter().enumerate() {
+        let state = match (scope.open, scope.this_thread) {
+            (true, true) => "open · this thread",
+            (true, false) => "open",
+            (false, _) => "ended",
+        };
+        lines.push(
+            format!(
+                "  {}. {} ({state}) · {}",
+                index + 1,
+                preview(&scope.title),
+                scope.scope_id
+            )
+            .into(),
+        );
+        if let Some(condition) = &scope.end_condition {
+            lines.push(format!("     ends: {condition}").into());
+        }
+    }
+    lines.push("List numbers are display conveniences. /memory join <scope-ID> · /memory end <scope-ID> · /memory leave".dim().into());
+    lines
+}

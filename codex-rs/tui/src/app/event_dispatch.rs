@@ -853,10 +853,19 @@ impl App {
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
             }
-            AppEvent::StatefulMemoryResult { thread_id, cell } => {
+            AppEvent::StatefulMemoryResult {
+                thread_id,
+                cell,
+                listing_generation,
+            } => {
                 // A reply for a thread the user has left belongs to that thread, not this one.
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     self.insert_history_cell(tui, cell);
+                    // Its numbers are now what the user sees.
+                    if let Some(generation) = listing_generation {
+                        self.memory_listing
+                            .displayed(&thread_id.to_string(), generation);
+                    }
                 } else {
                     tracing::debug!(%thread_id, "dropped a /memory result for an inactive thread");
                 }

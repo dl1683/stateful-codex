@@ -41,6 +41,9 @@ fn item(
         source: BlackboardProvenanceKind::User,
         updated_at: 1_790_000_000,
         replaces: Vec::new(),
+        authority: None,
+        scope_title: None,
+        attributed_to: None,
     }
 }
 
@@ -223,7 +226,7 @@ fn group_receipts_count_what_was_committed() {
         turn_id: "turn-1".to_string(),
         group_id: "group-1".to_string(),
         category: StatefulKnowledgeCategory::Rule,
-        declared_count: Some(4),
+        declared_count: Some(5),
         recognized: 4,
         saved: 2,
         already_present: 1,
@@ -249,5 +252,29 @@ fn group_receipts_count_what_was_committed() {
         super::group_receipt_cell(&notification)
             .map(|cell| render(cell.display_lines(/*width*/ 200)))
             .unwrap_or_default()
+    );
+}
+
+#[test]
+fn memory_help_and_investigations_show_explicit_targets() {
+    let help = crate::history_cell::PlainHistoryCell::new(
+        crate::stateful_memory_commands::HELP
+            .iter()
+            .map(|line| (*line).into())
+            .collect(),
+    );
+    insta::assert_snapshot!("memory_help", render(help.display_lines(/*width*/ 180)));
+    let response = codex_app_server_protocol::StatefulMemoryScopeResponse {
+        scopes: vec![codex_app_server_protocol::StatefulMemoryScope {
+            scope_id: "scope-parser".to_string(),
+            title: "Parser investigation".to_string(),
+            open: true,
+            this_thread: true,
+            end_condition: Some("until we agree on the root cause".to_string()),
+        }],
+    };
+    insta::assert_snapshot!(
+        "memory_investigations",
+        render(super::scope_lines(&response, /*done*/ None))
     );
 }

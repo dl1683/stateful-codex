@@ -1,0 +1,7 @@
+---
+source: tui/src/stateful_memory_tests.rs
+expression: "render(super::scope_lines(&response, None))"
+---
+  1. "Parser investigation" (open · this thread) · scope-parser
+     ends: until we agree on the root cause
+List numbers are display conveniences. /memory join <scope-ID> · /memory end <scope-ID> · /memory leave

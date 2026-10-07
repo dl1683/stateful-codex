@@ -7,16 +7,21 @@ Project memory
 
 Your rules (applied to all work)
   1. From now on, never run the whole test suite.
+     rule@1
 
 Task-limited rules (kept, not applied)
   2. Don't modify any files today.
+     pending@1
 
 About you (your words)
   3. I'm a backend developer, mostly Go for the last six years.
+     background@1
 
 Decisions
   4. Months use the symbol mth.
+     decision@1
      replaces: "Months use the symbol mo."
   More entries follow: /memory more
 
-  /memory add · /memory forget <number> · /memory correct <number> <new text> · /memory help · no model turn is used
+  List numbers are display conveniences. Use the shown ID@REV for changes.
+  /memory add · /memory forget <ID@REV> · /memory correct <ID@REV> <new text> · /memory help · no model turn is used
