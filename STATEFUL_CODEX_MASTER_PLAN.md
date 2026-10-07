@@ -50,7 +50,7 @@ The reference design stays as a detailed design reference, not as the execution 
 1. **One integrated build.** Merge the items 1–3 foundation, item 4 (reduced), item 5 (file-level needs-check), item 6 (partial) and item 7's safe parts. Use one migration map. Rebuild from a clean tree.
 2. **Memory within a run.** The capsule carries the next step and the last working test command. Re-send less text after a compaction. Pass Gate B, then the within1 replay: cost ≤ plain (3.70M units) and ≤ 18 compactions.
 3. **A lower first-session premium** (today 1.7–1.9x): a thinner opening packet, and no memory work on trivial requests.
-4. **Capture what plain Codex cannot keep:** decisions with reasons, ruled-out items, the working hypothesis.
+4. **Capture what plain Codex cannot keep:** decisions with reasons, ruled-out items (first-class: the evidence plus a capsule locator, never silently flipped; within2 showed both arms reporting a rejected tool as accepted), the working hypothesis, and user-adopted colleague formats as attributed, scoped source.
 5. **Safety only where it protects memory:** no resurrection of forgotten items, no invented rules, project isolation.
 6. **Prove it:**
    - repeat the 20-session and cross-domain hands-on tests;
