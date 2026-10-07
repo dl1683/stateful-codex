@@ -18,6 +18,7 @@ use codex_project_intelligence::ChangeOperation;
 use codex_project_intelligence::ChangeOrigin;
 use codex_project_intelligence::ChangeRecord;
 use codex_project_intelligence::ConfidenceScore;
+use codex_project_intelligence::CreateOutcome;
 use codex_project_intelligence::KnowledgeAuthority;
 use codex_project_intelligence::KnowledgeCategory as ChangeCategory;
 use codex_project_intelligence::KnowledgeContext;
@@ -94,123 +95,6 @@ pub(crate) struct CapturedRule {
     pub(crate) newly_stored: bool,
 }
 
-/// Stores what the user says about themselves or the whole work ("I know Python well but
-/// only a little Rust") verbatim, as promoted user-authored background. A statement already
-/// stored is not stored twice, and one the user forgot stays forgotten.
-pub(crate) async fn capture_background(
-    services: &ProjectIntelligenceServices,
-    event_sink: Option<&dyn StatefulEventSink>,
-    project_id: &str,
-    thread_id: &str,
-    turn_id: &str,
-    text: &str,
-) {
-    for statement in crate::user_rules::background_statements(text) {
-        if let Err(error) = store_background(
-            services, event_sink, project_id, thread_id, turn_id, &statement,
-        )
-        .await
-        {
-            tracing::warn!(%project_id, %error, "failed to capture user background");
-        }
-    }
-}
-
-async fn store_background(
-    services: &ProjectIntelligenceServices,
-    event_sink: Option<&dyn StatefulEventSink>,
-    project_id: &str,
-    thread_id: &str,
-    turn_id: &str,
-    statement: &str,
-) -> Result<(), String> {
-    let store = services
-        .blackboard()
-        .await
-        .map_err(|error| error.to_string())?;
-    let normalized = statement.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut hasher = Sha256::new();
-    hasher.update(project_id.as_bytes());
-    hasher.update([0]);
-    hasher.update(normalized.as_bytes());
-    let id = BlackboardEntryId::parse(format!("stateful-user-background-{:x}", hasher.finalize()))
-        .map_err(|error| error.to_string())?;
-    let (entry, outcome) = match store
-        .get_entry(project_id, &id)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        Some(existing) if existing.state == BlackboardEntryState::Active => {
-            (existing, CaptureOutcome::AlreadyStored)
-        }
-        Some(_) => return Ok(()),
-        None => {
-            let node_id = services.project_node_id(project_id).await?;
-            let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
-                .map_err(|error| error.to_string())?;
-            let (entry, _) = store
-                .create_entry_with_context(
-                    id,
-                    NewBlackboardEntry {
-                        project_id: project_id.to_string(),
-                        node_id,
-                        kind: BlackboardKind::Fact,
-                        content: statement.to_string(),
-                        structured_value: None,
-                        confidence,
-                        verification: BlackboardVerification::Unverified,
-                        importance: BlackboardImportance::High,
-                        root_promotion: RootPromotion::Promoted,
-                        evidence: Vec::new(),
-                        premises: Vec::new(),
-                        provenance: BlackboardProvenance {
-                            kind: BlackboardProvenanceKind::User,
-                            source_id: user_message_source(thread_id, turn_id),
-                        },
-                    },
-                    KnowledgeContext::new(
-                        ChangeCategory::Background,
-                        KnowledgeAuthority::HumanDirect,
-                    ),
-                    ChangeRecord {
-                        operation: ChangeOperation::Saved,
-                        origin: ChangeOrigin::HostCapture,
-                        category: ChangeCategory::Background,
-                        action_id: None,
-                        thread_id: Some(thread_id.to_string()),
-                        turn_id: Some(turn_id.to_string()),
-                        group_id: None,
-                        preview: statement.to_string(),
-                    },
-                )
-                .await
-                .map_err(|error| error.to_string())?;
-            if let Some(event_sink) = event_sink {
-                event_sink.emit(StatefulEvent::BlackboardUpdated {
-                    project_id: project_id.to_string(),
-                    entity_kind: BlackboardEntityKind::Entry,
-                    entity_id: entry.id.to_string(),
-                    revision: entry.revision,
-                });
-            }
-            (entry, CaptureOutcome::Stored)
-        }
-    };
-    if let Some(event_sink) = event_sink {
-        event_sink.emit(StatefulEvent::KnowledgeCaptured {
-            project_id: project_id.to_string(),
-            thread_id: thread_id.to_string(),
-            turn_id: turn_id.to_string(),
-            entry_id: entry.id.to_string(),
-            revision: entry.revision,
-            category: KnowledgeCategory::Background,
-            outcome,
-            text: receipt_text(&entry.value.content),
-        });
-    }
-    Ok(())
-}
-
 /// Where a rule came from and which turn's receipt reports it.
 pub(crate) struct RuleSource<'a> {
     pub(crate) thread_id: &'a str,
@@ -218,8 +102,12 @@ pub(crate) struct RuleSource<'a> {
     pub(crate) turn_id: &'a str,
     /// The turn being run now, which the receipt belongs to.
     pub(crate) receipt_turn_id: &'a str,
-    /// When the user wrote that message (Unix milliseconds).
+    /// When the user wrote that message (Unix milliseconds); orders it only against
+    /// retirements the journal did not record.
     pub(crate) stated_at_ms: i64,
+    /// The memory-change journal position of that message: retirements journaled after it
+    /// are later than the message. None when unknown, which never restores a retired rule.
+    pub(crate) after_change: Option<u64>,
     /// Where the rule sits: its scope, its position in the conversation, its capture group.
     pub(crate) placement: RulePlacement,
 }
@@ -233,7 +121,6 @@ pub(crate) struct RulePlacement {
     pub(crate) source_sequence: Option<u64>,
     pub(crate) unit_ordinal: Option<u32>,
     pub(crate) group_id: Option<String>,
-    pub(crate) receipt: ReceiptStyle,
 }
 
 impl RulePlacement {
@@ -246,7 +133,6 @@ impl RulePlacement {
             source_sequence: None,
             unit_ordinal: None,
             group_id: None,
-            receipt: ReceiptStyle::Each,
         }
     }
 
@@ -260,15 +146,6 @@ impl RulePlacement {
             ..KnowledgeContext::new(ChangeCategory::Rule, KnowledgeAuthority::HumanDirect)
         }
     }
-}
-
-/// How a stored rule is reported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ReceiptStyle {
-    /// Its own receipt.
-    Each,
-    /// The capture group's counted receipt reports it.
-    Grouped,
 }
 
 /// Stores one rule in the user's exact words (the whole clause they wrote), or returns the
@@ -286,7 +163,8 @@ pub(crate) async fn store_user_rule(
         turn_id,
         receipt_turn_id,
         stated_at_ms,
-        placement,
+        after_change,
+        mut placement,
     } = source;
     let change = |operation, entry_text: &str| ChangeRecord {
         operation,
@@ -302,15 +180,18 @@ pub(crate) async fn store_user_rule(
         .blackboard()
         .await
         .map_err(|error| error.to_string())?;
+    // A rule recorded outside a capture group still takes its place after everything
+    // captured before it.
+    if placement.source_sequence.is_none() {
+        placement.source_sequence = store.allocate_source_sequence(project_id).await.ok();
+    }
     let receipt = |entry: &BlackboardEntry, outcome: CaptureOutcome| {
         let category = if entry.value.root_promotion == RootPromotion::Promoted {
             KnowledgeCategory::Rule
         } else {
             KnowledgeCategory::PendingRule
         };
-        if let Some(event_sink) = event_sink
-            && placement.receipt == ReceiptStyle::Each
-        {
+        if let Some(event_sink) = event_sink {
             event_sink.emit(StatefulEvent::KnowledgeCaptured {
                 project_id: project_id.to_string(),
                 thread_id: thread_id.to_string(),
@@ -325,7 +206,9 @@ pub(crate) async fn store_user_rule(
     };
     // The current generation of this wording, or the first free one after inactive history.
     let mut id = None;
-    let mut retired_at_ms = None;
+    // Whether some generation was retired after the message stating it now: only a later
+    // message restores (or promotes) it.
+    let mut retired_after_message = false;
     for generation in 0..MAX_RULE_GENERATIONS {
         let candidate = user_rule_entry_id(
             project_id,
@@ -348,7 +231,7 @@ pub(crate) async fn store_user_rule(
                 // retired one: a message written after the retirement.
                 if standing == RuleStanding::Standing
                     && existing.value.root_promotion != RootPromotion::Promoted
-                    && retired_at_ms.is_some_and(|retired| stated_at_ms <= retired)
+                    && retired_after_message
                 {
                     return Err(RETIRED_BEFORE_MESSAGE.to_string());
                 }
@@ -366,13 +249,23 @@ pub(crate) async fn store_user_rule(
             }
             // Retired or superseded: the user restating it re-establishes it below.
             Some(inactive) => {
-                retired_at_ms = retired_at_ms.max(Some(inactive.updated_at_ms));
+                let retired = store
+                    .retirement_sequence(&inactive)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let message_is_later = match (retired, after_change) {
+                    (Some(retired), Some(position)) => position >= retired,
+                    (Some(_), None) => false,
+                    // An older retirement the journal did not record.
+                    (None, _) => stated_at_ms > inactive.updated_at_ms,
+                };
+                retired_after_message |= !message_is_later;
             }
         }
     }
     // Only a message written after the retirement restores the rule; quoting the message
     // that first stated it (or any other earlier one) never does.
-    if retired_at_ms.is_some_and(|retired| stated_at_ms <= retired) {
+    if retired_after_message {
         return Err(RETIRED_BEFORE_MESSAGE.to_string());
     }
     let id = id.ok_or_else(|| {
@@ -381,7 +274,7 @@ pub(crate) async fn store_user_rule(
     let node_id = services.project_node_id(project_id).await?;
     let confidence = ConfidenceScore::from_basis_points(USER_RULE_CONFIDENCE_BASIS_POINTS)
         .map_err(|error| error.to_string())?;
-    let (entry, _) = store
+    let (entry, created) = store
         .create_entry_with_context(
             id,
             NewBlackboardEntry {
@@ -409,6 +302,15 @@ pub(crate) async fn store_user_rule(
         )
         .await
         .map_err(|error| error.to_string())?;
+    // A concurrent capture of the same words stored it first: only one save is claimed.
+    if created == CreateOutcome::AlreadyPresent {
+        receipt(&entry, CaptureOutcome::AlreadyStored);
+        return Ok(CapturedRule {
+            entry,
+            standing,
+            newly_stored: false,
+        });
+    }
     if let Some(event_sink) = event_sink {
         event_sink.emit(StatefulEvent::BlackboardUpdated {
             project_id: project_id.to_string(),

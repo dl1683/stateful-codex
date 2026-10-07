@@ -223,11 +223,28 @@ impl TurnLifecycleContributor for StatefulExtension {
                     input.user_input,
                 );
                 if let Some(thread) = input.thread_store.get::<SelectedThread>() {
+                    // Where the message stands among journaled memory changes, so a retired
+                    // rule is restored only by a message written after its retirement.
+                    let after_change = match self.services.as_ref() {
+                        Some(services) => match services.blackboard().await {
+                            Ok(store) => store
+                                .message_watermark(
+                                    selected.project_id(),
+                                    &thread.thread_id,
+                                    input.turn_id,
+                                )
+                                .await
+                                .ok(),
+                            Err(_) => None,
+                        },
+                        None => None,
+                    };
                     self.user_messages.record(
                         &thread.thread_id,
                         selected.project_id(),
                         input.turn_id,
                         input.user_input,
+                        after_change,
                     );
                 }
                 if let (Some(thread), Some(services)) = (
@@ -246,15 +263,6 @@ impl TurnLifecycleContributor for StatefulExtension {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    crate::rule_capture::capture_background(
-                        services,
-                        self.event_sink.as_deref(),
-                        selected.project_id(),
-                        &thread.thread_id,
-                        input.turn_id,
-                        &text,
-                    )
-                    .await;
                     crate::rule_group::capture_marked_rules(
                         services,
                         self.event_sink.as_deref(),
@@ -264,16 +272,20 @@ impl TurnLifecycleContributor for StatefulExtension {
                         &text,
                     )
                     .await;
-                    if let Ok(store) = services.blackboard().await {
-                        crate::rule_scope::observe_turn_start(
-                            store,
-                            selected.project_id(),
-                            &thread.thread_id,
-                            input.turn_id,
-                            &text,
-                            crate::request_scope::RequestScope::of_turn(input.turn_store),
-                        )
-                        .await;
+                    // Someone else's instruction the user passes on is kept as attributed
+                    // context and noted for this turn as carrying no authority.
+                    let relayed = crate::relayed::relayed_instructions(&text);
+                    crate::relayed::capture_relayed(
+                        services,
+                        self.event_sink.as_deref(),
+                        selected.project_id(),
+                        &thread.thread_id,
+                        input.turn_id,
+                        &relayed,
+                    )
+                    .await;
+                    if let Some(note) = crate::relayed::RelayedNote::for_quotes(&relayed) {
+                        input.turn_store.insert(note);
                     }
                     let roots = self.project_roots(selected.project_id()).await;
                     if let Some(report) = crate::checkout::observe_turn_start(

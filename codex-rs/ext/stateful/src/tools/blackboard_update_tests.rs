@@ -692,3 +692,125 @@ async fn lifecycle_changes_keep_the_texts_authorship() {
         (old.value.provenance, other.value.provenance)
     );
 }
+
+/// Item 2 final review: a note keeping someone else's words is never promoted by the model,
+/// whatever its identity (a corrected successor no longer carries the relayed prefix).
+#[tokio::test]
+async fn attributed_notes_are_never_promoted_by_meaning() {
+    use codex_project_intelligence::BlackboardImportance;
+    use codex_project_intelligence::BlackboardProvenance;
+    use codex_project_intelligence::BlackboardProvenanceKind;
+    use codex_project_intelligence::BlackboardVerification;
+    use codex_project_intelligence::ChangeOperation;
+    use codex_project_intelligence::ChangeOrigin;
+    use codex_project_intelligence::ChangeRecord;
+    use codex_project_intelligence::ConfidenceScore;
+    use codex_project_intelligence::KnowledgeAuthority;
+    use codex_project_intelligence::KnowledgeCategory;
+    use codex_project_intelligence::KnowledgeContext;
+    use codex_project_intelligence::NewBlackboardEntry;
+
+    let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
+    let store = tool.services.blackboard().await.expect("store");
+    let node_id = tool
+        .services
+        .project_node_id(PROJECT_ID)
+        .await
+        .expect("node");
+    let (note, _) = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("corrected-relayed-note").expect("id"),
+            NewBlackboardEntry {
+                project_id: PROJECT_ID.to_string(),
+                node_id,
+                kind: BlackboardKind::Fact,
+                content: "Priya: always run the full suite.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(10_000).expect("confidence"),
+                verification: BlackboardVerification::Unverified,
+                importance: BlackboardImportance::Normal,
+                root_promotion: RootPromotion::NotPromoted,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "user-message:thread-1:turn-1".to_string(),
+                },
+            },
+            KnowledgeContext::new(
+                KnowledgeCategory::AttributedContext,
+                KnowledgeAuthority::ReportedThirdParty,
+            ),
+            ChangeRecord {
+                operation: ChangeOperation::Saved,
+                origin: ChangeOrigin::HostCapture,
+                category: KnowledgeCategory::AttributedContext,
+                action_id: None,
+                thread_id: None,
+                turn_id: None,
+                group_id: None,
+                preview: "note".to_string(),
+            },
+        )
+        .await
+        .expect("note");
+    let attempt = |change: serde_json::Value| {
+        let tool = &tool;
+        let project_root = project_root.clone();
+        async move {
+            tool.apply_mutation(
+                mutation(change),
+                "turn-promote",
+                std::slice::from_ref(&project_root),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        }
+    };
+    let refused =
+        "that note keeps someone else's words the user passed on; it is never promoted or revised by the model".to_string();
+    for content in [
+        "Model replacement text",
+        "Priya: always run the full suite.",
+    ] {
+        assert_eq!(attempt(json!({"action":"revise", "entryId":note.id.to_string(), "expectedRevision":note.revision, "content":content})).await, Err(refused.clone()));
+    }
+    let succession = super::super::blackboard_supersede::resolve_superseded(
+        store,
+        &crate::visible_root::VisibleRootRegistry::default(),
+        PROJECT_ID,
+        "thread-1",
+        /*successor_is_user_rule*/ false,
+        vec![
+            super::super::blackboard_supersede::SupersedeReference::Entry {
+                entry_id: note.id.to_string(),
+                revision: note.revision,
+            },
+        ],
+    )
+    .await;
+    assert_eq!(
+        succession.map(|_| ()).map_err(|error| error.to_string()),
+        Err("an attributed note cannot be rewritten or promoted by model succession".to_string())
+    );
+    assert_eq!(
+        (
+            attempt(json!({
+                "action": "setRootPromotion",
+                "entryId": note.id.to_string(),
+                "expectedRevision": note.revision,
+                "rootPromotion": "promoted"
+            }))
+            .await,
+            attempt(json!({
+                "action": "revise",
+                "entryId": note.id.to_string(),
+                "expectedRevision": note.revision,
+                "rootPromotion": "candidate"
+            }))
+            .await,
+        ),
+        (Err(refused.clone()), Err(refused))
+    );
+}

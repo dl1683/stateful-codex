@@ -39,6 +39,9 @@ const MAX_LIMIT: u32 = 50;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct QueryArguments {
+    entry_id: Option<String>,
+    expected_entry_revision: Option<u64>,
+    content_offset: Option<usize>,
     text: Option<String>,
     within_node_id: Option<String>,
     root_promotion: Option<RootPromotion>,
@@ -90,6 +93,9 @@ impl BlackboardQueryTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let QueryArguments {
+            entry_id,
+            expected_entry_revision,
+            content_offset,
             text,
             within_node_id,
             root_promotion,
@@ -119,6 +125,31 @@ impl BlackboardQueryTool {
             .blackboard()
             .await
             .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+        if let Some(id) = entry_id {
+            if text.is_some()
+                || within_node.is_some()
+                || evidence_context_map_entry_ids.is_some()
+                || after_entry_id.is_some()
+            {
+                return Err(FunctionCallError::RespondToModel(
+                    "entryId accepts only expectedEntryRevision and contentOffset".to_string(),
+                ));
+            }
+            return super::entry_read::read(
+                blackboard,
+                &self.project_id,
+                id,
+                expected_entry_revision,
+                content_offset.unwrap_or_default(),
+                call.response_byte_budget(MAX_RESPONSE_BYTES),
+            )
+            .await;
+        }
+        if expected_entry_revision.is_some() || content_offset.is_some() {
+            return Err(FunctionCallError::RespondToModel(
+                "exact content continuation requires entryId".to_string(),
+            ));
+        }
         let evidence_query = evidence_context_map_entry_ids.is_some();
         let (project_revision, result) = if let Some(entry_ids) = evidence_context_map_entry_ids {
             if text.is_some() || within_node.is_some() || root_promotion.is_some() {
@@ -366,12 +397,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query project knowledge the root packet lacks, or pending root candidates (rootPromotion=candidate). Reuse an entry only when evidenceFreshness and premiseFreshness are current or notApplicable and effectiveVerification has the authority the answer needs. entryScope=historical includes superseded entries. After evidence_read reports sourceRefreshed=true, pass its contextMapEntryId in evidenceContextMapEntryIds to find knowledge resting on that source, then revise or supersede it. If truncated=true, repeat with expectedProjectRevision and afterEntryId from the result.".to_string(),
+            description: "Query omitted or pending project knowledge. Reuse only current evidence/premises with adequate effectiveVerification. entryScope=historical includes retired entries. After evidence_read refreshes a source, evidenceContextMapEntryIds finds its dependents; continue with expectedProjectRevision/afterEntryId. For exact stored words use entryId; continue with expectedEntryRevision and nextContentOffset as contentOffset. Exact reads assert no current applicability.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
+                    "entryId": {"type": "string", "description": "Read exact stored words by ID, including words omitted from the root."},
+                    "expectedEntryRevision": {"type": "integer", "minimum": 1, "description": "Pin every content continuation to the returned revision."},
+                    "contentOffset": {"type": "integer", "minimum": 0, "description": "UTF-8 nextContentOffset from an exact ID read; defaults to zero."},
                     "text": {"type": "string", "description": "Optional literal topic search. Prefer this when looking for specific knowledge."},
                     "withinNodeId": {"type": "string", "description": "Optional hierarchy node whose subtree bounds the query."},
                     "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"], "description": "Optional lifecycle filter. Use candidate to review pending root-promotion decisions."},

@@ -6,7 +6,7 @@
 //! ("yet", "for now", "during this pass") is pending: it is kept for inspection but never
 //! applied. Rules phrased without markers are left to the model's verified-quote path.
 
-pub(crate) use crate::background::background_statements;
+#[cfg(test)]
 pub(crate) use crate::rule_units::marked_rules;
 
 /// Longest clause stored as a rule; longer clauses are never captured automatically.
@@ -88,6 +88,22 @@ const STANDING_PHRASES: &[&str] = &[
     "all of our work",
     "ground rules",
     "rules for this",
+    "house rules",
+    "style rules",
+];
+
+/// Phrases naming how long a rule lasts ("for the whole time we work on it"). They mark a
+/// rule only in a directive, never in the user's description of themselves ("I'm a backend
+/// developer for this project").
+const DURATION_PHRASES: &[&str] = &[
+    "for the whole time",
+    "the whole time we work",
+    "while we work on",
+    "throughout this project",
+    "for this project",
+    "for this essay",
+    "for this book",
+    "for this document",
 ];
 
 /// Phrases that scope a rule to a whole investigation, which may span sessions.
@@ -104,6 +120,9 @@ pub(crate) const INVESTIGATION_PHRASES: &[&str] = &[
 
 /// Markers that make a rule's standing unambiguous even next to a task word.
 pub(crate) const STRONG_STANDING_PHRASES: &[&str] = &[
+    "for the whole time",
+    "the whole time we work",
+    "throughout this project",
     "from now on",
     "going forward",
     "in future",
@@ -491,6 +510,31 @@ pub(crate) fn has_standing_marker(normalized: &str) -> bool {
         .any(|phrase| format!(" {body} ").contains(phrase))
         || has_phrase(normalized, STANDING_PHRASES)
         || has_phrase(normalized, INVESTIGATION_PHRASES)
+        || (has_phrase(normalized, DURATION_PHRASES) && !describes_the_user(body))
+}
+
+/// Whether a sentence describes the user or the work rather than directing it: it opens with
+/// the speaker ("I maintain this fork for this project") and asks nothing of the assistant.
+fn describes_the_user(body: &str) -> bool {
+    let first_person = [
+        "i ", "i'm ", "i've ", "i'd ", "my ", "we ", "we're ", "we've ", "our ",
+    ]
+    .iter()
+    .any(|opening| body.starts_with(opening));
+    let directs = [
+        " never ",
+        " always ",
+        " don't ",
+        " do not ",
+        " must ",
+        " should ",
+        " want you ",
+        " need you ",
+        " please ",
+    ]
+    .iter()
+    .any(|word| format!(" {body} ").contains(word));
+    first_person && !directs
 }
 
 pub(crate) fn strip_list_marker(normalized: &str) -> &str {

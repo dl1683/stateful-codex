@@ -6,6 +6,7 @@ mod blackboard_update;
 mod blackboard_write;
 mod context_map;
 mod conversation_read;
+mod entry_read;
 mod evidence;
 mod memory_read;
 mod obligation;

@@ -27,9 +27,19 @@ async fn the_user_adds_each_kind_directly() {
     let add = |addition: MemoryAddition, content: &'static str, action: &'static str| {
         let node_id = node_id.clone();
         async move {
-            add_entry(store, "project-1", node_id, addition, content, action)
-                .await
-                .expect("added")
+            add_entry(
+                store,
+                &crate::memory_controls::MemoryActor {
+                    thread_id: None,
+                    action_id: Some(action.to_string()),
+                },
+                "project-1",
+                node_id,
+                addition,
+                content,
+            )
+            .await
+            .expect("added")
         }
     };
     let rule = add(
@@ -54,15 +64,40 @@ async fn the_user_adds_each_kind_directly() {
     )
     .await;
     let retried = add(
-        MemoryAddition::Decision { reason: None },
+        MemoryAddition::Decision {
+            reason: Some("dashboards read it as minutes".to_string()),
+        },
         "Months use mth.",
         "a4",
     )
     .await;
+    // The same action identity for other words is refused, never applied.
+    let reused = add_entry(
+        store,
+        &crate::memory_controls::MemoryActor {
+            thread_id: None,
+            action_id: Some("a4".to_string()),
+        },
+        "project-1",
+        node_id.clone(),
+        MemoryAddition::Note,
+        "Something else.",
+    )
+    .await;
+    assert!(matches!(
+        reused,
+        Err(crate::memory_controls::MemoryControlError::Refused(_))
+    ));
     let note = add(MemoryAddition::Note, "The CI runs on Windows.", "a5").await;
-    forget_entry(store, "project-1", &rule.0.id, rule.0.revision)
-        .await
-        .expect("forget");
+    forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.0.id,
+        rule.0.revision,
+    )
+    .await
+    .expect("forget");
     // A retry of the first action after the forget returns what it made, without restoring
     // it; a new action restores the words.
     let retry = add(
@@ -77,14 +112,57 @@ async fn the_user_adds_each_kind_directly() {
         "a6",
     )
     .await;
-    let scoped = add(
-        MemoryAddition::Rule {
-            scope: Some("For this whole investigation, until we agree on the cause".to_string()),
-        },
-        "Do not change any code.",
-        "a7",
-    )
-    .await;
+    // A scoped rule needs an open investigation in the thread; it then applies only there.
+    let scoped_rule = |thread_id: &'static str, action: &'static str| {
+        let node_id = node_id.clone();
+        async move {
+            add_entry(
+                store,
+                &crate::memory_controls::MemoryActor {
+                    thread_id: Some(thread_id.to_string()),
+                    action_id: Some(action.to_string()),
+                },
+                "project-1",
+                node_id,
+                MemoryAddition::Rule {
+                    scope: Some("this whole investigation".to_string()),
+                },
+                "Do not change any code.",
+            )
+            .await
+        }
+    };
+    let unbound = scoped_rule("thread-2", "a7").await;
+    assert!(matches!(
+        unbound,
+        Err(crate::memory_controls::MemoryControlError::Refused(_))
+    ));
+    store
+        .open_scope(&codex_project_intelligence::KnowledgeScope {
+            project_id: "project-1".to_string(),
+            scope_id: "scope-1".to_string(),
+            kind: codex_project_intelligence::ScopeKind::Investigation,
+            title: "the config bug".to_string(),
+            state: codex_project_intelligence::ScopeState::Open,
+            end_condition: None,
+            opened_source: "test".to_string(),
+            ended_source: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        })
+        .await
+        .expect("scope");
+    store
+        .bind_thread_scope("project-1", "thread-1", "scope-1")
+        .await
+        .expect("bind");
+    let scoped = scoped_rule("thread-1", "a8").await.expect("scoped");
+    let scope_of = store
+        .knowledge_context("project-1", &scoped.0.id)
+        .await
+        .expect("context")
+        .and_then(|context| context.scope_id);
+    assert_eq!(scope_of, Some("scope-1".to_string()));
     let summary = |(entry, outcome): &(codex_project_intelligence::BlackboardEntry, AddOutcome)| {
         (
             memory_section(entry),
@@ -98,8 +176,17 @@ async fn the_user_adds_each_kind_directly() {
     let user = BlackboardProvenanceKind::User;
     let promoted = RootPromotion::Promoted;
     assert_eq!(
-        [&rule, &repeated, &background, &decision, &retried, &note, &restored, &scoped]
-            .map(summary),
+        [
+            &rule,
+            &repeated,
+            &background,
+            &decision,
+            &retried,
+            &note,
+            &restored,
+            &scoped
+        ]
+        .map(summary),
         [
             (
                 MemorySection::UserRule,
@@ -160,8 +247,7 @@ async fn the_user_adds_each_kind_directly() {
             (
                 MemorySection::UserRule,
                 BlackboardKind::Instruction,
-                "For this whole investigation, until we agree on the cause: Do not change any code."
-                    .to_string(),
+                "Do not change any code.".to_string(),
                 user,
                 promoted,
                 AddOutcome::Added
@@ -205,11 +291,14 @@ async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
     let store = services.blackboard().await.expect("store");
     let (added, outcome) = add_entry(
         store,
+        &crate::memory_controls::MemoryActor {
+            thread_id: None,
+            action_id: Some("action-1".to_string()),
+        },
         "project-1",
         node_id,
         MemoryAddition::Rule { scope: None },
         "Never run migrations during this pass.",
-        "action-1",
     )
     .await
     .expect("added");
@@ -217,4 +306,411 @@ async fn a_direct_rule_promotes_a_kept_task_limited_rule() {
         (added.id == pending.id, memory_section(&added), outcome),
         (true, MemorySection::UserRule, AddOutcome::Added)
     );
+}
+
+/// Item 3 review 2: an action is bound to its complete request (a decision with a reason is
+/// not the same request as one whose words contain "Reason:"), and a scoped rule must name
+/// the investigation the thread continues and carry no ending of its own.
+#[tokio::test]
+async fn an_action_is_bound_to_its_whole_request_and_scope() {
+    let state_home = TempDir::new().expect("state home");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let actor = |action: &str| crate::memory_controls::MemoryActor {
+        thread_id: Some("thread-1".to_string()),
+        action_id: Some(action.to_string()),
+    };
+    let refused = |result: Result<_, crate::memory_controls::MemoryControlError>| {
+        matches!(
+            result,
+            Err(crate::memory_controls::MemoryControlError::Refused(_))
+        )
+    };
+    add_entry(
+        store,
+        &actor("a1"),
+        "project-1",
+        node_id.clone(),
+        MemoryAddition::Decision {
+            reason: Some("Y".to_string()),
+        },
+        "X",
+    )
+    .await
+    .expect("decision");
+    let same_text_other_request = add_entry(
+        store,
+        &actor("a1"),
+        "project-1",
+        node_id.clone(),
+        MemoryAddition::Decision { reason: None },
+        "X Reason: Y",
+    )
+    .await;
+    store
+        .open_scope(&codex_project_intelligence::KnowledgeScope {
+            project_id: "project-1".to_string(),
+            scope_id: "scope-a".to_string(),
+            kind: codex_project_intelligence::ScopeKind::Investigation,
+            title: "Ground rules for the parser bug".to_string(),
+            state: codex_project_intelligence::ScopeState::Open,
+            end_condition: None,
+            opened_source: "test".to_string(),
+            ended_source: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        })
+        .await
+        .expect("scope");
+    store
+        .bind_thread_scope("project-1", "thread-1", "scope-a")
+        .await
+        .expect("bind");
+    let scoped = |action: &'static str, scope: &'static str| {
+        let node_id = node_id.clone();
+        let actor = actor(action);
+        async move {
+            add_entry(
+                store,
+                &actor,
+                "project-1",
+                node_id,
+                MemoryAddition::Rule {
+                    scope: Some(scope.to_string()),
+                },
+                "Never push.",
+            )
+            .await
+        }
+    };
+    // A retry of an addition that found the words already saved (spaced differently)
+    // replays that outcome.
+    let spaced = |action: &'static str, content: &'static str| {
+        let node_id = node_id.clone();
+        let actor = crate::memory_controls::MemoryActor {
+            thread_id: None,
+            action_id: Some(action.to_string()),
+        };
+        async move {
+            add_entry(
+                store,
+                &actor,
+                "project-1",
+                node_id,
+                MemoryAddition::Rule { scope: None },
+                content,
+            )
+            .await
+            .map(|(_, outcome)| outcome)
+            .ok()
+        }
+    };
+    let first_saved = spaced("n1", "Always run the linter.").await;
+    let first_spaced = spaced("n2", "Always run  the linter.").await;
+    let retried_spaced = spaced("n2", "Always run  the linter.").await;
+    let other_investigation = scoped("a2", "the cache investigation").await;
+    let with_ending = scoped("a3", "this investigation, until we agree").await;
+    let by_title = scoped("a4", "Ground rules for the parser bug").await;
+    let by_id = scoped("a5", "scope-a").await;
+    assert_eq!(
+        (first_saved, first_spaced, retried_spaced),
+        (
+            Some(AddOutcome::Added),
+            Some(AddOutcome::AlreadyPresent),
+            Some(AddOutcome::AlreadyDone)
+        )
+    );
+    assert_eq!(
+        (
+            refused(same_text_other_request),
+            refused(other_investigation),
+            refused(with_ending),
+            by_title.map(|(_, outcome)| outcome).ok(),
+            by_id.map(|(_, outcome)| outcome).ok(),
+        ),
+        (
+            true,
+            true,
+            true,
+            Some(AddOutcome::Added),
+            Some(AddOutcome::AlreadyPresent)
+        )
+    );
+}
+
+#[tokio::test]
+async fn noop_action_survives_forget_and_store_restart() {
+    let home = TempDir::new().expect("home");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let id;
+    {
+        let services = ProjectIntelligenceServices::new(sqlite.clone());
+        let node = services.project_node_id("project-1").await.expect("node");
+        let store = services.blackboard().await.expect("store");
+        let actor = |action: &str| crate::memory_controls::MemoryActor {
+            action_id: Some(action.to_string()),
+            ..Default::default()
+        };
+        let (entry, first) = add_entry(
+            store,
+            &actor("original"),
+            "project-1",
+            node.clone(),
+            MemoryAddition::Rule { scope: None },
+            "Never push.",
+        )
+        .await
+        .expect("first");
+        id = entry.id.clone();
+        let (_, noop) = add_entry(
+            store,
+            &actor("noop"),
+            "project-1",
+            node,
+            MemoryAddition::Rule { scope: None },
+            "Never push.",
+        )
+        .await
+        .expect("noop");
+        assert_eq!(
+            (first, noop),
+            (AddOutcome::Added, AddOutcome::AlreadyPresent)
+        );
+        forget_entry(store, &actor("forget"), "project-1", &id, entry.revision)
+            .await
+            .expect("forget");
+    }
+    let services = ProjectIntelligenceServices::new(sqlite);
+    let store = services.blackboard().await.expect("reopened");
+    let actor = crate::memory_controls::MemoryActor {
+        action_id: Some("noop".to_string()),
+        ..Default::default()
+    };
+    let (entry, outcome) = add_entry(
+        store,
+        &actor,
+        "project-1",
+        services.project_node_id("project-1").await.expect("node"),
+        MemoryAddition::Rule { scope: None },
+        "Never push.",
+    )
+    .await
+    .expect("retry");
+    assert_eq!(
+        (entry.id, entry.state, outcome),
+        (
+            id,
+            codex_project_intelligence::BlackboardEntryState::Tombstoned,
+            AddOutcome::AlreadyDone
+        )
+    );
+}
+
+#[tokio::test]
+async fn direct_rules_and_corrections_keep_insertion_order_after_restart() {
+    let home = TempDir::new().expect("home");
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let services = ProjectIntelligenceServices::new(sqlite.clone());
+    let node = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    let actor = |action: &str| crate::memory_controls::MemoryActor {
+        action_id: Some(action.to_string()),
+        ..Default::default()
+    };
+    let (first, _) = add_entry(
+        store,
+        &actor("first"),
+        "project-1",
+        node.clone(),
+        MemoryAddition::Rule { scope: None },
+        "Always preserve reasons.",
+    )
+    .await
+    .expect("first");
+    add_entry(
+        store,
+        &actor("second"),
+        "project-1",
+        node,
+        MemoryAddition::Rule { scope: None },
+        "Never push.",
+    )
+    .await
+    .expect("second");
+    crate::memory_controls::correct_entry(
+        store,
+        &actor("correction"),
+        "project-1",
+        &first.id,
+        first.revision,
+        "Always preserve complete reasons.",
+    )
+    .await
+    .expect("correct");
+    let reopened = codex_project_intelligence::BlackboardStore::open(&sqlite)
+        .await
+        .expect("reopen");
+    let root = reopened
+        .root_projection(codex_project_intelligence::RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 1,
+        })
+        .await
+        .expect("root");
+    assert_eq!(
+        (
+            root.data
+                .into_iter()
+                .map(|hit| hit.entry.value.content)
+                .collect::<Vec<_>>(),
+            root.omitted_entries
+        ),
+        (vec!["Always preserve complete reasons.".to_string()], 1)
+    );
+    let root = reopened
+        .root_projection(codex_project_intelligence::RootBlackboardQuery {
+            project_id: "project-1".to_string(),
+            max_entries: 10,
+        })
+        .await
+        .expect("root");
+    assert_eq!(
+        root.data
+            .into_iter()
+            .map(|hit| hit.entry.value.content)
+            .collect::<Vec<_>>(),
+        vec!["Always preserve complete reasons.", "Never push."]
+    );
+}
+
+/// Separate clients sharing the durable store agree on matching retries, and a losing
+/// mismatched request cannot leave an entry, context, outcome, or journal change.
+#[tokio::test]
+async fn concurrent_clients_replay_only_the_matching_full_request() {
+    let state_home = TempDir::new().expect("home");
+    let sqlite = SqliteConfig::new_for_testing(state_home.path().abs());
+    let left = ProjectIntelligenceServices::new(sqlite.clone());
+    let right = ProjectIntelligenceServices::new(sqlite.clone());
+    let node = left.project_node_id("project-1").await.expect("node");
+    let a = left.blackboard().await.expect("left");
+    let b = right.blackboard().await.expect("right");
+    for (index, other_words) in ["Matching words", "Conflicting words"]
+        .into_iter()
+        .enumerate()
+    {
+        let actor = crate::memory_controls::MemoryActor {
+            thread_id: Some("thread-1".to_string()),
+            action_id: Some(format!("concurrent-{index}")),
+        };
+        let words = if index == 0 {
+            "Matching words"
+        } else {
+            "Winning or losing words"
+        };
+        let (first, second) = tokio::join!(
+            add_entry(
+                a,
+                &actor,
+                "project-1",
+                node.clone(),
+                MemoryAddition::Rule { scope: None },
+                words
+            ),
+            add_entry(
+                b,
+                &actor,
+                "project-1",
+                node.clone(),
+                MemoryAddition::Rule { scope: None },
+                other_words
+            ),
+        );
+        if index == 0 {
+            let (first, first_outcome) = first.expect("first");
+            let (second, second_outcome) = second.expect("second");
+            assert_eq!(first, second);
+            assert!(matches!(
+                (first_outcome, second_outcome),
+                (AddOutcome::Added, AddOutcome::AlreadyDone)
+                    | (AddOutcome::AlreadyDone, AddOutcome::Added)
+            ));
+        } else {
+            assert!(matches!(
+                (first, second),
+                (
+                    Ok(_),
+                    Err(crate::memory_controls::MemoryControlError::Refused(_))
+                ) | (
+                    Err(crate::memory_controls::MemoryControlError::Refused(_)),
+                    Ok(_)
+                )
+            ));
+        }
+        assert_eq!(
+            a.latest_change_sequence("project-1")
+                .await
+                .expect("sequence"),
+            index as u64 + 1
+        );
+        let changes = a
+            .memory_changes(
+                "project-1",
+                /*thread_id*/ None,
+                /*after*/ 0,
+                /*limit*/ 10,
+            )
+            .await
+            .expect("changes");
+        assert_eq!(changes.len(), index + 1);
+        let winner_ids = changes
+            .into_iter()
+            .map(|change| change.entry_id.expect("entry"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let reopened = codex_project_intelligence::BlackboardStore::open(&sqlite)
+            .await
+            .expect("reopen");
+        for store in [a, b, &reopened] {
+            let root = store
+                .root_projection(codex_project_intelligence::RootBlackboardQuery {
+                    project_id: "project-1".to_string(),
+                    max_entries: 10,
+                })
+                .await
+                .expect("root");
+            assert_eq!(
+                root.data
+                    .into_iter()
+                    .map(|hit| hit.entry.id.to_string())
+                    .collect::<std::collections::BTreeSet<_>>(),
+                winner_ids
+            );
+            for words in [words, other_words] {
+                let id = crate::rule_capture::user_rule_entry_id(
+                    "project-1",
+                    /*scope_id*/ None,
+                    words,
+                    /*generation*/ 0,
+                )
+                .expect("id");
+                let expected = winner_ids.contains(id.as_str());
+                assert_eq!(
+                    (
+                        store
+                            .get_entry("project-1", &id)
+                            .await
+                            .expect("entry")
+                            .is_some(),
+                        store
+                            .knowledge_context("project-1", &id)
+                            .await
+                            .expect("context")
+                            .is_some()
+                    ),
+                    (expected, expected)
+                );
+            }
+        }
+    }
 }

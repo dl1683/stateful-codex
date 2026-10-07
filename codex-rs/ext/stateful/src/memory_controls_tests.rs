@@ -44,9 +44,15 @@ async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
     .remove(0)
     .entry;
     let store = services.blackboard().await.expect("store");
-    let forgotten = forget_entry(store, "project-1", &rule.id, rule.revision)
-        .await
-        .expect("forget");
+    let forgotten = forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+    )
+    .await
+    .expect("forget");
     let replayed = store_user_rule(
         &services,
         /*event_sink*/ None,
@@ -56,6 +62,7 @@ async fn a_forgotten_rule_stays_forgotten_when_its_message_is_quoted() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-2",
             stated_at_ms,
+            after_change: Some(0),
             placement: crate::rule_capture::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::HostCapture,
             ),
@@ -97,13 +104,34 @@ async fn correcting_a_rule_replaces_it_and_a_retry_is_idempotent() {
     .entry;
     let store = services.blackboard().await.expect("store");
     let corrected = "Never run the whole test suite; run the affected tests.";
-    let first = correct_entry(store, "project-1", &rule.id, rule.revision, corrected)
-        .await
-        .expect("correct");
-    let retry = correct_entry(store, "project-1", &rule.id, rule.revision, corrected)
-        .await
-        .expect("retry");
-    let stale = forget_entry(store, "project-1", &rule.id, rule.revision).await;
+    let first = correct_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+        corrected,
+    )
+    .await
+    .expect("correct");
+    let retry = correct_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+        corrected,
+    )
+    .await
+    .expect("retry");
+    let stale = forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+    )
+    .await;
     assert_eq!(
         (
             first.successor.id.clone(),
@@ -167,6 +195,7 @@ async fn corrections_of_agent_rules_and_decisions() {
         .expect("decision");
     let rule = correct_entry(
         store,
+        &crate::memory_controls::MemoryActor::default(),
         "project-1",
         &agent_rule.id,
         1,
@@ -176,6 +205,7 @@ async fn corrections_of_agent_rules_and_decisions() {
     .expect("rule");
     let corrected = correct_entry(
         store,
+        &crate::memory_controls::MemoryActor::default(),
         "project-1",
         &decision.id,
         1,
@@ -207,15 +237,20 @@ async fn corrections_of_agent_rules_and_decisions() {
 async fn background_is_its_own_section_before_and_after_correction() {
     let state_home = TempDir::new().expect("state home");
     let services = services(&state_home);
-    crate::rule_capture::capture_background(
-        &services,
-        /*event_sink*/ None,
+    let store = services.blackboard().await.expect("store");
+    crate::memory_add::add_entry(
+        store,
+        &crate::memory_controls::MemoryActor {
+            action_id: Some("background".to_string()),
+            ..Default::default()
+        },
         "project-1",
-        "thread-1",
-        "turn-1",
+        services.project_node_id("project-1").await.expect("node"),
+        crate::memory_add::MemoryAddition::Background,
         "I'm a backend developer, mostly Go.",
     )
-    .await;
+    .await
+    .expect("add background");
     let store = services.blackboard().await.expect("store");
     let page = store
         .active_review_page(
@@ -230,6 +265,7 @@ async fn background_is_its_own_section_before_and_after_correction() {
     let background = page.entries[0].clone();
     let corrected = correct_entry(
         store,
+        &crate::memory_controls::MemoryActor::default(),
         "project-1",
         &background.id,
         background.revision,
@@ -243,5 +279,94 @@ async fn background_is_its_own_section_before_and_after_correction() {
             memory_section(&corrected.successor),
         ),
         (MemorySection::Background, MemorySection::Background)
+    );
+}
+
+/// Item 2 final review: correcting a note of someone else's words keeps it attributed and
+/// never applied, but no longer names the old speaker for words the user just rewrote.
+#[tokio::test]
+async fn a_corrected_attributed_note_drops_the_old_speaker() {
+    use codex_project_intelligence::BlackboardImportance;
+    use codex_project_intelligence::BlackboardProvenance;
+    use codex_project_intelligence::BlackboardVerification;
+    use codex_project_intelligence::ChangeOperation;
+    use codex_project_intelligence::ChangeOrigin;
+    use codex_project_intelligence::ChangeRecord;
+    use codex_project_intelligence::ConfidenceScore;
+    use codex_project_intelligence::KnowledgeAuthority;
+    use codex_project_intelligence::KnowledgeCategory;
+    use codex_project_intelligence::KnowledgeContext;
+    use codex_project_intelligence::NewBlackboardEntry;
+
+    let state_home = TempDir::new().expect("state home");
+    let services = services(&state_home);
+    let store = services.blackboard().await.expect("store");
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let (note, _) = store
+        .create_entry_with_context(
+            BlackboardEntryId::parse("stateful-relayed-note").expect("id"),
+            NewBlackboardEntry {
+                project_id: "project-1".to_string(),
+                node_id,
+                kind: BlackboardKind::Fact,
+                content: "Always run the full suite.".to_string(),
+                structured_value: None,
+                confidence: ConfidenceScore::from_basis_points(10_000).expect("confidence"),
+                verification: BlackboardVerification::Unverified,
+                importance: BlackboardImportance::Normal,
+                root_promotion: RootPromotion::NotPromoted,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                provenance: BlackboardProvenance {
+                    kind: BlackboardProvenanceKind::User,
+                    source_id: "user-message:thread-1:turn-1".to_string(),
+                },
+            },
+            KnowledgeContext {
+                payload: Some(r#"{"speaker":"Priya","reporter":"user"}"#.to_string()),
+                ..KnowledgeContext::new(
+                    KnowledgeCategory::AttributedContext,
+                    KnowledgeAuthority::ReportedThirdParty,
+                )
+            },
+            ChangeRecord {
+                operation: ChangeOperation::Saved,
+                origin: ChangeOrigin::HostCapture,
+                category: KnowledgeCategory::AttributedContext,
+                action_id: None,
+                thread_id: None,
+                turn_id: None,
+                group_id: None,
+                preview: "note".to_string(),
+            },
+        )
+        .await
+        .expect("note");
+    let corrected = correct_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &note.id,
+        note.revision,
+        "Bob said: always run the full suite.",
+    )
+    .await
+    .expect("correct");
+    let context = store
+        .knowledge_context("project-1", &corrected.successor.id)
+        .await
+        .expect("context")
+        .expect("carried");
+    assert_eq!(
+        (
+            context.category,
+            context.payload,
+            corrected.successor.value.root_promotion
+        ),
+        (
+            KnowledgeCategory::AttributedContext,
+            None,
+            RootPromotion::NotPromoted
+        )
     );
 }

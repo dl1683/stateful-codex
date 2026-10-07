@@ -26,6 +26,8 @@ pub(crate) struct UserMessage {
     pub(crate) text: String,
     /// When the host received the message (Unix milliseconds).
     pub(crate) received_at_ms: i64,
+    /// The memory-change journal position when the host received it, if it could be read.
+    pub(crate) after_change: Option<u64>,
 }
 
 #[derive(Default)]
@@ -49,6 +51,7 @@ impl UserMessageRegistry {
         project_id: &str,
         turn_id: &str,
         content: &[UserInput],
+        after_change: Option<u64>,
     ) {
         let text = content
             .iter()
@@ -93,6 +96,7 @@ impl UserMessageRegistry {
             turn_id: turn_id.to_string(),
             text: text[..end].to_string(),
             received_at_ms: crate::rule_capture::now_ms(),
+            after_change,
         };
         let mut threads = self
             .threads

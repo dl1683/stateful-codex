@@ -3,6 +3,8 @@
 //! the model's verified-quote path both resolve a rule to the same unit, so they store the
 //! same words under the same identity.
 
+use std::ops::Range;
+
 use crate::quotation::Quotations;
 use crate::user_rules::Fence;
 use crate::user_rules::HeaderScope;
@@ -61,6 +63,7 @@ pub(crate) struct MarkedRules {
 
 /// Clauses of `text` that the user explicitly marked as standing (or pending) rules, in the
 /// order the user wrote them.
+#[cfg(test)]
 pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
     marked_rule_units(text)
         .rules
@@ -73,67 +76,141 @@ pub(crate) fn marked_rules(text: &str) -> Vec<RuleClause> {
 /// sentences and indented continuation lines). In prose each marked sentence is a rule;
 /// independent directives joined in one sentence ("never commit and always end with Next:")
 /// are separate rules, and a following sentence that qualifies a rule ("If you need an
-/// environment, ...") stays with it. Fenced and blockquoted lines are never the user's rules,
-/// and a unit longer than `MAX_RULE_BYTES` is reported as omitted, never stored in part.
+/// environment, ...") stays with it and decides its standing and scope with it. Fenced and
+/// blockquoted lines are never the user's rules, and a unit longer than `MAX_RULE_BYTES` is
+/// reported as omitted, never stored in part.
 pub(crate) fn marked_rule_units(text: &str) -> MarkedRules {
+    let located = locate_rules(text);
+    MarkedRules {
+        rules: located.rules.into_iter().map(|(rule, _)| rule).collect(),
+        omitted: located
+            .omitted
+            .iter()
+            .map(|(full, _)| opening(full))
+            .collect(),
+        declared_count: located.declared_count,
+    }
+}
+
+/// The rules of a message with the byte range of the user's words each came from.
+#[derive(Default)]
+struct LocatedRules {
+    rules: Vec<(MarkedRule, Range<usize>)>,
+    /// Recognized rules too long to store whole, in full.
+    omitted: Vec<(String, Range<usize>)>,
+    declared_count: Option<u32>,
+}
+
+fn locate_rules(text: &str) -> LocatedRules {
     let quotations = Quotations::new(text);
-    let mut marked = MarkedRules {
+    let mut located = LocatedRules {
         declared_count: declared_count(text),
-        ..MarkedRules::default()
+        ..LocatedRules::default()
     };
-    let keep = |rule: MarkedRule, marked: &mut MarkedRules| {
+    let offset = |part: &str| part.as_ptr() as usize - text.as_ptr() as usize;
+    let range = |part: &str| offset(part)..offset(part) + part.len();
+    let keep = |rule: MarkedRule, at: Range<usize>, located: &mut LocatedRules| {
         if rule.clause.text.len() <= MAX_RULE_BYTES {
-            marked.rules.push(rule);
+            located.rules.push((rule, at));
         } else {
-            marked.omitted.push(opening(&rule.clause.text));
+            located.omitted.push((rule.clause.text, at));
         }
     };
+    // The prose rule the previous sentence of this paragraph produced, which a qualifying
+    // sentence extends, even on the next line.
+    let mut extendable: Option<(MarkedRule, Range<usize>)> = None;
     for unit in rule_units(text) {
         let kept = kept_clauses(text, &quotations, &unit);
+        if (unit.item || unit.separated)
+            && let Some((rule, at)) = extendable.take()
+        {
+            keep(rule, at, &mut located);
+        }
         if unit.item {
-            if let Some(rule) = item_rule(&unit, &kept, Marker::Required) {
-                keep(rule, &mut marked);
+            if let (Some(rule), Some(first), Some(last)) = (
+                item_rule(&unit, &kept, Marker::Required),
+                unit.lines.first(),
+                unit.lines.last(),
+            ) {
+                keep(rule, offset(first)..offset(last) + last.len(), &mut located);
             }
             continue;
         }
-        // The prose rule the previous sentence of this line produced, which a qualifying
-        // sentence extends.
-        let mut extendable: Option<MarkedRule> = None;
         for clause in kept {
             let normalized = normalize(clause);
-            if let Some(rule) = extendable.as_mut()
+            if let Some((rule, at)) = extendable.as_mut()
                 && qualifies_previous(&normalized)
-                && !has_standing_marker(&normalized)
+                && (!has_standing_marker(&normalized) || is_exception(&normalized))
             {
-                rule.clause.text = format!("{} {clause}", rule.clause.text);
+                // The qualification is part of the rule: its standing, scope and ending are
+                // judged on the whole.
+                *rule = prose_rule(&format!("{} {clause}", rule.clause.text));
+                at.end = range(clause).end;
                 continue;
             }
-            if let Some(rule) = extendable.take() {
-                keep(rule, &mut marked);
+            if let Some((rule, at)) = extendable.take() {
+                keep(rule, at, &mut located);
             }
             if !has_standing_marker(&normalized) {
+                continue;
+            }
+            // "Some ground rules for this essay: second person; British spelling; ..." lists
+            // its rules after a framing colon; each item is its own rule, keeping the framing
+            // so its scope stays in the user's words.
+            if let Some(items) = framed_list(text, &quotations, clause) {
+                for (item, at) in items {
+                    keep(prose_rule(&item), at, &mut located);
+                }
                 continue;
             }
             let mut pieces = coordinated_directives(text, &quotations, clause);
             let last = pieces.pop();
             for piece in pieces {
-                keep(prose_rule(piece), &mut marked);
+                keep(prose_rule(piece), range(piece), &mut located);
             }
-            extendable = last.map(prose_rule);
-        }
-        if let Some(rule) = extendable {
-            keep(rule, &mut marked);
+            extendable = last.map(|piece| (prose_rule(piece), range(piece)));
         }
     }
-    marked
+    if let Some((rule, at)) = extendable {
+        keep(rule, at, &mut located);
+    }
+    located
 }
 
-/// The rule the unit holding `clause` (a sentence of `text`) states: the whole list item
-/// with its header's scope, or the sentence itself in prose. None when the clause is not in
-/// `text` or its list relays someone else's words. The caller checks the length.
-pub(crate) fn rule_for_clause(text: &str, clause: &str) -> Option<MarkedRule> {
+/// The rule the user's words at `quote` (inside `clause`, a sentence of `text`) belong to:
+/// the rule host capture keeps for that place (the list item with its header's scope, the
+/// coordinated directive or framed item the quote is in, with its qualifications), so both
+/// paths store the same words. A rule host capture found too long comes back whole, for the
+/// caller to refuse rather than store a part. Otherwise the unit holding the sentence: the
+/// whole list item, or the sentence itself in prose. None when the clause is not in `text`
+/// or its list relays someone else's words. The caller checks the length.
+pub(crate) fn rule_for_clause(text: &str, clause: &str, quote: &str) -> Option<MarkedRule> {
     let start = text.find(clause)?;
     let end = start + clause.len();
+    // Sentence punctuation at the quote's end is not part of the rule's own words.
+    let quote = quote.trim().trim_end_matches(['.', '!', ';', ',']);
+    let at = find_collapsed(&text[start..end], quote)
+        .map(|found| start + found.start..start + found.end)
+        .unwrap_or(start..end);
+    let located = locate_rules(text);
+    let within = |range: &Range<usize>| range.start <= at.start && at.end <= range.end;
+    if let Some((rule, _)) = located.rules.iter().find(|(_, range)| within(range)) {
+        return Some(rule.clone());
+    }
+    // A quote that runs across two recognized rules names neither.
+    let crosses = |range: &Range<usize>| range.start < at.end && at.start < range.end;
+    if located.rules.iter().any(|(_, range)| crosses(range)) {
+        return None;
+    }
+    if let Some((full, _)) = located.omitted.iter().find(|(_, range)| within(range)) {
+        return Some(MarkedRule {
+            clause: RuleClause {
+                text: full.clone(),
+                standing: RuleStanding::Standing,
+            },
+            scope: None,
+        });
+    }
     let quotations = Quotations::new(text);
     let unit = rule_units(text).into_iter().find(|unit| {
         unit.lines.iter().any(|line| {
@@ -146,6 +223,24 @@ pub(crate) fn rule_for_clause(text: &str, clause: &str) -> Option<MarkedRule> {
     }
     let kept = kept_clauses(text, &quotations, &unit);
     item_rule(&unit, &kept, Marker::NotRequired)
+}
+
+/// Where `needle`'s words appear in `haystack`, whatever whitespace separates them.
+fn find_collapsed(haystack: &str, needle: &str) -> Option<Range<usize>> {
+    let words = needle.split_whitespace().collect::<Vec<_>>();
+    let (first, rest) = words.split_first()?;
+    haystack.match_indices(first).find_map(|(found, _)| {
+        let mut position = found + first.len();
+        for word in rest {
+            let after = &haystack[position..];
+            let trimmed = after.trim_start();
+            if trimmed.len() == after.len() || !trimmed.starts_with(word) {
+                return None;
+            }
+            position += after.len() - trimmed.len() + word.len();
+        }
+        Some(found..position)
+    })
 }
 
 /// Openings of a sentence that qualifies the rule before it rather than stating a new one.
@@ -162,6 +257,14 @@ const QUALIFIER_OPENINGS: &[&str] = &[
     "when",
     "only if",
 ];
+
+/// Whether a qualifying sentence states an exception to the rule before it ("Unless I ask
+/// otherwise, you may ..."), which belongs to that rule even when it reads as a directive.
+fn is_exception(normalized: &str) -> bool {
+    ["unless", "except", "but if", "otherwise"]
+        .iter()
+        .any(|opening| normalized == *opening || normalized.starts_with(&format!("{opening} ")))
+}
 
 fn qualifies_previous(normalized: &str) -> bool {
     QUALIFIER_OPENINGS
@@ -220,6 +323,45 @@ fn coordinated_directives<'a>(
     }
     pieces.push(clause[start..].trim());
     pieces
+}
+
+/// The items of "<framing that names rules>: a; b; c", each with the framing and the range
+/// of its own words, when the framing names rules or preferences and at least two items
+/// follow. Items split only at "; " outside every quotation and code span of `text`.
+fn framed_list(
+    text: &str,
+    quotations: &Quotations<'_>,
+    clause: &str,
+) -> Option<Vec<(String, Range<usize>)>> {
+    let (framing, list) = clause.split_once(": ")?;
+    let framing_words = normalize(framing);
+    let names_rules = ["rules", "preferences", "conventions", "guidelines"]
+        .iter()
+        .any(|noun| framing_words.split(' ').any(|word| word == *noun));
+    let base = list.as_ptr() as usize - text.as_ptr() as usize;
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (index, _) in list.match_indices("; ") {
+        if !quotations.touches_quotation(base + index, base + index + 1) {
+            parts.push(&list[start..index]);
+            start = index + 2;
+        }
+    }
+    parts.push(&list[start..]);
+    let items = parts
+        .into_iter()
+        .map(|item| item.trim().trim_end_matches(['.', ';']).trim())
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    (names_rules && items.len() >= 2).then(|| {
+        items
+            .into_iter()
+            .map(|item| {
+                let at = item.as_ptr() as usize - text.as_ptr() as usize;
+                (format!("{framing}: {item}."), at..at + item.len())
+            })
+            .collect()
+    })
 }
 
 fn prose_rule(clause: &str) -> MarkedRule {
@@ -293,6 +435,22 @@ fn opening(text: &str) -> String {
     }
 }
 
+/// The complete unit of `text` (a list item with its continuation lines, or a prose line)
+/// holding `clause`, in the user's words.
+pub(crate) fn unit_text_for_clause(text: &str, clause: &str) -> Option<String> {
+    let start = text.find(clause)?;
+    let end = start + clause.len();
+    rule_units(text)
+        .into_iter()
+        .find(|unit| {
+            unit.lines.iter().any(|line| {
+                let line_start = line.as_ptr() as usize - text.as_ptr() as usize;
+                line_start <= start && end <= line_start + line.len()
+            })
+        })
+        .map(|unit| unit.lines.join(" "))
+}
+
 /// Whether an unheaded list item needs a standing marker in one of its sentences.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Marker {
@@ -332,7 +490,11 @@ fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<Marke
     if kept.is_empty() {
         return None;
     }
-    let body = kept.join(" ");
+    // The list marker ("1.", "-") is the message's layout, not the rule's words.
+    let joined = kept.join(" ");
+    let body = list_item_body(&joined)
+        .map_or(joined.as_str(), str::trim)
+        .to_string();
     let normalized = normalize(&body);
     match unit.header {
         // Items relayed from someone else are never the user's rules.
@@ -357,7 +519,7 @@ fn item_rule(unit: &RuleUnit<'_>, kept: &[&str], marker: Marker) -> Option<Marke
             let (text, scope) = match header.limited_scope {
                 // The header's limited scope stays with the rule, in the user's words.
                 Some(scope) => {
-                    let item = list_item_body(&body).map_or(body.as_str(), str::trim);
+                    let item = body.as_str();
                     let hint = ScopeHint {
                         title: scope.trim_end_matches(':').trim().to_string(),
                         end_condition: end_condition(item),
@@ -400,6 +562,8 @@ struct RuleUnit<'a> {
     header: Option<ListHeader<'a>>,
     item: bool,
     lines: Vec<&'a str>,
+    /// A blank line, fence or blockquote separates it from the unit before.
+    separated: bool,
 }
 
 /// Groups `text` into prose lines and list items (an item with its indented continuation
@@ -412,13 +576,16 @@ fn rule_units(text: &str) -> Vec<RuleUnit<'_>> {
     let mut in_list = false;
     let mut item_open = false;
     let mut fence = Fence::default();
+    let mut separated = false;
     for line in text.lines() {
         let trimmed = line.trim();
         if fence.skips(trimmed) || trimmed.starts_with('>') {
             item_open = false;
+            separated = true;
             continue;
         }
         if trimmed.is_empty() {
+            separated = true;
             continue;
         }
         let was_in_list = in_list;
@@ -428,7 +595,9 @@ fn rule_units(text: &str) -> Vec<RuleUnit<'_>> {
                 header: None,
                 item: false,
                 lines: vec![trimmed],
+                separated,
             });
+            separated = false;
             item_open = false;
             continue;
         }
@@ -439,8 +608,10 @@ fn rule_units(text: &str) -> Vec<RuleUnit<'_>> {
                 header: list_header,
                 item: true,
                 lines: vec![trimmed],
+                separated,
             }),
         }
+        separated = false;
         item_open = true;
     }
     units

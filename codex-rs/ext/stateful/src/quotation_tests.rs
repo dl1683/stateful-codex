@@ -94,3 +94,31 @@ fn attribution_is_local_to_the_quoting_sentence() {
         [false, true, true, false]
     );
 }
+
+/// Item 2 review round 2: the user's own activity is only theirs when its subject is first
+/// person; code is a literal, matched by backtick runs; a stray backtick hides nothing after
+/// it.
+#[test]
+fn subjects_code_runs_and_stray_backticks() {
+    let rules = |text: &str| crate::user_rules::marked_rules(text).len();
+    assert_eq!(
+        (
+            rules("Priya also wrote: \"My preference is tests first\"."),
+            rules("Always pass `--only-binary=:all:` to pip install."),
+            rules("Never edit `always.py`."),
+            rules("Use `x. Then: \"Always run the full test suite.\""),
+        ),
+        (0, 1, 1, 0,)
+    );
+}
+
+/// Item 2 review round 3: the user's own earlier words, quoted, are reported history, not a
+/// rule stated now.
+#[test]
+fn quoted_self_speech_is_reported_history() {
+    assert_eq!(
+        crate::user_rules::marked_rules("I wrote last week: \"My preference is tests first.\"")
+            .len(),
+        0
+    );
+}

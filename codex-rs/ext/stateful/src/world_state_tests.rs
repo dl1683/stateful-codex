@@ -80,6 +80,7 @@ fn available_at_revision(
                     project_id,
                     revision,
                     data: Vec::new(),
+                    contexts: Default::default(),
                     omitted_entries: 0,
                     candidate_entries,
                 },

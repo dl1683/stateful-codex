@@ -7,7 +7,7 @@ use super::marked_rules;
 
 /// The standing of the rule the unit holding `clause` states; None when it is relayed.
 fn scope(text: &str, clause: &str) -> Option<RuleStanding> {
-    crate::rule_units::rule_for_clause(text, clause).map(|rule| rule.clause.standing)
+    crate::rule_units::rule_for_clause(text, clause, clause).map(|rule| rule.clause.standing)
 }
 
 fn standing(text: &str) -> RuleClause {
@@ -45,11 +45,11 @@ fn list_items_inherit_a_preferences_header() {
         marked_rules(message),
         vec![
             standing(
-                "1. Only run the test files relevant to your change, never the whole suite unless I ask."
+                "Only run the test files relevant to your change, never the whole suite unless I ask."
             ),
-            standing("2. Don't touch CHANGES.md or anything under docs/ unless I ask."),
+            standing("Don't touch CHANGES.md or anything under docs/ unless I ask."),
             standing(
-                "3. End every reply with a single line starting with \"Next:\" saying what you'd do next."
+                "End every reply with a single line starting with \"Next:\" saying what you'd do next."
             ),
         ]
     );
@@ -94,10 +94,10 @@ fn reported_advice_and_task_limited_lists_never_become_standing_rules() {
         marked_rules(message),
         vec![
             RuleClause {
-                text: "1. Never touch the migrations.".to_string(),
+                text: "Never touch the migrations.".to_string(),
                 standing: RuleStanding::Pending,
             },
-            standing("1. Cite the file and section for every factual claim."),
+            standing("Cite the file and section for every factual claim."),
         ]
     );
 }
@@ -109,11 +109,11 @@ fn explicit_task_limits_win_and_mentions_of_an_assistant_are_not_relayed_speech(
         marked_rules(message),
         vec![
             RuleClause {
-                text: "- Do not modify docs.".to_string(),
+                text: "Do not modify docs.".to_string(),
                 standing: RuleStanding::Pending,
             },
             RuleClause {
-                text: "- Never touch migrations.".to_string(),
+                text: "Never touch migrations.".to_string(),
                 standing: RuleStanding::Pending,
             },
             standing("Never treat an assistant answer as evidence of my preferences."),
@@ -147,7 +147,7 @@ For this task:
         ),
         (
             vec![RuleClause {
-                text: "- Never touch migrations.".to_string(),
+                text: "Never touch migrations.".to_string(),
                 standing: RuleStanding::Pending,
             }],
             None,
@@ -178,8 +178,8 @@ fn indented_continuations_stay_under_their_list_header() {
             None,
             // A continuation line belongs to its item: one rule per item.
             [
-                "- Prefer targeted tests, keeping the changes small.",
-                "- Never run the whole suite."
+                "Prefer targeted tests, keeping the changes small.",
+                "Never run the whole suite."
             ]
             .map(|text| RuleClause {
                 text: text.to_string(),
@@ -213,17 +213,17 @@ fn nested_headers_and_requests_about_rules() {
         (
             vec![
                 RuleClause {
-                    text: "- Work carefully.".to_string(),
+                    text: "Work carefully.".to_string(),
                     standing: RuleStanding::Standing,
                 },
                 RuleClause {
-                    text: "- Never run migrations.".to_string(),
+                    text: "Never run migrations.".to_string(),
                     standing: RuleStanding::Pending,
                 },
             ],
             Some(RuleStanding::Pending),
             vec![RuleClause {
-                text: "- Work carefully.".to_string(),
+                text: "Work carefully.".to_string(),
                 standing: RuleStanding::Standing,
             }],
             Vec::new(),
@@ -254,7 +254,7 @@ fn neutral_nested_headers_keep_the_enclosing_restriction_and_rules_about_rules_a
             super::asks_about_rules("Show me the rules you follow here."),
         ),
         (
-            ["- Check the setup.", "- Never run migrations."]
+            ["Check the setup.", "Never run migrations."]
                 .map(|text| RuleClause {
                     text: text.to_string(),
                     standing: RuleStanding::Pending,
@@ -352,5 +352,20 @@ fn a_curly_quoted_relay_does_not_swallow_the_users_next_rule() {
             text: "From now on, never touch docs.".to_string(),
             standing: RuleStanding::Standing,
         }]
+    );
+}
+
+/// Item 2 final review: a statement about the user or the work that names its duration is
+/// not a rule ("I maintain this fork for this project."); a directive in the same words is.
+#[test]
+fn a_statement_naming_the_project_is_not_a_rule() {
+    assert_eq!(
+        (
+            crate::user_rules::marked_rules("I maintain this fork for this project.").len(),
+            crate::user_rules::marked_rules("We use uv for this project.").len(),
+            crate::user_rules::marked_rules("I want you to use uv for this project.").len(),
+            crate::user_rules::marked_rules("Use uv for this project.").len(),
+        ),
+        (0, 0, 1, 1)
     );
 }

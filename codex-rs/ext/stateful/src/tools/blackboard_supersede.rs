@@ -166,6 +166,18 @@ pub(super) async fn resolve_superseded(
                 "entry {id} changed since revision {revision}; read it again before replacing it"
             )));
         }
+        if store
+            .knowledge_context(project_id, &id)
+            .await
+            .map_err(respond)?
+            .is_some_and(|context| {
+                context.category == codex_project_intelligence::KnowledgeCategory::AttributedContext
+            })
+        {
+            return Err(respond(
+                "an attributed note cannot be rewritten or promoted by model succession",
+            ));
+        }
         if current.value.kind == BlackboardKind::Instruction
             && current.value.provenance.kind == BlackboardProvenanceKind::User
             && !successor_is_user_rule

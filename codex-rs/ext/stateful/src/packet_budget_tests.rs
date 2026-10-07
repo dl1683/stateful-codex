@@ -141,6 +141,7 @@ fn project_status() -> ProjectIntelligenceStatus {
                         .map(promoted_entry)
                         .chain([background_entry()])
                         .collect(),
+                    contexts: Default::default(),
                     omitted_entries: 0,
                     candidate_entries: 0,
                 },

@@ -326,6 +326,7 @@ async fn a_retired_rule_returns_only_from_a_later_message() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-3",
             stated_at_ms: stated_before,
+            after_change: Some(0),
             placement: super::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::ModelTool,
             ),
@@ -344,6 +345,7 @@ async fn a_retired_rule_returns_only_from_a_later_message() {
             turn_id: "turn-4",
             receipt_turn_id: "turn-4",
             stated_at_ms: super::now_ms() + 1_000,
+            after_change: Some(u64::MAX),
             placement: super::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::ModelTool,
             ),
@@ -376,9 +378,15 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
     .remove(0)
     .entry;
     let store = services.blackboard().await.expect("blackboard");
-    crate::memory_controls::forget_entry(store, "project-1", &rule.id, rule.revision)
-        .await
-        .expect("retire");
+    crate::memory_controls::forget_entry(
+        store,
+        &crate::memory_controls::MemoryActor::default(),
+        "project-1",
+        &rule.id,
+        rule.revision,
+    )
+    .await
+    .expect("retire");
     let pending = capture_marked_rules(
         &services,
         /*event_sink*/ None,
@@ -398,11 +406,12 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
             turn_id: "turn-1",
             receipt_turn_id: "turn-3",
             stated_at_ms: stated_before,
+            after_change: Some(0),
             placement: super::RulePlacement::project(
                 codex_project_intelligence::ChangeOrigin::ModelTool,
             ),
         },
-        "- Never run migrations.",
+        "Never run migrations.",
         RuleStanding::Standing,
     )
     .await;
@@ -418,48 +427,6 @@ async fn an_old_quote_cannot_promote_a_pending_restatement() {
 }
 
 /// Background is stored once, verbatim, as promoted user-authored knowledge.
-#[tokio::test]
-async fn background_is_stored_once_in_the_users_words() {
-    let state_home = TempDir::new().expect("state home");
-    let services =
-        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
-    let text = "I know Python well but only a little Rust.";
-    for turn in ["turn-1", "turn-2"] {
-        super::capture_background(
-            &services,
-            /*event_sink*/ None,
-            "project-1",
-            "thread-1",
-            turn,
-            text,
-        )
-        .await;
-    }
-    let store = services.blackboard().await.expect("blackboard");
-    let root = store
-        .root_projection(RootBlackboardQuery {
-            project_id: "project-1".to_string(),
-            max_entries: 10,
-        })
-        .await
-        .expect("root");
-    assert_eq!(
-        root.data
-            .iter()
-            .map(|hit| (
-                hit.entry.value.content.clone(),
-                hit.entry.value.provenance.kind,
-                hit.entry.value.root_promotion
-            ))
-            .collect::<Vec<_>>(),
-        vec![(
-            text.to_string(),
-            BlackboardProvenanceKind::User,
-            RootPromotion::Promoted
-        )]
-    );
-}
-
 /// horizon3: rules are applied and listed in the order the user wrote them, not in the order
 /// of their identities.
 #[tokio::test]
@@ -496,7 +463,7 @@ async fn rules_keep_the_order_the_user_wrote_them_in() {
         .expect("review")
         .expect("page");
     let first_words = |content: &str| content.split(' ').take(2).collect::<Vec<_>>().join(" ");
-    let expected = ["1. Only", "2. Never", "3. Don't", "4. End"]
+    let expected = ["Only run", "Never install", "Don't touch", "End every"]
         .map(str::to_string)
         .to_vec();
     assert_eq!(
