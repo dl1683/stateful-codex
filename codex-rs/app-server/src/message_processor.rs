@@ -1582,20 +1582,22 @@ impl MessageProcessor {
             ClientRequest::BlackboardRelate { params, .. } => {
                 self.blackboard_processor.relate(params).await
             }
+            // Memory-control futures are boxed so their temporaries stay out of this
+            // dispatcher's poll frame, which every other RPC (thread/resume included) pays for.
             ClientRequest::StatefulMemoryRead { params, .. } => {
-                self.blackboard_processor.memory_read(params).await
+                Box::pin(self.blackboard_processor.memory_read(params)).await
             }
             ClientRequest::StatefulMemoryForget { params, .. } => {
-                self.blackboard_processor.memory_forget(params).await
+                Box::pin(self.blackboard_processor.memory_forget(params)).await
             }
             ClientRequest::StatefulMemoryCorrect { params, .. } => {
-                self.blackboard_processor.memory_correct(params).await
+                Box::pin(self.blackboard_processor.memory_correct(params)).await
             }
             ClientRequest::StatefulMemoryAdd { params, .. } => {
-                self.blackboard_processor.memory_add(params).await
+                Box::pin(self.blackboard_processor.memory_add(params)).await
             }
             ClientRequest::StatefulMemoryScope { params, .. } => {
-                self.blackboard_processor.memory_scope(params).await
+                Box::pin(self.blackboard_processor.memory_scope(params)).await
             }
             ClientRequest::StatefulRunStart { params, .. } => {
                 self.stateful_processor.run_start(params).await
