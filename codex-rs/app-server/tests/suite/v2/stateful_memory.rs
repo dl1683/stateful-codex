@@ -260,7 +260,41 @@ async fn background_is_reviewed_corrected_and_forgotten_as_background() -> Resul
     )
     .await;
     let thread = start_thread(&mut server, &project.project.id).await?;
-    run_turn(&mut server, &thread, &format!("Hi! {BACKGROUND}")).await?;
+    let added: StatefulMemoryAddResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryAdd {
+            request_id,
+            params: StatefulMemoryAddParams {
+                thread_id: thread.clone(),
+                kind: StatefulMemoryAddKind::Background,
+                content: BACKGROUND.to_string(),
+                scope: None,
+                reason: None,
+                client_action_id: "explicit-background".to_string(),
+                background_section: true,
+            },
+        })
+        .await?;
+    assert_eq!(
+        (added.item.content, added.item.authority),
+        (
+            BACKGROUND.to_string(),
+            Some(codex_app_server_protocol::StatefulMemoryAuthority::HumanDirect)
+        )
+    );
+    run_turn(&mut server, &thread, "Review the project.").await?;
+    assert!(server.shutdown_gracefully().await?.success());
+    server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let request_id = server
+        .send_thread_resume_request(codex_app_server_protocol::ThreadResumeParams {
+            thread_id: thread.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let _: codex_app_server_protocol::ThreadResumeResponse =
+        server.read_response(request_id).await?;
     let read = |thread_id: String, background_section: bool| {
         move |request_id| ClientRequest::StatefulMemoryRead {
             request_id,
@@ -474,5 +508,114 @@ async fn run_turn(server: &mut TestAppServer, thread_id: &str, text: &str) -> Re
             ..Default::default()
         })
         .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_noop_add_retry_after_forget_and_restart_does_not_restore_words() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let home = TempDir::new()?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .write(home.path())?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized()
+        .await?;
+    let project: ProjectCreateResponse = server
+        .request(|request_id| ClientRequest::ProjectCreate {
+            request_id,
+            params: ProjectCreateParams {
+                name: "Retries".to_string(),
+                roots: Vec::new(),
+                metadata: None,
+                idempotency_key: "retry-project".to_string(),
+            },
+        })
+        .await?;
+    let thread = start_thread(&mut server, &project.project.id).await?;
+    responses::mount_sse_once(
+        &responses_server,
+        responses::sse(vec![
+            responses::ev_response_created("restart-turn"),
+            responses::ev_completed("restart-turn"),
+        ]),
+    )
+    .await;
+    run_turn(
+        &mut server,
+        &thread,
+        "Persist this conversation for a restart.",
+    )
+    .await?;
+    let add = |action: &str| {
+        let thread = thread.clone();
+        let action = action.to_string();
+        move |request_id| ClientRequest::StatefulMemoryAdd {
+            request_id,
+            params: StatefulMemoryAddParams {
+                thread_id: thread,
+                kind: StatefulMemoryAddKind::Rule,
+                content: "Never push.".to_string(),
+                scope: None,
+                reason: None,
+                client_action_id: action,
+                background_section: true,
+            },
+        }
+    };
+    let first: StatefulMemoryAddResponse = server.request(add("first")).await?;
+    let noop: StatefulMemoryAddResponse = server.request(add("noop")).await?;
+    assert_eq!(
+        (first.outcome, noop.outcome, first.item.entry_id.clone()),
+        (
+            codex_app_server_protocol::StatefulMemoryAddOutcome::Added,
+            codex_app_server_protocol::StatefulMemoryAddOutcome::AlreadyPresent,
+            noop.item.entry_id.clone()
+        )
+    );
+    let _: StatefulMemoryForgetResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryForget {
+            request_id,
+            params: StatefulMemoryForgetParams {
+                thread_id: thread.clone(),
+                entry_id: first.item.entry_id.clone(),
+                expected_revision: first.item.revision,
+            },
+        })
+        .await?;
+    assert!(server.shutdown_gracefully().await?.success());
+    server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized()
+        .await?;
+    let request_id = server
+        .send_thread_resume_request(codex_app_server_protocol::ThreadResumeParams {
+            thread_id: thread.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let _: codex_app_server_protocol::ThreadResumeResponse =
+        server.read_response(request_id).await?;
+    let retry: StatefulMemoryAddResponse = server.request(add("noop")).await?;
+    let memory: StatefulMemoryReadResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryRead {
+            request_id,
+            params: StatefulMemoryReadParams {
+                thread_id: thread.clone(),
+                cursor: None,
+                limit: None,
+                background_section: true,
+            },
+        })
+        .await?;
+    assert_eq!(
+        (retry.outcome, retry.item.entry_id, memory.data),
+        (
+            codex_app_server_protocol::StatefulMemoryAddOutcome::AlreadyDone,
+            first.item.entry_id,
+            Vec::new()
+        )
+    );
     Ok(())
 }

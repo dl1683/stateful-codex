@@ -24,6 +24,7 @@ const STORED: &str =
     "which may take a few days: Do NOT change any code until we have agreed on the root cause.";
 const NOT_HERE: &str = "belong to an investigation this thread is not part of";
 const CONTINUES: &str = "This thread continues the investigation";
+const ENDED: &str = "ended; its rules no longer apply";
 
 #[tokio::test]
 async fn investigation_rules_apply_only_while_and_where_the_investigation_runs() -> Result<()> {
@@ -69,14 +70,57 @@ async fn investigation_rules_apply_only_while_and_where_the_investigation_runs()
         "Rename the helper in utils.py to snake_case and update its callers",
     )
     .await?;
-    // A new thread that continues the earlier work joins the one open investigation.
+    // Joining is an explicit public control, independent of later prose.
     let continued = start_thread(&mut server, &project.project.id).await?;
+    let scopes: codex_app_server_protocol::StatefulMemoryScopeResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryScope {
+            request_id,
+            params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                thread_id: opened.clone(),
+                action: codex_app_server_protocol::StatefulMemoryScopeAction::List,
+                scope_id: None,
+            },
+        })
+        .await?;
+    let scope_id = scopes.scopes[0].scope_id.clone();
+    let joined: codex_app_server_protocol::StatefulMemoryScopeResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryScope {
+            request_id,
+            params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                thread_id: continued.clone(),
+                action: codex_app_server_protocol::StatefulMemoryScopeAction::Join,
+                scope_id: Some(scope_id.clone()),
+            },
+        })
+        .await?;
+    assert!(
+        joined
+            .scopes
+            .iter()
+            .any(|scope| scope.scope_id == scope_id && scope.this_thread && scope.open)
+    );
     run_turn(
         &mut server,
         &continued,
         "It's been a few days. Remind me what we ruled out so far.",
     )
     .await?;
+    let ended: codex_app_server_protocol::StatefulMemoryScopeResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryScope {
+            request_id,
+            params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                thread_id: continued.clone(),
+                action: codex_app_server_protocol::StatefulMemoryScopeAction::End,
+                scope_id: Some(scope_id.clone()),
+            },
+        })
+        .await?;
+    assert!(
+        ended
+            .scopes
+            .iter()
+            .any(|scope| scope.scope_id == scope_id && !scope.open)
+    );
     run_turn(
         &mut server,
         &continued,
@@ -84,27 +128,71 @@ async fn investigation_rules_apply_only_while_and_where_the_investigation_runs()
     )
     .await?;
     run_turn(&mut server, &continued, "Go on with the plan.").await?;
+    assert!(server.shutdown_gracefully().await?.success());
+    server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let persisted: codex_app_server_protocol::StatefulMemoryScopeResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryScope {
+            request_id,
+            params: codex_app_server_protocol::StatefulMemoryScopeParams {
+                thread_id: continued.clone(),
+                action: codex_app_server_protocol::StatefulMemoryScopeAction::List,
+                scope_id: None,
+            },
+        })
+        .await?;
+    assert!(
+        persisted
+            .scopes
+            .iter()
+            .any(|scope| scope.scope_id == scope_id && !scope.open && scope.this_thread)
+    );
     let requests = log.requests();
-    let packet = |index: usize| requests[index].body_json().to_string();
+    // The packet a thread's first request carries is what applies there; a later turn adds
+    // only what changed since, after the previous user message.
+    let whole = |index: usize| requests[index].body_json().to_string();
+    let added = |index: usize| {
+        let input = requests[index].input();
+        let users = input
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item["role"] == "user")
+            .map(|(position, _)| position)
+            .collect::<Vec<_>>();
+        let from = users
+            .len()
+            .checked_sub(2)
+            .map_or(0, |previous| users[previous] + 1);
+        serde_json::Value::Array(input[from..].to_vec()).to_string()
+    };
     // The rule as the root shows it, with its investigation (the raw message also reaches
     // later threads through the conversation record, so the raw words prove nothing).
-    let applied = |index: usize| packet(index).contains(STORED);
-    let elsewhere = |index: usize| packet(index).contains(NOT_HERE);
-    let continues = |index: usize| packet(index).contains(CONTINUES);
+    let first_turn = |index: usize| {
+        let packet = whole(index);
+        (
+            packet.contains(STORED),
+            packet.contains(CONTINUES),
+            packet.contains(NOT_HERE),
+        )
+    };
     assert_eq!(
-        [
-            (applied(0), continues(0), elsewhere(0)),
-            (applied(1), continues(1), elsewhere(1)),
-            (applied(2), continues(2), elsewhere(2)),
-            (applied(4), continues(4), elsewhere(4)),
-        ],
-        [
-            (true, true, false),
-            (false, false, true),
-            (true, true, false),
-            // After the user ended it, the thread is told its rules no longer apply.
-            (true, true, true),
-        ]
+        (
+            [first_turn(0), first_turn(1), first_turn(2)],
+            // The turn after the user ended it says its rules no longer apply.
+            added(3).contains(ENDED),
+            added(2).contains(ENDED),
+        ),
+        (
+            [
+                (true, true, false),
+                (false, false, true),
+                (true, true, false)
+            ],
+            true,
+            false,
+        )
     );
     Ok(())
 }
