@@ -108,7 +108,7 @@ count, extension grouping and all eight filenames, and said nothing was edited.
 | Full lifetime tokens | 69,900 | 85,477 (+15,577, +22.28%) | 130,251 (+60,351, +86.34%) |
 | Uncached input + output | 22,540 | 32,741 (+10,201, +45.26%) | 30,923 (+8,383, +37.19%) |
 | Model responses | 3 | 3 | 5 |
-| Read-bearing tool calls | 2 | 1 | 1 |
+| Read-bearing tool calls | 2 | 1 (-1, -50%) | 1 (-1, -50%) |
 
 Stateful also made one blackboard query, one obligation update and one run
 update, and no context-map query. **Negative result:** the saved read was much
@@ -809,7 +809,8 @@ representative workloads, and it does not change SC-EVAL-010.
 
 ## Completion integrity SC-EVAL-012 to SC-EVAL-014 (2026-09-22)
 
-All three re-ran the exact SC-EVAL-010 termination-risk prompt in one fresh
+All three were pre-registered before execution on 2026-09-22. Each
+re-ran the exact SC-EVAL-010 termination-risk prompt in one fresh
 Collaborative thread on project `01a0c98a-e567-7890-9711-3260f8fd1a0d`. The
 product gate in each: the persisted result and the final prose both state that
 executed amendment 2 removes data-security and confidentiality exposure (and
