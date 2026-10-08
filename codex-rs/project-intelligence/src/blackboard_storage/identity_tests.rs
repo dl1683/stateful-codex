@@ -10,6 +10,170 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 const PROJECT: &str = "project-1";
 
+async fn legacy_rows(store: &BlackboardStore) -> Vec<Vec<String>> {
+    let mut result = Vec::new();
+    for table in [
+        "blackboard_entries",
+        "blackboard_entry_revisions",
+        "knowledge_context",
+        "memory_changes",
+    ] {
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info(?) ORDER BY cid")
+                .bind(table)
+                .fetch_all(&store.pool)
+                .await
+                .unwrap();
+        let fields = columns
+            .iter()
+            .map(|name| format!("quote(\"{name}\")"))
+            .collect::<Vec<_>>()
+            .join(",");
+        result.push(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT json_array({fields}) AS cells FROM {table} ORDER BY cells"
+            )))
+            .fetch_all(&store.pool)
+            .await
+            .unwrap(),
+        );
+    }
+    result
+}
+
+#[tokio::test]
+async fn c2r1_legacy_metadata_revisions_preserve_active_words_and_real_retirements() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let mut value = rule("Active meridian note.");
+    value.kind = BlackboardKind::Note;
+    value.provenance.kind = BlackboardProvenanceKind::Agent;
+    let id = BlackboardEntryId::parse("legacy-active").unwrap();
+    let mut active = store.create_entry(id.clone(), value.clone()).await.unwrap();
+    for index in 0..66 {
+        let mut update = retire(&active);
+        update.state = BlackboardEntryState::Active;
+        update.confidence = ConfidenceScore::from_basis_points(5000 + index).unwrap();
+        active = store
+            .update_entry_from_model(PROJECT, &id, update)
+            .await
+            .unwrap();
+    }
+    value.content = "Old corrected wording.".to_string();
+    let changed_id = BlackboardEntryId::parse("legacy-changed").unwrap();
+    let changed = store
+        .create_entry(changed_id.clone(), value.clone())
+        .await
+        .unwrap();
+    let mut correction = retire(&changed);
+    correction.state = BlackboardEntryState::Active;
+    correction.content = "Current corrected wording.".to_string();
+    let changed = store
+        .update_entry_from_model(PROJECT, &changed_id, correction)
+        .await
+        .unwrap();
+    value.content = "Actually forgotten wording.".to_string();
+    let forgotten_id = BlackboardEntryId::parse("legacy-forgotten").unwrap();
+    let forgotten = store
+        .create_entry(forgotten_id.clone(), value)
+        .await
+        .unwrap();
+    store
+        .update_entry(PROJECT, &forgotten_id, retire(&forgotten))
+        .await
+        .unwrap();
+    let original = legacy_rows(&store).await;
+    sqlx::query("DELETE FROM capture_identity_aliases")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO capture_identity_coverage(project_id, watermark) SELECT 'project-1', MAX(rowid) FROM blackboard_entry_revisions").execute(&store.pool).await.unwrap();
+    sqlx::query("CREATE TRIGGER stop_after_identity_page BEFORE UPDATE ON capture_identity_coverage WHEN OLD.after_rowid >= 64 BEGIN SELECT RAISE(ABORT, 'cold continuation'); END").execute(&store.pool).await.unwrap();
+    assert!(store.maintain_capture_identities(PROJECT).await.is_err());
+    sqlx::query("DROP TRIGGER stop_after_identity_page")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(legacy_rows(&store).await, original);
+    store.pool.close().await;
+    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+        .await
+        .unwrap();
+    assert!(reopened.maintain_capture_identities(PROJECT).await.unwrap());
+    assert_eq!(legacy_rows(&reopened).await, original);
+    assert_eq!(
+        reopened
+            .get_source_eligible_entry(PROJECT, &id)
+            .await
+            .unwrap(),
+        Some(active.clone())
+    );
+    assert_eq!(
+        reopened
+            .get_source_eligible_entry(PROJECT, &changed_id)
+            .await
+            .unwrap(),
+        Some(changed)
+    );
+    assert!(
+        reopened
+            .source_text_eligible(PROJECT, &active.value.content)
+            .await
+            .unwrap()
+    );
+    let seal = reopened
+        .observe_source(
+            super::super::source_fixture::observation("active-original", &active.value.content),
+            &active.value.content,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened
+            .read_source_range(
+                PROJECT,
+                &seal.exact_source_locator,
+                &seal.digest,
+                /*start*/ 0,
+                active.value.content.len() as u32
+            )
+            .await
+            .unwrap()
+            .exact_text,
+        active.value.content
+    );
+    for retired in ["Old corrected wording.", "Actually forgotten wording."] {
+        assert!(
+            !reopened
+                .source_text_eligible(PROJECT, retired)
+                .await
+                .unwrap()
+        );
+        let mut copy = active.value.clone();
+        copy.content = retired.to_string();
+        assert!(matches!(
+            reopened
+                .create_entry(
+                    BlackboardEntryId::parse(format!("copy-{retired}")).unwrap(),
+                    copy
+                )
+                .await,
+            Err(BlackboardStoreError::RetiredIdentity)
+        ));
+    }
+    let mut update = retire(&active);
+    update.state = BlackboardEntryState::Active;
+    update.root_promotion = RootPromotion::Candidate;
+    let revised = reopened
+        .update_entry_from_model(PROJECT, &id, update)
+        .await
+        .unwrap();
+    assert_eq!(
+        (revised.value.content, revised.revision),
+        (active.value.content, active.revision + 1)
+    );
+}
+
 #[tokio::test]
 async fn c2_unicode_retirement_aliases_precede_limits_and_cross_writer_family_authority() {
     for (old, repeated) in [

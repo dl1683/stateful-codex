@@ -181,7 +181,7 @@ pub(super) async fn direct_match(
     Ok(Some(BlackboardEntryId::parse(id)?))
 }
 
-type IdentityRevision = (i64, Option<String>, String, Option<String>, String, i64);
+type IdentityRevision = (i64, Option<String>, String, Option<String>, String);
 
 impl BlackboardStore {
     /// Upgrade coverage, at most 64 revision rows per page and 256 per operation.
@@ -207,10 +207,10 @@ impl BlackboardStore {
             if after >= watermark {
                 return Ok(true);
             }
-            let rows: Vec<IdentityRevision> = sqlx::query_as("SELECT revision.rowid, CASE WHEN octet_length(entry.id) <= 512 THEN entry.id END, revision.kind, CASE WHEN octet_length(revision.content) <= 4096 AND octet_length(entry.id) <= 512 THEN revision.content END, revision.state, revision.revision FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id WHERE entry.project_id = ? AND revision.rowid > ? AND revision.rowid <= ? ORDER BY revision.rowid LIMIT 64")
+            let rows: Vec<IdentityRevision> = sqlx::query_as("SELECT revision.rowid, CASE WHEN octet_length(entry.id) <= 512 THEN entry.id END, revision.kind, CASE WHEN octet_length(revision.content) <= 4096 AND octet_length(entry.id) <= 512 THEN revision.content END, revision.state FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id WHERE entry.project_id = ? AND revision.rowid > ? AND revision.rowid <= ? ORDER BY revision.rowid LIMIT 64")
                 .bind(project_id).bind(after).bind(watermark).fetch_all(&mut *tx).await?;
             let mut last = after;
-            for (rowid, id, kind, content, historical_state, revision) in &rows {
+            for (rowid, id, kind, content, historical_state) in &rows {
                 let (Some(id), Some(content)) = (id, content) else {
                     sqlx::query("UPDATE capture_identity_coverage SET blocked_reason = 'unsupported legacy identity' WHERE project_id = ?").bind(project_id).execute(&mut *tx).await?;
                     tx.commit().await?;
@@ -233,11 +233,11 @@ impl BlackboardStore {
                     }
                     Err(error) => return Err(error),
                 };
-                let (current_revision, current_state): (i64, String) = sqlx::query_as("SELECT entry.revision, revision.state FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision WHERE entry.project_id = ? AND entry.id = ?").bind(project_id).bind(id.as_str()).fetch_one(&mut *tx).await?;
-                let state = if current_revision != *revision
-                    || historical_state != "active"
-                    || current_state != "active"
-                {
+                let current_state: String = sqlx::query_scalar("SELECT revision.state FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision WHERE entry.project_id = ? AND entry.id = ?").bind(project_id).bind(id.as_str()).fetch_one(&mut *tx).await?;
+                // Replay actual lifecycle and wording transitions in durable row order.
+                // register_alias retires changed wording and never clears a real fence;
+                // a metadata-only Active revision is not itself a retirement.
+                let state = if historical_state != "active" || current_state != "active" {
                     BlackboardEntryState::Tombstoned
                 } else {
                     BlackboardEntryState::Active
