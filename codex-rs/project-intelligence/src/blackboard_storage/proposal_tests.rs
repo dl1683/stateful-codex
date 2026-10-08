@@ -35,6 +35,50 @@ fn proposal(seal: &SourceSeal, text: &str) -> SourceProposal {
 }
 
 #[tokio::test]
+async fn c3r2_durable_proposal_group_keeps_unsupported_context_out_of_automatic_recall() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let admission = admission(&home).await;
+    let text = "Mara bought a prototype; its motor was not damaged.";
+    let seal = store
+        .observe_source(observation("damaged-context", text), text)
+        .await
+        .unwrap();
+    let result = store
+        .propose_sources(&admission, node(), "turn-1", vec![proposal(&seal, text)])
+        .await
+        .unwrap();
+    let id = BlackboardEntryId::parse(result[0].entry_id.clone().unwrap()).unwrap();
+    let archived = store.get_entry(PROJECT, &id).await.unwrap();
+    for payload in ["x".repeat(1048576), "not json".into(), "{}".into()] {
+        sqlx::query("UPDATE knowledge_context SET payload = ? WHERE entry_id = ?")
+            .bind(payload)
+            .bind(id.as_str())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let before = snapshot(&store).await;
+        assert_eq!(
+            store.get_source_eligible_entry(PROJECT, &id).await.unwrap(),
+            None
+        );
+        assert!(
+            store
+                .root_projection(RootBlackboardQuery {
+                    project_id: PROJECT.into(),
+                    max_entries: 1,
+                })
+                .await
+                .unwrap()
+                .data
+                .is_empty()
+        );
+        assert_eq!(store.get_entry(PROJECT, &id).await.unwrap(), archived);
+        assert_eq!(snapshot(&store).await, before);
+    }
+}
+
+#[tokio::test]
 async fn c3_reports_scope_negation_and_inner_ranges_keep_whole_enclosure_cold() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;

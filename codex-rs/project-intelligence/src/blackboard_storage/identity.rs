@@ -44,16 +44,25 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
         )))";
 
 /// Automatic proposal recall is unavailable until publication after hooks is fenced.
-/// Check every stored revision so corrections cannot reopen a cut proposal identity.
+/// Durable group membership covers proposals even when their context is unsupported.
+/// Bounded historical payload checks also cover linked copies of proposal context.
 pub(super) fn automatic_entry_eligibility() -> String {
-    format!("{ENTRY_SOURCE_ELIGIBILITY} AND NOT EXISTS (
+    format!(
+        "{ENTRY_SOURCE_ELIGIBILITY} AND NOT EXISTS (
+        SELECT 1 FROM capture_group_members AS member
+        JOIN capture_groups AS capture
+          ON capture.project_id = member.project_id AND capture.group_id = member.group_id
+        WHERE member.entry_id = entry.id AND capture.kind = 'proposal-v1')
+        AND NOT EXISTS (
         SELECT 1 FROM knowledge_context AS context
         WHERE context.entry_id = entry.id
           AND CASE
-              WHEN context.payload IS NULL THEN 0
-              WHEN octet_length(context.payload) > 8192 THEN 1
-              WHEN json_valid(context.payload) THEN json_type(context.payload, '$.proposal') IS NOT NULL
-              ELSE 1 END)")
+              WHEN octet_length(context.payload) <= 8192 THEN CASE
+                  WHEN json_valid(context.payload)
+                    THEN json_type(context.payload, '$.proposal') IS NOT NULL
+                  ELSE 0 END
+              ELSE 0 END)"
+    )
 }
 
 impl BlackboardStore {
