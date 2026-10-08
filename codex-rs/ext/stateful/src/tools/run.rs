@@ -20,6 +20,7 @@ use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::completion::CompletionRequest;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
+use crate::completion::completion_root;
 use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
@@ -107,6 +108,50 @@ impl StatefulRunUpdateTool {
                     "completion could not lock project knowledge ({error}); nothing changed, retry the same stateful_run_update"
                 ))
             })
+    }
+
+    /// Runs one call; a rejected completion attempt also shows valid completion calls
+    /// filled with the run's current revisions, so the next attempt can succeed.
+    async fn handle_guided(
+        &self,
+        call: ToolCall<'_>,
+    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        let completing = is_completion_attempt(&call);
+        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        match self.handle_call(call).await {
+            Err(FunctionCallError::RespondToModel(message)) if completing => {
+                let guided = format!("{message}. {}", self.completion_guide().await);
+                Err(FunctionCallError::RespondToModel(
+                    if serde_json::to_string(&guided).is_ok_and(|text| text.len() <= budget) {
+                        guided
+                    } else {
+                        message
+                    },
+                ))
+            }
+            outcome => outcome,
+        }
+    }
+
+    /// Valid completion calls for the run's current state, as copyable JSON.
+    async fn completion_guide(&self) -> String {
+        let Ok(run) = thread_run(&self.project_id, &self.thread_id, &self.services).await else {
+            return "Completion needs an active Stateful run on this thread.".to_string();
+        };
+        let revision = run.revision;
+        let lookup = format!(
+            r#"noReusableLearning (only when this run wrote no project knowledge): {{"expectedRevision":{revision},"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>"}}"#
+        );
+        let durable = match completion_root(&self.services, &self.project_id, &self.thread_id)
+            .await
+        {
+            Ok((root_revision, aliases)) if aliases > 0 => format!(
+                r#"durableLearning: {{"expectedRevision":{revision},"status":"completed","completionIdempotencyKey":"completion-{revision}","finalObligation":{{"learning":["<reusable conclusion>"]}},"result":"<final answer>","rootRevision":{root_revision},"materialRootFindings":["E1"]}} (E1..E{aliases} are the current root aliases)"#
+            ),
+            Ok(_) => "durableLearning first needs a root finding: record it with blackboard_record_batch rootPromotion promoted".to_string(),
+            Err(_) => "durableLearning needs rootRevision and materialRootFindings from the current World State".to_string(),
+        };
+        format!("Valid completion calls (replace the <...> text): {lookup}; {durable}.")
     }
 
     async fn handle_call(
@@ -457,6 +502,15 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     }
 }
 
+/// Whether a call tries to complete the run. Undecodable arguments count too: a model
+/// repeating a malformed call is not converging either.
+fn is_completion_attempt(call: &ToolCall<'_>) -> bool {
+    call.function_arguments()
+        .ok()
+        .and_then(|arguments| serde_json::from_str::<Value>(arguments).ok())
+        .is_none_or(|arguments| arguments["status"] == "completed")
+}
+
 fn status_name(status: StatefulRunStatus) -> &'static str {
     match status {
         StatefulRunStatus::Pending => "pending",
@@ -469,9 +523,6 @@ fn status_name(status: StatefulRunStatus) -> &'static str {
     }
 }
 use std::sync::Arc;
-
-#[path = "run_guard.rs"]
-mod guard;
 
 #[cfg(test)]
 #[path = "run_tests.rs"]

@@ -104,30 +104,26 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
         )),
     ];
-    tools.push(Arc::new(obligation::ObligationUpdateTool::new(
-        project_id.clone(),
-        thread_id.clone(),
-        services.clone(),
-        event_sink.clone(),
-    )));
-    // A turn that used up its completion attempts is no longer offered completion; the
-    // tool returns when the thread's next turn starts.
-    if !services.completion_attempts().exhausted(&thread_id) {
-        tools.push(Arc::new(run::StatefulRunUpdateTool::new(
+    tools.extend([
+        Arc::new(obligation::ObligationUpdateTool::new(
+            project_id.clone(),
+            thread_id.clone(),
+            services.clone(),
+            event_sink.clone(),
+        )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>,
+        Arc::new(run::StatefulRunUpdateTool::new(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
             projects,
             event_sink.clone(),
             visible_root,
-        )));
-    }
-    tools.extend([
+        )),
         Arc::new(run_read::StatefulRunReadTool::new(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
-        )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>,
+        )),
         Arc::new(steering::SteeringQueryTool::new(
             project_id.clone(),
             thread_id.clone(),
