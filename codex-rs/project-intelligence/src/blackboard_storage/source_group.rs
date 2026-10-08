@@ -51,7 +51,9 @@ impl BlackboardStore {
         }
         if group.project_id != admission.project_id()
             || group.members.iter().any(|member| {
-                member.seal.observation.authoritative_thread_id != admission.thread_id()
+                member.write.value.project_id != group.project_id
+                    || member.seal.observation.project_id != group.project_id
+                    || member.seal.observation.authoritative_thread_id != admission.thread_id()
                     || member.seal.observation.binding_generation != admission.binding_generation()
             })
         {

@@ -45,6 +45,54 @@ fn request(seal: &SourceSeal, action: &str) -> SourceCaptureGroup {
 }
 
 #[tokio::test]
+async fn c2r1_group_refuses_cross_project_member_without_any_mutation() {
+    let home = TempDir::new().unwrap();
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let store = store(&home).await;
+    let other_node = HierarchyNodeId::parse("other-project-node").unwrap();
+    HierarchyStore::open(&sqlite)
+        .await
+        .unwrap()
+        .create_node(
+            other_node.clone(),
+            NewHierarchyNode {
+                project_id: "project-2".to_string(),
+                parent_id: None,
+                kind: NodeKind::Project,
+                project_root: None,
+                relative_path: ProjectRelativePath::root(),
+                region_anchor: None,
+                source_fingerprint: None,
+            },
+        )
+        .await
+        .unwrap();
+    let admission = admission(&home).await;
+    let text = "Never push. Never commit.";
+    let seal = store
+        .observe_source(observation("original", text), text)
+        .await
+        .unwrap();
+    let before = snapshot(&store).await;
+    let mut mismatched = request(&seal, "action");
+    mismatched.members[1].write.value.project_id = "project-2".to_string();
+    mismatched.members[1].write.value.node_id = other_node;
+    assert!(matches!(
+        store.write_source_group(&admission, mismatched).await,
+        Err(BlackboardStoreError::InvalidSource)
+    ));
+    assert_eq!(snapshot(&store).await, before);
+    store.pool.close().await;
+    let reopened = BlackboardStore::open(&sqlite).await.unwrap();
+    assert_eq!(snapshot(&reopened).await, before);
+    let receipt = reopened
+        .write_source_group(&admission, request(&seal, "action"))
+        .await
+        .unwrap();
+    assert_eq!((receipt.saved, receipt.members.len()), (2, 2));
+}
+
+#[tokio::test]
 async fn c2_group_faults_roll_back_semantics_keep_observation_and_cold_retry() {
     for table in [
         "blackboard_entry_revisions",
