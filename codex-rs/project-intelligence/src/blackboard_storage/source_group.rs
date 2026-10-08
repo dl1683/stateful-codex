@@ -146,7 +146,7 @@ impl BlackboardStore {
                 if group
                     .members
                     .iter()
-                    .any(|member| member.write.change.origin == ChangeOrigin::ModelTool)
+                    .any(|member| member.write.change.origin != ChangeOrigin::DirectControl)
                 {
                     super::writer_policy::check_model_target(
                         &mut tx,

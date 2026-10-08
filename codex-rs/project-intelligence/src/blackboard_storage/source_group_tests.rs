@@ -715,3 +715,47 @@ async fn source_group_process_worker() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn c2_host_origin_group_replay_rechecks_current_human_authority() {
+    for origin in [ChangeOrigin::HostCapture, ChangeOrigin::HostObserved] {
+        let home = TempDir::new().unwrap();
+        let store = store(&home).await;
+        let admission = admission(&home).await;
+        let text = "Ground rules for this project:\n- Never push.\n";
+        let seal = store
+            .observe_source(observation("host-replay-original", text), text)
+            .await
+            .unwrap();
+        let request = || {
+            let mut group = request(&seal, "host-origin-action");
+            group.members.truncate(/*len*/ 1);
+            group.members[0].write.value.provenance.kind = BlackboardProvenanceKind::Agent;
+            group.members[0].write.context.authority = KnowledgeAuthority::AssistantReported;
+            group.members[0].write.change.origin = origin;
+            group
+        };
+        store
+            .write_source_group(&admission, request())
+            .await
+            .unwrap();
+        // A schema-valid legacy authority adjustment must be read from current
+        // context, not inferred from the unchanged group receipt or alias projection.
+        sqlx::query(
+            "UPDATE knowledge_context SET authority = 'human_direct' WHERE entry_id = 'member-0'",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let before = snapshot(&store).await;
+        store.pool.close().await;
+        let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+            .await
+            .unwrap();
+        assert!(matches!(
+            reopened.write_source_group(&admission, request()).await,
+            Err(BlackboardStoreError::ModelMutationRefused)
+        ));
+        assert_eq!(snapshot(&reopened).await, before);
+    }
+}
