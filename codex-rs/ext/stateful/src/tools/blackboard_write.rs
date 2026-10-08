@@ -102,11 +102,25 @@ struct BatchRecordArguments {
     relations: Vec<BatchRelationArguments>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
 enum BatchArguments {
     SourceProposal(super::source_proposals::ProposalBatch),
     Agent(BatchRecordArguments),
+}
+
+// An explicit proposal discriminator preserves ordinary Agent decoding errors.
+impl<'de> Deserialize<'de> for BatchArguments {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("type").is_some() {
+            serde_json::from_value(value)
+                .map(Self::SourceProposal)
+                .map_err(serde::de::Error::custom)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Agent)
+                .map_err(serde::de::Error::custom)
+        }
+    }
 }
 
 /// Validates and persists one record for the batch tool.
