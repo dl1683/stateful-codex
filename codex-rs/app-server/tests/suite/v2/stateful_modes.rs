@@ -129,6 +129,11 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
 
 #[tokio::test]
 async fn socratic_run_blocks_execution_until_the_user_resumes_it() -> Result<()> {
+    let output_command = if cfg!(windows) {
+        "Write-Output"
+    } else {
+        "echo"
+    };
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
@@ -155,7 +160,7 @@ async fn socratic_run_blocks_execution_until_the_user_resumes_it() -> Result<()>
                 responses::ev_function_call(
                     "blocked-exec",
                     "exec_command",
-                    &json!({"cmd": "Write-Output SHOULD_NOT_RUN"}).to_string(),
+                    &json!({"cmd": format!("{output_command} SHOULD_NOT_RUN")}).to_string(),
                 ),
                 responses::ev_completed("blocked-exec-response"),
             ]),
@@ -170,7 +175,7 @@ async fn socratic_run_blocks_execution_until_the_user_resumes_it() -> Result<()>
                 responses::ev_function_call(
                     "allowed-exec",
                     "exec_command",
-                    &json!({"cmd": "Write-Output SOCRATIC_RESUMED"}).to_string(),
+                    &json!({"cmd": format!("{output_command} SOCRATIC_RESUMED")}).to_string(),
                 ),
                 responses::ev_completed("allowed-exec-response"),
             ]),
