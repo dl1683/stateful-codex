@@ -231,16 +231,65 @@ async fn c3r2_automatic_proposal_recall_cut_keeps_storage_and_agent_control_cold
                 (json!([]), json!(false))
             );
         }
-        assert!(
-            tool.handle(call(
-                "blackboard_query",
-                json!({"entryId":id.as_str()}),
-                /*budget*/ 9000,
-                ToolCallSource::Direct
-            ))
-            .await
-            .is_err()
-        );
+        for source in [
+            ToolCallSource::Direct,
+            ToolCallSource::CodeMode {
+                cell_id: "cell".into(),
+                runtime_tool_call_id: "nested".into(),
+            },
+        ] {
+            for budget in [2, 4, 8, 20, 32, 64, 100, 240, 9000] {
+                for arguments in [
+                    json!({"entryId":id.as_str()}),
+                    json!({"entryId":"agent-control"}),
+                    json!({"entryId":"agent-control","expectedEntryRevision":1,
+                        "contentOffset":"independent Agent positive control".len()}),
+                    json!({"entryId":"agent-control","expectedEntryRevision":2}),
+                    json!({"entryId":id.as_str(),"text":"invalid combination"}),
+                ] {
+                    let call = call(
+                        "blackboard_query",
+                        arguments.clone(),
+                        budget,
+                        source.clone(),
+                    );
+                    let allowance = call.response_byte_budget(MAX_RESPONSE_BYTES);
+                    match tool.handle(call).await {
+                        Err(FunctionCallError::RespondToModel(message)) => {
+                            assert!(
+                                serde_json::to_string(&message).unwrap().len() <= allowance,
+                                "{budget}: {message}"
+                            );
+                            if arguments == json!({"entryId":id.as_str()}) && allowance >= 51 {
+                                assert_eq!(
+                                    message,
+                                    "entry not found or automatic evidence unavailable"
+                                );
+                            } else if allowance == 24 {
+                                assert_eq!(message, "budget_insufficient");
+                            }
+                        }
+                        Ok(output) => {
+                            assert_eq!(arguments["entryId"], json!("agent-control"));
+                            assert!(output.log_output().len() <= allowance);
+                            let result: serde_json::Value =
+                                serde_json::from_str(&output.log_output()).unwrap();
+                            assert_eq!(result["entryId"], json!("agent-control"));
+                            if allowance == MAX_RESPONSE_BYTES {
+                                assert_eq!(result["complete"], json!(true));
+                            } else if result["complete"] == false {
+                                assert!(result["nextContentOffset"].as_u64().unwrap() > 0);
+                                assert!(
+                                    "independent Agent positive control"
+                                        .starts_with(result["content"].as_str().unwrap())
+                                );
+                            }
+                        }
+                        Err(FunctionCallError::Fatal(message)) => panic!("{message}"),
+                    }
+                }
+            }
+        }
         let memory = memory_read::MemoryReadTool::new(
             project_id.clone(),
             services.clone(),

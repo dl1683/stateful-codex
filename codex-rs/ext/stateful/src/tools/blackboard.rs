@@ -131,8 +131,9 @@ impl BlackboardQueryTool {
                 || evidence_context_map_entry_ids.is_some()
                 || after_entry_id.is_some()
             {
-                return Err(FunctionCallError::RespondToModel(
-                    "entryId accepts only expectedEntryRevision and contentOffset".to_string(),
+                return Err(super::bounded_respond(
+                    &call,
+                    "entryId accepts only expectedEntryRevision and contentOffset",
                 ));
             }
             return super::entry_read::read(
@@ -143,7 +144,13 @@ impl BlackboardQueryTool {
                 content_offset.unwrap_or_default(),
                 call.response_byte_budget(MAX_RESPONSE_BYTES),
             )
-            .await;
+            .await
+            .map_err(|error| match error {
+                FunctionCallError::RespondToModel(message) => {
+                    super::bounded_respond(&call, &message)
+                }
+                error @ FunctionCallError::Fatal(_) => error,
+            });
         }
         if expected_entry_revision.is_some() || content_offset.is_some() {
             return Err(FunctionCallError::RespondToModel(
