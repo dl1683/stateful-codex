@@ -26,7 +26,8 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
         SELECT 1 FROM capture_identity_aliases AS current_alias
         JOIN capture_identity_aliases AS retired_alias
           ON retired_alias.project_id = current_alias.project_id
-          AND retired_alias.retirement_words = current_alias.retirement_words
+          AND retired_alias.retirement_words != ''
+          AND instr(' ' || current_alias.retirement_words || ' ', ' ' || retired_alias.retirement_words || ' ') > 0
           AND retired_alias.retired = 1
           AND (retired_alias.scope_id = '' OR current_alias.scope_id = '' OR retired_alias.scope_id = current_alias.scope_id
               OR NOT EXISTS(SELECT 1 FROM knowledge_scopes AS scope WHERE scope.project_id = retired_alias.project_id AND scope.scope_id = retired_alias.scope_id AND octet_length(scope.scope_id) <= 512 AND octet_length(scope.title) <= 512 AND (scope.end_condition IS NULL OR octet_length(scope.end_condition) <= 2000) AND octet_length(scope.opened_source) <= 512)
@@ -90,8 +91,8 @@ pub(super) async fn check_activation(
     let known: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM knowledge_scopes WHERE project_id = ? AND scope_id = ? AND octet_length(scope_id) <= 512 AND octet_length(title) <= 512 AND (end_condition IS NULL OR octet_length(end_condition) <= 2000) AND octet_length(opened_source) <= 512)")
         .bind(&value.project_id).bind(requested_scope).fetch_one(&mut *connection).await?;
     let scope = if known { requested_scope } else { "" };
-    let retired: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_identity_aliases AS alias WHERE project_id = ? AND retirement_words = ? AND retired = 1 AND (scope_id = '' OR ? = '' OR scope_id = ? OR NOT EXISTS(SELECT 1 FROM knowledge_scopes AS scope WHERE scope.project_id = alias.project_id AND scope.scope_id = alias.scope_id AND octet_length(scope.scope_id) <= 512 AND octet_length(scope.title) <= 512 AND (scope.end_condition IS NULL OR octet_length(scope.end_condition) <= 2000) AND octet_length(scope.opened_source) <= 512)))")
-        .bind(&value.project_id).bind(retirement_capture_words(&value.content))
+    let retired: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_identity_aliases AS alias WHERE project_id = ? AND retirement_words != '' AND instr(?, ' ' || retirement_words || ' ') > 0 AND retired = 1 AND (scope_id = '' OR ? = '' OR scope_id = ? OR NOT EXISTS(SELECT 1 FROM knowledge_scopes AS scope WHERE scope.project_id = alias.project_id AND scope.scope_id = alias.scope_id AND octet_length(scope.scope_id) <= 512 AND octet_length(scope.title) <= 512 AND (scope.end_condition IS NULL OR octet_length(scope.end_condition) <= 2000) AND octet_length(scope.opened_source) <= 512)))")
+        .bind(&value.project_id).bind(format!(" {} ", retirement_capture_words(&value.content)))
         .bind(scope).bind(scope).fetch_one(connection).await?;
     if retired {
         return Err(BlackboardStoreError::RetiredIdentity);

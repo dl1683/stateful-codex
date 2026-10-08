@@ -521,21 +521,6 @@ async fn entry_item(
         } else {
             &relation.value.from_entry_id
         };
-        if !store
-            .entry_source_eligible(project_id, other)
-            .await
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        if let Some(note) = relation.value.note.as_deref()
-            && !store
-                .source_text_eligible(project_id, note)
-                .await
-                .unwrap_or(false)
-        {
-            continue;
-        }
         let counterpart = store
             .get_source_eligible_entry(project_id, other)
             .await

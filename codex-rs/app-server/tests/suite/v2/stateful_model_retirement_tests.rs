@@ -152,7 +152,7 @@ async fn public_predecessor_fan_in_preview_is_bounded_after_restart() -> Result<
 
 // Compare all PI table cells, including revision history, context, action outcomes and
 // journal; this fixture contains only bounded text. Native turn history is separate.
-async fn snapshot(sqlite: &SqliteConfig) -> Result<Vec<Vec<String>>> {
+pub(super) async fn snapshot(sqlite: &SqliteConfig) -> Result<Vec<Vec<String>>> {
     let pool = sqlite
         .open_read_only_pool(
             &sqlite.home().join("project_intelligence_1.sqlite"),

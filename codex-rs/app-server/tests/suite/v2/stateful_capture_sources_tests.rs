@@ -7,7 +7,8 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-async fn setup() -> Result<(TempDir, TestAppServer, String, String, wiremock::MockServer)> {
+pub(super) async fn setup() -> Result<(TempDir, TestAppServer, String, String, wiremock::MockServer)>
+{
     let responses_server = responses::start_mock_server().await;
     let home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())

@@ -25,7 +25,7 @@ use super::StoredEvidenceLink;
 use super::load_entry;
 use super::parse_stored;
 use super::promotion_name;
-use super::relation::load_relations_for_entry;
+use super::relation::load_eligible_relations_for_entry;
 
 #[derive(FromRow)]
 struct StoredRouteKnowledge {
@@ -41,30 +41,14 @@ impl BlackboardStore {
         entry_id: &BlackboardEntryId,
     ) -> Result<Option<BlackboardHit>, BlackboardStoreError> {
         let mut transaction = self.pool.begin().await?;
-        let entry =
+        let hit =
             if super::identity::entry_source_eligible_on(&mut transaction, project_id, entry_id)
                 .await?
             {
-                load_entry(&mut transaction, project_id, entry_id).await?
+                Some(load_hit(&mut transaction, project_id, entry_id.to_string()).await?)
             } else {
                 None
             };
-        let hit = match entry {
-            Some(entry) => {
-                let freshness = load_evidence_freshness(&mut transaction, &entry).await?;
-                let premise_freshness = load_premise_freshness(&mut transaction, &entry).await?;
-                let premise_evidence = load_premise_evidence(&mut transaction, &entry).await?;
-                let relations =
-                    load_relations_for_entry(&mut transaction, project_id, &entry.id, 256).await?;
-                Some(
-                    BlackboardHit::new(entry, freshness)
-                        .with_premise_freshness(premise_freshness)
-                        .with_premise_evidence(premise_evidence)
-                        .with_relations(relations),
-                )
-            }
-            None => None,
-        };
         transaction.commit().await?;
         Ok(hit)
     }
@@ -175,6 +159,7 @@ impl BlackboardStore {
               WHEN 'historical' THEN revision.state <> 'active'
               ELSE 1 END",
         );
+        builder.push(super::identity::ENTRY_SOURCE_ELIGIBILITY);
         if let Some(after_entry_id) = &query.after_entry_id {
             builder.push(" AND entry.id > ");
             builder.push_bind(after_entry_id.as_str());
@@ -189,19 +174,7 @@ impl BlackboardStore {
         let entry_ids = entry_ids.into_iter().take(query.max_results as usize);
         let mut data = Vec::with_capacity(query.max_results as usize);
         for raw_id in entry_ids {
-            let id = BlackboardEntryId::parse(&raw_id)
-                .map_err(|_| BlackboardStoreError::CorruptEntry(raw_id.clone()))?;
-            let entry = load_entry(&mut transaction, &query.project_id, &id)
-                .await?
-                .ok_or_else(|| BlackboardStoreError::EntryNotFound(raw_id))?;
-            let freshness = load_evidence_freshness(&mut transaction, &entry).await?;
-            let premise_freshness = load_premise_freshness(&mut transaction, &entry).await?;
-            let premise_evidence = load_premise_evidence(&mut transaction, &entry).await?;
-            data.push(
-                BlackboardHit::new(entry, freshness)
-                    .with_premise_freshness(premise_freshness)
-                    .with_premise_evidence(premise_evidence),
-            );
+            data.push(load_hit(&mut transaction, &query.project_id, raw_id).await?);
         }
         transaction.commit().await?;
         Ok(BlackboardEvidenceDependentsResult {
@@ -517,7 +490,10 @@ pub(super) async fn load_hit(
     let freshness = load_evidence_freshness(connection, &entry).await?;
     let premise_freshness = load_premise_freshness(connection, &entry).await?;
     let premise_evidence = load_premise_evidence(connection, &entry).await?;
-    let relations = load_relations_for_entry(connection, project_id, &entry.id, 256).await?;
+    let relations = load_eligible_relations_for_entry(
+        connection, project_id, &entry.id, /*max_results*/ 256,
+    )
+    .await?;
     Ok(BlackboardHit::new(entry, freshness)
         .with_premise_freshness(premise_freshness)
         .with_premise_evidence(premise_evidence)

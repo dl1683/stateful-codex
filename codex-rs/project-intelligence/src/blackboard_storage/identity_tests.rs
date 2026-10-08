@@ -175,6 +175,95 @@ async fn c2r1_legacy_metadata_revisions_preserve_active_words_and_real_retiremen
 }
 
 #[tokio::test]
+async fn c2r1_container_policy_covers_create_update_succession_and_existing_reads() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let mut value = rule("Rule: Never push.");
+    value.kind = BlackboardKind::Note;
+    value.provenance.kind = BlackboardProvenanceKind::Agent;
+    let enclosing_id = BlackboardEntryId::parse("existing-container").unwrap();
+    store
+        .create_entry(enclosing_id.clone(), value.clone())
+        .await
+        .unwrap();
+    value.content = "Independent cedar note.".to_string();
+    let independent_id = BlackboardEntryId::parse("independent").unwrap();
+    let independent = store
+        .create_entry(independent_id.clone(), value.clone())
+        .await
+        .unwrap();
+    let forgotten_id = BlackboardEntryId::parse("forgotten-rule").unwrap();
+    let forgotten = store
+        .create_entry(forgotten_id.clone(), rule("Never push."))
+        .await
+        .unwrap();
+    store
+        .update_entry(PROJECT, &forgotten_id, retire(&forgotten))
+        .await
+        .unwrap();
+    let before = snapshot(&store).await;
+    assert_eq!(
+        store
+            .get_source_eligible_entry(PROJECT, &enclosing_id)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(
+        store
+            .get_hit(PROJECT, &enclosing_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .root_projection(RootBlackboardQuery {
+                project_id: PROJECT.to_string(),
+                max_entries: 1
+            })
+            .await
+            .unwrap()
+            .data
+            .len(),
+        1
+    );
+    value.content = "Rule: Never push.".to_string();
+    assert!(matches!(
+        store
+            .create_entry(
+                BlackboardEntryId::parse("new-container").unwrap(),
+                value.clone()
+            )
+            .await,
+        Err(BlackboardStoreError::RetiredIdentity)
+    ));
+    let mut revise = retire(&independent);
+    revise.state = BlackboardEntryState::Active;
+    revise.content = value.content.clone();
+    assert!(matches!(
+        store
+            .update_entry_from_model(PROJECT, &independent_id, revise)
+            .await,
+        Err(BlackboardStoreError::RetiredIdentity)
+    ));
+    assert!(matches!(
+        store
+            .create_successor_from_model(
+                BlackboardEntryId::parse("successor-container").unwrap(),
+                value,
+                vec![SupersededEntry {
+                    id: independent_id,
+                    expected_revision: independent.revision
+                }]
+            )
+            .await,
+        Err(BlackboardStoreError::RetiredIdentity)
+    ));
+    assert_eq!(snapshot(&store).await, before);
+}
+
+#[tokio::test]
 async fn c2_unicode_retirement_aliases_precede_limits_and_cross_writer_family_authority() {
     for (old, repeated) in [
         ("DNS: absent.", "DNS: absent."),
@@ -262,6 +351,7 @@ async fn c2_disjoint_scope_control_and_ambiguous_primary_aliases_fail_closed() {
         .update_entry(PROJECT, &id, retire(&entry))
         .await
         .unwrap();
+    value.content = "Heading: Never push.".to_string();
     store
         .create_entry_with_context(
             BlackboardEntryId::parse("scope-b").unwrap(),

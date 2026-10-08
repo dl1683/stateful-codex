@@ -130,6 +130,49 @@ pub(super) async fn load_relations_for_entry(
     stored.into_iter().map(parse_relation).collect()
 }
 
+/// Automatic adapters share endpoint and copied-note eligibility in the hit's snapshot.
+/// The raw loader above remains available for explicit archival inspection.
+pub(super) async fn load_eligible_relations_for_entry(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    entry_id: &BlackboardEntryId,
+    max_results: u32,
+) -> Result<Vec<BlackboardRelation>, BlackboardStoreError> {
+    let eligibility = super::identity::ENTRY_SOURCE_ELIGIBILITY;
+    let stored = sqlx::query_as::<_, StoredRelation>(sqlx::AssertSqlSafe(format!(
+        "SELECT relation.* FROM blackboard_relations AS relation
+         WHERE relation.project_id = ? AND (from_entry_id = ? OR to_entry_id = ?)
+           AND (note IS NULL OR octet_length(note) <= 2048)
+           AND EXISTS (SELECT 1 FROM blackboard_entries AS entry
+               JOIN blackboard_entry_revisions AS revision
+                 ON revision.entry_id = entry.id AND revision.revision = entry.revision
+               WHERE entry.project_id = relation.project_id AND entry.id = relation.from_entry_id {eligibility})
+           AND EXISTS (SELECT 1 FROM blackboard_entries AS entry
+               JOIN blackboard_entry_revisions AS revision
+                 ON revision.entry_id = entry.id AND revision.revision = entry.revision
+               WHERE entry.project_id = relation.project_id AND entry.id = relation.to_entry_id {eligibility})
+         ORDER BY relation.id LIMIT 256"
+    )))
+    .bind(project_id)
+    .bind(entry_id.as_str())
+    .bind(entry_id.as_str())
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut relations = Vec::new();
+    for row in stored {
+        if let Some(note) = &row.note
+            && !super::source::text_eligible_on(connection, project_id, note).await?
+        {
+            continue;
+        }
+        relations.push(parse_relation(row)?);
+        if relations.len() == max_results as usize {
+            break;
+        }
+    }
+    Ok(relations)
+}
+
 async fn load_relation(
     connection: &mut SqliteConnection,
     project_id: &str,

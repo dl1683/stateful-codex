@@ -46,6 +46,9 @@ mod model_retirement_tests;
 #[path = "stateful_capture_sources_tests.rs"]
 mod capture_sources_tests;
 
+#[path = "stateful_capture_repair_tests.rs"]
+mod capture_repair_tests;
+
 #[tokio::test]
 async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
