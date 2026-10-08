@@ -395,3 +395,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
         Box::pin(self.handle_call(call))
     }
 }
+
+#[cfg(test)]
+#[path = "acceptance_tests.rs"]
+mod tests;

@@ -23,6 +23,7 @@ use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
+use run_acceptance::AcceptanceDecision;
 
 use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
@@ -166,6 +167,43 @@ impl StatefulRunUpdateTool {
                     .to_string(),
             ));
         }
+        let acceptance = if status == StatefulRunStatus::Completed {
+            if current.revision != expected_revision {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "run revision conflict: expected {expected_revision}, found {}",
+                    current.revision
+                )));
+            }
+            match self
+                .acceptance_decision(&current, result.as_deref())
+                .await?
+            {
+                AcceptanceDecision::Proceed { commit, basis } => Some((commit, basis)),
+                AcceptanceDecision::Refused(message) => {
+                    return Err(FunctionCallError::RespondToModel(message));
+                }
+                AcceptanceDecision::Blocked(run) => {
+                    if let Some(event_sink) = &self.event_sink {
+                        event_sink.emit(StatefulEvent::RunUpdated {
+                            project_id: run.value.project_id.clone(),
+                            run_id: run.id.to_string(),
+                            revision: run.revision,
+                        });
+                    }
+                    return bounded_json_output(
+                        &call,
+                        json!({
+                            "runId": run.id.to_string(),
+                            "status": status_name(run.status),
+                            "revision": run.revision,
+                            "instruction": "Completion was refused repeatedly without acceptance progress, so the host moved this run to blocked as a partial result. Do not claim the work is complete: tell the user which acceptance gates remain unmet (read them with stateful_run_read section \"acceptance\") and what was delivered.",
+                        }),
+                    );
+                }
+            }
+        } else {
+            None
+        };
         // Terminal completion holds the project database's writer lock from validation
         // through the runtime commit, so no project mutation can land in between.
         let mut fence = None;
@@ -296,22 +334,30 @@ impl StatefulRunUpdateTool {
             }
             (None, None)
         };
+        let acceptance_basis = acceptance
+            .as_ref()
+            .map(|(_, basis)| basis.clone())
+            .unwrap_or_default();
+        let durable_result = completion
+            .as_ref()
+            .map(|completion| completion.result.clone())
+            .or(result);
         let update = StatefulRunUpdate {
             expected_revision,
             status,
             strategy: strategy.or(current.strategy),
-            result: completion
-                .as_ref()
-                .map(|completion| completion.result.clone())
-                .or(result)
-                .or(current.result),
+            result: match &acceptance {
+                Some((_, basis)) => durable_result
+                    .map(|durable| run_acceptance::with_acceptance_basis(durable, basis)),
+                None => durable_result,
+            }
+            .or(current.result),
         };
-        let (run, final_obligation) = if let Some((obligation_id, obligation)) = final_obligation {
-            let (run, obligation) = runtime
-                .complete_run_with_obligation(&current.id, update, obligation_id, obligation)
+        let (run, final_obligation) = if let Some((commit, _)) = &acceptance {
+            runtime
+                .complete_run_with_acceptance(&current.id, update, commit, final_obligation)
                 .await
-                .map_err(respond)?;
-            (run, Some(obligation))
+                .map_err(respond)?
         } else {
             (
                 runtime
@@ -361,6 +407,13 @@ impl StatefulRunUpdateTool {
                 "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. For a Windows drive path, use the exact C:/... Markdown target form and never rewrite it as /C:/.... Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, read the complete final obligation with stateful_run_read using section \"obligation\" and cursor finalObligationCursor, following nextCursor until it is null."
             ),
         });
+        if !acceptance_basis.is_empty() {
+            output["acceptanceBasis"] = json!(acceptance_basis);
+            output["omittedAcceptanceBasis"] = json!(0);
+            output["acceptanceInstruction"] = json!(
+                "The acceptance basis is part of the durable result. Disclose every UNVERIFIED, manual-observation and dismissed item in the final answer; never present them as verified."
+            );
+        }
         // The run is already durable here, so the response is packed to fit rather than
         // refused: an oversized result moves behind an exact paged read, then checklist
         // items drop from the end with an honest omitted count.
@@ -393,12 +446,25 @@ impl StatefulRunUpdateTool {
             if output["finalAnswerChecklist"]
                 .as_array_mut()
                 .and_then(Vec::pop)
+                .is_some()
+            {
+                let omitted = output["omittedChecklistItems"].as_u64().unwrap_or_default();
+                output["omittedChecklistItems"] = json!(omitted + 1);
+                continue;
+            }
+            // The full basis is in the durable result and the paged acceptance read.
+            if output
+                .get_mut("acceptanceBasis")
+                .and_then(Value::as_array_mut)
+                .and_then(Vec::pop)
                 .is_none()
             {
                 break;
             }
-            let omitted = output["omittedChecklistItems"].as_u64().unwrap_or_default();
-            output["omittedChecklistItems"] = json!(omitted + 1);
+            let omitted = output["omittedAcceptanceBasis"]
+                .as_u64()
+                .unwrap_or_default();
+            output["omittedAcceptanceBasis"] = json!(omitted + 1);
         }
         bounded_json_output(&call, output)
     }
@@ -473,6 +539,9 @@ use std::sync::Arc;
 
 #[path = "run_guard.rs"]
 mod guard;
+
+#[path = "run_acceptance.rs"]
+mod run_acceptance;
 
 #[cfg(test)]
 #[path = "run_tests.rs"]

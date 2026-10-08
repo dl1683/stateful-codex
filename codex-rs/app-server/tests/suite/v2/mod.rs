@@ -129,6 +129,7 @@ mod server_diagnostics;
 mod session_end;
 mod skills_list;
 mod sleep;
+mod stateful_acceptance_tests;
 mod stateful_blackboard_lifecycle;
 mod stateful_cancel;
 mod stateful_capture;
