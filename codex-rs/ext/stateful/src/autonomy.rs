@@ -217,6 +217,12 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             begin_turn_attribution(self, input.turn_id, input.thread_store);
+            if let (Some(thread), Some(services)) = (
+                input.thread_store.get::<SelectedThread>(),
+                self.services.as_ref(),
+            ) {
+                services.completion_attempts().clear(&thread.thread_id);
+            }
             input.turn_store.insert(crate::capture_sources::SourceTurn {
                 turn_id: input.turn_id.to_string(),
             });

@@ -16,6 +16,7 @@ use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
 use tokio::sync::OnceCell;
 
+use crate::completion_attempts::CompletionAttempts;
 use crate::read_receipts::EvidenceReadReceipts;
 
 #[derive(Clone)]
@@ -25,6 +26,7 @@ pub(super) struct ProjectIntelligenceServices {
     context_map: Arc<OnceCell<ContextMapStore>>,
     hierarchy: Arc<OnceCell<HierarchyStore>>,
     read_receipts: EvidenceReadReceipts,
+    completion_attempts: CompletionAttempts,
     runtime: Arc<OnceCell<StatefulRunStore>>,
     repository_observations: Arc<OnceCell<RepositoryObservationStore>>,
     /// Projects whose checkout changes could not be fully processed: no turn of any thread
@@ -51,6 +53,7 @@ impl ProjectIntelligenceServices {
             context_map: Arc::new(OnceCell::new()),
             hierarchy: Arc::new(OnceCell::new()),
             read_receipts: EvidenceReadReceipts::default(),
+            completion_attempts: CompletionAttempts::default(),
             runtime: Arc::new(OnceCell::new()),
             repository_observations: Arc::new(OnceCell::new()),
             checkout_holds: Arc::default(),
@@ -80,6 +83,10 @@ impl ProjectIntelligenceServices {
 
     pub(super) fn read_receipts(&self) -> &EvidenceReadReceipts {
         &self.read_receipts
+    }
+
+    pub(super) fn completion_attempts(&self) -> &CompletionAttempts {
+        &self.completion_attempts
     }
 
     pub(super) fn on_demand_index(&self, project_id: &str) -> Arc<OnceCell<()>> {

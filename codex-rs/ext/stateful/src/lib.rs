@@ -9,6 +9,7 @@ mod capture_test_support;
 mod checkout;
 mod checkpoint;
 mod completion;
+mod completion_attempts;
 mod continuity;
 mod continuity_source;
 mod conversation_summaries;
