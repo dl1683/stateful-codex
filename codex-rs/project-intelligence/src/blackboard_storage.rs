@@ -62,6 +62,9 @@ pub struct BlackboardStore {
 
 impl BlackboardStore {
     pub async fn open(sqlite: &SqliteConfig) -> Result<Self, BlackboardStoreError> {
+        sqlite
+            .check_migration_history(&sqlite.home().join(DATABASE_NAME), &MIGRATOR)
+            .await?;
         tokio::fs::create_dir_all(sqlite.home()).await?;
         let pool = sqlite
             .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
@@ -631,3 +634,7 @@ pub enum BlackboardStoreError {
 #[cfg(test)]
 #[path = "blackboard_storage_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "migration_history_tests.rs"]
+mod migration_history_tests;

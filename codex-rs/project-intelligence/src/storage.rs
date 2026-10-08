@@ -44,6 +44,9 @@ pub struct HierarchyRegionSourceUpdate {
 
 impl HierarchyStore {
     pub async fn open(sqlite: &SqliteConfig) -> Result<Self, HierarchyStoreError> {
+        sqlite
+            .check_migration_history(&sqlite.home().join(DATABASE_NAME), &MIGRATOR)
+            .await?;
         tokio::fs::create_dir_all(sqlite.home()).await?;
         let pool = sqlite
             .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))

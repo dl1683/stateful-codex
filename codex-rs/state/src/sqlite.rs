@@ -30,6 +30,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
+mod migration_history;
+
 const LOGS_DB_FILENAME: &str = "logs_2.sqlite";
 const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
 const MEMORIES_DB_FILENAME: &str = "memories_1.sqlite";
