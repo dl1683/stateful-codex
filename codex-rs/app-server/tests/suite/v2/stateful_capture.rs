@@ -245,17 +245,18 @@ async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<
                 },
             )
             .await?;
-        store
-            .update_run(
-                &run_id,
-                StatefulRunUpdate {
-                    expected_revision: run.revision,
-                    status: StatefulRunStatus::Completed,
-                    strategy: None,
-                    result: Some(format!("NEWER_OUTCOME_MARKER {index}")),
-                },
-            )
-            .await?;
+        complete_seeded_run(
+            &store,
+            &run_id,
+            StatefulRunUpdate {
+                expected_revision: run.revision,
+                status: StatefulRunStatus::Completed,
+                strategy: None,
+                result: Some(format!("NEWER_OUTCOME_MARKER {index}")),
+            },
+            None,
+        )
+        .await?;
     }
 
     let second = server
@@ -773,6 +774,36 @@ async fn run_turn(server: &mut TestAppServer, thread_id: &str, text: &str) -> Re
             }],
             ..Default::default()
         })
+        .await?;
+    Ok(())
+}
+
+/// Seeds a completed run through the host completion decision, as the product does.
+async fn complete_seeded_run(
+    store: &codex_stateful_runtime::StatefulRunStore,
+    run_id: &codex_stateful_runtime::StatefulRunId,
+    update: StatefulRunUpdate,
+    obligation: Option<(String, codex_stateful_runtime::NewObligation)>,
+) -> Result<()> {
+    let attempt = store.begin_verification(run_id, "seed", 60_000).await?;
+    let ledger = store.acceptance_ledger(run_id).await?;
+    let latest = store.latest_obligation(run_id).await?;
+    store
+        .complete_run_with_acceptance(
+            run_id,
+            update,
+            &codex_stateful_runtime::AcceptanceCommit {
+                ledger_revision: ledger.revision,
+                workspace_generation: ledger.workspace_generation,
+                artifacts: std::collections::BTreeMap::new(),
+                verification: codex_stateful_runtime::VerificationClaim {
+                    owner: "seed".to_string(),
+                    attempt,
+                },
+                validated_obligation_sequence: latest.map(|obligation| obligation.sequence),
+            },
+            obligation,
+        )
         .await?;
     Ok(())
 }

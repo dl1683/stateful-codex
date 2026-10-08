@@ -193,6 +193,11 @@ impl StatefulRunStore {
             if obligation.run_id != *id {
                 return Err(StatefulRunStoreError::ObligationRunMismatch);
             }
+            if !obligation.packet.blockers.is_empty() {
+                return Err(StatefulRunStoreError::AcceptanceGate(
+                    "the final obligation declares open blockers".to_string(),
+                ));
+            }
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let run = update_run_in_transaction(&mut transaction, id, update, Some(acceptance)).await?;
@@ -203,31 +208,6 @@ impl StatefulRunStore {
             ),
             None => None,
         };
-        transaction.commit().await?;
-        Ok((run, obligation))
-    }
-
-    pub async fn complete_run_with_obligation(
-        &self,
-        id: &StatefulRunId,
-        update: StatefulRunUpdate,
-        obligation_id: String,
-        obligation: NewObligation,
-    ) -> Result<(StatefulRun, StatefulObligation), StatefulRunStoreError> {
-        update.validate()?;
-        validate_record_id(&obligation_id)?;
-        obligation.validate()?;
-        if update.status != StatefulRunStatus::Completed {
-            return Err(StatefulRunStoreError::CompletionStatusRequired);
-        }
-        if obligation.run_id != *id {
-            return Err(StatefulRunStoreError::ObligationRunMismatch);
-        }
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let run =
-            update_run_in_transaction(&mut transaction, id, update, /*acceptance*/ None).await?;
-        let obligation =
-            append_obligation_in_transaction(&mut transaction, obligation_id, obligation).await?;
         transaction.commit().await?;
         Ok((run, obligation))
     }
@@ -549,6 +529,14 @@ impl StatefulRunStore {
         validate_record_id(&id)?;
         value.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if let Some(run) = load_run(&mut transaction, &value.run_id).await?
+            && run.status.is_terminal()
+            && load_obligation_by_id(&mut transaction, &id)
+                .await?
+                .is_none()
+        {
+            return Err(StatefulRunStoreError::AcceptanceRunState(run.status));
+        }
         let obligation = append_obligation_in_transaction(&mut transaction, id, value).await?;
         transaction.commit().await?;
         Ok(obligation)
@@ -642,7 +630,8 @@ async fn update_run_in_transaction(
                 status,
             });
         }
-        crate::acceptance_storage::enforce_acceptance_gate(connection, id, acceptance).await?;
+        crate::acceptance_storage::enforce_acceptance_gate(connection, &current, acceptance)
+            .await?;
     }
     let expected_revision = i64::try_from(update.expected_revision)
         .map_err(|_| StatefulRunStoreError::CountOverflow)?;
@@ -984,6 +973,10 @@ pub enum StatefulRunStoreError {
         "the acceptance ledger or workspace changed while completion was being validated; nothing changed, retry the completion"
     )]
     AcceptanceChanged,
+    #[error(
+        "a new Completed status needs the host acceptance decision; generic run updates cannot complete a run"
+    )]
+    CompletionRequiresAcceptanceDecision,
     #[error("completion gate: {0}")]
     AcceptanceGate(String),
     #[error("steering ID was already used for different content: {0}")]

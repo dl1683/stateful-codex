@@ -390,17 +390,18 @@ async fn fresh_thread_receives_the_exact_earlier_conversation_once() -> Result<(
             },
         )
         .await?;
-    store
-        .complete_run_with_obligation(
-            &run_id,
-            StatefulRunUpdate {
-                expected_revision: run.revision,
-                status: StatefulRunStatus::Completed,
-                strategy: Some("Reuse the verified checksum decision.".to_string()),
-                result: Some(
-                    "The deployment gate is green only after checksum verification.".to_string(),
-                ),
-            },
+    complete_seeded_run(
+        &store,
+        &run_id,
+        StatefulRunUpdate {
+            expected_revision: run.revision,
+            status: StatefulRunStatus::Completed,
+            strategy: Some("Reuse the verified checksum decision.".to_string()),
+            result: Some(
+                "The deployment gate is green only after checksum verification.".to_string(),
+            ),
+        },
+        Some((
             "cross-thread-final-obligation".to_string(),
             NewObligation {
                 project_id: created.project.id.clone(),
@@ -416,8 +417,9 @@ async fn fresh_thread_receives_the_exact_earlier_conversation_once() -> Result<(
                 },
                 provenance_source_id: "first-thread-completion".to_string(),
             },
-        )
-        .await?;
+        )),
+    )
+    .await?;
 
     let second = server
         .start_thread(ThreadStartParams {
@@ -1653,6 +1655,36 @@ async fn seed_context_map(
                     source_id: "integration-fixture".to_string(),
                 },
             },
+        )
+        .await?;
+    Ok(())
+}
+
+/// Seeds a completed run through the host completion decision, as the product does.
+async fn complete_seeded_run(
+    store: &codex_stateful_runtime::StatefulRunStore,
+    run_id: &codex_stateful_runtime::StatefulRunId,
+    update: StatefulRunUpdate,
+    obligation: Option<(String, NewObligation)>,
+) -> Result<()> {
+    let attempt = store.begin_verification(run_id, "seed", 60_000).await?;
+    let ledger = store.acceptance_ledger(run_id).await?;
+    let latest = store.latest_obligation(run_id).await?;
+    store
+        .complete_run_with_acceptance(
+            run_id,
+            update,
+            &codex_stateful_runtime::AcceptanceCommit {
+                ledger_revision: ledger.revision,
+                workspace_generation: ledger.workspace_generation,
+                artifacts: std::collections::BTreeMap::new(),
+                verification: codex_stateful_runtime::VerificationClaim {
+                    owner: "seed".to_string(),
+                    attempt,
+                },
+                validated_obligation_sequence: latest.map(|obligation| obligation.sequence),
+            },
+            obligation,
         )
         .await?;
     Ok(())

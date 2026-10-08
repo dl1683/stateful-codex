@@ -68,8 +68,10 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                         "completionIdempotencyKey": "autonomous-result",
                         "finalObligation": {
                             "implication": ["The run can now complete without user intervention."],
-                            "uncertainty": ["The external dependency remains uncertain."],
-                            "uncertainty": ["The signed approval may arrive later; the result does not depend on it."]
+                            "uncertainty": [
+                                "The external dependency remains uncertain.",
+                                "The signed approval may arrive later; the result does not depend on it."
+                            ]
                         }
                     })
                     .to_string(),

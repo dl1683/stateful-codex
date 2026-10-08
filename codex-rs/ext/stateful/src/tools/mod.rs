@@ -116,7 +116,7 @@ pub(super) fn project_intelligence_tools(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
-            projects,
+            projects.clone(),
             event_sink.clone(),
             visible_root,
         )),
@@ -124,6 +124,7 @@ pub(super) fn project_intelligence_tools(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
+            projects,
         )),
         Arc::new(run_read::StatefulRunReadTool::new(
             project_id.clone(),

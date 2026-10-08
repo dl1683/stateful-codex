@@ -16,26 +16,38 @@ use codex_extension_api::parse_tool_input_schema;
 use codex_stateful_runtime::AcceptanceChange;
 use codex_stateful_runtime::AcceptanceKind;
 use codex_stateful_runtime::AcceptanceOrigin;
+use codex_stateful_runtime::ArtifactState;
 use codex_stateful_runtime::CriterionTerms;
+use codex_stateful_runtime::DismissalReceipt;
 use codex_stateful_runtime::MAX_ACCEPTANCE_CHANGES;
 use codex_stateful_runtime::MAX_CRITERION_ARTIFACTS;
+use codex_stateful_runtime::MAX_CRITERION_DEPENDENCIES;
 use codex_stateful_runtime::RequestSpan;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::TermsUpdate;
 use serde::Deserialize;
 use serde_json::json;
 
+use std::sync::Arc;
+
+use codex_thread_store::ThreadStore;
+
+use crate::acceptance_observation::artifact_states;
 use crate::acceptance_render::AcceptanceView;
+use crate::acceptance_render::bounded;
 use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
+use super::bounded_respond;
 use super::parse_arguments;
 use super::provenance_source_id;
 use super::respond;
 use super::thread_run;
 
 const TOOL_NAME: &str = "stateful_acceptance_update";
+/// Largest argument text decoded; a larger call is refused before decoding.
+const MAX_ARGUMENT_BYTES: usize = 64 * 1024;
 /// Minimal valid call shown with every argument decoding rejection.
 const EXAMPLE: &str = r#"{"expectedLedgerRevision":0,"changes":[{"action":"add","origin":"user","kind":"check","statement":"<requirement>","requestQuote":"<exact goal text>","checkCommand":"<command>","expectedObservation":"<what passing output shows>"}]}"#;
 
@@ -54,6 +66,7 @@ enum Action {
     Accept,
     Dismiss,
     Retire,
+    Approve,
     Observe,
     NoCheck,
 }
@@ -72,7 +85,11 @@ struct ChangeArguments {
     milestone: Option<String>,
     artifacts: Option<Vec<String>>,
     check_command: Option<String>,
+    check_cwd: Option<String>,
     expected_observation: Option<String>,
+    steering_id: Option<String>,
+    steering_quote: Option<String>,
+    covered_by: Option<String>,
     text: Option<String>,
 }
 
@@ -80,6 +97,7 @@ pub(super) struct AcceptanceUpdateTool {
     project_id: String,
     thread_id: String,
     services: ProjectIntelligenceServices,
+    projects: Arc<dyn ThreadStore>,
 }
 
 impl AcceptanceUpdateTool {
@@ -87,11 +105,27 @@ impl AcceptanceUpdateTool {
         project_id: String,
         thread_id: String,
         services: ProjectIntelligenceServices,
+        projects: Arc<dyn ThreadStore>,
     ) -> Self {
         Self {
             project_id,
             thread_id,
             services,
+            projects,
+        }
+    }
+
+    /// Every refusal, including semantic ones, fits the call's serialized allowance.
+    async fn handle_bounded(
+        &self,
+        call: ToolCall<'_>,
+    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        let reply = call.clone();
+        match self.handle_call(call).await {
+            Err(FunctionCallError::RespondToModel(message)) => {
+                Err(bounded_respond(&reply, &message))
+            }
+            outcome => outcome,
         }
     }
 
@@ -99,16 +133,59 @@ impl AcceptanceUpdateTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        if call
+            .function_arguments()
+            .is_ok_and(|arguments| arguments.len() > MAX_ARGUMENT_BYTES)
+        {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "nothing changed: the arguments exceed {MAX_ARGUMENT_BYTES} bytes; send fewer or shorter changes"
+            )));
+        }
         let arguments: Arguments = parse_arguments(&call, EXAMPLE)?;
         let source_id = provenance_source_id(&call)?;
         let run = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
-        let changes = arguments
+        let mut changes = arguments
             .changes
             .into_iter()
             .enumerate()
             .map(|(index, change)| convert(&run, index, change))
             .collect::<Result<Vec<_>, _>>()?;
         let runtime = self.services.runtime().await.map_err(respond)?;
+        // A manual observation is pinned to the content of the criterion's artifacts, read by
+        // the host now; outside the local executor nothing can be pinned.
+        if changes
+            .iter()
+            .any(|change| matches!(change, AcceptanceChange::Observe { .. }))
+        {
+            let ledger = runtime.acceptance_ledger(&run.id).await.map_err(respond)?;
+            let roots = if super::run::local_executor(&call) {
+                match self.projects.read_project(self.project_id.clone()).await {
+                    Ok(Some(project)) => project.roots.into_iter().map(|root| root.path).collect(),
+                    Ok(None) | Err(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            };
+            for change in &mut changes {
+                if let AcceptanceChange::Observe {
+                    ordinal,
+                    artifact_digest,
+                    ..
+                } = change
+                    && let Some(criterion) = ledger.criterion(*ordinal)
+                    && !roots.is_empty()
+                {
+                    let states = artifact_states(&roots, std::iter::once(criterion)).await;
+                    *artifact_digest = match states.get(ordinal) {
+                        Some(ArtifactState::Observed { digest, missing }) if missing.is_empty() => {
+                            Some(digest.clone())
+                        }
+                        Some(ArtifactState::Observed { .. } | ArtifactState::Unavailable(_))
+                        | None => None,
+                    };
+                }
+            }
+        }
         let ledger = runtime
             .revise_acceptance(
                 &run.id,
@@ -177,7 +254,8 @@ fn convert(
             .and_then(|digits| digits.parse::<u32>().ok())
             .ok_or_else(|| {
                 FunctionCallError::RespondToModel(format!(
-                    "nothing changed: changes[{index}].{name} must hold C aliases such as C1, not {alias}"
+                    "nothing changed: changes[{index}].{name} must hold C aliases such as C1, not {}",
+                    bounded(alias, 40)
                 ))
             })
     };
@@ -191,6 +269,15 @@ fn convert(
         )
     };
     let depends_on = || -> Result<Option<Vec<u32>>, FunctionCallError> {
+        if change
+            .depends_on
+            .as_ref()
+            .is_some_and(|aliases| aliases.len() > MAX_CRITERION_DEPENDENCIES)
+        {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "nothing changed: changes[{index}].dependsOn names at most {MAX_CRITERION_DEPENDENCIES} criteria"
+            )));
+        }
         change
             .depends_on
             .as_ref()
@@ -208,6 +295,7 @@ fn convert(
             milestone: change.milestone.clone(),
             artifacts: change.artifacts.clone(),
             check_command: change.check_command.clone(),
+            check_cwd: change.check_cwd.clone(),
             expected_observation: change.expected_observation.clone(),
         })
     };
@@ -220,6 +308,7 @@ fn convert(
             ("requestQuote", change.request_quote.is_some()),
             ("artifacts", change.artifacts.is_some()),
             ("checkCommand", change.check_command.is_some()),
+            ("checkCwd", change.check_cwd.is_some()),
             ("expectedObservation", change.expected_observation.is_some()),
             ("required", change.required.is_some()),
             ("dependsOn", change.depends_on.is_some()),
@@ -261,6 +350,7 @@ fn convert(
                     milestone: change.milestone.clone(),
                     artifacts: change.artifacts.clone().unwrap_or_default(),
                     check_command: change.check_command.clone(),
+                    check_cwd: change.check_cwd.clone(),
                     expected_observation: change.expected_observation.clone(),
                 },
             })
@@ -292,8 +382,43 @@ fn convert(
             }
         }
         Action::Dismiss => {
+            let receipt_fields = (
+                change.steering_id.as_deref(),
+                change.steering_quote.as_deref(),
+                change.covered_by.as_deref(),
+            );
+            let receipt = match receipt_fields {
+                (Some(steering_id), Some(quote), None) => DismissalReceipt::UserSteering {
+                    steering_id: steering_id.to_string(),
+                    quote: quote.to_string(),
+                },
+                (None, None, Some(alias)) => {
+                    DismissalReceipt::CoveredBy(parse_alias(alias, "coveredBy")?)
+                }
+                _ => {
+                    return Err(FunctionCallError::RespondToModel(format!(
+                        "nothing changed: changes[{index}] dismisses a user requirement only with a receipt: steeringId plus steeringQuote (exact text of the user's own steering), or coveredBy (a user criterion whose quote covers it)"
+                    )));
+                }
+            };
             let (ordinal, reason) = labelled()?;
-            Ok(AcceptanceChange::Dismiss { ordinal, reason })
+            Ok(AcceptanceChange::Dismiss {
+                ordinal,
+                reason,
+                receipt,
+            })
+        }
+        Action::Approve => {
+            unexpected(&[("text", change.text.is_some())])?;
+            let steering_id = change
+                .steering_id
+                .clone()
+                .ok_or_else(|| field("steeringId"))?;
+            let ordinal = ordinal()?;
+            Ok(AcceptanceChange::Approve {
+                ordinal,
+                steering_id,
+            })
         }
         Action::Retire => {
             let (ordinal, reason) = labelled()?;
@@ -304,6 +429,7 @@ fn convert(
             Ok(AcceptanceChange::Observe {
                 ordinal,
                 observation,
+                artifact_digest: None,
             })
         }
         Action::NoCheck => {
@@ -343,7 +469,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Acceptance ledger of requirements. add (user: requestQuote of exact goal text, always required), refine, accept/dismiss proposals, retire derived, observe (manual), noCheck (why; optional only). Run checkCommand verbatim in the shell; the host records it.".to_string(),
+            description: "Acceptance ledger. add (user: requestQuote, exact goal text), refine, accept, dismiss (steeringId+steeringQuote or coveredBy), retire derived, approve (steeringId quoting the check), observe, noCheck. Run checkCommand verbatim in checkCwd.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -357,18 +483,22 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "action": {"type": "string", "enum": ["add", "refine", "accept", "dismiss", "retire", "observe", "noCheck"]},
+                                "action": {"type": "string", "enum": ["add", "refine", "accept", "dismiss", "retire", "approve", "observe", "noCheck"]},
                                 "criterion": {"type": "string"},
                                 "origin": {"type": "string", "enum": ["user", "derived"]},
-                                "kind": {"type": "string", "enum": ["deliverable", "constraint", "check", "manual"]},
+                                "kind": {"type": "string", "enum": ["deliverable", "constraint", "check", "manual", "existence"]},
                                 "statement": {"type": "string"},
                                 "requestQuote": {"type": "string"},
                                 "required": {"type": "boolean"},
-                                "dependsOn": {"type": "array", "items": {"type": "string"}},
+                                "dependsOn": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_CRITERION_DEPENDENCIES},
                                 "milestone": {"type": "string"},
                                 "artifacts": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_CRITERION_ARTIFACTS},
                                 "checkCommand": {"type": "string"},
+                                "checkCwd": {"type": "string"},
                                 "expectedObservation": {"type": "string"},
+                                "steeringId": {"type": "string"},
+                                "steeringQuote": {"type": "string"},
+                                "coveredBy": {"type": "string"},
                                 "text": {"type": "string"}
                             },
                             "required": ["action"],
@@ -392,7 +522,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
     where
         'call: 'a,
     {
-        Box::pin(self.handle_call(call))
+        Box::pin(self.handle_bounded(call))
     }
 }
 

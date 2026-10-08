@@ -14,21 +14,21 @@
 use codex_extension_api::FunctionCallError;
 use codex_extension_api::ToolCall;
 use codex_stateful_runtime::AcceptanceCommit;
+use codex_stateful_runtime::ArtifactState;
 use codex_stateful_runtime::CriterionVerdict;
 use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunUpdate;
+use codex_stateful_runtime::VerificationClaim;
 use codex_stateful_runtime::ledger_verdicts;
 use serde_json::json;
 
 use super::StatefulRunUpdateTool;
 use crate::StatefulEvent;
+use crate::acceptance_observation::in_flight;
 use crate::acceptance_observation::ledger_artifact_states;
-use crate::acceptance_policy::MAX_OMISSION_PROPOSALS;
-use crate::acceptance_policy::is_substantial;
-use crate::acceptance_policy::omission_proposals;
 use crate::acceptance_render::bounded;
 use crate::acceptance_render::completion_basis;
 use crate::tools::bounded_json_output;
@@ -61,6 +61,8 @@ impl StatefulRunUpdateTool {
         &self,
         current: &StatefulRun,
         submitted: Option<&str>,
+        local_executor: bool,
+        validated_obligation_sequence: Option<u64>,
     ) -> Result<AcceptanceDecision, FunctionCallError> {
         let runtime = self.services.runtime().await.map_err(respond)?;
         // One leased verification attempt per completion; the run stays Running throughout.
@@ -69,30 +71,44 @@ impl StatefulRunUpdateTool {
             .begin_verification(&current.id, &owner, VERIFICATION_LEASE_MS)
             .await
             .map_err(respond)?;
-        let mut ledger = runtime
-            .acceptance_ledger(&current.id)
+        // The omission pass runs on every attempt: coverage is recomputed from durable state,
+        // so sentences beyond one batch or a full ledger keep gating.
+        let (ledger, uncovered_remaining) = runtime
+            .propose_uncovered(&current.id)
             .await
             .map_err(respond)?;
-        let substantial = is_substantial(&current.value.goal, &ledger);
-        let mut uncovered_beyond_cap = 0;
-        if substantial && !ledger.omission_checked {
-            let (proposals, beyond) = omission_proposals(&current.value.goal, &ledger);
-            uncovered_beyond_cap = beyond;
-            ledger = runtime
-                .record_omission_check(&current.id, proposals)
-                .await
-                .map_err(respond)?;
-        }
         let roots = self.project_roots().await;
+        let artifacts = if local_executor {
+            ledger_artifact_states(&roots, &ledger).await
+        } else {
+            // Artifact evidence is read on the app-server host, which is only the executor
+            // for the local environment; elsewhere it would fingerprint same-path shadows.
+            ledger
+                .criteria
+                .iter()
+                .filter(|criterion| !criterion.artifacts.is_empty())
+                .map(|criterion| {
+                    (
+                        criterion.ordinal,
+                        ArtifactState::Unavailable(
+                            "this turn's executor is not the local host, so artifact evidence is unsupported".to_string(),
+                        ),
+                    )
+                })
+                .collect()
+        };
         let commit = AcceptanceCommit {
             ledger_revision: ledger.revision,
             workspace_generation: ledger.workspace_generation,
-            artifacts: ledger_artifact_states(&roots, &ledger).await,
-            omission_required: substantial,
-            verification: Some((owner.clone(), attempt)),
+            artifacts,
+            verification: VerificationClaim {
+                owner: owner.clone(),
+                attempt,
+            },
+            validated_obligation_sequence,
         };
-        let verdicts = ledger_verdicts(&ledger, &commit);
-        let unmet = verdicts
+        let verdicts = ledger_verdicts(&ledger, &commit.artifacts);
+        let mut unmet = verdicts
             .iter()
             .filter_map(|(ordinal, verdict)| match verdict {
                 CriterionVerdict::Unmet(reason) => Some(gate_line(&ledger, *ordinal, reason)),
@@ -103,6 +119,17 @@ impl StatefulRunUpdateTool {
                 | CriterionVerdict::Closed(_) => None,
             })
             .collect::<Vec<_>>();
+        if uncovered_remaining > 0 {
+            unmet.push(format!(
+                "{uncovered_remaining} request sentences are covered by no criterion or proposal (the ledger had no room or the batch was full); review the proposals, then complete again to receive the rest"
+            ));
+        }
+        let running = in_flight(&current.id);
+        if running > 0 {
+            unmet.push(format!(
+                "{running} commands of this run are still running; wait for them before completing"
+            ));
+        }
         if unmet.is_empty() {
             return Ok(AcceptanceDecision::Proceed {
                 basis: completion_basis(&ledger, &verdicts),
@@ -142,15 +169,8 @@ impl StatefulRunUpdateTool {
                 return Ok(AcceptanceDecision::Blocked(Box::new(run)));
             }
         }
-        let omission_note = if uncovered_beyond_cap > 0 {
-            format!(
-                " The omission check proposed the first {MAX_OMISSION_PROPOSALS} uncovered requirement sentences of the goal; {uncovered_beyond_cap} more were not proposed, so review the goal for them too."
-            )
-        } else {
-            String::new()
-        };
         Ok(AcceptanceDecision::Refused(format!(
-            "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress before the host blocks it as partial). Unmet acceptance gates: {gates}.{omission_note} Settle each gate: repair the work and run its exact checkCommand with the shell tool, and use stateful_acceptance_update to accept or dismiss (with a reason) each omission proposal. noCheck settles only optional criteria. Required work never completes unverified: if it cannot be verified or finished, set status blocked with a partial result that names the unmet criteria. Otherwise complete again"
+            "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress before the host blocks it as partial). Unmet acceptance gates: {gates}. Settle each gate: repair the work and run its exact checkCommand with the shell tool, accept each omission proposal (dismissal needs the user's own steering, quoted exactly, or a covering user criterion), and have the user approve each check (steering quoting the exact command, then approve). noCheck settles only optional criteria. Required work never completes unverified: if it cannot be verified or finished, set status blocked with a partial result that names the unmet criteria. Otherwise complete again"
         )))
     }
 
@@ -175,7 +195,7 @@ pub(super) async fn declared_open_issues(
     final_obligation: Option<&ObligationPacket>,
     runtime: &StatefulRunStore,
     run: &StatefulRun,
-) -> Result<Vec<String>, FunctionCallError> {
+) -> Result<(Vec<String>, Option<u64>), FunctionCallError> {
     let Some(declared) = open_issues else {
         return Err(FunctionCallError::RespondToModel(
             "completed requires openIssues: list every unresolved doubt, known discrepancy, failing check or open blocker that affects the result, or pass [] when there is none. Any entry ends the run blocked with a partial result instead of completed".to_string(),
@@ -190,24 +210,26 @@ pub(super) async fn declared_open_issues(
             "openIssues holds at most {MAX_OPEN_ISSUES} non-empty entries of at most {MAX_OPEN_ISSUE_BYTES} bytes"
         )));
     }
+    let latest = runtime.latest_obligation(&run.id).await.map_err(respond)?;
+    let sequence = latest.as_ref().map(|obligation| obligation.sequence);
     let blockers = match final_obligation {
         Some(packet) => packet.blockers.clone(),
-        None => runtime
-            .latest_obligation(&run.id)
-            .await
-            .map_err(respond)?
+        None => latest
             .map(|obligation| obligation.value.packet.blockers)
             .unwrap_or_default(),
     };
-    Ok(declared
-        .iter()
-        .map(|issue| issue.trim().to_string())
-        .chain(
-            blockers
-                .into_iter()
-                .map(|blocker| format!("Recorded blocker: {blocker}")),
-        )
-        .collect())
+    Ok((
+        declared
+            .iter()
+            .map(|issue| issue.trim().to_string())
+            .chain(
+                blockers
+                    .into_iter()
+                    .map(|blocker| format!("Recorded blocker: {blocker}")),
+            )
+            .collect(),
+        sequence,
+    ))
 }
 
 impl StatefulRunUpdateTool {

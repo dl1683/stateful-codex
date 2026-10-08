@@ -1,36 +1,59 @@
 use std::collections::HashMap;
+use std::path::Path;
 
+use codex_extension_api::ExtensionData;
 use codex_protocol::items::CommandExecutionItem;
 use codex_protocol::items::FileChangeItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::PatchApplyStatus;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::AcceptanceChange;
+use codex_stateful_runtime::AcceptanceCriterion;
 use codex_stateful_runtime::AcceptanceKind;
 use codex_stateful_runtime::AcceptanceOrigin;
+use codex_stateful_runtime::AcceptanceState;
 use codex_stateful_runtime::ArtifactState;
-use codex_stateful_runtime::CriterionVerdict;
+use codex_stateful_runtime::CriterionTerms;
 use codex_stateful_runtime::EvidenceOutcome;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::WorkflowMode;
-use codex_stateful_runtime::criterion_verdict;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
 
 use super::artifact_states;
+use super::bind_turn;
+use super::command_started;
+use super::in_flight;
 use super::observe_item;
 use super::runs_check;
 use crate::services::ProjectIntelligenceServices;
 
-fn command_item(id: &str, script: &str, status: &str, exit_code: i32, parsed: &str) -> TurnItem {
+fn file_uri(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
+}
+
+fn command_item(
+    id: &str,
+    script: &str,
+    cwd: &Path,
+    status: &str,
+    exit_code: i32,
+    parsed: &str,
+) -> TurnItem {
     let item: CommandExecutionItem = serde_json::from_value(json!({
         "id": id,
         "command": ["/bin/bash", "-lc", script],
-        "cwd": "file:///project",
+        "cwd": file_uri(cwd),
         "parsed_cmd": [{"type": parsed, "cmd": script, "name": "f", "path": "f"}],
         "source": "agent",
         "status": status,
@@ -39,6 +62,137 @@ fn command_item(id: &str, script: &str, status: &str, exit_code: i32, parsed: &s
     }))
     .expect("command item decodes");
     TurnItem::CommandExecution(item)
+}
+
+fn argv(script: &str) -> Vec<String> {
+    vec![
+        "/bin/bash".to_string(),
+        "-lc".to_string(),
+        script.to_string(),
+    ]
+}
+
+struct Fixture {
+    _state: TempDir,
+    project: TempDir,
+    services: ProjectIntelligenceServices,
+    store: StatefulRunStore,
+    run_id: StatefulRunId,
+    roots: Vec<String>,
+    turn: ExtensionData,
+}
+
+async fn fixture(run: &str) -> Fixture {
+    let state = TempDir::new().expect("state");
+    let project = TempDir::new().expect("project");
+    std::fs::create_dir_all(project.path().join("src")).expect("src");
+    std::fs::write(project.path().join("src/parse.py"), "v1").expect("source");
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state.path().abs()));
+    let store = services.runtime().await.expect("runtime").clone();
+    let run_id = StatefulRunId::parse(run).expect("run id");
+    store
+        .create_run(
+            run_id.clone(),
+            NewStatefulRun {
+                project_id: "project-1".to_string(),
+                thread_ids: vec!["thread-1".to_string()],
+                goal: "All tests must pass.".to_string(),
+                mode: WorkflowMode::Autonomous,
+                budget: RunBudget {
+                    max_continuations: 24,
+                    max_elapsed_seconds: 14_400,
+                },
+            },
+        )
+        .await
+        .expect("run created");
+    store
+        .revise_acceptance(
+            &run_id,
+            0,
+            vec![AcceptanceChange::Add {
+                origin: AcceptanceOrigin::Derived,
+                kind: AcceptanceKind::Check,
+                statement: "Unit tests pass.".to_string(),
+                request_span: None,
+                terms: CriterionTerms {
+                    required: true,
+                    artifacts: vec!["src/parse.py".to_string()],
+                    check_command: Some("pytest -q".to_string()),
+                    expected_observation: Some("every test passes".to_string()),
+                    ..CriterionTerms::default()
+                },
+            }],
+            "call-add",
+        )
+        .await
+        .expect("criterion added");
+    let turn = ExtensionData::new("turn");
+    bind_turn(&services, &turn, &run_id).await;
+    Fixture {
+        roots: vec![project.path().to_string_lossy().to_string()],
+        _state: state,
+        project,
+        services,
+        store,
+        run_id,
+        turn,
+    }
+}
+
+impl Fixture {
+    async fn start(&self, id: &str, script: &str, cwd: &Path) {
+        command_started(
+            &self.services,
+            &self.roots,
+            &self.turn,
+            id,
+            &argv(script),
+            cwd,
+        )
+        .await;
+    }
+
+    async fn finish(
+        &self,
+        id: &str,
+        script: &str,
+        cwd: &Path,
+        status: &str,
+        exit_code: i32,
+        parsed: &str,
+    ) {
+        observe_item(
+            &self.services,
+            &self.roots,
+            &self.turn,
+            &command_item(id, script, cwd, status, exit_code, parsed),
+        )
+        .await;
+    }
+
+    async fn check(&self, id: &str, status: &str, exit_code: i32) {
+        let root = self.project.path().to_path_buf();
+        self.start(id, "pytest -q", &root).await;
+        self.finish(id, "pytest -q", &root, status, exit_code, "unknown")
+            .await;
+    }
+
+    async fn latest(&self) -> (Option<EvidenceOutcome>, u64) {
+        let ledger = self
+            .store
+            .acceptance_ledger(&self.run_id)
+            .await
+            .expect("ledger");
+        (
+            ledger.criteria[0]
+                .evidence
+                .as_ref()
+                .map(|evidence| evidence.outcome),
+            ledger.workspace_generation,
+        )
+    }
 }
 
 #[test]
@@ -68,19 +222,21 @@ fn checks_match_the_executed_script_exactly() {
 }
 
 #[tokio::test]
-async fn artifact_digests_track_content_and_report_missing_or_outside_files() {
+async fn artifact_digests_track_content_and_refuse_unpinnable_files() {
     let root = TempDir::new().expect("root");
     let outside = TempDir::new().expect("outside");
     std::fs::create_dir_all(root.path().join("out")).expect("out dir");
     std::fs::write(root.path().join("out/report.json"), "{}").expect("artifact written");
     std::fs::write(outside.path().join("secret.txt"), "x").expect("outside written");
+    let large = vec![0_u8; 16 * 1024 * 1024 + 1];
+    std::fs::write(root.path().join("out/large.bin"), large).expect("large written");
     let roots = vec![root.path().to_string_lossy().to_string()];
-    let criterion = |artifacts: Vec<String>| codex_stateful_runtime::AcceptanceCriterion {
+    let criterion = |artifacts: Vec<String>| AcceptanceCriterion {
         id: "run#C1".to_string(),
         ordinal: 1,
         origin: AcceptanceOrigin::Derived,
-        kind: AcceptanceKind::Deliverable,
-        state: codex_stateful_runtime::AcceptanceState::Active,
+        kind: AcceptanceKind::Existence,
+        state: AcceptanceState::Active,
         statement: "Report exists.".to_string(),
         requirement: "Report exists.".to_string(),
         required: true,
@@ -89,7 +245,10 @@ async fn artifact_digests_track_content_and_report_missing_or_outside_files() {
         request_span: None,
         artifacts,
         check_command: None,
+        check_cwd: None,
         expected_observation: None,
+        approved_by_steering: None,
+        dismissal: None,
         note: None,
         revision: 1,
         ledger_revision: 1,
@@ -111,7 +270,6 @@ async fn artifact_digests_track_content_and_report_missing_or_outside_files() {
     };
     assert_eq!(missing, &Vec::<String>::new());
     assert_ne!(before, after);
-
     let absent = criterion(vec!["out/missing.csv".to_string()]);
     assert!(matches!(
         artifact_states(&roots, std::iter::once(&absent)).await.get(&1),
@@ -128,18 +286,91 @@ async fn artifact_digests_track_content_and_report_missing_or_outside_files() {
         artifact_states(&roots, std::iter::once(&escaped)).await.get(&1),
         Some(ArtifactState::Unavailable(reason)) if reason.contains("outside the project roots")
     ));
+    // Size and modification time are never content identity.
+    let oversized = criterion(vec!["out/large.bin".to_string()]);
+    assert!(matches!(
+        artifact_states(&roots, std::iter::once(&oversized)).await.get(&1),
+        Some(ArtifactState::Unavailable(reason)) if reason.contains("cannot be pinned")
+    ));
 }
 
 #[tokio::test]
-async fn observed_checks_bind_evidence_and_later_mutations_make_it_stale() {
-    let state = TempDir::new().expect("state");
-    let services =
-        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state.path().abs()));
-    let runtime = services.runtime().await.expect("runtime opens");
-    let run_id = StatefulRunId::parse("observed-run").expect("run id");
-    runtime
+async fn a_check_binds_only_in_its_directory_with_a_start_snapshot() {
+    let fixture = fixture("run-directory").await;
+    let elsewhere = TempDir::new().expect("other repository");
+    let root = fixture.project.path().to_path_buf();
+    // The same command text in an unrelated directory is no evidence (and is a mutation).
+    fixture.start("other", "pytest -q", elsewhere.path()).await;
+    fixture
+        .finish(
+            "other",
+            "pytest -q",
+            elsewhere.path(),
+            "completed",
+            0,
+            "unknown",
+        )
+        .await;
+    assert_eq!(fixture.latest().await, (None, 1));
+    // No start snapshot: unavailable, never passed.
+    fixture
+        .finish("unseen", "pytest -q", &root, "completed", 0, "unknown")
+        .await;
+    assert_eq!(fixture.latest().await.0, Some(EvidenceOutcome::Unavailable));
+    // A clean run in the pinned directory passes and tracks in-flight state.
+    fixture.start("clean", "pytest -q", &root).await;
+    assert_eq!(in_flight(&fixture.run_id), 1);
+    fixture
+        .finish("clean", "pytest -q", &root, "completed", 0, "unknown")
+        .await;
+    assert_eq!(in_flight(&fixture.run_id), 0);
+    assert_eq!(fixture.latest().await, (Some(EvidenceOutcome::Passed), 1));
+    // A verifier the shell tool timed out is failed, never passed.
+    fixture.check("timed-out", "failed", 124).await;
+    assert_eq!(fixture.latest().await.0, Some(EvidenceOutcome::Failed));
+}
+
+#[tokio::test]
+async fn changes_while_a_check_runs_make_it_unavailable() {
+    let fixture = fixture("run-race").await;
+    let root = fixture.project.path().to_path_buf();
+    // The pinned input changes while the check runs.
+    fixture.start("edit-during", "pytest -q", &root).await;
+    std::fs::write(root.join("src/parse.py"), "v2").expect("edited");
+    fixture
+        .finish("edit-during", "pytest -q", &root, "completed", 0, "unknown")
+        .await;
+    assert_eq!(fixture.latest().await.0, Some(EvidenceOutcome::Unavailable));
+    // Another observed mutation lands between the check's start and end.
+    fixture.start("concurrent", "pytest -q", &root).await;
+    fixture.start("writer", "sed -i s/a/b/ f", &root).await;
+    fixture
+        .finish(
+            "writer",
+            "sed -i s/a/b/ f",
+            &root,
+            "completed",
+            0,
+            "unknown",
+        )
+        .await;
+    fixture
+        .finish("concurrent", "pytest -q", &root, "completed", 0, "unknown")
+        .await;
+    assert_eq!(fixture.latest().await.0, Some(EvidenceOutcome::Unavailable));
+}
+
+#[tokio::test]
+async fn a_late_result_stays_with_the_run_that_started_it() {
+    let fixture = fixture("run-a").await;
+    let root = fixture.project.path().to_path_buf();
+    fixture.start("background", "pytest -q", &root).await;
+    // Run B starts on the same thread with the same check, in a new turn.
+    let run_b = StatefulRunId::parse("run-b").expect("run id");
+    fixture
+        .store
         .create_run(
-            run_id.clone(),
+            run_b.clone(),
             NewStatefulRun {
                 project_id: "project-1".to_string(),
                 thread_ids: vec!["thread-1".to_string()],
@@ -152,142 +383,64 @@ async fn observed_checks_bind_evidence_and_later_mutations_make_it_stale() {
             },
         )
         .await
-        .expect("run created");
-    runtime
-        .revise_acceptance(
-            &run_id,
-            0,
-            vec![AcceptanceChange::Add {
-                origin: AcceptanceOrigin::User,
-                kind: AcceptanceKind::Check,
-                statement: "All tests must pass.".to_string(),
-                request_span: Some(codex_stateful_runtime::RequestSpan { start: 0, end: 20 }),
-                terms: codex_stateful_runtime::CriterionTerms {
-                    required: true,
-                    check_command: Some("pytest -q".to_string()),
-                    expected_observation: Some("every test passes".to_string()),
-                    ..Default::default()
-                },
-            }],
-            "call-add",
-        )
-        .await
-        .expect("criterion added");
-    let verdict = || async {
-        let ledger = runtime
-            .acceptance_ledger(&run_id)
-            .await
-            .expect("ledger reads");
-        let criterion = ledger.criterion(1).expect("criterion").clone();
-        (
-            criterion.evidence.as_ref().map(|evidence| evidence.outcome),
-            criterion_verdict(&criterion, ledger.workspace_generation, None),
-        )
-    };
-
-    // A read-only command neither binds nor invalidates; a declined check of required work
-    // is recorded as unavailable and keeps the criterion unmet.
-    observe_item(
-        &services,
-        &run_id,
-        &[],
-        &command_item("read", "cat setup.py", "completed", 0, "read"),
-    )
-    .await;
-    observe_item(
-        &services,
-        &run_id,
-        &[],
-        &command_item("declined", "pytest -q", "declined", -1, "unknown"),
-    )
-    .await;
+        .expect("run b");
+    let turn_b = ExtensionData::new("turn-b");
+    bind_turn(&fixture.services, &turn_b, &run_b).await;
+    // A's delayed result arrives with A's originating turn store.
+    fixture
+        .finish("background", "pytest -q", &root, "completed", 0, "unknown")
+        .await;
     assert_eq!(
-        verdict().await,
-        (
-            Some(EvidenceOutcome::Unavailable),
-            CriterionVerdict::Unmet(
-                "required but unverified (the session's approval policy declined the check, so it did not run); required work cannot complete unverified. Repair it or find a safe check; if it cannot be verified, set the run blocked with a partial result that names it".to_string()
-            )
-        )
-    );
-    observe_item(
-        &services,
-        &run_id,
-        &[],
-        &command_item("green", "pytest -q", "completed", 0, "unknown"),
-    )
-    .await;
-    assert_eq!(
-        verdict().await,
-        (
-            Some(EvidenceOutcome::Passed),
-            CriterionVerdict::SatisfiedByHost
-        )
-    );
-    assert_eq!(
-        runtime
-            .acceptance_ledger(&run_id)
+        fixture
+            .store
+            .acceptance_ledger(&run_b)
             .await
             .expect("ledger")
-            .workspace_generation,
-        0
+            .criteria,
+        Vec::new()
     );
+    assert_eq!(fixture.latest().await.0, Some(EvidenceOutcome::Passed));
+}
 
-    // A later mutating command or applied patch makes the green result stale.
-    observe_item(
-        &services,
-        &run_id,
-        &[],
-        &command_item("edit", "sed -i s/a/b/ f", "completed", 0, "unknown"),
-    )
-    .await;
-    assert_eq!(
-        verdict().await,
-        (
-            Some(EvidenceOutcome::Passed),
-            CriterionVerdict::Unmet(
-                "stale: the workspace changed after `pytest -q` passed; run it again".to_string()
-            )
-        )
-    );
-    observe_item(
-        &services,
-        &run_id,
-        &[],
-        &command_item("timed-out", "pytest -q", "failed", 124, "unknown"),
-    )
-    .await;
-    // A verifier the shell tool timed out is a failed check, never a pass.
-    assert_eq!(
-        verdict().await,
-        (
-            Some(EvidenceOutcome::Failed),
-            CriterionVerdict::Unmet(
-                "`pytest -q` failed (exit 124); repair the work and run it again".to_string()
-            )
-        )
-    );
-    observe_item(
-        &services,
-        &run_id,
-        &[],
-        &command_item("fixed", "pytest -q", "completed", 0, "unknown"),
-    )
-    .await;
-    assert_eq!(verdict().await.1, CriterionVerdict::SatisfiedByHost);
-    observe_item(
-        &services,
-        &run_id,
-        &[],
-        &TurnItem::FileChange(FileChangeItem {
+#[tokio::test]
+async fn patches_and_reads_affect_the_generation_conservatively() {
+    let fixture = fixture("run-patches").await;
+    let root = fixture.project.path().to_path_buf();
+    fixture
+        .finish("read", "cat setup.py", &root, "completed", 0, "read")
+        .await;
+    assert_eq!(fixture.latest().await.1, 0);
+    let patch = |status: PatchApplyStatus| {
+        TurnItem::FileChange(FileChangeItem {
             id: "patch".to_string(),
             changes: HashMap::new(),
-            status: Some(PatchApplyStatus::Completed),
+            status: Some(status),
             auto_approved: None,
             stdout: None,
             stderr: None,
-        }),
+        })
+    };
+    observe_item(
+        &fixture.services,
+        &fixture.roots,
+        &fixture.turn,
+        &patch(PatchApplyStatus::Declined),
     )
     .await;
-    assert!(verdict().await.1.is_unmet());
+    assert_eq!(fixture.latest().await.1, 0);
+    // A failed patch may have applied a prefix.
+    observe_item(
+        &fixture.services,
+        &fixture.roots,
+        &fixture.turn,
+        &patch(PatchApplyStatus::Failed),
+    )
+    .await;
+    assert_eq!(fixture.latest().await.1, 1);
+    let ledger = fixture
+        .store
+        .acceptance_ledger(&fixture.run_id)
+        .await
+        .expect("ledger");
+    assert_eq!(ledger.observed_executions, 1);
 }

@@ -1,0 +1,142 @@
+use pretty_assertions::assert_eq;
+
+use super::coverage_exempt;
+use super::sentences;
+use super::uncovered_sentences;
+use crate::AcceptanceCriterion;
+use crate::AcceptanceKind;
+use crate::AcceptanceLedger;
+use crate::AcceptanceOrigin;
+use crate::AcceptanceState;
+use crate::RequestSpan;
+use crate::StatefulRunId;
+
+fn ledger() -> AcceptanceLedger {
+    AcceptanceLedger::empty(StatefulRunId::parse("run").expect("run id"))
+}
+
+fn criterion(
+    ordinal: u32,
+    origin: AcceptanceOrigin,
+    state: AcceptanceState,
+    required: bool,
+    goal: &str,
+    quote: &str,
+) -> AcceptanceCriterion {
+    let start = goal.find(quote).expect("quote in goal");
+    AcceptanceCriterion {
+        id: format!("run#C{ordinal}"),
+        ordinal,
+        origin,
+        kind: AcceptanceKind::Check,
+        state,
+        statement: quote.to_string(),
+        requirement: quote.to_string(),
+        required,
+        depends_on: Vec::new(),
+        milestone: None,
+        request_span: Some(RequestSpan {
+            start,
+            end: start + quote.len(),
+        }),
+        artifacts: Vec::new(),
+        check_command: None,
+        check_cwd: None,
+        expected_observation: None,
+        approved_by_steering: None,
+        dismissal: None,
+        note: None,
+        revision: 1,
+        ledger_revision: 1,
+        evidence: None,
+    }
+}
+
+fn quotes(goal: &str, spans: Vec<RequestSpan>) -> Vec<&str> {
+    spans
+        .into_iter()
+        .map(|span| span.quote(goal).expect("span"))
+        .collect()
+}
+
+#[test]
+fn a_partial_clause_leaves_the_whole_sentence_uncovered() {
+    let goal = "Write report.txt and values.csv with reconciled totals.";
+    let mut ledger = ledger();
+    ledger.criteria.push(criterion(
+        1,
+        AcceptanceOrigin::User,
+        AcceptanceState::Active,
+        true,
+        goal,
+        "Write report.txt",
+    ));
+    assert_eq!(quotes(goal, uncovered_sentences(goal, &ledger)), vec![goal]);
+}
+
+#[test]
+fn derived_retired_and_optional_overlaps_do_not_cover_user_text() {
+    let goal = "Fix the parser. Keep the API stable.";
+    let mut ledger = ledger();
+    ledger.criteria.push(criterion(
+        1,
+        AcceptanceOrigin::Derived,
+        AcceptanceState::Active,
+        true,
+        goal,
+        "Fix the parser.",
+    ));
+    ledger.criteria.push(criterion(
+        2,
+        AcceptanceOrigin::Derived,
+        AcceptanceState::Retired,
+        true,
+        goal,
+        "Keep the API stable.",
+    ));
+    assert_eq!(
+        quotes(goal, uncovered_sentences(goal, &ledger)),
+        vec!["Fix the parser.", "Keep the API stable."]
+    );
+    ledger.criteria.push(criterion(
+        3,
+        AcceptanceOrigin::User,
+        AcceptanceState::Active,
+        true,
+        goal,
+        "Fix the parser.",
+    ));
+    assert_eq!(
+        quotes(goal, uncovered_sentences(goal, &ledger)),
+        vec!["Keep the API stable."]
+    );
+}
+
+#[test]
+fn only_an_untouched_one_sentence_request_is_exempt() {
+    let goal = "Compute the totals for a, b and c and write a summary.";
+    let mut ledger = ledger();
+    assert!(coverage_exempt(goal, &ledger));
+    ledger.observed_executions = 1;
+    assert!(!coverage_exempt(goal, &ledger));
+    assert_eq!(quotes(goal, uncovered_sentences(goal, &ledger)), vec![goal]);
+    assert!(!coverage_exempt(
+        "Fix it. Test it.",
+        &crate::AcceptanceLedger::empty(StatefulRunId::parse("run").expect("run id"))
+    ));
+}
+
+#[test]
+fn sentences_keep_their_punctuation_and_drop_separators() {
+    let goal =
+        "Fix src/parse.py. Write out/report.json.\nAll tests must pass; do not modify tests/.";
+    assert_eq!(
+        quotes(goal, sentences(goal)),
+        vec![
+            "Fix src/parse.py.",
+            "Write out/report.json.",
+            "All tests must pass",
+            "do not modify tests/."
+        ]
+    );
+}

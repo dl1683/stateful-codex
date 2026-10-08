@@ -189,7 +189,7 @@ impl<C: Sync> ThreadLifecycleContributor<C> for StatefulExtension {
 
 impl StatefulExtension {
     /// The selected project's configured roots, or none when it cannot be read.
-    async fn project_roots(&self, project_id: &str) -> Vec<String> {
+    pub(crate) async fn project_roots(&self, project_id: &str) -> Vec<String> {
         match self.projects.read_project(project_id.to_string()).await {
             Ok(Some(project)) => project.roots.into_iter().map(|root| root.path).collect(),
             Ok(None) => Vec::new(),
@@ -288,6 +288,8 @@ impl TurnLifecycleContributor for StatefulExtension {
             match store.run_for_thread(&thread.thread_id).await {
                 Ok(Some(run)) if run.value.project_id == selected.project_id() => {
                     self.attribution.bind_run(input.turn_id, run.id.clone());
+                    crate::acceptance_observation::bind_turn(services, input.turn_store, &run.id)
+                        .await;
                     input.thread_store.insert(ActiveRunTurn {
                         run_id: run.id,
                         turn_id: input.turn_id.to_string(),
@@ -328,13 +330,14 @@ impl TurnLifecycleContributor for StatefulExtension {
             if matches!(
                 item,
                 TurnItem::CommandExecution(_) | TurnItem::FileChange(_)
-            ) && let (Some(selected), Some(active), Some(services)) = (
+            ) && let (Some(selected), Some(services)) = (
                 thread_store.get::<SelectedProject>(),
-                thread_store.get::<ActiveRunTurn>(),
                 self.services.as_ref(),
             ) {
+                // Attributed through the originating turn's binding, never the thread's
+                // current run: a late result of an earlier run cannot settle a newer one.
                 let roots = self.project_roots(selected.project_id()).await;
-                crate::acceptance_observation::observe_item(services, &active.run_id, &roots, item)
+                crate::acceptance_observation::observe_item(services, &roots, turn_store, item)
                     .await;
             }
         })

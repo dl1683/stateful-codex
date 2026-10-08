@@ -13,9 +13,11 @@ use crate::AcceptanceLedger;
 use crate::AcceptanceOrigin;
 use crate::AcceptanceState;
 use crate::CommandEvidence;
+use crate::DismissalReceipt;
 use crate::EvidenceOutcome;
 use crate::EvidenceSource;
 use crate::RequestSpan;
+use crate::StatefulRun;
 use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunStore;
@@ -29,6 +31,8 @@ use crate::acceptance_changes::ChangeContext;
 use crate::acceptance_changes::apply_change;
 use crate::acceptance_changes::insert_omission_proposal;
 use crate::acceptance_changes::next_ordinal;
+use crate::acceptance_coverage::MAX_OMISSION_PROPOSALS;
+use crate::acceptance_coverage::uncovered_sentences;
 use crate::storage::load_run;
 use crate::storage::unix_timestamp_millis;
 
@@ -73,6 +77,7 @@ impl StatefulRunStore {
             });
         }
         let now = unix_timestamp_millis()?;
+        let mut changed = false;
         for change in changes {
             let ledger = load_ledger(&mut transaction, run_id).await?;
             let context = ChangeContext {
@@ -82,21 +87,27 @@ impl StatefulRunStore {
                 source_id,
                 now,
             };
-            apply_change(&mut transaction, &context, change).await?;
+            changed |= apply_change(&mut transaction, &context, change).await?;
         }
-        bump_revision(&mut transaction, run_id, now).await?;
+        // A no-op is not progress: it neither advances the revision nor resets the refusal
+        // count.
+        if changed {
+            bump_revision(&mut transaction, run_id, now).await?;
+        }
         let ledger = load_ledger(&mut transaction, run_id).await?;
         transaction.commit().await?;
         Ok(ledger)
     }
 
-    /// Runs the host omission check once per run: records its proposals for review and marks
-    /// the check done. A ledger already checked is returned unchanged.
-    pub async fn record_omission_check(
+    /// The omission pass: proposes, for review, the next uncovered goal sentences (at most
+    /// `MAX_OMISSION_PROPOSALS`, and never more than the ledger has room for). Coverage is
+    /// recomputed from durable state, so sentences left over by the cap, by a full ledger or
+    /// by a restart stay uncovered and keep gating. Returns the ledger and how many uncovered
+    /// sentences remain without a proposal.
+    pub async fn propose_uncovered(
         &self,
         run_id: &StatefulRunId,
-        proposals: Vec<(String, RequestSpan)>,
-    ) -> Result<AcceptanceLedger, StatefulRunStoreError> {
+    ) -> Result<(AcceptanceLedger, usize), StatefulRunStoreError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let run = load_run(&mut transaction, run_id)
             .await?
@@ -106,12 +117,11 @@ impl StatefulRunStore {
         }
         ensure_ledger(&mut transaction, run_id).await?;
         let ledger = load_ledger(&mut transaction, run_id).await?;
-        if ledger.omission_checked {
-            transaction.commit().await?;
-            return Ok(ledger);
-        }
+        let uncovered = uncovered_sentences(&run.value.goal, &ledger);
+        let slots = MAX_ACCEPTANCE_CRITERIA
+            .saturating_sub(ledger.criteria.len())
+            .min(MAX_OMISSION_PROPOSALS);
         let now = unix_timestamp_millis()?;
-        let slots = MAX_ACCEPTANCE_CRITERIA.saturating_sub(ledger.criteria.len());
         let context = ChangeContext {
             run: &run,
             ledger: &ledger,
@@ -120,25 +130,79 @@ impl StatefulRunStore {
             now,
         };
         let mut added = 0;
-        for (ordinal, (statement, span)) in
-            (next_ordinal(&ledger)..).zip(proposals.into_iter().take(slots))
-        {
-            insert_omission_proposal(&mut transaction, &context, ordinal, &statement, span).await?;
+        for (ordinal, span) in (next_ordinal(&ledger)..).zip(uncovered.iter().take(slots)) {
+            let quote = span
+                .quote(&run.value.goal)
+                .ok_or(AcceptanceError::InvalidSpan)?;
+            insert_omission_proposal(
+                &mut transaction,
+                &context,
+                ordinal,
+                &proposal_statement(quote),
+                *span,
+            )
+            .await?;
             added += 1;
         }
-        sqlx::query(
-            "UPDATE stateful_acceptance_ledgers
-             SET omission_checked = 1, revision = revision + ?, updated_at_ms = ?
-             WHERE run_id = ?",
+        if added > 0 {
+            bump_revision(&mut transaction, run_id, now).await?;
+        }
+        let ledger = load_ledger(&mut transaction, run_id).await?;
+        transaction.commit().await?;
+        Ok((ledger, uncovered.len() - added))
+    }
+
+    /// Counts one observed command execution (any kind, read-only included).
+    pub async fn record_execution(
+        &self,
+        run_id: &StatefulRunId,
+    ) -> Result<(), StatefulRunStoreError> {
+        self.adjust_counters(run_id, "observed_executions = observed_executions + 1")
+            .await
+    }
+
+    /// Cold re-entry of a run (a new process, resume, or a different workspace): mutations
+    /// while no observer ran are unknown, so every earlier receipt and observation becomes
+    /// stale. A run with no evidence is left untouched.
+    pub async fn invalidate_after_reentry(
+        &self,
+        run_id: &StatefulRunId,
+    ) -> Result<(), StatefulRunStoreError> {
+        let has_evidence = sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM stateful_acceptance_evidence WHERE run_id = ? LIMIT 1",
         )
-        .bind(i64::from(added > 0))
-        .bind(now)
+        .bind(run_id.as_str())
+        .fetch_optional(&self.pool)
+        .await?
+        .is_some();
+        if !has_evidence {
+            return Ok(());
+        }
+        self.bump_workspace_generation(run_id).await
+    }
+
+    async fn adjust_counters(
+        &self,
+        run_id: &StatefulRunId,
+        assignment: &'static str,
+    ) -> Result<(), StatefulRunStoreError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let Some(run) = load_run(&mut transaction, run_id).await? else {
+            return Ok(());
+        };
+        if run.status.is_terminal() {
+            return Ok(());
+        }
+        ensure_ledger(&mut transaction, run_id).await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE stateful_acceptance_ledgers SET {assignment}, updated_at_ms = ? WHERE run_id = ?"
+        )))
+        .bind(unix_timestamp_millis()?)
         .bind(run_id.as_str())
         .execute(&mut *transaction)
         .await?;
-        let ledger = load_ledger(&mut transaction, run_id).await?;
         transaction.commit().await?;
-        Ok(ledger)
+        Ok(())
     }
 
     /// Records observed check executions. Evidence binds only to the active criterion revision
@@ -169,20 +233,31 @@ impl StatefulRunStore {
             {
                 continue;
             }
+            // A mutation observed between the check's start and this insert means the check
+            // did not run against one workspace state.
+            let raced = observed.start_generation != ledger.workspace_generation;
+            let (outcome, detail) = if raced && observed.outcome == EvidenceOutcome::Passed {
+                (
+                    EvidenceOutcome::Unavailable,
+                    Some("the workspace changed while the check ran"),
+                )
+            } else {
+                (observed.outcome, observed.detail.as_deref())
+            };
             insert_evidence(
                 &mut transaction,
                 run_id,
                 criterion,
                 EvidenceRow {
                     source: EvidenceSource::HostCommand,
-                    outcome: observed.outcome,
+                    outcome,
                     command: Some(&observed.command),
                     exit_code: observed.exit_code,
                     output_tail: Some(&bounded_tail(&observed.output_tail)),
                     output_digest: Some(&observed.output_digest),
                     artifact_digest: observed.artifact_digest.as_deref(),
-                    detail: observed.detail.as_deref(),
-                    workspace_generation: ledger.workspace_generation,
+                    detail,
+                    workspace_generation: observed.start_generation,
                     source_id: &observed.source_id,
                 },
                 now,
@@ -328,45 +403,103 @@ impl StatefulRunStore {
     }
 }
 
-/// Evaluates the gate inside the terminal transaction. With a commit, the ledger revision and
-/// workspace generation must be exactly the ones the caller validated against; without one
-/// (direct store callers), declared artifacts count as unread.
+/// Evaluates the gate inside the terminal transaction. Every `Completed` write needs a host
+/// decision (`commit`); the policy (coverage, verdicts, blockers, approvals) is re-derived
+/// here from durable state, never taken from the caller.
 pub(crate) async fn enforce_acceptance_gate(
     connection: &mut SqliteConnection,
-    run_id: &StatefulRunId,
+    run: &StatefulRun,
     commit: Option<&AcceptanceCommit>,
 ) -> Result<(), StatefulRunStoreError> {
-    let ledger = load_ledger(connection, run_id).await?;
-    let default_commit = AcceptanceCommit::default();
-    let commit = match commit {
-        Some(commit) => {
-            if commit.ledger_revision != ledger.revision
-                || commit.workspace_generation != ledger.workspace_generation
-            {
-                return Err(StatefulRunStoreError::AcceptanceChanged);
-            }
-            if commit.omission_required && !ledger.omission_checked {
-                return Err(StatefulRunStoreError::AcceptanceGate(
-                    "the omission check has not run for this substantial task".to_string(),
-                ));
-            }
-            if let Some((owner, attempt)) = &commit.verification {
-                consume_verification_lease(connection, run_id, owner, *attempt).await?;
-            }
-            commit
-        }
-        None => &default_commit,
+    let Some(commit) = commit else {
+        return Err(StatefulRunStoreError::CompletionRequiresAcceptanceDecision);
     };
-    let unmet = unmet_criteria(&ledger, commit);
+    let ledger = load_ledger(connection, &run.id).await?;
+    if commit.ledger_revision != ledger.revision
+        || commit.workspace_generation != ledger.workspace_generation
+    {
+        return Err(StatefulRunStoreError::AcceptanceChanged);
+    }
+    consume_verification_lease(
+        connection,
+        &run.id,
+        &commit.verification.owner,
+        commit.verification.attempt,
+    )
+    .await?;
+    let latest = sqlx::query_as::<_, (i64, String)>(
+        "SELECT sequence, packet_json FROM stateful_obligations
+         WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
+    )
+    .bind(run.id.as_str())
+    .fetch_optional(&mut *connection)
+    .await?;
+    let latest_sequence = latest
+        .as_ref()
+        .map(|(sequence, _)| u64::try_from(*sequence))
+        .transpose()
+        .map_err(|_| StatefulRunStoreError::CorruptCount)?;
+    if latest_sequence != commit.validated_obligation_sequence {
+        return Err(StatefulRunStoreError::AcceptanceChanged);
+    }
+    if let Some((_, packet)) = latest
+        && !serde_json::from_str::<crate::ObligationPacket>(&packet)?
+            .blockers
+            .is_empty()
+    {
+        return Err(StatefulRunStoreError::AcceptanceGate(
+            "the latest recorded obligation declares open blockers".to_string(),
+        ));
+    }
+    for criterion in &ledger.criteria {
+        if let Some(steering_id) = &criterion.approved_by_steering
+            && crate::acceptance_changes::user_steering_text(connection, &run.id, steering_id)
+                .await
+                .is_err()
+        {
+            return Err(StatefulRunStoreError::AcceptanceGate(format!(
+                "C{}'s approval by steering {steering_id} is no longer valid",
+                criterion.ordinal
+            )));
+        }
+    }
+    let mut unmet = unmet_criteria(&ledger, &commit.artifacts)
+        .into_iter()
+        .map(|(ordinal, reason)| format!("C{ordinal}: {reason}"))
+        .collect::<Vec<_>>();
+    let uncovered = uncovered_sentences(&run.value.goal, &ledger).len();
+    if uncovered > 0 {
+        unmet.push(format!(
+            "{uncovered} request sentences are covered by no criterion or proposal"
+        ));
+    }
     if unmet.is_empty() {
         return Ok(());
     }
-    let summary = unmet
-        .iter()
-        .map(|(ordinal, reason)| format!("C{ordinal}: {reason}"))
-        .collect::<Vec<_>>()
-        .join("; ");
-    Err(StatefulRunStoreError::AcceptanceGate(summary))
+    Err(StatefulRunStoreError::AcceptanceGate(unmet.join("; ")))
+}
+
+/// A proposal's statement: the sentence, cut at a character boundary when very long.
+fn proposal_statement(quote: &str) -> String {
+    const MAX_PROPOSAL_BYTES: usize = 480;
+    let quote = quote
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    if quote.len() <= MAX_PROPOSAL_BYTES {
+        return quote;
+    }
+    let mut end = MAX_PROPOSAL_BYTES;
+    while !quote.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", quote[..end].trim_end())
 }
 
 /// The terminal transaction consumes the attempt it was validated in; an expired or replaced
@@ -488,7 +621,7 @@ async fn ensure_ledger(
 ) -> Result<(), StatefulRunStoreError> {
     sqlx::query(
         "INSERT OR IGNORE INTO stateful_acceptance_ledgers (
-            run_id, revision, workspace_generation, omission_checked, stalled_completions,
+            run_id, revision, workspace_generation, observed_executions, stalled_completions,
             stalled_at_revision, verification_attempt, updated_at_ms
          ) VALUES (?, 0, 0, 0, 0, 0, 0, ?)",
     )
@@ -531,7 +664,7 @@ fn bounded_tail(output: &str) -> String {
 struct StoredLedger {
     revision: i64,
     workspace_generation: i64,
-    omission_checked: i64,
+    observed_executions: i64,
     stalled_completions: i64,
     verification_attempt: i64,
     verification_lease_expires_at_ms: Option<i64>,
@@ -554,6 +687,11 @@ struct StoredCriterion {
     span_end: Option<i64>,
     artifacts_json: String,
     check_command: Option<String>,
+    check_cwd: Option<String>,
+    approved_by_steering: Option<String>,
+    dismissal_steering_id: Option<String>,
+    dismissal_quote: Option<String>,
+    dismissal_covered_by: Option<i64>,
     note: Option<String>,
     revision: i64,
     ledger_revision: i64,
@@ -582,7 +720,7 @@ pub(crate) async fn load_ledger(
     run_id: &StatefulRunId,
 ) -> Result<AcceptanceLedger, StatefulRunStoreError> {
     let Some(stored) = sqlx::query_as::<_, StoredLedger>(
-        "SELECT revision, workspace_generation, omission_checked, stalled_completions,
+        "SELECT revision, workspace_generation, observed_executions, stalled_completions,
                 verification_attempt, verification_lease_expires_at_ms
          FROM stateful_acceptance_ledgers WHERE run_id = ?",
     )
@@ -595,7 +733,9 @@ pub(crate) async fn load_ledger(
     let criteria = sqlx::query_as::<_, StoredCriterion>(
         "SELECT ordinal, criterion_id, origin, kind, state, statement, requirement, required,
                 depends_on_json, milestone, expected_observation, span_start, span_end,
-                artifacts_json, check_command, note, revision, ledger_revision
+                artifacts_json, check_command, check_cwd, approved_by_steering,
+                dismissal_steering_id, dismissal_quote, dismissal_covered_by, note, revision,
+                ledger_revision
          FROM stateful_acceptance_criteria WHERE run_id = ? ORDER BY ordinal LIMIT ?",
     )
     .bind(run_id.as_str())
@@ -646,7 +786,22 @@ pub(crate) async fn load_ledger(
             request_span: span,
             artifacts: serde_json::from_str(&stored.artifacts_json)?,
             check_command: stored.check_command,
+            check_cwd: stored.check_cwd,
             expected_observation: stored.expected_observation,
+            approved_by_steering: stored.approved_by_steering,
+            dismissal: match (
+                stored.dismissal_steering_id,
+                stored.dismissal_quote,
+                stored.dismissal_covered_by,
+            ) {
+                (Some(steering_id), Some(quote), _) => {
+                    Some(DismissalReceipt::UserSteering { steering_id, quote })
+                }
+                (_, _, Some(covered_by)) => Some(DismissalReceipt::CoveredBy(
+                    u32::try_from(covered_by).map_err(|_| StatefulRunStoreError::CorruptCount)?,
+                )),
+                _ => None,
+            },
             note: stored.note,
             revision: u64::try_from(stored.revision)
                 .map_err(|_| StatefulRunStoreError::CorruptCount)?,
@@ -661,7 +816,8 @@ pub(crate) async fn load_ledger(
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         workspace_generation: u64::try_from(stored.workspace_generation)
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
-        omission_checked: stored.omission_checked == 1,
+        observed_executions: u64::try_from(stored.observed_executions)
+            .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         stalled_completions: u32::try_from(stored.stalled_completions)
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         verification_attempt: u64::try_from(stored.verification_attempt)
@@ -717,6 +873,7 @@ codec!(origin_name, parse_origin, AcceptanceOrigin, {
 codec!(kind_name, parse_kind, AcceptanceKind, {
     AcceptanceKind::Deliverable => "deliverable", AcceptanceKind::Constraint => "constraint",
     AcceptanceKind::Check => "check", AcceptanceKind::Manual => "manual",
+    AcceptanceKind::Existence => "existence",
 });
 codec!(state_name, parse_state, AcceptanceState, {
     AcceptanceState::Active => "active", AcceptanceState::Proposed => "proposed",

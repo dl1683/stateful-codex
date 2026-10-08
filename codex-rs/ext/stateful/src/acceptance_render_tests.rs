@@ -60,7 +60,10 @@ fn criterion(ordinal: u32, statement: &str, passed_at: Option<u64>) -> Acceptanc
         request_span: None,
         artifacts: Vec::new(),
         check_command: Some(format!("check-{ordinal}")),
+        check_cwd: None,
         expected_observation: Some("exit 0".to_string()),
+        approved_by_steering: Some("steering-1".to_string()),
+        dismissal: None,
         note: None,
         revision: 1,
         ledger_revision: 1,
@@ -87,7 +90,7 @@ fn ledger(revision: u64, generation: u64, criteria: Vec<AcceptanceCriterion>) ->
         run_id: StatefulRunId::parse("run-1").expect("run id"),
         revision,
         workspace_generation: generation,
-        omission_checked: false,
+        observed_executions: 0,
         stalled_completions: 0,
         verification_attempt: 0,
         verification_lease_expires_at_ms: None,
@@ -138,7 +141,7 @@ fn stale_evidence_replaces_only_the_acceptance_block() {
         .expect("full packet");
     assert!(
         full.body()
-            .contains("- C1 [derived; check; required] All tests pass. expects: exit 0. -> agent-written check `check-1` passed (host-observed exit 0)")
+            .contains("- C1 [derived; check; required] All tests pass. expects: exit 0. -> user-approved check `check-1` passed (host-observed exit 0)")
     );
     let delta = current
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))

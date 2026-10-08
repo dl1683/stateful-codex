@@ -8,11 +8,11 @@ use codex_extension_api::ToolCallSource;
 use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolPayload;
-use codex_protocol::items::CommandExecutionItem;
-use codex_protocol::items::TurnItem;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::AcceptanceOrigin;
 use codex_stateful_runtime::AcceptanceState;
+use codex_stateful_runtime::CommandEvidence;
+use codex_stateful_runtime::EvidenceOutcome;
 use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::RequestSpan;
 use codex_stateful_runtime::RunBudget;
@@ -72,6 +72,7 @@ async fn fixture(goal: &str, mode: WorkflowMode) -> Fixture {
             PROJECT_ID.to_string(),
             THREAD_ID.to_string(),
             services.clone(),
+            Arc::new(InMemoryThreadStore::default()),
         ),
         completion: StatefulRunUpdateTool::new(
             PROJECT_ID.to_string(),
@@ -109,7 +110,7 @@ impl Fixture {
     async fn update(&self, revision: u64, changes: Value) -> Result<Value, String> {
         match self
             .acceptance
-            .handle_call(call(
+            .handle_bounded(call(
                 "stateful_acceptance_update",
                 &json!({"expectedLedgerRevision": revision, "changes": changes}),
             ))
@@ -154,25 +155,46 @@ impl Fixture {
             .expect("run exists")
     }
 
-    async fn observe(&self, id: &str, script: &str, exit_code: i32) {
-        let item: CommandExecutionItem = serde_json::from_value(json!({
-            "id": id,
-            "command": ["/bin/bash", "-lc", script],
-            "cwd": "file:///project",
-            "parsed_cmd": [{"type": "unknown", "cmd": script}],
-            "source": "agent",
-            "status": if exit_code == 0 { "completed" } else { "failed" },
-            "aggregated_output": "ok",
-            "exit_code": exit_code,
-        }))
-        .expect("command item decodes");
-        crate::acceptance_observation::observe_item(
-            &self.services,
-            &self.run.id,
-            &[],
-            &TurnItem::CommandExecution(item),
-        )
-        .await;
+    async fn record_check(&self, ordinal: u32, exit_code: i32) {
+        let runtime = self.services.runtime().await.expect("runtime");
+        let ledger = runtime
+            .acceptance_ledger(&self.run.id)
+            .await
+            .expect("ledger");
+        let criterion = ledger.criterion(ordinal).expect("criterion");
+        runtime
+            .record_command_evidence(
+                &self.run.id,
+                vec![CommandEvidence {
+                    ordinal,
+                    criterion_revision: criterion.revision,
+                    outcome: if exit_code == 0 {
+                        EvidenceOutcome::Passed
+                    } else {
+                        EvidenceOutcome::Failed
+                    },
+                    command: criterion.check_command.clone().expect("check"),
+                    exit_code: Some(exit_code),
+                    output_tail: "ok".to_string(),
+                    output_digest: "sha256:output".to_string(),
+                    artifact_digest: Some("sha256:pinned".to_string()),
+                    detail: None,
+                    start_generation: ledger.workspace_generation,
+                    source_id: "call-check".to_string(),
+                }],
+            )
+            .await
+            .expect("evidence recorded");
+    }
+
+    async fn ledger(&self) -> codex_stateful_runtime::AcceptanceLedger {
+        self.services
+            .runtime()
+            .await
+            .expect("runtime")
+            .acceptance_ledger(&self.run.id)
+            .await
+            .expect("ledger")
     }
 }
 
@@ -186,7 +208,7 @@ async fn user_criteria_link_to_exact_goal_spans() {
     let refused = fixture
         .update(
             0,
-            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "Tests pass.", "requestQuote": "all tests pass", "checkCommand": "pytest -q", "expectedObservation": "every test passes"}]),
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "Tests pass.", "requestQuote": "all tests pass", "checkCommand": "pytest -q", "expectedObservation": "every test passes", "artifacts": ["tests/test_parser.py"]}]),
         )
         .await
         .expect_err("a paraphrase is not a quote");
@@ -197,7 +219,7 @@ async fn user_criteria_link_to_exact_goal_spans() {
     let output = fixture
         .update(
             0,
-            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes"}]),
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes", "artifacts": ["tests/test_parser.py"]}]),
         )
         .await
         .expect("criterion added");
@@ -227,7 +249,7 @@ async fn completion_runs_the_omission_check_refuses_unmet_gates_and_blocks_after
     fixture
         .update(
             0,
-            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes"}]),
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes", "artifacts": ["tests/test_parser.py"]}]),
         )
         .await
         .expect("criterion added");
@@ -256,7 +278,6 @@ async fn completion_runs_the_omission_check_refuses_unmet_gates_and_blocks_after
         .acceptance_ledger(&fixture.run.id)
         .await
         .expect("ledger");
-    assert!(ledger.omission_checked);
     assert_eq!(
         ledger
             .criteria
@@ -285,47 +306,140 @@ async fn completion_runs_the_omission_check_refuses_unmet_gates_and_blocks_after
 }
 
 #[tokio::test]
-async fn completion_with_current_evidence_discloses_its_acceptance_basis() {
+async fn an_unapproved_or_foreign_executor_receipt_is_observational() {
     let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;
     fixture
         .update(
             0,
-            json!([
-                {"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes"},
-                {"action": "add", "origin": "derived", "kind": "manual", "statement": "The error message reads well."},
-                {"action": "add", "origin": "derived", "kind": "constraint", "statement": "Performance is unchanged.", "required": false}
-            ]),
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "echo suite-ok", "expectedObservation": "the suite reports success", "artifacts": ["tests/test_parser.py"]}]),
         )
         .await
-        .expect("criteria added");
-    fixture.observe("check-1", "pytest -q", 0).await;
-    let ledger_revision = 2;
+        .expect("criterion added");
+    fixture.record_check(1, 0).await;
+    // The unit-test call carries no local environment, so no artifact evidence qualifies.
+    let refused = fixture
+        .complete()
+        .await
+        .expect_err("a passing echo settles nothing");
+    assert!(
+        refused.contains("executor is not the local host, so artifact evidence is unsupported"),
+        "{refused}"
+    );
+    let vague = fixture
+        .update(
+            2,
+            json!([{"action": "approve", "criterion": "C1", "steeringId": "no-such-steering"}]),
+        )
+        .await
+        .expect_err("approval needs the user's instruction");
+    assert!(
+        vague.contains("not an unrejected user instruction"),
+        "{vague}"
+    );
+    assert_eq!(
+        fixture.stored_run().await.status,
+        StatefulRunStatus::Running
+    );
+}
+
+#[tokio::test]
+async fn a_dismissal_without_a_user_receipt_is_refused() {
+    let fixture = fixture(
+        "Fix the parser. Write the report.",
+        WorkflowMode::Autonomous,
+    )
+    .await;
+    fixture.complete().await.expect_err("proposals created");
+    let ledger = fixture.ledger().await;
+    let refused = fixture
+        .update(
+            ledger.revision,
+            json!([{"action": "dismiss", "criterion": "C2", "text": "The user withdrew the report in steering."}]),
+        )
+        .await
+        .expect_err("model prose is no receipt");
+    assert!(refused.contains("only with a receipt"), "{refused}");
+    let forged = fixture
+        .update(
+            ledger.revision,
+            json!([{"action": "dismiss", "criterion": "C2", "text": "Withdrawn.", "steeringId": "made-up", "steeringQuote": "drop the report"}]),
+        )
+        .await
+        .expect_err("an unknown steering is no receipt");
+    assert!(
+        forged.contains("not an unrejected user instruction"),
+        "{forged}"
+    );
+    assert_eq!(fixture.ledger().await, ledger);
+}
+
+#[tokio::test]
+async fn acceptance_refusals_fit_the_call_allowance_and_dependency_bounds_hold() {
+    let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;
+    let mut tiny = call(
+        "stateful_acceptance_update",
+        &json!({"expectedLedgerRevision": 0, "changes": [{"action": "refine", "criterion": format!("X{}", "y".repeat(12_000))}]}),
+    );
+    tiny.truncation_policy = TruncationPolicy::Bytes(200);
+    let budget = tiny.response_byte_budget(crate::tools::MAX_RESPONSE_BYTES);
+    match fixture.acceptance.handle_bounded(tiny).await {
+        Err(FunctionCallError::RespondToModel(message)) => {
+            assert!(
+                serde_json::to_string(&message).expect("serializes").len() <= budget,
+                "{message}"
+            );
+        }
+        other => panic!("expected a bounded refusal, got {:?}", other.is_ok()),
+    }
+    fixture
+        .update(0, json!([{"action": "add", "origin": "derived", "kind": "manual", "statement": "First."}]))
+        .await
+        .expect("C1");
+    let dependencies = vec!["C1"; 9];
+    let refused = fixture
+        .update(
+            1,
+            json!([{"action": "add", "origin": "derived", "kind": "manual", "statement": "Second.", "dependsOn": dependencies}]),
+        )
+        .await
+        .expect_err("oversized dependency vector");
+    assert!(refused.contains("dependsOn names at most 8"), "{refused}");
+    let refused = fixture
+        .update(
+            1,
+            json!([{"action": "add", "origin": "derived", "kind": "manual", "statement": "Second.", "dependsOn": ["C1", "C1"]}]),
+        )
+        .await
+        .expect_err("duplicate dependencies");
+    assert!(refused.contains("distinct earlier criteria"), "{refused}");
+}
+
+#[tokio::test]
+async fn no_op_refinements_do_not_reset_the_refusal_count() {
+    let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;
     fixture
         .update(
-            ledger_revision,
-            json!([
-                {"action": "observe", "criterion": "C2", "text": "Read the new message in the CLI output."},
-                {"action": "noCheck", "criterion": "C3", "text": "No benchmark harness exists in this repository."}
-            ]),
+            0,
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes", "artifacts": ["tests/test_parser.py"]}]),
         )
         .await
-        .expect("labelled evidence recorded");
-
-    let output = fixture.complete().await.expect("completion accepted");
-    assert_eq!(output["status"], json!("completed"));
-    assert_eq!(
-        output["acceptanceBasis"],
-        json!([
-            "C1 [user] All tests pass.: agent-written check `pytest -q` exited 0 on the host against the final workspace (expected: every test passes)",
-            "C2 [derived] The error message reads well.: manual observation (agent-written, not host-verified): Read the new message in the CLI output.",
-            "C3 [derived] Performance is unchanged.: OPTIONAL, UNVERIFIED: No benchmark harness exists in this repository."
-        ])
-    );
-    let result = fixture.stored_run().await.result.expect("result stored");
-    assert!(
-        result.starts_with("The parser is fixed.\n\nAcceptance basis:\n- C1 [user]"),
-        "{result}"
-    );
+        .expect("criterion added");
+    for attempt in 1..=2 {
+        let refused = fixture.complete().await.expect_err("unmet");
+        assert!(
+            refused.contains(&format!("refusal {attempt} of 3")),
+            "{refused}"
+        );
+        fixture
+            .update(1, json!([{"action": "refine", "criterion": "C1"}]))
+            .await
+            .expect("no-op refinement");
+    }
+    let blocked = fixture
+        .complete()
+        .await
+        .expect("third unchanged refusal blocks");
+    assert_eq!(blocked["status"], json!("blocked"));
 }
 
 #[tokio::test]
@@ -334,11 +448,11 @@ async fn failed_check_cannot_be_disclosed_away_and_keeps_the_run_running() {
     fixture
         .update(
             0,
-            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes"}]),
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q", "expectedObservation": "every test passes", "artifacts": ["tests/test_parser.py"]}]),
         )
         .await
         .expect("criterion added");
-    fixture.observe("check-1", "pytest -q", 1).await;
+    fixture.record_check(1, 1).await;
     let refused = fixture
         .update(
             2,
@@ -374,7 +488,7 @@ async fn trivial_lookup_completes_without_acceptance_busywork() {
         .acceptance_ledger(&fixture.run.id)
         .await
         .expect("ledger");
-    assert!(!ledger.omission_checked);
+    assert_eq!(ledger.criteria, Vec::new());
     assert_eq!(
         fixture.stored_run().await.result.as_deref(),
         Some("The parser is fixed.")
@@ -387,7 +501,7 @@ async fn socratic_pending_run_agrees_criteria_but_records_no_evidence() {
     fixture
         .update(
             0,
-            json!([{"action": "add", "origin": "derived", "kind": "manual", "statement": "The plan is agreed."}]),
+            json!([{"action": "add", "origin": "derived", "kind": "manual", "statement": "The plan is agreed.", "artifacts": ["PLAN.md"]}]),
         )
         .await
         .expect("criteria can be agreed before execution");

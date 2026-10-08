@@ -158,14 +158,16 @@ impl StatefulRunUpdateTool {
             ));
         }
         let runtime = self.services.runtime().await.map_err(respond)?;
+        let mut validated_obligation_sequence = None;
         if status == StatefulRunStatus::Completed {
-            let open_issues = run_acceptance::declared_open_issues(
+            let (open_issues, sequence) = run_acceptance::declared_open_issues(
                 open_issues.as_deref(),
                 final_obligation.as_ref(),
                 runtime,
                 &current,
             )
             .await?;
+            validated_obligation_sequence = sequence;
             if !open_issues.is_empty() {
                 let run = self
                     .block_with_open_issues(
@@ -340,7 +342,12 @@ impl StatefulRunUpdateTool {
                 )));
             }
             match self
-                .acceptance_decision(&current, result.as_deref())
+                .acceptance_decision(
+                    &current,
+                    result.as_deref(),
+                    local_executor(&call),
+                    validated_obligation_sequence,
+                )
                 .await?
             {
                 AcceptanceDecision::Proceed { commit, basis } => Some((commit, basis)),
@@ -547,6 +554,17 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     {
         Box::pin(self.handle_guided(call))
     }
+}
+
+/// Whether every environment of the call is the app-server host itself, the only executor
+/// whose files the host can read as artifact evidence.
+pub(super) fn local_executor(call: &ToolCall<'_>) -> bool {
+    const LOCAL_ENVIRONMENT_ID: &str = "local";
+    !call.environments.is_empty()
+        && call
+            .environments
+            .iter()
+            .all(|environment| environment.environment_id == LOCAL_ENVIRONMENT_ID)
 }
 
 fn status_name(status: StatefulRunStatus) -> &'static str {

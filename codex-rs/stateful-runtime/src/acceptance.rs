@@ -1,16 +1,25 @@
 //! The run-owned acceptance ledger and the completion gate it enforces.
 //!
-//! A ledger lists what the user's request requires (deliverables, constraints, measurable
-//! checks and items no host can check). Each criterion has a stable ID, its explicit
-//! requirement text (for user criteria, the exact byte span of the run goal it came from), a
-//! required/optional flag, dependency and milestone links, and the ledger revision that last
-//! changed it. Evidence is host-observed (a check command's exit status and bounded output), a
-//! labelled manual observation, or an explicit statement that no safe check exists. A model
-//! assertion is never evidence. Required work must be satisfied with current evidence: an
-//! unverified required criterion can never enter `Completed`; only optional criteria may be
-//! completed as disclosed-unverified. A host receipt proves what ran and its exit status, not
-//! that the agent-written check establishes the requirement; every check therefore states the
-//! observation it expects, and completion labels it agent-written.
+//! A ledger lists what the user's request requires. User criteria are linked to the exact
+//! byte span of the run goal they quote; every goal sentence must be covered by such a
+//! criterion (or by a host omission proposal) before a substantial run can complete. Only a
+//! host-validated user receipt can waive a user requirement.
+//!
+//! The gate is conservative: when evidence cannot be qualified it stays unmet, and the run
+//! ends `Blocked` with a partial result instead of `Completed`.
+//!
+//! - A host receipt (an observed check execution) proves what ran, in which directory, and
+//!   its exit status. It is observational until the user approves the check as the method
+//!   for the criterion (a steering instruction that quotes the exact check command). Only an
+//!   approved, current receipt satisfies a criterion.
+//! - Receipts are current only against pinned artifact content, an unchanged workspace
+//!   generation, and an unchanged criterion revision; a criterion without pinned artifacts
+//!   cannot be satisfied by a receipt.
+//! - Existence evidence settles only derived `existence` criteria; manual observations settle
+//!   only derived `manual` criteria and only with pinned artifact content. Neither can settle
+//!   a user requirement.
+//! - Unverified required work is unmet; only optional criteria may complete
+//!   disclosed-unverified.
 
 use std::collections::BTreeMap;
 
@@ -26,6 +35,8 @@ pub const MAX_ACCEPTANCE_CRITERIA: usize = 32;
 pub const MAX_ACCEPTANCE_CHANGES: usize = 8;
 /// Artifact paths one criterion may declare.
 pub const MAX_CRITERION_ARTIFACTS: usize = 8;
+/// Distinct earlier criteria one criterion may depend on.
+pub const MAX_CRITERION_DEPENDENCIES: usize = 8;
 pub const MAX_STATEMENT_BYTES: usize = 1024;
 pub const MAX_ARTIFACT_PATH_BYTES: usize = 512;
 pub const MAX_CHECK_COMMAND_BYTES: usize = 1024;
@@ -39,9 +50,9 @@ pub const MAX_OUTPUT_TAIL_BYTES: usize = 1024;
 pub enum AcceptanceOrigin {
     /// Stated by the user; linked to a goal span and never weakened or retired.
     User,
-    /// Derived by the agent; refinable and retirable with a reason.
+    /// Derived by the agent; refinable and retirable, and never covers a user requirement.
     Derived,
-    /// Proposed by the host omission check from an uncovered goal span.
+    /// Proposed by the host omission check from an uncovered goal sentence.
     Omission,
 }
 
@@ -52,13 +63,15 @@ pub enum AcceptanceKind {
     Constraint,
     Check,
     Manual,
+    /// Only that the declared artifacts exist; says nothing about their content.
+    Existence,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AcceptanceState {
     Active,
-    /// An omission proposal awaiting accept or dismiss; blocks completion.
+    /// An omission proposal awaiting accept or a receipted dismissal; blocks completion.
     Proposed,
     Dismissed,
     Retired,
@@ -79,6 +92,16 @@ impl RequestSpan {
             .then(|| goal.get(self.start..self.end))
             .flatten()
     }
+}
+
+/// Why a user-bound omission proposal no longer gates. Model prose is never a receipt.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DismissalReceipt {
+    /// A user steering instruction on this run whose exact text (`quote`) changes the scope.
+    UserSteering { steering_id: String, quote: String },
+    /// An active required user-bound criterion whose span already covers the proposal.
+    CoveredBy(u32),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -111,8 +134,11 @@ pub struct AcceptanceEvidence {
     pub exit_code: Option<i32>,
     pub output_tail: Option<String>,
     pub output_digest: Option<String>,
+    /// Content digest of the criterion's artifacts when the check started (or when the
+    /// manual observation was recorded).
     pub artifact_digest: Option<String>,
     pub detail: Option<String>,
+    /// The workspace generation when the check started.
     pub workspace_generation: u64,
     pub criterion_revision: u64,
     pub source_id: String,
@@ -135,16 +161,24 @@ pub struct AcceptanceCriterion {
     pub requirement: String,
     /// Required criteria gate completion; optional ones may complete disclosed-unverified.
     pub required: bool,
-    /// Criteria (by ordinal) that must be met before this one counts as met.
+    /// Distinct earlier criteria (by ordinal) that must be met before this one counts as met.
     pub depends_on: Vec<u32>,
     /// The irreversible step (approval, filing, publication, ...) this criterion must be
-    /// verified before.
+    /// verified before. A label only; the action itself is not gated.
     pub milestone: Option<String>,
     pub request_span: Option<RequestSpan>,
+    /// The files this criterion's evidence is pinned to (inputs and outputs).
     pub artifacts: Vec<String>,
     pub check_command: Option<String>,
+    /// The working directory the check must run in, relative to the first project root or
+    /// absolute inside a project root; the first root when absent.
+    pub check_cwd: Option<String>,
     /// What a passing check must show for it to establish the requirement.
     pub expected_observation: Option<String>,
+    /// The user steering instruction that approved the current check as this criterion's
+    /// method. Cleared whenever the check, its directory or its artifacts change.
+    pub approved_by_steering: Option<String>,
+    pub dismissal: Option<DismissalReceipt>,
     pub note: Option<String>,
     pub revision: u64,
     /// The ledger revision that created or last changed this criterion.
@@ -173,11 +207,13 @@ impl AcceptanceCriterion {
 #[serde(rename_all = "camelCase")]
 pub struct AcceptanceLedger {
     pub run_id: StatefulRunId,
-    /// Incremented by every criterion change and every recorded evidence.
+    /// Incremented only by actual criterion changes and recorded evidence.
     pub revision: u64,
-    /// Incremented by every host-observed workspace mutation that is not a declared check.
+    /// Incremented by every host-observed workspace mutation and by every cold re-entry of a
+    /// run that holds evidence.
     pub workspace_generation: u64,
-    pub omission_checked: bool,
+    /// Command executions the host observed for this run, read-only ones included.
+    pub observed_executions: u64,
     /// Consecutive rejected completions with no ledger change in between.
     pub stalled_completions: u32,
     /// Completion verification attempts started for this run.
@@ -193,7 +229,7 @@ impl AcceptanceLedger {
             run_id,
             revision: 0,
             workspace_generation: 0,
-            omission_checked: false,
+            observed_executions: 0,
             stalled_completions: 0,
             verification_attempt: 0,
             verification_lease_expires_at_ms: None,
@@ -209,7 +245,7 @@ impl AcceptanceLedger {
 }
 
 /// One requested change to a ledger. Omission proposals are host-only and are added through
-/// `StatefulRunStore::record_omission_check`.
+/// `StatefulRunStore::propose_uncovered`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AcceptanceChange {
     Add {
@@ -233,14 +269,23 @@ pub enum AcceptanceChange {
     Dismiss {
         ordinal: u32,
         reason: String,
+        receipt: DismissalReceipt,
     },
     Retire {
         ordinal: u32,
         reason: String,
     },
+    /// Records that the user approved the criterion's current check, citing the steering
+    /// instruction that quotes the exact command.
+    Approve {
+        ordinal: u32,
+        steering_id: String,
+    },
     Observe {
         ordinal: u32,
         observation: String,
+        /// Host-read content digest of the criterion's artifacts at observation time.
+        artifact_digest: Option<String>,
     },
     NoCheck {
         ordinal: u32,
@@ -256,6 +301,7 @@ pub struct CriterionTerms {
     pub milestone: Option<String>,
     pub artifacts: Vec<String>,
     pub check_command: Option<String>,
+    pub check_cwd: Option<String>,
     pub expected_observation: Option<String>,
 }
 
@@ -266,10 +312,12 @@ pub struct TermsUpdate {
     pub milestone: Option<String>,
     pub artifacts: Option<Vec<String>>,
     pub check_command: Option<String>,
+    pub check_cwd: Option<String>,
     pub expected_observation: Option<String>,
 }
 
-/// A check command execution the host observed, bound to one criterion revision.
+/// A check command execution the host observed, bound to one criterion revision and to the
+/// workspace generation and artifact content when it started.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandEvidence {
     pub ordinal: u32,
@@ -281,6 +329,7 @@ pub struct CommandEvidence {
     pub output_digest: String,
     pub artifact_digest: Option<String>,
     pub detail: Option<String>,
+    pub start_generation: u64,
     pub source_id: String,
 }
 
@@ -294,33 +343,38 @@ pub enum ArtifactState {
     Unavailable(String),
 }
 
-/// What a completion commit was validated against; the store re-checks it inside the
-/// terminal transaction.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// The verification attempt a completion commit consumes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerificationClaim {
+    pub owner: String,
+    pub attempt: u64,
+}
+
+/// What a completion commit was validated against; the store re-derives the policy and
+/// re-checks all of it inside the terminal transaction.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AcceptanceCommit {
     pub ledger_revision: u64,
     pub workspace_generation: u64,
     pub artifacts: BTreeMap<u32, ArtifactState>,
-    /// Whether policy required the omission check before this completion.
-    pub omission_required: bool,
-    /// The verification attempt (owner, number) this commit consumes; its lease must still
-    /// be held when the terminal transaction runs.
-    pub verification: Option<(String, u64)>,
+    pub verification: VerificationClaim,
+    /// The latest recorded obligation sequence the caller checked for open blockers.
+    pub validated_obligation_sequence: Option<u64>,
 }
 
 /// How one criterion stands against the gate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CriterionVerdict {
-    /// A host-observed check passed against the current workspace.
+    /// A user-approved check passed against the current pinned artifacts.
     SatisfiedByHost,
-    /// Every declared artifact is present now; content was not checked.
+    /// A derived existence criterion: every declared artifact is present now.
     ArtifactsPresent,
-    /// A labelled manual observation, current with the workspace.
+    /// A derived manual criterion with an observation pinned to the current artifacts.
     ManualObservation,
     /// An optional criterion explicitly unverified, with the reason disclosed in the
     /// completion. Required criteria are never in this state.
     DisclosedUnverified(String),
-    /// Not gating: dismissed or retired with a disclosed reason.
+    /// Not gating: a receipted dismissal or a retired derived criterion.
     Closed(String),
     /// Blocks completion; the text says exactly what is missing or failed.
     Unmet(String),
@@ -332,8 +386,8 @@ impl CriterionVerdict {
     }
 }
 
-/// Judges one criterion against the workspace generation and, for criteria that declare
-/// artifacts, the host's current reading of them.
+/// Judges one criterion against the workspace generation and the host's current reading of
+/// its declared artifacts.
 pub fn criterion_verdict(
     criterion: &AcceptanceCriterion,
     workspace_generation: u64,
@@ -342,7 +396,7 @@ pub fn criterion_verdict(
     match criterion.state {
         AcceptanceState::Proposed => {
             return CriterionVerdict::Unmet(
-                "omission proposal awaiting review: accept it as a criterion or dismiss it with a reason".to_string(),
+                "omission proposal awaiting review: accept it as a criterion, or dismiss it only with a user steering receipt or a covering criterion".to_string(),
             );
         }
         AcceptanceState::Dismissed | AcceptanceState::Retired => {
@@ -354,13 +408,17 @@ pub fn criterion_verdict(
         .evidence
         .as_ref()
         .filter(|evidence| evidence.criterion_revision == criterion.revision);
-    let artifact_reading = || -> Result<Option<&str>, String> {
+    // The current content digest of the pinned artifacts; every grade below needs one.
+    let pinned = || -> Result<&str, String> {
         if criterion.artifacts.is_empty() {
-            return Ok(None);
+            return Err(
+                "no artifacts are pinned, so no evidence can be current; declare the files this criterion covers"
+                    .to_string(),
+            );
         }
         match artifacts {
             Some(ArtifactState::Observed { digest, missing }) if missing.is_empty() => {
-                Ok(Some(digest.as_str()))
+                Ok(digest.as_str())
             }
             Some(ArtifactState::Observed { missing, .. }) => Err(format!(
                 "declared artifact {} is missing",
@@ -375,7 +433,7 @@ pub fn criterion_verdict(
     if let Some(command) = criterion.check_command.as_deref() {
         let Some(evidence) = current else {
             return CriterionVerdict::Unmet(format!(
-                "no current host evidence: run exactly `{command}` with the shell tool; the host records its exit status"
+                "no current host evidence: run exactly `{command}` with the shell tool in its check directory"
             ));
         };
         return match evidence.outcome {
@@ -385,24 +443,29 @@ pub fn criterion_verdict(
                     .exit_code
                     .map_or_else(|| "unknown".to_string(), |code| code.to_string())
             )),
-            EvidenceOutcome::Unavailable => unverified(
+            EvidenceOutcome::Unavailable | EvidenceOutcome::Observed => unverified(
                 criterion,
                 evidence
                     .detail
                     .clone()
                     .unwrap_or_else(|| "the check could not run".to_string()),
             ),
-            EvidenceOutcome::Passed | EvidenceOutcome::Observed => {
+            EvidenceOutcome::Passed => {
                 if evidence.workspace_generation != workspace_generation {
                     return CriterionVerdict::Unmet(format!(
-                        "stale: the workspace changed after `{command}` passed; run it again"
+                        "stale: the workspace changed after `{command}` started; run it again"
                     ));
                 }
-                match artifact_reading() {
+                match pinned() {
                     Err(reason) => CriterionVerdict::Unmet(reason),
-                    Ok(Some(digest)) if evidence.artifact_digest.as_deref() != Some(digest) => {
+                    Ok(digest) if evidence.artifact_digest.as_deref() != Some(digest) => {
                         CriterionVerdict::Unmet(format!(
-                            "stale: declared artifacts changed after `{command}` passed; run it again"
+                            "stale: the pinned artifacts changed after `{command}` started; run it again"
+                        ))
+                    }
+                    Ok(_) if criterion.approved_by_steering.is_none() => {
+                        CriterionVerdict::Unmet(format!(
+                            "`{command}` passed, but a passing exit only shows what ran; it settles nothing until the user approves it as this criterion's method (a steering instruction quoting the exact command, then approve). Without that approval, end the run blocked with a partial result"
                         ))
                     }
                     Ok(_) => CriterionVerdict::SatisfiedByHost,
@@ -410,34 +473,58 @@ pub fn criterion_verdict(
             }
         };
     }
-    match current.map(|evidence| (evidence.outcome, evidence)) {
-        Some((EvidenceOutcome::Unavailable, evidence)) => unverified(
+    if let Some(evidence) = current
+        && evidence.outcome == EvidenceOutcome::Unavailable
+    {
+        return unverified(
             criterion,
             evidence
                 .detail
                 .clone()
                 .unwrap_or_else(|| "no safe check is available".to_string()),
-        ),
-        Some((EvidenceOutcome::Observed, evidence))
-            if evidence.workspace_generation == workspace_generation =>
-        {
-            match artifact_reading() {
-                Err(reason) => CriterionVerdict::Unmet(reason),
-                Ok(_) => CriterionVerdict::ManualObservation,
+        );
+    }
+    let derived = criterion.origin == AcceptanceOrigin::Derived;
+    match criterion.kind {
+        AcceptanceKind::Existence if derived => match pinned() {
+            Ok(_) => CriterionVerdict::ArtifactsPresent,
+            Err(reason) => CriterionVerdict::Unmet(reason),
+        },
+        AcceptanceKind::Manual if derived => match current {
+            Some(evidence) if evidence.outcome == EvidenceOutcome::Observed => {
+                if evidence.workspace_generation != workspace_generation {
+                    return CriterionVerdict::Unmet(
+                        "stale: the workspace changed after the manual observation; observe it again"
+                            .to_string(),
+                    );
+                }
+                match pinned() {
+                    Err(reason) => CriterionVerdict::Unmet(reason),
+                    Ok(digest) if evidence.artifact_digest.as_deref() != Some(digest) => {
+                        CriterionVerdict::Unmet(
+                            "stale: the observed artifacts changed after the manual observation; observe them again"
+                                .to_string(),
+                        )
+                    }
+                    Ok(_) => CriterionVerdict::ManualObservation,
+                }
             }
-        }
-        Some((EvidenceOutcome::Observed, _)) => CriterionVerdict::Unmet(
-            "stale: the workspace changed after the manual observation; observe it again"
+            _ => CriterionVerdict::Unmet(
+                "no current manual observation pinned to the declared artifacts".to_string(),
+            ),
+        },
+        AcceptanceKind::Existence | AcceptanceKind::Manual if !derived => unverified(
+            criterion,
+            "a user requirement is settled only by a user-approved check".to_string(),
+        ),
+        AcceptanceKind::Deliverable
+        | AcceptanceKind::Constraint
+        | AcceptanceKind::Check
+        | AcceptanceKind::Existence
+        | AcceptanceKind::Manual => unverified(
+            criterion,
+            "no check: add a checkCommand pinned to the artifacts and have the user approve it"
                 .to_string(),
-        ),
-        _ if criterion.kind == AcceptanceKind::Deliverable && !criterion.artifacts.is_empty() => {
-            match artifact_reading() {
-                Err(reason) => CriterionVerdict::Unmet(reason),
-                Ok(_) => CriterionVerdict::ArtifactsPresent,
-            }
-        }
-        _ => CriterionVerdict::Unmet(
-            "no evidence: add a checkCommand and run it, record a labelled manual observation, or record noCheck with the reason no safe check exists".to_string(),
         ),
     }
 }
@@ -446,7 +533,7 @@ pub fn criterion_verdict(
 fn unverified(criterion: &AcceptanceCriterion, reason: String) -> CriterionVerdict {
     if criterion.required {
         CriterionVerdict::Unmet(format!(
-            "required but unverified ({reason}); required work cannot complete unverified. Repair it or find a safe check; if it cannot be verified, set the run blocked with a partial result that names it"
+            "required but unverified ({reason}); required work cannot complete unverified. Repair it or obtain an approved check; otherwise set the run blocked with a partial result that names it"
         ))
     } else {
         CriterionVerdict::DisclosedUnverified(reason)
@@ -457,14 +544,14 @@ fn unverified(criterion: &AcceptanceCriterion, reason: String) -> CriterionVerdi
 /// itself, whatever its own evidence says.
 pub fn ledger_verdicts(
     ledger: &AcceptanceLedger,
-    commit: &AcceptanceCommit,
+    artifacts: &BTreeMap<u32, ArtifactState>,
 ) -> Vec<(u32, CriterionVerdict)> {
     let mut verdicts: Vec<(u32, CriterionVerdict)> = Vec::with_capacity(ledger.criteria.len());
     for criterion in &ledger.criteria {
         let verdict = criterion_verdict(
             criterion,
             ledger.workspace_generation,
-            commit.artifacts.get(&criterion.ordinal),
+            artifacts.get(&criterion.ordinal),
         );
         let blocked_by = (criterion.state == AcceptanceState::Active)
             .then(|| {
@@ -489,8 +576,11 @@ pub fn ledger_verdicts(
 }
 
 /// Every criterion that blocks completion, with the reason, in ordinal order.
-pub fn unmet_criteria(ledger: &AcceptanceLedger, commit: &AcceptanceCommit) -> Vec<(u32, String)> {
-    ledger_verdicts(ledger, commit)
+pub fn unmet_criteria(
+    ledger: &AcceptanceLedger,
+    artifacts: &BTreeMap<u32, ArtifactState>,
+) -> Vec<(u32, String)> {
+    ledger_verdicts(ledger, artifacts)
         .into_iter()
         .filter_map(|(ordinal, verdict)| match verdict {
             CriterionVerdict::Unmet(reason) => Some((ordinal, reason)),
@@ -524,21 +614,24 @@ pub(crate) fn validate_check_command(value: &str) -> Result<(), AcceptanceError>
     Ok(())
 }
 
-/// Artifact paths are relative to a project root, or absolute inside one; the extension
-/// resolves them. Here they are only bounded, single-line and free of parent traversal.
+/// Paths are relative to a project root, or absolute inside one; the extension resolves
+/// them. Here they are only bounded, single-line and free of parent traversal.
+pub(crate) fn validate_path(path: &str) -> Result<(), AcceptanceError> {
+    validate_bounded(path, MAX_ARTIFACT_PATH_BYTES)?;
+    if path.chars().any(char::is_control)
+        || path.split(['/', '\\']).any(|component| component == "..")
+    {
+        return Err(AcceptanceError::InvalidArtifact(path.to_string()));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_artifacts(artifacts: &[String]) -> Result<(), AcceptanceError> {
     if artifacts.len() > MAX_CRITERION_ARTIFACTS {
         return Err(AcceptanceError::TooManyArtifacts);
     }
     for artifact in artifacts {
-        validate_bounded(artifact, MAX_ARTIFACT_PATH_BYTES)?;
-        if artifact.chars().any(char::is_control)
-            || artifact
-                .split(['/', '\\'])
-                .any(|component| component == "..")
-        {
-            return Err(AcceptanceError::InvalidArtifact(artifact.clone()));
-        }
+        validate_path(artifact)?;
     }
     Ok(())
 }
@@ -553,7 +646,7 @@ pub enum AcceptanceError {
     UnsupportedCheckCommand,
     #[error("a criterion may declare at most {MAX_CRITERION_ARTIFACTS} artifacts")]
     TooManyArtifacts,
-    #[error("artifact path {0:?} must be one line without parent-directory components")]
+    #[error("path {0:?} must be one line without parent-directory components")]
     InvalidArtifact(String),
     #[error("a ledger holds at most {MAX_ACCEPTANCE_CRITERIA} criteria")]
     TooManyCriteria,
@@ -566,11 +659,11 @@ pub enum AcceptanceError {
     #[error("request span is not an exact non-empty range of the run goal")]
     InvalidSpan,
     #[error(
-        "a checkCommand needs expectedObservation: what its passing output must show to establish the requirement"
+        "a checkCommand needs expectedObservation (what its passing output must show) and at least one pinned artifact"
     )]
     CheckWithoutExpectation,
     #[error(
-        "dependsOn may name only earlier criteria of this ledger (no self or forward references)"
+        "dependsOn may name at most {MAX_CRITERION_DEPENDENCIES} distinct earlier criteria of this ledger (no duplicates, self or forward references)"
     )]
     InvalidDependency,
     #[error("another completion verification holds the lease until {0}; retry after it ends")]

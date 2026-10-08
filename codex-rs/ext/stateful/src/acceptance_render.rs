@@ -55,7 +55,7 @@ impl AcceptanceView {
             .filter(|criterion| status_label(criterion, ledger.workspace_generation).1)
             .count();
         let mut lines = vec![format!(
-            "Acceptance ledger (revision {}; pass expectedLedgerRevision: {} to stateful_acceptance_update): {current} of {} criteria settled. Completion is refused until every required criterion is satisfied with current evidence and every proposal is reviewed; only optional criteria may be disclosed unverified. If required work cannot be verified, set the run blocked with a partial result.",
+            "Acceptance ledger (revision {}; pass expectedLedgerRevision: {} to stateful_acceptance_update): {current} of {} criteria settled. Completion needs every goal sentence covered, every proposal reviewed and every required criterion satisfied by a user-approved check pinned to artifacts; otherwise set the run blocked with a partial result.",
             ledger.revision,
             ledger.revision,
             ledger.criteria.len()
@@ -148,7 +148,7 @@ fn status_label(criterion: &AcceptanceCriterion, generation: u64) -> (String, bo
     match criterion.state {
         AcceptanceState::Proposed => {
             return (
-                "PROPOSED by the omission check: accept it or dismiss it with a reason".to_string(),
+                "PROPOSED by the omission check: accept it, or dismiss it only with a user steering receipt or a covering user criterion".to_string(),
                 false,
             );
         }
@@ -177,12 +177,19 @@ fn status_label(criterion: &AcceptanceCriterion, generation: u64) -> (String, bo
         (Some(evidence), _) => {
             let fresh = evidence.workspace_generation == generation;
             match (evidence.outcome, fresh) {
-                (EvidenceOutcome::Passed, true) => (
+                (EvidenceOutcome::Passed, true) if criterion.approved_by_steering.is_some() => (
                     format!(
-                        "agent-written check `{}` passed (host-observed exit 0)",
+                        "user-approved check `{}` passed (host-observed exit 0)",
                         check.unwrap_or_default()
                     ),
                     true,
+                ),
+                (EvidenceOutcome::Passed, true) => (
+                    format!(
+                        "RECEIPT ONLY: `{}` passed, but the user has not approved it as this criterion's method",
+                        check.unwrap_or_default()
+                    ),
+                    false,
                 ),
                 (EvidenceOutcome::Passed, false) => (
                     format!(
@@ -255,15 +262,16 @@ pub(crate) fn completion_basis(
             let criterion = ledger.criterion(*ordinal)?;
             let label = match verdict {
                 CriterionVerdict::SatisfiedByHost => format!(
-                    "agent-written check `{}` exited 0 on the host against the final workspace (expected: {})",
+                    "agent-written check `{}`, approved by the user (steering {}), exited 0 on the host against the pinned artifacts (expected: {})",
                     criterion.check_command.as_deref().unwrap_or_default(),
+                    criterion.approved_by_steering.as_deref().unwrap_or_default(),
                     single_line(&bounded(
                         criterion.expected_observation.as_deref().unwrap_or_default(),
                         160
                     ))
                 ),
                 CriterionVerdict::ArtifactsPresent => {
-                    "satisfied: declared artifacts are present (content not checked)".to_string()
+                    "derived existence predicate: the declared artifacts exist (content not checked)".to_string()
                 }
                 CriterionVerdict::ManualObservation => format!(
                     "manual observation (agent-written, not host-verified): {}",
@@ -315,6 +323,7 @@ fn kind_name(criterion: &AcceptanceCriterion) -> &'static str {
         codex_stateful_runtime::AcceptanceKind::Constraint => "constraint",
         codex_stateful_runtime::AcceptanceKind::Check => "check",
         codex_stateful_runtime::AcceptanceKind::Manual => "manual",
+        codex_stateful_runtime::AcceptanceKind::Existence => "existence",
     }
 }
 

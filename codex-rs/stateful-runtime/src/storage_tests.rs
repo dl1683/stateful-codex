@@ -554,15 +554,17 @@ async fn final_obligation_and_completion_commit_atomically() {
         provenance_source_id: "completion-turn".to_string(),
     };
 
-    let error = store
-        .complete_run_with_obligation(
-            &run_id,
-            completion_update.clone(),
+    let error = complete(
+        &store,
+        &run_id,
+        completion_update.clone(),
+        Some((
             "conflicting-final-obligation".to_string(),
             final_obligation.clone(),
-        )
-        .await
-        .expect_err("obligation conflict rolls completion back");
+        )),
+    )
+    .await
+    .expect_err("obligation conflict rolls completion back");
     assert_eq!(
         error.to_string(),
         StatefulRunStoreError::ObligationIdentityConflict(
@@ -582,16 +584,19 @@ async fn final_obligation_and_completion_commit_atomically() {
         Some(existing)
     );
 
-    let (completed, obligation) = store
-        .complete_run_with_obligation(
-            &run_id,
-            completion_update,
+    let (completed, obligation) = complete(
+        &store,
+        &run_id,
+        completion_update,
+        Some((
             "successful-final-obligation".to_string(),
             final_obligation.clone(),
-        )
-        .await
-        .expect("completion commits");
+        )),
+    )
+    .await
+    .expect("completion commits");
     assert_eq!(completed.status, StatefulRunStatus::Completed);
+    let obligation = obligation.expect("final obligation");
     assert_eq!(obligation.value, final_obligation);
     assert_eq!(
         store.get_run(&run_id).await.expect("completed run loads"),
@@ -661,15 +666,17 @@ async fn completion_rejects_unresolved_steering_without_mutating_the_run() {
         (SteeringStatus::Submitted, "submitted"),
         (SteeringStatus::Acknowledged, "acknowledged"),
     ] {
-        let error = store
-            .complete_run_with_obligation(
-                &run_id,
-                completion_update.clone(),
+        let error = complete(
+            &store,
+            &run_id,
+            completion_update.clone(),
+            Some((
                 "guarded-final-obligation".to_string(),
                 final_obligation.clone(),
-            )
-            .await
-            .expect_err("unresolved steering rejects completion");
+            )),
+        )
+        .await
+        .expect_err("unresolved steering rejects completion");
         assert_eq!(
             error.to_string(),
             StatefulRunStoreError::UnresolvedSteering {
@@ -717,16 +724,19 @@ async fn completion_rejects_unresolved_steering_without_mutating_the_run() {
         )
         .await
         .expect("steering resolves");
-    let (completed, obligation) = store
-        .complete_run_with_obligation(
-            &run_id,
-            completion_update,
+    let (completed, obligation) = complete(
+        &store,
+        &run_id,
+        completion_update,
+        Some((
             "guarded-final-obligation".to_string(),
             final_obligation.clone(),
-        )
-        .await
-        .expect("resolved steering permits completion");
+        )),
+    )
+    .await
+    .expect("resolved steering permits completion");
     assert_eq!(completed.status, StatefulRunStatus::Completed);
+    let obligation = obligation.expect("final obligation");
     assert_eq!(obligation.value, final_obligation);
 }
 
@@ -752,18 +762,19 @@ async fn terminal_run_rejects_new_steering() {
         )
         .await
         .expect("run inserts");
-    store
-        .update_run(
-            &run_id,
-            StatefulRunUpdate {
-                expected_revision: created.revision,
-                status: StatefulRunStatus::Completed,
-                strategy: None,
-                result: Some("The investigation is complete.".to_string()),
-            },
-        )
-        .await
-        .expect("run completes");
+    complete(
+        &store,
+        &run_id,
+        StatefulRunUpdate {
+            expected_revision: created.revision,
+            status: StatefulRunStatus::Completed,
+            strategy: None,
+            result: Some("The investigation is complete.".to_string()),
+        },
+        None,
+    )
+    .await
+    .expect("run completes");
 
     let error = store
         .submit_steering(
@@ -782,4 +793,34 @@ async fn terminal_run_rejects_new_steering() {
         error.to_string(),
         StatefulRunStoreError::SteeringRunTerminal(StatefulRunStatus::Completed).to_string()
     );
+}
+
+async fn complete(
+    store: &StatefulRunStore,
+    run_id: &StatefulRunId,
+    update: StatefulRunUpdate,
+    obligation: Option<(String, NewObligation)>,
+) -> Result<(crate::StatefulRun, Option<crate::StatefulObligation>), StatefulRunStoreError> {
+    let attempt = store
+        .begin_verification(run_id, "test-owner", 60_000)
+        .await?;
+    let ledger = store.acceptance_ledger(run_id).await?;
+    let latest = store.latest_obligation(run_id).await?;
+    store
+        .complete_run_with_acceptance(
+            run_id,
+            update,
+            &crate::AcceptanceCommit {
+                ledger_revision: ledger.revision,
+                workspace_generation: ledger.workspace_generation,
+                artifacts: std::collections::BTreeMap::new(),
+                verification: crate::VerificationClaim {
+                    owner: "test-owner".to_string(),
+                    attempt,
+                },
+                validated_obligation_sequence: latest.map(|obligation| obligation.sequence),
+            },
+            obligation,
+        )
+        .await
 }

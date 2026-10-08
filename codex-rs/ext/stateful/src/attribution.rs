@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
+use codex_extension_api::CommandStartInput;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ToolCallOutcome;
 use codex_extension_api::ToolCallSource;
@@ -281,8 +282,40 @@ impl ToolLifecycleContributor for StatefulExtension {
         })
     }
 
+    fn on_command_start<'a>(&'a self, input: CommandStartInput<'a>) -> ToolLifecycleFuture<'a> {
+        Box::pin(async move {
+            let (Some(selected), Some(services)) = (
+                input.thread_store.get::<SelectedProject>(),
+                self.services.as_ref(),
+            ) else {
+                return;
+            };
+            let roots = self.project_roots(selected.project_id()).await;
+            crate::acceptance_observation::command_started(
+                services,
+                &roots,
+                input.turn_store,
+                input.call_id,
+                input.command,
+                &input.cwd.to_path_buf(),
+            )
+            .await;
+        })
+    }
+
     fn on_tool_finish<'a>(&'a self, input: ToolFinishInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
+            // A command the host never ran produces no end event to clear it.
+            if matches!(
+                input.outcome,
+                ToolCallOutcome::Blocked
+                    | ToolCallOutcome::Aborted
+                    | ToolCallOutcome::Failed {
+                        handler_executed: false
+                    }
+            ) {
+                crate::acceptance_observation::forget_command(input.turn_store, input.call_id);
+            }
             if let Some(thread) = input.thread_store.get::<SelectedThread>() {
                 self.run_activity.for_thread(&thread.thread_id).record(
                     matches!(input.source, ToolCallSource::Direct),
