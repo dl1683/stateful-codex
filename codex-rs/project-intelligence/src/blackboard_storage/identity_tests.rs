@@ -13,7 +13,9 @@ const PROJECT: &str = "project-1";
 #[tokio::test]
 async fn c2_unicode_retirement_aliases_precede_limits_and_cross_writer_family_authority() {
     for (old, repeated) in [
-        ("DNS:\u{a0}absent.", "dns - absent."),
+        ("DNS: absent.", "DNS: absent."),
+        ("DNS:\u{a0}absent.", "DNS: absent."),
+        ("DNS - absent.", "DNS: absent."),
         ("ÜBER", "über"),
         ("é", "e\u{301}"),
         ("Straße", "STRASSE"),
@@ -28,7 +30,7 @@ async fn c2_unicode_retirement_aliases_precede_limits_and_cross_writer_family_au
             .await
             .unwrap();
         for ordinal in 0..300 {
-            let mut value = rule(&format!("D NS: decoy {ordinal}."));
+            let mut value = rule("D NS: absent.");
             value.provenance.kind = BlackboardProvenanceKind::Agent;
             store
                 .create_entry(
@@ -58,9 +60,8 @@ async fn c2_unicode_retirement_aliases_precede_limits_and_cross_writer_family_au
         ));
         assert_eq!(snapshot(&store).await, before);
         assert_eq!(
-            canonical_capture_words(old),
-            canonical_capture_words(repeated).replace(" - ", ": "),
-            "exact folds or separate punctuation aliases"
+            retirement_capture_words(old),
+            retirement_capture_words(repeated)
         );
     }
 }
@@ -79,7 +80,7 @@ async fn c2_disjoint_scope_control_and_ambiguous_primary_aliases_fail_closed() {
             KnowledgeAuthority::AssistantReported,
         )
     };
-    let mut value = rule("a-b");
+    let mut value = rule("Never push.");
     value.kind = BlackboardKind::Note;
     value.provenance.kind = BlackboardProvenanceKind::Agent;
     let id = BlackboardEntryId::parse("scope-a").unwrap();
@@ -88,7 +89,7 @@ async fn c2_disjoint_scope_control_and_ambiguous_primary_aliases_fail_closed() {
             id.clone(),
             value.clone(),
             make_context("inv-A"),
-            change(ChangeOperation::Saved, "a-b"),
+            change(ChangeOperation::Saved, "Never push."),
         )
         .await
         .unwrap()
@@ -102,7 +103,7 @@ async fn c2_disjoint_scope_control_and_ambiguous_primary_aliases_fail_closed() {
             BlackboardEntryId::parse("scope-b").unwrap(),
             value.clone(),
             make_context("inv-B"),
-            change(ChangeOperation::Saved, "a-b"),
+            change(ChangeOperation::Saved, "Never push."),
         )
         .await
         .unwrap();
@@ -115,7 +116,7 @@ async fn c2_disjoint_scope_control_and_ambiguous_primary_aliases_fail_closed() {
                     KnowledgeCategory::Note,
                     KnowledgeAuthority::AssistantReported
                 ),
-                change(ChangeOperation::Saved, "a-b")
+                change(ChangeOperation::Saved, "Never push.")
             )
             .await,
         Err(BlackboardStoreError::RetiredIdentity)
@@ -126,11 +127,28 @@ async fn c2_disjoint_scope_control_and_ambiguous_primary_aliases_fail_closed() {
                 BlackboardEntryId::parse("invented-scope-escape").unwrap(),
                 value.clone(),
                 make_context("unresolved-invented"),
-                change(ChangeOperation::Saved, "a-b")
+                change(ChangeOperation::Saved, "Never push.")
             )
             .await,
         Err(BlackboardStoreError::RetiredIdentity)
     ));
+    let mut punctuation = value.clone();
+    punctuation.content = "a-b".to_string();
+    let punctuation_id = BlackboardEntryId::parse("punctuation-sensitive").unwrap();
+    let punctuation_entry = store
+        .create_entry_with_context(
+            punctuation_id.clone(),
+            punctuation,
+            make_context("inv-A"),
+            change(ChangeOperation::Saved, "a-b"),
+        )
+        .await
+        .unwrap()
+        .0;
+    store
+        .update_entry(PROJECT, &punctuation_id, retire(&punctuation_entry))
+        .await
+        .unwrap();
     value.content = "ab".to_string();
     store
         .create_entry_with_context(
@@ -294,14 +312,19 @@ async fn c2_identity_backfill_cold_cursor_and_unknown_source_fail_closed() {
             .await,
         Err(BlackboardStoreError::IdentityCoverageIncomplete)
     ));
-    store.maintain_capture_identities(PROJECT).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_second_identity_page BEFORE UPDATE ON capture_identity_coverage WHEN OLD.after_rowid >= 64 BEGIN SELECT RAISE(ABORT, 'after first durable page'); END").execute(&store.pool).await.unwrap();
+    assert!(store.maintain_capture_identities(PROJECT).await.is_err());
+    sqlx::query("DROP TRIGGER fail_second_identity_page")
+        .execute(&store.pool)
+        .await
+        .unwrap();
     let after: i64 = sqlx::query_scalar(
         "SELECT after_rowid FROM capture_identity_coverage WHERE project_id = 'project-1'",
     )
     .fetch_one(&store.pool)
     .await
     .unwrap();
-    assert!(after > 0 && after <= 256);
+    assert_eq!(after, 64);
     store.pool.close().await;
     let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await

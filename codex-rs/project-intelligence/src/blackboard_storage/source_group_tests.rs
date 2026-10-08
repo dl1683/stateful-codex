@@ -420,15 +420,20 @@ async fn c2_failed_original_group_then_forget_and_cold_replay_never_restores() {
                 .await
                 .unwrap();
         }
-        let text = "Ground rules for this project:\r\n- Never push.\r\n- Never commit.\r\n";
+        let text = "Ground rules for this project:\n- Never push.\n";
         let observed = observation("original-failed-message", text);
         let seal = store.observe_source(observed.clone(), text).await.unwrap();
+        let original_request = |action: &str| {
+            let mut group = request(&seal, action);
+            group.members.truncate(/*len*/ 1);
+            group
+        };
         let before_failure = snapshot(&store).await;
         sqlx::query("CREATE TRIGGER fail_original BEFORE INSERT ON capture_group_actions BEGIN SELECT RAISE(ABORT, 'before group outcome'); END")
             .execute(&store.pool).await.unwrap();
         assert!(
             store
-                .write_source_group(&admission, request(&seal, "failed-original-action"))
+                .write_source_group(&admission, original_request("failed-original-action"))
                 .await
                 .is_err()
         );
@@ -456,7 +461,7 @@ async fn c2_failed_original_group_then_forget_and_cold_replay_never_restores() {
         assert_eq!(reopened.observe_source(observed, text).await.unwrap(), seal);
         // Transport IDs are deliberately not part of the native observation identity.
         for action in ["failed-original-action", "new-transport-action"] {
-            let mut automatic = request(&seal, action);
+            let mut automatic = original_request(action);
             for member in &mut automatic.members {
                 member.write.value.provenance.kind = BlackboardProvenanceKind::Agent;
                 member.write.context.authority = KnowledgeAuthority::AssistantReported;
