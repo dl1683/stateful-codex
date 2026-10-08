@@ -14,6 +14,7 @@ use crate::AcceptanceOrigin;
 use crate::AcceptanceState;
 use crate::ArtifactState;
 use crate::CommandEvidence;
+use crate::CriterionTerms;
 use crate::EvidenceOutcome;
 use crate::NewObligation;
 use crate::NewStatefulRun;
@@ -25,6 +26,7 @@ use crate::StatefulRunStatus;
 use crate::StatefulRunStore;
 use crate::StatefulRunStoreError;
 use crate::StatefulRunUpdate;
+use crate::TermsUpdate;
 use crate::WorkflowMode;
 use crate::unmet_criteria;
 
@@ -70,8 +72,12 @@ fn user_check(quote: &str, command: &str) -> AcceptanceChange {
         kind: AcceptanceKind::Check,
         statement: quote.to_string(),
         request_span: Some(span(quote)),
-        artifacts: Vec::new(),
-        check_command: Some(command.to_string()),
+        terms: CriterionTerms {
+            required: true,
+            check_command: Some(command.to_string()),
+            expected_observation: Some("exit 0 with every test passing".to_string()),
+            ..CriterionTerms::default()
+        },
     }
 }
 
@@ -81,8 +87,11 @@ fn report_deliverable() -> AcceptanceChange {
         kind: AcceptanceKind::Deliverable,
         statement: "The summary is written to out/report.json.".to_string(),
         request_span: Some(span("Write the summary to out/report.json.")),
-        artifacts: vec!["out/report.json".to_string()],
-        check_command: None,
+        terms: CriterionTerms {
+            required: true,
+            artifacts: vec!["out/report.json".to_string()],
+            ..CriterionTerms::default()
+        },
     }
 }
 
@@ -112,6 +121,7 @@ fn commit(ledger: &AcceptanceLedger, artifacts: BTreeMap<u32, ArtifactState>) ->
         workspace_generation: ledger.workspace_generation,
         artifacts,
         omission_required: false,
+        verification: None,
     }
 }
 
@@ -200,20 +210,32 @@ async fn acceptance_revisions_conflict_and_user_criteria_cannot_be_weakened() {
         AcceptanceChange::Refine {
             ordinal: 1,
             statement: Some("Most tests pass.".to_string()),
-            artifacts: None,
-            check_command: None,
+            required: None,
+            terms: TermsUpdate::default(),
         },
         AcceptanceChange::Refine {
             ordinal: 1,
             statement: None,
-            artifacts: None,
-            check_command: Some("true".to_string()),
+            required: None,
+            terms: TermsUpdate {
+                check_command: Some("true".to_string()),
+                ..TermsUpdate::default()
+            },
+        },
+        AcceptanceChange::Refine {
+            ordinal: 1,
+            statement: None,
+            required: Some(false),
+            terms: TermsUpdate::default(),
         },
         AcceptanceChange::Refine {
             ordinal: 2,
             statement: None,
-            artifacts: Some(Vec::new()),
-            check_command: None,
+            required: None,
+            terms: TermsUpdate {
+                artifacts: Some(Vec::new()),
+                ..TermsUpdate::default()
+            },
         },
         AcceptanceChange::Retire {
             ordinal: 2,
@@ -228,8 +250,7 @@ async fn acceptance_revisions_conflict_and_user_criteria_cannot_be_weakened() {
             kind: AcceptanceKind::Constraint,
             statement: "Self-proposed.".to_string(),
             request_span: Some(span("Fix the parser.")),
-            artifacts: Vec::new(),
-            check_command: None,
+            terms: CriterionTerms::default(),
         },
     ] {
         let error = store
@@ -473,8 +494,7 @@ async fn acceptance_evidence_is_bounded_and_waits_for_socratic_execution() {
                 kind: AcceptanceKind::Manual,
                 statement: "The chart reads well.".to_string(),
                 request_span: None,
-                artifacts: Vec::new(),
-                check_command: None,
+                terms: CriterionTerms::default(),
             }],
             "call-2",
         )
@@ -543,5 +563,267 @@ async fn acceptance_rejected_completions_count_only_without_ledger_progress() {
     assert_eq!(
         store.note_rejected_completion(&id).await.expect("counted"),
         1
+    );
+}
+
+#[tokio::test]
+async fn acceptance_criteria_carry_stable_ids_requirements_and_revisions() {
+    let (_home, _sqlite, store, id) = store_with_run(WorkflowMode::Autonomous).await;
+    let missing_expectation = store
+        .revise_acceptance(
+            &id,
+            0,
+            vec![AcceptanceChange::Add {
+                origin: AcceptanceOrigin::Derived,
+                kind: AcceptanceKind::Check,
+                statement: "Lint is clean.".to_string(),
+                request_span: None,
+                terms: CriterionTerms {
+                    required: true,
+                    check_command: Some("ruff check".to_string()),
+                    ..CriterionTerms::default()
+                },
+            }],
+            "call-0",
+        )
+        .await
+        .expect_err("a check must state its expected observation");
+    assert!(matches!(
+        missing_expectation,
+        StatefulRunStoreError::Acceptance(AcceptanceError::CheckWithoutExpectation)
+    ));
+    let ledger = store
+        .revise_acceptance(
+            &id,
+            0,
+            vec![
+                report_deliverable(),
+                AcceptanceChange::Add {
+                    origin: AcceptanceOrigin::Derived,
+                    kind: AcceptanceKind::Check,
+                    statement: "The report totals reconcile with the inputs.".to_string(),
+                    request_span: None,
+                    terms: CriterionTerms {
+                        required: true,
+                        depends_on: vec![1],
+                        milestone: Some("publish the report".to_string()),
+                        check_command: Some("python reconcile.py".to_string()),
+                        expected_observation: Some(
+                            "independently recomputed totals equal the report".to_string(),
+                        ),
+                        ..CriterionTerms::default()
+                    },
+                },
+            ],
+            "call-1",
+        )
+        .await
+        .expect("criteria recorded");
+    let user = ledger.criterion(1).expect("C1");
+    assert_eq!(
+        (
+            user.id.as_str(),
+            user.requirement.as_str(),
+            user.required,
+            user.ledger_revision
+        ),
+        (
+            "acceptance-run#C1",
+            "Write the summary to out/report.json.",
+            true,
+            1
+        )
+    );
+    let derived = ledger.criterion(2).expect("C2");
+    assert_eq!(
+        (
+            derived.id.as_str(),
+            derived.requirement.as_str(),
+            derived.depends_on.clone(),
+            derived.milestone.as_deref()
+        ),
+        (
+            "acceptance-run#C2",
+            "The report totals reconcile with the inputs.",
+            vec![1],
+            Some("publish the report")
+        )
+    );
+    let forward = store
+        .revise_acceptance(
+            &id,
+            1,
+            vec![AcceptanceChange::Refine {
+                ordinal: 1,
+                statement: None,
+                required: None,
+                terms: TermsUpdate {
+                    depends_on: Some(vec![2]),
+                    ..TermsUpdate::default()
+                },
+            }],
+            "call-2",
+        )
+        .await
+        .expect_err("dependencies point only backwards");
+    assert!(matches!(
+        forward,
+        StatefulRunStoreError::Acceptance(AcceptanceError::InvalidDependency)
+    ));
+    // C2's own check passes, but it depends on the missing report.
+    store
+        .record_command_evidence(&id, vec![observed(&ledger, 2, 0)])
+        .await
+        .expect("check recorded");
+    let ledger = store.acceptance_ledger(&id).await.expect("ledger reads");
+    let missing = BTreeMap::from([(
+        1,
+        ArtifactState::Observed {
+            digest: "sha256:none".to_string(),
+            missing: vec!["out/report.json".to_string()],
+        },
+    )]);
+    assert_eq!(
+        unmet_criteria(&ledger, &commit(&ledger, missing)),
+        vec![
+            (
+                1,
+                "declared artifact out/report.json is missing".to_string()
+            ),
+            (2, "depends on C1, which is unmet".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn unverified_required_work_never_completes_but_optional_work_is_disclosed() {
+    let (_home, _sqlite, store, id) = store_with_run(WorkflowMode::Autonomous).await;
+    let manual = |required: bool, statement: &str| AcceptanceChange::Add {
+        origin: AcceptanceOrigin::Derived,
+        kind: AcceptanceKind::Manual,
+        statement: statement.to_string(),
+        request_span: None,
+        terms: CriterionTerms {
+            required,
+            ..CriterionTerms::default()
+        },
+    };
+    let ledger = store
+        .revise_acceptance(
+            &id,
+            0,
+            vec![
+                manual(true, "The filing reconciles."),
+                manual(false, "Performance is unchanged."),
+            ],
+            "call-1",
+        )
+        .await
+        .expect("criteria recorded");
+    let ledger = store
+        .revise_acceptance(
+            &id,
+            ledger.revision,
+            vec![
+                AcceptanceChange::NoCheck {
+                    ordinal: 1,
+                    reason: "No reconciliation source is available.".to_string(),
+                },
+                AcceptanceChange::NoCheck {
+                    ordinal: 2,
+                    reason: "No benchmark harness exists.".to_string(),
+                },
+            ],
+            "call-2",
+        )
+        .await
+        .expect("statements recorded");
+    let unmet = unmet_criteria(&ledger, &commit(&ledger, BTreeMap::new()));
+    assert_eq!(unmet.len(), 1);
+    assert_eq!(unmet[0].0, 1);
+    assert!(
+        unmet[0]
+            .1
+            .starts_with("required but unverified (No reconciliation source is available.)")
+    );
+    let run = store
+        .get_run(&id)
+        .await
+        .expect("run reads")
+        .expect("run exists");
+    assert!(matches!(
+        store.update_run(&id, completion(run.revision)).await,
+        Err(StatefulRunStoreError::AcceptanceGate(_))
+    ));
+    // The honest outcome is Blocked with a partial result.
+    let blocked = store
+        .update_run(
+            &id,
+            StatefulRunUpdate {
+                expected_revision: run.revision,
+                status: StatefulRunStatus::Blocked,
+                strategy: None,
+                result: Some("Partial: the filing could not be reconciled.".to_string()),
+            },
+        )
+        .await
+        .expect("blocked with a partial result");
+    assert_eq!(blocked.status, StatefulRunStatus::Blocked);
+}
+
+#[tokio::test]
+async fn completion_consumes_a_held_verification_lease_and_the_run_stays_running() {
+    let (_home, _sqlite, store, id) = store_with_run(WorkflowMode::Autonomous).await;
+    let attempt = store
+        .begin_verification(&id, "owner-a", 60_000)
+        .await
+        .expect("attempt starts");
+    assert_eq!(attempt, 1);
+    let leased = store
+        .begin_verification(&id, "owner-b", 60_000)
+        .await
+        .expect_err("one attempt at a time");
+    assert!(matches!(
+        leased,
+        StatefulRunStoreError::Acceptance(AcceptanceError::VerificationLeased(_))
+    ));
+    let run = store
+        .get_run(&id)
+        .await
+        .expect("run reads")
+        .expect("run exists");
+    assert_eq!(run.status, StatefulRunStatus::Running);
+    let ledger = store.acceptance_ledger(&id).await.expect("ledger reads");
+    let mut stale = commit(&ledger, BTreeMap::new());
+    stale.verification = Some(("owner-b".to_string(), attempt));
+    assert!(matches!(
+        store
+            .complete_run_with_acceptance(&id, completion(run.revision), &stale, None)
+            .await,
+        Err(StatefulRunStoreError::AcceptanceChanged)
+    ));
+    store
+        .end_verification(&id, "owner-a", attempt)
+        .await
+        .expect("refusal ends the attempt");
+    let attempt = store
+        .begin_verification(&id, "owner-b", 60_000)
+        .await
+        .expect("next attempt starts");
+    let ledger = store.acceptance_ledger(&id).await.expect("ledger reads");
+    let mut current = commit(&ledger, BTreeMap::new());
+    current.verification = Some(("owner-b".to_string(), attempt));
+    let (completed, _) = store
+        .complete_run_with_acceptance(&id, completion(run.revision), &current, None)
+        .await
+        .expect("held lease completes");
+    assert_eq!(completed.status, StatefulRunStatus::Completed);
+    assert_eq!(
+        store
+            .acceptance_ledger(&id)
+            .await
+            .expect("ledger reads")
+            .verification_lease_expires_at_ms,
+        None
     );
 }

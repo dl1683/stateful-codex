@@ -1,11 +1,16 @@
 //! The run-owned acceptance ledger and the completion gate it enforces.
 //!
 //! A ledger lists what the user's request requires (deliverables, constraints, measurable
-//! checks and items no host can check), each user criterion linked to the exact byte span of
-//! the run goal it came from. Evidence is host-observed (a check command's exit status and
-//! bounded output), a labelled manual observation, or an explicit statement that no safe
-//! check exists. A model assertion is never evidence: the gate below decides whether every
-//! criterion is satisfied with current evidence or explicitly disclosed as unverified.
+//! checks and items no host can check). Each criterion has a stable ID, its explicit
+//! requirement text (for user criteria, the exact byte span of the run goal it came from), a
+//! required/optional flag, dependency and milestone links, and the ledger revision that last
+//! changed it. Evidence is host-observed (a check command's exit status and bounded output), a
+//! labelled manual observation, or an explicit statement that no safe check exists. A model
+//! assertion is never evidence. Required work must be satisfied with current evidence: an
+//! unverified required criterion can never enter `Completed`; only optional criteria may be
+//! completed as disclosed-unverified. A host receipt proves what ran and its exit status, not
+//! that the agent-written check establishes the requirement; every check therefore states the
+//! observation it expects, and completion labels it agent-written.
 
 use std::collections::BTreeMap;
 
@@ -25,6 +30,7 @@ pub const MAX_STATEMENT_BYTES: usize = 1024;
 pub const MAX_ARTIFACT_PATH_BYTES: usize = 512;
 pub const MAX_CHECK_COMMAND_BYTES: usize = 1024;
 pub const MAX_REASON_BYTES: usize = 1024;
+pub const MAX_MILESTONE_BYTES: usize = 160;
 /// Stored tail of a check's combined output; the full output is kept only as a digest.
 pub const MAX_OUTPUT_TAIL_BYTES: usize = 1024;
 
@@ -116,16 +122,33 @@ pub struct AcceptanceEvidence {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcceptanceCriterion {
+    /// Stable for the life of the run: `<run id>#C<ordinal>`.
+    pub id: String,
     pub ordinal: u32,
     pub origin: AcceptanceOrigin,
     pub kind: AcceptanceKind,
     pub state: AcceptanceState,
+    /// The agent's operational statement of the criterion.
     pub statement: String,
+    /// The requirement itself: the exact goal text for user and omission criteria, the
+    /// statement for derived ones.
+    pub requirement: String,
+    /// Required criteria gate completion; optional ones may complete disclosed-unverified.
+    pub required: bool,
+    /// Criteria (by ordinal) that must be met before this one counts as met.
+    pub depends_on: Vec<u32>,
+    /// The irreversible step (approval, filing, publication, ...) this criterion must be
+    /// verified before.
+    pub milestone: Option<String>,
     pub request_span: Option<RequestSpan>,
     pub artifacts: Vec<String>,
     pub check_command: Option<String>,
+    /// What a passing check must show for it to establish the requirement.
+    pub expected_observation: Option<String>,
     pub note: Option<String>,
     pub revision: u64,
+    /// The ledger revision that created or last changed this criterion.
+    pub ledger_revision: u64,
     /// The newest evidence recorded for this criterion, of any revision.
     pub evidence: Option<AcceptanceEvidence>,
 }
@@ -157,6 +180,10 @@ pub struct AcceptanceLedger {
     pub omission_checked: bool,
     /// Consecutive rejected completions with no ledger change in between.
     pub stalled_completions: u32,
+    /// Completion verification attempts started for this run.
+    pub verification_attempt: u64,
+    /// Lease of the attempt in progress; the run stays `Running` meanwhile.
+    pub verification_lease_expires_at_ms: Option<i64>,
     pub criteria: Vec<AcceptanceCriterion>,
 }
 
@@ -168,6 +195,8 @@ impl AcceptanceLedger {
             workspace_generation: 0,
             omission_checked: false,
             stalled_completions: 0,
+            verification_attempt: 0,
+            verification_lease_expires_at_ms: None,
             criteria: Vec::new(),
         }
     }
@@ -188,20 +217,18 @@ pub enum AcceptanceChange {
         kind: AcceptanceKind,
         statement: String,
         request_span: Option<RequestSpan>,
-        artifacts: Vec<String>,
-        check_command: Option<String>,
+        terms: CriterionTerms,
     },
     Refine {
         ordinal: u32,
         statement: Option<String>,
-        artifacts: Option<Vec<String>>,
-        check_command: Option<String>,
+        required: Option<bool>,
+        terms: TermsUpdate,
     },
     Accept {
         ordinal: u32,
         kind: Option<AcceptanceKind>,
-        artifacts: Option<Vec<String>>,
-        check_command: Option<String>,
+        terms: TermsUpdate,
     },
     Dismiss {
         ordinal: u32,
@@ -219,6 +246,27 @@ pub enum AcceptanceChange {
         ordinal: u32,
         reason: String,
     },
+}
+
+/// How a new criterion is checked and ordered.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CriterionTerms {
+    pub required: bool,
+    pub depends_on: Vec<u32>,
+    pub milestone: Option<String>,
+    pub artifacts: Vec<String>,
+    pub check_command: Option<String>,
+    pub expected_observation: Option<String>,
+}
+
+/// Additions or replacements to a criterion's terms; `None` keeps the current value.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TermsUpdate {
+    pub depends_on: Option<Vec<u32>>,
+    pub milestone: Option<String>,
+    pub artifacts: Option<Vec<String>>,
+    pub check_command: Option<String>,
+    pub expected_observation: Option<String>,
 }
 
 /// A check command execution the host observed, bound to one criterion revision.
@@ -255,6 +303,9 @@ pub struct AcceptanceCommit {
     pub artifacts: BTreeMap<u32, ArtifactState>,
     /// Whether policy required the omission check before this completion.
     pub omission_required: bool,
+    /// The verification attempt (owner, number) this commit consumes; its lease must still
+    /// be held when the terminal transaction runs.
+    pub verification: Option<(String, u64)>,
 }
 
 /// How one criterion stands against the gate.
@@ -266,7 +317,8 @@ pub enum CriterionVerdict {
     ArtifactsPresent,
     /// A labelled manual observation, current with the workspace.
     ManualObservation,
-    /// Explicitly unverified, with the reason disclosed in the completion.
+    /// An optional criterion explicitly unverified, with the reason disclosed in the
+    /// completion. Required criteria are never in this state.
     DisclosedUnverified(String),
     /// Not gating: dismissed or retired with a disclosed reason.
     Closed(String),
@@ -333,7 +385,8 @@ pub fn criterion_verdict(
                     .exit_code
                     .map_or_else(|| "unknown".to_string(), |code| code.to_string())
             )),
-            EvidenceOutcome::Unavailable => CriterionVerdict::DisclosedUnverified(
+            EvidenceOutcome::Unavailable => unverified(
+                criterion,
                 evidence
                     .detail
                     .clone()
@@ -358,7 +411,8 @@ pub fn criterion_verdict(
         };
     }
     match current.map(|evidence| (evidence.outcome, evidence)) {
-        Some((EvidenceOutcome::Unavailable, evidence)) => CriterionVerdict::DisclosedUnverified(
+        Some((EvidenceOutcome::Unavailable, evidence)) => unverified(
+            criterion,
             evidence
                 .detail
                 .clone()
@@ -388,24 +442,63 @@ pub fn criterion_verdict(
     }
 }
 
+/// Unverified required work is unmet: disclosure is a partial outcome, never completion.
+fn unverified(criterion: &AcceptanceCriterion, reason: String) -> CriterionVerdict {
+    if criterion.required {
+        CriterionVerdict::Unmet(format!(
+            "required but unverified ({reason}); required work cannot complete unverified. Repair it or find a safe check; if it cannot be verified, set the run blocked with a partial result that names it"
+        ))
+    } else {
+        CriterionVerdict::DisclosedUnverified(reason)
+    }
+}
+
+/// Every criterion's verdict in ordinal order. A criterion whose dependency is unmet is unmet
+/// itself, whatever its own evidence says.
+pub fn ledger_verdicts(
+    ledger: &AcceptanceLedger,
+    commit: &AcceptanceCommit,
+) -> Vec<(u32, CriterionVerdict)> {
+    let mut verdicts: Vec<(u32, CriterionVerdict)> = Vec::with_capacity(ledger.criteria.len());
+    for criterion in &ledger.criteria {
+        let verdict = criterion_verdict(
+            criterion,
+            ledger.workspace_generation,
+            commit.artifacts.get(&criterion.ordinal),
+        );
+        let blocked_by = (criterion.state == AcceptanceState::Active)
+            .then(|| {
+                criterion.depends_on.iter().copied().find(|dependency| {
+                    verdicts
+                        .iter()
+                        .any(|(ordinal, verdict)| ordinal == dependency && verdict.is_unmet())
+                })
+            })
+            .flatten();
+        verdicts.push((
+            criterion.ordinal,
+            match blocked_by {
+                Some(dependency) if !verdict.is_unmet() => {
+                    CriterionVerdict::Unmet(format!("depends on C{dependency}, which is unmet"))
+                }
+                _ => verdict,
+            },
+        ));
+    }
+    verdicts
+}
+
 /// Every criterion that blocks completion, with the reason, in ordinal order.
 pub fn unmet_criteria(ledger: &AcceptanceLedger, commit: &AcceptanceCommit) -> Vec<(u32, String)> {
-    ledger
-        .criteria
-        .iter()
-        .filter_map(|criterion| {
-            match criterion_verdict(
-                criterion,
-                ledger.workspace_generation,
-                commit.artifacts.get(&criterion.ordinal),
-            ) {
-                CriterionVerdict::Unmet(reason) => Some((criterion.ordinal, reason)),
-                CriterionVerdict::SatisfiedByHost
-                | CriterionVerdict::ArtifactsPresent
-                | CriterionVerdict::ManualObservation
-                | CriterionVerdict::DisclosedUnverified(_)
-                | CriterionVerdict::Closed(_) => None,
-            }
+    ledger_verdicts(ledger, commit)
+        .into_iter()
+        .filter_map(|(ordinal, verdict)| match verdict {
+            CriterionVerdict::Unmet(reason) => Some((ordinal, reason)),
+            CriterionVerdict::SatisfiedByHost
+            | CriterionVerdict::ArtifactsPresent
+            | CriterionVerdict::ManualObservation
+            | CriterionVerdict::DisclosedUnverified(_)
+            | CriterionVerdict::Closed(_) => None,
         })
         .collect()
 }
@@ -472,4 +565,14 @@ pub enum AcceptanceError {
     Refused(String),
     #[error("request span is not an exact non-empty range of the run goal")]
     InvalidSpan,
+    #[error(
+        "a checkCommand needs expectedObservation: what its passing output must show to establish the requirement"
+    )]
+    CheckWithoutExpectation,
+    #[error(
+        "dependsOn may name only earlier criteria of this ledger (no self or forward references)"
+    )]
+    InvalidDependency,
+    #[error("another completion verification holds the lease until {0}; retry after it ends")]
+    VerificationLeased(i64),
 }
