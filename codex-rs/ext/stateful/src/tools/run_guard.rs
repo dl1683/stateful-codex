@@ -54,7 +54,7 @@ impl StatefulRunUpdateTool {
             .await
         {
             Ok((root_revision, aliases)) if aliases > 0 => format!(
-                r#"durableLearning: {{"expectedRevision":{revision},"status":"completed","completionIdempotencyKey":"completion-{revision}","finalObligation":{{"learning":["<reusable conclusion>"]}},"result":"<final answer>","rootRevision":{root_revision},"materialRootFindings":["E1"]}} (E1..E{aliases} are the current root aliases)"#
+                r#"durableLearning: {{"expectedRevision":{revision},"status":"completed","completionIdempotencyKey":"<unique completion key for this run>","finalObligation":{{"learning":["<reusable conclusion>"]}},"result":"<final answer>","rootRevision":{root_revision},"materialRootFindings":["E1"]}} (E1..E{aliases} are the current root aliases)"#
             ),
             Ok(_) => "durableLearning first needs a root finding: record it with blackboard_record_batch rootPromotion promoted".to_string(),
             Err(_) => "durableLearning needs rootRevision and materialRootFindings from the current World State".to_string(),
