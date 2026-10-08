@@ -78,8 +78,8 @@ async fn public_predecessor_fan_in_preview_is_bounded_after_restart() -> Result<
             value.content = "Current short note.".into();
             store.create_entry(successor.clone(), value.clone()).await?;
             value.root_promotion = codex_project_intelligence::RootPromotion::NotPromoted;
-            value.content = "Original short note.".into();
             for i in previous..count {
+                value.content = format!("Original short note {i}.");
                 let id = BlackboardEntryId::parse(format!("fanin-predecessor-{i:08}"))?;
                 let entry = store.create_entry(id.clone(), value.clone()).await?;
                 let update = codex_project_intelligence::BlackboardEntryUpdate {
@@ -126,13 +126,13 @@ async fn public_predecessor_fan_in_preview_is_bounded_after_restart() -> Result<
             assert_eq!(
                 item.replaces
                     .iter()
-                    .map(|entry| (&entry.entry_id, entry.content.as_str()))
+                    .map(|entry| (entry.entry_id.clone(), entry.content.clone()))
                     .collect::<Vec<_>>(),
                 (0..3)
-                    .map(|i| format!("fanin-predecessor-{i:08}"))
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(|id| (id, "Original short note."))
+                    .map(|i| (
+                        format!("fanin-predecessor-{i:08}"),
+                        format!("Original short note {i}.")
+                    ))
                     .collect::<Vec<_>>()
             );
             assert_eq!(snapshot(&sqlite).await?, before);
@@ -164,6 +164,19 @@ async fn snapshot(sqlite: &SqliteConfig) -> Result<Vec<Vec<String>>> {
         .fetch_all(&mut *transaction).await?;
     let mut result = Vec::new();
     for table in tables {
+        // Original turn observations commit independently of refused model mutations.
+        // C2 source tests compare these tables too when no new native turn is submitted.
+        if [
+            "capture_sources",
+            "capture_source_chunks",
+            "capture_source_terms",
+            "capture_source_omissions",
+            "knowledge_source_sequences",
+        ]
+        .contains(&table.as_str())
+        {
+            continue;
+        }
         let columns =
             sqlx::query_scalar::<_, String>("SELECT name FROM pragma_table_info(?) ORDER BY cid")
                 .bind(&table)

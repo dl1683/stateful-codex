@@ -13,8 +13,9 @@ async fn user_corrected_assistant_memory_refuses_all_model_mutations_after_resta
     for kind in ["decision", "fact"] {
         for authority in [None, Some("assistant_reported"), Some("human_direct")] {
             let key = format!("corrected-{kind}-{authority:?}");
+            let original_words = format!("Use SQLite for {key}");
             let record = json!({"records":[{
-                "idempotencyKey":key,"kind":kind,"content":"Use SQLite",
+                "idempotencyKey":key,"kind":kind,"content":original_words,
                 "confidenceBasisPoints":9000,"verification":"unverified",
                 "importance":"high","rootPromotion":"promoted"
             }]});
@@ -39,7 +40,7 @@ async fn user_corrected_assistant_memory_refuses_all_model_mutations_after_resta
                 .await?
                 .data
                 .into_iter()
-                .find(|item| item.content == "Use SQLite")
+                .find(|item| item.content == original_words)
                 .expect("original");
             let corrected: StatefulMemoryCorrectResponse = server
                 .request(|request_id| ClientRequest::StatefulMemoryCorrect {
@@ -49,8 +50,9 @@ async fn user_corrected_assistant_memory_refuses_all_model_mutations_after_resta
                         expected_project_id: project.clone(),
                         entry_id: original.entry_id.clone(),
                         expected_revision: original.revision,
-                        content: "Use PostgreSQL. Reason: I require local SQL transactions."
-                            .to_string(),
+                        content: format!(
+                            "Use PostgreSQL for {key}. Reason: I require local SQL transactions."
+                        ),
                         background_section: true,
                     },
                 })
