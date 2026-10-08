@@ -1,6 +1,6 @@
 //! One evidence-bearing recall (council slice 4): a question about a changed decision is
-//! answered from one memory_read result carrying the current value, what it replaced and
-//! when, and the earlier turn where the user changed it.
+//! answered from one memory_read result carrying eligible current wording and the earlier
+//! turn where the user changed it. Retired Agent wording remains archival.
 
 use std::collections::BTreeMap;
 
@@ -25,8 +25,8 @@ const TWO: &str = "Default rate formatting uses TWO decimal places because the d
 const CHANGE_REQUEST: &str = "Requirement changed: default formatting must now use TWO decimal places, because the dashboard compares sub-unit rates.";
 
 #[tokio::test]
-async fn one_memory_read_returns_the_current_decision_its_history_and_the_users_reason()
--> Result<()> {
+async fn one_memory_read_returns_current_decision_and_reason_without_retired_history() -> Result<()>
+{
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
@@ -131,17 +131,7 @@ async fn one_memory_read_returns_the_current_decision_its_history_and_the_users_
             )
         })
         .collect::<Vec<_>>();
-    let two_id = entries[0]["entryId"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    assert_eq!(
-        statuses,
-        vec![
-            (TWO.to_string(), "current".to_string()),
-            (ONE.to_string(), format!("replaced by {two_id}")),
-        ]
-    );
+    assert_eq!(statuses, vec![(TWO.to_string(), "current".to_string())]);
     let turns = recall["turns"].as_array().expect("turns");
     assert!(
         turns
@@ -150,9 +140,9 @@ async fn one_memory_read_returns_the_current_decision_its_history_and_the_users_
         "{turns:?}"
     );
     assert_eq!(entries[0]["source"], json!("agent record"));
-    // History rows carry the same authority fields as current ones.
+    // The retained current row keeps its authority fields.
     assert_eq!(
-        (entries[1]["kind"].clone(), entries[1]["source"].clone()),
+        (entries[0]["kind"].clone(), entries[0]["source"].clone()),
         (json!("decision"), json!("agent record"))
     );
 
