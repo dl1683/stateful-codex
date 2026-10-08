@@ -39,6 +39,9 @@ mod review;
 mod root_projection;
 mod scopes;
 mod source;
+#[cfg(test)]
+#[path = "blackboard_storage/source_fixture_tests.rs"]
+mod source_fixture;
 mod source_group_read;
 mod source_links;
 mod source_observation;

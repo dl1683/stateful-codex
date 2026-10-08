@@ -14,6 +14,9 @@ pub(super) fn digest(text: &str) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))
 }
 
+#[cfg(test)]
+#[path = "source_tests.rs"]
+mod tests;
 
 impl BlackboardStore {
     /// A model/automatic exact read always rechecks current range exclusions in its snapshot.
