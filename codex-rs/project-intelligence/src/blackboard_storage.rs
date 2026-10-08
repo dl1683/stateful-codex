@@ -38,8 +38,11 @@ mod relation;
 mod review;
 mod root_projection;
 mod scopes;
+mod source;
 mod source_group_read;
+mod source_observation;
 mod source_order;
+mod source_projection;
 mod succession;
 mod temporal;
 mod update;
@@ -512,6 +515,9 @@ async fn write_revision(
     )
     .await?;
     identity::register(connection, id, value, state, context.as_ref()).await?;
+    if state != BlackboardEntryState::Active {
+        source::retire_entry_sources(connection, &value.project_id, id).await?;
+    }
     Ok(())
 }
 
