@@ -40,6 +40,7 @@ const MAX_TURN_RUNS_PER_THREAD: u32 = 100;
 pub(super) async fn gather_continuity(
     threads: &dyn ThreadStore,
     runtime: Option<&StatefulRunStore>,
+    blackboard: Option<&codex_project_intelligence::BlackboardStore>,
     project_id: &str,
     current_thread_id: &str,
 ) -> ContinuityRecord {
@@ -96,11 +97,42 @@ pub(super) async fn gather_continuity(
             None => None,
         };
         let current_thread = thread_id == current_thread_id;
-        turns.extend(
-            page.turns.into_iter().filter_map(|turn| {
+        for turn in page.turns {
+            if let Some(mut captured) =
                 captured_turn(thread, current_thread, turn_runs.as_deref(), turn)
-            }),
-        );
+            {
+                let Some(store) = blackboard else {
+                    history_unavailable = true;
+                    continue;
+                };
+                if !store
+                    .source_turn_eligible(project_id, &captured.turn_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    history_unavailable = true;
+                    continue;
+                }
+                for text in [
+                    &mut captured.user,
+                    &mut captured.answer,
+                    &mut captured.thread_title,
+                ] {
+                    if let Some(value) = text.as_ref()
+                        && !store
+                            .source_text_eligible(project_id, value)
+                            .await
+                            .unwrap_or(false)
+                    {
+                        *text = None;
+                        history_unavailable = true;
+                    }
+                }
+                if captured.user.is_some() || captured.answer.is_some() {
+                    turns.push(captured);
+                }
+            }
+        }
     }
     turns.sort_by_key(|turn| std::cmp::Reverse(turn.at_ms));
     if turns.len() > MAX_TURNS {

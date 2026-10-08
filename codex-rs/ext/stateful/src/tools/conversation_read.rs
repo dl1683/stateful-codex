@@ -61,13 +61,19 @@ struct Arguments {
 }
 
 pub(super) struct ConversationReadTool {
+    services: crate::services::ProjectIntelligenceServices,
     project_id: String,
     threads: Arc<dyn ThreadStore>,
 }
 
 impl ConversationReadTool {
-    pub(super) fn new(project_id: String, threads: Arc<dyn ThreadStore>) -> Self {
+    pub(super) fn new(
+        project_id: String,
+        threads: Arc<dyn ThreadStore>,
+        services: crate::services::ProjectIntelligenceServices,
+    ) -> Self {
         Self {
+            services,
             project_id,
             threads,
         }
@@ -133,19 +139,29 @@ impl ConversationReadTool {
                 ))
                 .await
                 .map_err(respond)?;
-            let threads = page
-                .items
-                .iter()
-                .filter(|thread| is_top_level(thread))
-                .map(|thread| {
-                    json!({
-                        "threadId": thread.thread_id.to_string(),
-                        "title": thread.name.as_deref().map(preview),
-                        "updatedAt": thread.updated_at.timestamp(),
-                        "firstRequest": thread.first_user_message.as_deref().map(preview),
-                    })
-                })
-                .collect::<Vec<_>>();
+            let store = self.services.blackboard().await.map_err(respond)?;
+            let mut threads = Vec::new();
+            for thread in page.items.iter().filter(|thread| is_top_level(thread)) {
+                let mut title = None;
+                if let Some(text) = thread.name.as_deref()
+                    && store
+                        .source_text_eligible(&self.project_id, text)
+                        .await
+                        .map_err(respond)?
+                {
+                    title = Some(preview(text));
+                }
+                let mut first_request = None;
+                if let Some(text) = thread.first_user_message.as_deref()
+                    && store
+                        .source_text_eligible(&self.project_id, text)
+                        .await
+                        .map_err(respond)?
+                {
+                    first_request = Some(preview(text));
+                }
+                threads.push(json!({"threadId": thread.thread_id.to_string(), "title": title, "updatedAt": thread.updated_at.timestamp(), "firstRequest": first_request}));
+            }
             let result = json!({
                 "cursor": cursor,
                 "threads": threads,
@@ -179,22 +195,49 @@ impl ConversationReadTool {
                 })
                 .await
                 .map_err(respond)?;
-            let turns = page
-                .turns
-                .iter()
-                .map(|turn| {
-                    let (user, answer) = turn_texts(&turn.items);
-                    json!({
-                        "turnId": turn.turn_id,
-                        "atMs": turn_time_ms(turn),
-                        "status": turn_status(turn).unwrap_or("completed"),
-                        "user": user.as_deref().map(preview),
-                        "userBytes": user.as_ref().map_or(0, String::len),
-                        "answer": answer.as_deref().map(preview),
-                        "answerBytes": answer.as_ref().map_or(0, String::len),
-                    })
-                })
-                .collect::<Vec<_>>();
+            let mut turns = Vec::new();
+            for turn in &page.turns {
+                let store = self.services.blackboard().await.map_err(respond)?;
+                if !store
+                    .source_turn_eligible(&self.project_id, &turn.turn_id)
+                    .await
+                    .map_err(respond)?
+                {
+                    continue;
+                }
+                let (user, answer) = turn_texts(&turn.items);
+                let user = match user {
+                    Some(text)
+                        if store
+                            .source_text_eligible(&self.project_id, &text)
+                            .await
+                            .map_err(respond)? =>
+                    {
+                        Some(text)
+                    }
+                    _ => None,
+                };
+                let answer = match answer {
+                    Some(text)
+                        if store
+                            .source_text_eligible(&self.project_id, &text)
+                            .await
+                            .map_err(respond)? =>
+                    {
+                        Some(text)
+                    }
+                    _ => None,
+                };
+                turns.push(json!({
+                    "turnId": turn.turn_id,
+                    "atMs": turn_time_ms(turn),
+                    "status": turn_status(turn).unwrap_or("completed"),
+                    "user": user.as_deref().map(preview),
+                    "userBytes": user.as_ref().map_or(0, String::len),
+                    "answer": answer.as_deref().map(preview),
+                    "answerBytes": answer.as_ref().map_or(0, String::len),
+                }));
+            }
             // `cursor` is echoed so an exact read can start from the page that lists a turn.
             let result = json!({
                 "threadId": thread.thread_id.to_string(),
@@ -233,12 +276,36 @@ impl ConversationReadTool {
                 .await
                 .map_err(respond)?;
             if let Some(turn) = page.turns.iter().find(|turn| turn.turn_id == turn_id) {
+                if !self
+                    .services
+                    .blackboard()
+                    .await
+                    .map_err(respond)?
+                    .source_turn_eligible(&self.project_id, turn_id)
+                    .await
+                    .map_err(respond)?
+                {
+                    return Err(respond("original turn fallback excluded after retirement"));
+                }
                 let (user, answer) = turn_texts(&turn.items);
                 let text = match part {
                     Part::User => user,
                     Part::Answer => answer,
                 }
                 .unwrap_or_default();
+                if !self
+                    .services
+                    .blackboard()
+                    .await
+                    .map_err(respond)?
+                    .source_text_eligible(&self.project_id, &text)
+                    .await
+                    .map_err(respond)?
+                {
+                    return Err(respond(
+                        "source unavailable for automatic recall after retirement; original archival history remains stored",
+                    ));
+                }
                 return text_page(call, thread, turn_id, part, &text, offset);
             }
             match page.next_cursor {

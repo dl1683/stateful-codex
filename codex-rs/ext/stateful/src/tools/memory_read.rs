@@ -248,6 +248,13 @@ impl MemoryReadTool {
         let mut lookups = 0usize;
         let mut history_remaining = MAX_HISTORY_PREDECESSORS;
         for hit in hits {
+            if !store
+                .entry_source_eligible(&self.project_id, &hit.entry.id)
+                .await
+                .map_err(respond)?
+            {
+                continue;
+            }
             let mut current = hit;
             let mut path = Vec::new();
             let target = loop {
@@ -269,6 +276,13 @@ impl MemoryReadTool {
                 else {
                     break Some(id);
                 };
+                if !store
+                    .entry_source_eligible(&self.project_id, &successor.entry.id)
+                    .await
+                    .map_err(respond)?
+                {
+                    break None;
+                }
                 path.push(std::mem::replace(&mut current, successor));
             };
             let Some(target) = target else {
@@ -301,7 +315,11 @@ impl MemoryReadTool {
                         history_remaining -= replaced.len() as u32;
                         truncated |= more;
                         for predecessor in replaced {
-                            if !shown.contains(&predecessor.id.to_string())
+                            if store
+                                .entry_source_eligible(&self.project_id, &predecessor.id)
+                                .await
+                                .map_err(respond)?
+                                && !shown.contains(&predecessor.id.to_string())
                                 && let Some(predecessor) = store
                                     .get_hit(&self.project_id, &predecessor.id)
                                     .await
@@ -389,7 +407,36 @@ impl MemoryReadTool {
                 if since_ms.is_some_and(|since| at.is_none_or(|at| at < since)) {
                     continue;
                 }
+                let Ok(store) = self.services.blackboard().await else {
+                    unreadable_threads += 1;
+                    continue;
+                };
+                if !store
+                    .source_turn_eligible(&self.project_id, &turn.turn_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
                 let (user, answer) = turn_texts(&turn.items);
+                let mut user = user;
+                let mut answer = answer;
+                if let Some(text) = &user
+                    && !store
+                        .source_text_eligible(&self.project_id, text)
+                        .await
+                        .unwrap_or(false)
+                {
+                    user = None;
+                }
+                if let Some(text) = &answer
+                    && !store
+                        .source_text_eligible(&self.project_id, text)
+                        .await
+                        .unwrap_or(false)
+                {
+                    answer = None;
+                }
                 let matches = terms.is_empty()
                     || [user.as_deref(), answer.as_deref()]
                         .into_iter()
@@ -474,7 +521,26 @@ async fn entry_item(
         } else {
             &relation.value.from_entry_id
         };
-        let counterpart = store.get_entry(project_id, other).await.ok().flatten();
+        if !store
+            .entry_source_eligible(project_id, other)
+            .await
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if let Some(note) = relation.value.note.as_deref()
+            && !store
+                .source_text_eligible(project_id, note)
+                .await
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let counterpart = store
+            .get_source_eligible_entry(project_id, other)
+            .await
+            .ok()
+            .flatten();
         relations.push(json!({
             "kind": relation.value.kind,
             "otherEntryId": other.to_string(),

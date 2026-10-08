@@ -41,6 +41,9 @@ pub(super) struct ProjectIntelligenceServices {
 }
 
 impl ProjectIntelligenceServices {
+    pub(super) fn sqlite(&self) -> &SqliteConfig {
+        &self.sqlite
+    }
     pub(super) fn new(sqlite: SqliteConfig) -> Self {
         Self {
             sqlite,

@@ -36,7 +36,7 @@ async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay(
             let mut mutations = Vec::new();
             for i in 0..count {
                 let id = BlackboardEntryId::parse(format!("{head}-predecessor-{i:04}")).unwrap();
-                let mut value = decision(&node, "Original short note.");
+                let mut value = decision(&node, &format!("Original short note {head}-{i}."));
                 value.root_promotion = RootPromotion::NotPromoted;
                 store.create_entry(id.clone(), value).await.unwrap();
                 mutations.push(serde_json::json!({"action":"supersede","entryId":id.to_string(),"expectedRevision":1,"successorEntryId":head}));

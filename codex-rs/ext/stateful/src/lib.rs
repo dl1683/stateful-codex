@@ -3,6 +3,7 @@
 mod attributed_text;
 mod attribution;
 mod autonomy;
+mod capture_sources;
 mod checkout;
 mod checkpoint;
 mod completion;
@@ -229,6 +230,10 @@ impl ContextContributor for StatefulExtension {
                             continuity_source::gather_continuity(
                                 self.projects.as_ref(),
                                 runtime,
+                                match self.services.as_ref() {
+                                    Some(services) => services.blackboard().await.ok(),
+                                    None => None,
+                                },
                                 &project.id,
                                 &thread_id,
                             )

@@ -153,7 +153,9 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
                 .expect("predecessor ID");
         let successor_id = BlackboardEntryId::parse(format!("successor-{origin:?}-{authority:?}"))
             .expect("successor ID");
-        let mut user_value = value("User's corrected words and reason.");
+        let mut user_value = value(&format!(
+            "User's corrected words and reason {origin:?}-{authority:?}."
+        ));
         user_value.provenance.kind = origin;
         let mut predecessor = store
             .create_entry(predecessor_id.clone(), user_value)

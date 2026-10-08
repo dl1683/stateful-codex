@@ -19,10 +19,14 @@ pub(super) async fn read(
     let id = BlackboardEntryId::parse(id)
         .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
     let entry = store
-        .get_entry(project_id, &id)
+        .get_source_eligible_entry(project_id, &id)
         .await
         .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?
-        .ok_or_else(|| FunctionCallError::RespondToModel("entry not found".to_string()))?;
+        .ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "entry not found or evidence excluded after retirement".to_string(),
+            )
+        })?;
     if expected_revision.is_some_and(|revision| revision != entry.revision)
         || (offset > 0 && expected_revision.is_none())
     {

@@ -217,6 +217,9 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             begin_turn_attribution(self, input.turn_id, input.thread_store);
+            input.turn_store.insert(crate::capture_sources::SourceTurn {
+                turn_id: input.turn_id.to_string(),
+            });
             if let Some(selected) = input.thread_store.get::<SelectedProject>() {
                 crate::request_scope::RequestScope::record_turn_start(
                     input.turn_store,
@@ -311,12 +314,18 @@ impl TurnLifecycleContributor for StatefulExtension {
         turn_store: &'a ExtensionData,
         item: &'a TurnItem,
     ) -> ExtensionFuture<'a, ()> {
-        if let TurnItem::UserMessage(message) = item
-            && thread_store.get::<SelectedProject>().is_some()
-        {
-            crate::request_scope::RequestScope::observe_user_message(turn_store, &message.content);
-        }
-        Box::pin(std::future::ready(()))
+        Box::pin(async move {
+            if let TurnItem::UserMessage(message) = item
+                && thread_store.get::<SelectedProject>().is_some()
+            {
+                crate::request_scope::RequestScope::observe_user_message(
+                    turn_store,
+                    &message.content,
+                );
+                self.observe_original_item(thread_store, turn_store, message)
+                    .await;
+            }
+        })
     }
 
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {

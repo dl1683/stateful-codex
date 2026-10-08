@@ -74,6 +74,7 @@ pub(super) fn project_intelligence_tools(
         Arc::new(conversation_read::ConversationReadTool::new(
             project_id.clone(),
             projects.clone(),
+            services.clone(),
         )),
         Arc::new(memory_read::MemoryReadTool::new(
             project_id.clone(),
