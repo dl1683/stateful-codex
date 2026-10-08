@@ -19,8 +19,6 @@ use serde_json::json;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::completion::CompletionRequest;
-use crate::completion::HistoricalFindingReference;
-use crate::completion::MAX_MATERIAL_HISTORICAL_FINDINGS;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
@@ -47,7 +45,8 @@ struct Arguments {
     result: Option<String>,
     root_revision: Option<u64>,
     material_root_findings: Option<Vec<String>>,
-    material_historical_findings: Option<Vec<HistoricalFindingArguments>>,
+    // Accept only an empty legacy field; historical completion publication is unsupported.
+    material_historical_findings: Option<Vec<Value>>,
     completion_idempotency_key: Option<String>,
     final_obligation: Option<ObligationPacket>,
     #[serde(default)]
@@ -62,13 +61,6 @@ enum CompletionDisposition {
     #[default]
     DurableLearning,
     NoReusableLearning,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct HistoricalFindingArguments {
-    entry_id: String,
-    revision: u64,
 }
 
 pub(super) struct StatefulRunUpdateTool {
@@ -129,6 +121,14 @@ impl StatefulRunUpdateTool {
             final_obligation,
             completion_disposition,
         } = parse_arguments(&call)?;
+        if material_historical_findings
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "materialHistoricalFindings is unsupported; completion may select only current root findings".to_string(),
+            ));
+        }
         if !matches!(
             status,
             StatefulRunStatus::Running
@@ -168,12 +168,11 @@ impl StatefulRunUpdateTool {
         let (completion, final_obligation) = if no_reusable_learning {
             if material_root_findings.is_some()
                 || root_revision.is_some()
-                || material_historical_findings.is_some()
                 || completion_idempotency_key.is_some()
                 || final_obligation.is_some()
             {
                 return Err(FunctionCallError::RespondToModel(
-                    "completionDisposition noReusableLearning takes only expectedRevision, status, completionDisposition, and result; omit rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
+                    "completionDisposition noReusableLearning takes only expectedRevision, status, completionDisposition, and result; omit rootRevision, materialRootFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
                 ));
             }
             let knowledge_changed = fence
@@ -204,17 +203,9 @@ impl StatefulRunUpdateTool {
             }
             let material_root_findings = material_root_findings.ok_or_else(|| {
                 FunctionCallError::RespondToModel(
-                    format!("completed requires materialRootFindings; pass at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome. If finalObligation.learning is non-empty, select at least one current root alias or exact materialHistoricalFinding that preserves the reusable learning. Pass [] only when the run produced no reusable project learning")
+                    format!("completed requires materialRootFindings; pass at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome. If finalObligation.learning is non-empty, select at least one current root alias that preserves the reusable learning. Pass [] only when the run produced no reusable project learning")
                 )
             })?;
-            let material_historical_findings = material_historical_findings
-                .unwrap_or_default()
-                .into_iter()
-                .map(|reference| HistoricalFindingReference {
-                    entry_id: reference.entry_id,
-                    revision: reference.revision,
-                })
-                .collect::<Vec<_>>();
             let root_revision = root_revision.ok_or_else(|| {
                 FunctionCallError::RespondToModel(
                     "completed requires rootRevision from the current project intelligence World State"
@@ -265,7 +256,6 @@ impl StatefulRunUpdateTool {
                     packet: &final_obligation,
                     root_revision,
                     material_root_findings: &material_root_findings,
-                    material_historical_findings: &material_historical_findings,
                     visible_root: visible_root.as_ref(),
                 },
             )
@@ -283,12 +273,11 @@ impl StatefulRunUpdateTool {
         } else {
             if material_root_findings.is_some()
                 || root_revision.is_some()
-                || material_historical_findings.is_some()
                 || completion_idempotency_key.is_some()
                 || final_obligation.is_some()
             {
                 return Err(FunctionCallError::RespondToModel(
-                    "rootRevision, materialRootFindings, materialHistoricalFindings, completionIdempotencyKey, and finalObligation are only valid when status is completed".to_string(),
+                    "rootRevision, materialRootFindings, completionIdempotencyKey, and finalObligation are only valid when status is completed".to_string(),
                 ));
             }
             (None, None)
@@ -419,7 +408,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
         );
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: format!("Change the active Stateful run's strategy or status, or complete it. noReusableLearning completion (answer from existing knowledge, a narrow citation, or cheap to recompute): exactly expectedRevision, status completed, completionDisposition noReusableLearning, result. durableLearning completion (default), after every other durable write: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, materialRootFindings (at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases; optionally {MAX_MATERIAL_HISTORICAL_FINDINGS} materialHistoricalFindings), selecting a finding that preserves any finalObligation.learning. Rejected while steering is unresolved or a revision changed. Cannot begin a pending Socratic run, pause, or cancel."),
+            description: format!("Change the active Stateful run's strategy or status, or complete it. noReusableLearning completion (answer from existing knowledge, a narrow citation, or cheap to recompute): exactly expectedRevision, status completed, completionDisposition noReusableLearning, result. durableLearning completion (default), after every other durable write: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, materialRootFindings (at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases), selecting a finding that preserves any finalObligation.learning. Rejected while steering is unresolved or a revision changed. Cannot begin a pending Socratic run, pause, or cancel."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -431,7 +420,6 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative."},
                     "rootRevision": {"type": "integer", "minimum": 0, "description": "durableLearning only; the root blackboard's project intelligence revision."},
                     "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": "durableLearning only; [] only when nothing reusable was learned."},
-                    "materialHistoricalFindings": {"type": "array", "items": {"type": "object", "properties": {"entryId": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}}, "required": ["entryId", "revision"], "additionalProperties": false}, "maxItems": MAX_MATERIAL_HISTORICAL_FINDINGS, "description": "durableLearning only; e.g. historicalFinding from blackboard_update_batch."},
                     "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
                     "finalObligation": final_obligation,
                     "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."}

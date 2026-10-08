@@ -538,7 +538,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} independent revision-guarded lifecycle changes. Targets need Agent provenance in every revision and known non-human authority; otherwise use explicit user memory controls. Preserve provenance. setRootPromotion: promote a project-wide candidate (not verification). revise: content, confidence, verification, importance, evidence, premises (empty array clears); changing source-verified meaning needs fresh evidence_read receipts. supersede: replace obsolete knowledge with a newer entry. retire: obsolete without successor. Neither deletes history, run results or conversation; for Forget, state what remains. Copy material historicalFinding into materialHistoricalFindings at completion."
+                "Apply 1-{MAX_MUTATIONS} independent revision-guarded lifecycle changes. Targets need Agent provenance in every revision and known non-human authority; otherwise use explicit user memory controls. Preserve provenance. setRootPromotion: promote a project-wide candidate (not verification). revise: content, confidence, verification, importance, evidence, premises (empty array clears); changing source-verified meaning needs fresh evidence_read receipts. supersede: replace obsolete knowledge with a newer entry. retire: obsolete without successor. Neither deletes history, run results or conversation; for Forget, state what remains."
             ),
             strict: false,
             defer_loading: None,

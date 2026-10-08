@@ -69,8 +69,7 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
         &ToolPayload::Function {
             arguments: serde_json::json!({
                 "status": "completed",
-                "materialRootFindings": ["E1", "E2"],
-                "materialHistoricalFindings": [{"entryId": "entry-1", "revision": 1}]
+                "materialRootFindings": ["E1", "E2"]
             })
             .to_string(),
         },
@@ -108,7 +107,7 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
                 conversation_read_calls: 1,
                 blackboard_write_calls: 1,
                 run_update_calls: 1,
-                material_findings_reused: 3,
+                material_findings_reused: 2,
                 ..Default::default()
             },
         }

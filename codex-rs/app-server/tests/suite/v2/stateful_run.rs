@@ -385,7 +385,7 @@ async fn completion_rejects_an_unselected_source_fingerprint_without_mutating_th
     assert_eq!(requests.len(), 2);
     let rejection = requests[1].function_call_output("invalid-completion");
     assert!(rejection.to_string().contains("unknown source fingerprint"));
-    assert!(rejection.to_string().contains("materialHistoricalFindings"));
+    assert!(rejection.to_string().contains("materialRootFindings"));
     let read: StatefulRunReadResponse = server
         .request(|request_id| ClientRequest::StatefulRunRead {
             request_id,

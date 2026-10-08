@@ -3,8 +3,6 @@ use std::fmt::Write;
 use std::path::PathBuf;
 
 use codex_extension_api::FunctionCallError;
-use codex_project_intelligence::BlackboardEntryId;
-use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardVerification;
 use codex_stateful_runtime::ObligationPacket;
@@ -23,15 +21,9 @@ use crate::visible_root::VisibleRoot;
 const MAX_FINAL_CHECKLIST_ITEMS: usize = 16;
 const MAX_FINAL_CHECKLIST_ITEM_BYTES: usize = 640;
 pub(crate) const MAX_MATERIAL_ROOT_FINDINGS: usize = 8;
-pub(crate) const MAX_MATERIAL_HISTORICAL_FINDINGS: usize = 8;
 /// Shared completion-disposition rule, rendered verbatim by the run update tool
 /// and the run world-state packet so the model never sees divergent guidance.
 pub(crate) const REUSABLE_LEARNING_RULE: &str = "Choose the completion disposition by what the run learned, not by whether files changed or the answer is short. Use noReusableLearning for an answer drawn from adequate existing project knowledge, a narrow source citation that adds no reusable understanding, or a trivial answer or cheap-to-recompute inventory. Reading sources can produce reusable learning even when no source files change: when an orientation establishes project purpose, module responsibilities and relationships (not a directory listing), or how to run the tests (stating whether that procedure is documented, executed successfully, or blocked), record the findings worth reusing and complete with durableLearning. Do not create duplicate entries or persist routine inventories merely to qualify for completion.";
-
-pub(crate) struct HistoricalFindingReference {
-    pub(crate) entry_id: String,
-    pub(crate) revision: u64,
-}
 
 pub(crate) struct CompletionRecord {
     pub(crate) result: String,
@@ -48,7 +40,6 @@ pub(crate) struct CompletionRequest<'a> {
     pub(crate) packet: &'a ObligationPacket,
     pub(crate) root_revision: u64,
     pub(crate) material_root_findings: &'a [String],
-    pub(crate) material_historical_findings: &'a [HistoricalFindingReference],
     /// The root the model was last shown; selected findings shown in full at the
     /// same revision are echoed back by alias instead of repeating their prose.
     pub(crate) visible_root: Option<&'a VisibleRoot>,
@@ -79,7 +70,6 @@ pub(crate) async fn prepare_completion(
         packet,
         root_revision,
         material_root_findings,
-        material_historical_findings,
         visible_root,
     } = request;
     if material_root_findings.len() > MAX_MATERIAL_ROOT_FINDINGS {
@@ -97,21 +87,13 @@ pub(crate) async fn prepare_completion(
         )));
     }
 
-    if material_historical_findings.len() > MAX_MATERIAL_HISTORICAL_FINDINGS {
-        return Err(respond(format!(
-            "materialHistoricalFindings accepts at most {MAX_MATERIAL_HISTORICAL_FINDINGS} entries"
-        )));
-    }
-    if !packet.learning.is_empty()
-        && material_root_findings.is_empty()
-        && material_historical_findings.is_empty()
-    {
+    if !packet.learning.is_empty() && material_root_findings.is_empty() {
         return Err(respond(
-            "finalObligation.learning contains reusable project knowledge, but completion selected no blackboard finding; record and promote the smallest durable conclusion, then retry with its current root alias in materialRootFindings, or select an exact historical entry revision in materialHistoricalFindings",
+            "finalObligation.learning contains reusable project knowledge, but completion selected no blackboard finding; record and promote the smallest durable conclusion, then retry with its current root alias in materialRootFindings",
         ));
     }
 
-    let mut material = material_root_checklist(
+    let material = material_root_checklist(
         project_id,
         thread_id,
         services,
@@ -121,12 +103,6 @@ pub(crate) async fn prepare_completion(
         visible_root,
     )
     .await?;
-    let historical =
-        material_historical_checklist(project_id, services, material_historical_findings).await?;
-    material.items.extend(historical.items);
-    material
-        .source_fingerprints
-        .extend(historical.source_fingerprints);
     validate_source_fingerprint_references(result, packet, &material.source_fingerprints)?;
 
     let mut checklist = material.items;
@@ -144,7 +120,6 @@ pub(crate) async fn prepare_completion(
     for item in &checklist {
         let label = match item.category {
             "rootFinding" => "Root finding",
-            "historicalFinding" => "Historical finding",
             "learning" => "Learning",
             "implication" => "Implication",
             "uncertainty" => "Uncertainty",
@@ -368,91 +343,6 @@ fn root_alias_guidance(root_entries: usize) -> String {
     )
 }
 
-async fn material_historical_checklist(
-    project_id: &str,
-    services: &ProjectIntelligenceServices,
-    requested_references: &[HistoricalFindingReference],
-) -> Result<MaterialChecklist, FunctionCallError> {
-    let blackboard = services.blackboard().await.map_err(respond)?;
-    let context_map = services.context_map().await.map_err(respond)?;
-    let mut unique_references = HashSet::new();
-    let mut material = MaterialChecklist {
-        items: Vec::with_capacity(requested_references.len()),
-        source_fingerprints: HashSet::new(),
-    };
-    for reference in requested_references {
-        if !unique_references.insert(reference.entry_id.as_str()) {
-            return Err(respond(format!(
-                "materialHistoricalFindings contains duplicate entry {}",
-                reference.entry_id
-            )));
-        }
-        let entry_id = BlackboardEntryId::parse(reference.entry_id.clone()).map_err(respond)?;
-        let entry = blackboard
-            .get_entry(project_id, &entry_id)
-            .await
-            .map_err(respond)?
-            .ok_or_else(|| {
-                respond(format!(
-                    "unknown historical blackboard entry {}",
-                    reference.entry_id
-                ))
-            })?;
-        if entry.revision != reference.revision {
-            return Err(respond(format!(
-                "historical blackboard entry {} changed from revision {} to {}",
-                reference.entry_id, reference.revision, entry.revision
-            )));
-        }
-        if entry.state == BlackboardEntryState::Active {
-            return Err(respond(format!(
-                "materialHistoricalFindings entry {} is active; select its root alias in materialRootFindings instead",
-                reference.entry_id
-            )));
-        }
-        let mut sources = Vec::new();
-        for evidence in &entry.value.evidence {
-            let fingerprint = evidence.source_fingerprint.as_str().to_string();
-            material
-                .source_fingerprints
-                .insert(fingerprint.to_ascii_lowercase());
-            let locator = context_map
-                .get_hit(project_id, &evidence.context_map_entry_id)
-                .await
-                .map_err(respond)?
-                .map_or_else(
-                    || evidence.context_map_entry_id.to_string(),
-                    |route| match evidence.line_range {
-                        Some(range) => format!(
-                            "{}:L{}-L{}",
-                            route.source.relative_path, range.start, range.end
-                        ),
-                        None => route.source.relative_path.to_string(),
-                    },
-                );
-            sources.push(format!("{locator}@{fingerprint}"));
-        }
-        let sources = if sources.is_empty() {
-            String::new()
-        } else {
-            format!(" sources=[{}]", sources.join(","))
-        };
-        material.items.push(ChecklistItem {
-            category: "historicalFinding",
-            text: bounded_item(&format!(
-                "{}@r{} [state={}; verification={}] {}{sources}",
-                reference.entry_id,
-                reference.revision,
-                entry_state_name(entry.state),
-                verification_name(entry.value.verification),
-                entry.value.content,
-            )),
-            compact_text: None,
-        });
-    }
-    Ok(material)
-}
-
 fn validate_source_fingerprint_references(
     result: &str,
     packet: &ObligationPacket,
@@ -462,7 +352,7 @@ fn validate_source_fingerprint_references(
     for fingerprint in sha256_references(result).chain(sha256_references(&packet)) {
         if !allowed.contains(&fingerprint.to_ascii_lowercase()) {
             return Err(respond(format!(
-                "completion cites unknown source fingerprint {fingerprint}; select its exact entry and revision in materialHistoricalFindings or remove the opaque identifier"
+                "completion cites unknown source fingerprint {fingerprint}; select a current root finding with that evidence in materialRootFindings or remove the opaque identifier"
             )));
         }
     }
@@ -543,14 +433,6 @@ fn freshness_name(freshness: AuditedEvidenceFreshness) -> &'static str {
         AuditedEvidenceFreshness::Stale => "stale",
         AuditedEvidenceFreshness::SourceUnavailable => "sourceUnavailable",
         AuditedEvidenceFreshness::UncheckedThisTurn => "uncheckedThisTurn",
-    }
-}
-
-fn entry_state_name(state: BlackboardEntryState) -> &'static str {
-    match state {
-        BlackboardEntryState::Active => "active",
-        BlackboardEntryState::Superseded => "superseded",
-        BlackboardEntryState::Tombstoned => "tombstoned",
     }
 }
 

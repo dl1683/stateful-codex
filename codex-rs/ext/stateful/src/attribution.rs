@@ -151,10 +151,7 @@ impl StatefulAttributionTracker {
         }
         let count = arguments
             .material_root_findings
-            .map_or(0, |items| items.len())
-            + arguments
-                .material_historical_findings
-                .map_or(0, |items| items.len());
+            .map_or(0, |items| items.len());
         self.with_turn(turn_id, |turn| {
             turn.pending_material_findings
                 .insert(call_id.to_string(), count as u64);
@@ -245,7 +242,6 @@ impl StatefulAttributionTracker {
 struct RunUpdateAttributionArguments {
     status: Option<String>,
     material_root_findings: Option<Vec<serde_json::Value>>,
-    material_historical_findings: Option<Vec<serde_json::Value>>,
 }
 
 fn stateful_tool_name(name: &codex_extension_api::ToolName) -> Option<&str> {
