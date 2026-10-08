@@ -211,6 +211,10 @@ impl NewObligation {
     }
 }
 
+pub(crate) fn validate_source_id(value: &str) -> Result<(), StatefulRunError> {
+    validate_identity(value, MAX_ID_BYTES).map_err(|()| StatefulRunError::InvalidProvenance)
+}
+
 pub(crate) fn validate_project_id(value: &str) -> Result<(), StatefulRunError> {
     validate_identity(value, MAX_PROJECT_ID_BYTES).map_err(|()| StatefulRunError::InvalidProjectId)
 }

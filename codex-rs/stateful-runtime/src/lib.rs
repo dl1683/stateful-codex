@@ -1,5 +1,7 @@
 //! Durable run, obligation, steering, and autonomous-recovery state for Stateful Codex.
 
+mod acceptance;
+mod acceptance_storage;
 mod measurement;
 mod measurement_storage;
 mod run;
@@ -8,6 +10,27 @@ mod steering;
 mod steering_storage;
 mod storage;
 
+pub use acceptance::AcceptanceChange;
+pub use acceptance::AcceptanceCommit;
+pub use acceptance::AcceptanceCriterion;
+pub use acceptance::AcceptanceError;
+pub use acceptance::AcceptanceEvidence;
+pub use acceptance::AcceptanceKind;
+pub use acceptance::AcceptanceLedger;
+pub use acceptance::AcceptanceOrigin;
+pub use acceptance::AcceptanceState;
+pub use acceptance::ArtifactState;
+pub use acceptance::CommandEvidence;
+pub use acceptance::CriterionVerdict;
+pub use acceptance::EvidenceOutcome;
+pub use acceptance::EvidenceSource;
+pub use acceptance::MAX_ACCEPTANCE_CHANGES;
+pub use acceptance::MAX_ACCEPTANCE_CRITERIA;
+pub use acceptance::MAX_CRITERION_ARTIFACTS;
+pub use acceptance::MAX_OUTPUT_TAIL_BYTES;
+pub use acceptance::RequestSpan;
+pub use acceptance::criterion_verdict;
+pub use acceptance::unmet_criteria;
 pub use measurement::NewStatefulTurnMeasurement;
 pub use measurement::StatefulAttributionCounters;
 pub use measurement::StatefulMeasurementSummary;

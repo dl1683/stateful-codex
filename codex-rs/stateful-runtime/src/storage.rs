@@ -8,6 +8,7 @@ use sqlx::SqlitePool;
 use sqlx::migrate::MigrateError;
 use thiserror::Error;
 
+use crate::AcceptanceCommit;
 use crate::NewObligation;
 use crate::NewStatefulRun;
 use crate::ObligationPacket;
@@ -166,9 +167,44 @@ impl StatefulRunStore {
     ) -> Result<StatefulRun, StatefulRunStoreError> {
         update.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let run = update_run_in_transaction(&mut transaction, id, update).await?;
+        let run =
+            update_run_in_transaction(&mut transaction, id, update, /*acceptance*/ None).await?;
         transaction.commit().await?;
         Ok(run)
+    }
+
+    /// Completes a run only if its acceptance ledger still matches `acceptance` and passes
+    /// the gate, all inside the terminal transaction; the optional final obligation commits
+    /// with it.
+    pub async fn complete_run_with_acceptance(
+        &self,
+        id: &StatefulRunId,
+        update: StatefulRunUpdate,
+        acceptance: &AcceptanceCommit,
+        obligation: Option<(String, NewObligation)>,
+    ) -> Result<(StatefulRun, Option<StatefulObligation>), StatefulRunStoreError> {
+        update.validate()?;
+        if update.status != StatefulRunStatus::Completed {
+            return Err(StatefulRunStoreError::CompletionStatusRequired);
+        }
+        if let Some((obligation_id, obligation)) = &obligation {
+            validate_record_id(obligation_id)?;
+            obligation.validate()?;
+            if obligation.run_id != *id {
+                return Err(StatefulRunStoreError::ObligationRunMismatch);
+            }
+        }
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let run = update_run_in_transaction(&mut transaction, id, update, Some(acceptance)).await?;
+        let obligation = match obligation {
+            Some((obligation_id, obligation)) => Some(
+                append_obligation_in_transaction(&mut transaction, obligation_id, obligation)
+                    .await?,
+            ),
+            None => None,
+        };
+        transaction.commit().await?;
+        Ok((run, obligation))
     }
 
     pub async fn complete_run_with_obligation(
@@ -188,7 +224,8 @@ impl StatefulRunStore {
             return Err(StatefulRunStoreError::ObligationRunMismatch);
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let run = update_run_in_transaction(&mut transaction, id, update).await?;
+        let run =
+            update_run_in_transaction(&mut transaction, id, update, /*acceptance*/ None).await?;
         let obligation =
             append_obligation_in_transaction(&mut transaction, obligation_id, obligation).await?;
         transaction.commit().await?;
@@ -573,6 +610,7 @@ async fn update_run_in_transaction(
     connection: &mut SqliteConnection,
     id: &StatefulRunId,
     update: StatefulRunUpdate,
+    acceptance: Option<&AcceptanceCommit>,
 ) -> Result<StatefulRun, StatefulRunStoreError> {
     let current = load_run(connection, id)
         .await?
@@ -604,6 +642,7 @@ async fn update_run_in_transaction(
                 status,
             });
         }
+        crate::acceptance_storage::enforce_acceptance_gate(connection, id, acceptance).await?;
     }
     let expected_revision = i64::try_from(update.expected_revision)
         .map_err(|_| StatefulRunStoreError::CountOverflow)?;
@@ -935,6 +974,18 @@ pub enum StatefulRunStoreError {
         "cannot complete while steering instruction {steering_id} is {status}; apply or reject every unresolved steering instruction before completion"
     )]
     UnresolvedSteering { steering_id: String, status: String },
+    #[error(transparent)]
+    Acceptance(#[from] crate::AcceptanceError),
+    #[error("acceptance ledger revision conflict: expected {expected}, found {actual}")]
+    AcceptanceRevisionConflict { expected: u64, actual: u64 },
+    #[error("the acceptance ledger cannot change while the run is {0:?}")]
+    AcceptanceRunState(StatefulRunStatus),
+    #[error(
+        "the acceptance ledger or workspace changed while completion was being validated; nothing changed, retry the completion"
+    )]
+    AcceptanceChanged,
+    #[error("completion gate: {0}")]
+    AcceptanceGate(String),
     #[error("steering ID was already used for different content: {0}")]
     SteeringIdentityConflict(String),
     #[error("steering instruction not found: {0}")]
