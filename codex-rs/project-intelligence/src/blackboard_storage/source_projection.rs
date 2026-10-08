@@ -31,6 +31,18 @@ impl BlackboardStore {
         query: &str,
         after: Option<&crate::SourceSearchCursor>,
     ) -> Result<SourceSearchPage, BlackboardStoreError> {
+        self.search_source_ranges_with_budget(project_id, query, after, /*byte_budget*/ 9000)
+            .await
+    }
+
+    /// Sizes evidence and its continuation inside the source/eligibility snapshot.
+    pub async fn search_source_ranges_with_budget(
+        &self,
+        project_id: &str,
+        query: &str,
+        after: Option<&crate::SourceSearchCursor>,
+        byte_budget: usize,
+    ) -> Result<SourceSearchPage, BlackboardStoreError> {
         if query.is_empty() || query.len() > 1024 || project_id.len() > 512 {
             return Err(BlackboardStoreError::InvalidSource);
         }
@@ -150,12 +162,12 @@ impl BlackboardStore {
                     || serde_json::to_string(&page)
                         .map_err(|_| BlackboardStoreError::InvalidSource)?
                         .len()
-                        > 9000
+                        > byte_budget.min(9000)
                 {
                     page.ranges.pop();
                     page.after = previous;
                     if page.ranges.is_empty() {
-                        return Err(BlackboardStoreError::InvalidSource);
+                        return Err(BlackboardStoreError::SourceBudgetInsufficient);
                     }
                     page.complete = false;
                     break;
@@ -176,6 +188,13 @@ impl BlackboardStore {
         }
         if page.complete {
             page.after = None;
+        }
+        if serde_json::to_string(&page)
+            .map_err(|_| BlackboardStoreError::InvalidSource)?
+            .len()
+            > byte_budget.min(9000)
+        {
+            return Err(BlackboardStoreError::SourceBudgetInsufficient);
         }
         tx.commit().await?;
         Ok(page)

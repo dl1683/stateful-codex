@@ -19,6 +19,31 @@ pub(super) fn digest(text: &str) -> String {
 mod tests;
 
 impl BlackboardStore {
+    /// One original chunk, revision-pinned, with current retirement eligibility rechecked.
+    pub async fn read_source_page(
+        &self,
+        project: &str,
+        locator: &str,
+        digest: &str,
+        revision: u64,
+        offset: u32,
+    ) -> Result<SourceRangeRead, BlackboardStoreError> {
+        let mut tx = self.pool.begin().await?;
+        let seal = seal_on(&mut tx, project, locator)
+            .await?
+            .ok_or(BlackboardStoreError::InvalidSource)?;
+        if seal.observation.source_revision != revision || offset >= seal.original_utf8_length {
+            return Err(BlackboardStoreError::InvalidSource);
+        }
+        let end: i64 = sqlx::query_scalar("SELECT MIN(end_byte) FROM capture_source_chunks WHERE source_id = ? AND start_byte <= ? AND end_byte > ?")
+            .bind(locator).bind(i64::from(offset)).bind(i64::from(offset)).fetch_one(&mut *tx).await?;
+        let mut page = read_on(&mut tx, project, locator, digest, offset, end as u32).await?;
+        page.next_offset =
+            (page.end_byte < page.seal.original_utf8_length).then_some(page.end_byte);
+        tx.commit().await?;
+        Ok(page)
+    }
+
     /// A model/automatic exact read always rechecks current range exclusions in its snapshot.
     /// Native archival access is a separate user surface, not a mode of this reader.
     pub async fn read_source_range(
