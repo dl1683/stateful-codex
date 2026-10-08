@@ -47,6 +47,27 @@ Do not attribute their behavior to `stateful/main`.
 
 ## 2. Unmerged work on the `stateful` remote
 
+### Integration on `main` (in progress, 2026-10-07)
+
+The paused branches are being integrated directly on `stateful/main`, one reviewed
+checkpoint at a time (plan: `sc_dogfood/integrate/INTEGRATION_PLAN.md`; log:
+`sc_dogfood/integrate/EXEC_LOG.md`). Landed so far:
+
+- **Step 1, foundation and direct control** (`052741b9c`..`6839ad4f5`): the
+  shared continuity base `52694362a1` merged once; transactional capture writer
+  and journal; explicit unscoped `/memory add|correct|forget` with `ID@REV`
+  targets, expected-project admission and client result fences; bounded review
+  and exact reads. Verdict: landable with named limitations after the repair cap.
+  **Cut** from this slice, acceptance rows OPEN: automatic word-for-word rule
+  capture from messages, quotation-backed user decisions, investigations and
+  scoped rules (historical scoped entries are held back and readable), model
+  editing or replacement of user-provenance memory, and historical scope titles
+  in review. A narrower automatic-capture contract is scheduled around Step 3.
+  Linux: 0 new failures against the 83eee86b6 baseline.
+
+The table below describes the branch tips as paused; rows are consumed as their
+checkpoints land.
+
 All of these branches start from `stateful/main` (merge base `5eacf03387`).
 None is merged. Master plan priority 1 is to integrate them into one build
 with one migration map and rebuild from a clean tree. Status lines come from the
@@ -54,8 +75,8 @@ builder logs (`sc_dogfood/fix/*_LOG.md`) at the 2026-10-03 pause.
 
 | Branch | Tip | Status |
 | --- | --- | --- |
-| `fix/continuity` | `d10057bac0` | Continuity line (base `3da78a47c4`): trimmed packet, exact delivery floor, standing rules, deferred tools, lean protocol and window budget, each reviewed clean; frozen builds `cont_0e160ee0f6`, `cont_9a3c2109d8` and `cont_c466898af7` came from it. Also carries items 1-3 (`/memory`, `codex memory`, investigations), which hit the repair cap and stay open; on-demand indexing stopped at the cap with a zero-entry once-cell defect; two post-cap commits (`9b09858e40`, `d10057bac0`) are unreviewed fixes. |
-| `h1done/foundation` | `9de1ef0052` | `fix/continuity` plus one unreviewed `wip` commit extracting the items 1-3 foundation (action-ID fence, root projection module, explicit-only investigation join/end, host background capture off). When saved it left 4 app-server Stateful tests failing; the rubric review was not run. |
+| `fix/continuity` | `d10057bac0` | **Consumed by Step 1 (curated, cuts above).** Continuity line (base `3da78a47c4`): trimmed packet, exact delivery floor, standing rules, deferred tools, lean protocol and window budget, each reviewed clean; frozen builds `cont_0e160ee0f6`, `cont_9a3c2109d8` and `cont_c466898af7` came from it. Also carries items 1-3 (`/memory`, `codex memory`, investigations), which hit the repair cap and stay open; on-demand indexing stopped at the cap with a zero-entry once-cell defect; two post-cap commits (`9b09858e40`, `d10057bac0`) are unreviewed fixes. |
+| `h1done/foundation` | `9de1ef0052` | **Consumed by Step 1 (curated, cuts above).** `fix/continuity` plus one unreviewed `wip` commit extracting the items 1-3 foundation (action-ID fence, root projection module, explicit-only investigation join/end, host background capture off). When saved it left 4 app-server Stateful tests failing; the rubric review was not run. |
 | `h1done/item4` | `7be002b288` | Item 4 reduced contract (base `52694362a1`): 2 of 4 slices committed, unreviewed (canonical identity index; capture judged by canonical identity inside the commit). Parser and recall slices must be redone. Its migration `0018` may clash with other branches. |
 | `h1done/item5file` | `4418ddc737` | File-level "needs check" replacement for item 5 (base `52694362a1`): project-intelligence jobs and `paths_changed_between` committed and tested but unreviewed, plus a `wip` worker commit. Read adapters, the remaining tests and the review are left. The rejected regex-confirmation pivot stays on `h1done/item5` (`0b458025a2`). |
 | `h1done/item6` | `d265021d3e` | Execution-waste item (base `52694362a1`): the final scoped Codex check rated it safe to land as partial. Open: thin 2 KiB opening packet, topic card, per-response attribution, recipe executor identity, and the other named limits in its log. |
