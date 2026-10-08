@@ -225,7 +225,7 @@ impl StatefulRunStore {
     }
 
     /// Starts a completion verification attempt and leases it to `owner`. The run's public
-    /// status stays `Running`; a second attempt waits until the lease ends or expires.
+    /// status stays `Running`; another owner's attempt waits until the lease ends or expires.
     pub async fn begin_verification(
         &self,
         run_id: &StatefulRunId,
@@ -243,8 +243,20 @@ impl StatefulRunStore {
         ensure_ledger(&mut transaction, run_id).await?;
         let now = unix_timestamp_millis()?;
         let ledger = load_ledger(&mut transaction, run_id).await?;
+        let held_by_other = sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM stateful_acceptance_ledgers
+             WHERE run_id = ? AND verification_owner IS NOT NULL AND verification_owner <> ?",
+        )
+        .bind(run_id.as_str())
+        .bind(owner)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .is_some();
+        // The same owner (one thread's completion path) takes over its own earlier attempt,
+        // so an attempt abandoned by an error does not lock out its retry.
         if let Some(expires) = ledger.verification_lease_expires_at_ms
             && expires > now
+            && held_by_other
         {
             return Err(AcceptanceError::VerificationLeased(expires).into());
         }
