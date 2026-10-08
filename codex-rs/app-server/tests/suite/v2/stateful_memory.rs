@@ -49,6 +49,9 @@ mod capture_sources_tests;
 #[path = "stateful_source_proposals_tests.rs"]
 mod source_proposals_tests;
 
+#[path = "stateful_source_handle_budget_tests.rs"]
+mod source_handle_budget_tests;
+
 #[path = "stateful_capture_repair_tests.rs"]
 mod capture_repair_tests;
 

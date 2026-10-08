@@ -9,13 +9,22 @@ use codex_project_intelligence::SourceSpanRole;
 use codex_protocol::items::UserMessageItem;
 use codex_protocol::user_input::UserInput;
 
+#[cfg(test)]
+#[path = "capture_sources_tests.rs"]
+mod tests;
+
 #[derive(Clone)]
 pub(crate) struct SourceTurn {
     pub(crate) turn_id: String,
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct SourceHandles(pub(crate) Vec<codex_project_intelligence::SourceSeal>);
+pub(crate) struct SourceHandles {
+    handles: Vec<codex_project_intelligence::SourceSeal>,
+    // Once the bounded identity set fills, repeated delivery cannot be distinguished
+    // from another distinct source without unbounded state. Disclose a lower bound.
+    additional_handles: bool,
+}
 
 impl StatefulExtension {
     pub(crate) async fn observe_original_item(
@@ -126,13 +135,16 @@ impl StatefulExtension {
                         .get::<SourceHandles>()
                         .map(|handles| (*handles).clone())
                         .unwrap_or_default();
-                    if handles.0.len() < 8
-                        && !handles
-                            .0
-                            .iter()
-                            .any(|old| old.exact_source_locator == seal.exact_source_locator)
+                    if !handles
+                        .handles
+                        .iter()
+                        .any(|old| old.exact_source_locator == seal.exact_source_locator)
                     {
-                        handles.0.push(seal);
+                        if handles.handles.len() < 8 {
+                            handles.handles.push(seal);
+                        } else {
+                            handles.additional_handles = true;
+                        }
                         turn_store.insert(handles);
                     }
                 }
@@ -145,7 +157,8 @@ impl StatefulExtension {
 }
 
 /// Existing World State wrapper carries a <1,000-byte, append-only source handle item.
-/// Excess handles are disclosed; all original parts remain in the exact source index.
+/// Omission is exact until the identity set fills, then an explicit lower bound.
+/// This avoids overflow and double-counting redelivery without an unbounded set.
 pub(crate) fn handle_section(
     handles: Option<&SourceHandles>,
 ) -> Option<(usize, codex_extension_api::WorldStateSectionContribution)> {
@@ -154,8 +167,10 @@ pub(crate) fn handle_section(
     use codex_extension_api::WorldStateSectionContribution;
     use serde_json::json;
     let handles = handles?;
-    let mut body = json!({"source":"sealed user-delivered bytes; not endorsement", "handles":[], "omitted":handles.0.len()});
-    for seal in &handles.0 {
+    let omitted = handles.handles.len() + usize::from(handles.additional_handles);
+    let mut body = json!({"source":"sealed user-delivered bytes; not endorsement", "handles":[], "omitted":omitted,
+        "omittedIsExact": !handles.additional_handles, "selection":"first eight distinct sources"});
+    for seal in &handles.handles {
         body["handles"].as_array_mut()?.push(json!([
             seal.exact_source_locator,
             seal.digest,
@@ -163,10 +178,10 @@ pub(crate) fn handle_section(
             seal.observation.part_index,
             seal.original_utf8_length
         ]));
-        body["omitted"] = json!(handles.0.len() - body["handles"].as_array()?.len());
+        body["omitted"] = json!(omitted - body["handles"].as_array()?.len());
         if body.to_string().len() > 850 {
             body["handles"].as_array_mut()?.pop();
-            body["omitted"] = json!(handles.0.len() - body["handles"].as_array()?.len());
+            body["omitted"] = json!(omitted - body["handles"].as_array()?.len());
             break;
         }
     }

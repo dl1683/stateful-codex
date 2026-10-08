@@ -4,6 +4,8 @@ mod attributed_text;
 mod attribution;
 mod autonomy;
 mod capture_sources;
+#[cfg(test)]
+mod capture_test_support;
 mod checkout;
 mod checkpoint;
 mod completion;
