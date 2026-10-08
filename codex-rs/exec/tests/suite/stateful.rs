@@ -254,7 +254,7 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
                 responses::ev_function_call(
                     "complete-autonomous-run",
                     "stateful_run_update",
-                    r#"{"expectedRevision": 2, "status": "completed", "result": "The autonomous investigation is complete.", "rootRevision": 0, "materialRootFindings": [], "completionIdempotencyKey": "autonomous-final", "finalObligation": {"learning": [], "implication": ["No further continuation is required."]}}"#,
+                    r#"{"expectedRevision": 2, "status": "completed", "openIssues": [], "result": "The autonomous investigation is complete.", "rootRevision": 0, "materialRootFindings": [], "completionIdempotencyKey": "autonomous-final", "finalObligation": {"learning": [], "implication": ["No further continuation is required."]}}"#,
                 ),
                 responses::ev_completed("response-2"),
             ]),

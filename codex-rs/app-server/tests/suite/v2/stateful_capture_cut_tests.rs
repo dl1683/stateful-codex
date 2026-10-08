@@ -103,7 +103,7 @@ async fn c2cut_historical_completion_refuses_without_mutation_and_current_root_c
             &thread,
             "stateful_run_update",
             json!({
-                "expectedRevision": before.revision, "status": "completed",
+                "expectedRevision": before.revision, "status": "completed", "openIssues": [],
                 "completionDisposition": "durableLearning", "result": "Ready.",
                 "rootRevision": root.revision, "materialRootFindings": [],
                 "materialHistoricalFindings": [{"entryId": archived.id, "revision": archived.revision}],
@@ -155,7 +155,7 @@ async fn c2cut_historical_completion_refuses_without_mutation_and_current_root_c
         &thread,
         "stateful_run_update",
         json!({
-            "expectedRevision": current.revision, "status": "completed",
+            "expectedRevision": current.revision, "status": "completed", "openIssues": [],
             "completionDisposition": "durableLearning", "result": "Ready.",
             "rootRevision": root.revision, "materialRootFindings": ["E1"],
             "completionIdempotencyKey": "cut-current-final",

@@ -44,7 +44,7 @@ impl AcceptanceView {
         let ledger = &self.ledger;
         if ledger.criteria.is_empty() {
             let line = format!(
-                "Acceptance ledger: empty (revision {}). When the work changes files or the request has several requirements, record each requirement early with stateful_acceptance_update: user criteria quote the exact goal text, checks state their expected observation. A one-sentence lookup needs none.",
+                "Acceptance ledger: empty (revision {}). When work changes files or has several requirements, record each early with stateful_acceptance_update; a one-sentence lookup needs none.",
                 ledger.revision
             );
             return vec![line];

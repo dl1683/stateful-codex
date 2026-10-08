@@ -39,7 +39,7 @@ const MAX_RENDERED_STEERING: usize = 5;
 const MAX_RENDERED_GOAL_BYTES: usize = 2 * 1024;
 const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
 const WRITE_TOOLS_ARE_DIRECT: &str = "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_acceptance_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec.";
-const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across the user's turns and the host records every final answer, so do not complete it at the end of a turn. Complete it only when the user says the overall goal is done or asks to close it; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed, completionDisposition noReusableLearning and result when nothing reusable was learned; otherwise durableLearning with expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
+const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across the user's turns and the host records every final answer, so do not complete it at the end of a turn. Complete it only when the user says the overall goal is done or asks to close it; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed, completionDisposition noReusableLearning and result when nothing reusable was learned; otherwise durableLearning with expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings. Both pass openIssues; any entry ends the run blocked.";
 const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 
 pub(super) enum RunWorldStateStatus {
@@ -214,7 +214,7 @@ impl RunWorldStateStatus {
                     WorkflowMode::Autonomous | WorkflowMode::Socratic => line(
                         &mut output,
                         &format!(
-                            "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. {REUSABLE_LEARNING_RULE} {WRITE_TOOLS_ARE_DIRECT} Completion: if the run learned nothing reusable, finish once with stateful_run_update passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result. Otherwise, after recording the reusable findings and all other warranted durable writes, finish once with durableLearning: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings. Completion must be the final Stateful mutation."
+                            "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. {REUSABLE_LEARNING_RULE} {WRITE_TOOLS_ARE_DIRECT} Completion: if the run learned nothing reusable, finish once with stateful_run_update passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result. Otherwise, after recording the reusable findings and all other warranted durable writes, finish once with durableLearning: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings. Both pass openIssues; any entry or recorded blocker ends the run blocked. Completion must be the final Stateful mutation."
                         ),
                     ),
                 }
@@ -286,9 +286,7 @@ impl RunWorldStateStatus {
 fn acceptance_lines(acceptance: Option<&AcceptanceView>) -> Vec<String> {
     match acceptance {
         Some(view) => view.ledger_lines(),
-        None => vec![
-            "Acceptance ledger: unavailable. Do not claim acceptance criteria are met until it can be read with stateful_run_read section=\"acceptance\".".to_string(),
-        ],
+        None => vec!["Acceptance ledger: unavailable; claim no criterion met.".to_string()],
     }
 }
 

@@ -130,6 +130,7 @@ impl Fixture {
                 &json!({
                     "expectedRevision": revision,
                     "status": "completed",
+                    "openIssues": [],
                     "completionDisposition": "noReusableLearning",
                     "result": "The parser is fixed.",
                 }),
@@ -460,5 +461,125 @@ async fn required_work_without_a_safe_check_ends_blocked_not_completed() {
     assert_eq!(
         fixture.stored_run().await.status,
         StatefulRunStatus::Blocked
+    );
+}
+
+impl Fixture {
+    async fn complete_with(&self, arguments: Value) -> Result<Value, String> {
+        match self
+            .completion
+            .handle(call("stateful_run_update", &arguments))
+            .await
+        {
+            Ok(output) => Ok(serde_json::from_str(&output.log_output()).expect("JSON output")),
+            Err(FunctionCallError::RespondToModel(message)) => Err(message),
+            Err(error) => panic!("unexpected error: {error:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_admitted_open_issue_ends_the_run_blocked_not_completed() {
+    let fixture = fixture("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let revision = fixture.stored_run().await.revision;
+    let missing = fixture
+        .complete_with(json!({
+            "expectedRevision": revision,
+            "status": "completed",
+            "completionDisposition": "noReusableLearning",
+            "result": "The answer is 42.",
+        }))
+        .await
+        .expect_err("openIssues is required with completed");
+    assert!(
+        missing.contains("completed requires openIssues"),
+        "{missing}"
+    );
+    assert_eq!(
+        fixture.stored_run().await.status,
+        StatefulRunStatus::Running
+    );
+
+    let blocked = fixture
+        .complete_with(json!({
+            "expectedRevision": revision,
+            "status": "completed",
+            "completionDisposition": "noReusableLearning",
+            "result": "The answer is 42.",
+            "openIssues": ["The second source gives 41; the discrepancy is unresolved."],
+        }))
+        .await
+        .expect("the host records the admitted issue");
+    assert_eq!(blocked["status"], json!("blocked"));
+    let run = fixture.stored_run().await;
+    assert_eq!(run.status, StatefulRunStatus::Blocked);
+    assert_eq!(
+        run.result.as_deref(),
+        Some(
+            "Partial result: the completion declared unresolved issues, so the run is blocked instead of completed.\nOpen issues:\n- The second source gives 41; the discrepancy is unresolved.\n\nSubmitted result (not accepted as complete): The answer is 42."
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_recorded_open_blocker_ends_the_run_blocked_not_completed() {
+    let fixture = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
+    fixture
+        .services
+        .runtime()
+        .await
+        .expect("runtime")
+        .append_obligation(
+            "obligation-blocker".to_string(),
+            codex_stateful_runtime::NewObligation {
+                project_id: PROJECT_ID.to_string(),
+                run_id: fixture.run.id.clone(),
+                packet: codex_stateful_runtime::ObligationPacket {
+                    blockers: vec!["The verifier fixture is missing.".to_string()],
+                    ..Default::default()
+                },
+                provenance_source_id: "call-obligation".to_string(),
+            },
+        )
+        .await
+        .expect("obligation recorded");
+    let blocked = fixture
+        .complete()
+        .await
+        .expect("the host records the blocker");
+    assert_eq!(blocked["status"], json!("blocked"));
+    let run = fixture.stored_run().await;
+    assert_eq!(run.status, StatefulRunStatus::Blocked);
+    assert!(run.result.as_deref().is_some_and(|result| {
+        result.contains("- Recorded blocker: The verifier fixture is missing.")
+    }));
+}
+
+#[tokio::test]
+async fn a_long_request_with_budget_left_requires_the_independent_omission_check() {
+    let fixture = fixture(
+        "Convert every invoice in data/ to the new schema. Write the totals to out/totals.csv. Keep the original files unchanged.",
+        WorkflowMode::Autonomous,
+    )
+    .await;
+    // Nothing declared, nothing changed, nearly the whole budget left: the agent still
+    // cannot complete before the host's goal-derived check has been reviewed.
+    let refused = fixture
+        .complete()
+        .await
+        .expect_err("the omission check is required");
+    for expected in [
+        "C1 (Convert every invoice in data/ to the new schema.): omission proposal awaiting review",
+        "C2 (Write the totals to out/totals.csv.): omission proposal awaiting review",
+        "C3 (Keep the original files unchanged.): omission proposal awaiting review",
+    ] {
+        assert!(
+            refused.contains(expected),
+            "{expected} missing from {refused}"
+        );
+    }
+    assert_eq!(
+        fixture.stored_run().await.status,
+        StatefulRunStatus::Running
     );
 }

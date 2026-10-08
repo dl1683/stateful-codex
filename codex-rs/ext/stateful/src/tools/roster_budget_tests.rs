@@ -14,8 +14,9 @@ use crate::visible_root::VisibleRootRegistry;
 /// 11,032; deferred tools are loaded only through tool search. memory_read (direct) with
 /// blackboard_query deferred: 19,158 in total, 9,895 direct. The direct acceptance ledger tool
 /// (checkpoint E, about 1.2 KB) raised the total ceiling from 19,500; the direct ceiling,
-/// which is the per-request cost, is unchanged.
-const MAX_ROSTER_BYTES: usize = 20_000;
+/// which is the per-request cost, is unchanged. The required completion openIssues field took
+/// the total to about 20,190.
+const MAX_ROSTER_BYTES: usize = 20_250;
 /// Every request carries the directly exposed tools, so their size is a fixed per-request
 /// cost; specialized tools are deferred to tool search.
 const MAX_DIRECT_ROSTER_BYTES: usize = 11_500;

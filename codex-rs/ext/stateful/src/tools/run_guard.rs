@@ -48,13 +48,13 @@ impl StatefulRunUpdateTool {
         };
         let revision = run.revision;
         let lookup = format!(
-            r#"noReusableLearning (only when this run wrote no project knowledge): {{"expectedRevision":{revision},"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>"}}"#
+            r#"noReusableLearning (only when this run wrote no project knowledge): {{"expectedRevision":{revision},"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>","openIssues":[]}}"#
         );
         let durable = match completion_root(&self.services, &self.project_id, &self.thread_id)
             .await
         {
             Ok((root_revision, aliases)) if aliases > 0 => format!(
-                r#"durableLearning: {{"expectedRevision":{revision},"status":"completed","completionIdempotencyKey":"<unique completion key for this run>","finalObligation":{{"learning":["<reusable conclusion>"]}},"result":"<final answer>","rootRevision":{root_revision},"materialRootFindings":["E1"]}} (E1..E{aliases} are the current root aliases)"#
+                r#"durableLearning: {{"expectedRevision":{revision},"status":"completed","completionIdempotencyKey":"<unique completion key for this run>","finalObligation":{{"learning":["<reusable conclusion>"]}},"result":"<final answer>","rootRevision":{root_revision},"materialRootFindings":["E1"],"openIssues":[]}} (E1..E{aliases} are the current root aliases)"#
             ),
             Ok(_) => "durableLearning first needs a root finding: record it with blackboard_record_batch rootPromotion promoted".to_string(),
             Err(_) => "durableLearning needs rootRevision and materialRootFindings from the current World State".to_string(),

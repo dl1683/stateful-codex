@@ -104,6 +104,7 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
                     &json!({
                         "expectedRevision": started.run.revision,
                         "status": "completed",
+                        "openIssues": [],
                         "result": "The work is complete.",
                         "rootRevision": 0,
                         "materialRootFindings": [],
@@ -226,6 +227,7 @@ async fn model_cannot_complete_with_reusable_learning_absent_from_the_blackboard
                     &json!({
                         "expectedRevision": started.run.revision,
                         "status": "completed",
+                        "openIssues": [],
                         "result": "The decisive threshold is six.",
                         "rootRevision": 0,
                         "materialRootFindings": [],
@@ -376,6 +378,7 @@ async fn model_completes_a_lookup_in_one_call_without_durable_learning_ceremony(
             json!({
                 "expectedRevision": expected_revision,
                 "status": "completed",
+                "openIssues": [],
                 "completionDisposition": "noReusableLearning",
                 "result": "The release gate is build C7-42."
             })
@@ -413,6 +416,7 @@ async fn model_lookup_completion_with_durable_fields_is_rejected() -> Result<()>
             json!({
                 "expectedRevision": expected_revision,
                 "status": "completed",
+                "openIssues": [],
                 "completionDisposition": "noReusableLearning",
                 "result": "The release gate is build C7-42.",
                 "finalObligation": {"learning": ["The release gate is build C7-42."]}
@@ -421,7 +425,7 @@ async fn model_lookup_completion_with_durable_fields_is_rejected() -> Result<()>
         .await?;
 
     assert!(output.contains(
-        "noReusableLearning takes only expectedRevision, status, completionDisposition, and result"
+        "noReusableLearning takes only expectedRevision, status, completionDisposition, result, and openIssues"
     ));
     assert_eq!(
         (requests, status, result, obligations),
@@ -546,6 +550,7 @@ async fn complete_lookup_after_recording(
                     &json!({
                         "expectedRevision": started.run.revision,
                         "status": "completed",
+                        "openIssues": [],
                         "completionDisposition": "noReusableLearning",
                         "result": "The release gate is build C7-42."
                     })
@@ -821,6 +826,7 @@ async fn complete_without_learning(
                     &json!({
                         "expectedRevision": expected_revision,
                         "status": "completed",
+                        "openIssues": [],
                         "completionDisposition": "noReusableLearning",
                         "result": "The release gate is build C7-42."
                     })

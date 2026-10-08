@@ -98,6 +98,7 @@ fn lookup_completion(expected_revision: u64) -> Value {
     json!({
         "expectedRevision": expected_revision,
         "status": "completed",
+        "openIssues": [],
         "completionDisposition": "noReusableLearning",
         "result": RESULT,
     })
@@ -224,7 +225,7 @@ async fn rejected_completions_name_the_field_and_show_a_valid_call() {
     let fixture = fixture().await;
     let revision = fixture.run.revision;
     let valid_lookup = format!(
-        r#"{{"expectedRevision":{revision},"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>"}}"#
+        r#"{{"expectedRevision":{revision},"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>","openIssues":[]}}"#
     );
     let mut contradictory = lookup_completion(revision);
     contradictory["rootRevision"] = json!(0);

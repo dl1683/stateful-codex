@@ -47,6 +47,7 @@ fn complete(call_id: &str, revision: u64) -> String {
         json!({
             "expectedRevision": revision,
             "status": "completed",
+            "openIssues": [],
             "completionDisposition": "noReusableLearning",
             "result": "The tests pass.",
         }),

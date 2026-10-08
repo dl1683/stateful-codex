@@ -12,20 +12,26 @@
 //! with the unmet gates as its partial result, which also stops Autonomous continuation.
 
 use codex_extension_api::FunctionCallError;
+use codex_extension_api::ToolCall;
 use codex_stateful_runtime::AcceptanceCommit;
 use codex_stateful_runtime::CriterionVerdict;
+use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunStatus;
+use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunUpdate;
 use codex_stateful_runtime::ledger_verdicts;
+use serde_json::json;
 
 use super::StatefulRunUpdateTool;
+use crate::StatefulEvent;
 use crate::acceptance_observation::ledger_artifact_states;
 use crate::acceptance_policy::MAX_OMISSION_PROPOSALS;
 use crate::acceptance_policy::is_substantial;
 use crate::acceptance_policy::omission_proposals;
 use crate::acceptance_render::bounded;
 use crate::acceptance_render::completion_basis;
+use crate::tools::bounded_json_output;
 use crate::tools::respond;
 
 /// Lease of one completion verification attempt (artifact reads are bounded to seconds).
@@ -153,6 +159,118 @@ impl StatefulRunUpdateTool {
             Ok(Some(project)) => project.roots.into_iter().map(|root| root.path).collect(),
             Ok(None) | Err(_) => Vec::new(),
         }
+    }
+}
+
+/// Most open issues one completion may declare.
+const MAX_OPEN_ISSUES: usize = 16;
+const MAX_OPEN_ISSUE_BYTES: usize = 1_024;
+
+/// Every agent-admitted open issue for a completion: the declared `openIssues`, plus the
+/// blockers of the final obligation (durable completion) or, without one, of the latest
+/// recorded obligation. Read from structured fields only, never from narrative text; recorded
+/// uncertainty that does not undermine a criterion stays allowed in a completed result.
+pub(super) async fn declared_open_issues(
+    open_issues: Option<&[String]>,
+    final_obligation: Option<&ObligationPacket>,
+    runtime: &StatefulRunStore,
+    run: &StatefulRun,
+) -> Result<Vec<String>, FunctionCallError> {
+    let Some(declared) = open_issues else {
+        return Err(FunctionCallError::RespondToModel(
+            "completed requires openIssues: list every unresolved doubt, known discrepancy, failing check or open blocker that affects the result, or pass [] when there is none. Any entry ends the run blocked with a partial result instead of completed".to_string(),
+        ));
+    };
+    if declared.len() > MAX_OPEN_ISSUES
+        || declared.iter().any(|issue| {
+            issue.trim().is_empty() || issue.len() > MAX_OPEN_ISSUE_BYTES || issue.contains('\0')
+        })
+    {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "openIssues holds at most {MAX_OPEN_ISSUES} non-empty entries of at most {MAX_OPEN_ISSUE_BYTES} bytes"
+        )));
+    }
+    let blockers = match final_obligation {
+        Some(packet) => packet.blockers.clone(),
+        None => runtime
+            .latest_obligation(&run.id)
+            .await
+            .map_err(respond)?
+            .map(|obligation| obligation.value.packet.blockers)
+            .unwrap_or_default(),
+    };
+    Ok(declared
+        .iter()
+        .map(|issue| issue.trim().to_string())
+        .chain(
+            blockers
+                .into_iter()
+                .map(|blocker| format!("Recorded blocker: {blocker}")),
+        )
+        .collect())
+}
+
+impl StatefulRunUpdateTool {
+    /// Records an admitted-incomplete completion as Blocked with the partial result and the
+    /// declared issues, so it can never read as done.
+    pub(super) async fn block_with_open_issues(
+        &self,
+        current: &StatefulRun,
+        expected_revision: u64,
+        submitted: Option<&str>,
+        open_issues: &[String],
+    ) -> Result<StatefulRun, FunctionCallError> {
+        let mut result = "Partial result: the completion declared unresolved issues, so the run is blocked instead of completed.\nOpen issues:".to_string();
+        for issue in open_issues {
+            result.push_str("\n- ");
+            result.push_str(issue);
+        }
+        if let Some(submitted) = submitted {
+            result.push_str("\n\nSubmitted result (not accepted as complete): ");
+            result.push_str(submitted);
+        }
+        let result = bounded(&result, MAX_DURABLE_RESULT_BYTES - 4);
+        self.services
+            .runtime()
+            .await
+            .map_err(respond)?
+            .update_run(
+                &current.id,
+                StatefulRunUpdate {
+                    expected_revision,
+                    status: StatefulRunStatus::Blocked,
+                    strategy: current.strategy.clone(),
+                    result: Some(result.trim().to_string()),
+                },
+            )
+            .await
+            .map_err(respond)
+    }
+
+    /// The tool output for a run the host recorded as blocked instead of completed.
+    pub(super) fn blocked_output(
+        &self,
+        call: &ToolCall<'_>,
+        run: &StatefulRun,
+        instruction: &str,
+    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        if let Some(event_sink) = &self.event_sink {
+            event_sink.emit(StatefulEvent::RunUpdated {
+                project_id: run.value.project_id.clone(),
+                run_id: run.id.to_string(),
+                revision: run.revision,
+            });
+        }
+        bounded_json_output(
+            call,
+            json!({
+                "runId": run.id.to_string(),
+                "status": "blocked",
+                "revision": run.revision,
+                "partialResult": run.result,
+                "instruction": instruction,
+            }),
+        )
     }
 }
 

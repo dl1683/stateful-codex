@@ -61,6 +61,7 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                     &json!({
                         "expectedRevision": 2,
                         "status": "completed",
+                        "openIssues": [],
                         "result": "The unattended investigation reached its evidence-grounded result.",
                         "rootRevision": 0,
                         "materialRootFindings": [],
@@ -68,7 +69,7 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                         "finalObligation": {
                             "implication": ["The run can now complete without user intervention."],
                             "uncertainty": ["The external dependency remains uncertain."],
-                            "blockers": ["The signed approval is still unavailable."]
+                            "uncertainty": ["The signed approval may arrive later; the result does not depend on it."]
                         }
                     })
                     .to_string(),

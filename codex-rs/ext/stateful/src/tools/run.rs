@@ -35,7 +35,7 @@ use super::stable_id;
 use super::thread_run;
 
 /// Minimal valid call shown with every argument decoding rejection.
-const EXAMPLE: &str = r#"{"expectedRevision":1,"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>"}"#;
+const EXAMPLE: &str = r#"{"expectedRevision":1,"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>","openIssues":[]}"#;
 
 const COMPLETION_FENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const PAGED_RESULT_INSTRUCTION: &str = "The completed result is too large to return here. Read it exactly with stateful_run_read using section \"submittedResult\" and cursor submittedResultCursor, following nextCursor until it is null, then return it as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. Copy opaque evidence identifiers only from finalAnswerChecklist; if omittedChecklistItems is nonzero, read the complete final obligation with stateful_run_read using section \"obligation\" and cursor finalObligationCursor, following nextCursor until it is null.";
@@ -53,6 +53,9 @@ struct Arguments {
     material_historical_findings: Option<Vec<Value>>,
     completion_idempotency_key: Option<String>,
     final_obligation: Option<ObligationPacket>,
+    /// Required with `completed`: every unresolved doubt, known discrepancy, failing check or
+    /// open blocker the agent knows of; any entry ends the run blocked, not completed.
+    open_issues: Option<Vec<String>>,
     #[serde(default)]
     completion_disposition: CompletionDisposition,
 }
@@ -124,6 +127,7 @@ impl StatefulRunUpdateTool {
             material_historical_findings,
             completion_idempotency_key,
             final_obligation,
+            open_issues,
             completion_disposition,
         } = arguments;
         if material_historical_findings
@@ -154,6 +158,34 @@ impl StatefulRunUpdateTool {
             ));
         }
         let runtime = self.services.runtime().await.map_err(respond)?;
+        if status == StatefulRunStatus::Completed {
+            let open_issues = run_acceptance::declared_open_issues(
+                open_issues.as_deref(),
+                final_obligation.as_ref(),
+                runtime,
+                &current,
+            )
+            .await?;
+            if !open_issues.is_empty() {
+                let run = self
+                    .block_with_open_issues(
+                        &current,
+                        expected_revision,
+                        result.as_deref(),
+                        &open_issues,
+                    )
+                    .await?;
+                return self.blocked_output(
+                    &call,
+                    &run,
+                    "The completion declared unresolved issues or open blockers, so the host recorded this run as blocked with a partial result instead of completed. Report the partial result and each open issue to the user; resume work (status running) only to resolve them.",
+                );
+            }
+        } else if open_issues.is_some() {
+            return Err(FunctionCallError::RespondToModel(
+                "openIssues is only valid when status is completed".to_string(),
+            ));
+        }
         let submitted_result = (status == StatefulRunStatus::Completed)
             .then(|| result.clone())
             .flatten();
@@ -185,7 +217,7 @@ impl StatefulRunUpdateTool {
             .collect::<Vec<_>>();
             if !durable_fields.is_empty() {
                 return Err(FunctionCallError::RespondToModel(format!(
-                    "completionDisposition noReusableLearning takes only expectedRevision, status, completionDisposition, and result; remove {}, or use durableLearning when the run produced reusable project knowledge",
+                    "completionDisposition noReusableLearning takes only expectedRevision, status, completionDisposition, result, and openIssues; remove {}, or use durableLearning when the run produced reusable project knowledge",
                     durable_fields.join(", ")
                 )));
             }
@@ -316,21 +348,10 @@ impl StatefulRunUpdateTool {
                     return Err(FunctionCallError::RespondToModel(message));
                 }
                 AcceptanceDecision::Blocked(run) => {
-                    if let Some(event_sink) = &self.event_sink {
-                        event_sink.emit(StatefulEvent::RunUpdated {
-                            project_id: run.value.project_id.clone(),
-                            run_id: run.id.to_string(),
-                            revision: run.revision,
-                        });
-                    }
-                    return bounded_json_output(
+                    return self.blocked_output(
                         &call,
-                        json!({
-                            "runId": run.id.to_string(),
-                            "status": status_name(run.status),
-                            "revision": run.revision,
-                            "instruction": "Completion was refused repeatedly without acceptance progress, so the host moved this run to blocked as a partial result. Do not claim the work is complete: tell the user which acceptance gates remain unmet (read them with stateful_run_read section \"acceptance\") and what was delivered.",
-                        }),
+                        &run,
+                        "Completion was refused repeatedly without acceptance progress, so the host moved this run to blocked as a partial result. Do not claim the work is complete: tell the user which acceptance gates remain unmet (read them with stateful_run_read section \"acceptance\") and what was delivered.",
                     );
                 }
             }
@@ -491,7 +512,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
         );
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: format!("Change the active Stateful run's strategy or status, or complete it. noReusableLearning completion (answer from existing knowledge, a narrow citation, or cheap to recompute): exactly expectedRevision, status completed, completionDisposition noReusableLearning, result. durableLearning completion (default), after every other durable write: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, materialRootFindings (at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases), selecting a finding that preserves any finalObligation.learning. Rejected while steering is unresolved or a revision changed. Cannot begin a pending Socratic run, pause, or cancel."),
+            description: format!("Change the active Stateful run's strategy or status, or complete it. Every completion passes openIssues. noReusableLearning completion (answer from existing knowledge, a narrow citation, or cheap to recompute): exactly expectedRevision, status completed, completionDisposition noReusableLearning, result. durableLearning completion (default), after every other durable write: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, materialRootFindings (at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases), selecting a finding that preserves any finalObligation.learning. Rejected while steering is unresolved or a revision changed. Cannot begin a pending Socratic run, pause, or cancel."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -505,7 +526,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "materialRootFindings": {"type": "array", "items": {"type": "string", "pattern": "^E[1-9][0-9]*$"}, "maxItems": MAX_MATERIAL_ROOT_FINDINGS, "description": "durableLearning only; [] only when nothing reusable was learned."},
                     "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
                     "finalObligation": final_obligation,
-                    "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."}
+                    "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."},
+                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed: open doubts, discrepancies, failing checks, blockers ([] if none); any entry blocks the run."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false

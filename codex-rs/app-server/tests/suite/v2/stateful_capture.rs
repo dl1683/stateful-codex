@@ -188,6 +188,7 @@ async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<
                 json!({
                     "expectedRevision": run_revision,
                     "status": "completed",
+                    "openIssues": [],
                     "result": ORIENTATION_RESULT,
                     "rootRevision": root_revision,
                     "materialRootFindings": ["E1"],

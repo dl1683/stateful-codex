@@ -69,6 +69,7 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
         &ToolPayload::Function {
             arguments: serde_json::json!({
                 "status": "completed",
+                "openIssues": [],
                 "materialRootFindings": ["E1", "E2"]
             })
             .to_string(),

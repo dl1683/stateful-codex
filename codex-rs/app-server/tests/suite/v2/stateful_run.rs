@@ -346,6 +346,7 @@ async fn completion_rejects_an_unselected_source_fingerprint_without_mutating_th
                     &json!({
                         "expectedRevision": 1,
                         "status": "completed",
+                        "openIssues": [],
                         "result": format!("The historical source was {invented}."),
                         "rootRevision": 0,
                         "materialRootFindings": [],
@@ -700,6 +701,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                     &json!({
                         "expectedRevision": 2,
                         "status": "completed",
+                        "openIssues": [],
                         "result": "Verified the decisive connection and incorporated the user's direction.",
                         "rootRevision": root_revision,
                         "materialRootFindings": [material_finding_reference],
@@ -708,8 +710,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
                             "examined": ["The verified source constraint and deployment finding."],
                             "learning": ["The deployment risk is triggered by the source constraint."],
                             "implication": ["The decisive project constraint must remain in the durable result."],
-                            "uncertainty": ["No material uncertainty remains for this connection."],
-                            "blockers": ["No blocker remains."]
+                            "uncertainty": ["No material uncertainty remains for this connection."]
                         }
                     })
                     .to_string(),
@@ -833,7 +834,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(obligations.data.iter().any(|obligation| {
         obligation.packet.learning
             == vec!["The deployment risk is triggered by the source constraint."]
-            && obligation.packet.blockers == vec!["No blocker remains."]
+            && obligation.packet.blockers.is_empty()
     }));
     let steering: SteeringListResponse = server
         .request(|request_id| ClientRequest::SteeringList {
@@ -1395,6 +1396,7 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
                     &json!({
                         "expectedRevision": started.run.revision,
                         "status": "completed",
+                        "openIssues": [],
                         "completionDisposition": "noReusableLearning",
                         "result": result,
                     })
@@ -1601,6 +1603,7 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
                     &json!({
                         "expectedRevision": started.run.revision,
                         "status": "completed",
+                        "openIssues": [],
                         "result": result,
                         "rootRevision": root_revision,
                         "materialRootFindings": ["E1"],
@@ -1880,6 +1883,7 @@ async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() 
             &json!({
                 "expectedRevision": revision,
                 "status": "completed",
+                "openIssues": [],
                 "result": "Completion committed.",
                 "rootRevision": root_revision,
                 "materialRootFindings": [],
@@ -1963,6 +1967,7 @@ async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> R
             &json!({
                 "expectedRevision": revision,
                 "status": "completed",
+                "openIssues": [],
                 "result": "Should not commit.",
                 "rootRevision": root_revision,
                 "materialRootFindings": [],
