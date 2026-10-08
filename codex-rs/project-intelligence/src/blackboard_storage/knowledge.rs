@@ -9,8 +9,6 @@ use sqlx::SqliteConnection;
 use crate::BlackboardEntry;
 use crate::BlackboardEntryId;
 use crate::BlackboardEntryState;
-use crate::CaptureGroup;
-use crate::CaptureGroupMember;
 use crate::ChangeRecord;
 use crate::KnowledgeContext;
 use crate::MAX_CHANGE_PREVIEW_BYTES;
@@ -241,52 +239,6 @@ impl BlackboardStore {
         .unwrap_or(0);
         u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
     }
-
-    /// A stored capture group with its members in order, so a receipt can be replayed.
-    pub async fn capture_group(
-        &self,
-        project_id: &str,
-        group_id: &str,
-    ) -> Result<Option<CaptureGroup>, BlackboardStoreError> {
-        let Some(row) = sqlx::query_as::<_, StoredGroup>(
-            "SELECT * FROM capture_groups WHERE project_id = ? AND group_id = ?",
-        )
-        .bind(project_id)
-        .bind(group_id)
-        .fetch_optional(&self.pool)
-        .await?
-        else {
-            return Ok(None);
-        };
-        let members = sqlx::query_as::<_, StoredMember>(
-            "SELECT * FROM capture_group_members
-             WHERE project_id = ? AND group_id = ? ORDER BY ordinal",
-        )
-        .bind(project_id)
-        .bind(group_id)
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .map(StoredMember::into_member)
-        .collect::<Result<Vec<_>, _>>()?;
-        let count =
-            |value: i64| u32::try_from(value).map_err(|_| BlackboardStoreError::RevisionOverflow);
-        Ok(Some(CaptureGroup {
-            project_id: row.project_id,
-            group_id: row.group_id,
-            thread_id: row.thread_id,
-            turn_id: row.turn_id,
-            kind: row.kind,
-            declared_count: row.declared_count.map(count).transpose()?,
-            recognized: count(row.recognized)?,
-            saved: count(row.saved)?,
-            already_present: count(row.already_present)?,
-            pending: count(row.pending)?,
-            omitted: count(row.omitted)?,
-            failed: count(row.failed)?,
-            members,
-        }))
-    }
 }
 
 /// Inserts the context of one entry revision.
@@ -429,48 +381,8 @@ pub(super) fn parse<T: std::str::FromStr<Err = String>>(
         .map_err(|error: String| BlackboardStoreError::InvalidStoredKnowledge(error))
 }
 
-fn unsigned(value: i64) -> Result<u64, BlackboardStoreError> {
+pub(super) fn unsigned(value: i64) -> Result<u64, BlackboardStoreError> {
     u64::try_from(value).map_err(|_| BlackboardStoreError::RevisionOverflow)
-}
-
-#[derive(FromRow)]
-struct StoredGroup {
-    project_id: String,
-    group_id: String,
-    thread_id: Option<String>,
-    turn_id: Option<String>,
-    kind: String,
-    declared_count: Option<i64>,
-    recognized: i64,
-    saved: i64,
-    already_present: i64,
-    pending: i64,
-    omitted: i64,
-    failed: i64,
-}
-
-#[derive(FromRow)]
-struct StoredMember {
-    ordinal: i64,
-    entry_id: Option<String>,
-    revision: Option<i64>,
-    outcome: String,
-    preview: String,
-    reason: Option<String>,
-}
-
-impl StoredMember {
-    fn into_member(self) -> Result<CaptureGroupMember, BlackboardStoreError> {
-        Ok(CaptureGroupMember {
-            ordinal: u32::try_from(self.ordinal)
-                .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
-            entry_id: self.entry_id,
-            revision: self.revision.map(unsigned).transpose()?,
-            outcome: parse(&self.outcome)?,
-            preview: self.preview,
-            reason: self.reason,
-        })
-    }
 }
 
 #[derive(FromRow)]

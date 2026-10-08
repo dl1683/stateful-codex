@@ -37,6 +37,7 @@ mod relation;
 mod review;
 mod root_projection;
 mod scopes;
+mod source_group_read;
 mod source_order;
 mod temporal;
 mod succession;
