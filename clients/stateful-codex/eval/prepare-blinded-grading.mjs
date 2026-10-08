@@ -204,7 +204,7 @@ function parseArgs(args) {
   ];
   if (required.some((field) => !options[field])) {
     throw new Error(
-      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --output PATH --mapping-output PATH --seed VALUE [--sessions-root PATH]",
+      "usage: --manifest PATH --result-root PATH --snapshot-root PATH --output PATH --mapping-output PATH --seed VALUE --sessions-root PATH",
     );
   }
   for (const field of required.filter((field) => field !== "seed")) {
