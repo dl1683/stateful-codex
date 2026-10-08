@@ -347,8 +347,8 @@ manifest through the live gateway:
 npm run eval:state -- --project <project-id> --gateway http://127.0.0.1:4173 [--manifest PATH]
 ```
 
-The script's own default gateway is `http://127.0.0.1:4174`, the port used in
-the recorded evaluations; pass `--gateway` for the default `npm start` port.
+The script's default gateway uses `STATEFUL_CODEX_PORT` or `http://127.0.0.1:4173`,
+matching `npm start`; pass `--gateway` to use a different address.
 The default procurement manifest checks expected decisions, decisive facts,
 contradictions, and open questions. It reports semantic probe recall separately
 from supported-entry precision. A supported entry must be active,

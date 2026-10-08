@@ -107,7 +107,7 @@ async function main() {
 
 function parseArgs(args) {
   const options = {
-    gateway: "http://127.0.0.1:4174",
+    gateway: `http://127.0.0.1:${process.env.STATEFUL_CODEX_PORT ?? "4173"}`,
     manifest: new URL("./manifests/procurement-state.json", import.meta.url),
   };
   for (let index = 0; index < args.length; index += 1) {
