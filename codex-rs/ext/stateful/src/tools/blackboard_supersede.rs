@@ -40,7 +40,7 @@ pub(super) fn supersedes_schema() -> serde_json::Value {
     json!({
         "type": "array",
         "maxItems": MAX_SUPERSEDED_ENTRIES,
-        "description": "Replaces assistant-origin entries with all-Agent revision history and known non-human authority (same subject/scope). Pass this thread's E alias or entryId and observed revision; otherwise use explicit user controls.",
+        "description": "Same-subject/scope all-Agent replacement only; current thread E alias or entryId with observed revision.",
         "items": {
             "type": "object",
             "properties": {

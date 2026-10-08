@@ -14,6 +14,9 @@ pub(crate) struct SourceTurn {
     pub(crate) turn_id: String,
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct SourceHandles(pub(crate) Vec<codex_project_intelligence::SourceSeal>);
+
 impl StatefulExtension {
     pub(crate) async fn observe_original_item(
         &self,
@@ -117,9 +120,72 @@ impl StatefulExtension {
                     Vec::new()
                 },
             };
-            if let Err(error) = store.observe_source(observation, text).await {
-                tracing::warn!(%error, "original source observation refused; no admission");
+            match store.observe_source(observation, text).await {
+                Ok(seal) => {
+                    let mut handles = turn_store
+                        .get::<SourceHandles>()
+                        .map(|handles| (*handles).clone())
+                        .unwrap_or_default();
+                    if handles.0.len() < 8
+                        && !handles
+                            .0
+                            .iter()
+                            .any(|old| old.exact_source_locator == seal.exact_source_locator)
+                    {
+                        handles.0.push(seal);
+                        turn_store.insert(handles);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "original source observation refused; no admission")
+                }
             }
         }
     }
+}
+
+/// Existing World State wrapper carries a <1,000-byte, append-only source handle item.
+/// Excess handles are disclosed; all original parts remain in the exact source index.
+pub(crate) fn handle_section(
+    handles: Option<&SourceHandles>,
+) -> Option<(usize, codex_extension_api::WorldStateSectionContribution)> {
+    use codex_extension_api::PreviousWorldStateSection;
+    use codex_extension_api::RenderedWorldStateFragment;
+    use codex_extension_api::WorldStateSectionContribution;
+    use serde_json::json;
+    let handles = handles?;
+    let mut body = json!({"source":"sealed user-delivered bytes; not endorsement", "handles":[], "omitted":handles.0.len()});
+    for seal in &handles.0 {
+        body["handles"].as_array_mut()?.push(json!([
+            seal.exact_source_locator,
+            seal.digest,
+            seal.observation.source_revision,
+            seal.observation.part_index,
+            seal.original_utf8_length
+        ]));
+        body["omitted"] = json!(handles.0.len() - body["handles"].as_array()?.len());
+        if body.to_string().len() > 850 {
+            body["handles"].as_array_mut()?.pop();
+            body["omitted"] = json!(handles.0.len() - body["handles"].as_array()?.len());
+            break;
+        }
+    }
+    let snapshot = body.clone();
+    let text = body.to_string();
+    let bytes = text.len() + 49;
+    Some((
+        bytes,
+        WorldStateSectionContribution::new("capture_sources", snapshot.clone(), move |previous| {
+            match previous {
+                PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
+                PreviousWorldStateSection::Absent
+                | PreviousWorldStateSection::Unknown
+                | PreviousWorldStateSection::Known(_) => Some(RenderedWorldStateFragment::new(
+                    "developer",
+                    ("<capture_sources>", "</capture_sources>"),
+                    text.clone(),
+                )),
+            }
+        }),
+    ))
 }

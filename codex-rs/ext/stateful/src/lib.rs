@@ -266,7 +266,14 @@ impl ContextContributor for StatefulExtension {
             };
             // One aggregate budget for a fresh window: the conversation record gets what the
             // project and run packets leave, within its own bounds.
-            let packet_bytes = world_state::START_MARKER.len()
+            let source_handles = capture_sources::handle_section(
+                input
+                    .turn_store
+                    .get::<capture_sources::SourceHandles>()
+                    .as_deref(),
+            );
+            let packet_bytes = source_handles.as_ref().map_or(0, |(bytes, _)| *bytes)
+                + world_state::START_MARKER.len()
                 + status.render().0.len()
                 + world_state::END_MARKER.len()
                 + run_status.as_ref().map_or(0, |run| {
@@ -300,6 +307,9 @@ impl ContextContributor for StatefulExtension {
             sections.push(scope_note.section());
             sections.push(checkout_report.section());
             sections.push(relayed_note.section());
+            if let Some((_, section)) = source_handles {
+                sections.push(section);
+            }
             if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }

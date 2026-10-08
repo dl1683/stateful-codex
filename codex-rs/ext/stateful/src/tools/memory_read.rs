@@ -549,7 +549,12 @@ async fn entry_item(
             })
         })
         .collect::<Vec<_>>();
-    json!({
+    let proposal = store.proposal_context(project_id, &hit.entry.id).await;
+    let (proposal, metadata_status) = match proposal {
+        Ok(proposal) => (proposal, "supported"),
+        Err(_) => (None, "unsupported; original context withheld"),
+    };
+    let mut result = json!({
         "entryId": hit.entry.id.to_string(),
         "kind": value.kind,
         "status": current_status(hit),
@@ -562,7 +567,18 @@ async fn entry_item(
         "relations": relations,
         "relationsOmitted": hit.relations.len().saturating_sub(MAX_RELATIONS_PER_ENTRY),
         "evidence": evidence,
-    })
+    });
+    if let Some(proposal) = proposal {
+        result["source"] = json!(
+            "user-delivered source with model-derived interpretation; not standing rules, endorsement or settled decision"
+        );
+        result["proposal"] = json!(proposal);
+        result["temporal"] = json!(store.temporal_context(project_id, &hit.entry.id).await.ok());
+        result["applied"] = json!(false);
+    } else if metadata_status != "supported" {
+        result["metadataStatus"] = json!(metadata_status);
+    }
+    result
 }
 
 /// How many distinct terms `text` mentions.
@@ -688,7 +704,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "One recall of earlier work when the packet and conversation lack the answer: what was decided and why, what changed, a summary since a date. Returns matching knowledge with status (current, replaced, retired), what it replaced, source and dates, plus matching earlier turns, in one result; its evidence needs no confirmation read. Do not chain reads; skip it when the packet already answers.".to_string(),
+            description: "Recall missing earlier work once: matching knowledge, status/history, sources/dates and turns. Evidence needs no confirmation read. Proposals are source recall, not settled decisions. For omitted exact details search conversation_read sourceQuery.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

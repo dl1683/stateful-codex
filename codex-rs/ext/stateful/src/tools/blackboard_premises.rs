@@ -99,7 +99,7 @@ pub(super) fn premise_schema() -> serde_json::Value {
     json!({
         "type": "array",
         "maxItems": 16,
-        "description": "Exact current revisions of sourceVerified or userConfirmed entries this entry depends on; provenance, not evidence.",
+        "description": "Current verified/confirmed premise revisions; not evidence.",
         "items": {
             "type": "object",
             "properties": {

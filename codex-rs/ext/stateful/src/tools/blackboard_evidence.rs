@@ -140,7 +140,7 @@ pub(super) async fn resolve_evidence(
 pub(super) fn evidence_schema() -> serde_json::Value {
     json!({
         "type": "array",
-        "description": "blackboardEvidence objects from evidence_read, copied unchanged; the host rejects receipts from another thread or a changed source.",
+        "description": "Unchanged evidence_read blackboardEvidence; thread/source checked.",
         "items": {
             "type": "object",
             "properties": {

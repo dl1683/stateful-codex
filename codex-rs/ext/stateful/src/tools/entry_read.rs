@@ -33,20 +33,32 @@ pub(super) async fn read(
         return Err(FunctionCallError::RespondToModel("entry revision changed or continuation has no expectedEntryRevision; restart at contentOffset=0".to_string()));
     }
     let words = &entry.value.content;
+    let proposal = store
+        .proposal_context(project_id, &id)
+        .await
+        .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
     if offset > words.len() || !words.is_char_boundary(offset) {
         return Err(FunctionCallError::RespondToModel(
             "contentOffset must be a UTF-8 boundary within the entry".to_string(),
         ));
     }
     let envelope = |end| {
-        json!({
+        let mut result = json!({
             "entryId": entry.id.to_string(), "revision": entry.revision,
             "state": entry.state, "source": entry.value.provenance,
             "contentOffset": offset, "content": &words[offset..end],
             "nextContentOffset": (end < words.len()).then_some(end),
             "complete": end == words.len(),
             "coverage": "exact stored words only; current applicability and verification are not asserted"
-        })
+        });
+        if let Some(proposal) = &proposal {
+            result["proposal"] = json!(proposal);
+            result["applied"] = json!(false);
+            result["coverage"] = json!(
+                "model interpretation of user-delivered material; source recall, never standing rules or a settled decision"
+            );
+        }
+        result
     };
     let mut end = offset;
     for (index, ch) in words[offset..].char_indices().take(4096) {

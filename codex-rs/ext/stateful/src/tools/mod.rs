@@ -12,6 +12,7 @@ mod memory_read;
 mod obligation;
 mod run;
 mod run_read;
+mod source_proposals;
 mod source_read;
 mod steering;
 
@@ -170,7 +171,7 @@ fn receipt_error(error: impl std::fmt::Display) -> String {
             end -= 1;
         }
         message.truncate(end);
-        message.push('â€¦');
+        message.push('…');
     }
     message
 }

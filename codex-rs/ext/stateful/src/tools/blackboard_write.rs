@@ -102,6 +102,13 @@ struct BatchRecordArguments {
     relations: Vec<BatchRelationArguments>,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BatchArguments {
+    SourceProposal(super::source_proposals::ProposalBatch),
+    Agent(BatchRecordArguments),
+}
+
 /// Validates and persists one record for the batch tool.
 struct BlackboardRecorder {
     project_id: String,
@@ -341,7 +348,25 @@ impl BlackboardBatchRecordTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let BatchRecordArguments { records, relations } = parse_arguments(&call)?;
+        if call.function_arguments()?.len() > 32768 {
+            return Err(respond(
+                "record batch exceeds the 32 KiB input bound; nothing written",
+            ));
+        }
+        let arguments: BatchArguments = parse_arguments(&call)?;
+        let BatchRecordArguments { records, relations } = match arguments {
+            BatchArguments::SourceProposal(batch) => {
+                return super::source_proposals::record(
+                    &self.recorder.services,
+                    &self.recorder.project_id,
+                    &self.recorder.thread_id,
+                    &call,
+                    batch,
+                )
+                .await;
+            }
+            BatchArguments::Agent(batch) => batch,
+        };
         if records.is_empty() || records.len() > MAX_BATCH_RECORDS {
             return Err(FunctionCallError::RespondToModel(format!(
                 "records must contain 1-{MAX_BATCH_RECORDS} items"
@@ -512,11 +537,11 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} findings and up to {MAX_BATCH_RELATIONS} relations by idempotencyKey once results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact scoped numbers; failures; rejected approaches; open questions. Records have Agent provenance. Replacement/replay requires all-Agent revision history and known non-human authority for every target; otherwise use explicit user memory controls. User rules and user-authored decisions also require those controls. sourceVerified needs evidence_read evidence. Idempotent."
+                "Idempotent Agent findings (1-{MAX_BATCH_RECORDS}, {MAX_BATCH_RELATIONS} relations); sourceVerified needs evidence_read. Or type=sourceProposal: same-turn capture_sources handle, ordered UTF-8 detail/reason/time spans, interpretation <=512 bytes. Whole enclosure retained, never applies/promotes/settles. Unresolved dependencies stay pending."
             ),
             strict: false,
             defer_loading: None,
-            parameters: parse_tool_input_schema(&json!({
+            parameters: parse_tool_input_schema(&super::source_proposals::schema(json!({
                 "type": "object",
                 "properties": {
                     "records": {
@@ -528,13 +553,13 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
                     "relations": {
                         "type": "array",
                         "maxItems": MAX_BATCH_RELATIONS,
-                        "description": "Optional relationships among records in this call, referenced by record idempotencyKey.",
+                        "description": "Relations use this batch's idempotencyKeys.",
                         "items": batch_relation_schema()
                     }
                 },
                 "required": ["records"],
                 "additionalProperties": false
-            }))
+            })))
             .unwrap_or_else(|error| {
                 unreachable!("invalid static blackboard batch schema: {error}")
             }),
@@ -564,7 +589,7 @@ fn record_schema() -> serde_json::Value {
             "content": {"type": "string"},
             "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false},
             "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
-            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "sourceVerified only with evidence receipts; userConfirmed is host-issued and unavailable here."},
+            "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "sourceVerified requires evidence receipts."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
             "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]},
             "evidence": evidence_schema(),
@@ -581,8 +606,8 @@ fn batch_relation_schema() -> serde_json::Value {
         "type": "object",
         "properties": {
             "idempotencyKey": {"type": "string"},
-            "fromRecordKey": {"type": "string", "description": "idempotencyKey of the source record in this batch."},
-            "toRecordKey": {"type": "string", "description": "idempotencyKey of the target record in this batch."},
+            "fromRecordKey": {"type": "string", "description": "Source idempotencyKey."},
+            "toRecordKey": {"type": "string", "description": "Target idempotencyKey."},
             "kind": {"type": "string", "enum": ["supports", "contradicts", "dependsOn", "relatedTo"]},
             "note": {"type": "string"},
             "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000}
