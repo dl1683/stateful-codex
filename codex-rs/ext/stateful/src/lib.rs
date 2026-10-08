@@ -1,6 +1,8 @@
 //! Project-scoped Stateful Codex integration.
 
 mod acceptance_observation;
+mod acceptance_policy;
+mod acceptance_render;
 mod attributed_text;
 mod attribution;
 mod autonomy;
@@ -573,12 +575,29 @@ impl StatefulExtension {
                 )
             })
             .collect();
+        let acceptance = match store.acceptance_ledger(&run.id).await {
+            Ok(ledger) => {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |duration| {
+                        i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
+                    });
+                Some(Box::new(acceptance_render::AcceptanceView::new(
+                    &run, ledger, now_ms,
+                )))
+            }
+            Err(error) => {
+                tracing::warn!(run_id = %run.id, %error, "failed to load the acceptance ledger");
+                None
+            }
+        };
         Some(RunWorldStateStatus::Available {
             run: Box::new(run),
             obligation: obligation.map(Box::new),
             steering,
             steering_complete,
             checkpoint_due,
+            acceptance,
         })
     }
 }

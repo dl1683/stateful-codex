@@ -14,6 +14,7 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
+use codex_stateful_runtime::AcceptanceLedger;
 use codex_stateful_runtime::StatefulObligation;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
@@ -43,6 +44,7 @@ enum Section {
     Strategy,
     Obligation,
     SubmittedResult,
+    Acceptance,
 }
 
 impl Section {
@@ -52,6 +54,7 @@ impl Section {
             Self::Strategy => "strategy",
             Self::Obligation => "obligation",
             Self::SubmittedResult => "submittedResult",
+            Self::Acceptance => "acceptance",
         }
     }
 
@@ -61,6 +64,7 @@ impl Section {
             "strategy" => Some(Self::Strategy),
             "obligation" => Some(Self::Obligation),
             "submittedResult" => Some(Self::SubmittedResult),
+            "acceptance" => Some(Self::Acceptance),
             _ => None,
         }
     }
@@ -167,6 +171,18 @@ fn obligation_text(obligation: &StatefulObligation) -> Result<SectionText, Funct
     Ok(SectionText {
         identity: format!("obligation:{}@{}", obligation.id, obligation.revision),
         text: serde_json::to_string(&obligation.value.packet).map_err(respond)?,
+    })
+}
+
+/// Canonical JSON of the whole acceptance ledger: every criterion with its exact statement,
+/// goal span, artifacts, check and newest evidence.
+fn acceptance_text(ledger: &AcceptanceLedger) -> Result<SectionText, FunctionCallError> {
+    Ok(SectionText {
+        identity: format!(
+            "acceptance@{}:{}",
+            ledger.revision, ledger.workspace_generation
+        ),
+        text: serde_json::to_string(ledger).map_err(respond)?,
     })
 }
 
@@ -277,6 +293,16 @@ impl StatefulRunReadTool {
                 .as_ref()
                 .and_then(|cursor| submitted_result_text(&run, cursor.length))
                 .ok_or_else(stale)?,
+            Section::Acceptance => acceptance_text(
+                &self
+                    .services
+                    .runtime()
+                    .await
+                    .map_err(respond)?
+                    .acceptance_ledger(&run.id)
+                    .await
+                    .map_err(respond)?,
+            )?,
         };
         let offset = match &cursor {
             Some(cursor)
@@ -411,13 +437,13 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Read the exact stored goal, strategy, or current obligation of the selected thread's Stateful run, or a completed run's submitted result with the cursor its completion returned, one bounded page at a time; follow nextCursor until null.".to_string(),
+            description: "Read the exact stored goal, strategy, current obligation, or acceptance ledger of the selected thread's Stateful run, or a completed run's submitted result with the cursor its completion returned, one bounded page at a time; follow nextCursor until null.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "section": {"type": "string", "enum": ["goal", "strategy", "obligation", "submittedResult"]},
+                    "section": {"type": "string", "enum": ["goal", "strategy", "obligation", "submittedResult", "acceptance"]},
                     "cursor": {"type": "string"}
                 },
                 "required": ["section"],

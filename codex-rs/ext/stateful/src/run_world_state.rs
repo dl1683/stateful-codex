@@ -10,6 +10,7 @@ use codex_stateful_runtime::SteeringStatus;
 use codex_stateful_runtime::WorkflowMode;
 use serde_json::Value;
 
+use crate::acceptance_render::AcceptanceView;
 use crate::checkpoint::CHECKPOINT_TOOL_CALLS;
 use crate::completion::REUSABLE_LEARNING_RULE;
 use crate::limits::MAX_MODEL_ITEM_BYTES;
@@ -29,13 +30,15 @@ const MAX_BODY_BYTES: usize = MAX_MODEL_ITEM_BYTES - START_MARKER.len() - END_MA
 /// text can crowd the current obligation out of the packet.
 const MAX_OBLIGATION_BYTES: usize = 3 * 1024;
 const MAX_STEERING_BYTES: usize = 5 * 512;
+const MAX_ACCEPTANCE_BYTES: usize = 1_536;
+const ACCEPTANCE_SHORTENED: &str = "Acceptance shortened: later criteria are omitted here. Call stateful_run_read with section=\"acceptance\" and follow nextCursor for the exact ledger.";
 const OBLIGATION_SHORTENED: &str = "Obligation shortened: later items are omitted here. Call stateful_run_read with section=\"obligation\" and follow nextCursor for the exact current obligation.";
 const STEERING_SHORTENED: &str = "This bounded view omitted or shortened unresolved steering. Use steering_query to retrieve the exact remaining detail before choosing or revising strategy.";
 const MAX_ESTIMATED_TOKENS: usize = 3 * 1024;
 const MAX_RENDERED_STEERING: usize = 5;
 const MAX_RENDERED_GOAL_BYTES: usize = 2 * 1024;
 const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
-const WRITE_TOOLS_ARE_DIRECT: &str = "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec.";
+const WRITE_TOOLS_ARE_DIRECT: &str = "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_acceptance_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec.";
 const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across the user's turns and the host records every final answer, so do not complete it at the end of a turn. Complete it only when the user says the overall goal is done or asks to close it; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed, completionDisposition noReusableLearning and result when nothing reusable was learned; otherwise durableLearning with expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
 const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 
@@ -47,6 +50,8 @@ pub(super) enum RunWorldStateStatus {
         steering_complete: bool,
         /// Checkpoint epoch once enough tool calls passed since the last obligation.
         checkpoint_due: Option<u64>,
+        /// The run's acceptance ledger and effort policy; absent when it could not be read.
+        acceptance: Option<Box<AcceptanceView>>,
     },
     Unavailable {
         project_id: String,
@@ -81,8 +86,13 @@ impl RunWorldStateStatus {
                 steering,
                 steering_complete,
                 checkpoint_due,
+                acceptance,
             } => {
                 hash(&mut hasher, run.id.as_str());
+                for acceptance_line in acceptance_lines(acceptance.as_deref()) {
+                    hash(&mut hasher, &acceptance_line);
+                }
+                hash(&mut hasher, &capacity(run, acceptance.as_deref()));
                 // Collaborative runs render no checkpoint text, so an epoch change must not
                 // produce an otherwise empty update.
                 let rendered_checkpoint = match run.value.mode {
@@ -125,6 +135,7 @@ impl RunWorldStateStatus {
                 steering,
                 steering_complete,
                 checkpoint_due,
+                acceptance,
             } => {
                 field(&mut output, "Run ID", run.id.as_str());
                 field(&mut output, "Run revision", &run.revision.to_string());
@@ -173,13 +184,8 @@ impl RunWorldStateStatus {
                 if run.value.mode == WorkflowMode::Autonomous {
                     field(
                         &mut output,
-                        "Autonomous continuation budget",
-                        &format!(
-                            "{} of {} used; up to {} seconds elapsed",
-                            run.continuations_used,
-                            run.value.budget.max_continuations,
-                            run.value.budget.max_elapsed_seconds
-                        ),
+                        "Autonomous capacity",
+                        &capacity(run, acceptance.as_deref()),
                     );
                 }
                 match run.value.mode {
@@ -232,6 +238,16 @@ impl RunWorldStateStatus {
                         render_steering(segment, steering, *steering_complete);
                     },
                 );
+                append_segment(
+                    &mut output,
+                    MAX_ACCEPTANCE_BYTES,
+                    ACCEPTANCE_SHORTENED,
+                    |segment| {
+                        for acceptance_line in acceptance_lines(acceptance.as_deref()) {
+                            line(segment, &single_line(&acceptance_line));
+                        }
+                    },
+                );
                 // Descriptive text comes last so a long goal or strategy can never crowd
                 // out the binding obligation and steering above.
                 let (goal, goal_shortened) = bounded_text(&run.value.goal, MAX_RENDERED_GOAL_BYTES);
@@ -264,6 +280,31 @@ impl RunWorldStateStatus {
             }
         }
         output
+    }
+}
+
+fn acceptance_lines(acceptance: Option<&AcceptanceView>) -> Vec<String> {
+    match acceptance {
+        Some(view) => view.ledger_lines(),
+        None => vec![
+            "Acceptance ledger: unavailable. Do not claim acceptance criteria are met until it can be read with stateful_run_read section=\"acceptance\".".to_string(),
+        ],
+    }
+}
+
+fn capacity(run: &StatefulRun, acceptance: Option<&AcceptanceView>) -> String {
+    match acceptance {
+        Some(view) => view.capacity_line(run),
+        None => format!(
+            "{} of {} continuations used, {} remain; elapsed limit {} min.",
+            run.continuations_used,
+            run.value.budget.max_continuations,
+            run.value
+                .budget
+                .max_continuations
+                .saturating_sub(run.continuations_used),
+            run.value.budget.max_elapsed_seconds / 60
+        ),
     }
 }
 
@@ -341,6 +382,7 @@ pub(super) fn run_world_state_section(
         "fieldKeys": block_lines(&body, RunBlockKind::Field).map(field_key).collect::<Vec<_>>(),
         "steering": line_digest(&block_lines(&body, RunBlockKind::Steering).collect::<Vec<_>>().join("\n")),
         "obligation": line_digest(&block_lines(&body, RunBlockKind::Obligation).collect::<Vec<_>>().join("\n")),
+        "acceptance": line_digest(&block_lines(&body, RunBlockKind::Acceptance).collect::<Vec<_>>().join("\n")),
     });
     WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
@@ -429,6 +471,11 @@ fn run_delta(previous: &Value, current: &Value, body: &str) -> Option<String> {
             "obligation",
             "Semantic obligation (replaces the previous obligation entirely):",
         ),
+        (
+            RunBlockKind::Acceptance,
+            "acceptance",
+            "Acceptance (replaces the previous acceptance ledger view):",
+        ),
     ] {
         if previous.get(key) != current.get(key) {
             delta.push('\n');
@@ -447,6 +494,7 @@ enum RunBlockKind {
     Field,
     Steering,
     Obligation,
+    Acceptance,
 }
 
 fn block_lines(body: &str, kind: RunBlockKind) -> impl Iterator<Item = &str> {
@@ -454,7 +502,15 @@ fn block_lines(body: &str, kind: RunBlockKind) -> impl Iterator<Item = &str> {
 }
 
 fn run_block(line: &str) -> RunBlockKind {
-    if line.starts_with("Unresolved user steering")
+    let criterion_line = line
+        .strip_prefix("- C")
+        .is_some_and(|rest| rest.starts_with(|character: char| character.is_ascii_digit()));
+    if criterion_line
+        || line.starts_with("Acceptance ledger")
+        || line.starts_with("Acceptance shortened:")
+    {
+        RunBlockKind::Acceptance
+    } else if line.starts_with("Unresolved user steering")
         || line.starts_with("- [id ")
         || line.starts_with("This current unresolved steering")
         || line.starts_with("This bounded view omitted")

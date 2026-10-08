@@ -218,6 +218,7 @@ fn run_status(mode: WorkflowMode) -> RunWorldStateStatus {
             .collect(),
         steering_complete: true,
         checkpoint_due: Some(1),
+        acceptance: None,
     }
 }
 

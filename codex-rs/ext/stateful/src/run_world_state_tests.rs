@@ -66,6 +66,7 @@ fn run_world_state_is_semantic_bounded_and_stable() {
         steering: Vec::new(),
         steering_complete: true,
         checkpoint_due: None,
+        acceptance: None,
     });
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
@@ -142,6 +143,7 @@ fn run_world_state_discloses_omitted_detail() {
         steering: Vec::new(),
         steering_complete: true,
         checkpoint_due: None,
+        acceptance: None,
     });
 
     let rendered = section
@@ -202,6 +204,7 @@ fn obligation_change_replaces_only_the_obligation_block() {
         steering: Vec::new(),
         steering_complete: true,
         checkpoint_due: None,
+        acceptance: None,
     };
     let previous = run_world_state_section(status("The permit was never transferred.", 1));
     let current = run_world_state_section(status("The landlord consent is also missing.", 2));
@@ -253,6 +256,7 @@ fn different_run_renders_the_full_packet() {
             steering: Vec::new(),
             steering_complete: true,
             checkpoint_due: None,
+            acceptance: None,
         })
     };
     let previous = section("run-1");
@@ -293,6 +297,7 @@ fn due_checkpoint_renders_one_line_that_changes_only_per_epoch() {
         steering: Vec::new(),
         steering_complete: true,
         checkpoint_due,
+        acceptance: None,
     };
     let current = run_world_state_section(status(None));
     let due = run_world_state_section(status(Some(1)));
@@ -361,6 +366,7 @@ fn run_with_obligation(obligation_id: &str, learning: Vec<String>) -> RunWorldSt
         steering: Vec::new(),
         steering_complete: true,
         checkpoint_due: None,
+        acceptance: None,
     }
 }
 
@@ -437,6 +443,7 @@ fn swapping_one_field_for_another_renders_the_full_packet() {
             steering: Vec::new(),
             steering_complete: true,
             checkpoint_due: None,
+            acceptance: None,
         }
     };
     let previous =
@@ -452,7 +459,7 @@ fn swapping_one_field_for_another_renders_the_full_packet() {
         .expect("a mode change must render");
 
     assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
-    assert!(!rendered.body().contains("Autonomous continuation budget"));
+    assert!(!rendered.body().contains("Autonomous capacity"));
 }
 
 #[test]
@@ -535,6 +542,7 @@ fn maximal_run_state_keeps_the_obligation_ahead_of_steering_within_bounds() {
         steering,
         steering_complete: true,
         checkpoint_due: Some(3),
+        acceptance: None,
     });
 
     let rendered = section

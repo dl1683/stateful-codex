@@ -1,3 +1,4 @@
+mod acceptance;
 mod batch_input;
 mod blackboard;
 mod blackboard_evidence;
@@ -118,6 +119,11 @@ pub(super) fn project_intelligence_tools(
             projects,
             event_sink.clone(),
             visible_root,
+        )),
+        Arc::new(acceptance::AcceptanceUpdateTool::new(
+            project_id.clone(),
+            thread_id.clone(),
+            services.clone(),
         )),
         Arc::new(run_read::StatefulRunReadTool::new(
             project_id.clone(),
