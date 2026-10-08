@@ -107,6 +107,15 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   Forget): automatic exact-source/source-search recall and automatic proposal
   recall. Linux: 0 new failures.
 
+- **Cleanup K2, portable tool schemas** (`738e1c401`..`68638f6e6`): Stateful tool
+  schemas stay within a portable JSON Schema subset (checked by a test);
+  rejections name the field and show a valid call within the response budget;
+  call IDs are recorded verbatim, and empty, control-character or over-512-byte
+  IDs are refused up front with a clear reason. Known gap (OPEN): providers whose
+  bridge puts very long data in call IDs (LiteLLM with Gemini thought signatures)
+  are refused rather than supported, and there is no host-enforced cap on a model
+  that never produces a valid completion.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
