@@ -325,6 +325,18 @@ impl TurnLifecycleContributor for StatefulExtension {
                 self.observe_original_item(thread_store, turn_store, message)
                     .await;
             }
+            if matches!(
+                item,
+                TurnItem::CommandExecution(_) | TurnItem::FileChange(_)
+            ) && let (Some(selected), Some(active), Some(services)) = (
+                thread_store.get::<SelectedProject>(),
+                thread_store.get::<ActiveRunTurn>(),
+                self.services.as_ref(),
+            ) {
+                let roots = self.project_roots(selected.project_id()).await;
+                crate::acceptance_observation::observe_item(services, &active.run_id, &roots, item)
+                    .await;
+            }
         })
     }
 

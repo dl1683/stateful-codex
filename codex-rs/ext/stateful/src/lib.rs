@@ -1,5 +1,6 @@
 //! Project-scoped Stateful Codex integration.
 
+mod acceptance_observation;
 mod attributed_text;
 mod attribution;
 mod autonomy;
