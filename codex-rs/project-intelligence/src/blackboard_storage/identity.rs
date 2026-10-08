@@ -15,6 +15,7 @@ use sqlx::SqliteConnection;
 
 /// Current source exclusions and cross-writer retirement apply before root/query limits.
 pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
+    AND revision.state != 'tombstoned'
     AND NOT EXISTS (SELECT 1 FROM capture_entry_sources AS link
         JOIN capture_sources AS source ON source.source_id = link.source_id
         JOIN capture_source_exclusions AS excluded ON excluded.project_id = source.project_id

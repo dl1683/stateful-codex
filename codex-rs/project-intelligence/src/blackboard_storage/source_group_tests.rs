@@ -481,3 +481,237 @@ async fn c2_failed_original_group_then_forget_and_cold_replay_never_restores() {
         }
     }
 }
+
+#[tokio::test]
+async fn c2_source_group_and_forget_serialize_across_actual_processes() {
+    for (order, failed_original) in [
+        ("race", false),
+        ("capture-first", false),
+        ("forget-first", false),
+        ("race", true),
+        ("capture-first", true),
+        ("forget-first", true),
+    ] {
+        let home = TempDir::new().unwrap();
+        let store = store(&home).await;
+        let native_admission = admission(&home).await;
+        if failed_original {
+            store
+                .create_entry_with_context(
+                    BlackboardEntryId::parse("member-0").unwrap(),
+                    rule("Never push."),
+                    KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect),
+                    ChangeRecord {
+                        origin: ChangeOrigin::DirectControl,
+                        ..change(ChangeOperation::Saved, "Never push.")
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let text = "Ground rules for this project:\n- Never push.\n";
+        let seal = store
+            .observe_source(observation("cross-process-original", text), text)
+            .await
+            .unwrap();
+        let mut original = request(&seal, "process-original");
+        original.members.truncate(/*len*/ 1);
+        if failed_original {
+            let before = snapshot(&store).await;
+            sqlx::query("CREATE TRIGGER fail_process_original BEFORE INSERT ON capture_group_actions BEGIN SELECT RAISE(ABORT, 'failed first capture'); END").execute(&store.pool).await.unwrap();
+            assert!(
+                store
+                    .write_source_group(&native_admission, original)
+                    .await
+                    .is_err()
+            );
+            sqlx::query("DROP TRIGGER fail_process_original")
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            assert_eq!(snapshot(&store).await, before);
+        } else {
+            original.members[0].write.value.provenance.kind = BlackboardProvenanceKind::Agent;
+            original.members[0].write.context.authority = KnowledgeAuthority::AssistantReported;
+            original.members[0].write.change.origin = ChangeOrigin::ModelTool;
+            store
+                .write_source_group(&native_admission, original)
+                .await
+                .unwrap();
+        }
+        drop(native_admission);
+
+        // Run this library's own test binary: each worker owns a separate OS process
+        // and SQLite pool. No workspace executable lookup or shell interpolation.
+        let executable = std::env::current_exe().unwrap();
+        let worker = format!(
+            "{}::source_group_process_worker",
+            module_path!().split_once("::").unwrap().1
+        );
+        let mut capture = tokio::process::Command::new(&executable);
+        capture
+            .args(["--ignored", "--exact", &worker, "--nocapture"])
+            .env("CODEX_C2_PROCESS_HOME", home.path())
+            .env("CODEX_C2_PROCESS_ROLE", "capture")
+            .env("CODEX_C2_PROCESS_ORDER", order)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let capture = capture.spawn().unwrap();
+        let mut forget = tokio::process::Command::new(&executable);
+        forget
+            .args(["--ignored", "--exact", &worker, "--nocapture"])
+            .env("CODEX_C2_PROCESS_HOME", home.path())
+            .env("CODEX_C2_PROCESS_ROLE", "forget")
+            .env("CODEX_C2_PROCESS_ORDER", order)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let forget = forget.spawn().unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 10), async {
+            while !home.path().join("capture-ready").exists()
+                || !home.path().join("forget-ready").exists()
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::fs::write(home.path().join("start"), b"start")
+            .await
+            .unwrap();
+        let (capture, forget) = tokio::join!(capture.wait_with_output(), forget.wait_with_output());
+        for output in [capture.unwrap(), forget.unwrap()] {
+            assert!(
+                output.status.success(),
+                "{order}: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let committed = snapshot(&store).await;
+        store.pool.close().await;
+        let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+            .await
+            .unwrap();
+        assert_eq!(snapshot(&reopened).await, committed);
+        let entry = reopened
+            .get_entry(PROJECT, &BlackboardEntryId::parse("member-0").unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.state, BlackboardEntryState::Tombstoned);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM blackboard_entries")
+                .fetch_one(&reopened.pool)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            reopened
+                .observe_source(observation("cross-process-original", text), text)
+                .await
+                .unwrap(),
+            seal
+        );
+        assert!(
+            !reopened
+                .entry_source_eligible(PROJECT, &entry.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            reopened
+                .get_source_eligible_entry(PROJECT, &entry.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(
+            reopened
+                .read_source_range(
+                    PROJECT,
+                    &seal.exact_source_locator,
+                    &seal.digest,
+                    /*start*/ 0,
+                    text.len() as u32
+                )
+                .await,
+            Err(BlackboardStoreError::SourceExcluded)
+        ));
+        let admission = admission(&home).await;
+        let mut retry = request(&seal, "process-original");
+        retry.members.truncate(/*len*/ 1);
+        retry.members[0].write.value.provenance.kind = BlackboardProvenanceKind::Agent;
+        retry.members[0].write.context.authority = KnowledgeAuthority::AssistantReported;
+        retry.members[0].write.change.origin = ChangeOrigin::ModelTool;
+        let before = snapshot(&reopened).await;
+        assert!(matches!(
+            reopened.write_source_group(&admission, retry).await,
+            Err(BlackboardStoreError::RetiredIdentity | BlackboardStoreError::SourceExcluded)
+        ));
+        assert_eq!(snapshot(&reopened).await, before);
+    }
+}
+
+#[tokio::test]
+#[ignore = "support worker executed by the cross-process qualification test"]
+async fn source_group_process_worker() {
+    let path = std::path::PathBuf::from(std::env::var_os("CODEX_C2_PROCESS_HOME").unwrap());
+    let role = std::env::var("CODEX_C2_PROCESS_ROLE").unwrap();
+    let order = std::env::var("CODEX_C2_PROCESS_ORDER").unwrap();
+    let sqlite = SqliteConfig::new_for_testing(path.abs());
+    let store = BlackboardStore::open(&sqlite).await.unwrap();
+    tokio::fs::write(path.join(format!("{role}-ready")), b"ready")
+        .await
+        .unwrap();
+    let dependency = match (order.as_str(), role.as_str()) {
+        ("capture-first", "forget") => Some("capture-done"),
+        ("forget-first", "capture") => Some("forget-done"),
+        ("race" | "capture-first" | "forget-first", "capture" | "forget") => None,
+        _ => panic!("invalid worker role/order"),
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 10), async {
+        while !path.join("start").exists()
+            || dependency.is_some_and(|name| !path.join(name).exists())
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    if role == "forget" {
+        let id = BlackboardEntryId::parse("member-0").unwrap();
+        let entry = store.get_entry(PROJECT, &id).await.unwrap().unwrap();
+        store
+            .update_entry(PROJECT, &id, retire(&entry))
+            .await
+            .unwrap();
+    } else {
+        let thread = serde_json::from_str("\"00000000-0000-0000-0000-000000000001\"").unwrap();
+        let admission = codex_state::ThreadProjectAdmission::acquire(&sqlite, thread, PROJECT)
+            .await
+            .unwrap()
+            .unwrap();
+        let metadata: String = sqlx::query_scalar("SELECT metadata FROM capture_sources WHERE project_id = 'project-1' AND original_event_id = 'cross-process-original'").fetch_one(&store.pool).await.unwrap();
+        let seal: SourceSeal = serde_json::from_str(&metadata).unwrap();
+        let mut capture = request(&seal, "process-racer");
+        capture.members.truncate(/*len*/ 1);
+        capture.members[0].write.value.provenance.kind = BlackboardProvenanceKind::Agent;
+        capture.members[0].write.context.authority = KnowledgeAuthority::AssistantReported;
+        capture.members[0].write.change.origin = ChangeOrigin::ModelTool;
+        match store.write_source_group(&admission, capture).await {
+            Ok(receipt) => assert_eq!((receipt.saved, receipt.already_present), (0, 1)),
+            Err(
+                BlackboardStoreError::RetiredIdentity
+                | BlackboardStoreError::SourceExcluded
+                | BlackboardStoreError::ModelMutationRefused,
+            ) => (),
+            Err(error) => panic!("unexpected process outcome: {error}"),
+        }
+    }
+    store.pool.close().await;
+    tokio::fs::write(path.join(format!("{role}-done")), b"done")
+        .await
+        .unwrap();
+}
