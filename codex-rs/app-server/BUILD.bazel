@@ -11,6 +11,10 @@ codex_rust_crate(
     extra_binaries_non_windows = [
         "//codex-rs/cli:codex",
     ],
+    integration_compile_data_extra = [
+        "//codex-rs/project-intelligence:migration-history-test-data",
+        "//codex-rs/stateful-runtime:migration-history-test-data",
+    ],
     integration_test_timeout = "long",
     run_tests_with_wine_exec = True,
     test_shard_counts = {

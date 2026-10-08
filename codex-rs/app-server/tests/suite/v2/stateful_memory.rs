@@ -34,6 +34,9 @@ const SUITE_RULE: &str = "From now on, never run the whole test suite.";
 const NEXT_RULE: &str = "From now on, end every reply with a line starting with 'Next:'.";
 const CORRECTED: &str = "End every reply with a line starting with 'Next step:'.";
 
+#[path = "stateful_migration_history_tests.rs"]
+mod migration_history_tests;
+
 #[path = "stateful_memory_repair_tests.rs"]
 mod repair_tests;
 
