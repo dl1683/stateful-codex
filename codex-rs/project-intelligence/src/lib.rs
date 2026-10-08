@@ -134,6 +134,8 @@ pub use storage::HierarchyStoreError;
 pub use blackboard_storage::CaptureEntryWrite;
 pub use blackboard_storage::CaptureWrite;
 pub use blackboard_storage::CaptureWriteResult;
+pub use blackboard_storage::SourceCaptureGroup;
+pub use blackboard_storage::SourceCaptureMember;
 pub use capture_identity::CAPTURE_NORMALIZER_VERSION;
 pub use capture_identity::canonical_capture_words;
 pub use capture_identity::retirement_capture_words;

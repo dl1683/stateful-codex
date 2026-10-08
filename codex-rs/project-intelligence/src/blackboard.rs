@@ -234,7 +234,7 @@ pub struct BlackboardRelation {
     pub updated_at_ms: i64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct NewBlackboardEntry {
     pub project_id: String,
     pub node_id: HierarchyNodeId,

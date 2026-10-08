@@ -42,6 +42,7 @@ mod source;
 #[cfg(test)]
 #[path = "blackboard_storage/source_fixture_tests.rs"]
 mod source_fixture;
+mod source_group;
 mod source_group_read;
 mod source_links;
 mod source_observation;
@@ -61,6 +62,8 @@ pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;
 pub use review::ReviewContext;
 pub use review::ReviewPage;
+pub use source_group::SourceCaptureGroup;
+pub use source_group::SourceCaptureMember;
 pub use succession::MAX_SUPERSEDED_ENTRIES;
 pub use succession::Succession;
 pub use succession::SupersededEntry;
