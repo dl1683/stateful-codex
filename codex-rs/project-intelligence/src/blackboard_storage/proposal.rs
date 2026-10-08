@@ -371,3 +371,15 @@ impl BlackboardStore {
         Ok(results)
     }
 }
+
+#[cfg(test)]
+#[path = "proposal_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "proposal_product_tests.rs"]
+mod product_tests;
+
+#[cfg(test)]
+#[path = "proposal_boundaries_tests.rs"]
+mod boundary_tests;
