@@ -588,29 +588,11 @@ fn successful_update_result(
     result
 }
 
+/// One mutation item for every action. Unions are not portable across tool-call
+/// providers, so the per-action fields are stated in the action description and enforced
+/// when the batch is decoded.
 fn update_schema() -> serde_json::Value {
-    let shared = json!({
-        "entryId": {"type": "string"},
-        "expectedRevision": {"type": "integer", "minimum": 1}
-    });
-    let mut revise_properties = shared.clone();
-    revise_properties["kind"] = json!({"type": "string", "enum": ["instruction", "fact", "claim", "number", "decision", "strategy", "question", "contradiction", "failure", "rejectedApproach", "signal", "note"]});
-    revise_properties["content"] = json!({"type": "string"});
-    revise_properties["structuredValue"] = json!({"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false});
-    revise_properties["clearStructuredValue"] = json!({"type": "boolean"});
-    revise_properties["confidenceBasisPoints"] =
-        json!({"type": "integer", "minimum": 0, "maximum": 10000});
-    revise_properties["verification"] = json!({
-        "type": "string",
-        "enum": ["unverified", "sourceVerified", "disputed", "stale"],
-        "description": "sourceVerified only with evidence receipts; userConfirmed is host-issued and unavailable here."
-    });
-    revise_properties["importance"] =
-        json!({"type": "string", "enum": ["critical", "high", "normal", "low"]});
-    revise_properties["rootPromotion"] =
-        json!({"type": "string", "enum": ["notPromoted", "candidate", "promoted"]});
-    revise_properties["evidence"] = evidence_schema();
-    revise_properties["premises"] = premise_schema();
+    let promotion = json!({"type": "string", "enum": ["notPromoted", "candidate", "promoted"]});
     json!({
         "type": "object",
         "properties": {
@@ -619,42 +601,37 @@ fn update_schema() -> serde_json::Value {
                 "minItems": 1,
                 "maxItems": MAX_MUTATIONS,
                 "items": {
-                    "oneOf": [
-                        mutation_schema("setRootPromotion", shared.clone(), json!({
-                            "rootPromotion": {"type": "string", "enum": ["notPromoted", "candidate", "promoted"]}
-                        }), &["rootPromotion"]),
-                        mutation_schema("revise", revise_properties, json!({}), &[]),
-                        mutation_schema("supersede", shared.clone(), json!({
-                            "successorEntryId": {"type": "string"}
-                        }), &["successorEntryId"]),
-                        mutation_schema("retire", shared, json!({}), &[])
-                    ]
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["setRootPromotion", "revise", "supersede", "retire"],
+                            "description": "setRootPromotion requires rootPromotion. revise takes any of kind, content, structuredValue, clearStructuredValue, confidenceBasisPoints, verification, importance, rootPromotion, evidence, premises. supersede requires successorEntryId. retire takes no other field."
+                        },
+                        "entryId": {"type": "string"},
+                        "expectedRevision": {"type": "integer", "minimum": 1},
+                        "kind": {"type": "string", "enum": ["instruction", "fact", "claim", "number", "decision", "strategy", "question", "contradiction", "failure", "rejectedApproach", "signal", "note"]},
+                        "content": {"type": "string"},
+                        "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": "string", "description": "Omit when unitless."}}, "required": ["value"], "additionalProperties": false},
+                        "clearStructuredValue": {"type": "boolean"},
+                        "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
+                        "verification": {
+                            "type": "string",
+                            "enum": ["unverified", "sourceVerified", "disputed", "stale"],
+                            "description": "sourceVerified only with evidence receipts; userConfirmed is host-issued and unavailable here."
+                        },
+                        "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
+                        "rootPromotion": promotion,
+                        "evidence": evidence_schema(),
+                        "premises": premise_schema(),
+                        "successorEntryId": {"type": "string"}
+                    },
+                    "required": ["action", "entryId", "expectedRevision"],
+                    "additionalProperties": false
                 }
             }
         },
         "required": ["mutations"],
-        "additionalProperties": false
-    })
-}
-
-fn mutation_schema(
-    action: &str,
-    mut properties: serde_json::Value,
-    additional: serde_json::Value,
-    additional_required: &[&str],
-) -> serde_json::Value {
-    properties["action"] = json!({"type": "string", "enum": [action]});
-    if let (Some(properties), Some(additional)) =
-        (properties.as_object_mut(), additional.as_object())
-    {
-        properties.extend(additional.clone());
-    }
-    let mut required = vec!["action", "entryId", "expectedRevision"];
-    required.extend_from_slice(additional_required);
-    json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
         "additionalProperties": false
     })
 }

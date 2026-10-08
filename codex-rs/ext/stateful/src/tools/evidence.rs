@@ -374,7 +374,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
                             "contextMapEntryId": {"type": "string"},
                             "sourceFingerprint": {"type": "string"},
                             "lineRange": {
-                                "type": ["object", "null"],
+                                "type": "object",
+                                "description": "Copy it when the issued route has one; omit it when the route's lineRange is null.",
                                 "properties": {
                                     "start": {"type": "integer", "minimum": 1},
                                     "end": {"type": "integer", "minimum": 1}
@@ -383,7 +384,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for EvidenceReadTool {
                                 "additionalProperties": false
                             }
                         },
-                        "required": ["contextMapEntryId", "sourceFingerprint", "lineRange"],
+                        "required": ["contextMapEntryId", "sourceFingerprint"],
                         "additionalProperties": false
                     },
                     "relativePath": {"type": "string", "description": "Project-relative path shown by the root blackboard or context map."},

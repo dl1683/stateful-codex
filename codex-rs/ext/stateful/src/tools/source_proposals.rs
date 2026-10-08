@@ -112,26 +112,26 @@ pub(super) async fn record(
     }
 }
 
-pub(super) fn schema(agent: serde_json::Value) -> serde_json::Value {
+/// Fields of one sourceProposal record. They share the batch record item with Agent
+/// findings because unions are not portable across tool-call providers; decoding still
+/// keeps the two shapes apart by the batch's `type`.
+pub(super) fn record_properties() -> serde_json::Value {
     let span = json!({"type":"object","properties":{
         "startByte":{"type":"integer"},"endByte":{"type":"integer"},
         "role":{"type":"string","enum":["body","heading","attribution","qualifier","duration","scope","evidence","temporal"]}
     },"required":["startByte","endByte","role"],"additionalProperties":false});
-    json!({"anyOf":[agent,{"type":"object","properties":{
-        "type":{"type":"string","enum":["sourceProposal"]},
-        "records":{"type":"array","minItems":1,"maxItems":24,"items":{"type":"object","properties":{
-            "sourceId":{"type":"string"},"digest":{"type":"string"},"sourceRevision":{"type":"integer"},"partIndex":{"type":"integer"},
-            "spans":{"type":"array","maxItems":8,"items":span},
-            "category":{"type":"string","enum":["rule","background","attributedContext","decision","brainstormOption","openCheck","note"]},
-            "interpretation":{"type":"string"},"dependency":{"type":"string","enum":["scope","attribution","referent","promotion"]},
-            "eventStatus":{"type":"string","enum":["unknown","sourceReportedOccurrence","currentAssertion","plan","cancelledPlan","uncertainReport","proposedModel"]},
-            "attribution":{"type":"string","enum":["unknown","historicalUser","reportedThirdParty","reportedAssistant","importedMaterial"]},"speakerSpan":{"type":"integer"},
-            "temporal":{"type":"object","properties":{
-                "sourceTimeSpan":{"type":"integer"},"eventTimeSpan":{"type":"integer"},"anchorSpan":{"type":"integer"},
-                "form":{"type":"string","enum":["point","interval","duration","recurrence","unresolvedRelative"]}
-                ,"precision":{"type":"string","enum":["second","minute","hour","day","month","year","approximate"]},
-                "inclusiveStart":{"type":"boolean"},"inclusiveEnd":{"type":"boolean"}
-            },"required":["form"],"additionalProperties":false}
-        },"required":["sourceId","digest","sourceRevision","partIndex","spans","category","interpretation"],"additionalProperties":false}}
-    },"required":["type","records"],"additionalProperties":false}]})
+    json!({
+        "sourceId":{"type":"string"},"digest":{"type":"string"},"sourceRevision":{"type":"integer"},"partIndex":{"type":"integer"},
+        "spans":{"type":"array","items":span},
+        "category":{"type":"string","enum":["rule","background","attributedContext","decision","brainstormOption","openCheck","note"]},
+        "interpretation":{"type":"string"},"dependency":{"type":"string","enum":["scope","attribution","referent","promotion"]},
+        "eventStatus":{"type":"string","enum":["unknown","sourceReportedOccurrence","currentAssertion","plan","cancelledPlan","uncertainReport","proposedModel"]},
+        "attribution":{"type":"string","enum":["unknown","historicalUser","reportedThirdParty","reportedAssistant","importedMaterial"]},"speakerSpan":{"type":"integer"},
+        "temporal":{"type":"object","properties":{
+            "sourceTimeSpan":{"type":"integer"},"eventTimeSpan":{"type":"integer"},"anchorSpan":{"type":"integer"},
+            "form":{"type":"string","enum":["point","interval","duration","recurrence","unresolvedRelative"]}
+            ,"precision":{"type":"string","enum":["second","minute","hour","day","month","year","approximate"]},
+            "inclusiveStart":{"type":"boolean"},"inclusiveEnd":{"type":"boolean"}
+        },"required":["form"],"additionalProperties":false}
+    })
 }

@@ -48,9 +48,14 @@ struct QueryArguments {
     limit: Option<u32>,
 }
 
+/// The refresh takes no input. `reason` exists because several function-declaration
+/// translators reject an object schema with no properties; its value is not used.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RefreshArguments {}
+struct RefreshArguments {
+    #[serde(rename = "reason")]
+    _reason: Option<String>,
+}
 
 pub(super) struct ContextMapQueryTool {
     project_id: String,
@@ -369,7 +374,9 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapRefreshTool {
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "reason": {"type": "string", "description": "Optional: why the index needs a refresh."}
+                },
                 "additionalProperties": false
             }))
             .unwrap_or_else(|error| unreachable!("invalid static context-map refresh schema: {error}")),

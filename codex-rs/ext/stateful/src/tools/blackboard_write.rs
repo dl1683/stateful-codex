@@ -561,9 +561,10 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
             ),
             strict: false,
             defer_loading: None,
-            parameters: parse_tool_input_schema(&super::source_proposals::schema(json!({
+            parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
+                    "type": {"type": "string", "enum": ["sourceProposal"], "description": "Only for source proposals; omit for Agent findings."},
                     "records": {
                         "type": "array",
                         "minItems": 1,
@@ -573,13 +574,13 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
                     "relations": {
                         "type": "array",
                         "maxItems": MAX_BATCH_RELATIONS,
-                        "description": "Relations use this batch's idempotencyKeys.",
+                        "description": "Agent findings only; relations use this batch's idempotencyKeys.",
                         "items": batch_relation_schema()
                     }
                 },
                 "required": ["records"],
                 "additionalProperties": false
-            })))
+            }))
             .unwrap_or_else(|error| {
                 unreachable!("invalid static blackboard batch schema: {error}")
             }),
@@ -599,15 +600,19 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
     }
 }
 
+/// One batch record. Agent findings and source proposals share this item because unions
+/// are not portable across tool-call providers, so each shape's required fields are
+/// stated in the description and enforced when the batch is decoded.
 fn record_schema() -> serde_json::Value {
-    json!({
+    let mut schema = json!({
         "type": "object",
+        "description": "Agent finding: idempotencyKey, kind, content, confidenceBasisPoints, verification, importance, rootPromotion required. sourceProposal: sourceId, digest, sourceRevision, partIndex, spans, category, interpretation required.",
         "properties": {
             "idempotencyKey": {"type": "string"},
             "nodeId": {"type": "string"},
             "kind": {"type": "string", "enum": ["fact", "claim", "number", "decision", "strategy", "question", "contradiction", "failure", "rejectedApproach", "signal", "note"]},
             "content": {"type": "string"},
-            "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": ["string", "null"]}}, "required": ["value"], "additionalProperties": false},
+            "structuredValue": {"type": "object", "properties": {"value": {"type": "string"}, "unit": {"type": "string", "description": "Omit when unitless."}}, "required": ["value"], "additionalProperties": false},
             "confidenceBasisPoints": {"type": "integer", "minimum": 0, "maximum": 10000},
             "verification": {"type": "string", "enum": ["unverified", "sourceVerified", "disputed", "stale"], "description": "sourceVerified requires evidence receipts."},
             "importance": {"type": "string", "enum": ["critical", "high", "normal", "low"]},
@@ -616,9 +621,15 @@ fn record_schema() -> serde_json::Value {
             "premises": premise_schema(),
             "supersedes": supersedes_schema()
         },
-        "required": ["idempotencyKey", "kind", "content", "confidenceBasisPoints", "verification", "importance", "rootPromotion"],
         "additionalProperties": false
-    })
+    });
+    if let (Some(properties), serde_json::Value::Object(proposal)) = (
+        schema["properties"].as_object_mut(),
+        super::source_proposals::record_properties(),
+    ) {
+        properties.extend(proposal);
+    }
+    schema
 }
 
 fn batch_relation_schema() -> serde_json::Value {

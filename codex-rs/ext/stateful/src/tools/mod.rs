@@ -305,6 +305,10 @@ mod roster_budget_tests;
 mod provider_call_id_tests;
 
 #[cfg(test)]
+#[path = "schema_portability_tests.rs"]
+mod schema_portability_tests;
+
+#[cfg(test)]
 #[path = "capture_repair_tests.rs"]
 mod capture_repair_tests;
 
