@@ -253,6 +253,7 @@ impl StatefulRunUpdateTool {
             }
             (None, None)
         } else if status == StatefulRunStatus::Completed {
+            let source_id = provenance_source_id(&call)?;
             if current.revision != expected_revision {
                 return Err(FunctionCallError::RespondToModel(format!(
                     "run revision conflict: expected {expected_revision}, found {}",
@@ -324,7 +325,7 @@ impl StatefulRunUpdateTool {
                     project_id: self.project_id.clone(),
                     run_id: current.id.clone(),
                     packet: final_obligation,
-                    provenance_source_id: provenance_source_id(&call.call_id),
+                    provenance_source_id: source_id,
                 },
             );
             (Some(completion), Some(obligation))

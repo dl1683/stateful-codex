@@ -263,23 +263,38 @@ fn fits_response(value: &serde_json::Value, byte_budget: usize) -> bool {
     serde_json::to_vec(value).is_ok_and(|serialized| serialized.len() <= byte_budget)
 }
 
-/// Longest tool call ID kept verbatim as a provenance source. Some provider bridges carry
-/// opaque reasoning state inside call IDs (LiteLLM appends Gemini thought signatures as
+/// Provenance source limit shared by the blackboard and run stores. Call IDs up to this
+/// size are recorded exactly as before, so stored records still match their retries.
+const MAX_VERBATIM_SOURCE_BYTES: usize = 512;
+/// Namespace reserved for digests of oversized call IDs. Some provider bridges carry opaque
+/// reasoning state inside call IDs (LiteLLM appends Gemini thought signatures as
 /// `call_<id>__thought__<signature>`), which exceeds every stored identity bound.
-const MAX_VERBATIM_SOURCE_BYTES: usize = 128;
+const OVERSIZED_SOURCE_NAMESPACE: &str = "stateful:oversized-call-id:";
+const OVERSIZED_SOURCE_PREFIX: &str = "stateful:oversized-call-id:v1:sha256:";
 
-/// The provenance source recorded for one tool call: the call ID itself when it is short,
-/// trimmed, and control-free, otherwise a stable digest of it. Either form names exactly
-/// one bounded source, so stored provenance validation is unchanged.
-fn provenance_source_id(call_id: &str) -> String {
-    if !call_id.is_empty()
-        && call_id.len() <= MAX_VERBATIM_SOURCE_BYTES
-        && call_id.trim() == call_id
-        && !call_id.chars().any(char::is_control)
-    {
-        return call_id.to_string();
-    }
-    format!("call-sha256:{:x}", Sha256::digest(call_id.as_bytes()))
+/// The provenance source recorded for one tool call, decided before any write.
+///
+/// A call ID within the store limit is kept verbatim, so each store validates it exactly as
+/// before. Only a nonempty, trimmed, control-free ID above the limit is replaced, by a digest
+/// in a namespace verbatim IDs may not use, so a raw ID can never alias a digest. Missing,
+/// control-containing, padded oversized, and namespace-claiming IDs are refused.
+fn provenance_source_id(call: &ToolCall<'_>) -> Result<String, FunctionCallError> {
+    let call_id = call.call_id.as_str();
+    let refusal = if call_id.is_empty() || call_id.chars().any(char::is_control) {
+        "nothing was written: this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded"
+    } else if call_id.starts_with(OVERSIZED_SOURCE_NAMESPACE) {
+        "nothing was written: this tool call's ID uses the reserved stateful:oversized-call-id: namespace, so its provenance would be ambiguous"
+    } else if call_id.len() <= MAX_VERBATIM_SOURCE_BYTES {
+        return Ok(call_id.to_string());
+    } else if call_id.trim() != call_id {
+        "nothing was written: this tool call's oversized ID has surrounding whitespace, so it does not identify one source"
+    } else {
+        return Ok(format!(
+            "{OVERSIZED_SOURCE_PREFIX}{:x}",
+            Sha256::digest(call_id.as_bytes())
+        ));
+    };
+    Err(bounded_respond(call, refusal))
 }
 
 fn stable_id(prefix: &str, project_id: &str, idempotency_key: &str) -> String {

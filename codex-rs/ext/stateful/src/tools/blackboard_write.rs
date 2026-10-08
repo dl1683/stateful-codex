@@ -433,6 +433,7 @@ impl BlackboardBatchRecordTool {
                     .collect::<Vec<_>>(),
             }),
         )?;
+        let source_id = provenance_source_id(&call)?;
         let mut results = Vec::with_capacity(records.len());
         let mut entry_ids = HashMap::with_capacity(records.len());
         let mut recorded = 0usize;
@@ -448,12 +449,7 @@ impl BlackboardBatchRecordTool {
             let record_key = record.idempotency_key.clone();
             match self
                 .recorder
-                .record(
-                    record,
-                    &call.turn_id,
-                    &provenance_source_id(&call.call_id),
-                    &project_roots,
-                )
+                .record(record, &call.turn_id, &source_id, &project_roots)
                 .await
             {
                 Ok(entry) => {
@@ -510,11 +506,7 @@ impl BlackboardBatchRecordTool {
                 note: relation.note,
                 confidence_basis_points: relation.confidence_basis_points,
             };
-            match self
-                .relator
-                .relate(arguments, &provenance_source_id(&call.call_id))
-                .await
-            {
+            match self.relator.relate(arguments, &source_id).await {
                 Ok(created) => {
                     relations_recorded += 1;
                     relation_results.push(json!({
@@ -689,9 +681,8 @@ impl BlackboardRelateTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: RelateArguments = parse_arguments(&call, RELATE_EXAMPLE)?;
-        let relation = self
-            .relate(arguments, &provenance_source_id(&call.call_id))
-            .await?;
+        let source_id = provenance_source_id(&call)?;
+        let relation = self.relate(arguments, &source_id).await?;
         bounded_json_output(
             &call,
             json!({

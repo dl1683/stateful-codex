@@ -61,6 +61,7 @@ impl ObligationUpdateTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: Arguments = parse_arguments(&call, EXAMPLE)?;
+        let source_id = provenance_source_id(&call)?;
         let has_forward_work = !arguments.packet.next.is_empty()
             || !arguments.packet.blockers.is_empty()
             || !arguments.packet.requested_judgment.is_empty();
@@ -101,7 +102,7 @@ impl ObligationUpdateTool {
                     project_id: self.project_id.clone(),
                     run_id: run.id,
                     packet: arguments.packet,
-                    provenance_source_id: provenance_source_id(&call.call_id),
+                    provenance_source_id: source_id,
                 },
             )
             .await
