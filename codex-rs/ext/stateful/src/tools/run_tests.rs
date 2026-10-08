@@ -121,7 +121,7 @@ async fn minimal_lookup_completion_persists_once_without_an_obligation() {
 
     let output = fixture
         .tool
-        .handle_call(call(&lookup_completion(fixture.run.revision)))
+        .handle_guided(call(&lookup_completion(fixture.run.revision)))
         .await
         .expect("lookup completion succeeds");
 
@@ -166,7 +166,7 @@ async fn minimal_lookup_completion_persists_once_without_an_obligation() {
 
     let repeated = fixture
         .tool
-        .handle_call(call(&lookup_completion(completed.revision)))
+        .handle_guided(call(&lookup_completion(completed.revision)))
         .await;
     assert!(matches!(
         repeated,
@@ -193,7 +193,7 @@ async fn durable_only_fields_are_rejected_without_mutation() {
         let mut arguments = lookup_completion(fixture.run.revision);
         arguments[field] = value;
 
-        let rejected = fixture.tool.handle_call(call(&arguments)).await;
+        let rejected = fixture.tool.handle_guided(call(&arguments)).await;
 
         assert!(
             matches!(rejected, Err(FunctionCallError::RespondToModel(_))),
@@ -209,7 +209,7 @@ async fn stale_revision_cannot_complete_a_lookup() {
 
     let rejected = fixture
         .tool
-        .handle_call(call(&lookup_completion(fixture.run.revision + 1)))
+        .handle_guided(call(&lookup_completion(fixture.run.revision + 1)))
         .await;
 
     assert!(matches!(
