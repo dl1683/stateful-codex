@@ -98,6 +98,15 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   new source groups. Contract: `sc_dogfood/integrate/capture/CONTRACT.md`
   (capture-c1-v3). Linux: 0 new failures.
 
+- **Capture C3, model proposals and exact source** (`3fe03dfa6`..`42370b992`):
+  the model can record a bounded, non-applied proposal citing byte ranges of the
+  same sealed user turn (never assistant text, summaries or compaction output);
+  proposals carry verbatim detail and temporal spans, are stored atomically
+  without user authority, and are labelled as proposals. Cut for now (no
+  post-hook publication fence exists, so a result held by a hook could outlive a
+  Forget): automatic exact-source/source-search recall and automatic proposal
+  recall. Linux: 0 new failures.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
