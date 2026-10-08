@@ -765,3 +765,6 @@ async fn c2r1_public_conversation_fallbacks_exclude_forgotten_bytes_after_restar
 
 #[path = "stateful_capture_repair3_tests.rs"]
 mod repair3_tests;
+
+#[path = "stateful_capture_route_repair3_tests.rs"]
+mod route_repair3_tests;

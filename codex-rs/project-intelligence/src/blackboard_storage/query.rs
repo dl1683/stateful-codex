@@ -254,9 +254,10 @@ impl BlackboardStore {
              WHERE entry.project_id = ",
         );
         builder.push_bind(&query.project_id);
+        builder.push(" AND revision.state = 'active'");
+        builder.push(super::identity::ENTRY_SOURCE_ELIGIBILITY);
         builder.push(
-            " AND revision.state = 'active'
-              GROUP BY requested_sources.context_map_entry_id
+            " GROUP BY requested_sources.context_map_entry_id
               ORDER BY requested_sources.context_map_entry_id",
         );
         let rows = builder
