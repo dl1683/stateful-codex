@@ -34,6 +34,7 @@ mod current_words;
 mod fence;
 mod identity;
 mod knowledge;
+mod proposal_time;
 mod query;
 mod relation;
 mod review;
@@ -581,6 +582,8 @@ enum_codec!(provenance_name, parse_provenance, BlackboardProvenanceKind, {
 
 #[derive(Debug, Error)]
 pub enum BlackboardStoreError {
+    #[error("budget_insufficient: increase the response budget; no continuation issued")]
+    SourceBudgetInsufficient,
     #[error("invalid, unavailable or changed original source; nothing was admitted")]
     InvalidSource,
     #[error("source is excluded from automatic recall; archival history remains preserved")]
