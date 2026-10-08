@@ -16,7 +16,7 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
-fn source_handles(value: &Value) -> Option<Value> {
+pub(super) fn source_handles(value: &Value) -> Option<Value> {
     match value {
         Value::String(text) => text
             .split_once("<capture_sources>")
@@ -29,7 +29,7 @@ fn source_handles(value: &Value) -> Option<Value> {
 }
 
 #[tokio::test]
-async fn c3_public_first_turn_proposals_exact_read_recall_forget_and_cold_retry() -> Result<()> {
+async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() -> Result<()> {
     let (home, mut server, project, thread, responses_server) =
         super::capture_sources_tests::setup().await?;
     let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
@@ -56,13 +56,21 @@ async fn c3_public_first_turn_proposals_exact_read_recall_forget_and_cold_retry(
                 1 => responses::sse(vec![responses::ev_assistant_message("answer", "The note records the purchase."), responses::ev_completed("answer")]),
                 2 => responses::sse(vec![responses::ev_function_call("sources", "conversation_read", &json!({"sourceQuery":"QX-704"}).to_string()), responses::ev_completed("search")]),
                 3 => {
-                    let output = tool_output(&body, "sources").unwrap();
-                    let seal = &output["ranges"][0]["seal"];
+                    let handles = source_handles(&calls[0]).unwrap();
+                    let seal = &handles["handles"][0];
                     responses::sse(vec![responses::ev_function_call("exact", "conversation_read", &json!({
-                        "sourceId":seal["exactSourceLocator"],"digest":seal["digest"],"sourceRevision":seal["observation"]["sourceRevision"]
+                        "sourceId":seal[0],"digest":seal[1],"sourceRevision":seal[2]
                     }).to_string()),responses::ev_completed("read")])
                 }
                 4 => responses::sse(vec![responses::ev_function_call("recall", "memory_read", &json!({"question":"Mara prototype"}).to_string()),responses::ev_completed("recall")]),
+                6 => responses::sse(vec![responses::ev_function_call("excluded-search", "conversation_read", &json!({"sourceQuery":"QX-704"}).to_string()), responses::ev_completed("excluded-search")]),
+                7 => {
+                    let handles = source_handles(&calls[0]).unwrap();
+                    let seal = &handles["handles"][0];
+                    responses::sse(vec![responses::ev_function_call("excluded-exact", "conversation_read", &json!({
+                        "sourceId":seal[0],"digest":seal[1],"sourceRevision":seal[2]
+                    }).to_string()),responses::ev_completed("excluded-exact")])
+                }
                 _ => responses::sse(vec![responses::ev_assistant_message("answer", "The attributed note names QX-704."), responses::ev_completed("answer")]),
             };
             ResponseTemplate::new(200).insert_header("content-type","text/event-stream").set_body_string(response)
@@ -112,7 +120,20 @@ async fn c3_public_first_turn_proposals_exact_read_recall_forget_and_cold_retry(
             .len(),
         0
     );
-    // Normal later recall can find details absent from both the derived summary and final answer.
+    // Native source storage survives the model-recall cut, including summary-omitted details.
+    assert_eq!(
+        store
+            .read_source_page(
+                &project,
+                &proposal.source.source_id,
+                &proposal.source.digest,
+                proposal.source.source_revision,
+                /*offset*/ 0
+            )
+            .await?
+            .exact_text,
+        text
+    );
     server
         .start_turn_and_wait_for_completion(TurnStartParams {
             thread_id: thread.clone(),
@@ -124,8 +145,24 @@ async fn c3_public_first_turn_proposals_exact_read_recall_forget_and_cold_retry(
         })
         .await?;
     let bodies = calls.lock().unwrap().clone();
-    let exact = tool_output(&bodies[4], "exact").unwrap();
-    assert_eq!(exact["text"], json!(text));
+    for (body, call, field) in [
+        (&bodies[3], "sources", "sourceQuery"),
+        (&bodies[4], "exact", "digest"),
+    ] {
+        let output = body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["call_id"] == call && item["type"] == "function_call_output")
+            .unwrap()["output"]
+            .as_str()
+            .unwrap();
+        assert!(
+            output.contains("unknown field") && output.contains(field),
+            "{output}"
+        );
+        assert!(!output.contains("QX-704") && !output.contains("Meridian M-17"));
+    }
     let recall = tool_output(&bodies[5], "recall").unwrap();
     assert_eq!(recall["entries"][0]["applied"], json!(false));
     assert_eq!(
@@ -134,6 +171,37 @@ async fn c3_public_first_turn_proposals_exact_read_recall_forget_and_cold_retry(
     );
     let forget = server.send_request("statefulMemory/forget",Some(json!({"threadId":thread,"expectedProjectId":project,"entryId":id.as_str(),"expectedRevision":1,"clientActionId":"forget-proposal"}))).await?;
     let _: StatefulMemoryForgetResponse = server.read_response(forget).await?;
+    let before = super::model_retirement_tests::snapshot(&sqlite).await?;
+    server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.clone(),
+            input: vec![UserInput::Text {
+                text: "independent unrelated control".into(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let bodies = calls.lock().unwrap().clone();
+    for (body, call) in [
+        (&bodies[7], "excluded-search"),
+        (&bodies[8], "excluded-exact"),
+    ] {
+        let output = body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["call_id"] == call && item["type"] == "function_call_output")
+            .unwrap()["output"]
+            .as_str()
+            .unwrap();
+        assert!(output.contains("unknown field"));
+        assert!(!output.contains("QX-704") && !output.contains("Meridian M-17"));
+    }
+    assert_eq!(
+        super::model_retirement_tests::snapshot(&sqlite).await?,
+        before
+    );
     assert!(
         store
             .read_source_page(
@@ -156,6 +224,18 @@ async fn c3_public_first_turn_proposals_exact_read_recall_forget_and_cold_retry(
             .await?
             .ranges
             .is_empty()
+    );
+    assert!(
+        reopened
+            .search_source_ranges(
+                &project,
+                "independent unrelated control",
+                /*after*/ None
+            )
+            .await?
+            .ranges
+            .iter()
+            .any(|range| range.exact_text.contains("independent unrelated control"))
     );
     let admission = codex_state::ThreadProjectAdmission::acquire(
         &sqlite,

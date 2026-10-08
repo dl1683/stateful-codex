@@ -13,7 +13,6 @@ mod obligation;
 mod run;
 mod run_read;
 mod source_proposals;
-mod source_read;
 mod steering;
 
 use std::sync::Arc;
@@ -75,7 +74,6 @@ pub(super) fn project_intelligence_tools(
         )),
         Arc::new(conversation_read::ConversationReadTool::new(
             project_id.clone(),
-            thread_id.clone(),
             projects.clone(),
             services.clone(),
         )),

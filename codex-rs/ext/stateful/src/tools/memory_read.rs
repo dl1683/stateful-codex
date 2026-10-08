@@ -704,7 +704,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Recall missing earlier work once: matching knowledge, status/history, sources/dates and turns. Evidence needs no confirmation read. Proposals are source recall, not settled decisions. For omitted exact details search conversation_read sourceQuery.".to_string(),
+            description: "Recall missing earlier work once: matching knowledge, status/history, sources/dates and turns. Evidence needs no confirmation read. Proposals are source recall, not settled decisions. Original-source search and exact-source recall are unavailable.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

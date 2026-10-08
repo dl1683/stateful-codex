@@ -60,32 +60,21 @@ struct Arguments {
     cursor: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ReadArguments {
-    Source(super::source_read::SourceRead),
-    Search(super::source_read::SourceSearch),
-    Conversation(Arguments),
-}
-
 pub(super) struct ConversationReadTool {
     services: crate::services::ProjectIntelligenceServices,
     project_id: String,
-    thread_id: String,
     threads: Arc<dyn ThreadStore>,
 }
 
 impl ConversationReadTool {
     pub(super) fn new(
         project_id: String,
-        thread_id: String,
         threads: Arc<dyn ThreadStore>,
         services: crate::services::ProjectIntelligenceServices,
     ) -> Self {
         Self {
             services,
             project_id,
-            thread_id,
             threads,
         }
     }
@@ -99,37 +88,7 @@ impl ConversationReadTool {
                 "source/history read exceeds the 32 KiB input bound",
             ));
         }
-        let arguments: ReadArguments = parse_arguments(&call)?;
-        let _admission = if matches!(
-            &arguments,
-            ReadArguments::Source(_) | ReadArguments::Search(_)
-        ) {
-            Some(
-                codex_state::ThreadProjectAdmission::acquire(
-                    self.services.sqlite(),
-                    codex_protocol::ThreadId::from_string(&self.thread_id).map_err(respond)?,
-                    &self.project_id,
-                )
-                .await
-                .map_err(respond)?
-                .ok_or_else(|| {
-                    respond("source read refused: authoritative project binding changed")
-                })?,
-            )
-        } else {
-            None
-        };
-        let arguments = match arguments {
-            ReadArguments::Source(arguments) => {
-                let store = self.services.blackboard().await.map_err(respond)?;
-                return super::source_read::read(store, &self.project_id, arguments, &call).await;
-            }
-            ReadArguments::Search(arguments) => {
-                let store = self.services.blackboard().await.map_err(respond)?;
-                return super::source_read::search(store, &self.project_id, arguments, &call).await;
-            }
-            ReadArguments::Conversation(arguments) => arguments,
-        };
+        let arguments: Arguments = parse_arguments(&call)?;
         let Some(thread_id) = arguments.thread_id else {
             if arguments.turn_id.is_some() || arguments.part.is_some() {
                 return Err(respond("turnId and part require threadId"));
@@ -437,14 +396,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ConversationReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Project history: {} threads, {threadId} turns, {threadId,turnId,part} summary. {sourceQuery,sourceCursor?} searches original parts, follow after. {sourceId,digest,sourceRevision,offset} exact bytes, follow nextOffset. Source recall is not standing rules.".to_string(),
+            description: "Project history: {} threads, {threadId} turns, {threadId,turnId,part} summary. Original-source search and exact-source recall are unavailable. Source recall is not standing rules.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "sourceId":{"type":"string"},"digest":{"type":"string"},"sourceRevision":{"type":"integer"},
-                    "sourceQuery":{"type":"string"},"sourceCursor":{"type":"object"},
                     "threadId": {"type": "string"},
                     "turnId": {"type": "string"},
                     "part": {"type": "string", "enum": ["user", "answer"]},
