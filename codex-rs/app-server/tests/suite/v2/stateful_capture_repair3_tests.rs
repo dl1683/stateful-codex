@@ -40,8 +40,9 @@ async fn c2r3_public_corrected_successor_root_preserves_history_after_forget_and
         if words != direct_words {
             // Seed valid links to the real captured ingress part. Public Forget below
             // must exclude that part without needing a wording match on the predecessor.
-            sqlx::query("INSERT INTO capture_entry_sources SELECT ?, source.source_id, 0, chunk.end_byte, '\"evidence\"' FROM capture_sources AS source JOIN capture_source_chunks AS chunk ON chunk.source_id = source.source_id AND chunk.start_byte = 0 WHERE source.project_id = ? LIMIT 1")
+            let linked = sqlx::query("INSERT INTO capture_entry_sources SELECT ?, source.source_id, 0, chunk.end_byte, '\"evidence\"' FROM capture_sources AS source JOIN capture_source_chunks AS chunk ON chunk.source_id = source.source_id AND chunk.start_byte = 0 WHERE source.project_id = ? LIMIT 1")
                 .bind(original.id.as_str()).bind(&project).execute(&pool).await?;
+            assert_eq!(linked.rows_affected(), 1);
         }
         let corrected: StatefulMemoryCorrectResponse = server
             .request(|request_id| ClientRequest::StatefulMemoryCorrect {
@@ -83,6 +84,15 @@ async fn c2r3_public_corrected_successor_root_preserves_history_after_forget_and
             direct.item.revision,
         )
         .await?;
+        if words != direct_words {
+            let exclusions: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM capture_source_exclusions WHERE entry_id = ?",
+            )
+            .bind(&direct.item.entry_id)
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(exclusions, 1);
+        }
         assert!(!store.entry_source_eligible(&project, &original.id).await?);
         pool.close().await;
         let archived = store.get_entry(&project, &original.id).await?.unwrap();

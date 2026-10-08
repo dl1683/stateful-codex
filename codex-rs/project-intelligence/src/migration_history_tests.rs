@@ -41,11 +41,7 @@ fn prefix(version: i64) -> Migrator {
 
 #[tokio::test]
 async fn c2r3_populated_0021_upgrade_preserves_live_body_value_unit_and_genuine_retirement() {
-    for (field, category) in [
-        ("content", "note"),
-        ("structured_value", "structured_value"),
-        ("structured_unit", "structured_unit"),
-    ] {
+    for field in ["content", "structured_value", "structured_unit"] {
         let home = TempDir::new().unwrap();
         let sqlite = SqliteConfig::new_for_testing(home.path().abs());
         seed(&sqlite, &prefix(/*version*/ 21)).await;
@@ -65,14 +61,21 @@ async fn c2r3_populated_0021_upgrade_preserves_live_body_value_unit_and_genuine_
             .execute(&pool).await.unwrap();
         sqlx::query(AssertSqlSafe(format!("UPDATE blackboard_entry_revisions SET {field} = 'Current cedar fact.' WHERE entry_id = 'legacy' AND revision = 2")))
             .execute(&pool).await.unwrap();
-        for (words, retired) in [("Old meridian fact.", 1_i64), ("Current cedar fact.", 0)] {
+        // The 0021 writer tracked body aliases only. Structured aliases/proofs must
+        // remain absent in this supported pre-0022 fixture.
+        let wording = if field == "content" {
+            vec![("Old meridian fact.", 1_i64), ("Current cedar fact.", 0)]
+        } else {
+            vec![("Independent body.", 0)]
+        };
+        for (words, retired) in wording {
             sqlx::query("INSERT INTO capture_identity_aliases VALUES ('project', 'legacy', ?, ?, 'agent', '', ?, ?, ?)")
-                .bind(crate::CAPTURE_NORMALIZER_VERSION).bind(category)
+                .bind(crate::CAPTURE_NORMALIZER_VERSION).bind("note")
                 .bind(crate::canonical_capture_words(words)).bind(crate::retirement_capture_words(words))
                 .bind(retired).execute(&pool).await.unwrap();
         }
         // Simulate completed applied-0021 coverage; 0022 must repin it without replay.
-        sqlx::query("UPDATE capture_identity_coverage SET after_rowid = watermark WHERE project_id = 'project'")
+        sqlx::query("INSERT INTO capture_identity_coverage(project_id, after_rowid, watermark) SELECT 'project', MAX(rowid), MAX(rowid) FROM blackboard_entry_revisions WHERE 1 ON CONFLICT(project_id) DO UPDATE SET after_rowid = excluded.after_rowid, watermark = excluded.watermark")
             .execute(&pool).await.unwrap();
         let before: Vec<String> = sqlx::query_scalar("SELECT json_array(entry_id, revision, kind, content, structured_value, structured_unit, confidence_basis_points, verification, importance, root_promotion, state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms, agent_run_id) FROM blackboard_entry_revisions ORDER BY revision")
             .fetch_all(&pool).await.unwrap();

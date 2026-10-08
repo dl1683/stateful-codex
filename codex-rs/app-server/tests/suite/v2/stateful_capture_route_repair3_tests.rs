@@ -1,6 +1,7 @@
 //! Model-delivered usable route coverage.
 use super::*;
 use pretty_assertions::assert_eq;
+use sha2::Digest;
 
 async fn route_query(
     server: &mut TestAppServer,
@@ -74,7 +75,10 @@ async fn c2r3_public_route_counts_eligible_structured_knowledge_and_reports_upgr
         )
         .await?;
     let file = pi::HierarchyNodeId::parse("evidence-file")?;
-    let fingerprint = pi::SourceFingerprint::parse("sha256:fixture")?;
+    let bytes = b"Fixture evidence.\n";
+    std::fs::write(home.path().join("evidence.txt"), bytes)?;
+    let fingerprint =
+        pi::SourceFingerprint::parse(format!("sha256:{:x}", sha2::Sha256::digest(bytes)))?;
     hierarchy
         .create_node(
             file.clone(),
@@ -121,6 +125,7 @@ async fn c2r3_public_route_counts_eligible_structured_knowledge_and_reports_upgr
             .await?;
     }
     let initial = route_query(&mut server, &responses_server, &thread, "fixture").await?;
+    assert_eq!(initial["data"][0]["freshness"], json!("current"));
     assert_eq!(
         initial["data"][0]["knownKnowledge"],
         json!({"rootEntries":2,"deeperEntries":0})
