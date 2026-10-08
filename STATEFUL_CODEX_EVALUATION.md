@@ -52,6 +52,7 @@ pre-cleanup documents at `46d9071051445583c00b21e0163d373372d1a966`.
 | SC-EVAL-033 | 09-28/29 | Matched behaviour study | Fresh-thread best on data room; overhead on trivial asks |
 | SC-EVAL-034 | 09-30 | 25-question model eval | -13.4% cost; same-day negative findings |
 | SC-EVAL-035 | 10-02/03 | Hands-on campaign | Helps across fresh threads; not yet within one run |
+| SC-EVAL-036 | 10-07 | Cloud benchmark program, first pass (Stateful only) | TB2.1 76.6%, SWE-bench Verified 91.6%, GAIA 81.2%, LoCoMo J 84.1% (proxy judge); no regression, no Stateful advantage shown |
 
 Unnumbered records: live interface validation (09-21/22), project-state
 instrumentation (09-22), fresh rendered browser validation (09-22), the
@@ -2753,3 +2754,70 @@ workspace-write in both arms.
 Per-test notes, tables, transcripts and review files are kept outside the repository in the campaign folder
 (`sc_dogfood/campaign2/<test>/NOTES.md`, harness folders `hz1_harness`-`hz3_harness`, and the consolidated
 `campaign2/FINDINGS.md`).
+
+## SC-EVAL-036: cloud benchmark program, first pass (2026-10-07)
+
+Status: external public benchmarks, Stateful Codex only (no ordinary-Codex arm). Every comparison with a published
+number is descriptive: the published rows use a released Codex build or a different harness, judge or model setting.
+Partial and proxy-judged scores are labelled. All artifacts (trajectories, session logs, patches, Stateful state
+exports, verifier and judge input/output, per-trial hardware samples) are kept in the private bucket
+`gs://sc-bench-iqidis-artifacts/runs/<run>/` with credential redaction verified, pending publication.
+
+**Setup.** Build `stateful/main` 83eee86b6 (codex-cli 0.159.2), packaged with the repository's own portable recipe
+(`stateful_harbor/Dockerfile.bundle`; x86_64 sha256 `d3efa073...`, aarch64 `a4b8a63f...` with only the target triple
+changed). Model `gpt-5.6-luna` through the ChatGPT login; workers receive a copy of the login with the refresh token
+removed, so concurrent workers can never rotate the laptop's login. Harbor commit `15da91c1`, agent
+`stateful_harbor.stateful_codex:StatefulCodex` (`codex exec --stateful autonomous`), one fresh container and fresh
+Stateful store per trial. Google Cloud workers (n2-standard-16/32, t2a ARM), one Harbor job shard per VM; per-trial
+CPU, memory, disk I/O, writable-layer size and network bytes from cgroup v2 and container network namespaces sampled
+every 2 s. Infrastructure failures that prevent the agent from producing a scorable attempt are classified
+"infra-invalid", listed, and replaced once by a fresh trial; a scored trial (pass, fail, agent timeout) is never
+replaced. Task lists were frozen from the pinned dataset refs before any run.
+
+### Finished results
+
+| Benchmark (public split) | Protocol | Score | Published reference (descriptive) |
+|---|---|---:|---|
+| Terminal-Bench 2.1 (89 tasks) | official 89 x 5 trials, effort max | **341/445 = 76.6%** (Wilson 72.5-80.3; task-clustered SE 3.6 pp) | released Codex 0.144.1 + Luna max: 75.73% +/- 1.32 (445 trials) |
+| SWE-bench Verified (500, Harbor) | 1 attempt, effort max | **458/500 = 91.6%** (Wilson 88.8-93.7) | mini-SWE-agent + Luna max 93.0 (not re-verified) |
+| GAIA validation (165, Harbor) | 1 attempt, effort max, Harbor exact-match verifier | **134/165 = 81.2%** (Wilson 74.6-86.4) | none verified for Codex |
+| LoCoMo (10 conversations, 1,986 Q) | memory track: snapshot-per-question isolation, effort high | **J 84.1%** (cat 1-4, 1,533 judged; Luna proxy judge) / official F1 0.490 / adversarial 50.2% | Mem0 platform, same judge prompt with gpt-5: 91.6% (top-200), 82.7% (top-50) |
+
+- Infra-invalid trials replaced: TB2.1 24 (21 agent-setup apt timeouts during Cloud NAT port starvation, 2 network,
+  1 exit before any model response); SWE-bench Verified 54 (agent-setup apt timeouts); GAIA 0.
+- Memory protocol (user decision 2026-10-07, used instead of waiting for SC-PKRO-001): ingestion runs one fresh
+  Stateful session per history unit with memory writable; the store (CODEX_HOME sqlite including WAL/SHM and the
+  project directory) is then snapshotted and hashed; each question runs in a fresh session on its own copy of the
+  snapshot mounted at the same path, memory writable within the question, copy discarded. The history is never placed
+  in the project. Snapshot hashes are recorded per question.
+- LoCoMo "J" uses the mem0 memory-benchmarks unified judge prompt verbatim with a fresh Luna session per question:
+  Luna judge, not the official judge; unofficial proxy score. F1 follows snap-research `evaluation.py`.
+
+### What this does and does not establish
+
+- On short, single-session capability benchmarks (TB2.1, SWE-bench Verified, GAIA) Stateful Codex performs at the level
+  of the published ordinary-Codex/Luna references. This is evidence of no regression, not of a Stateful advantage; no
+  matched ordinary arm was run.
+- LoCoMo shows that answers can be recovered from Stateful memory alone after per-session ingestion (84% J), below Mem0's
+  best published configuration with a different answerer and judge. Error analysis points to ingestion summaries that
+  keep the gist but drop specific facts (names, places), and to temporal (74.8%) and open-domain (64.6%) questions.
+- Hardware is not the cost driver: TB2.1 used 30 CPU core-hours over 80 trial-hours (p95 peak RAM 5.3 GB); SWE-bench
+  Verified 11.7 core-hours over 66 trial-hours (p95 1.6 GB). Model time and the account's weekly quota bind first
+  (about 0.04 weekly-quota points per concurrent session-hour; turn-level 429 retries appeared near 550-600 concurrent
+  sessions).
+
+### Product findings
+
+- Stateful autonomous mode refuses any prompt over 16 KiB ("run goal must be non-empty, bounded, trimmed", stateful-runtime
+  `MAX_GOAL_BYTES`), killing the run before it starts; ordinary Codex has no such limit. Hit by long LLM-judge prompts,
+  4 SWE-Marathon instructions (19-24 KB) and DolphinBench message morgan/001070 (18 KB), which is recorded as an
+  unprocessed message.
+- Two TB4.0 trials connected to the API endpoint without a token (401) instead of using the ChatGPT login inside the
+  task container; they failed closed and are classified infra-invalid pending diagnosis.
+
+### In progress at the time of this entry
+
+DolphinBench (official runner, 3 personas), MemoryArena (travel 270, math 40, physics 20; shopping pending its environment
+stack; progressive search blocked by its OpenAI Embeddings dependency), SWE-bench Pro public V1, TB4.0, DeepSWE, Harvey
+LAB (preregistered 72-task stratified subset, Luna proxy judge through unmodified rewardkit), Horizon public examples;
+LongMemEval-S, BEAM, MemoryAgentBench and MINTEval adapters are ready and queued against the weekly quota budget.
