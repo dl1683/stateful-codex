@@ -89,9 +89,9 @@ async fn new_context_components_are_bounded_and_identity_reads_select_only_neede
         KnowledgeCategory::Note,
         KnowledgeAuthority::AssistantReported,
     );
-    context.end_condition = Some("Ã©".repeat(/*n*/ 1000));
+    context.end_condition = Some("\u{e9}".repeat(/*n*/ 1000));
     context.group_id = Some("g".repeat(/*n*/ 512));
-    context.payload = Some(format!("{{\"speaker\":\"{}\"}}", "Ã©".repeat(/*n*/ 80)));
+    context.payload = Some(format!("{{\"speaker\":\"{}\"}}", "\u{e9}".repeat(/*n*/ 80)));
     let mut value = rule("Ordinary note");
     value.kind = BlackboardKind::Note;
     value.provenance.kind = BlackboardProvenanceKind::Agent;
@@ -147,7 +147,7 @@ async fn new_context_components_are_bounded_and_identity_reads_select_only_neede
     let before = snapshot(&store).await;
     for unsupported in [
         KnowledgeContext {
-            end_condition: Some("Ã©".repeat(/*n*/ 1001)),
+            end_condition: Some("\u{e9}".repeat(/*n*/ 1001)),
             ..context.clone()
         },
         KnowledgeContext {
@@ -159,7 +159,7 @@ async fn new_context_components_are_bounded_and_identity_reads_select_only_neede
             ..context.clone()
         },
         KnowledgeContext {
-            payload: Some(format!("{{\"speaker\":\"{}\"}}", "Ã©".repeat(/*n*/ 81))),
+            payload: Some(format!("{{\"speaker\":\"{}\"}}", "\u{e9}".repeat(/*n*/ 81))),
             ..context.clone()
         },
         KnowledgeContext {
@@ -244,10 +244,7 @@ async fn legacy_context_materialization_is_bounded_before_root_policy_and_writer
             ),
             "speaker" => (
                 "payload",
-                format!(
-                    "{{\"speaker\":\"{}\"}}",
-                    "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©".repeat(/*n*/ 81)
-                ),
+                format!("{{\"speaker\":\"{}\"}}", "\u{e9}".repeat(/*n*/ 81)),
             ),
             other => (other, "x".repeat(/*n*/ 1048576)),
         };
