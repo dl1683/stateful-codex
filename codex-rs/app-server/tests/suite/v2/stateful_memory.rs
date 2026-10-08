@@ -40,6 +40,9 @@ mod migration_history_tests;
 #[path = "stateful_memory_repair_tests.rs"]
 mod repair_tests;
 
+#[path = "stateful_model_retirement_tests.rs"]
+mod model_retirement_tests;
+
 #[tokio::test]
 async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
