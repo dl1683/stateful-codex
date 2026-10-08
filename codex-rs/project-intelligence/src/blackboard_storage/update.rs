@@ -118,7 +118,10 @@ impl BlackboardStore {
             root_promotion: update.root_promotion,
             evidence: update.evidence,
             premises: update.premises,
-            provenance: update.provenance,
+            provenance: match actor {
+                WriterActor::Model => current.value.provenance.clone(),
+                WriterActor::Host => update.provenance,
+            },
         };
         value.validate()?;
         let preserves_historical_evidence = value.evidence == current.value.evidence

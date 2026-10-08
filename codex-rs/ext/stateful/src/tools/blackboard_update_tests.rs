@@ -211,6 +211,86 @@ fn mutation(value: serde_json::Value) -> MutationArguments {
 }
 
 #[tokio::test]
+async fn non_agent_and_unknown_authority_targets_refuse_every_model_mutation_route() {
+    let (_home, tool, entry_id, successor_id, project_root, _receipt_id) = fixture().await;
+    let store = tool.services.blackboard().await.unwrap();
+    let template = store
+        .get_entry(PROJECT_ID, &entry_id)
+        .await
+        .unwrap()
+        .unwrap();
+    for (origin, authority) in [
+        (BlackboardProvenanceKind::Import, None),
+        (BlackboardProvenanceKind::Maintenance, None),
+        (
+            BlackboardProvenanceKind::Agent,
+            Some(codex_project_intelligence::KnowledgeAuthority::LegacyUnknown),
+        ),
+    ] {
+        let mut value = template.value.clone();
+        value.provenance.kind = origin;
+        let id = BlackboardEntryId::parse(format!("protected-{origin:?}")).unwrap();
+        let target = store.create_entry(id.clone(), value).await.unwrap();
+        if let Some(authority) = authority {
+            store
+                .record_context(
+                    &target,
+                    &codex_project_intelligence::KnowledgeContext::new(
+                        codex_project_intelligence::KnowledgeCategory::Note,
+                        authority,
+                    ),
+                    /*change*/ None,
+                )
+                .await
+                .unwrap();
+        }
+        for change in [
+            json!({"action":"revise", "kind":"fact"}),
+            json!({"action":"revise", "content":"Model-authored replacement."}),
+            json!({"action":"setRootPromotion", "rootPromotion":"promoted"}),
+            json!({"action":"supersede", "successorEntryId":successor_id.to_string()}),
+            json!({"action":"retire"}),
+        ] {
+            let mut change = change;
+            change["entryId"] = json!(id.to_string());
+            change["expectedRevision"] = json!(target.revision);
+            let error = tool
+                .apply_mutation(
+                    mutation(change),
+                    "model-mutate",
+                    std::slice::from_ref(&project_root),
+                )
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("only assistant-origin"));
+            assert_eq!(
+                store.get_entry(PROJECT_ID, &id).await.unwrap(),
+                Some(target.clone())
+            );
+        }
+        let error = super::super::blackboard_supersede::resolve_superseded(
+            store,
+            &crate::visible_root::VisibleRootRegistry::default(),
+            PROJECT_ID,
+            "thread-1",
+            vec![
+                super::super::blackboard_supersede::SupersedeReference::Entry {
+                    entry_id: id.to_string(),
+                    revision: target.revision,
+                },
+            ],
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("requires assistant-origin"));
+        assert_eq!(
+            store.get_entry(PROJECT_ID, &id).await.unwrap(),
+            Some(target)
+        );
+    }
+}
+
+#[tokio::test]
 async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
     let (_temp_dir, tool, entry_id, successor_id, project_root, receipt_id) = fixture().await;
     let promoted = tool
@@ -259,7 +339,6 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
         source_fingerprint: fingerprint(),
         line_range: Some(EvidenceLineRange { start: 1, end: 1 }),
     }];
-    expected_value.provenance.source_id = "turn-revise".to_string();
     assert_eq!(revised.value, expected_value);
 
     let unreceipted_error = tool
@@ -331,12 +410,28 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
         (BlackboardEntryState::Superseded, Some(successor_id.clone()))
     );
 
+    let successor = tool
+        .services
+        .blackboard()
+        .await
+        .unwrap()
+        .get_entry(PROJECT_ID, &successor_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let reclassified = tool.apply_mutation(
+        mutation(json!({"action":"revise", "entryId":successor_id.to_string(), "expectedRevision":1, "kind":"fact"})),
+        "turn-reclassify", std::slice::from_ref(&project_root),
+    ).await.expect("assistant kind-only revision succeeds");
+    let mut expected = successor.value;
+    expected.kind = BlackboardKind::Fact;
+    assert_eq!(reclassified.value, expected);
     let retired = tool
         .apply_mutation(
             mutation(json!({
                 "action": "retire",
                 "entryId": successor_id,
-                "expectedRevision": 1
+                "expectedRevision": reclassified.revision
             })),
             "turn-retire",
             std::slice::from_ref(&project_root),
@@ -344,6 +439,7 @@ async fn lifecycle_mutations_promote_revise_supersede_and_retire_entries() {
         .await
         .expect("successor retires");
     assert_eq!(retired.state, BlackboardEntryState::Tombstoned);
+    assert_eq!(retired.value, expected);
 }
 
 #[tokio::test]

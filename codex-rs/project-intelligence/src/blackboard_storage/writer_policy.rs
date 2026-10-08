@@ -24,19 +24,19 @@ pub(super) async fn check_model_target(
     entry: &BlackboardEntry,
     operation: ModelOperation,
 ) -> Result<(), BlackboardStoreError> {
-    if entry.value.provenance.kind == BlackboardProvenanceKind::User {
+    // Classification or text edits cannot establish assistant origin for historical memory.
+    // Judge the current target under the writer lock for every mutation and retry.
+    if entry.value.provenance.kind != BlackboardProvenanceKind::Agent {
         return Err(BlackboardStoreError::ModelMutationRefused);
     }
     let context = policy_of(connection, &entry.value.project_id, entry.id.as_str()).await?;
-    if context
-        .as_ref()
-        .is_some_and(|context| context.authority == KnowledgeAuthority::HumanDirect)
-        || (matches!(operation, ModelOperation::Retirement)
-            && (entry.value.provenance.kind != BlackboardProvenanceKind::Agent
-                || context.is_some_and(|context| {
-                    context.authority == KnowledgeAuthority::LegacyUnknown
-                        || context.category == KnowledgeCategory::RuledOut
-                })))
+    if context.as_ref().is_some_and(|context| {
+        matches!(
+            context.authority,
+            KnowledgeAuthority::HumanDirect | KnowledgeAuthority::LegacyUnknown
+        )
+    }) || (matches!(operation, ModelOperation::Retirement)
+        && context.is_some_and(|context| context.category == KnowledgeCategory::RuledOut))
     {
         return Err(BlackboardStoreError::ModelMutationRefused);
     }

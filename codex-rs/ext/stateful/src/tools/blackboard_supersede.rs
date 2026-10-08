@@ -2,7 +2,7 @@
 //!
 //! An E alias resolves only through what this thread's packet actually showed (the entry
 //! and the revision shown), never against a newer projection; an entry ID must carry the
-//! revision the caller saw. Model succession never replaces direct-human memory.
+//! revision the caller saw. Model succession replaces only assistant-origin memory.
 
 use codex_extension_api::FunctionCallError;
 use codex_project_intelligence::BlackboardEntry;
@@ -71,17 +71,21 @@ pub(super) async fn committed_succession(
     };
     let replaced = store.superseded_by(project_id, id).await.map_err(respond)?;
     for predecessor in &replaced {
-        if predecessor.value.provenance.kind == BlackboardProvenanceKind::User
+        if predecessor.value.provenance.kind != BlackboardProvenanceKind::Agent
             || store
                 .knowledge_policy(project_id, &predecessor.id)
                 .await
                 .map_err(respond)?
                 .is_some_and(|context| {
-                    context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+                    matches!(
+                        context.authority,
+                        codex_project_intelligence::KnowledgeAuthority::HumanDirect
+                            | codex_project_intelligence::KnowledgeAuthority::LegacyUnknown
+                    )
                 })
         {
             return Err(respond(
-                "direct-human memory cannot be replaced by model succession; use an explicit memory correction",
+                "model succession requires assistant-origin memory with known authority; imported, unknown-origin and direct-human memory require explicit user memory controls",
             ));
         }
     }
@@ -199,13 +203,17 @@ pub(super) async fn resolve_superseded(
             .knowledge_policy(project_id, &id)
             .await
             .map_err(respond)?;
-        if current.value.provenance.kind == BlackboardProvenanceKind::User
+        if current.value.provenance.kind != BlackboardProvenanceKind::Agent
             || context.as_ref().is_some_and(|context| {
-                context.authority == codex_project_intelligence::KnowledgeAuthority::HumanDirect
+                matches!(
+                    context.authority,
+                    codex_project_intelligence::KnowledgeAuthority::HumanDirect
+                        | codex_project_intelligence::KnowledgeAuthority::LegacyUnknown
+                )
             })
         {
             return Err(respond(
-                "direct-human memory cannot be replaced by model succession; use an explicit memory correction",
+                "model succession requires assistant-origin memory with known authority; imported, unknown-origin and direct-human memory require explicit user memory controls",
             ));
         }
         if context.is_some_and(|context| {

@@ -193,6 +193,8 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
         "corrected-agent",
         "legacy-user",
         "agent-human-direct",
+        "public-import",
+        "legacy-unknown",
     ] {
         let responses_server = responses::start_mock_server().await;
         let home = TempDir::new()?;
@@ -249,9 +251,45 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
             };
             value.kind = codex_project_intelligence::BlackboardKind::Note;
             value.content = "Assistant-origin note before correction.".into();
-            target = store
-                .create_entry(BlackboardEntryId::parse("additional-target")?, value)
-                .await?;
+            if case == "public-import" {
+                let imported: codex_app_server_protocol::BlackboardUpsertResponse = server
+                    .request(|request_id| ClientRequest::BlackboardUpsert {
+                        request_id,
+                        params: codex_app_server_protocol::BlackboardUpsertParams {
+                            project_id: project_id.clone(),
+                            entry_id: "import-note".into(),
+                            expected_revision: None,
+                            node_id: Some(value.node_id.to_string()),
+                            kind: BlackboardKind::Note,
+                            content: "Use local persistence.".into(),
+                            structured_value: None,
+                            confidence_basis_points: 9000,
+                            verification:
+                                codex_app_server_protocol::BlackboardVerification::Unverified,
+                            importance: codex_app_server_protocol::BlackboardImportance::High,
+                            root_promotion:
+                                codex_app_server_protocol::BlackboardRootPromotion::Promoted,
+                            evidence: Vec::new(),
+                            premises: None,
+                            provenance: codex_app_server_protocol::BlackboardProvenance {
+                                kind: BlackboardProvenanceKind::Import,
+                                source_id: "public-import".into(),
+                            },
+                            state: None,
+                            superseded_by: None,
+                        },
+                    })
+                    .await?;
+                target = store
+                    .get_entry(&project_id, &BlackboardEntryId::parse(imported.entry.id)?)
+                    .await?
+                    .unwrap();
+                assert_eq!(store.knowledge_policy(&project_id, &target.id).await?, None);
+            } else {
+                target = store
+                    .create_entry(BlackboardEntryId::parse("additional-target")?, value)
+                    .await?;
+            }
             if case == "corrected-agent" {
                 let corrected: StatefulMemoryCorrectResponse = server
                     .request(|request_id| ClientRequest::StatefulMemoryCorrect {
@@ -273,30 +311,41 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
                     )
                     .await?
                     .unwrap();
-            } else if case == "agent-human-direct" {
+            } else if case == "agent-human-direct" || case == "legacy-unknown" {
                 store
                     .record_context(
                         &target,
                         &KnowledgeContext::new(
                             KnowledgeCategory::Note,
-                            KnowledgeAuthority::HumanDirect,
+                            if case == "legacy-unknown" {
+                                KnowledgeAuthority::LegacyUnknown
+                            } else {
+                                KnowledgeAuthority::HumanDirect
+                            },
                         ),
                         /*change*/ None,
                     )
                     .await?;
             }
         }
-        let arguments = json!({"mutations":[{"action":"retire","entryId":target.id.to_string(),"expectedRevision":target.revision}]}).to_string();
+        // Separate registered calls, in the reviewer's exact order, against the same revision.
+        let actions = [
+            json!({"mutations":[{"action":"revise","entryId":target.id.to_string(),"expectedRevision":target.revision,"kind":"fact"}]}).to_string(),
+            json!({"mutations":[{"action":"retire","entryId":target.id.to_string(),"expectedRevision":target.revision}]}).to_string(),
+        ];
         let log = responses::mount_sse_sequence(
             &responses_server,
-            (0..2)
-                .flat_map(|_| {
+            actions
+                .iter()
+                .cycle()
+                .take(/*n*/ 4)
+                .flat_map(|arguments| {
                     [
                         responses::sse(vec![
                             responses::ev_function_call(
-                                "model-retire",
+                                "model-mutate",
                                 "blackboard_update_batch",
-                                &arguments,
+                                arguments,
                             ),
                             responses::ev_completed("retire-request"),
                         ]),
@@ -313,33 +362,41 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
         };
         let root = store.root_projection(query.clone()).await?;
         for attempt in 0..2 {
-            run_turn(
-                &mut server,
-                &thread,
-                "Assess whether this memory is obsolete.",
-            )
-            .await?;
-            let requests = log.requests();
-            let output: serde_json::Value = serde_json::from_str(
-                &requests[attempt * 2 + 1]
-                    .function_call_output_text("model-retire")
-                    .expect("model retirement result"),
-            )?;
-            assert_eq!(
-                (output["updated"].clone(), output["failed"].clone()),
-                (json!(0), json!(1)),
-                "case={case}"
-            );
-            assert_eq!(
-                store.get_entry(&project_id, &target.id).await?,
-                Some(target.clone())
-            );
-            assert_eq!(store.root_projection(query.clone()).await?, root);
-            assert_eq!(
-                snapshot(&sqlite).await?,
-                before,
-                "case={case}, attempt={attempt}"
-            );
+            for action in 0..2 {
+                run_turn(
+                    &mut server,
+                    &thread,
+                    "Assess the classification and lifecycle of this memory.",
+                )
+                .await?;
+                let requests = log.requests();
+                let output: serde_json::Value = serde_json::from_str(
+                    &requests[(attempt * 2 + action) * 2 + 1]
+                        .function_call_output_text("model-mutate")
+                        .expect("model retirement result"),
+                )?;
+                assert_eq!(
+                    (output["updated"].clone(), output["failed"].clone()),
+                    (json!(0), json!(1)),
+                    "case={case}"
+                );
+                assert!(
+                    output["results"][0]["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains("memory")
+                );
+                assert_eq!(
+                    store.get_entry(&project_id, &target.id).await?,
+                    Some(target.clone())
+                );
+                assert_eq!(store.root_projection(query.clone()).await?, root);
+                assert_eq!(
+                    snapshot(&sqlite).await?,
+                    before,
+                    "case={case}, attempt={attempt}"
+                );
+            }
             if attempt == 0 {
                 assert!(server.shutdown_gracefully().await?.success());
                 server = TestAppServer::builder()
@@ -370,6 +427,14 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
             })
             .await?;
         assert_eq!(forgotten.revision, target.revision + 1);
+        let forgotten_entry = store.get_entry(&project_id, &target.id).await?.unwrap();
+        assert_eq!(
+            (forgotten_entry.state, forgotten_entry.value),
+            (
+                codex_project_intelligence::BlackboardEntryState::Tombstoned,
+                target.value
+            ),
+        );
         assert!(server.shutdown_gracefully().await?.success());
     }
     Ok(())

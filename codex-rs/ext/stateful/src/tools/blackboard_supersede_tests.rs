@@ -126,19 +126,31 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
     }
     assert_eq!(outcomes, vec![true, true, false, false, false, false]);
 
-    // Legacy committed successions from User-provenance entries are excluded on replay,
-    // irrespective of the authority recorded on the predecessor.
-    for authority in [
-        None,
-        Some(codex_project_intelligence::KnowledgeAuthority::AssistantReported),
-        Some(codex_project_intelligence::KnowledgeAuthority::HumanDirect),
+    // Public/host successions do not authorize model replay of non-Agent predecessors.
+    for (origin, authority) in [
+        (BlackboardProvenanceKind::User, None),
+        (
+            BlackboardProvenanceKind::User,
+            Some(codex_project_intelligence::KnowledgeAuthority::AssistantReported),
+        ),
+        (
+            BlackboardProvenanceKind::User,
+            Some(codex_project_intelligence::KnowledgeAuthority::HumanDirect),
+        ),
+        (BlackboardProvenanceKind::Import, None),
+        (BlackboardProvenanceKind::Maintenance, None),
+        (
+            BlackboardProvenanceKind::Agent,
+            Some(codex_project_intelligence::KnowledgeAuthority::LegacyUnknown),
+        ),
     ] {
         let predecessor_id =
-            BlackboardEntryId::parse(format!("user-{authority:?}")).expect("predecessor ID");
-        let successor_id =
-            BlackboardEntryId::parse(format!("successor-{authority:?}")).expect("successor ID");
+            BlackboardEntryId::parse(format!("protected-{origin:?}-{authority:?}"))
+                .expect("predecessor ID");
+        let successor_id = BlackboardEntryId::parse(format!("successor-{origin:?}-{authority:?}"))
+            .expect("successor ID");
         let mut user_value = value("User's corrected words and reason.");
-        user_value.provenance.kind = BlackboardProvenanceKind::User;
+        user_value.provenance.kind = origin;
         let predecessor = store
             .create_entry(predecessor_id.clone(), user_value)
             .await

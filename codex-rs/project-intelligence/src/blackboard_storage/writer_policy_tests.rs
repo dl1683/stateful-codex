@@ -18,7 +18,8 @@ use tempfile::TempDir;
 const PROJECT: &str = "project-1";
 
 #[tokio::test]
-async fn model_retirement_and_succession_refuse_user_authority_inside_common_transaction() {
+async fn model_mutation_retirement_and_succession_refuse_non_agent_targets_inside_common_transaction()
+ {
     for (provenance, authority) in [
         (
             BlackboardProvenanceKind::User,
@@ -34,6 +35,11 @@ async fn model_retirement_and_succession_refuse_user_authority_inside_common_tra
             Some(KnowledgeAuthority::HumanDirect),
         ),
         (BlackboardProvenanceKind::Import, None),
+        (
+            BlackboardProvenanceKind::Import,
+            Some(KnowledgeAuthority::AssistantReported),
+        ),
+        (BlackboardProvenanceKind::Maintenance, None),
         (
             BlackboardProvenanceKind::Agent,
             Some(KnowledgeAuthority::LegacyUnknown),
@@ -57,6 +63,28 @@ async fn model_retirement_and_succession_refuse_user_authority_inside_common_tra
         }
         let before = snapshot(&store).await;
         for attempt in 0..2 {
+            // Kind-only revision cannot convert imported or unknown-origin words to Agent.
+            let mut revise = retire(&entry);
+            revise.state = BlackboardEntryState::Active;
+            revise.kind = crate::BlackboardKind::Fact;
+            revise.provenance.kind = BlackboardProvenanceKind::Agent;
+            assert!(matches!(
+                store
+                    .update_entry_from_model(PROJECT, &id, revise.clone())
+                    .await,
+                Err(BlackboardStoreError::ModelMutationRefused)
+            ));
+            assert_eq!(snapshot(&store).await, before);
+            let model_revision = crate::ChangeRecord {
+                origin: crate::ChangeOrigin::ModelTool,
+                ..change(ChangeOperation::Corrected, "model revision")
+            };
+            assert!(matches!(
+                store
+                    .update_entry_recorded(PROJECT, &id, revise, Some(&model_revision))
+                    .await,
+                Err(BlackboardStoreError::ModelMutationRefused)
+            ));
             assert!(matches!(
                 store
                     .update_entry_from_model(PROJECT, &id, retire(&entry))
@@ -112,6 +140,127 @@ async fn model_retirement_and_succession_refuse_user_authority_inside_common_tra
                 .state,
             BlackboardEntryState::Tombstoned
         );
+        store.pool.close().await;
+    }
+}
+
+#[tokio::test]
+async fn model_agent_revision_preserves_provenance_and_can_retire() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let id = BlackboardEntryId::parse("agent-note").unwrap();
+    let mut value = rule("Assistant-origin note.");
+    value.kind = crate::BlackboardKind::Note;
+    value.provenance.kind = BlackboardProvenanceKind::Agent;
+    value.provenance.source_id = "assistant-turn".into();
+    let entry = store.create_entry(id.clone(), value).await.unwrap();
+    let mut revise = retire(&entry);
+    revise.state = BlackboardEntryState::Active;
+    revise.kind = crate::BlackboardKind::Fact;
+    revise.content = "Revised assistant-origin fact.".into();
+    revise.provenance.kind = BlackboardProvenanceKind::Import;
+    revise.provenance.source_id = "replacement-source".into();
+    let revised = store
+        .update_entry_from_model(PROJECT, &id, revise)
+        .await
+        .unwrap();
+    let mut expected = entry.value;
+    expected.kind = crate::BlackboardKind::Fact;
+    expected.content = "Revised assistant-origin fact.".into();
+    assert_eq!(revised.value, expected);
+    let retired = store
+        .update_entry_from_model(PROJECT, &id, retire(&revised))
+        .await
+        .unwrap();
+    assert_eq!(
+        (retired.state, retired.value),
+        (BlackboardEntryState::Tombstoned, expected)
+    );
+    store.pool.close().await;
+}
+
+#[tokio::test]
+async fn model_succession_replay_refuses_non_agent_history_after_reopen() {
+    for (origin, authority) in [
+        (BlackboardProvenanceKind::Import, None),
+        (BlackboardProvenanceKind::Maintenance, None),
+        (
+            BlackboardProvenanceKind::Agent,
+            Some(KnowledgeAuthority::LegacyUnknown),
+        ),
+    ] {
+        let home = TempDir::new().unwrap();
+        let mut store = store(&home).await;
+        let id = BlackboardEntryId::parse("legacy-target").unwrap();
+        let successor_id = BlackboardEntryId::parse("host-successor").unwrap();
+        let mut value = rule("Original historical note.");
+        value.kind = crate::BlackboardKind::Note;
+        value.provenance.kind = origin;
+        let target = store.create_entry(id.clone(), value.clone()).await.unwrap();
+        if let Some(authority) = authority {
+            store
+                .record_context(
+                    &target,
+                    &KnowledgeContext::new(KnowledgeCategory::Note, authority),
+                    /*change*/ None,
+                )
+                .await
+                .unwrap();
+        }
+        value.provenance.kind = BlackboardProvenanceKind::Agent;
+        value.content = "Host-established successor.".into();
+        let replaced = vec![SupersededEntry {
+            id,
+            expected_revision: target.revision,
+        }];
+        let succession = store
+            .create_successor(successor_id.clone(), value.clone(), replaced.clone())
+            .await
+            .unwrap();
+        let before = snapshot(&store).await;
+        for attempt in 0..2 {
+            assert!(matches!(
+                store
+                    .create_successor_from_model(
+                        successor_id.clone(),
+                        value.clone(),
+                        replaced.clone()
+                    )
+                    .await,
+                Err(BlackboardStoreError::ModelMutationRefused)
+            ));
+            let model_change = crate::ChangeRecord {
+                origin: crate::ChangeOrigin::ModelTool,
+                ..change(ChangeOperation::Corrected, "model succession retry")
+            };
+            assert!(matches!(
+                store
+                    .create_successor_recorded(
+                        successor_id.clone(),
+                        value.clone(),
+                        replaced.clone(),
+                        Some(&model_change)
+                    )
+                    .await,
+                Err(BlackboardStoreError::ModelMutationRefused)
+            ));
+            assert_eq!(snapshot(&store).await, before);
+            assert_eq!(
+                store
+                    .create_successor(successor_id.clone(), value.clone(), replaced.clone())
+                    .await
+                    .unwrap(),
+                succession
+            );
+            if attempt == 0 {
+                store.pool.close().await;
+                store = BlackboardStore::open(&codex_state::SqliteConfig::new_for_testing(
+                    codex_utils_absolute_path::AbsolutePathBuf::try_from(home.path()).unwrap(),
+                ))
+                .await
+                .unwrap();
+            }
+        }
         store.pool.close().await;
     }
 }

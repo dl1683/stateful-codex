@@ -15,7 +15,6 @@ use codex_project_intelligence::BlackboardEntryState;
 use codex_project_intelligence::BlackboardEntryUpdate;
 use codex_project_intelligence::BlackboardImportance;
 use codex_project_intelligence::BlackboardKind;
-use codex_project_intelligence::BlackboardProvenance;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardStoreError;
 use codex_project_intelligence::BlackboardStructuredValue;
@@ -268,7 +267,7 @@ impl BlackboardUpdateTool {
     async fn apply_mutation(
         &self,
         mutation: MutationArguments,
-        source_id: &str,
+        _source_id: &str,
         project_roots: &[std::path::PathBuf],
     ) -> Result<BlackboardEntry, FunctionCallError> {
         let id = BlackboardEntryId::parse(mutation.entry_id()).map_err(respond)?;
@@ -300,14 +299,18 @@ impl BlackboardUpdateTool {
                 "direct-human memory cannot be revised, promoted or replaced by the model; use an explicit memory correction",
             ));
         }
+        if current.value.provenance.kind != BlackboardProvenanceKind::Agent
+            || context.as_ref().is_some_and(|context| {
+                context.authority == codex_project_intelligence::KnowledgeAuthority::LegacyUnknown
+            })
+        {
+            return Err(respond(
+                "only assistant-origin memory with known authority can be mutated by the model; use explicit user memory controls",
+            ));
+        }
         // Legacy user rules without recorded authority still keep the user's exact words.
         let user_rule = current.value.kind == BlackboardKind::Instruction
             && current.value.provenance.kind == BlackboardProvenanceKind::User;
-        let original = (
-            current.value.kind,
-            current.value.content.clone(),
-            current.value.provenance.clone(),
-        );
         let current_promotion = current.value.root_promotion;
         // Someone else's words the user passed on (by recorded meaning, which a correction
         // carries to its successor, or by the note's identity) are kept for explanation only:
@@ -329,10 +332,7 @@ impl BlackboardUpdateTool {
             premises: current.value.premises,
             state: BlackboardEntryState::Active,
             superseded_by: None,
-            provenance: BlackboardProvenance {
-                kind: BlackboardProvenanceKind::Agent,
-                source_id: source_id.to_string(),
-            },
+            provenance: current.value.provenance,
         };
         match mutation {
             MutationArguments::SetRootPromotion {
@@ -508,11 +508,6 @@ impl BlackboardUpdateTool {
                 "a pending user rule applies only after the user states it as standing; it cannot be promoted",
             ));
         }
-        // Promotion, supersession and retirement do not change who wrote the text; only a
-        // revision of the text itself is the agent's.
-        if update.kind == original.0 && update.content == original.1 {
-            update.provenance = original.2;
-        }
         let entry = store
             .update_entry_from_model(&self.project_id, &id, update)
             .await
@@ -543,7 +538,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardUpdateTool {
         ToolSpec::Function(ResponsesApiTool {
             name: UPDATE_TOOL_NAME.to_string(),
             description: format!(
-                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to existing entries, each independent. Direct-human memory cannot be revised, promoted or replaced by the model; use explicit user memory controls. setRootPromotion: promote a project-wide candidate (not verification). revise: change content, confidence, verification, importance, evidence, or premises (empty array clears); changing source-verified meaning needs fresh evidence_read receipts. supersede: a newer entry replaces an older one, including a \"current\" value that is no longer current. retire: obsolete with no successor. Nothing forgets or deletes: history, run results and conversation keep the text; if the user asks to forget, say so and state what remains. Copy a returned historicalFinding into materialHistoricalFindings when material to completion."
+                "Apply 1-{MAX_MUTATIONS} revision-guarded lifecycle decisions to assistant-origin entries with known authority, each independent. Imported, unknown-origin and direct-human memory require explicit user memory controls. Revisions preserve provenance. setRootPromotion: promote a project-wide candidate (not verification). revise: change content, confidence, verification, importance, evidence, or premises (empty array clears); changing source-verified meaning needs fresh evidence_read receipts. supersede: a newer entry replaces an older one, including a \"current\" value that is no longer current. retire: obsolete with no successor. Nothing forgets or deletes: history, run results and conversation keep the text; if the user asks to forget, say so and state what remains. Copy a returned historicalFinding into materialHistoricalFindings when material to completion."
             ),
             strict: false,
             defer_loading: None,
