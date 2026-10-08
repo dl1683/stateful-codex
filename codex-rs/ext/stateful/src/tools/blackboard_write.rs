@@ -512,7 +512,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Persist 1-{MAX_BATCH_RECORDS} findings (and up to {MAX_BATCH_RELATIONS} relations among them by idempotencyKey) once their results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact numbers with scope; failures; rejected approaches; open questions. All model records have Agent provenance; user rules and user-authored decisions require explicit memory controls. sourceVerified needs evidence copied from evidence_read. Items are idempotent."
+                "Persist 1-{MAX_BATCH_RECORDS} findings and up to {MAX_BATCH_RELATIONS} relations by idempotencyKey once results are in: user-approved decisions with reasons and verified recipes ('Recipe:' facts with exact commands), both promoted; exact scoped numbers; failures; rejected approaches; open questions. Records have Agent provenance. Replacement/replay requires all-Agent revision history and known non-human authority for every target; otherwise use explicit user memory controls. User rules and user-authored decisions also require those controls. sourceVerified needs evidence_read evidence. Idempotent."
             ),
             strict: false,
             defer_loading: None,

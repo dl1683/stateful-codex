@@ -18,6 +18,206 @@ use tempfile::TempDir;
 const PROJECT: &str = "project-1";
 
 #[tokio::test]
+async fn model_lifecycle_refuses_old_origin_transfer_and_replay_after_reopen() {
+    for origin in [
+        BlackboardProvenanceKind::Import,
+        BlackboardProvenanceKind::User,
+        BlackboardProvenanceKind::Maintenance,
+    ] {
+        let home = TempDir::new().unwrap();
+        let store = store(&home).await;
+        let id = BlackboardEntryId::parse("old-origin-transfer").unwrap();
+        let mut value = rule("Use local persistence.");
+        value.kind = crate::BlackboardKind::Note;
+        value.provenance.kind = origin;
+        let imported = store.create_entry(id.clone(), value).await.unwrap();
+        // The base binary used this host writer after its kind-only model edit changed
+        // Import/Note to Agent/Fact. Seed that exact revision without the new model gate.
+        let mut old_update = retire(&imported);
+        old_update.state = BlackboardEntryState::Active;
+        old_update.kind = crate::BlackboardKind::Fact;
+        old_update.provenance.kind = BlackboardProvenanceKind::Agent;
+        old_update.provenance.source_id = "old-model-call".into();
+        let target = store
+            .update_entry(PROJECT, &id, old_update.clone())
+            .await
+            .unwrap();
+        assert_eq!(target.revision, 2);
+        assert_eq!(target.value.content, imported.value.content);
+        let query = crate::RootBlackboardQuery {
+            project_id: PROJECT.into(),
+            max_entries: 256,
+        };
+        let before = snapshot(&store).await;
+        store.pool.close().await;
+        let store = BlackboardStore::open(&codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::AbsolutePathBuf::try_from(home.path()).unwrap(),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(snapshot(&store).await, before);
+        let successor_id = BlackboardEntryId::parse("host-successor").unwrap();
+        let successor = store
+            .create_entry(successor_id.clone(), target.value.clone())
+            .await
+            .unwrap();
+        let before = snapshot(&store).await;
+        let root = store.root_projection(query.clone()).await.unwrap();
+        let model_change = crate::ChangeRecord {
+            origin: crate::ChangeOrigin::ModelTool,
+            ..change(ChangeOperation::Corrected, "model lifecycle")
+        };
+        for action in ["retire", "revise", "promote", "supersede"] {
+            let mut update = retire(&target);
+            match action {
+                "revise" => {
+                    update.state = BlackboardEntryState::Active;
+                    update.content = "Changed by model.".into();
+                }
+                "promote" => {
+                    update.state = BlackboardEntryState::Active;
+                    update.root_promotion = crate::RootPromotion::Candidate;
+                }
+                "supersede" => {
+                    update.state = BlackboardEntryState::Superseded;
+                    update.superseded_by = Some(successor.id.clone());
+                }
+                "retire" => {}
+                _ => unreachable!(),
+            }
+            assert!(matches!(
+                store
+                    .update_entry_from_model(PROJECT, &id, update.clone())
+                    .await,
+                Err(BlackboardStoreError::ModelMutationRefused)
+            ));
+            assert!(matches!(
+                store
+                    .update_entry_recorded(PROJECT, &id, update, Some(&model_change))
+                    .await,
+                Err(BlackboardStoreError::ModelMutationRefused)
+            ));
+            assert_eq!(snapshot(&store).await, before, "action={action}");
+            assert_eq!(store.root_projection(query.clone()).await.unwrap(), root);
+        }
+        let replaced = vec![SupersededEntry {
+            id: id.clone(),
+            expected_revision: target.revision,
+        }];
+        let new_id = BlackboardEntryId::parse("new-successor").unwrap();
+        assert!(matches!(
+            store
+                .create_successor_from_model(new_id.clone(), target.value.clone(), replaced.clone())
+                .await,
+            Err(BlackboardStoreError::ModelMutationRefused)
+        ));
+        assert_eq!(snapshot(&store).await, before);
+        assert_eq!(store.root_projection(query.clone()).await.unwrap(), root);
+        let forgotten = store
+            .update_entry_recorded(
+                PROJECT,
+                &id,
+                retire(&target),
+                Some(&change(ChangeOperation::Forgotten, "explicit Forget")),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            (forgotten.state, forgotten.value),
+            (BlackboardEntryState::Tombstoned, target.value.clone())
+        );
+        // A committed old/host succession must not become a successful model replay.
+        let replay_id = BlackboardEntryId::parse("old-replay-target").unwrap();
+        store
+            .create_entry(replay_id.clone(), imported.value)
+            .await
+            .unwrap();
+        let replay_target = store
+            .update_entry(PROJECT, &replay_id, old_update)
+            .await
+            .unwrap();
+        let replaced = vec![SupersededEntry {
+            id: replay_id,
+            expected_revision: replay_target.revision,
+        }];
+        let succession = store
+            .create_successor(new_id.clone(), target.value.clone(), replaced.clone())
+            .await
+            .unwrap();
+        let before_replay = snapshot(&store).await;
+        let replay_root = store.root_projection(query.clone()).await.unwrap();
+        store.pool.close().await;
+        let store = BlackboardStore::open(&codex_state::SqliteConfig::new_for_testing(
+            codex_utils_absolute_path::AbsolutePathBuf::try_from(home.path()).unwrap(),
+        ))
+        .await
+        .unwrap();
+        for recorded in [false, true] {
+            let result = if recorded {
+                store
+                    .create_successor_recorded(
+                        new_id.clone(),
+                        target.value.clone(),
+                        replaced.clone(),
+                        Some(&model_change),
+                    )
+                    .await
+            } else {
+                store
+                    .create_successor_from_model(
+                        new_id.clone(),
+                        target.value.clone(),
+                        replaced.clone(),
+                    )
+                    .await
+            };
+            assert!(matches!(
+                result,
+                Err(BlackboardStoreError::ModelMutationRefused)
+            ));
+            assert_eq!(snapshot(&store).await, before_replay);
+            assert_eq!(
+                store.root_projection(query.clone()).await.unwrap(),
+                replay_root
+            );
+        }
+        assert_eq!(
+            store
+                .create_successor(new_id, target.value, replaced)
+                .await
+                .unwrap(),
+            succession
+        );
+        store.pool.close().await;
+    }
+}
+
+#[tokio::test]
+async fn model_history_query_unavailable_refuses_without_writing() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let mut value = rule("Assistant-origin note.");
+    value.provenance.kind = BlackboardProvenanceKind::Agent;
+    let entry = store
+        .create_entry(BlackboardEntryId::parse("agent-note").unwrap(), value)
+        .await
+        .unwrap();
+    let before = snapshot(&store).await;
+    let mut transaction = store.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+    sqlx::query("ALTER TABLE blackboard_entry_revisions RENAME TO unavailable_revisions")
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    assert!(matches!(
+        super::check_model_target(&mut transaction, &entry, super::ModelOperation::Mutation).await,
+        Err(BlackboardStoreError::ModelMutationRefused)
+    ));
+    transaction.rollback().await.unwrap();
+    assert_eq!(snapshot(&store).await, before);
+    store.pool.close().await;
+}
+
+#[tokio::test]
 async fn model_mutation_retirement_and_succession_refuse_non_agent_targets_inside_common_transaction()
  {
     for (provenance, authority) in [

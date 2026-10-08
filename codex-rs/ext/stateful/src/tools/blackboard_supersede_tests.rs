@@ -138,6 +138,10 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
             Some(codex_project_intelligence::KnowledgeAuthority::HumanDirect),
         ),
         (BlackboardProvenanceKind::Import, None),
+        (
+            BlackboardProvenanceKind::Import,
+            Some(codex_project_intelligence::KnowledgeAuthority::AssistantReported),
+        ),
         (BlackboardProvenanceKind::Maintenance, None),
         (
             BlackboardProvenanceKind::Agent,
@@ -151,10 +155,35 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
             .expect("successor ID");
         let mut user_value = value("User's corrected words and reason.");
         user_value.provenance.kind = origin;
-        let predecessor = store
+        let mut predecessor = store
             .create_entry(predecessor_id.clone(), user_value)
             .await
             .expect("user predecessor");
+        if origin == BlackboardProvenanceKind::Import && authority.is_some() {
+            // Seed an old binary's origin transfer before the committed succession.
+            predecessor = store
+                .update_entry(
+                    PROJECT_ID,
+                    &predecessor_id,
+                    codex_project_intelligence::BlackboardEntryUpdate {
+                        expected_revision: predecessor.revision,
+                        kind: BlackboardKind::Fact,
+                        content: predecessor.value.content.clone(),
+                        structured_value: predecessor.value.structured_value.clone(),
+                        confidence: predecessor.value.confidence,
+                        verification: predecessor.value.verification,
+                        importance: predecessor.value.importance,
+                        root_promotion: predecessor.value.root_promotion,
+                        evidence: predecessor.value.evidence.clone(),
+                        premises: predecessor.value.premises.clone(),
+                        state: codex_project_intelligence::BlackboardEntryState::Active,
+                        superseded_by: None,
+                        provenance: value("old-model-call").provenance,
+                    },
+                )
+                .await
+                .unwrap();
+        }
         if let Some(authority) = authority {
             store
                 .record_context(
@@ -174,7 +203,7 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
                 value("Historical model successor."),
                 vec![SupersededEntry {
                     id: predecessor_id.clone(),
-                    expected_revision: 1,
+                    expected_revision: predecessor.revision,
                 }],
             )
             .await
@@ -192,12 +221,12 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
             &successor.successor.value,
             &[SupersedeReference::Entry {
                 entry_id: predecessor_id.to_string(),
-                revision: 1,
+                revision: predecessor.revision,
             }],
         )
         .await
         .expect_err("User-provenance replay refused");
-        assert!(error.to_string().contains("direct-human"));
+        assert!(error.to_string().contains("memory"));
         assert_eq!(
             store
                 .get_entry(PROJECT_ID, &predecessor_id)

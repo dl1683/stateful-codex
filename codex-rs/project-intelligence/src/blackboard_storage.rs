@@ -573,7 +573,7 @@ pub enum BlackboardStoreError {
     #[error("unsupported or oversized knowledge context; original metadata remains stored")]
     UnsupportedContext,
     #[error(
-        "model mutation requires assistant-origin memory with known authority and no human authority; retirement also refuses ruled-out memory; use explicit user memory controls"
+        "model mutation requires assistant-origin memory with Agent provenance in every recorded revision, known authority and no human authority; retirement also refuses ruled-out memory; use explicit user memory controls"
     )]
     ModelMutationRefused,
     #[error("blackboard entry ID was already used for different content: {0}")]

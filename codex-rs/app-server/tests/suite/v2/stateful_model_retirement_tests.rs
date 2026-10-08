@@ -194,6 +194,7 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
         "legacy-user",
         "agent-human-direct",
         "public-import",
+        "old-import-agent",
         "legacy-unknown",
     ] {
         let responses_server = responses::start_mock_server().await;
@@ -251,7 +252,7 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
             };
             value.kind = codex_project_intelligence::BlackboardKind::Note;
             value.content = "Assistant-origin note before correction.".into();
-            if case == "public-import" {
+            if case == "public-import" || case == "old-import-agent" {
                 let imported: codex_app_server_protocol::BlackboardUpsertResponse = server
                     .request(|request_id| ClientRequest::BlackboardUpsert {
                         request_id,
@@ -285,6 +286,37 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
                     .await?
                     .unwrap();
                 assert_eq!(store.knowledge_policy(&project_id, &target.id).await?, None);
+                if case == "old-import-agent" {
+                    // Persist the base binary's Import rev1 -> Agent rev2 transition
+                    // directly through its host writer, keeping the imported text intact.
+                    target = store
+                        .update_entry(
+                            &project_id,
+                            &target.id,
+                            codex_project_intelligence::BlackboardEntryUpdate {
+                                expected_revision: target.revision,
+                                kind: codex_project_intelligence::BlackboardKind::Fact,
+                                content: target.value.content.clone(),
+                                structured_value: target.value.structured_value.clone(),
+                                confidence: target.value.confidence,
+                                verification: target.value.verification,
+                                importance: target.value.importance,
+                                root_promotion: target.value.root_promotion,
+                                evidence: target.value.evidence.clone(),
+                                premises: target.value.premises.clone(),
+                                state: codex_project_intelligence::BlackboardEntryState::Active,
+                                superseded_by: None,
+                                provenance: codex_project_intelligence::BlackboardProvenance {
+                                    kind:
+                                        codex_project_intelligence::BlackboardProvenanceKind::Agent,
+                                    source_id: "old-model-call".into(),
+                                },
+                            },
+                        )
+                        .await?;
+                    assert_eq!(target.revision, 2);
+                    assert_eq!(target.value.content, "Use local persistence.");
+                }
             } else {
                 target = store
                     .create_entry(BlackboardEntryId::parse("additional-target")?, value)
@@ -329,16 +361,28 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
             }
         }
         // Separate registered calls, in the reviewer's exact order, against the same revision.
-        let actions = [
+        let mut actions = vec![
             json!({"mutations":[{"action":"revise","entryId":target.id.to_string(),"expectedRevision":target.revision,"kind":"fact"}]}).to_string(),
             json!({"mutations":[{"action":"retire","entryId":target.id.to_string(),"expectedRevision":target.revision}]}).to_string(),
         ];
+        if case == "old-import-agent" {
+            let successor = store
+                .create_entry(
+                    BlackboardEntryId::parse("model-supersede-target")?,
+                    target.value.clone(),
+                )
+                .await?;
+            actions.extend([
+                json!({"mutations":[{"action":"setRootPromotion","entryId":target.id.to_string(),"expectedRevision":target.revision,"rootPromotion":"candidate"}]}).to_string(),
+                json!({"mutations":[{"action":"supersede","entryId":target.id.to_string(),"expectedRevision":target.revision,"successorEntryId":successor.id.to_string()}]}).to_string(),
+            ]);
+        }
         let log = responses::mount_sse_sequence(
             &responses_server,
             actions
                 .iter()
                 .cycle()
-                .take(/*n*/ 4)
+                .take(actions.len() * 2)
                 .flat_map(|arguments| {
                     [
                         responses::sse(vec![
@@ -362,7 +406,7 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
         };
         let root = store.root_projection(query.clone()).await?;
         for attempt in 0..2 {
-            for action in 0..2 {
+            for action in 0..actions.len() {
                 run_turn(
                     &mut server,
                     &thread,
@@ -371,7 +415,7 @@ async fn public_user_memory_survives_model_retirement_and_cold_retry() -> Result
                 .await?;
                 let requests = log.requests();
                 let output: serde_json::Value = serde_json::from_str(
-                    &requests[(attempt * 2 + action) * 2 + 1]
+                    &requests[(attempt * actions.len() + action) * 2 + 1]
                         .function_call_output_text("model-mutate")
                         .expect("model retirement result"),
                 )?;

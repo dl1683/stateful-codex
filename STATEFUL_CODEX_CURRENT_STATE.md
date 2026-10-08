@@ -65,6 +65,14 @@ checkpoint at a time (plan: `sc_dogfood/integrate/INTEGRATION_PLAN.md`; log:
   in review. A narrower automatic-capture contract is scheduled around Step 3.
   Linux: 0 new failures against the 83eee86b6 baseline.
 
+Step 2's final cut additionally refuses model lifecycle operations when any recorded
+revision of the target has non-Agent provenance, including Agent entries produced by
+older binaries from imported memory. Explicit user correction and Forget remain available.
+
+| Acceptance row | Status |
+| --- | --- |
+| Model lifecycle of entries with any non-Agent revision history | **OPEN** — cut from the retained model mutation, promotion, retirement, supersession and committed replay surface. |
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
