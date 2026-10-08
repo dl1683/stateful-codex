@@ -244,6 +244,17 @@ pub(super) async fn validate_context(
             return Err(BlackboardStoreError::UnsupportedContext);
         }
     }
+    if let Some(payload) = &context.payload {
+        let json: serde_json::Value =
+            serde_json::from_str(payload).map_err(|_| BlackboardStoreError::UnsupportedContext)?;
+        if let Some(temporal) = json.get("temporal") {
+            let temporal: crate::TemporalContext = serde_json::from_value(temporal.clone())
+                .map_err(|_| BlackboardStoreError::UnsupportedContext)?;
+            temporal
+                .validate()
+                .map_err(|_| BlackboardStoreError::UnsupportedContext)?;
+        }
+    }
     let supported: bool = sqlx::query_scalar(
         "WITH input(payload) AS (SELECT ?) SELECT CASE WHEN payload IS NULL THEN 1
          WHEN json_valid(payload) THEN NOT EXISTS (

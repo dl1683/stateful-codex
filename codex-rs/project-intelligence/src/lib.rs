@@ -3,6 +3,7 @@
 mod blackboard;
 mod blackboard_storage;
 mod capture_identity;
+mod capture_source;
 mod context_map;
 mod context_map_presence;
 mod context_map_storage;
@@ -15,6 +16,7 @@ mod repository_observation_storage;
 mod search;
 mod status;
 mod storage;
+mod temporal_context;
 
 pub use blackboard::BlackboardEntry;
 pub use blackboard::BlackboardEntryId;
@@ -132,7 +134,25 @@ pub use storage::HierarchyStoreError;
 pub use blackboard_storage::CaptureEntryWrite;
 pub use blackboard_storage::CaptureWrite;
 pub use blackboard_storage::CaptureWriteResult;
-
 pub use capture_identity::CAPTURE_NORMALIZER_VERSION;
 pub use capture_identity::canonical_capture_words;
 pub use capture_identity::retirement_capture_words;
+pub use capture_source::SourceObservation;
+pub use capture_source::SourceRangeRead;
+pub use capture_source::SourceSeal;
+pub use capture_source::SourceSearchCursor;
+pub use capture_source::SourceSearchPage;
+pub use capture_source::SourceSpan;
+pub use capture_source::SourceSpanRole;
+pub use temporal_context::EventStatus;
+pub use temporal_context::EventTime;
+pub use temporal_context::SourceTime;
+pub use temporal_context::TemporalAnchor;
+pub use temporal_context::TemporalContext;
+pub use temporal_context::TemporalDerivation;
+pub use temporal_context::TimePrecision;
+pub use temporal_context::TimeZone;
+
+pub use capture_source::SourceLink;
+pub use capture_source::SourceLinkCursor;
+pub use capture_source::SourceLinkPage;
