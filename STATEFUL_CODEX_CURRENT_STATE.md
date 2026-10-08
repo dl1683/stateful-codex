@@ -73,6 +73,20 @@ older binaries from imported memory. Explicit user correction and Forget remain 
 | --- | --- |
 | Model lifecycle of entries with any non-Agent revision history | **OPEN** — cut from the retained model mutation, promotion, retirement, supersession and committed replay surface. |
 
+- **Cleanup K1** (`fd89dfca5`..`f5f9fea96`): eval script usage/port fixes, test-only
+  TUI version stamp, platform shell in a Stateful test, boxed dispatcher futures.
+  The backfill-warning JSON fix was reverted (it lost the warning under default
+  log filters).
+- **Step 2, migration map and store classification** (`716e3ae5e`..`e334727cb`):
+  every store open checks its applied migration history in one read snapshot and
+  refuses unknown or incompatible histories (paused item-4/item-5 `0018`, runtime
+  `0005`+) with a precise error, leaving the store untouched; common-prefix and
+  continuity stores upgrade normally. No offline converter (no data-bearing
+  incompatible store exists). Also: legacy context is bounded before it is read,
+  predecessor fan-in is bounded, and the model can change or retire only memory
+  whose every revision is assistant-authored. Verdict: landable with named
+  limitations. Linux: 0 new failures.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
