@@ -57,6 +57,53 @@ impl BlackboardStore {
         {
             return Err(BlackboardStoreError::InvalidSource);
         }
+        // Bound every fragment before constructing the whole-request fingerprint.
+        for member in &group.members {
+            member.write.value.validate()?;
+            let context = &member.write.context;
+            let change = &member.write.change;
+            let observation = &member.seal.observation;
+            if member.write.candidates.is_empty()
+                || member.write.candidates.len() > 64
+                || member.spans.is_empty()
+                || member.spans.len() > 8
+                || observation.ordered_spans.len() > 8
+                || member
+                    .write
+                    .candidates
+                    .iter()
+                    .any(|id| id.as_str().len() > 512)
+                || [
+                    &observation.project_id,
+                    &observation.authoritative_thread_id,
+                    &observation.original_event_id,
+                    &observation.turn_id,
+                ]
+                .iter()
+                .any(|id| id.len() > 512)
+                || member.seal.digest.len() != 64
+                || member.seal.exact_source_locator.len() != 64
+                || member.seal.capture_contract_version.len() > 64
+                || change.preview.len() > 240
+            {
+                return Err(BlackboardStoreError::InvalidSource);
+            }
+            for (value, limit) in [
+                (&context.scope_id, 512),
+                (&context.group_id, 512),
+                (&context.end_condition, 2000),
+                (&context.payload, 8192),
+                (&change.action_id, 128),
+                (&change.thread_id, 512),
+                (&change.turn_id, 512),
+                (&change.group_id, 512),
+                (&observation.incomplete_reason, 240),
+            ] {
+                if value.as_ref().is_some_and(|value| value.len() > limit) {
+                    return Err(BlackboardStoreError::UnsupportedContext);
+                }
+            }
+        }
         let requests = group.members.iter().map(|member| {
             let context = &member.write.context;
             serde_json::json!({ "candidates": member.write.candidates, "value": member.write.value,

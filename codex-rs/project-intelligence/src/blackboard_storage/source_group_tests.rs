@@ -307,6 +307,12 @@ async fn c2_group_bounds_noop_fault_and_model_authority_refusal_leave_whole_stor
             .await
             .is_err()
     );
+    let mut large_context = request(&seal, "legacy-sized-context");
+    large_context.members[0].write.context.payload = Some("x".repeat(/*n*/ 1048576));
+    assert!(matches!(
+        store.write_source_group(&admission, large_context).await,
+        Err(BlackboardStoreError::UnsupportedContext)
+    ));
     let mut model = request(&seal, "model-authority");
     for member in &mut model.members {
         member.write.change.origin = ChangeOrigin::ModelTool;
@@ -469,7 +475,7 @@ async fn c2_failed_original_group_then_forget_and_cold_replay_never_restores() {
             }
             assert!(matches!(
                 reopened.write_source_group(&admission, automatic).await,
-                Err(BlackboardStoreError::RetiredIdentity)
+                Err(BlackboardStoreError::RetiredIdentity | BlackboardStoreError::SourceExcluded)
             ));
             assert_eq!(snapshot(&reopened).await, forgotten);
         }
