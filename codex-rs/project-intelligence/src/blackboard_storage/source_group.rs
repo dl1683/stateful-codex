@@ -13,6 +13,9 @@ use crate::MemberOutcome;
 use crate::SourceSeal;
 use crate::SourceSpan;
 
+#[cfg(test)]
+#[path = "source_group_tests.rs"]
+mod tests;
 
 /// Each member retains its separately labelled original source ranges.
 pub struct SourceCaptureMember {
