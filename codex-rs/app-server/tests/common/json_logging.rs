@@ -92,7 +92,7 @@ pub fn app_server_json_shutdown_event(
             codex_home.join("managed_config.toml"),
         )
         .env("LOG_FORMAT", "json")
-        .env("RUST_LOG", "codex_app_server=info")
+        .env("RUST_LOG", "codex_app_server=info,codex_rollout=warn")
         .args(args)
         .output()?;
 
@@ -101,6 +101,17 @@ pub fn app_server_json_shutdown_event(
 
     let events = json_log_events(stderr.lines())
         .with_context(|| format!("app-server stderr was not valid JSONL: {stderr}"))?;
+    anyhow::ensure!(
+        events.iter().any(|event| {
+            event["level"] == "WARN"
+                && event["fields"]["message"].as_str().is_some_and(|message| {
+                    message.starts_with("state db historical rollout backfill is pending at ")
+                        && message.contains(&codex_home.display().to_string())
+                        && message.contains("using filesystem fallback until it completes")
+                })
+        }),
+        "missing historical rollout backfill warning in app-server JSON logs: {stderr}"
+    );
     let event = events
         .iter()
         .find(|event| event["fields"]["message"] == "processor task exited")

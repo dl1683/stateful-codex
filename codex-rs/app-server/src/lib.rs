@@ -75,6 +75,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 use tracing::info;
+use tracing::instrument::WithSubscriber;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
@@ -436,6 +437,22 @@ fn log_format_from_env() -> LogFormat {
     LogFormat::from_env_value(value.as_deref())
 }
 
+fn stderr_log_layer() -> StderrLogLayer {
+    match log_format_from_env() {
+        LogFormat::Json => tracing_subscriber::fmt::layer()
+            .json()
+            .with_writer(std::io::stderr)
+            .with_span_events(stderr_span_events())
+            .with_filter(EnvFilter::from_default_env())
+            .boxed(),
+        LogFormat::Default => tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_span_events(stderr_span_events())
+            .with_filter(EnvFilter::from_default_env())
+            .boxed(),
+    }
+}
+
 pub async fn run_main(
     arg0_paths: Arg0DispatchPaths,
     cli_config_overrides: CliConfigOverrides,
@@ -655,7 +672,12 @@ pub async fn run_main_with_transport_options(
         }
         _ => None,
     };
-    let state_db_init = match init_sqlite_state_db_with_fresh_start_on_corruption(&config).await {
+    // State initialization can warn before the database-backed subscriber exists.
+    // Use the same stderr format during bootstrap so JSON logs remain valid.
+    let state_db_init = match init_sqlite_state_db_with_fresh_start_on_corruption(&config)
+        .with_subscriber(tracing_subscriber::registry().with(stderr_log_layer()))
+        .await
+    {
         Ok(state_db_init) => state_db_init,
         Err(err) => {
             return Err(std::io::Error::other(format!(
@@ -714,19 +736,7 @@ pub async fn run_main_with_transport_options(
     // SQLx enters the caller's span for each command. Skip enter/exit records
     // that can block its worker on stderr while holding a write transaction.
     // Preserve span boundaries, busy/idle timings, and explicit events.
-    let stderr_fmt: StderrLogLayer = match log_format_from_env() {
-        LogFormat::Json => tracing_subscriber::fmt::layer()
-            .json()
-            .with_writer(std::io::stderr)
-            .with_span_events(stderr_span_events())
-            .with_filter(EnvFilter::from_default_env())
-            .boxed(),
-        LogFormat::Default => tracing_subscriber::fmt::layer()
-            .with_writer(std::io::stderr)
-            .with_span_events(stderr_span_events())
-            .with_filter(EnvFilter::from_default_env())
-            .boxed(),
-    };
+    let stderr_fmt = stderr_log_layer();
 
     let log_write_warning = log_write_warning::LogWriteWarningReporter::new(
         feedback.clone(),
