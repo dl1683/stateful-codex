@@ -250,11 +250,22 @@ async fn model_output(
     arguments: Value,
 ) -> Result<String> {
     let call_id = format!("repair-{}", uuid::Uuid::new_v4());
+    model_output_with_id(server, responses_server, thread, tool, arguments, &call_id).await
+}
+
+async fn model_output_with_id(
+    server: &mut TestAppServer,
+    responses_server: &wiremock::MockServer,
+    thread: &str,
+    tool: &str,
+    arguments: Value,
+    call_id: &str,
+) -> Result<String> {
     let log = responses::mount_sse_sequence(
         responses_server,
         vec![
             responses::sse(vec![
-                responses::ev_function_call(&call_id, tool, &arguments.to_string()),
+                responses::ev_function_call(call_id, tool, &arguments.to_string()),
                 responses::ev_completed("repair-request"),
             ]),
             responses::sse(vec![responses::ev_completed("repair-done")]),
@@ -264,9 +275,17 @@ async fn model_output(
     run_turn(server, thread, "Inspect the retained project memory.").await?;
     let requests = log.requests();
     assert_eq!(requests.len(), 2);
-    Ok(requests[1]
-        .function_call_output_text(&call_id)
-        .expect("actual model-delivered result"))
+    let body = requests[1].body_json();
+    Ok(body["input"]
+        .as_array()
+        .expect("model input array")
+        .iter()
+        .rev()
+        .find(|item| item["call_id"] == call_id && item["type"] == "function_call_output")
+        .expect("actual latest model-delivered result")["output"]
+        .as_str()
+        .expect("text tool output")
+        .to_string())
 }
 
 fn record(key: &str, content: &str) -> Value {

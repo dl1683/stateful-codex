@@ -362,15 +362,15 @@ impl BlackboardBatchRecordTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        if call.function_arguments()?.len() > 32768 {
-            return Err(super::bounded_respond(
-                &call,
-                "record batch exceeds the 32 KiB input bound; nothing written",
-            ));
-        }
         let arguments: BatchArguments = parse_arguments(&call)?;
         let BatchRecordArguments { records, relations } = match arguments {
             BatchArguments::SourceProposal(batch) => {
+                if call.function_arguments()?.len() > 32768 {
+                    return Err(super::bounded_respond(
+                        &call,
+                        "source proposal exceeds the 32 KiB input bound; nothing written",
+                    ));
+                }
                 return super::source_proposals::record(
                     &self.recorder.services,
                     &self.recorder.project_id,

@@ -8,6 +8,95 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
+#[tokio::test]
+async fn c3r2_public_ordinary_agent_batch_above_32k_commits_and_replays_cold() -> Result<()> {
+    let (home, mut server, project, thread, responses_server) = setup().await?;
+    let records: Vec<_> = (0..9).map(|index| json!({
+        "idempotencyKey":format!("compat-{index}"), "kind":"note", "content":format!("{index}{}","a".repeat(3999)),
+        "confidenceBasisPoints":0,"verification":"unverified","importance":"normal","rootPromotion":"notPromoted"
+    })).collect();
+    let request = json!({"records":records,"relations":[]});
+    assert!(request.to_string().len() > 32768);
+    let result: Value = serde_json::from_str(
+        &model_output_with_id(
+            &mut server,
+            &responses_server,
+            &thread,
+            "blackboard_record_batch",
+            request.clone(),
+            "compat-agent",
+        )
+        .await?,
+    )?;
+    assert_eq!(
+        (
+            result["recorded"].clone(),
+            result["failed"].clone(),
+            result["relationsRecorded"].clone(),
+            result["relationsFailed"].clone()
+        ),
+        (json!(9), json!(0), json!(0), json!(0))
+    );
+    assert!(result.to_string().len() <= 9000);
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let store = pi::BlackboardStore::open(&sqlite).await?;
+    let node = pi::HierarchyStore::open(&sqlite)
+        .await?
+        .project_node(&project)
+        .await?
+        .unwrap()
+        .id;
+    let mut committed = Vec::new();
+    for (index, receipt) in result["results"].as_array().unwrap().iter().enumerate() {
+        let id = pi::BlackboardEntryId::parse(receipt["entryId"].as_str().unwrap())?;
+        let entry = store.get_entry(&project, &id).await?.unwrap();
+        let expected = pi::NewBlackboardEntry {
+            project_id: project.clone(),
+            node_id: node.clone(),
+            kind: pi::BlackboardKind::Note,
+            content: records[index]["content"].as_str().unwrap().into(),
+            structured_value: None,
+            confidence: pi::ConfidenceScore::from_basis_points(/*value*/ 0)?,
+            verification: pi::BlackboardVerification::Unverified,
+            importance: pi::BlackboardImportance::Normal,
+            root_promotion: pi::RootPromotion::NotPromoted,
+            evidence: Vec::new(),
+            premises: Vec::new(),
+            provenance: pi::BlackboardProvenance {
+                kind: pi::BlackboardProvenanceKind::Agent,
+                source_id: "compat-agent".into(),
+            },
+        };
+        assert_eq!(entry.value, expected);
+        assert_eq!(
+            (entry.revision, entry.state, entry.superseded_by.clone()),
+            (1, pi::BlackboardEntryState::Active, None)
+        );
+        committed.push(entry);
+    }
+    assert_eq!(committed.len(), 9);
+    let before = snapshot(&sqlite).await?;
+    reopen(&mut server, &home, &thread).await?;
+    let replay: Value = serde_json::from_str(
+        &model_output_with_id(
+            &mut server,
+            &responses_server,
+            &thread,
+            "blackboard_record_batch",
+            request,
+            "compat-agent",
+        )
+        .await?,
+    )?;
+    assert_eq!(replay, result);
+    assert_eq!(snapshot(&sqlite).await?, before);
+    let reopened = pi::BlackboardStore::open(&sqlite).await?;
+    for entry in committed {
+        assert_eq!(reopened.get_entry(&project, &entry.id).await?, Some(entry));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum ProposalRefusal {
     Valid,
