@@ -78,3 +78,78 @@ async fn c3r2_decoded_proposal_refusals_and_backstops_fit_call_budgets() {
     }
     assert_eq!(store.project_revision("project-1").await.unwrap(), before);
 }
+
+#[tokio::test]
+async fn c3r2_memory_read_omitted_matches_refuse_without_progress_cold() {
+    let home = TempDir::new().unwrap();
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let services = ProjectIntelligenceServices::new(sqlite.clone());
+    let write = blackboard_write::BlackboardBatchRecordTool::new(
+        "project-1".into(),
+        "thread-1".into(),
+        services.clone(),
+        Arc::new(InMemoryThreadStore::default()),
+        /*event_sink*/ None,
+        VisibleRootRegistry::default(),
+    );
+    write.handle(call("blackboard_record_batch",json!({"records":[{
+        "idempotencyKey":"budget-entry","kind":"note","content":format!("equipment {}", "a".repeat(3990)),
+        "confidenceBasisPoints":0,"verification":"unverified","importance":"normal","rootPromotion":"notPromoted"
+    }]}),9000,ToolCallSource::Direct)).await.unwrap();
+    for _ in 0..2 {
+        let services = ProjectIntelligenceServices::new(sqlite.clone());
+        let store = services.blackboard().await.unwrap();
+        let before = store.project_revision("project-1").await.unwrap();
+        let tool = memory_read::MemoryReadTool::new(
+            "project-1".into(),
+            services.clone(),
+            Arc::new(InMemoryThreadStore::default()),
+        );
+        let mut refused = false;
+        let mut delivered = false;
+        for budget in [20, 100, 800, 1200, 1600, 2000, 4000, 9000] {
+            let call = call(
+                "memory_read",
+                json!({"question":"equipment","includeHistory":false}),
+                budget,
+                ToolCallSource::Direct,
+            );
+            match tool.handle(call.clone()).await {
+                Err(FunctionCallError::RespondToModel(message)) => {
+                    assert_eq!(message, "budget_insufficient");
+                    assert!(
+                        serde_json::to_string(&message).unwrap().len()
+                            <= call.response_byte_budget(MAX_RESPONSE_BYTES)
+                    );
+                    refused = true;
+                }
+                Ok(output) => {
+                    let result: serde_json::Value =
+                        serde_json::from_str(&output.log_output()).unwrap();
+                    assert_eq!(result["entries"].as_array().unwrap().len(), 1);
+                    assert!(
+                        output.log_output().len() <= call.response_byte_budget(MAX_RESPONSE_BYTES)
+                    );
+                    delivered = true;
+                }
+                Err(error) => panic!("{error}"),
+            }
+        }
+        assert!(refused && delivered);
+        let output = tool
+            .handle(call(
+                "memory_read",
+                json!({"question":"absent"}),
+                /*budget*/ 9000,
+                ToolCallSource::Direct,
+            ))
+            .await
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
+        assert_eq!(
+            (result["entries"].clone(), result["turns"].clone()),
+            (json!([]), json!([]))
+        );
+        assert_eq!(store.project_revision("project-1").await.unwrap(), before);
+    }
+}

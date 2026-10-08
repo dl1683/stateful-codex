@@ -202,3 +202,102 @@ async fn c3r2_public_decoded_proposal_refusals_fit_tiny_budgets_without_writes()
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn c3r2_public_memory_read_matching_entry_advances_or_terminally_refuses_cold() -> Result<()>
+{
+    let (home, mut server, project, _, responses_server) = setup().await?;
+    assert!(server.shutdown_gracefully().await?.success());
+    let config = core_test_support::load_default_config_for_test(&home).await;
+    let model = codex_core::test_support::construct_model_info_offline("mock-model", &config);
+    let catalog = home.path().join("memory-budget-models.json");
+    let models: Vec<_> = [("memory-small", 1200), ("memory-large", 9000)]
+        .into_iter()
+        .map(|(slug, limit)| {
+            let mut model = model.clone();
+            model.slug = slug.into();
+            model.truncation_policy =
+                codex_protocol::openai_models::TruncationPolicyConfig::bytes(limit);
+            model
+        })
+        .collect();
+    std::fs::write(&catalog, serde_json::to_vec(&json!({"models":models}))?)?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .with_model("memory-large")
+        .with_root_config(&format!(
+            "model_catalog_json = {}",
+            serde_json::to_string(&catalog)?
+        ))
+        .write(home.path())?;
+    server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized()
+        .await?;
+    let thread = start_thread(&mut server, &project).await?;
+    let written = model_call(
+        &mut server,
+        &responses_server,
+        &thread,
+        "blackboard_record_batch",
+        json!({"records":[record("memory-budget",&format!("equipment {}","a".repeat(3990)))]}),
+    )
+    .await?;
+    assert_eq!(written["recorded"], json!(1));
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let before = snapshot(&sqlite).await?;
+    for round in 0..2 {
+        if round == 1 {
+            reopen(&mut server, &home, &thread).await?;
+        }
+        for (model, budget) in [("memory-small", 1440), ("memory-large", 9000)] {
+            let call_id = format!("memory-{round}-{model}");
+            let mock = responses::mount_sse_sequence(
+                &responses_server,
+                vec![
+                    responses::sse(vec![
+                        responses::ev_function_call(
+                            &call_id,
+                            "memory_read",
+                            &json!({"question":"equipment","includeHistory":false}).to_string(),
+                        ),
+                        responses::ev_completed("read"),
+                    ]),
+                    responses::sse(vec![responses::ev_completed("done")]),
+                ],
+            )
+            .await;
+            server
+                .start_turn_and_wait_for_completion(TurnStartParams {
+                    thread_id: thread.clone(),
+                    model: Some(model.into()),
+                    input: vec![UserInput::Text {
+                        text: "Inspect the retained project memory.".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                })
+                .await?;
+            let requests = mock.requests();
+            assert_eq!(requests.len(), 2);
+            let output = requests[1].function_call_output_text(&call_id).unwrap();
+            assert!(output.len() <= budget);
+            if model == "memory-small" {
+                assert_eq!(output, "budget_insufficient");
+            } else {
+                let output: Value = serde_json::from_str(&output)
+                    .map_err(|error| anyhow::anyhow!("{error}: delivered {output}"))?;
+                assert_eq!(
+                    (
+                        output["entries"].as_array().unwrap().len(),
+                        output["entries"][0]["entryId"].clone(),
+                        output["turns"].clone()
+                    ),
+                    (1, written["results"][0]["entryId"].clone(), json!([]))
+                );
+            }
+            assert_eq!(snapshot(&sqlite).await?, before);
+        }
+    }
+    Ok(())
+}

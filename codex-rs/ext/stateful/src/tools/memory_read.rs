@@ -180,9 +180,13 @@ impl MemoryReadTool {
         result["coverage"]["moreMatchingKnowledge"] = json!(knowledge_truncated);
         result["coverage"]["turnsOmittedBySize"] = json!(omitted_turns);
         if !fits_response(&result, budget) {
-            result["entries"] = json!([]);
-            result["turns"] = json!([]);
-            result["coverage"]["note"] = json!("the result budget was too small for any item");
+            return Err(super::bounded_respond(&call, "budget_insufficient"));
+        }
+        if result["entries"].as_array().is_some_and(Vec::is_empty)
+            && result["turns"].as_array().is_some_and(Vec::is_empty)
+            && (omitted_entries > 0 || omitted_turns > 0)
+        {
+            return Err(super::bounded_respond(&call, "budget_insufficient"));
         }
         bounded_json_output(&call, result)
     }
