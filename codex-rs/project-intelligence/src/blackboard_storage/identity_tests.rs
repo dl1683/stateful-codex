@@ -42,7 +42,7 @@ pub(super) async fn legacy_rows(store: &BlackboardStore) -> Vec<Vec<String>> {
 }
 
 #[tokio::test]
-async fn c2r1_legacy_metadata_revisions_preserve_active_words_and_real_retirements() {
+async fn c2r3_legacy_metadata_history_preserved_with_unavailable_coverage() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     let mut value = rule("Active meridian note.");
@@ -88,90 +88,39 @@ async fn c2r1_legacy_metadata_revisions_preserve_active_words_and_real_retiremen
         .await
         .unwrap();
     sqlx::query("INSERT INTO capture_identity_coverage(project_id, watermark) SELECT 'project-1', MAX(rowid) FROM blackboard_entry_revisions").execute(&store.pool).await.unwrap();
-    sqlx::query("CREATE TRIGGER stop_after_identity_page BEFORE UPDATE ON capture_identity_coverage WHEN OLD.after_rowid >= 64 BEGIN SELECT RAISE(ABORT, 'cold continuation'); END").execute(&store.pool).await.unwrap();
-    assert!(store.maintain_capture_identities(PROJECT).await.is_err());
-    sqlx::query("DROP TRIGGER stop_after_identity_page")
-        .execute(&store.pool)
-        .await
-        .unwrap();
+    assert!(!store.maintain_capture_identities(PROJECT).await.unwrap());
     assert_eq!(legacy_rows(&store).await, original);
     store.pool.close().await;
     let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await
         .unwrap();
-    assert!(reopened.maintain_capture_identities(PROJECT).await.unwrap());
+    assert!(!reopened.maintain_capture_identities(PROJECT).await.unwrap());
     assert_eq!(legacy_rows(&reopened).await, original);
-    assert_eq!(
-        reopened
-            .get_source_eligible_entry(PROJECT, &id)
-            .await
-            .unwrap(),
-        Some(active.clone())
-    );
-    assert_eq!(
-        reopened
-            .get_source_eligible_entry(PROJECT, &changed_id)
-            .await
-            .unwrap(),
-        Some(changed)
-    );
+    for entry in [&active, &changed] {
+        assert_eq!(
+            reopened.get_entry(PROJECT, &entry.id).await.unwrap(),
+            Some(entry.clone())
+        );
+        assert_eq!(
+            reopened
+                .get_source_eligible_entry(PROJECT, &entry.id)
+                .await
+                .unwrap(),
+            None
+        );
+    }
     assert!(
-        reopened
+        !reopened
             .source_text_eligible(PROJECT, &active.value.content)
             .await
             .unwrap()
     );
-    let seal = reopened
-        .observe_source(
-            super::super::source_fixture::observation("active-original", &active.value.content),
-            &active.value.content,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        reopened
-            .read_source_range(
-                PROJECT,
-                &seal.exact_source_locator,
-                &seal.digest,
-                /*start*/ 0,
-                active.value.content.len() as u32
-            )
-            .await
-            .unwrap()
-            .exact_text,
-        active.value.content
-    );
-    for retired in ["Old corrected wording.", "Actually forgotten wording."] {
-        assert!(
-            !reopened
-                .source_text_eligible(PROJECT, retired)
-                .await
-                .unwrap()
-        );
-        let mut copy = active.value.clone();
-        copy.content = retired.to_string();
-        assert!(matches!(
-            reopened
-                .create_entry(
-                    BlackboardEntryId::parse(format!("copy-{retired}")).unwrap(),
-                    copy
-                )
-                .await,
-            Err(BlackboardStoreError::RetiredIdentity)
-        ));
-    }
     let mut update = retire(&active);
     update.state = BlackboardEntryState::Active;
-    update.root_promotion = RootPromotion::Candidate;
-    let revised = reopened
-        .update_entry_from_model(PROJECT, &id, update)
-        .await
-        .unwrap();
-    assert_eq!(
-        (revised.value.content, revised.revision),
-        (active.value.content, active.revision + 1)
-    );
+    assert!(matches!(
+        reopened.update_entry_from_model(PROJECT, &id, update).await,
+        Err(BlackboardStoreError::ModelMutationRefused)
+    ));
 }
 
 #[tokio::test]
@@ -539,7 +488,7 @@ async fn c2_direct_canonical_reuse_correction_retirement_and_fresh_restore() {
 }
 
 #[tokio::test]
-async fn c2_identity_backfill_cold_cursor_and_unknown_source_fail_closed() {
+async fn c2r3_legacy_coverage_stays_unavailable_without_inventing_source_or_cursor() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     for index in 0..300 {
@@ -566,28 +515,27 @@ async fn c2_identity_backfill_cold_cursor_and_unknown_source_fail_closed() {
             .await,
         Err(BlackboardStoreError::IdentityCoverageIncomplete)
     ));
-    sqlx::query("CREATE TRIGGER fail_second_identity_page BEFORE UPDATE ON capture_identity_coverage WHEN OLD.after_rowid >= 64 BEGIN SELECT RAISE(ABORT, 'after first durable page'); END").execute(&store.pool).await.unwrap();
-    assert!(store.maintain_capture_identities(PROJECT).await.is_err());
-    sqlx::query("DROP TRIGGER fail_second_identity_page")
-        .execute(&store.pool)
-        .await
-        .unwrap();
+    let original = legacy_rows(&store).await;
+    assert!(!store.maintain_capture_identities(PROJECT).await.unwrap());
     let after: i64 = sqlx::query_scalar(
         "SELECT after_rowid FROM capture_identity_coverage WHERE project_id = 'project-1'",
     )
     .fetch_one(&store.pool)
     .await
     .unwrap();
-    assert_eq!(after, 64);
+    assert_eq!(after, 0);
     store.pool.close().await;
     let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await
         .unwrap();
-    assert!(reopened.maintain_capture_identities(PROJECT).await.unwrap());
-    reopened
-        .create_entry(BlackboardEntryId::parse("auto").unwrap(), value)
-        .await
-        .unwrap();
+    assert!(!reopened.maintain_capture_identities(PROJECT).await.unwrap());
+    assert_eq!(legacy_rows(&reopened).await, original);
+    assert!(matches!(
+        reopened
+            .create_entry(BlackboardEntryId::parse("auto").unwrap(), value)
+            .await,
+        Err(BlackboardStoreError::IdentityCoverageIncomplete)
+    ));
     let known_sources: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM capture_sources")
         .fetch_one(&reopened.pool)
         .await

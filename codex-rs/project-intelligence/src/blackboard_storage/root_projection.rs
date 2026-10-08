@@ -70,6 +70,9 @@ impl BlackboardStore {
     ) -> Result<(RootBlackboardProjection, ThreadScopes), BlackboardStoreError> {
         query.validate()?;
         let mut transaction = self.pool.begin().await?;
+        if !super::identity::coverage_available(&mut transaction, &query.project_id).await? {
+            return Err(BlackboardStoreError::IdentityCoverageIncomplete);
+        }
         let eligibility = super::identity::ENTRY_SOURCE_ELIGIBILITY;
         let scoped = format!("{UNSCOPED_CONTEXT} AND NOT ({LEGACY_LIMITED_RULE})");
         let outside = format!("{ROOT_ELIGIBILITY}{scoped}{eligibility}");

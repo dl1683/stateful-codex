@@ -529,9 +529,6 @@ async fn route_knowledge(
     project_id: &str,
     hits: &[ContextMapHit],
 ) -> (HashMap<ContextMapEntryId, BlackboardRouteKnowledge>, bool) {
-    if hits.is_empty() {
-        return (HashMap::new(), true);
-    }
     let store = match services.blackboard().await {
         Ok(store) => store,
         Err(error) => {
@@ -539,6 +536,15 @@ async fn route_knowledge(
             return (HashMap::new(), false);
         }
     };
+    if hits.is_empty() {
+        return (
+            HashMap::new(),
+            store
+                .maintain_capture_identities(project_id)
+                .await
+                .unwrap_or(false),
+        );
+    }
     match store
         .route_knowledge(BlackboardRouteKnowledgeQuery {
             project_id: project_id.to_string(),

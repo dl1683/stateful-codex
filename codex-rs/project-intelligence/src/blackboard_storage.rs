@@ -589,7 +589,9 @@ pub enum BlackboardStoreError {
     RetiredIdentity,
     #[error("identity aliases are ambiguous; nothing was merged")]
     AmbiguousIdentity,
-    #[error("legacy identity coverage is incomplete or blocked; automatic insertion refused")]
+    #[error(
+        "identity coverage is unavailable; legacy upgrade replay and automatic access are excluded"
+    )]
     IdentityCoverageIncomplete,
     #[error("source index rebuild is incomplete; resume bounded maintenance")]
     SourceIndexIncomplete,

@@ -146,7 +146,7 @@ async fn c2r2_structured_fields_cover_existing_copies_update_succession_and_limi
 }
 
 #[tokio::test]
-async fn c2r2_legacy_word_cycle_current_binding_survives_paged_upgrade_and_forget() {
+async fn c2r3_legacy_word_cycle_is_archival_with_unavailable_automatic_coverage() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     // Faithful old-store fixture: pre-0021 writes permitted A -> B -> A. Seed the
@@ -222,119 +222,53 @@ async fn c2r2_legacy_word_cycle_current_binding_survives_paged_upgrade_and_forge
         .await
         .unwrap();
     sqlx::query("INSERT INTO capture_identity_coverage(project_id, watermark) SELECT 'project-1', MAX(rowid) FROM blackboard_entry_revisions WHERE 1 ON CONFLICT(project_id) DO UPDATE SET after_rowid = 0, watermark = excluded.watermark").execute(&store.pool).await.unwrap();
-    sqlx::query("CREATE TRIGGER stop_cycle_page BEFORE UPDATE ON capture_identity_coverage WHEN OLD.after_rowid >= 64 BEGIN SELECT RAISE(ABORT, 'cold continuation'); END").execute(&store.pool).await.unwrap();
-    assert!(store.maintain_capture_identities(PROJECT).await.is_err());
-    sqlx::query("DROP TRIGGER stop_cycle_page")
-        .execute(&store.pool)
-        .await
-        .unwrap();
+    assert!(!store.maintain_capture_identities(PROJECT).await.unwrap());
     assert_eq!(legacy_rows(&store).await, original);
     store.pool.close().await;
     let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await
         .unwrap();
-    assert!(reopened.maintain_capture_identities(PROJECT).await.unwrap());
+    assert!(!reopened.maintain_capture_identities(PROJECT).await.unwrap());
     assert_eq!(legacy_rows(&reopened).await, original);
-    let direct = reopened
-        .create_entry(
-            BlackboardEntryId::parse("fresh-direct-A").unwrap(),
-            rule("Old meridian fact."),
-        )
-        .await
-        .unwrap();
-    reopened
-        .update_entry(PROJECT, &direct.id, retire(&direct))
-        .await
-        .unwrap();
-    // A live B-after-A is still eligible; B's metadata can change without restoration.
-    let before = snapshot(&reopened).await;
-    assert_eq!(reopened.get_hit(PROJECT, &cycle.id).await.unwrap(), None);
-    assert_eq!(
-        reopened
-            .get_source_eligible_entry(PROJECT, &cycle.id)
-            .await
-            .unwrap(),
-        None
-    );
     assert_eq!(
         reopened.get_entry(PROJECT, &cycle.id).await.unwrap(),
         Some(cycle.clone())
     );
-    let queried = reopened
-        .query(BlackboardQuery {
-            project_id: PROJECT.to_string(),
-            text: None,
-            within_node: None,
-            root_promotion: None,
-            entry_scope: BlackboardEntryScope::All,
-            max_results: 50,
-        })
-        .await
-        .unwrap();
-    assert!(!queried.data.iter().any(|hit| hit.entry.id == cycle.id));
-    assert!(
-        !reopened
-            .get_hit(PROJECT, &control.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .relations
-            .iter()
-            .any(|item| item.id == relation.id)
-    );
-    for root in [
+    for id in [&cycle.id, &control.id] {
+        assert_eq!(
+            reopened
+                .get_source_eligible_entry(PROJECT, id)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(reopened.get_hit(PROJECT, id).await.unwrap(), None);
+    }
+    assert!(matches!(
         reopened
             .root_projection(RootBlackboardQuery {
                 project_id: PROJECT.to_string(),
                 max_entries: 256,
             })
+            .await,
+        Err(BlackboardStoreError::IdentityCoverageIncomplete)
+    ));
+    assert_eq!(
+        reopened
+            .list_relations(PROJECT, &control.id, /*max_results*/ 256)
             .await
             .unwrap(),
-        reopened
-            .root_projection_for_thread(
-                RootBlackboardQuery {
-                    project_id: PROJECT.to_string(),
-                    max_entries: 256,
-                },
-                "thread-1",
-            )
-            .await
-            .unwrap()
-            .0,
-    ] {
-        assert!(!root.data.iter().any(|hit| hit.entry.id == cycle.id));
-        assert!(root.data.iter().any(|hit| hit.entry.id == control.id));
-    }
+        vec![relation]
+    );
     let mut update = retire(&control);
     update.state = BlackboardEntryState::Active;
-    update.content = cycle.value.content.clone();
+    update.content = cycle.value.content;
     assert!(matches!(
         reopened
             .update_entry_from_model(PROJECT, &control.id, update)
             .await,
-        Err(BlackboardStoreError::RetiredIdentity)
+        Err(BlackboardStoreError::ModelMutationRefused)
     ));
-    assert_eq!(snapshot(&reopened).await, before);
+    assert_eq!(legacy_rows(&reopened).await, original);
     assert_eq!(changed.value.content, "Current cedar fact.");
-    reopened.pool.close().await;
-    let cold = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
-        .await
-        .unwrap();
-    assert_eq!(cold.get_hit(PROJECT, &cycle.id).await.unwrap(), None);
-    assert!(
-        !cold
-            .get_hit(PROJECT, &control.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .relations
-            .iter()
-            .any(|item| item.id == relation.id)
-    );
-    assert_eq!(
-        cold.get_source_eligible_entry(PROJECT, &control.id)
-            .await
-            .unwrap(),
-        Some(control)
-    );
 }

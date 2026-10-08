@@ -12,6 +12,9 @@ pub(super) async fn range_eligible(
     end: u32,
     budget: &mut SourceBudget,
 ) -> Result<bool, BlackboardStoreError> {
+    if !super::identity::coverage_available(connection, project_id).await? {
+        return Ok(false);
+    }
     let retired: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_identity_aliases WHERE project_id = ? AND retired = 1)")
         .bind(project_id).fetch_one(&mut *connection).await?;
     if !retired {

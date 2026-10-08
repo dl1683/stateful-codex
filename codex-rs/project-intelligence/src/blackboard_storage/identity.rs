@@ -22,11 +22,10 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
           AND excluded.digest = source.digest AND excluded.start_byte < link.end_byte
           AND excluded.end_byte > link.start_byte
         WHERE link.entry_id = entry.id)
+    AND NOT EXISTS (SELECT 1 FROM capture_identity_coverage AS coverage
+            WHERE coverage.project_id = entry.project_id)
     AND (revision.provenance_kind = 'user' OR (
-        NOT EXISTS (SELECT 1 FROM capture_identity_coverage AS coverage
-            WHERE coverage.project_id = entry.project_id
-              AND (coverage.after_rowid < coverage.watermark OR coverage.blocked_reason IS NOT NULL))
-        AND (SELECT COUNT(*) FROM capture_current_words AS proof
+        (SELECT COUNT(*) FROM capture_current_words AS proof
              WHERE proof.entry_id = entry.id AND proof.revision = entry.revision) = 3
         AND NOT EXISTS (
         SELECT 1 FROM capture_current_words AS current_alias
@@ -89,9 +88,7 @@ pub(super) async fn check_activation(
     value: &NewBlackboardEntry,
     context: Option<&KnowledgeContext>,
 ) -> Result<(), BlackboardStoreError> {
-    let incomplete: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_identity_coverage WHERE project_id = ? AND (after_rowid < watermark OR blocked_reason IS NOT NULL))")
-        .bind(&value.project_id).fetch_one(&mut *connection).await?;
-    if incomplete {
+    if !coverage_available(connection, &value.project_id).await? {
         return Err(BlackboardStoreError::IdentityCoverageIncomplete);
     }
     let requested_scope = context
@@ -129,6 +126,9 @@ pub(super) async fn text_eligible(
     scope: &str,
     text: &str,
 ) -> Result<bool, BlackboardStoreError> {
+    if !coverage_available(connection, project_id).await? {
+        return Ok(false);
+    }
     let retired: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_identity_aliases AS alias WHERE project_id = ? AND retired = 1 AND ((retirement_words != '' AND instr(?, ' ' || retirement_words || ' ') > 0) OR (retirement_words = '' AND primary_words != '' AND instr(?, primary_words) > 0)) AND (scope_id = '' OR ? = '' OR scope_id = ? OR NOT EXISTS(SELECT 1 FROM knowledge_scopes AS scope WHERE scope.project_id = alias.project_id AND scope.scope_id = alias.scope_id AND octet_length(scope.scope_id) <= 512 AND octet_length(scope.title) <= 512 AND (scope.end_condition IS NULL OR octet_length(scope.end_condition) <= 2000) AND octet_length(scope.opened_source) <= 512)))")
         .bind(project_id).bind(format!(" {} ", retirement_capture_words(text)))
         .bind(canonical_capture_words(text)).bind(scope).bind(scope)
@@ -223,112 +223,33 @@ pub(super) async fn direct_match(
     Ok(Some(BlackboardEntryId::parse(id)?))
 }
 
-type IdentityRevision = (i64, Option<String>, String, Option<String>, String, i64);
-
 impl BlackboardStore {
-    /// Upgrade coverage, at most 64 revision rows per page and 256 per operation.
-    /// Progress commits independently of later refused semantic writes. Unknown source stays unknown.
+    /// Reports whether automatic identity coverage is available. Historical alias replay is
+    /// excluded: it can manufacture retirement of live wording on populated upgraded stores.
+    /// Upgraded stores, including previously certified ones, retain their archival bytes
+    /// and return false without mutation. Fresh stores have no upgrade coverage row.
     pub async fn maintain_capture_identities(
         &self,
         project_id: &str,
     ) -> Result<bool, BlackboardStoreError> {
-        let start = std::time::Instant::now();
-        let mut examined = 0;
-        while examined < 256
-            && start.elapsed() < std::time::Duration::from_millis(/*millis*/ 1500)
-        {
-            let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-            let coverage: Option<(i64, i64, Option<String>)> = sqlx::query_as("SELECT after_rowid, watermark, blocked_reason FROM capture_identity_coverage WHERE project_id = ?")
-                .bind(project_id).fetch_optional(&mut *tx).await?;
-            let Some((after, watermark, blocked)) = coverage else {
-                return Ok(true);
-            };
-            if blocked.is_some() {
-                return Ok(false);
-            }
-            if after >= watermark {
-                return Ok(true);
-            }
-            let rows: Vec<IdentityRevision> = sqlx::query_as("SELECT revision.rowid, CASE WHEN octet_length(entry.id) <= 512 THEN entry.id END, revision.kind, CASE WHEN octet_length(revision.content) <= 4096 AND octet_length(entry.id) <= 512 THEN revision.content END, revision.state, revision.revision FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id WHERE entry.project_id = ? AND revision.rowid > ? AND revision.rowid <= ? ORDER BY revision.rowid LIMIT 64")
-                .bind(project_id).bind(after).bind(watermark).fetch_all(&mut *tx).await?;
-            let mut last = after;
-            for (rowid, id, kind, content, historical_state, revision) in &rows {
-                let (Some(id), Some(content)) = (id, content) else {
-                    sqlx::query("UPDATE capture_identity_coverage SET blocked_reason = 'unsupported legacy identity' WHERE project_id = ?").bind(project_id).execute(&mut *tx).await?;
-                    tx.commit().await?;
-                    return Ok(false);
-                };
-                let id = BlackboardEntryId::parse(id)?;
-                let context = match read_context(
-                    &mut tx,
-                    project_id,
-                    id.as_str(),
-                    ContextFields::Identity,
-                )
-                .await
-                {
-                    Ok(context) => context,
-                    Err(BlackboardStoreError::UnsupportedContext) => {
-                        sqlx::query("UPDATE capture_identity_coverage SET blocked_reason = 'unsupported legacy context' WHERE project_id = ?").bind(project_id).execute(&mut *tx).await?;
-                        tx.commit().await?;
-                        return Ok(false);
-                    }
-                    Err(error) => return Err(error),
-                };
-                let current_state: String = sqlx::query_scalar("SELECT revision.state FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision WHERE entry.project_id = ? AND entry.id = ?").bind(project_id).bind(id.as_str()).fetch_one(&mut *tx).await?;
-                // Replay actual lifecycle and wording transitions in durable row order.
-                // register_alias retires changed wording and never clears a real fence;
-                // a metadata-only Active revision is not itself a retirement.
-                let state = if historical_state != "active" || current_state != "active" {
-                    BlackboardEntryState::Tombstoned
-                } else {
-                    BlackboardEntryState::Active
-                };
-                register_alias(
-                    &mut tx,
-                    project_id,
-                    &id,
-                    super::parse_kind(kind)?,
-                    content,
-                    state,
-                    context.as_ref(),
-                )
-                .await?;
-                if let Err(error) = super::current_words::register(
-                    &mut tx,
-                    id.as_str(),
-                    *revision,
-                    context.as_ref(),
-                )
-                .await
-                {
-                    if matches!(error, BlackboardStoreError::IdentityCoverageIncomplete) {
-                        sqlx::query("UPDATE capture_identity_coverage SET blocked_reason = 'unsupported legacy semantic fields' WHERE project_id = ?").bind(project_id).execute(&mut *tx).await?;
-                        tx.commit().await?;
-                        return Ok(false);
-                    }
-                    return Err(error);
-                }
-                last = *rowid;
-            }
-            if rows.len() < 64 {
-                last = watermark;
-            }
-            sqlx::query(
-                "UPDATE capture_identity_coverage SET after_rowid = ? WHERE project_id = ?",
-            )
-            .bind(last)
-            .bind(project_id)
-            .execute(&mut *tx)
-            .await?;
-            tx.commit().await?;
-            examined += rows.len();
-            if last >= watermark {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        let mut tx = self.pool.begin().await?;
+        let complete = coverage_available(&mut tx, project_id).await?;
+        tx.commit().await?;
+        Ok(complete)
     }
+}
+
+pub(super) async fn coverage_available(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+) -> Result<bool, BlackboardStoreError> {
+    let upgraded: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM capture_identity_coverage WHERE project_id = ?)",
+    )
+    .bind(project_id)
+    .fetch_one(connection)
+    .await?;
+    Ok(!upgraded)
 }
 
 #[cfg(test)]

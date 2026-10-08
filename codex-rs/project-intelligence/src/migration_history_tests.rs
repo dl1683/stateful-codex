@@ -39,6 +39,87 @@ fn prefix(version: i64) -> Migrator {
     }
 }
 
+#[tokio::test]
+async fn c2r3_populated_0021_upgrade_preserves_live_body_value_unit_and_genuine_retirement() {
+    for (field, category) in [
+        ("content", "note"),
+        ("structured_value", "structured_value"),
+        ("structured_unit", "structured_unit"),
+    ] {
+        let home = TempDir::new().unwrap();
+        let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+        seed(&sqlite, &prefix(/*version*/ 21)).await;
+        let pool = sqlite
+            .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
+            .await
+            .unwrap();
+        sqlx::query("UPDATE blackboard_entry_revisions SET kind = 'note', state = 'active', provenance_kind = 'agent', content = 'Independent body.', structured_value = '17', structured_unit = 'kits' WHERE entry_id = 'legacy'")
+            .execute(&pool).await.unwrap();
+        sqlx::query(AssertSqlSafe(format!("UPDATE blackboard_entry_revisions SET {field} = 'Old meridian fact.' WHERE entry_id = 'legacy'")))
+            .execute(&pool).await.unwrap();
+        sqlx::query("UPDATE blackboard_entries SET revision = 2 WHERE id = 'legacy'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO blackboard_entry_revisions SELECT entry_id, 2, kind, content, structured_value, structured_unit, confidence_basis_points, verification, importance, root_promotion, state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms, agent_run_id FROM blackboard_entry_revisions WHERE entry_id = 'legacy'")
+            .execute(&pool).await.unwrap();
+        sqlx::query(AssertSqlSafe(format!("UPDATE blackboard_entry_revisions SET {field} = 'Current cedar fact.' WHERE entry_id = 'legacy' AND revision = 2")))
+            .execute(&pool).await.unwrap();
+        for (words, retired) in [("Old meridian fact.", 1_i64), ("Current cedar fact.", 0)] {
+            sqlx::query("INSERT INTO capture_identity_aliases VALUES ('project', 'legacy', ?, ?, 'agent', '', ?, ?, ?)")
+                .bind(crate::CAPTURE_NORMALIZER_VERSION).bind(category)
+                .bind(crate::canonical_capture_words(words)).bind(crate::retirement_capture_words(words))
+                .bind(retired).execute(&pool).await.unwrap();
+        }
+        // Simulate completed applied-0021 coverage; 0022 must repin it without replay.
+        sqlx::query("UPDATE capture_identity_coverage SET after_rowid = watermark WHERE project_id = 'project'")
+            .execute(&pool).await.unwrap();
+        let before: Vec<String> = sqlx::query_scalar("SELECT json_array(entry_id, revision, kind, content, structured_value, structured_unit, confidence_basis_points, verification, importance, root_promotion, state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms, agent_run_id) FROM blackboard_entry_revisions ORDER BY revision")
+            .fetch_all(&pool).await.unwrap();
+        let aliases: Vec<String> = sqlx::query_scalar("SELECT json_array(project_id, entry_id, normalizer_version, category, authority, scope_id, primary_words, retirement_words, retired) FROM capture_identity_aliases ORDER BY primary_words")
+            .fetch_all(&pool).await.unwrap();
+        pool.close().await;
+        for _ in 0..2 {
+            let store = BlackboardStore::open(&sqlite).await.unwrap();
+            assert!(!store.maintain_capture_identities("project").await.unwrap());
+            assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_array(entry_id, revision, kind, content, structured_value, structured_unit, confidence_basis_points, verification, importance, root_promotion, state, superseded_by, provenance_kind, provenance_source_id, recorded_at_ms, agent_run_id) FROM blackboard_entry_revisions ORDER BY revision")
+                .fetch_all(&store.pool).await.unwrap(), before);
+            assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_array(project_id, entry_id, normalizer_version, category, authority, scope_id, primary_words, retirement_words, retired) FROM capture_identity_aliases ORDER BY primary_words")
+                .fetch_all(&store.pool).await.unwrap(), aliases);
+            let id = BlackboardEntryId::parse("legacy").unwrap();
+            let current = store.get_entry("project", &id).await.unwrap().unwrap();
+            assert_eq!(
+                (current.revision, current.state),
+                (2, crate::BlackboardEntryState::Active)
+            );
+            assert_eq!(
+                store
+                    .get_source_eligible_entry("project", &id)
+                    .await
+                    .unwrap(),
+                None
+            );
+            for words in ["Old meridian fact.", "Current cedar fact."] {
+                assert!(!store.source_text_eligible("project", words).await.unwrap());
+            }
+            assert!(matches!(
+                store
+                    .root_projection(crate::RootBlackboardQuery {
+                        project_id: "project".to_string(),
+                        max_entries: 256,
+                    })
+                    .await,
+                Err(crate::BlackboardStoreError::IdentityCoverageIncomplete)
+            ));
+            // Earlier binaries could falsely certify replay. That certificate cannot
+            // restore automatic coverage on the next cold open.
+            sqlx::query("UPDATE capture_identity_coverage SET after_rowid = watermark WHERE project_id = 'project'")
+                .execute(&store.pool).await.unwrap();
+            store.pool.close().await;
+        }
+    }
+}
+
 async fn seed(sqlite: &SqliteConfig, migrator: &Migrator) {
     let pool = sqlite
         .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))

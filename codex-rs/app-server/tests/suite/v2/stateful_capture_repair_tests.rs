@@ -238,7 +238,7 @@ async fn c2r2_public_structured_copy_refuses_repeat_full_query_root_and_cold_ret
 }
 
 #[tokio::test]
-async fn c2r2_public_forget_withholds_upgraded_legacy_word_cycle_after_restart() -> Result<()> {
+async fn c2r3_public_incomplete_upgrade_withholds_legacy_word_cycle_after_restart() -> Result<()> {
     let (home, mut server, project, thread, responses_server) = setup().await?;
     let seed = model_call(
         &mut server,
@@ -287,7 +287,7 @@ async fn c2r2_public_forget_withholds_upgraded_legacy_word_cycle_after_restart()
     tx.commit().await?;
     pool.close().await;
     let legacy = store.get_entry(&project, &id).await?;
-    while !store.maintain_capture_identities(&project).await? {}
+    assert!(!store.maintain_capture_identities(&project).await?);
     assert_eq!(store.get_entry(&project, &id).await?, legacy);
     let added: StatefulMemoryAddResponse = server
         .request(|request_id| ClientRequest::StatefulMemoryAdd {
@@ -314,7 +314,7 @@ async fn c2r2_public_forget_withholds_upgraded_legacy_word_cycle_after_restart()
     .await?;
     for attempt in 0..2 {
         let before = snapshot(&sqlite).await?;
-        let output = model_call(
+        let output = model_output(
             &mut server,
             &responses_server,
             &thread,
@@ -322,7 +322,8 @@ async fn c2r2_public_forget_withholds_upgraded_legacy_word_cycle_after_restart()
             json!({"entryScope":"all","detail":"full","limit":50}),
         )
         .await?;
-        assert!(!output.to_string().contains("Old meridian fact."));
+        assert!(!output.contains("Old meridian fact."));
+        assert!(output.contains("coverage"), "{output}");
         let exact = model_output(
             &mut server,
             &responses_server,
@@ -346,13 +347,10 @@ async fn c2r2_public_forget_withholds_upgraded_legacy_word_cycle_after_restart()
         );
         assert_eq!(snapshot(&sqlite).await?, before);
         assert_eq!(store.get_entry(&project, &id).await?, legacy);
-        assert!(
-            store
-                .root_projection(root_query.clone())
-                .await?
-                .data
-                .is_empty()
-        );
+        assert!(matches!(
+            store.root_projection(root_query.clone()).await,
+            Err(pi::BlackboardStoreError::IdentityCoverageIncomplete)
+        ));
         if attempt == 0 {
             reopen(&mut server, &home, &thread).await?;
         }

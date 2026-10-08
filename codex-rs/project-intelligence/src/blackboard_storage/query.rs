@@ -59,6 +59,9 @@ impl BlackboardStore {
     ) -> Result<BlackboardEvidenceDependentsResult, BlackboardStoreError> {
         query.validate()?;
         let mut transaction = self.pool.begin().await?;
+        if !super::identity::coverage_available(&mut transaction, &query.project_id).await? {
+            return Err(BlackboardStoreError::IdentityCoverageIncomplete);
+        }
         let project_revision = sqlx::query_scalar::<_, i64>(
             "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
         )
@@ -189,6 +192,10 @@ impl BlackboardStore {
         query: BlackboardRouteKnowledgeQuery,
     ) -> Result<Vec<BlackboardRouteKnowledge>, BlackboardStoreError> {
         query.validate()?;
+        let mut transaction = self.pool.begin().await?;
+        if !super::identity::coverage_available(&mut transaction, &query.project_id).await? {
+            return Err(BlackboardStoreError::IdentityCoverageIncomplete);
+        }
         let mut builder =
             QueryBuilder::<Sqlite>::new("WITH requested(context_map_entry_id) AS (VALUES ");
         {
@@ -254,8 +261,9 @@ impl BlackboardStore {
         );
         let rows = builder
             .build_query_as::<StoredRouteKnowledge>()
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *transaction)
             .await?;
+        transaction.commit().await?;
         rows.into_iter()
             .map(|row| {
                 Ok(BlackboardRouteKnowledge {
@@ -280,6 +288,9 @@ impl BlackboardStore {
     ) -> Result<BlackboardQueryResult, BlackboardStoreError> {
         query.validate()?;
         let mut transaction = self.pool.begin().await?;
+        if !super::identity::coverage_available(&mut transaction, &query.project_id).await? {
+            return Err(BlackboardStoreError::IdentityCoverageIncomplete);
+        }
         if let Some(node_id) = query.within_node.as_ref()
             && load_node(&mut transaction, &query.project_id, node_id)
                 .await?
