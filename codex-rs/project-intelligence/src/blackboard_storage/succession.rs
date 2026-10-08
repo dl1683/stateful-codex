@@ -115,7 +115,16 @@ impl BlackboardStore {
                 let current = load_entry(&mut transaction, &value.project_id, &target.id)
                     .await?
                     .ok_or_else(|| BlackboardStoreError::EntryNotFound(target.id.to_string()))?;
-                check_model_target(&mut transaction, &current, ModelOperation::Retirement).await?;
+                let operation = if current.state == BlackboardEntryState::Superseded
+                    && current.superseded_by.as_ref() == Some(&id)
+                {
+                    // A committed predecessor is archival. Recheck its authority,
+                    // while delivery eligibility belongs to the live successor below.
+                    ModelOperation::SuccessionReplay
+                } else {
+                    ModelOperation::Retirement
+                };
+                check_model_target(&mut transaction, &current, operation).await?;
             }
         }
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
@@ -142,6 +151,9 @@ impl BlackboardStore {
             }
             if existing.state != BlackboardEntryState::Active || existing.value != expected {
                 return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
+            }
+            if matches!(actor, WriterActor::Model) {
+                check_model_target(&mut transaction, &existing, ModelOperation::Mutation).await?;
             }
             transaction.commit().await?;
             return Ok(Succession {

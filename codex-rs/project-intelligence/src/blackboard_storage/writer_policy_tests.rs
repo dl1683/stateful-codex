@@ -483,6 +483,7 @@ async fn model_succession_retry_rechecks_authority_under_the_writer_lock() {
     value.kind = crate::BlackboardKind::Note;
     value.provenance.kind = BlackboardProvenanceKind::Agent;
     let target = store.create_entry(id.clone(), value.clone()).await.unwrap();
+    value.content = "Current independent assistant note".to_string();
     let request = vec![SupersededEntry {
         id: id.clone(),
         expected_revision: target.revision,

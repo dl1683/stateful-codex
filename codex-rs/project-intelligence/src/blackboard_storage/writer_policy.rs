@@ -17,6 +17,7 @@ pub(super) enum WriterActor {
 pub(super) enum ModelOperation {
     Mutation,
     Retirement,
+    SuccessionReplay,
 }
 
 pub(super) async fn check_model_target(
@@ -41,7 +42,12 @@ pub(super) async fn check_model_target(
     if non_agent_revisions != 0 {
         return Err(BlackboardStoreError::ModelMutationRefused);
     }
-    if !super::identity::entry_source_eligible_on(connection, &entry.value.project_id, &entry.id)
+    if !matches!(operation, ModelOperation::SuccessionReplay)
+        && !super::identity::entry_source_eligible_on(
+            connection,
+            &entry.value.project_id,
+            &entry.id,
+        )
         .await?
     {
         return Err(BlackboardStoreError::ModelMutationRefused);
@@ -52,8 +58,10 @@ pub(super) async fn check_model_target(
             context.authority,
             KnowledgeAuthority::HumanDirect | KnowledgeAuthority::LegacyUnknown
         )
-    }) || (matches!(operation, ModelOperation::Retirement)
-        && context.is_some_and(|context| context.category == KnowledgeCategory::RuledOut))
+    }) || (matches!(
+        operation,
+        ModelOperation::Retirement | ModelOperation::SuccessionReplay
+    ) && context.is_some_and(|context| context.category == KnowledgeCategory::RuledOut))
     {
         return Err(BlackboardStoreError::ModelMutationRefused);
     }

@@ -30,6 +30,7 @@ use crate::storage::unix_timestamp_millis;
 
 mod capture_write;
 mod context_bounds;
+mod current_words;
 mod fence;
 mod identity;
 mod knowledge;

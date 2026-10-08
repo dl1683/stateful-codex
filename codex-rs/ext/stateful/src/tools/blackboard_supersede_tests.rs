@@ -54,12 +54,18 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
     let a = BlackboardEntryId::parse("a").expect("ID");
     let b = BlackboardEntryId::parse("b").expect("ID");
     let x = BlackboardEntryId::parse("x").expect("ID");
-    store.create_entry(a.clone(), value("A.")).await.expect("A");
-    store.create_entry(b.clone(), value("B.")).await.expect("B");
+    store
+        .create_entry(a.clone(), value("First original conclusion."))
+        .await
+        .expect("A");
+    store
+        .create_entry(b.clone(), value("Second original conclusion."))
+        .await
+        .expect("B");
     store
         .create_successor(
             x.clone(),
-            value("A and B."),
+            value("Merged independent conclusion."),
             vec![
                 SupersededEntry {
                     id: a.clone(),
@@ -93,7 +99,7 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
         alias: "E1".to_string(),
     };
     let mut outcomes = Vec::new();
-    let mut retry_value = value("A and B.");
+    let mut retry_value = value("Merged independent conclusion.");
     retry_value.provenance.source_id = "turn-2".to_string();
     for references in [
         vec![entry("a"), entry("b")],

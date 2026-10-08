@@ -95,7 +95,7 @@ async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay(
                     groups.iter().map(Vec::len).sum::<usize>(),
                     more
                 ),
-                (2, if include_history { 32 } else { 2 }, include_history)
+                (2, 2, include_history)
             );
         }
         let successor = BlackboardEntryId::parse("first").unwrap();
@@ -244,8 +244,8 @@ fn decision(
     }
 }
 
-/// A -> B -> C where the question matches A and C: one group, C first, with B and A as
-/// history; and a since filter applies before matches are ranked.
+/// A -> B -> C returns the eligible current wording, withholding retired history;
+/// a since filter still applies before matches are ranked.
 #[tokio::test]
 async fn matches_of_one_chain_share_a_group_and_since_filters_first() {
     let state_home = tempfile::TempDir::new().expect("state home");
@@ -323,13 +323,12 @@ async fn matches_of_one_chain_share_a_group_and_since_filters_first() {
             ids[0].len(),
             future_only.len()
         ),
-        (1, Some("c".to_string()), 3, 0)
+        (1, Some("c".to_string()), 1, 0)
     );
 }
 
-/// A -> B -> C -> D -> E -> F with matches on F and A: the walk from A stops at the
-/// four-hop bound on E, which the group of F already shows, so A joins that group and no
-/// entry repeats.
+/// A -> B -> C -> D -> E -> F with matches on F and A returns the eligible F,
+/// while the retired predecessors remain archival.
 #[tokio::test]
 async fn a_long_chain_joins_the_group_that_already_shows_it() {
     let state_home = tempfile::TempDir::new().expect("state home");
@@ -387,12 +386,7 @@ async fn a_long_chain_joins_the_group_that_already_shows_it() {
     ids.sort();
     assert_eq!(
         (groups.len(), first, ids, truncated),
-        (
-            1,
-            Some("f".to_string()),
-            ["a", "b", "c", "d", "e", "f"].map(String::from).to_vec(),
-            false
-        )
+        (1, Some("f".to_string()), vec!["f".to_string()], false)
     );
 }
 
@@ -437,10 +431,10 @@ async fn since_matches_beyond_the_hit_cap_are_reported() {
     );
 }
 
-/// With A -> ... -> F, older matches arriving first (A, then B) still resolve to F: B is not
-/// stopped at an entry that only A's walk had reached.
+/// Retired wording is withheld from automatic matching; the current independent
+/// wording remains readable in either history mode.
 #[tokio::test]
-async fn older_matches_first_still_reach_the_current_entry() {
+async fn retired_matches_are_withheld_and_current_wording_remains_readable() {
     let state_home = tempfile::TempDir::new().expect("state home");
     let services = crate::services::ProjectIntelligenceServices::new(
         codex_state::SqliteConfig::new_for_testing(
@@ -494,7 +488,24 @@ async fn older_matches_first_still_reach_the_current_entry() {
                 .collect::<Vec<_>>(),
         );
     }
-    assert_eq!(heads, vec![vec!["f".to_string()], vec!["f".to_string()]]);
+    assert_eq!(heads, vec![Vec::<String>::new(), Vec::<String>::new()]);
+    let (current, _) = tool
+        .knowledge(
+            store,
+            &question_terms("sixth"),
+            Some(0),
+            /*include_history*/ true,
+        )
+        .await
+        .expect("current wording");
+    assert_eq!(
+        current
+            .iter()
+            .flatten()
+            .map(|row| row["entryId"].clone())
+            .collect::<Vec<_>>(),
+        vec![serde_json::json!("f")]
+    );
 }
 
 /// A replaced entry keeps the authorship of its own words: a user-authored entry replaced by

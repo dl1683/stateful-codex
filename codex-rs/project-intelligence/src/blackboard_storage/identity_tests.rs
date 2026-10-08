@@ -10,7 +10,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 const PROJECT: &str = "project-1";
 
-async fn legacy_rows(store: &BlackboardStore) -> Vec<Vec<String>> {
+pub(super) async fn legacy_rows(store: &BlackboardStore) -> Vec<Vec<String>> {
     let mut result = Vec::new();
     for table in [
         "blackboard_entries",

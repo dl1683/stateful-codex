@@ -634,10 +634,7 @@ async fn guarded_updates_supersede_entries_without_rewriting_identity() {
             .await
             .expect("historical query succeeds"),
         BlackboardQueryResult {
-            data: vec![BlackboardHit::new(
-                superseded.clone(),
-                BlackboardEvidenceFreshness::Current,
-            )],
+            data: Vec::new(),
             truncated: false,
         }
     );

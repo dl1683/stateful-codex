@@ -137,9 +137,11 @@ pub(super) async fn text_eligible_on(
     if text.len() > 65536 {
         return Ok(false);
     }
-    let normalized = format!(" {} ", crate::retirement_capture_words(text));
-    let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_source_exclusions WHERE project_id = ? AND digest = ?) OR EXISTS(SELECT 1 FROM capture_identity_aliases WHERE project_id = ? AND retired = 1 AND retirement_words != '' AND instr(?, ' ' || retirement_words || ' ') > 0) OR EXISTS(SELECT 1 FROM capture_source_exclusions AS excluded JOIN capture_sources AS source ON source.project_id = excluded.project_id AND source.digest = excluded.digest JOIN capture_source_chunks AS chunk ON chunk.source_id = source.source_id AND chunk.start_byte < excluded.end_byte AND chunk.end_byte > excluded.start_byte WHERE excluded.project_id = ? AND (instr(CAST(? AS BLOB), substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte))) > 0 OR instr(substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte)), CAST(? AS BLOB)) > 0))")
-            .bind(project_id).bind(digest(text)).bind(project_id).bind(normalized).bind(project_id).bind(text).bind(text).fetch_one(connection).await?;
+    if !super::identity::text_eligible(connection, project_id, "", text).await? {
+        return Ok(false);
+    }
+    let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_source_exclusions WHERE project_id = ? AND digest = ?) OR EXISTS(SELECT 1 FROM capture_source_exclusions AS excluded JOIN capture_sources AS source ON source.project_id = excluded.project_id AND source.digest = excluded.digest JOIN capture_source_chunks AS chunk ON chunk.source_id = source.source_id AND chunk.start_byte < excluded.end_byte AND chunk.end_byte > excluded.start_byte WHERE excluded.project_id = ? AND (instr(CAST(? AS BLOB), substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte))) > 0 OR instr(substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte)), CAST(? AS BLOB)) > 0))")
+            .bind(project_id).bind(digest(text)).bind(project_id).bind(text).bind(text).fetch_one(connection).await?;
     Ok(!excluded)
 }
 
