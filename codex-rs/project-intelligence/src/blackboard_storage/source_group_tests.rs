@@ -166,7 +166,7 @@ async fn c2_group_faults_roll_back_semantics_keep_observation_and_cold_retry() {
 }
 
 #[tokio::test]
-async fn c2_group_noop_binding_loser_and_lost_response_are_durable() {
+async fn c2_group_binding_loser_and_lost_response_are_durable() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     let admission = admission(&home).await;
@@ -183,12 +183,7 @@ async fn c2_group_noop_binding_loser_and_lost_response_are_durable() {
         other.write_source_group(&admission, request(&seal, "first"))
     );
     assert_eq!(first.unwrap(), second.unwrap());
-    let noop = store
-        .write_source_group(&admission, request(&seal, "noop"))
-        .await
-        .unwrap();
-    assert_eq!((noop.saved, noop.already_present), (0, 2));
-    let mut mismatch = request(&seal, "noop");
+    let mut mismatch = request(&seal, "first");
     mismatch.members[1].write.value.content = "Never deploy.".to_string();
     let before = snapshot(&store).await;
     assert!(matches!(
@@ -208,12 +203,6 @@ async fn c2_group_noop_binding_loser_and_lost_response_are_durable() {
     assert!(matches!(
         store
             .write_source_group(&admission, request(&seal, "first"))
-            .await,
-        Err(BlackboardStoreError::RetiredIdentity)
-    ));
-    assert!(matches!(
-        store
-            .write_source_group(&admission, request(&seal, "noop"))
             .await,
         Err(BlackboardStoreError::RetiredIdentity)
     ));
@@ -328,7 +317,7 @@ async fn c2_original_source_cold_retry_after_failed_group_and_dual_writer_forget
 }
 
 #[tokio::test]
-async fn c2_group_bounds_noop_fault_and_model_authority_refusal_leave_whole_store_unchanged() {
+async fn c2_group_bounds_and_model_authority_refusal_leave_whole_store_unchanged() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     let admission = admission(&home).await;
@@ -370,28 +359,6 @@ async fn c2_group_bounds_noop_fault_and_model_authority_refusal_leave_whole_stor
         Err(BlackboardStoreError::ModelMutationRefused)
     ));
     assert_eq!(snapshot(&store).await, before);
-    store
-        .write_source_group(&admission, request(&seal, "first"))
-        .await
-        .unwrap();
-    let before = snapshot(&store).await;
-    sqlx::query("CREATE TRIGGER noop_fault BEFORE INSERT ON capture_group_actions BEGIN SELECT RAISE(ABORT, 'noop fault'); END").execute(&store.pool).await.unwrap();
-    assert!(
-        store
-            .write_source_group(&admission, request(&seal, "noop"))
-            .await
-            .is_err()
-    );
-    sqlx::query("DROP TRIGGER noop_fault")
-        .execute(&store.pool)
-        .await
-        .unwrap();
-    assert_eq!(snapshot(&store).await, before);
-    let receipt = store
-        .write_source_group(&admission, request(&seal, "noop"))
-        .await
-        .unwrap();
-    assert_eq!((receipt.saved, receipt.already_present), (0, 2));
 }
 
 #[tokio::test]
@@ -438,9 +405,7 @@ async fn c2_agent_group_races_forget_without_active_identity_after_retirement() 
             retirement.unwrap();
             capture
         };
-        if let Ok(receipt) = result {
-            assert_eq!((receipt.saved, receipt.already_present), (0, 2));
-        }
+        assert!(result.is_err());
         assert_eq!(
             store.get_entry(PROJECT, &id).await.unwrap().unwrap().state,
             BlackboardEntryState::Tombstoned
@@ -749,11 +714,14 @@ async fn source_group_process_worker() {
         capture.members[0].write.context.authority = KnowledgeAuthority::AssistantReported;
         capture.members[0].write.change.origin = ChangeOrigin::ModelTool;
         match store.write_source_group(&admission, capture).await {
-            Ok(receipt) => assert_eq!((receipt.saved, receipt.already_present), (0, 1)),
+            Ok(receipt) => {
+                panic!("existing-entry source group unexpectedly committed: {receipt:?}")
+            }
             Err(
                 BlackboardStoreError::RetiredIdentity
                 | BlackboardStoreError::SourceExcluded
-                | BlackboardStoreError::ModelMutationRefused,
+                | BlackboardStoreError::ModelMutationRefused
+                | BlackboardStoreError::EntryIdentityConflict(_),
             ) => (),
             Err(error) => panic!("unexpected process outcome: {error}"),
         }
@@ -763,6 +731,9 @@ async fn source_group_process_worker() {
         .await
         .unwrap();
 }
+
+#[path = "source_group_cut_tests.rs"]
+mod cut_tests;
 
 #[tokio::test]
 async fn c2_host_origin_group_replay_rechecks_current_human_authority() {

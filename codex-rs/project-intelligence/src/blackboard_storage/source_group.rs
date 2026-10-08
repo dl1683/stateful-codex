@@ -35,6 +35,7 @@ pub struct SourceCaptureGroup {
 impl BlackboardStore {
     /// Atomic entry/context/alias/source/member/action/journal commit; observation predates it.
     /// Retry returns committed members, but refuses if any member is no longer current.
+    /// New actions accept only new entries; existing-entry reuse and promotion are unsupported.
     pub async fn write_source_group(
         &self,
         admission: &codex_state::ThreadProjectAdmission,
@@ -264,6 +265,26 @@ impl BlackboardStore {
             members: Vec::new(),
         };
         for (ordinal, mut member) in group.members.into_iter().enumerate() {
+            // Committed-action replay above is the only permitted reuse. Arbitrate
+            // collisions under this writer lock before write_unit can reconcile or
+            // promote an existing entry. Any earlier members roll back with the group.
+            if let Some(id) =
+                super::identity::direct_match(&mut tx, &member.write.value, &member.write.context)
+                    .await?
+            {
+                return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
+            }
+            for id in &member.write.candidates {
+                let exists: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM blackboard_entries WHERE id = ?)",
+                )
+                .bind(id.as_str())
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists {
+                    return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
+                }
+            }
             member.write.context.source_sequence =
                 Some(member.seal.immutable_first_observation_sequence);
             member.write.context.unit_ordinal = Some(ordinal as u32);
