@@ -13,6 +13,179 @@ use tempfile::TempDir;
 const PROJECT: &str = "project-1";
 
 #[tokio::test]
+async fn c2r2_symbol_identity_excludes_existing_and_unlinked_native_sources() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let mut value = rule("🛑");
+    value.kind = BlackboardKind::Note;
+    value.provenance.kind = BlackboardProvenanceKind::Agent;
+    let copy = store
+        .create_entry(
+            BlackboardEntryId::parse("symbol-copy").unwrap(),
+            value.clone(),
+        )
+        .await
+        .unwrap();
+    let direct = store
+        .create_entry(
+            BlackboardEntryId::parse("direct-symbol").unwrap(),
+            rule("🛑"),
+        )
+        .await
+        .unwrap();
+    store
+        .update_entry(PROJECT, &direct.id, retire(&direct))
+        .await
+        .unwrap();
+    let seal = store
+        .observe_source(observation("unlinked-symbol", "🛑"), "🛑")
+        .await
+        .unwrap();
+    store.pool.close().await;
+    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+        .await
+        .unwrap();
+    let before = snapshot(&reopened).await;
+    assert!(!reopened.source_text_eligible(PROJECT, "🛑").await.unwrap());
+    assert!(
+        !reopened
+            .source_text_eligible(PROJECT, "Copied symbol 🛑.")
+            .await
+            .unwrap()
+    );
+    assert!(
+        reopened
+            .source_text_eligible(PROJECT, "Independent Cedar.")
+            .await
+            .unwrap()
+    );
+    assert_eq!(reopened.get_hit(PROJECT, &copy.id).await.unwrap(), None);
+    assert!(matches!(
+        reopened
+            .read_source_range(
+                PROJECT,
+                &seal.exact_source_locator,
+                &seal.digest,
+                /*start*/ 0,
+                /*end*/ 4
+            )
+            .await,
+        Err(BlackboardStoreError::SourceExcluded)
+    ));
+    assert!(matches!(
+        reopened
+            .create_entry(BlackboardEntryId::parse("new-symbol").unwrap(), value)
+            .await,
+        Err(BlackboardStoreError::RetiredIdentity)
+    ));
+    assert_eq!(snapshot(&reopened).await, before);
+}
+
+#[tokio::test]
+async fn c2r2_source_budget_excludes_sixteen_long_parts_and_advances_continuation() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let forgotten = store
+        .create_entry(
+            BlackboardEntryId::parse("obsolete").unwrap(),
+            rule("obsoleteword"),
+        )
+        .await
+        .unwrap();
+    store
+        .update_entry(PROJECT, &forgotten.id, retire(&forgotten))
+        .await
+        .unwrap();
+    let mut text = format!("needle obsoleteword {}", "x ".repeat(/*n*/ 32768));
+    text.truncate(/*new_len*/ 65536);
+    let mut seals = Vec::new();
+    for index in 0..16 {
+        seals.push(
+            store
+                .observe_source(observation(&format!("long-{index}"), &text), &text)
+                .await
+                .unwrap(),
+        );
+    }
+    let chunks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM capture_source_chunks")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(chunks, 272);
+    let before = snapshot(&store).await;
+    // Instrument the production allowance, which is charged before any helper
+    // materialization and after each bounded exact read. Long exclusion reads zero chunks.
+    let mut tx = store.pool.begin().await.unwrap();
+    let mut budget = super::SourceBudget::default();
+    for seal in &seals {
+        assert!(matches!(
+            super::read_with_budget(
+                &mut tx,
+                PROJECT,
+                &seal.exact_source_locator,
+                &seal.digest,
+                /*start*/ 0,
+                /*end*/ 4096,
+                &mut budget
+            )
+            .await,
+            Err(BlackboardStoreError::SourceExcluded)
+        ));
+    }
+    assert_eq!(budget.examined, 0);
+    tx.commit().await.unwrap();
+    let page = store
+        .search_source_ranges(PROJECT, "needle", /*after*/ None)
+        .await
+        .unwrap();
+    assert_eq!(
+        (page.ranges, page.examined, page.complete, page.after),
+        (Vec::<SourceRangeRead>::new(), 16, true, None)
+    );
+    assert_eq!(snapshot(&store).await, before);
+    // More than one candidate page also proves excluded scans make forward progress.
+    for index in 16..60 {
+        store
+            .observe_source(observation(&format!("long-{index}"), &text), &text)
+            .await
+            .unwrap();
+    }
+    let control = "needle independent Cedar source.";
+    let independent = store
+        .observe_source(observation("independent-budget", control), control)
+        .await
+        .unwrap();
+    store.pool.close().await;
+    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+        .await
+        .unwrap();
+    reopened.begin_source_index_rebuild(PROJECT).await.unwrap();
+    while !reopened.maintain_source_index(PROJECT).await.unwrap() {}
+    let mut cursor = None;
+    let mut found = Vec::new();
+    let mut total = 0;
+    loop {
+        let page = reopened
+            .search_source_ranges(PROJECT, "needle", cursor.as_ref())
+            .await
+            .unwrap();
+        assert!(page.examined <= 256);
+        total += page.examined;
+        found.extend(page.ranges);
+        if page.complete {
+            assert!(page.after.is_none());
+            break;
+        }
+        assert_ne!(page.after, cursor);
+        cursor = page.after;
+    }
+    assert_eq!(total, 63); // 61 candidates, one short retirement chunk and one exact chunk.
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].seal, independent);
+    assert!(found[0].exact_text.contains("Cedar"));
+}
+
+#[tokio::test]
 async fn c2r1_unlinked_retired_words_cross_chunks_reopen_and_rebuild() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
@@ -359,8 +532,10 @@ async fn c2_forget_fences_linked_copies_overlap_rebuild_and_native_fallbacks() {
             .ranges,
         Vec::<SourceRangeRead>::new()
     );
+    // Repair 2 excludes long-part expansion in retirement domains. Separate,
+    // independently eligible short sources remain available (covered above).
     assert!(
-        !store
+        store
             .search_source_ranges(PROJECT, "Cedar", /*after*/ None)
             .await
             .unwrap()

@@ -75,25 +75,40 @@ impl BlackboardStore {
             .push_bind(after_source)
             .push(", ")
             .push_bind(after_byte)
-            .push(") ORDER BY term.source_id, term.start_byte LIMIT 256");
+            // Reserve at most five units per candidate: metadata, retirement check,
+            // and up to three overlapping exact chunks. One budget owns all reads.
+            .push(") ORDER BY term.source_id, term.start_byte LIMIT 51");
         let rows: Vec<(String, i64, i64, String)> =
             sql.build_query_as().fetch_all(&mut *tx).await?;
+        let mut budget = super::source::SourceBudget::default();
+        budget.charge(rows.len() as u32)?;
         let mut page = SourceSearchPage {
             ranges: Vec::new(),
             after: None,
             examined: 0,
-            complete: rows.len() < 256,
+            complete: rows.len() < 51,
         };
         let total_rows = rows.len();
         for (index, (locator, start, end, digest)) in rows.into_iter().enumerate() {
-            page.examined += 1;
             let start = start as u32;
-            if super::source::eligible(&mut tx, project_id, &locator, start, end as u32).await? {
+            let result = super::source::read_with_budget(
+                &mut tx,
+                project_id,
+                &locator,
+                &digest,
+                start,
+                end as u32,
+                &mut budget,
+            )
+            .await;
+            page.examined = budget.examined;
+            let range = match result {
+                Ok(range) => Some(range),
+                Err(BlackboardStoreError::SourceExcluded) => None,
+                Err(error) => return Err(error),
+            };
+            if let Some(mut range) = range {
                 // Enclosure is identified by the immutable seal; excerpt is explicitly a range.
-                let mut range = super::source::read_on(
-                    &mut tx, project_id, &locator, &digest, start, end as u32,
-                )
-                .await?;
                 let mut offset = 0;
                 let matched = range
                     .exact_text
@@ -155,7 +170,7 @@ impl BlackboardStore {
                 after_source: locator,
                 after_byte: start,
             });
-            if index + 1 == total_rows && total_rows < 256 {
+            if index + 1 == total_rows && total_rows < 51 {
                 page.complete = true;
             }
         }

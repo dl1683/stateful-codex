@@ -170,11 +170,48 @@ pub(super) async fn eligible(
     start: u32,
     end: u32,
 ) -> Result<bool, BlackboardStoreError> {
+    eligible_with_budget(
+        connection,
+        project_id,
+        locator,
+        start,
+        end,
+        &mut SourceBudget::default(),
+    )
+    .await
+}
+
+/// One allowance counts candidate metadata and every materialized source chunk.
+#[derive(Default)]
+pub(super) struct SourceBudget {
+    pub(super) examined: u32,
+}
+
+impl SourceBudget {
+    pub(super) fn charge(&mut self, units: u32) -> Result<(), BlackboardStoreError> {
+        if units > 256 - self.examined {
+            return Err(BlackboardStoreError::InvalidSource);
+        }
+        self.examined += units;
+        Ok(())
+    }
+}
+
+async fn eligible_with_budget(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    locator: &str,
+    start: u32,
+    end: u32,
+    budget: &mut SourceBudget,
+) -> Result<bool, BlackboardStoreError> {
     let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_sources AS source JOIN capture_source_exclusions AS exclusion ON exclusion.project_id = source.project_id AND exclusion.digest = source.digest WHERE source.project_id = ? AND source.source_id = ? AND exclusion.start_byte < ? AND exclusion.end_byte > ?)")
         .bind(project_id).bind(locator).bind(i64::from(end)).bind(i64::from(start)).fetch_one(&mut *connection).await?;
     Ok(!excluded
-        && super::source_retirement::range_eligible(connection, project_id, locator, start, end)
-            .await?)
+        && super::source_retirement::range_eligible(
+            connection, project_id, locator, start, end, budget,
+        )
+        .await?)
 }
 
 pub(super) async fn read_on(
@@ -184,6 +221,27 @@ pub(super) async fn read_on(
     expected_digest: &str,
     start: u32,
     end: u32,
+) -> Result<SourceRangeRead, BlackboardStoreError> {
+    read_with_budget(
+        connection,
+        project_id,
+        locator,
+        expected_digest,
+        start,
+        end,
+        &mut SourceBudget::default(),
+    )
+    .await
+}
+
+pub(super) async fn read_with_budget(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    locator: &str,
+    expected_digest: &str,
+    start: u32,
+    end: u32,
+    budget: &mut SourceBudget,
 ) -> Result<SourceRangeRead, BlackboardStoreError> {
     let seal = seal_on(connection, project_id, locator)
         .await?
@@ -195,11 +253,13 @@ pub(super) async fn read_on(
     {
         return Err(BlackboardStoreError::InvalidSource);
     }
-    if !eligible(connection, project_id, locator, start, end).await? {
+    if !eligible_with_budget(connection, project_id, locator, start, end, budget).await? {
         return Err(BlackboardStoreError::SourceExcluded);
     }
-    let chunks: Vec<(i64, i64, Option<String>, String)> = sqlx::query_as("SELECT start_byte, end_byte, CASE WHEN octet_length(exact_bytes) <= 4096 THEN exact_bytes END, chunk_digest FROM capture_source_chunks WHERE source_id = ? AND start_byte < ? AND end_byte > ? ORDER BY start_byte LIMIT 3")
-        .bind(locator).bind(i64::from(end)).bind(i64::from(start)).fetch_all(connection).await?;
+    let limit = 3.min(256 - budget.examined);
+    let chunks: Vec<(i64, i64, Option<String>, String)> = sqlx::query_as("SELECT start_byte, end_byte, CASE WHEN octet_length(exact_bytes) <= 4096 THEN exact_bytes END, chunk_digest FROM capture_source_chunks WHERE source_id = ? AND start_byte < ? AND end_byte > ? ORDER BY start_byte LIMIT ?")
+        .bind(locator).bind(i64::from(end)).bind(i64::from(start)).bind(i64::from(limit)).fetch_all(connection).await?;
+    budget.charge(chunks.len() as u32)?;
     let mut text = String::new();
     let mut offset = start;
     for (chunk_start, chunk_end, bytes, checksum) in chunks {
