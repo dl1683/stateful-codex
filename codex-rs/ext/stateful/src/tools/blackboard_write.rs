@@ -52,6 +52,7 @@ use super::blackboard_supersede::supersedes_schema;
 use super::bounded_json_output;
 use super::parse_arguments;
 use super::preflight_receipts;
+use super::provenance_source_id;
 use super::receipt_error;
 use super::stable_id;
 use super::worst_identifier;
@@ -441,7 +442,12 @@ impl BlackboardBatchRecordTool {
             let record_key = record.idempotency_key.clone();
             match self
                 .recorder
-                .record(record, &call.turn_id, &call.call_id, &project_roots)
+                .record(
+                    record,
+                    &call.turn_id,
+                    &provenance_source_id(&call.call_id),
+                    &project_roots,
+                )
                 .await
             {
                 Ok(entry) => {
@@ -498,7 +504,11 @@ impl BlackboardBatchRecordTool {
                 note: relation.note,
                 confidence_basis_points: relation.confidence_basis_points,
             };
-            match self.relator.relate(arguments, &call.call_id).await {
+            match self
+                .relator
+                .relate(arguments, &provenance_source_id(&call.call_id))
+                .await
+            {
                 Ok(created) => {
                     relations_recorded += 1;
                     relation_results.push(json!({
@@ -662,7 +672,9 @@ impl BlackboardRelateTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: RelateArguments = parse_arguments(&call)?;
-        let relation = self.relate(arguments, &call.call_id).await?;
+        let relation = self
+            .relate(arguments, &provenance_source_id(&call.call_id))
+            .await?;
         bounded_json_output(
             &call,
             json!({

@@ -27,6 +27,7 @@ use crate::visible_root::VisibleRootRegistry;
 use super::MAX_RESPONSE_BYTES;
 use super::bounded_json_output;
 use super::parse_arguments;
+use super::provenance_source_id;
 use super::respond;
 use super::run_read::obligation_cursor;
 use super::run_read::submitted_result_cursor;
@@ -266,7 +267,7 @@ impl StatefulRunUpdateTool {
                     project_id: self.project_id.clone(),
                     run_id: current.id.clone(),
                     packet: final_obligation,
-                    provenance_source_id: call.call_id.clone(),
+                    provenance_source_id: provenance_source_id(&call.call_id),
                 },
             );
             (Some(completion), Some(obligation))

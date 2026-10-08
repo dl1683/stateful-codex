@@ -17,6 +17,7 @@ use crate::services::ProjectIntelligenceServices;
 
 use super::bounded_json_output;
 use super::parse_arguments;
+use super::provenance_source_id;
 use super::respond;
 use super::stable_id;
 use super::thread_run;
@@ -97,7 +98,7 @@ impl ObligationUpdateTool {
                     project_id: self.project_id.clone(),
                     run_id: run.id,
                     packet: arguments.packet,
-                    provenance_source_id: call.call_id.clone(),
+                    provenance_source_id: provenance_source_id(&call.call_id),
                 },
             )
             .await

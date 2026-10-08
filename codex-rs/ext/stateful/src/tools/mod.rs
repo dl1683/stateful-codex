@@ -239,6 +239,25 @@ fn fits_response(value: &serde_json::Value, byte_budget: usize) -> bool {
     serde_json::to_vec(value).is_ok_and(|serialized| serialized.len() <= byte_budget)
 }
 
+/// Longest tool call ID kept verbatim as a provenance source. Some provider bridges carry
+/// opaque reasoning state inside call IDs (LiteLLM appends Gemini thought signatures as
+/// `call_<id>__thought__<signature>`), which exceeds every stored identity bound.
+const MAX_VERBATIM_SOURCE_BYTES: usize = 128;
+
+/// The provenance source recorded for one tool call: the call ID itself when it is short,
+/// trimmed, and control-free, otherwise a stable digest of it. Either form names exactly
+/// one bounded source, so stored provenance validation is unchanged.
+fn provenance_source_id(call_id: &str) -> String {
+    if !call_id.is_empty()
+        && call_id.len() <= MAX_VERBATIM_SOURCE_BYTES
+        && call_id.trim() == call_id
+        && !call_id.chars().any(char::is_control)
+    {
+        return call_id.to_string();
+    }
+    format!("call-sha256:{:x}", Sha256::digest(call_id.as_bytes()))
+}
+
 fn stable_id(prefix: &str, project_id: &str, idempotency_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(project_id.as_bytes());
@@ -280,6 +299,10 @@ fn respond(error: impl std::fmt::Display) -> FunctionCallError {
 #[cfg(test)]
 #[path = "roster_budget_tests.rs"]
 mod roster_budget_tests;
+
+#[cfg(test)]
+#[path = "provider_call_id_tests.rs"]
+mod provider_call_id_tests;
 
 #[cfg(test)]
 #[path = "capture_repair_tests.rs"]
