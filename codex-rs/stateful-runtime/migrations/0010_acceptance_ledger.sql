@@ -7,10 +7,11 @@ CREATE TABLE stateful_acceptance_ledgers (
     workspace_generation INTEGER NOT NULL CHECK (workspace_generation >= 0),
     observed_executions INTEGER NOT NULL CHECK (observed_executions >= 0),
     stalled_completions INTEGER NOT NULL CHECK (stalled_completions >= 0),
-    stalled_at_revision INTEGER NOT NULL CHECK (stalled_at_revision >= 0),
+    stalled_fingerprint TEXT NOT NULL,
     verification_attempt INTEGER NOT NULL CHECK (verification_attempt >= 0),
     verification_owner TEXT,
     verification_lease_expires_at_ms INTEGER,
+    exemption TEXT CHECK (exemption IS NULL OR exemption = 'cheapLookup'),
     updated_at_ms INTEGER NOT NULL,
     CHECK ((verification_owner IS NULL) = (verification_lease_expires_at_ms IS NULL))
 );
@@ -33,11 +34,12 @@ CREATE TABLE stateful_acceptance_criteria (
     span_start INTEGER CHECK (span_start IS NULL OR span_start >= 0),
     span_end INTEGER,
     artifacts_json TEXT NOT NULL,
+    checker_json TEXT NOT NULL,
     check_command TEXT,
     check_cwd TEXT,
-    approved_by_steering TEXT,
-    dismissal_steering_id TEXT,
-    dismissal_quote TEXT,
+    plan_criterion_revision INTEGER,
+    plan_checker_digest TEXT,
+    plan_ledger_revision INTEGER,
     dismissal_covered_by INTEGER,
     note TEXT,
     revision INTEGER NOT NULL CHECK (revision > 0),
@@ -46,17 +48,14 @@ CREATE TABLE stateful_acceptance_criteria (
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, ordinal),
     CHECK (check_command IS NULL OR expected_observation IS NOT NULL),
-    CHECK (approved_by_steering IS NULL OR check_command IS NOT NULL),
+    CHECK ((plan_criterion_revision IS NULL) = (plan_checker_digest IS NULL)),
+    CHECK ((plan_criterion_revision IS NULL) = (plan_ledger_revision IS NULL)),
+    CHECK (plan_criterion_revision IS NULL OR check_command IS NOT NULL),
     CHECK ((span_start IS NULL) = (span_end IS NULL)),
     CHECK (span_end IS NULL OR span_end > span_start),
     CHECK (origin = 'derived' OR span_start IS NOT NULL),
     CHECK (state NOT IN ('dismissed', 'retired') OR note IS NOT NULL),
-    CHECK ((dismissal_steering_id IS NULL) = (dismissal_quote IS NULL)),
-    CHECK (
-        state <> 'dismissed'
-        OR dismissal_steering_id IS NOT NULL
-        OR dismissal_covered_by IS NOT NULL
-    )
+    CHECK (state <> 'dismissed' OR dismissal_covered_by IS NOT NULL)
 );
 
 CREATE TABLE stateful_acceptance_evidence (
@@ -70,6 +69,7 @@ CREATE TABLE stateful_acceptance_evidence (
     output_tail TEXT,
     output_digest TEXT,
     artifact_digest TEXT,
+    checker_digest TEXT,
     detail TEXT,
     workspace_generation INTEGER NOT NULL CHECK (workspace_generation >= 0),
     criterion_revision INTEGER NOT NULL CHECK (criterion_revision > 0),
@@ -81,3 +81,20 @@ CREATE TABLE stateful_acceptance_evidence (
 
 CREATE INDEX stateful_acceptance_evidence_criterion
 ON stateful_acceptance_evidence (run_id, ordinal, sequence DESC);
+
+-- Applied steering the ledger has reconciled; completion requires every applied instruction.
+CREATE TABLE stateful_acceptance_steering (
+    run_id TEXT NOT NULL REFERENCES stateful_acceptance_ledgers(run_id) ON DELETE CASCADE,
+    steering_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    reconciled_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, steering_id)
+);
+
+-- Commands started for a run whose effects have not been accounted for yet.
+CREATE TABLE stateful_acceptance_pending (
+    run_id TEXT NOT NULL REFERENCES stateful_acceptance_ledgers(run_id) ON DELETE CASCADE,
+    call_id TEXT NOT NULL,
+    started_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, call_id)
+);

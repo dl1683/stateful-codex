@@ -58,11 +58,16 @@ fn criterion(ordinal: u32, statement: &str, passed_at: Option<u64>) -> Acceptanc
         depends_on: Vec::new(),
         milestone: None,
         request_span: None,
-        artifacts: Vec::new(),
+        artifacts: vec!["out.txt".to_string()],
+        checker: vec!["verify.sh".to_string()],
         check_command: Some(format!("check-{ordinal}")),
         check_cwd: None,
         expected_observation: Some("exit 0".to_string()),
-        approved_by_steering: Some("steering-1".to_string()),
+        plan: Some(codex_stateful_runtime::PlanAdmission {
+            criterion_revision: 1,
+            checker_digest: "sha256:checker".to_string(),
+            ledger_revision: 1,
+        }),
         dismissal: None,
         note: None,
         revision: 1,
@@ -75,7 +80,8 @@ fn criterion(ordinal: u32, statement: &str, passed_at: Option<u64>) -> Acceptanc
             exit_code: Some(0),
             output_tail: None,
             output_digest: None,
-            artifact_digest: None,
+            artifact_digest: Some("sha256:out".to_string()),
+            checker_digest: Some("sha256:checker".to_string()),
             detail: None,
             workspace_generation: generation,
             criterion_revision: 1,
@@ -91,6 +97,9 @@ fn ledger(revision: u64, generation: u64, criteria: Vec<AcceptanceCriterion>) ->
         revision,
         workspace_generation: generation,
         observed_executions: 0,
+        pending_commands: 0,
+        reconciled_steering: Vec::new(),
+        cheap_lookup: false,
         stalled_completions: 0,
         verification_attempt: 0,
         verification_lease_expires_at_ms: None,
@@ -141,14 +150,14 @@ fn stale_evidence_replaces_only_the_acceptance_block() {
         .expect("full packet");
     assert!(
         full.body()
-            .contains("- C1 [derived; check; required] All tests pass. expects: exit 0. -> user-approved check `check-1` passed (host-observed exit 0)")
+            .contains("- C1 [derived; check; required; plan admitted] All tests pass. artifacts: out.txt. checker: verify.sh. -> passed `check-1` per its host-admitted plan (files re-checked at completion)")
     );
     let delta = current
         .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
         .expect("stale evidence renders");
     let body = delta.body();
     assert!(body.contains("Acceptance (replaces the previous acceptance ledger view):"));
-    assert!(body.contains("- C1 [derived; check; required] All tests pass. expects: exit 0. -> STALE: the workspace changed after `check-1` passed; run it again"));
+    assert!(body.contains("- C1 [derived; check; required; plan admitted] All tests pass. artifacts: out.txt. checker: verify.sh. -> UNMET: stale: the workspace changed after `check-1` started; run it again"));
     assert!(!body.contains("Goal:"));
 }
 
@@ -164,4 +173,46 @@ fn a_full_ledger_stays_bounded_and_names_the_exact_read() {
     assert!(start.len() + rendered.body().len() + end.len() <= crate::limits::MAX_MODEL_ITEM_BYTES);
     assert!(rendered.body().contains("Acceptance shortened:"));
     assert!(rendered.body().contains("section=\"acceptance\""));
+}
+
+#[test]
+fn the_settled_count_uses_the_gate_policy() {
+    let observed = |origin: AcceptanceOrigin, digest: Option<&str>| {
+        let mut manual = criterion(1, "The chart reads well.", None);
+        manual.origin = origin;
+        manual.kind = AcceptanceKind::Manual;
+        manual.check_command = None;
+        manual.plan = None;
+        manual.evidence = Some(AcceptanceEvidence {
+            sequence: 1,
+            source: EvidenceSource::Manual,
+            outcome: EvidenceOutcome::Observed,
+            command: None,
+            exit_code: None,
+            output_tail: None,
+            output_digest: None,
+            artifact_digest: digest.map(str::to_string),
+            checker_digest: None,
+            detail: Some("Viewed it.".to_string()),
+            workspace_generation: 0,
+            criterion_revision: 1,
+            source_id: "call".to_string(),
+            observed_at_ms: 1,
+        });
+        manual
+    };
+    let header = |manual: AcceptanceCriterion| {
+        AcceptanceView::new(&run(0), ledger(1, 0, vec![manual]), 0).ledger_lines()[0].clone()
+    };
+    // A user requirement is never settled by an observation, as the gate also says.
+    assert!(
+        header(observed(AcceptanceOrigin::User, Some("sha256:out")))
+            .contains("0 of 1 criteria settled")
+    );
+    // A derived manual criterion is settled only when the observation is pinned to its files.
+    assert!(header(observed(AcceptanceOrigin::Derived, None)).contains("0 of 1 criteria settled"));
+    assert!(
+        header(observed(AcceptanceOrigin::Derived, Some("sha256:out")))
+            .contains("1 of 1 criteria settled")
+    );
 }

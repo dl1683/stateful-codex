@@ -178,6 +178,7 @@ impl Fixture {
                     output_tail: "ok".to_string(),
                     output_digest: "sha256:output".to_string(),
                     artifact_digest: Some("sha256:pinned".to_string()),
+                    checker_digest: None,
                     detail: None,
                     start_generation: ledger.workspace_generation,
                     source_id: "call-check".to_string(),
@@ -306,35 +307,33 @@ async fn completion_runs_the_omission_check_refuses_unmet_gates_and_blocks_after
 }
 
 #[tokio::test]
-async fn an_unapproved_or_foreign_executor_receipt_is_observational() {
+async fn superficial_or_foreign_executor_receipts_are_observational() {
     let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;
     fixture
         .update(
             0,
-            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "echo suite-ok", "expectedObservation": "the suite reports success", "artifacts": ["tests/test_parser.py"]}]),
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "echo suite-ok", "expectedObservation": "the suite reports success", "artifacts": ["out.txt"], "checker": ["tests/test_parser.py"]}]),
         )
         .await
         .expect("criterion added");
+    // An echo names no checker file, so the host refuses to admit it as the method.
+    let superficial = fixture
+        .update(1, json!([{"action": "admit", "criterion": "C1"}]))
+        .await
+        .expect_err("an echo is no check of its checker");
+    assert!(
+        superficial.contains("names none of C1's checker files"),
+        "{superficial}"
+    );
     fixture.record_check(1, 0).await;
-    // The unit-test call carries no local environment, so no artifact evidence qualifies.
+    // The unit-test call carries no local environment, so no file evidence qualifies.
     let refused = fixture
         .complete()
         .await
         .expect_err("a passing echo settles nothing");
     assert!(
-        refused.contains("executor is not the local host, so artifact evidence is unsupported"),
+        refused.contains("executor is not the local host, so file evidence is unsupported"),
         "{refused}"
-    );
-    let vague = fixture
-        .update(
-            2,
-            json!([{"action": "approve", "criterion": "C1", "steeringId": "no-such-steering"}]),
-        )
-        .await
-        .expect_err("approval needs the user's instruction");
-    assert!(
-        vague.contains("not an unrejected user instruction"),
-        "{vague}"
     );
     assert_eq!(
         fixture.stored_run().await.status,
@@ -343,7 +342,64 @@ async fn an_unapproved_or_foreign_executor_receipt_is_observational() {
 }
 
 #[tokio::test]
-async fn a_dismissal_without_a_user_receipt_is_refused() {
+async fn admission_outside_the_local_executor_cannot_freeze_checker_bytes() {
+    let fixture = fixture("All tests must pass.", WorkflowMode::Collaborative).await;
+    fixture
+        .update(
+            0,
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q tests/test_parser.py", "expectedObservation": "every test passes", "artifacts": ["src/parser.py"], "checker": ["tests/test_parser.py"]}]),
+        )
+        .await
+        .expect("criterion added");
+    let refused = fixture
+        .update(1, json!([{"action": "admit", "criterion": "C1"}]))
+        .await
+        .expect_err("no local executor");
+    assert!(
+        refused.contains("could not be read on the local executor"),
+        "{refused}"
+    );
+}
+
+#[tokio::test]
+async fn identical_no_check_statements_do_not_reset_the_refusal_count() {
+    let fixture = fixture("Reconcile the filing.", WorkflowMode::Autonomous).await;
+    fixture
+        .update(
+            0,
+            json!([{"action": "add", "origin": "user", "kind": "manual", "statement": "The filing reconciles.", "requestQuote": "Reconcile the filing."}]),
+        )
+        .await
+        .expect("criterion added");
+    fixture
+        .update(
+            1,
+            json!([{"action": "noCheck", "criterion": "C1", "text": "No source."}]),
+        )
+        .await
+        .expect("first statement");
+    for attempt in 1..=2 {
+        let refused = fixture.complete().await.expect_err("unmet");
+        assert!(
+            refused.contains(&format!("refusal {attempt} of 3")),
+            "{refused}"
+        );
+        fixture
+            .update(
+                2,
+                json!([{"action": "noCheck", "criterion": "C1", "text": "No source."}]),
+            )
+            .await
+            .expect("identical restatement is accepted without progress");
+    }
+    let blocked = fixture
+        .complete()
+        .await
+        .expect("third unchanged refusal blocks");
+    assert_eq!(blocked["status"], json!("blocked"));
+}
+#[tokio::test]
+async fn a_dismissal_without_a_covering_criterion_is_refused() {
     let fixture = fixture(
         "Fix the parser. Write the report.",
         WorkflowMode::Autonomous,
@@ -358,21 +414,17 @@ async fn a_dismissal_without_a_user_receipt_is_refused() {
         )
         .await
         .expect_err("model prose is no receipt");
-    assert!(refused.contains("only with a receipt"), "{refused}");
-    let forged = fixture
+    assert!(refused.contains("only as coveredBy"), "{refused}");
+    let quoted = fixture
         .update(
             ledger.revision,
-            json!([{"action": "dismiss", "criterion": "C2", "text": "Withdrawn.", "steeringId": "made-up", "steeringQuote": "drop the report"}]),
+            json!([{"action": "dismiss", "criterion": "C2", "text": "Withdrawn.", "steeringId": "made-up"}]),
         )
         .await
-        .expect_err("an unknown steering is no receipt");
-    assert!(
-        forged.contains("not an unrejected user instruction"),
-        "{forged}"
-    );
+        .expect_err("a steering reference is no receipt");
+    assert!(quoted.contains("only as coveredBy"), "{quoted}");
     assert_eq!(fixture.ledger().await, ledger);
 }
-
 #[tokio::test]
 async fn acceptance_refusals_fit_the_call_allowance_and_dependency_bounds_hold() {
     let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;

@@ -40,10 +40,11 @@ fn criterion(
             end: start + quote.len(),
         }),
         artifacts: Vec::new(),
+        checker: Vec::new(),
         check_command: None,
         check_cwd: None,
         expected_observation: None,
-        approved_by_steering: None,
+        plan: None,
         dismissal: None,
         note: None,
         revision: 1,
@@ -117,6 +118,13 @@ fn only_an_untouched_one_sentence_request_is_exempt() {
     let goal = "Compute the totals for a, b and c and write a summary.";
     let mut ledger = ledger();
     assert!(coverage_exempt(goal, &ledger));
+    // A long single sentence is not a cheap lookup.
+    assert!(!coverage_exempt(
+        &"Reconcile every invoice total. "
+            .repeat(10)
+            .replace(". ", ", "),
+        &ledger
+    ));
     ledger.observed_executions = 1;
     assert!(!coverage_exempt(goal, &ledger));
     assert_eq!(quotes(goal, uncovered_sentences(goal, &ledger)), vec![goal]);

@@ -1,14 +1,15 @@
 //! The acceptance gate both completion dispositions consult before anything commits.
 //!
-//! A completion is accepted only when every required criterion of the run's ledger is
-//! satisfied with current evidence (dependencies included), every omission proposal is
-//! reviewed, and only optional criteria are disclosed unverified. Substantial tasks first get
-//! the one-time host omission check. The decision runs as a leased verification attempt while
-//! the run stays Running, and the terminal transaction consumes that attempt. A refused
+//! A completion is accepted only when every goal sentence is covered, every required
+//! criterion is satisfied by a current receipt of its host-admitted check plan (dependencies
+//! included), every omission proposal is reviewed, applied steering is reconciled, no command
+//! is pending, and only optional criteria are disclosed unverified. The omission pass
+//! recomputes coverage on every attempt. The decision runs as a leased verification attempt
+//! while the run stays Running, and the terminal transaction re-derives all of it. A refused
 //! completion leaves the run Running with the exact unmet gates; required work that cannot be
 //! verified ends Blocked with a partial result, never Completed. An extension cannot end a
 //! turn, so the loop bound is a run transition: after `MAX_STALLED_COMPLETIONS` consecutive
-//! refusals with no ledger progress (durable accounting), the host moves the run to Blocked
+//! refusals without semantic progress (durable accounting), the host moves the run to Blocked
 //! with the unmet gates as its partial result, which also stops Autonomous continuation.
 
 use codex_extension_api::FunctionCallError;
@@ -27,8 +28,7 @@ use serde_json::json;
 
 use super::StatefulRunUpdateTool;
 use crate::StatefulEvent;
-use crate::acceptance_observation::in_flight;
-use crate::acceptance_observation::ledger_artifact_states;
+use crate::acceptance_observation::ledger_file_states;
 use crate::acceptance_render::bounded;
 use crate::acceptance_render::completion_basis;
 use crate::tools::bounded_json_output;
@@ -36,6 +36,8 @@ use crate::tools::respond;
 
 /// Lease of one completion verification attempt (artifact reads are bounded to seconds).
 const VERIFICATION_LEASE_MS: u32 = 120_000;
+/// How long completion waits for pending commands to be accounted before refusing.
+const PENDING_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Consecutive refused completions without ledger progress before the host blocks the run.
 pub(super) const MAX_STALLED_COMPLETIONS: u32 = 3;
 /// The runtime's bound on a stored run result.
@@ -65,6 +67,19 @@ impl StatefulRunUpdateTool {
         validated_obligation_sequence: Option<u64>,
     ) -> Result<AcceptanceDecision, FunctionCallError> {
         let runtime = self.services.runtime().await.map_err(respond)?;
+        // Command end events are delivered asynchronously; give commands that already exited a
+        // bounded moment to have their effects accounted before judging.
+        let settle_deadline = std::time::Instant::now() + PENDING_SETTLE_WAIT;
+        while std::time::Instant::now() < settle_deadline
+            && runtime
+                .acceptance_ledger(&current.id)
+                .await
+                .map_err(respond)?
+                .pending_commands
+                > 0
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
         // One leased verification attempt per completion; the run stays Running throughout.
         let owner = format!("completion:{}", self.thread_id);
         let attempt = runtime
@@ -78,36 +93,43 @@ impl StatefulRunUpdateTool {
             .await
             .map_err(respond)?;
         let roots = self.project_roots().await;
-        let artifacts = if local_executor {
-            ledger_artifact_states(&roots, &ledger).await
+        let (artifacts, checkers) = if local_executor {
+            ledger_file_states(&roots, &ledger).await
         } else {
-            // Artifact evidence is read on the app-server host, which is only the executor
-            // for the local environment; elsewhere it would fingerprint same-path shadows.
-            ledger
-                .criteria
-                .iter()
-                .filter(|criterion| !criterion.artifacts.is_empty())
-                .map(|criterion| {
-                    (
-                        criterion.ordinal,
-                        ArtifactState::Unavailable(
-                            "this turn's executor is not the local host, so artifact evidence is unsupported".to_string(),
-                        ),
-                    )
-                })
-                .collect()
+            // Files are read on the app-server host, which is only the executor for the local
+            // environment; elsewhere it would fingerprint same-path shadows.
+            let unsupported = |files: fn(&codex_stateful_runtime::AcceptanceCriterion) -> bool| {
+                ledger
+                    .criteria
+                    .iter()
+                    .filter(|criterion| files(criterion))
+                    .map(|criterion| {
+                        (
+                            criterion.ordinal,
+                            ArtifactState::Unavailable(
+                                "this turn's executor is not the local host, so file evidence is unsupported".to_string(),
+                            ),
+                        )
+                    })
+                    .collect()
+            };
+            (
+                unsupported(|criterion| !criterion.artifacts.is_empty()),
+                unsupported(|criterion| !criterion.checker.is_empty()),
+            )
         };
         let commit = AcceptanceCommit {
             ledger_revision: ledger.revision,
             workspace_generation: ledger.workspace_generation,
             artifacts,
+            checkers,
             verification: VerificationClaim {
                 owner: owner.clone(),
                 attempt,
             },
             validated_obligation_sequence,
         };
-        let verdicts = ledger_verdicts(&ledger, &commit.artifacts);
+        let verdicts = ledger_verdicts(&ledger, &commit.artifacts, &commit.checkers);
         let mut unmet = verdicts
             .iter()
             .filter_map(|(ordinal, verdict)| match verdict {
@@ -124,10 +146,30 @@ impl StatefulRunUpdateTool {
                 "{uncovered_remaining} request sentences are covered by no criterion or proposal (the ledger had no room or the batch was full); review the proposals, then complete again to receive the rest"
             ));
         }
-        let running = in_flight(&current.id);
-        if running > 0 {
+        if ledger.pending_commands > 0 {
             unmet.push(format!(
-                "{running} commands of this run are still running; wait for them before completing"
+                "{} commands of this run have not finished or their effects are not accounted for yet; wait for them before completing",
+                ledger.pending_commands
+            ));
+        }
+        let unreconciled = runtime
+            .list_steering(&current.id, /*after*/ None, /*max_results*/ 100)
+            .await
+            .map_err(respond)?
+            .into_iter()
+            .filter(|steering| {
+                steering.status == codex_stateful_runtime::SteeringStatus::Applied
+                    && !ledger
+                        .reconciled_steering
+                        .iter()
+                        .any(|reconciled| reconciled.steering_id == steering.id.as_str())
+            })
+            .map(|steering| steering.id.to_string())
+            .collect::<Vec<_>>();
+        if !unreconciled.is_empty() {
+            unmet.push(format!(
+                "applied steering {} may have changed the scope; reconcile it with stateful_acceptance_update (reconcileSteering), add criteria for any new requirement, and admit their plans again",
+                unreconciled.join(", ")
             ));
         }
         if unmet.is_empty() {
@@ -170,7 +212,7 @@ impl StatefulRunUpdateTool {
             }
         }
         Ok(AcceptanceDecision::Refused(format!(
-            "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress before the host blocks it as partial). Unmet acceptance gates: {gates}. Settle each gate: repair the work and run its exact checkCommand with the shell tool, accept each omission proposal (dismissal needs the user's own steering, quoted exactly, or a covering user criterion), and have the user approve each check (steering quoting the exact command, then approve). noCheck settles only optional criteria. Required work never completes unverified: if it cannot be verified or finished, set status blocked with a partial result that names the unmet criteria. Otherwise complete again"
+            "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress before the host blocks it as partial). Unmet acceptance gates: {gates}. Settle each gate: repair the work and run its exact checkCommand with the shell tool, accept each omission proposal (dismiss only as covered by a user criterion), give each check its checker files and have the host admit its plan (admit). noCheck settles only optional criteria. Required work never completes unverified: if it cannot be verified or finished, set status blocked with a partial result that names the unmet criteria. Otherwise complete again"
         )))
     }
 

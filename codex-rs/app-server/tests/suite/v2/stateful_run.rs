@@ -696,6 +696,22 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             ]),
             responses::sse(vec![
                 responses::ev_function_call(
+                    "reconcile-acceptance",
+                    "stateful_acceptance_update",
+                    &json!({
+                        "expectedLedgerRevision": 0,
+                        "changes": [{
+                            "action": "reconcileSteering",
+                            "steeringId": submitted.steering.id.clone(),
+                            "text": "The direction changes the investigation order, not what is accepted."
+                        }]
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("reconcile-acceptance-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
                     "complete-run",
                     "stateful_run_update",
                     &json!({
@@ -791,7 +807,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     );
 
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 5);
+    assert_eq!(requests.len(), 6);
     assert!(requests[0].body_contains_text("<stateful_run>"));
     assert!(requests[0].body_contains_text("check only what the task depends on"));
     assert!(requests[0].body_contains_text("completed only after all other durable writes"));
@@ -803,23 +819,23 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(requests[0].body_contains_text(material_finding_reference));
     assert!(requests[0].body_contains_text("Connect the source constraint to deployment risk."));
     assert!(requests[0].body_contains_text(&submitted.steering.id));
-    assert!(requests[4].body_contains_text("finalAnswerChecklist"));
-    assert!(requests[4].body_contains_text("submittedResult"));
-    assert!(requests[4].body_contains_text(
+    assert!(requests[5].body_contains_text("finalAnswerChecklist"));
+    assert!(requests[5].body_contains_text("submittedResult"));
+    assert!(requests[5].body_contains_text(
         "Verified the decisive connection and incorporated the user's direction."
     ));
-    assert!(requests[4].body_contains_text("rootFinding"));
-    assert!(requests[4].body_contains_text(material_finding_reference));
+    assert!(requests[5].body_contains_text("rootFinding"));
+    assert!(requests[5].body_contains_text(material_finding_reference));
     assert!(
-        requests[4].body_contains_text(
+        requests[5].body_contains_text(
             "The decisive project constraint must remain in the durable result."
         )
     );
     assert!(
-        requests[4]
+        requests[5]
             .body_contains_text("The deployment risk is triggered by the source constraint.")
     );
-    assert!(requests[4].body_contains_text("Return submittedResult as the final answer"));
+    assert!(requests[5].body_contains_text("Return submittedResult as the final answer"));
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,
@@ -864,6 +880,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(result.contains(material_finding_reference));
     assert!(result.contains("The decisive project constraint must remain in the durable result."));
     assert!(result.contains("The deployment risk is triggered by the source constraint."));
+    assert!(result.contains("reconciled by the agent (agent-written, not host-verified)"));
     Ok(())
 }
 

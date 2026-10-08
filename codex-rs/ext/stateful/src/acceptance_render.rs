@@ -1,13 +1,16 @@
 //! Bounded, model-facing views of the acceptance ledger: the run packet block, the effort
 //! line, and the completion basis appended to a completed run's durable result.
 
+use std::collections::BTreeMap;
+
 use codex_stateful_runtime::AcceptanceCriterion;
 use codex_stateful_runtime::AcceptanceLedger;
 use codex_stateful_runtime::AcceptanceOrigin;
 use codex_stateful_runtime::AcceptanceState;
+use codex_stateful_runtime::ArtifactState;
 use codex_stateful_runtime::CriterionVerdict;
-use codex_stateful_runtime::EvidenceOutcome;
 use codex_stateful_runtime::StatefulRun;
+use codex_stateful_runtime::ledger_verdicts;
 
 use crate::acceptance_policy::RiskProfile;
 use crate::acceptance_policy::VerificationReserve;
@@ -49,23 +52,22 @@ impl AcceptanceView {
             );
             return vec![line];
         }
-        let current = ledger
-            .criteria
+        // The packet judges with the gate's own policy, assuming the files are unchanged since
+        // their evidence; completion re-reads them.
+        let verdicts = projected_verdicts(ledger);
+        let current = verdicts
             .iter()
-            .filter(|criterion| status_label(criterion, ledger.workspace_generation).1)
+            .filter(|(_, verdict)| !verdict.is_unmet())
             .count();
         let mut lines = vec![format!(
-            "Acceptance ledger (revision {}; pass expectedLedgerRevision: {} to stateful_acceptance_update): {current} of {} criteria settled. Completion needs every goal sentence covered, every proposal reviewed and every required criterion satisfied by a user-approved check pinned to artifacts; otherwise set the run blocked with a partial result.",
+            "Acceptance ledger (revision {}; pass expectedLedgerRevision: {} to stateful_acceptance_update): {current} of {} criteria settled. Completion needs every goal sentence covered, every proposal reviewed, applied steering reconciled, and every required criterion satisfied by a current receipt of its host-admitted check plan; otherwise set the run blocked with a partial result.",
             ledger.revision,
             ledger.revision,
             ledger.criteria.len()
         )];
-        lines.extend(
-            ledger
-                .criteria
-                .iter()
-                .map(|criterion| criterion_line(criterion, ledger.workspace_generation)),
-        );
+        lines.extend(verdicts.iter().filter_map(|(ordinal, verdict)| {
+            Some(criterion_line(ledger.criterion(*ordinal)?, verdict))
+        }));
         lines
     }
 
@@ -102,12 +104,62 @@ impl AcceptanceView {
     }
 }
 
-fn criterion_line(criterion: &AcceptanceCriterion, generation: u64) -> String {
-    let (status, _) = status_label(criterion, generation);
+/// Verdicts by the gate's own policy, assuming each criterion's files are as its evidence
+/// and plan last saw them (the gate re-reads them at completion).
+fn projected_verdicts(ledger: &AcceptanceLedger) -> Vec<(u32, CriterionVerdict)> {
+    let observed = |digest: String| ArtifactState::Observed {
+        digest,
+        missing: Vec::new(),
+    };
+    let artifacts = ledger
+        .criteria
+        .iter()
+        .filter_map(|criterion| {
+            let digest = criterion.evidence.as_ref()?.artifact_digest.clone()?;
+            Some((criterion.ordinal, observed(digest)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let checkers = ledger
+        .criteria
+        .iter()
+        .filter_map(|criterion| {
+            let digest = criterion.plan.as_ref()?.checker_digest.clone();
+            Some((criterion.ordinal, observed(digest)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    ledger_verdicts(ledger, &artifacts, &checkers)
+}
+
+fn criterion_line(criterion: &AcceptanceCriterion, verdict: &CriterionVerdict) -> String {
+    let status = match verdict {
+        CriterionVerdict::SatisfiedByHost => format!(
+            "passed `{}` per its host-admitted plan (files re-checked at completion)",
+            criterion.check_command.as_deref().unwrap_or_default()
+        ),
+        CriterionVerdict::ArtifactsPresent => {
+            "derived existence predicate (files re-checked at completion)".to_string()
+        }
+        CriterionVerdict::ManualObservation => {
+            "manual observation pinned to its files (agent-written)".to_string()
+        }
+        CriterionVerdict::DisclosedUnverified(reason) => format!(
+            "optional, unverified (disclosed): {}",
+            single_line(&bounded(reason, 160))
+        ),
+        CriterionVerdict::Closed(reason) => {
+            format!("closed: {}", single_line(&bounded(reason, 160)))
+        }
+        CriterionVerdict::Unmet(reason) => format!("UNMET: {}", single_line(&bounded(reason, 240))),
+    };
     let artifacts = if criterion.artifacts.is_empty() {
         String::new()
     } else {
         format!(" artifacts: {}.", criterion.artifacts.join(", "))
+    };
+    let checker = if criterion.checker.is_empty() {
+        String::new()
+    } else {
+        format!(" checker: {}.", criterion.checker.join(", "))
     };
     let mut labels = vec![
         origin_name(criterion.origin).to_string(),
@@ -119,6 +171,9 @@ fn criterion_line(criterion: &AcceptanceCriterion, generation: u64) -> String {
         }
         .to_string(),
     ];
+    if criterion.plan.is_some() {
+        labels.push("plan admitted".to_string());
+    }
     if !criterion.depends_on.is_empty() {
         let dependencies = criterion
             .depends_on
@@ -130,125 +185,12 @@ fn criterion_line(criterion: &AcceptanceCriterion, generation: u64) -> String {
     if let Some(milestone) = &criterion.milestone {
         labels.push(format!("before: {}", single_line(&bounded(milestone, 80))));
     }
-    let expected = criterion
-        .expected_observation
-        .as_deref()
-        .map(|expected| format!(" expects: {}.", single_line(&bounded(expected, 120))))
-        .unwrap_or_default();
     format!(
-        "- {} [{}] {}{artifacts}{expected} -> {status}",
+        "- {} [{}] {}{artifacts}{checker} -> {status}",
         criterion.alias(),
         labels.join("; "),
         single_line(&bounded(&criterion.statement, MAX_RENDERED_STATEMENT_BYTES)),
     )
-}
-
-/// A packet status for a criterion, without reading artifacts, and whether it is settled.
-fn status_label(criterion: &AcceptanceCriterion, generation: u64) -> (String, bool) {
-    match criterion.state {
-        AcceptanceState::Proposed => {
-            return (
-                "PROPOSED by the omission check: accept it, or dismiss it only with a user steering receipt or a covering user criterion".to_string(),
-                false,
-            );
-        }
-        AcceptanceState::Dismissed | AcceptanceState::Retired => {
-            return (
-                format!(
-                    "{}: {}",
-                    if criterion.state == AcceptanceState::Dismissed {
-                        "dismissed"
-                    } else {
-                        "retired"
-                    },
-                    single_line(&bounded(criterion.note.as_deref().unwrap_or_default(), 160))
-                ),
-                true,
-            );
-        }
-        AcceptanceState::Active => {}
-    }
-    let current = criterion
-        .evidence
-        .as_ref()
-        .filter(|evidence| evidence.criterion_revision == criterion.revision);
-    let check = criterion.check_command.as_deref();
-    match (current, check) {
-        (Some(evidence), _) => {
-            let fresh = evidence.workspace_generation == generation;
-            match (evidence.outcome, fresh) {
-                (EvidenceOutcome::Passed, true) if criterion.approved_by_steering.is_some() => (
-                    format!(
-                        "user-approved check `{}` passed (host-observed exit 0)",
-                        check.unwrap_or_default()
-                    ),
-                    true,
-                ),
-                (EvidenceOutcome::Passed, true) => (
-                    format!(
-                        "RECEIPT ONLY: `{}` passed, but the user has not approved it as this criterion's method",
-                        check.unwrap_or_default()
-                    ),
-                    false,
-                ),
-                (EvidenceOutcome::Passed, false) => (
-                    format!(
-                        "STALE: the workspace changed after `{}` passed; run it again",
-                        check.unwrap_or_default()
-                    ),
-                    false,
-                ),
-                (EvidenceOutcome::Failed, _) => (
-                    format!(
-                        "FAILED: `{}` exited {}",
-                        check.unwrap_or_default(),
-                        evidence
-                            .exit_code
-                            .map_or_else(|| "unknown".to_string(), |code| code.to_string())
-                    ),
-                    false,
-                ),
-                (EvidenceOutcome::Unavailable, _) if criterion.required => (
-                    format!(
-                        "UNVERIFIED and required, so completion is refused: {}",
-                        single_line(&bounded(
-                            evidence.detail.as_deref().unwrap_or_default(),
-                            160
-                        ))
-                    ),
-                    false,
-                ),
-                (EvidenceOutcome::Unavailable, _) => (
-                    format!(
-                        "optional, unverified (disclosed): {}",
-                        single_line(&bounded(
-                            evidence.detail.as_deref().unwrap_or_default(),
-                            160
-                        ))
-                    ),
-                    true,
-                ),
-                (EvidenceOutcome::Observed, true) => (
-                    "manual observation (agent-written, not host-verified)".to_string(),
-                    true,
-                ),
-                (EvidenceOutcome::Observed, false) => (
-                    "STALE manual observation: the workspace changed after it".to_string(),
-                    false,
-                ),
-            }
-        }
-        (None, Some(command)) => (format!("OPEN: run `{command}` with the shell tool"), false),
-        (None, None) if !criterion.artifacts.is_empty() => (
-            "OPEN: artifacts are re-read at completion; add a check or observation for content"
-                .to_string(),
-            false,
-        ),
-        (None, None) => (
-            "OPEN: needs a check, a manual observation, or noCheck with a reason".to_string(),
-            false,
-        ),
-    }
 }
 
 /// The disclosed completion basis: every criterion's verdict, exactly as the gate judged it.
@@ -262,9 +204,9 @@ pub(crate) fn completion_basis(
             let criterion = ledger.criterion(*ordinal)?;
             let label = match verdict {
                 CriterionVerdict::SatisfiedByHost => format!(
-                    "agent-written check `{}`, approved by the user (steering {}), exited 0 on the host against the pinned artifacts (expected: {})",
+                    "agent-written check `{}` ran its host-admitted plan (checker {} frozen at admission) and exited 0 on the host against the pinned artifacts (expected: {})",
                     criterion.check_command.as_deref().unwrap_or_default(),
-                    criterion.approved_by_steering.as_deref().unwrap_or_default(),
+                    criterion.checker.join(", "),
                     single_line(&bounded(
                         criterion.expected_observation.as_deref().unwrap_or_default(),
                         160
@@ -306,6 +248,13 @@ pub(crate) fn completion_basis(
                 single_line(&bounded(&criterion.statement, MAX_RENDERED_STATEMENT_BYTES)),
             ))
         })
+        .chain(ledger.reconciled_steering.iter().map(|reconciled| {
+            format!(
+                "steering {} reconciled by the agent (agent-written, not host-verified): {}",
+                reconciled.steering_id,
+                single_line(&bounded(&reconciled.reason, 240))
+            )
+        }))
         .collect()
 }
 

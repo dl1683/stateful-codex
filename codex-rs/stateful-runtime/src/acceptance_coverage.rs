@@ -7,6 +7,7 @@
 //! proposal that carries a host-validated receipt. Derived, optional and retired criteria
 //! never cover user text. Partial coverage proposes the whole sentence.
 
+use crate::AcceptanceCriterion;
 use crate::AcceptanceLedger;
 use crate::AcceptanceOrigin;
 use crate::AcceptanceState;
@@ -15,14 +16,42 @@ use crate::RequestSpan;
 /// Proposals one omission pass may add.
 pub const MAX_OMISSION_PROPOSALS: usize = 8;
 
-/// Whether the run may complete without request coverage: a one-sentence request with no
-/// criteria, no observed command execution and no observed workspace mutation. Anything else
-/// owes coverage of every goal sentence.
+/// Longest request the cheap-lookup admission accepts.
+pub const MAX_CHEAP_LOOKUP_BYTES: usize = 240;
+
+/// Whether the host may admit the run as a cheap lookup that owes no request coverage: one
+/// short sentence, no criteria, no observed command execution or workspace mutation, nothing
+/// pending. Applied steering must still be reconciled; the agent-written reason is disclosed
+/// in the completion basis. The terminal transaction records the admission on the
+/// ledger. Anything else owes coverage of every goal sentence.
 pub fn coverage_exempt(goal: &str, ledger: &AcceptanceLedger) -> bool {
-    sentences(goal).len() <= 1
+    goal.len() <= MAX_CHEAP_LOOKUP_BYTES
+        && sentences(goal).len() <= 1
         && ledger.criteria.is_empty()
         && ledger.observed_executions == 0
         && ledger.workspace_generation == 0
+        && ledger.pending_commands == 0
+}
+
+/// Whether `covering` is an active required user-bound criterion whose span contains the
+/// span of `proposal`.
+pub(crate) fn covers(
+    ledger: &AcceptanceLedger,
+    covering: u32,
+    proposal: &AcceptanceCriterion,
+) -> bool {
+    let Some(span) = proposal.request_span else {
+        return false;
+    };
+    ledger.criterion(covering).is_some_and(|other| {
+        other.ordinal != proposal.ordinal
+            && other.is_user_bound()
+            && other.state == AcceptanceState::Active
+            && other.required
+            && other
+                .request_span
+                .is_some_and(|other| other.start <= span.start && span.end <= other.end)
+    })
 }
 
 /// Goal sentences not fully covered by binding criteria or proposals, in goal order.
@@ -38,7 +67,12 @@ pub fn uncovered_sentences(goal: &str, ledger: &AcceptanceLedger) -> Vec<Request
                 && match criterion.state {
                     AcceptanceState::Active => criterion.required,
                     AcceptanceState::Proposed => true,
-                    AcceptanceState::Dismissed => criterion.dismissal.is_some(),
+                    AcceptanceState::Dismissed => match &criterion.dismissal {
+                        Some(crate::DismissalReceipt::CoveredBy(covering)) => {
+                            covers(ledger, *covering, criterion)
+                        }
+                        None => false,
+                    },
                     AcceptanceState::Retired => false,
                 }
         })

@@ -16,6 +16,7 @@ use crate::CommandEvidence;
 use crate::DismissalReceipt;
 use crate::EvidenceOutcome;
 use crate::EvidenceSource;
+use crate::PlanAdmission;
 use crate::RequestSpan;
 use crate::StatefulRun;
 use crate::StatefulRunId;
@@ -26,6 +27,7 @@ use crate::acceptance::AcceptanceError;
 use crate::acceptance::MAX_ACCEPTANCE_CHANGES;
 use crate::acceptance::MAX_ACCEPTANCE_CRITERIA;
 use crate::acceptance::MAX_OUTPUT_TAIL_BYTES;
+use crate::acceptance::SteeringReconciliation;
 use crate::acceptance::unmet_criteria;
 use crate::acceptance_changes::ChangeContext;
 use crate::acceptance_changes::apply_change;
@@ -161,26 +163,6 @@ impl StatefulRunStore {
             .await
     }
 
-    /// Cold re-entry of a run (a new process, resume, or a different workspace): mutations
-    /// while no observer ran are unknown, so every earlier receipt and observation becomes
-    /// stale. A run with no evidence is left untouched.
-    pub async fn invalidate_after_reentry(
-        &self,
-        run_id: &StatefulRunId,
-    ) -> Result<(), StatefulRunStoreError> {
-        let has_evidence = sqlx::query_scalar::<_, i64>(
-            "SELECT 1 FROM stateful_acceptance_evidence WHERE run_id = ? LIMIT 1",
-        )
-        .bind(run_id.as_str())
-        .fetch_optional(&self.pool)
-        .await?
-        .is_some();
-        if !has_evidence {
-            return Ok(());
-        }
-        self.bump_workspace_generation(run_id).await
-    }
-
     async fn adjust_counters(
         &self,
         run_id: &StatefulRunId,
@@ -256,6 +238,7 @@ impl StatefulRunStore {
                     output_tail: Some(&bounded_tail(&observed.output_tail)),
                     output_digest: Some(&observed.output_digest),
                     artifact_digest: observed.artifact_digest.as_deref(),
+                    checker_digest: observed.checker_digest.as_deref(),
                     detail,
                     workspace_generation: observed.start_generation,
                     source_id: &observed.source_id,
@@ -298,109 +281,6 @@ impl StatefulRunStore {
         transaction.commit().await?;
         Ok(())
     }
-
-    /// Starts a completion verification attempt and leases it to `owner`. The run's public
-    /// status stays `Running`; another owner's attempt waits until the lease ends or expires.
-    pub async fn begin_verification(
-        &self,
-        run_id: &StatefulRunId,
-        owner: &str,
-        lease_ms: u32,
-    ) -> Result<u64, StatefulRunStoreError> {
-        crate::run::validate_source_id(owner)?;
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let run = load_run(&mut transaction, run_id)
-            .await?
-            .ok_or_else(|| StatefulRunStoreError::RunNotFound(run_id.to_string()))?;
-        if run.status.is_terminal() {
-            return Err(StatefulRunStoreError::AcceptanceRunState(run.status));
-        }
-        ensure_ledger(&mut transaction, run_id).await?;
-        let now = unix_timestamp_millis()?;
-        let ledger = load_ledger(&mut transaction, run_id).await?;
-        let held_by_other = sqlx::query_scalar::<_, i64>(
-            "SELECT 1 FROM stateful_acceptance_ledgers
-             WHERE run_id = ? AND verification_owner IS NOT NULL AND verification_owner <> ?",
-        )
-        .bind(run_id.as_str())
-        .bind(owner)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .is_some();
-        // The same owner (one thread's completion path) takes over its own earlier attempt,
-        // so an attempt abandoned by an error does not lock out its retry.
-        if let Some(expires) = ledger.verification_lease_expires_at_ms
-            && expires > now
-            && held_by_other
-        {
-            return Err(AcceptanceError::VerificationLeased(expires).into());
-        }
-        let expires = now
-            .checked_add(i64::from(lease_ms))
-            .ok_or(StatefulRunStoreError::TimestampOverflow)?;
-        sqlx::query(
-            "UPDATE stateful_acceptance_ledgers
-             SET verification_attempt = verification_attempt + 1, verification_owner = ?,
-                 verification_lease_expires_at_ms = ?, updated_at_ms = ?
-             WHERE run_id = ?",
-        )
-        .bind(owner)
-        .bind(expires)
-        .bind(now)
-        .bind(run_id.as_str())
-        .execute(&mut *transaction)
-        .await?;
-        let ledger = load_ledger(&mut transaction, run_id).await?;
-        transaction.commit().await?;
-        Ok(ledger.verification_attempt)
-    }
-
-    /// Ends a verification attempt without completing (a refusal); only its owner can end it.
-    pub async fn end_verification(
-        &self,
-        run_id: &StatefulRunId,
-        owner: &str,
-        attempt: u64,
-    ) -> Result<(), StatefulRunStoreError> {
-        sqlx::query(
-            "UPDATE stateful_acceptance_ledgers
-             SET verification_owner = NULL, verification_lease_expires_at_ms = NULL
-             WHERE run_id = ? AND verification_owner = ? AND verification_attempt = ?",
-        )
-        .bind(run_id.as_str())
-        .bind(owner)
-        .bind(i64::try_from(attempt).map_err(|_| StatefulRunStoreError::CountOverflow)?)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    /// Counts a rejected completion. The count is consecutive rejections at the same ledger
-    /// revision: any criterion change or new evidence starts it again at one.
-    pub async fn note_rejected_completion(
-        &self,
-        run_id: &StatefulRunId,
-    ) -> Result<u32, StatefulRunStoreError> {
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if load_run(&mut transaction, run_id).await?.is_none() {
-            return Err(StatefulRunStoreError::RunNotFound(run_id.to_string()));
-        }
-        ensure_ledger(&mut transaction, run_id).await?;
-        sqlx::query(
-            "UPDATE stateful_acceptance_ledgers
-             SET stalled_completions = CASE WHEN stalled_at_revision = revision
-                     THEN stalled_completions + 1 ELSE 1 END,
-                 stalled_at_revision = revision, updated_at_ms = ?
-             WHERE run_id = ?",
-        )
-        .bind(unix_timestamp_millis()?)
-        .bind(run_id.as_str())
-        .execute(&mut *transaction)
-        .await?;
-        let ledger = load_ledger(&mut transaction, run_id).await?;
-        transaction.commit().await?;
-        Ok(ledger.stalled_completions)
-    }
 }
 
 /// Evaluates the gate inside the terminal transaction. Every `Completed` write needs a host
@@ -420,7 +300,15 @@ pub(crate) async fn enforce_acceptance_gate(
     {
         return Err(StatefulRunStoreError::AcceptanceChanged);
     }
-    consume_verification_lease(
+    // Commands whose effects are not accounted for yet could still change or fail the
+    // evidence this decision relies on.
+    if ledger.pending_commands > 0 {
+        return Err(StatefulRunStoreError::AcceptanceGate(format!(
+            "{} commands of this run have not finished or have unaccounted effects",
+            ledger.pending_commands
+        )));
+    }
+    crate::acceptance_lifecycle::consume_verification_lease(
         connection,
         &run.id,
         &commit.verification.owner,
@@ -451,19 +339,22 @@ pub(crate) async fn enforce_acceptance_gate(
             "the latest recorded obligation declares open blockers".to_string(),
         ));
     }
-    for criterion in &ledger.criteria {
-        if let Some(steering_id) = &criterion.approved_by_steering
-            && crate::acceptance_changes::user_steering_text(connection, &run.id, steering_id)
-                .await
-                .is_err()
-        {
-            return Err(StatefulRunStoreError::AcceptanceGate(format!(
-                "C{}'s approval by steering {steering_id} is no longer valid",
-                criterion.ordinal
-            )));
-        }
+    let unreconciled = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM stateful_steering
+         WHERE run_id = ? AND status = 'applied' AND id NOT IN (
+             SELECT steering_id FROM stateful_acceptance_steering WHERE run_id = ?
+         ) ORDER BY created_at_ms, id LIMIT 1",
+    )
+    .bind(run.id.as_str())
+    .bind(run.id.as_str())
+    .fetch_optional(&mut *connection)
+    .await?;
+    if let Some(steering_id) = unreconciled {
+        return Err(StatefulRunStoreError::AcceptanceGate(format!(
+            "applied steering {steering_id} may have changed the scope; reconcile it with stateful_acceptance_update before completing"
+        )));
     }
-    let mut unmet = unmet_criteria(&ledger, &commit.artifacts)
+    let mut unmet = unmet_criteria(&ledger, &commit.artifacts, &commit.checkers)
         .into_iter()
         .map(|(ordinal, reason)| format!("C{ordinal}: {reason}"))
         .collect::<Vec<_>>();
@@ -473,10 +364,20 @@ pub(crate) async fn enforce_acceptance_gate(
             "{uncovered} request sentences are covered by no criterion or proposal"
         ));
     }
-    if unmet.is_empty() {
-        return Ok(());
+    if !unmet.is_empty() {
+        return Err(StatefulRunStoreError::AcceptanceGate(unmet.join("; ")));
     }
-    Err(StatefulRunStoreError::AcceptanceGate(unmet.join("; ")))
+    // The cheap-lookup admission is recorded, so the completed run shows it owed no coverage.
+    if crate::acceptance_coverage::coverage_exempt(&run.value.goal, &ledger) {
+        ensure_ledger(connection, &run.id).await?;
+        sqlx::query(
+            "UPDATE stateful_acceptance_ledgers SET exemption = 'cheapLookup' WHERE run_id = ?",
+        )
+        .bind(run.id.as_str())
+        .execute(&mut *connection)
+        .await?;
+    }
+    Ok(())
 }
 
 /// A proposal's statement: the sentence, cut at a character boundary when very long.
@@ -502,33 +403,6 @@ fn proposal_statement(quote: &str) -> String {
     format!("{}…", quote[..end].trim_end())
 }
 
-/// The terminal transaction consumes the attempt it was validated in; an expired or replaced
-/// lease means another attempt may have observed different state.
-async fn consume_verification_lease(
-    connection: &mut SqliteConnection,
-    run_id: &StatefulRunId,
-    owner: &str,
-    attempt: u64,
-) -> Result<(), StatefulRunStoreError> {
-    let consumed = sqlx::query(
-        "UPDATE stateful_acceptance_ledgers
-         SET verification_owner = NULL, verification_lease_expires_at_ms = NULL
-         WHERE run_id = ? AND verification_owner = ? AND verification_attempt = ?
-           AND verification_lease_expires_at_ms > ?",
-    )
-    .bind(run_id.as_str())
-    .bind(owner)
-    .bind(i64::try_from(attempt).map_err(|_| StatefulRunStoreError::CountOverflow)?)
-    .bind(unix_timestamp_millis()?)
-    .execute(&mut *connection)
-    .await?
-    .rows_affected();
-    if consumed != 1 {
-        return Err(StatefulRunStoreError::AcceptanceChanged);
-    }
-    Ok(())
-}
-
 pub(crate) fn executes(status: StatefulRunStatus) -> bool {
     matches!(
         status,
@@ -544,6 +418,7 @@ pub(crate) struct EvidenceRow<'a> {
     pub(crate) output_tail: Option<&'a str>,
     pub(crate) output_digest: Option<&'a str>,
     pub(crate) artifact_digest: Option<&'a str>,
+    pub(crate) checker_digest: Option<&'a str>,
     pub(crate) detail: Option<&'a str>,
     pub(crate) workspace_generation: u64,
     pub(crate) source_id: &'a str,
@@ -559,9 +434,9 @@ pub(crate) async fn insert_evidence(
     sqlx::query(
         "INSERT INTO stateful_acceptance_evidence (
             run_id, ordinal, source, outcome, command, exit_code, output_tail, output_digest,
-            artifact_digest, detail, workspace_generation, criterion_revision, source_id,
-            observed_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            artifact_digest, checker_digest, detail, workspace_generation, criterion_revision,
+            source_id, observed_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(run_id.as_str())
     .bind(i64::from(criterion.ordinal))
@@ -572,6 +447,7 @@ pub(crate) async fn insert_evidence(
     .bind(row.output_tail)
     .bind(row.output_digest)
     .bind(row.artifact_digest)
+    .bind(row.checker_digest)
     .bind(row.detail)
     .bind(
         i64::try_from(row.workspace_generation)
@@ -615,15 +491,15 @@ pub(crate) async fn host_checked(
     .is_some())
 }
 
-async fn ensure_ledger(
+pub(crate) async fn ensure_ledger(
     connection: &mut SqliteConnection,
     run_id: &StatefulRunId,
 ) -> Result<(), StatefulRunStoreError> {
     sqlx::query(
         "INSERT OR IGNORE INTO stateful_acceptance_ledgers (
             run_id, revision, workspace_generation, observed_executions, stalled_completions,
-            stalled_at_revision, verification_attempt, updated_at_ms
-         ) VALUES (?, 0, 0, 0, 0, 0, 0, ?)",
+            stalled_fingerprint, verification_attempt, updated_at_ms
+         ) VALUES (?, 0, 0, 0, 0, '', 0, ?)",
     )
     .bind(run_id.as_str())
     .bind(unix_timestamp_millis()?)
@@ -632,7 +508,7 @@ async fn ensure_ledger(
     Ok(())
 }
 
-async fn bump_revision(
+pub(crate) async fn bump_revision(
     connection: &mut SqliteConnection,
     run_id: &StatefulRunId,
     now: i64,
@@ -668,6 +544,7 @@ struct StoredLedger {
     stalled_completions: i64,
     verification_attempt: i64,
     verification_lease_expires_at_ms: Option<i64>,
+    exemption: Option<String>,
 }
 
 #[derive(FromRow)]
@@ -686,11 +563,12 @@ struct StoredCriterion {
     span_start: Option<i64>,
     span_end: Option<i64>,
     artifacts_json: String,
+    checker_json: String,
     check_command: Option<String>,
     check_cwd: Option<String>,
-    approved_by_steering: Option<String>,
-    dismissal_steering_id: Option<String>,
-    dismissal_quote: Option<String>,
+    plan_criterion_revision: Option<i64>,
+    plan_checker_digest: Option<String>,
+    plan_ledger_revision: Option<i64>,
     dismissal_covered_by: Option<i64>,
     note: Option<String>,
     revision: i64,
@@ -708,6 +586,7 @@ struct StoredEvidence {
     output_tail: Option<String>,
     output_digest: Option<String>,
     artifact_digest: Option<String>,
+    checker_digest: Option<String>,
     detail: Option<String>,
     workspace_generation: i64,
     criterion_revision: i64,
@@ -721,7 +600,7 @@ pub(crate) async fn load_ledger(
 ) -> Result<AcceptanceLedger, StatefulRunStoreError> {
     let Some(stored) = sqlx::query_as::<_, StoredLedger>(
         "SELECT revision, workspace_generation, observed_executions, stalled_completions,
-                verification_attempt, verification_lease_expires_at_ms
+                verification_attempt, verification_lease_expires_at_ms, exemption
          FROM stateful_acceptance_ledgers WHERE run_id = ?",
     )
     .bind(run_id.as_str())
@@ -733,8 +612,8 @@ pub(crate) async fn load_ledger(
     let criteria = sqlx::query_as::<_, StoredCriterion>(
         "SELECT ordinal, criterion_id, origin, kind, state, statement, requirement, required,
                 depends_on_json, milestone, expected_observation, span_start, span_end,
-                artifacts_json, check_command, check_cwd, approved_by_steering,
-                dismissal_steering_id, dismissal_quote, dismissal_covered_by, note, revision,
+                artifacts_json, checker_json, check_command, check_cwd, plan_criterion_revision,
+                plan_checker_digest, plan_ledger_revision, dismissal_covered_by, note, revision,
                 ledger_revision
          FROM stateful_acceptance_criteria WHERE run_id = ? ORDER BY ordinal LIMIT ?",
     )
@@ -744,7 +623,7 @@ pub(crate) async fn load_ledger(
     .await?;
     let evidence = sqlx::query_as::<_, StoredEvidence>(
         "SELECT sequence, ordinal, source, outcome, command, exit_code, output_tail,
-                output_digest, artifact_digest, detail, workspace_generation,
+                output_digest, artifact_digest, checker_digest, detail, workspace_generation,
                 criterion_revision, source_id, observed_at_ms
          FROM stateful_acceptance_evidence AS evidence
          WHERE run_id = ? AND sequence = (
@@ -785,23 +664,35 @@ pub(crate) async fn load_ledger(
             milestone: stored.milestone,
             request_span: span,
             artifacts: serde_json::from_str(&stored.artifacts_json)?,
+            checker: serde_json::from_str(&stored.checker_json)?,
             check_command: stored.check_command,
             check_cwd: stored.check_cwd,
             expected_observation: stored.expected_observation,
-            approved_by_steering: stored.approved_by_steering,
-            dismissal: match (
-                stored.dismissal_steering_id,
-                stored.dismissal_quote,
-                stored.dismissal_covered_by,
+            plan: match (
+                stored.plan_criterion_revision,
+                stored.plan_checker_digest,
+                stored.plan_ledger_revision,
             ) {
-                (Some(steering_id), Some(quote), _) => {
-                    Some(DismissalReceipt::UserSteering { steering_id, quote })
+                (Some(criterion_revision), Some(checker_digest), Some(ledger_revision)) => {
+                    Some(PlanAdmission {
+                        criterion_revision: u64::try_from(criterion_revision)
+                            .map_err(|_| StatefulRunStoreError::CorruptCount)?,
+                        checker_digest,
+                        ledger_revision: u64::try_from(ledger_revision)
+                            .map_err(|_| StatefulRunStoreError::CorruptCount)?,
+                    })
                 }
-                (_, _, Some(covered_by)) => Some(DismissalReceipt::CoveredBy(
-                    u32::try_from(covered_by).map_err(|_| StatefulRunStoreError::CorruptCount)?,
-                )),
-                _ => None,
+                (None, None, None) => None,
+                _ => return Err(StatefulRunStoreError::CorruptCount),
             },
+            dismissal: stored
+                .dismissal_covered_by
+                .map(|covered_by| {
+                    u32::try_from(covered_by)
+                        .map(DismissalReceipt::CoveredBy)
+                        .map_err(|_| StatefulRunStoreError::CorruptCount)
+                })
+                .transpose()?,
             note: stored.note,
             revision: u64::try_from(stored.revision)
                 .map_err(|_| StatefulRunStoreError::CorruptCount)?,
@@ -820,6 +711,29 @@ pub(crate) async fn load_ledger(
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         stalled_completions: u32::try_from(stored.stalled_completions)
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
+        pending_commands: u64::try_from(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM stateful_acceptance_pending WHERE run_id = ?",
+            )
+            .bind(run_id.as_str())
+            .fetch_one(&mut *connection)
+            .await?,
+        )
+        .map_err(|_| StatefulRunStoreError::CorruptCount)?,
+        reconciled_steering: sqlx::query_as::<_, (String, String)>(
+            "SELECT steering_id, reason FROM stateful_acceptance_steering
+             WHERE run_id = ? ORDER BY reconciled_at_ms, steering_id LIMIT 64",
+        )
+        .bind(run_id.as_str())
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .map(|(steering_id, reason)| SteeringReconciliation {
+            steering_id,
+            reason,
+        })
+        .collect(),
+        cheap_lookup: stored.exemption.is_some(),
         verification_attempt: u64::try_from(stored.verification_attempt)
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         verification_lease_expires_at_ms: stored.verification_lease_expires_at_ms,
@@ -842,6 +756,7 @@ fn decode_evidence(stored: StoredEvidence) -> Result<AcceptanceEvidence, Statefu
         output_tail: stored.output_tail,
         output_digest: stored.output_digest,
         artifact_digest: stored.artifact_digest,
+        checker_digest: stored.checker_digest,
         detail: stored.detail,
         workspace_generation: u64::try_from(stored.workspace_generation)
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,

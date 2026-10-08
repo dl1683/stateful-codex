@@ -7,13 +7,18 @@
 //! attributes the observation to the run of the turn that started the command (never to a
 //! run that started later on the same thread).
 //!
-//! At the command's start the host snapshots the workspace generation and the content of the
-//! criterion's pinned artifacts; at its end it records the receipt against that start state.
-//! A receipt is unavailable, never passed, when the pinned content changed while it ran, when
-//! a mutation was observed meanwhile, or when no start snapshot exists. Every other observed
-//! mutation (unmatched commands that are not read-only, input written into a running
-//! session, applied or partially applied patches) advances the workspace generation. Commands
-//! still running are tracked so completion can refuse while relevant work is in flight.
+//! Every started command is recorded as pending in the run's ledger until its effects
+//! (execution count, mutation, receipt) are durably accounted for; the terminal gate refuses
+//! completion while any is pending. Only a command proven never to have launched is
+//! forgotten. At a matched check's start the host snapshots the workspace generation, the
+//! check's pinned artifacts and checker bytes, and every criterion's pinned files. At its end
+//! it records the receipt against that start state: unavailable, never passed, when its own
+//! pinned content changed while it ran, when another mutation was observed meanwhile, or when
+//! no start snapshot exists. A check that changed any criterion's pinned files is itself a
+//! mutation: earlier evidence becomes stale and only its own unchanged post-write state is
+//! qualified. Every other observed mutation (unmatched commands that are not read-only, input
+//! written into a running session, applied or partially applied patches) advances the
+//! workspace generation.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -71,13 +76,14 @@ struct CheckStarts(Mutex<HashMap<String, CheckStart>>);
 
 struct CheckStart {
     generation: u64,
-    /// Criterion revision and the content digest of its pinned artifacts at start.
-    criteria: BTreeMap<u32, (u64, Option<String>)>,
+    /// Matched criteria: revision, pinned-artifact digest and checker digest at start.
+    criteria: BTreeMap<u32, (u64, Option<String>, Option<String>)>,
+    /// Every active criterion's pinned artifacts and checker files at start.
+    governing: Governing,
 }
 
-/// Commands started for each run (by run ID) whose end has not been observed.
-static IN_FLIGHT: LazyLock<Mutex<HashMap<String, HashSet<String>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Digests of every active criterion's pinned artifacts and checker files.
+type Governing = BTreeMap<u32, (Option<String>, Option<String>)>;
 /// Runs this process has bound a turn to; the first binding is a cold re-entry.
 static ENTERED_RUNS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -111,33 +117,22 @@ pub(crate) async fn bind_turn(
     }
 }
 
-/// How many commands of the run are still running, as far as this process observed.
-pub(crate) fn in_flight(run_id: &StatefulRunId) -> usize {
-    IN_FLIGHT
-        .lock()
-        .map(|in_flight| in_flight.get(run_id.as_str()).map_or(0, HashSet::len))
-        .unwrap_or(usize::MAX)
-}
-
-/// Forgets a command the host never ran (blocked, failed before the handler, or aborted).
-pub(crate) fn forget_command(turn_store: &ExtensionData, call_id: &str) {
-    if let Some(binding) = turn_store.get::<TurnRunBinding>() {
-        finish_in_flight(&binding.run_id, call_id);
-    }
-}
-
-fn finish_in_flight(run_id: &StatefulRunId, call_id: &str) {
-    if let Ok(mut in_flight) = IN_FLIGHT.lock()
-        && let Some(calls) = in_flight.get_mut(run_id.as_str())
+/// Forgets a command proven never to have launched (blocked by policy, or failed before its
+/// handler ran). An aborted command may still be running, so it stays pending until its end.
+pub(crate) async fn forget_command(
+    services: &ProjectIntelligenceServices,
+    turn_store: &ExtensionData,
+    call_id: &str,
+) {
+    if let Some(binding) = turn_store.get::<TurnRunBinding>()
+        && let Ok(store) = services.runtime().await
+        && let Err(error) = store.finish_command(&binding.run_id, call_id).await
     {
-        calls.remove(call_id);
-        if calls.is_empty() {
-            in_flight.remove(run_id.as_str());
-        }
+        tracing::warn!(run_id = %binding.run_id, %error, "failed to forget an unlaunched command");
     }
 }
 
-/// A builtin command is about to execute: track it as in flight and snapshot the checks it
+/// A builtin command is about to execute: record it as pending and snapshot the checks it
 /// runs.
 pub(crate) async fn command_started(
     services: &ProjectIntelligenceServices,
@@ -150,15 +145,12 @@ pub(crate) async fn command_started(
     let Some(binding) = turn_store.get::<TurnRunBinding>() else {
         return;
     };
-    if let Ok(mut in_flight) = IN_FLIGHT.lock() {
-        in_flight
-            .entry(binding.run_id.to_string())
-            .or_default()
-            .insert(call_id.to_string());
-    }
     let Ok(store) = services.runtime().await else {
         return;
     };
+    if let Err(error) = store.begin_command(&binding.run_id, call_id).await {
+        tracing::warn!(run_id = %binding.run_id, %error, "failed to record a pending command");
+    }
     let Ok(ledger) = store.acceptance_ledger(&binding.run_id).await else {
         return;
     };
@@ -166,25 +158,47 @@ pub(crate) async fn command_started(
     if matched.is_empty() {
         return;
     }
-    let states = artifact_states(roots, matched.iter().copied()).await;
+    let governing = governing_digests(roots, &ledger).await;
     let start = CheckStart {
         generation: ledger.workspace_generation,
         criteria: matched
             .iter()
             .map(|criterion| {
-                (
-                    criterion.ordinal,
-                    (
-                        criterion.revision,
-                        pinned_digest(states.get(&criterion.ordinal)),
-                    ),
-                )
+                let (artifacts, checker) = governing
+                    .get(&criterion.ordinal)
+                    .cloned()
+                    .unwrap_or_default();
+                (criterion.ordinal, (criterion.revision, artifacts, checker))
             })
             .collect(),
+        governing,
     };
     if let Ok(mut starts) = turn_store.get_or_init(CheckStarts::default).0.lock() {
         starts.insert(call_id.to_string(), start);
     }
+}
+
+/// Digests of every active criterion's pinned artifacts and checker files.
+async fn governing_digests(roots: &[String], ledger: &AcceptanceLedger) -> Governing {
+    let active = || {
+        ledger
+            .criteria
+            .iter()
+            .filter(|criterion| criterion.state == AcceptanceState::Active)
+    };
+    let artifacts = artifact_states(roots, active()).await;
+    let checkers = checker_states(roots, active()).await;
+    active()
+        .map(|criterion| {
+            (
+                criterion.ordinal,
+                (
+                    pinned_digest(artifacts.get(&criterion.ordinal)),
+                    pinned_digest(checkers.get(&criterion.ordinal)),
+                ),
+            )
+        })
+        .collect()
 }
 
 /// Records host evidence or a workspace mutation for one completed item, attributed to the run
@@ -201,10 +215,20 @@ pub(crate) async fn observe_item(
     let run_id = &binding.run_id;
     let result = match item {
         TurnItem::CommandExecution(command) => {
-            if command.status != CommandExecutionStatus::InProgress {
-                finish_in_flight(run_id, &command.id);
+            // Pending is cleared only after the effects are durably accounted for; a
+            // failure leaves it pending, which fails completion closed.
+            match observe_command(services, run_id, roots, turn_store, command).await {
+                Ok(()) if command.status != CommandExecutionStatus::InProgress => {
+                    match services.runtime().await {
+                        Ok(store) => store
+                            .finish_command(run_id, &command.id)
+                            .await
+                            .map_err(|error| error.to_string()),
+                        Err(error) => Err(error.to_string()),
+                    }
+                }
+                outcome => outcome,
             }
-            observe_command(services, run_id, roots, turn_store, command).await
         }
         // A failed patch may have applied a prefix; only a declined one changed nothing.
         TurnItem::FileChange(change)
@@ -277,45 +301,65 @@ async fn observe_command(
         )
     });
     let output_digest = format!("sha256:{:x}", Sha256::digest(output.as_bytes()));
-    let end = artifact_states(roots, matched.iter().copied()).await;
+    let end = governing_digests(roots, &ledger).await;
+    // A check that changed any criterion's pinned files is a mutation: earlier evidence
+    // becomes stale, and only a receipt whose own pinned state is unchanged is qualified
+    // against the post-write state.
+    let mut stamp_generation = None;
+    if let Some(start) = &start
+        && start.generation == ledger.workspace_generation
+        && start.governing != end
+    {
+        bump(services, run_id).await?;
+        stamp_generation = Some(ledger.workspace_generation + 1);
+    }
     let evidence = matched
         .iter()
         .map(|criterion| {
+            let unavailable = |detail: &str| {
+                (
+                    EvidenceOutcome::Unavailable,
+                    Some(detail.to_string()),
+                    ledger.workspace_generation,
+                    None,
+                    None,
+                )
+            };
             let started = start
                 .as_ref()
                 .and_then(|start| Some((start.generation, start.criteria.get(&criterion.ordinal)?)));
-            let (outcome, detail, generation, digest) = match started {
-                None => (
-                    EvidenceOutcome::Unavailable,
-                    Some("no start snapshot of this check exists (it started before this process observed it)".to_string()),
-                    ledger.workspace_generation,
-                    None,
+            let (outcome, detail, generation, digest, checker) = match started {
+                None => unavailable(
+                    "no start snapshot of this check exists (it started before this process observed it)",
                 ),
-                Some((_, (revision, _))) if *revision != criterion.revision => (
-                    EvidenceOutcome::Unavailable,
-                    Some("the criterion changed while the check ran".to_string()),
-                    ledger.workspace_generation,
-                    None,
-                ),
-                Some((generation, (_, start_digest))) => {
-                    let end_digest = pinned_digest(end.get(&criterion.ordinal));
+                Some((_, (revision, _, _))) if *revision != criterion.revision => {
+                    unavailable("the criterion changed while the check ran")
+                }
+                Some((generation, (_, start_digest, start_checker))) => {
+                    let (end_digest, end_checker) =
+                        end.get(&criterion.ordinal).cloned().unwrap_or_default();
+                    let unchanged = start_digest.is_some()
+                        && *start_digest == end_digest
+                        && *start_checker == end_checker;
                     let (outcome, detail) = match (command.status, command.exit_code) {
                         (CommandExecutionStatus::Declined, _) => (
                             EvidenceOutcome::Unavailable,
                             Some("the session's approval policy declined the check, so it did not run".to_string()),
                         ),
-                        (CommandExecutionStatus::Completed, Some(0))
-                            if start_digest.is_none() || *start_digest != end_digest =>
-                        {
-                            (
-                                EvidenceOutcome::Unavailable,
-                                Some("the pinned artifacts were unreadable or changed while the check ran".to_string()),
-                            )
-                        }
+                        (CommandExecutionStatus::Completed, Some(0)) if !unchanged => (
+                            EvidenceOutcome::Unavailable,
+                            Some("the pinned artifacts or checker were unreadable or changed while the check ran".to_string()),
+                        ),
                         (CommandExecutionStatus::Completed, Some(0)) => (EvidenceOutcome::Passed, None),
                         _ => (EvidenceOutcome::Failed, None),
                     };
-                    (outcome, detail, generation, start_digest.clone())
+                    (
+                        outcome,
+                        detail,
+                        stamp_generation.unwrap_or(generation),
+                        start_digest.clone(),
+                        start_checker.clone(),
+                    )
                 }
             };
             CommandEvidence {
@@ -327,6 +371,7 @@ async fn observe_command(
                 output_tail: tail(&output),
                 output_digest: output_digest.clone(),
                 artifact_digest: digest,
+                checker_digest: checker,
                 detail,
                 start_generation: generation,
                 source_id: command.id.clone(),
@@ -440,10 +485,35 @@ pub(crate) async fn artifact_states<'a>(
     roots: &[String],
     criteria: impl Iterator<Item = &'a AcceptanceCriterion>,
 ) -> BTreeMap<u32, ArtifactState> {
-    let requests = criteria
-        .filter(|criterion| !criterion.artifacts.is_empty())
-        .map(|criterion| (criterion.ordinal, criterion.artifacts.clone()))
-        .collect::<Vec<_>>();
+    file_states(
+        roots,
+        criteria
+            .filter(|criterion| !criterion.artifacts.is_empty())
+            .map(|criterion| (criterion.ordinal, criterion.artifacts.clone()))
+            .collect(),
+    )
+    .await
+}
+
+/// The host's reading of the given criteria's checker files.
+pub(crate) async fn checker_states<'a>(
+    roots: &[String],
+    criteria: impl Iterator<Item = &'a AcceptanceCriterion>,
+) -> BTreeMap<u32, ArtifactState> {
+    file_states(
+        roots,
+        criteria
+            .filter(|criterion| !criterion.checker.is_empty())
+            .map(|criterion| (criterion.ordinal, criterion.checker.clone()))
+            .collect(),
+    )
+    .await
+}
+
+async fn file_states(
+    roots: &[String],
+    requests: Vec<(u32, Vec<String>)>,
+) -> BTreeMap<u32, ArtifactState> {
     if requests.is_empty() {
         return BTreeMap::new();
     }
@@ -483,19 +553,22 @@ pub(crate) async fn artifact_states<'a>(
     }
 }
 
-/// Artifact states for every active criterion of a ledger, for a completion attempt.
-pub(crate) async fn ledger_artifact_states(
+/// Artifact and checker states for every active criterion of a ledger, for a completion
+/// attempt.
+pub(crate) async fn ledger_file_states(
     roots: &[String],
     ledger: &AcceptanceLedger,
-) -> BTreeMap<u32, ArtifactState> {
-    artifact_states(
-        roots,
+) -> (BTreeMap<u32, ArtifactState>, BTreeMap<u32, ArtifactState>) {
+    let active = || {
         ledger
             .criteria
             .iter()
-            .filter(|criterion| criterion.state == AcceptanceState::Active),
+            .filter(|criterion| criterion.state == AcceptanceState::Active)
+    };
+    (
+        artifact_states(roots, active()).await,
+        checker_states(roots, active()).await,
     )
-    .await
 }
 
 fn read_artifacts(
@@ -555,7 +628,13 @@ fn file_digest(
     if !canonical_roots.iter().any(|root| path.starts_with(root)) {
         return Err("it is outside the project roots".to_string());
     }
-    let mut file = std::fs::File::open(&path).map_err(|error| error.to_string())?;
+    // Refuse non-regular files before opening: opening a FIFO with no writer would block.
+    let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("it is not a regular file".to_string());
+    }
+    let file = open_nonblocking(&path).map_err(|error| error.to_string())?;
+    // Re-check the opened handle: the path may have been replaced after the first check.
     let metadata = file.metadata().map_err(|error| error.to_string())?;
     if !metadata.is_file() {
         return Err("it is not a regular file".to_string());
@@ -565,7 +644,40 @@ fn file_digest(
             "it is larger than {MAX_HASHED_ARTIFACT_BYTES} bytes, so its content cannot be pinned"
         ));
     }
-    let limit = metadata.len();
+    hash_bounded(file, metadata.len(), stop).map(Some)
+}
+
+/// Opens a file for reading without blocking on special files where the platform allows it.
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(0o4000);
+    }
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(0x0004);
+    }
+    options.open(path)
+}
+
+/// SHA-256 of exactly `limit` bytes of `reader`, checking `stop` before every chunk; a reader
+/// that yields more or fewer bytes than `limit` changed while being read.
+pub(crate) fn hash_bounded(
+    mut reader: impl Read,
+    limit: u64,
+    stop: &dyn Fn() -> bool,
+) -> Result<String, String> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     let mut total = 0_u64;
@@ -573,7 +685,9 @@ fn file_digest(
         if stop() {
             return Err("the read budget ran out".to_string());
         }
-        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
         if read == 0 {
             break;
         }
@@ -586,7 +700,7 @@ fn file_digest(
     if total != limit {
         return Err("it changed size while being read".to_string());
     }
-    Ok(Some(format!("sha256:{:x}", hasher.finalize())))
+    Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 
 #[cfg(test)]

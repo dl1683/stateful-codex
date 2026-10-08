@@ -796,6 +796,7 @@ async fn complete_seeded_run(
                 ledger_revision: ledger.revision,
                 workspace_generation: ledger.workspace_generation,
                 artifacts: std::collections::BTreeMap::new(),
+                checkers: std::collections::BTreeMap::new(),
                 verification: codex_stateful_runtime::VerificationClaim {
                     owner: "seed".to_string(),
                     attempt,

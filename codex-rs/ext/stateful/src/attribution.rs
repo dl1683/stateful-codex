@@ -306,15 +306,21 @@ impl ToolLifecycleContributor for StatefulExtension {
     fn on_tool_finish<'a>(&'a self, input: ToolFinishInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(async move {
             // A command the host never ran produces no end event to clear it.
+            // An aborted command may still be running, so only these are forgotten.
             if matches!(
                 input.outcome,
                 ToolCallOutcome::Blocked
-                    | ToolCallOutcome::Aborted
                     | ToolCallOutcome::Failed {
                         handler_executed: false
                     }
-            ) {
-                crate::acceptance_observation::forget_command(input.turn_store, input.call_id);
+            ) && let Some(services) = self.services.as_ref()
+            {
+                crate::acceptance_observation::forget_command(
+                    services,
+                    input.turn_store,
+                    input.call_id,
+                )
+                .await;
             }
             if let Some(thread) = input.thread_store.get::<SelectedThread>() {
                 self.run_activity.for_thread(&thread.thread_id).record(

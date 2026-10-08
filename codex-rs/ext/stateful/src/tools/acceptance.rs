@@ -33,6 +33,7 @@ use std::sync::Arc;
 use codex_thread_store::ThreadStore;
 
 use crate::acceptance_observation::artifact_states;
+use crate::acceptance_observation::checker_states;
 use crate::acceptance_render::AcceptanceView;
 use crate::acceptance_render::bounded;
 use crate::services::ProjectIntelligenceServices;
@@ -66,7 +67,8 @@ enum Action {
     Accept,
     Dismiss,
     Retire,
-    Approve,
+    Admit,
+    ReconcileSteering,
     Observe,
     NoCheck,
 }
@@ -87,8 +89,8 @@ struct ChangeArguments {
     check_command: Option<String>,
     check_cwd: Option<String>,
     expected_observation: Option<String>,
+    checker: Option<Vec<String>>,
     steering_id: Option<String>,
-    steering_quote: Option<String>,
     covered_by: Option<String>,
     text: Option<String>,
 }
@@ -151,12 +153,15 @@ impl AcceptanceUpdateTool {
             .map(|(index, change)| convert(&run, index, change))
             .collect::<Result<Vec<_>, _>>()?;
         let runtime = self.services.runtime().await.map_err(respond)?;
-        // A manual observation is pinned to the content of the criterion's artifacts, read by
-        // the host now; outside the local executor nothing can be pinned.
-        if changes
-            .iter()
-            .any(|change| matches!(change, AcceptanceChange::Observe { .. }))
-        {
+        // A manual observation is pinned to the content of the criterion's artifacts, and a
+        // plan admission to the checker bytes, both read by the host now; outside the local
+        // executor nothing can be pinned.
+        if changes.iter().any(|change| {
+            matches!(
+                change,
+                AcceptanceChange::Observe { .. } | AcceptanceChange::Admit { .. }
+            )
+        }) {
             let ledger = runtime.acceptance_ledger(&run.id).await.map_err(respond)?;
             let roots = if super::run::local_executor(&call) {
                 match self.projects.read_project(self.project_id.clone()).await {
@@ -166,23 +171,34 @@ impl AcceptanceUpdateTool {
             } else {
                 Vec::new()
             };
+            let pinned = |state: Option<&ArtifactState>| match state {
+                Some(ArtifactState::Observed { digest, missing }) if missing.is_empty() => {
+                    Some(digest.clone())
+                }
+                Some(ArtifactState::Observed { .. } | ArtifactState::Unavailable(_)) | None => None,
+            };
             for change in &mut changes {
-                if let AcceptanceChange::Observe {
-                    ordinal,
-                    artifact_digest,
-                    ..
-                } = change
-                    && let Some(criterion) = ledger.criterion(*ordinal)
-                    && !roots.is_empty()
-                {
-                    let states = artifact_states(&roots, std::iter::once(criterion)).await;
-                    *artifact_digest = match states.get(ordinal) {
-                        Some(ArtifactState::Observed { digest, missing }) if missing.is_empty() => {
-                            Some(digest.clone())
+                match change {
+                    AcceptanceChange::Observe {
+                        ordinal,
+                        artifact_digest,
+                        ..
+                    } if !roots.is_empty() => {
+                        if let Some(criterion) = ledger.criterion(*ordinal) {
+                            let states = artifact_states(&roots, std::iter::once(criterion)).await;
+                            *artifact_digest = pinned(states.get(ordinal));
                         }
-                        Some(ArtifactState::Observed { .. } | ArtifactState::Unavailable(_))
-                        | None => None,
-                    };
+                    }
+                    AcceptanceChange::Admit {
+                        ordinal,
+                        checker_digest,
+                    } if !roots.is_empty() => {
+                        if let Some(criterion) = ledger.criterion(*ordinal) {
+                            let states = checker_states(&roots, std::iter::once(criterion)).await;
+                            *checker_digest = pinned(states.get(ordinal));
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -294,6 +310,7 @@ fn convert(
             depends_on: depends_on()?,
             milestone: change.milestone.clone(),
             artifacts: change.artifacts.clone(),
+            checker: change.checker.clone(),
             check_command: change.check_command.clone(),
             check_cwd: change.check_cwd.clone(),
             expected_observation: change.expected_observation.clone(),
@@ -307,6 +324,7 @@ fn convert(
             ("statement", change.statement.is_some()),
             ("requestQuote", change.request_quote.is_some()),
             ("artifacts", change.artifacts.is_some()),
+            ("checker", change.checker.is_some()),
             ("checkCommand", change.check_command.is_some()),
             ("checkCwd", change.check_cwd.is_some()),
             ("expectedObservation", change.expected_observation.is_some()),
@@ -349,6 +367,7 @@ fn convert(
                     depends_on: depends_on()?.unwrap_or_default(),
                     milestone: change.milestone.clone(),
                     artifacts: change.artifacts.clone().unwrap_or_default(),
+                    checker: change.checker.clone().unwrap_or_default(),
                     check_command: change.check_command.clone(),
                     check_cwd: change.check_cwd.clone(),
                     expected_observation: change.expected_observation.clone(),
@@ -382,22 +401,11 @@ fn convert(
             }
         }
         Action::Dismiss => {
-            let receipt_fields = (
-                change.steering_id.as_deref(),
-                change.steering_quote.as_deref(),
-                change.covered_by.as_deref(),
-            );
-            let receipt = match receipt_fields {
-                (Some(steering_id), Some(quote), None) => DismissalReceipt::UserSteering {
-                    steering_id: steering_id.to_string(),
-                    quote: quote.to_string(),
-                },
-                (None, None, Some(alias)) => {
-                    DismissalReceipt::CoveredBy(parse_alias(alias, "coveredBy")?)
-                }
-                _ => {
+            let receipt = match change.covered_by.as_deref() {
+                Some(alias) => DismissalReceipt::CoveredBy(parse_alias(alias, "coveredBy")?),
+                None => {
                     return Err(FunctionCallError::RespondToModel(format!(
-                        "nothing changed: changes[{index}] dismisses a user requirement only with a receipt: steeringId plus steeringQuote (exact text of the user's own steering), or coveredBy (a user criterion whose quote covers it)"
+                        "nothing changed: changes[{index}] dismisses a user requirement only as coveredBy a user criterion whose quote covers it; there is no other waiver"
                     )));
                 }
             };
@@ -408,16 +416,24 @@ fn convert(
                 receipt,
             })
         }
-        Action::Approve => {
-            unexpected(&[("text", change.text.is_some())])?;
-            let steering_id = change
-                .steering_id
-                .clone()
-                .ok_or_else(|| field("steeringId"))?;
-            let ordinal = ordinal()?;
-            Ok(AcceptanceChange::Approve {
-                ordinal,
-                steering_id,
+        Action::Admit => {
+            unexpected(&[
+                ("text", change.text.is_some()),
+                ("steeringId", change.steering_id.is_some()),
+            ])?;
+            Ok(AcceptanceChange::Admit {
+                ordinal: ordinal()?,
+                checker_digest: None,
+            })
+        }
+        Action::ReconcileSteering => {
+            unexpected(&[("criterion", change.criterion.is_some())])?;
+            Ok(AcceptanceChange::ReconcileSteering {
+                steering_id: change
+                    .steering_id
+                    .clone()
+                    .ok_or_else(|| field("steeringId"))?,
+                reason: change.text.clone().ok_or_else(|| field("text"))?,
             })
         }
         Action::Retire => {
@@ -469,7 +485,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Acceptance ledger. add (user: requestQuote, exact goal text), refine, accept, dismiss (steeringId+steeringQuote or coveredBy), retire derived, approve (steeringId quoting the check), observe, noCheck. Run checkCommand verbatim in checkCwd.".to_string(),
+            description: "Acceptance ledger. add (user: requestQuote, exact goal text), refine, accept, dismiss (coveredBy), retire derived, admit (host freezes the plan: checkCommand naming its checker files), reconcileSteering, observe, noCheck. Run checkCommand verbatim in checkCwd.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -483,7 +499,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "action": {"type": "string", "enum": ["add", "refine", "accept", "dismiss", "retire", "approve", "observe", "noCheck"]},
+                                "action": {"type": "string", "enum": ["add", "refine", "accept", "dismiss", "retire", "admit", "reconcileSteering", "observe", "noCheck"]},
                                 "criterion": {"type": "string"},
                                 "origin": {"type": "string", "enum": ["user", "derived"]},
                                 "kind": {"type": "string", "enum": ["deliverable", "constraint", "check", "manual", "existence"]},
@@ -496,8 +512,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
                                 "checkCommand": {"type": "string"},
                                 "checkCwd": {"type": "string"},
                                 "expectedObservation": {"type": "string"},
+                                "checker": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_CRITERION_ARTIFACTS},
                                 "steeringId": {"type": "string"},
-                                "steeringQuote": {"type": "string"},
                                 "coveredBy": {"type": "string"},
                                 "text": {"type": "string"}
                             },

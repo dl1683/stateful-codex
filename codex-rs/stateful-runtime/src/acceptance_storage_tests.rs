@@ -20,7 +20,6 @@ use crate::DismissalReceipt;
 use crate::EvidenceOutcome;
 use crate::NewObligation;
 use crate::NewStatefulRun;
-use crate::NewSteeringInstruction;
 use crate::ObligationPacket;
 use crate::RequestSpan;
 use crate::RunBudget;
@@ -29,7 +28,6 @@ use crate::StatefulRunStatus;
 use crate::StatefulRunStore;
 use crate::StatefulRunStoreError;
 use crate::StatefulRunUpdate;
-use crate::SteeringId;
 use crate::TermsUpdate;
 use crate::VerificationClaim;
 use crate::WorkflowMode;
@@ -129,6 +127,7 @@ fn observed(ledger: &AcceptanceLedger, ordinal: u32, exit_code: i32) -> CommandE
         output_tail: "1 passed".to_string(),
         output_digest: "sha256:output".to_string(),
         artifact_digest: Some(DIGEST.to_string()),
+        checker_digest: None,
         detail: None,
         start_generation: ledger.workspace_generation,
         source_id: "call-check".to_string(),
@@ -178,6 +177,7 @@ async fn complete(
                 ledger_revision: ledger.revision,
                 workspace_generation: ledger.workspace_generation,
                 artifacts,
+                checkers: BTreeMap::new(),
                 verification: VerificationClaim {
                     owner: "test-owner".to_string(),
                     attempt,
@@ -188,44 +188,6 @@ async fn complete(
         )
         .await
         .map(|(run, _)| run)
-}
-
-async fn steer(store: &StatefulRunStore, id: &StatefulRunId, key: &str, input: &str) -> String {
-    store
-        .submit_steering(
-            SteeringId::parse(key).expect("steering id"),
-            NewSteeringInstruction {
-                project_id: "project-1".to_string(),
-                run_id: id.clone(),
-                input: input.to_string(),
-                affected_obligation_ids: Vec::new(),
-            },
-        )
-        .await
-        .expect("steering submitted")
-        .id
-        .to_string()
-}
-
-async fn reject_steering(store: &StatefulRunStore, steering_id: &str) {
-    let id = SteeringId::parse(steering_id).expect("steering id");
-    let current = store
-        .get_steering(&id)
-        .await
-        .expect("steering reads")
-        .expect("steering exists");
-    store
-        .update_steering(
-            &id,
-            crate::SteeringUpdate {
-                expected_revision: current.revision,
-                status: crate::SteeringStatus::Rejected,
-                resulting_strategy_revision: None,
-                reason: Some("Handled.".to_string()),
-            },
-        )
-        .await
-        .expect("steering resolved");
 }
 
 #[tokio::test]
@@ -422,89 +384,77 @@ async fn user_criteria_cannot_be_weakened_and_revisions_conflict() {
 }
 
 #[tokio::test]
-async fn a_forged_dismissal_cannot_waive_a_user_requirement() {
+async fn only_a_covering_user_criterion_dismisses_a_proposal() {
     let (_home, _sqlite, store, id) = store_with_run(WorkflowMode::Autonomous).await;
     let (ledger, remaining) = store.propose_uncovered(&id).await.expect("omission pass");
     assert_eq!((ledger.criteria.len(), remaining), (3, 0));
-    // Model prose naming a user withdrawal, with no matching user instruction.
-    let unrelated = steer(&store, &id, "unrelated", "Prefer short answers.").await;
-    for receipt in [
-        DismissalReceipt::UserSteering {
-            steering_id: "missing".to_string(),
-            quote: "drop the report".to_string(),
-        },
-        DismissalReceipt::UserSteering {
-            steering_id: unrelated.clone(),
-            quote: "drop the report".to_string(),
-        },
-        DismissalReceipt::CoveredBy(1),
-    ] {
-        let error = store
-            .revise_acceptance(
-                &id,
-                ledger.revision,
-                vec![AcceptanceChange::Dismiss {
-                    ordinal: 2,
-                    reason: "The user withdrew the report in steering.".to_string(),
-                    receipt,
-                }],
-                "call-forged",
-            )
-            .await
-            .expect_err("forged receipt refused");
-        assert!(
-            matches!(
-                error,
-                StatefulRunStoreError::Acceptance(AcceptanceError::Refused(_))
-            ),
-            "{error}"
-        );
-    }
+    // There is no quote-based waiver; a proposal does not cover another proposal.
+    let refused = store
+        .revise_acceptance(
+            &id,
+            ledger.revision,
+            vec![AcceptanceChange::Dismiss {
+                ordinal: 2,
+                reason: "The user withdrew the report in steering.".to_string(),
+                receipt: DismissalReceipt::CoveredBy(1),
+            }],
+            "call-forged",
+        )
+        .await
+        .expect_err("a proposal is no cover");
+    assert!(
+        matches!(
+            refused,
+            StatefulRunStoreError::Acceptance(AcceptanceError::Refused(_))
+        ),
+        "{refused}"
+    );
     assert_eq!(
         store.acceptance_ledger(&id).await.expect("ledger reads"),
         ledger
     );
-    // The user's own instruction is a receipt.
-    let withdrawal = steer(
-        &store,
-        &id,
-        "withdrawal",
-        "Skip the summary: drop the report entirely.",
-    )
-    .await;
+    // A user criterion quoting the sentence covers the proposal.
+    let ledger = store
+        .revise_acceptance(
+            &id,
+            ledger.revision,
+            vec![report_deliverable()],
+            "call-cover",
+        )
+        .await
+        .expect("covering criterion");
     let dismissed = store
         .revise_acceptance(
             &id,
             ledger.revision,
             vec![AcceptanceChange::Dismiss {
                 ordinal: 2,
-                reason: "The user withdrew the report.".to_string(),
-                receipt: DismissalReceipt::UserSteering {
-                    steering_id: withdrawal.clone(),
-                    quote: "drop the report entirely".to_string(),
-                },
+                reason: "C4 already states this requirement.".to_string(),
+                receipt: DismissalReceipt::CoveredBy(4),
             }],
             "call-receipt",
         )
         .await
-        .expect("receipted dismissal");
+        .expect("covered dismissal");
     assert_eq!(dismissed.criteria[1].state, AcceptanceState::Dismissed);
-    // A rejected instruction no longer approves anything.
-    reject_steering(&store, &withdrawal).await;
-    reject_steering(&store, &unrelated).await;
-    let ledger = store.acceptance_ledger(&id).await.expect("ledger reads");
+    // The receipt is re-validated: without its cover, the dismissal no longer counts.
+    let mut uncovered = dismissed;
+    uncovered
+        .criteria
+        .retain(|criterion| criterion.ordinal != 4);
     assert!(
-        crate::acceptance_changes::user_steering_text(
-            &mut store.pool.acquire().await.expect("connection"),
-            &id,
-            &withdrawal
-        )
-        .await
-        .is_err()
+        ledger_verdicts(&uncovered, &BTreeMap::new(), &BTreeMap::new())[1]
+            .1
+            .is_unmet()
     );
-    assert_eq!(ledger.criteria[1].state, AcceptanceState::Dismissed);
+    assert_eq!(
+        crate::uncovered_sentences(GOAL, &uncovered)
+            .into_iter()
+            .map(|span| span.quote(GOAL).expect("span").to_string())
+            .collect::<Vec<_>>(),
+        vec!["Write the summary to out/report.json.".to_string()]
+    );
 }
-
 #[tokio::test]
 async fn omission_overflow_persists_across_restart_and_blocks() {
     let goal = (1..=11)
@@ -611,133 +561,12 @@ async fn manual_assertions_and_file_presence_do_not_settle_requirements() {
             _
         )))
     ));
-    let verdicts = ledger_verdicts(&ledger, &pinned(&[2, 3]));
+    let verdicts = ledger_verdicts(&ledger, &pinned(&[2, 3]), &BTreeMap::new());
     assert!(verdicts[0].1.is_unmet());
     // A present but content-bearing deliverable is not settled by existence.
     assert!(verdicts[1].1.is_unmet(), "{:?}", verdicts[1]);
     // An explicit derived existence predicate is.
     assert_eq!(verdicts[2].1, CriterionVerdict::ArtifactsPresent);
-}
-
-#[tokio::test]
-async fn a_passing_receipt_is_observational_until_the_user_approves_the_check() {
-    let (_home, _sqlite, store, id) =
-        store_with_goal("All tests must pass.", WorkflowMode::Collaborative).await;
-    let add = AcceptanceChange::Add {
-        origin: AcceptanceOrigin::User,
-        kind: AcceptanceKind::Check,
-        statement: "All tests must pass.".to_string(),
-        request_span: Some(span_in("All tests must pass.", "All tests must pass.")),
-        terms: CriterionTerms {
-            required: true,
-            artifacts: vec!["tests/test_parser.py".to_string()],
-            check_command: Some("echo suite-ok".to_string()),
-            expected_observation: Some("the suite reports success".to_string()),
-            ..CriterionTerms::default()
-        },
-    };
-    let ledger = store
-        .revise_acceptance(&id, 0, vec![add], "call-1")
-        .await
-        .expect("criterion");
-    store
-        .record_command_evidence(&id, vec![observed(&ledger, 1, 0)])
-        .await
-        .expect("superficial check passes");
-    assert!(
-        complete(&store, &id, pinned(&[1]), None)
-            .await
-            .expect_err("unapproved receipt is observational")
-            .to_string()
-            .contains("settles nothing until the user approves it")
-    );
-    let ledger = store.acceptance_ledger(&id).await.expect("ledger reads");
-    let vague = steer(&store, &id, "vague", "Looks fine to me.").await;
-    assert!(matches!(
-        store
-            .revise_acceptance(
-                &id,
-                ledger.revision,
-                vec![AcceptanceChange::Approve {
-                    ordinal: 1,
-                    steering_id: vague.clone()
-                }],
-                "call-approve"
-            )
-            .await,
-        Err(StatefulRunStoreError::Acceptance(AcceptanceError::Refused(
-            _
-        )))
-    ));
-    let approval = steer(&store, &id, "approval", "Use `echo suite-ok` as the check.").await;
-    let ledger = store
-        .revise_acceptance(
-            &id,
-            ledger.revision,
-            vec![AcceptanceChange::Approve {
-                ordinal: 1,
-                steering_id: approval.clone(),
-            }],
-            "call-approve",
-        )
-        .await
-        .expect("user-approved check");
-    assert_eq!(
-        ledger.criteria[0].approved_by_steering.as_deref(),
-        Some(approval.as_str())
-    );
-    reject_steering(&store, &vague).await;
-    // The approval steering is resolved by the agent applying it; rejecting it would revoke it.
-    let approval_id = SteeringId::parse(approval.clone()).expect("steering id");
-    let current = store
-        .get_steering(&approval_id)
-        .await
-        .expect("reads")
-        .expect("exists");
-    store
-        .update_steering(
-            &approval_id,
-            crate::SteeringUpdate {
-                expected_revision: current.revision,
-                status: crate::SteeringStatus::Acknowledged,
-                resulting_strategy_revision: None,
-                reason: None,
-            },
-        )
-        .await
-        .expect("acknowledged");
-    let run = store.get_run(&id).await.expect("run").expect("exists");
-    let applied = store
-        .update_run(
-            &id,
-            StatefulRunUpdate {
-                expected_revision: run.revision,
-                status: StatefulRunStatus::Running,
-                strategy: Some("Use the approved check.".to_string()),
-                result: None,
-            },
-        )
-        .await
-        .expect("strategy changes");
-    store
-        .update_steering(
-            &approval_id,
-            crate::SteeringUpdate {
-                expected_revision: current.revision + 1,
-                status: crate::SteeringStatus::Applied,
-                resulting_strategy_revision: Some(applied.strategy_revision),
-                reason: None,
-            },
-        )
-        .await
-        .expect("applied");
-    assert_eq!(
-        complete(&store, &id, pinned(&[1]), None)
-            .await
-            .expect("approved receipt completes")
-            .status,
-        StatefulRunStatus::Completed
-    );
 }
 
 #[tokio::test]
@@ -797,14 +626,14 @@ async fn receipts_are_bound_to_start_state_pinned_content_and_reentry() {
         },
     )]);
     assert!(
-        unmet_criteria(&ledger, &changed)[0]
+        unmet_criteria(&ledger, &changed, &BTreeMap::new())[0]
             .1
             .contains("pinned artifacts changed")
     );
     store.invalidate_after_reentry(&id).await.expect("re-entry");
     let ledger = store.acceptance_ledger(&id).await.expect("ledger reads");
     assert!(
-        unmet_criteria(&ledger, &pinned(&[1]))[0]
+        unmet_criteria(&ledger, &pinned(&[1]), &BTreeMap::new())[0]
             .1
             .starts_with("stale: the workspace changed")
     );
@@ -846,7 +675,7 @@ async fn manual_observations_are_pinned_to_the_inspected_content() {
         .await
         .expect("observation");
     assert_eq!(
-        ledger_verdicts(&ledger, &pinned(&[1]))[0].1,
+        ledger_verdicts(&ledger, &pinned(&[1]), &BTreeMap::new())[0].1,
         CriterionVerdict::ManualObservation
     );
     let replaced = BTreeMap::from([(
@@ -856,7 +685,11 @@ async fn manual_observations_are_pinned_to_the_inspected_content() {
             missing: Vec::new(),
         },
     )]);
-    assert!(ledger_verdicts(&ledger, &replaced)[0].1.is_unmet());
+    assert!(
+        ledger_verdicts(&ledger, &replaced, &BTreeMap::new())[0]
+            .1
+            .is_unmet()
+    );
 }
 
 #[tokio::test]
@@ -889,6 +722,7 @@ async fn admitted_blockers_are_checked_inside_the_terminal_transaction() {
         ledger_revision: ledger.revision,
         workspace_generation: ledger.workspace_generation,
         artifacts: BTreeMap::new(),
+        checkers: BTreeMap::new(),
         verification: VerificationClaim {
             owner: "test-owner".to_string(),
             attempt,
@@ -1066,6 +900,7 @@ async fn completion_consumes_a_held_verification_lease_and_the_run_stays_running
         ledger_revision: ledger.revision,
         workspace_generation: ledger.workspace_generation,
         artifacts: BTreeMap::new(),
+        checkers: BTreeMap::new(),
         verification: VerificationClaim {
             owner: "owner-b".to_string(),
             attempt,

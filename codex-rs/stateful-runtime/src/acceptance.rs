@@ -2,22 +2,24 @@
 //!
 //! A ledger lists what the user's request requires. User criteria are linked to the exact
 //! byte span of the run goal they quote; every goal sentence must be covered by such a
-//! criterion (or by a host omission proposal) before a substantial run can complete. Only a
-//! host-validated user receipt can waive a user requirement.
+//! criterion (or by a host omission proposal) before a substantial run can complete. A
+//! proposal can be dismissed only as covered by an active required user criterion; there is
+//! no model-interpreted waiver.
 //!
 //! The gate is conservative: when evidence cannot be qualified it stays unmet, and the run
 //! ends `Blocked` with a partial result instead of `Completed`.
 //!
 //! - A host receipt (an observed check execution) proves what ran, in which directory, and
-//!   its exit status. It is observational until the user approves the check as the method
-//!   for the criterion (a steering instruction that quotes the exact check command). Only an
-//!   approved, current receipt satisfies a criterion.
-//! - Receipts are current only against pinned artifact content, an unchanged workspace
-//!   generation, and an unchanged criterion revision; a criterion without pinned artifacts
-//!   cannot be satisfied by a receipt.
+//!   its exit status. It settles a criterion only against the criterion's host-admitted check
+//!   plan: the host freezes, from the ledger, the exact criterion revision, check command and
+//!   directory, the checker files the command names (content-frozen), and the pinned
+//!   artifacts. The receipt must have run that plan with the frozen checker bytes, against
+//!   the current pinned artifacts and workspace generation. Any change of scope, method,
+//!   checker or dependencies invalidates the admission. No user approval is involved, so
+//!   Autonomous runs can complete unattended; the admission can never be minted from quoted
+//!   text.
 //! - Existence evidence settles only derived `existence` criteria; manual observations settle
-//!   only derived `manual` criteria and only with pinned artifact content. Neither can settle
-//!   a user requirement.
+//!   only derived `manual` criteria and only with pinned artifact content.
 //! - Unverified required work is unmet; only optional criteria may complete
 //!   disclosed-unverified.
 
@@ -94,14 +96,23 @@ impl RequestSpan {
     }
 }
 
-/// Why a user-bound omission proposal no longer gates. Model prose is never a receipt.
+/// Why a user-bound omission proposal no longer gates: an active required user-bound
+/// criterion whose span already covers it. Re-validated at every evaluation.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DismissalReceipt {
-    /// A user steering instruction on this run whose exact text (`quote`) changes the scope.
-    UserSteering { steering_id: String, quote: String },
-    /// An active required user-bound criterion whose span already covers the proposal.
     CoveredBy(u32),
+}
+
+/// The host's admission of a criterion's check plan, frozen from the ledger.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanAdmission {
+    /// The criterion revision (command, directory, checker, artifacts, expectation) admitted.
+    pub criterion_revision: u64,
+    /// Content digest of the checker files at admission.
+    pub checker_digest: String,
+    pub ledger_revision: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -137,6 +148,8 @@ pub struct AcceptanceEvidence {
     /// Content digest of the criterion's artifacts when the check started (or when the
     /// manual observation was recorded).
     pub artifact_digest: Option<String>,
+    /// Content digest of the criterion's checker files when the check started.
+    pub checker_digest: Option<String>,
     pub detail: Option<String>,
     /// The workspace generation when the check started.
     pub workspace_generation: u64,
@@ -169,15 +182,16 @@ pub struct AcceptanceCriterion {
     pub request_span: Option<RequestSpan>,
     /// The files this criterion's evidence is pinned to (inputs and outputs).
     pub artifacts: Vec<String>,
+    /// The checker files the check command runs (tests, scripts); content-frozen at admission.
+    pub checker: Vec<String>,
     pub check_command: Option<String>,
     /// The working directory the check must run in, relative to the first project root or
     /// absolute inside a project root; the first root when absent.
     pub check_cwd: Option<String>,
     /// What a passing check must show for it to establish the requirement.
     pub expected_observation: Option<String>,
-    /// The user steering instruction that approved the current check as this criterion's
-    /// method. Cleared whenever the check, its directory or its artifacts change.
-    pub approved_by_steering: Option<String>,
+    /// The host-admitted check plan, if any.
+    pub plan: Option<PlanAdmission>,
     pub dismissal: Option<DismissalReceipt>,
     pub note: Option<String>,
     pub revision: u64,
@@ -203,6 +217,15 @@ impl AcceptanceCriterion {
     }
 }
 
+/// An applied steering instruction the ledger reconciled. The reason is agent-written and is
+/// disclosed in the completion basis.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SteeringReconciliation {
+    pub steering_id: String,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcceptanceLedger {
@@ -216,6 +239,12 @@ pub struct AcceptanceLedger {
     pub observed_executions: u64,
     /// Consecutive rejected completions with no ledger change in between.
     pub stalled_completions: u32,
+    /// Commands started for this run whose effects are not accounted for yet.
+    pub pending_commands: u64,
+    /// Applied steering instructions this ledger has reconciled, with the agent's reason.
+    pub reconciled_steering: Vec<SteeringReconciliation>,
+    /// Set when the host admitted the run as a cheap lookup that owes no coverage.
+    pub cheap_lookup: bool,
     /// Completion verification attempts started for this run.
     pub verification_attempt: u64,
     /// Lease of the attempt in progress; the run stays `Running` meanwhile.
@@ -231,6 +260,9 @@ impl AcceptanceLedger {
             workspace_generation: 0,
             observed_executions: 0,
             stalled_completions: 0,
+            pending_commands: 0,
+            reconciled_steering: Vec::new(),
+            cheap_lookup: false,
             verification_attempt: 0,
             verification_lease_expires_at_ms: None,
             criteria: Vec::new(),
@@ -275,11 +307,17 @@ pub enum AcceptanceChange {
         ordinal: u32,
         reason: String,
     },
-    /// Records that the user approved the criterion's current check, citing the steering
-    /// instruction that quotes the exact command.
-    Approve {
+    /// Asks the host to admit the criterion's current check plan; `checker_digest` is the
+    /// host's own reading of the checker files (absent when they could not be read).
+    Admit {
         ordinal: u32,
+        checker_digest: Option<String>,
+    },
+    /// Records how an applied steering instruction affects acceptance; invalidates every
+    /// admitted plan and earlier evidence, since the scope may have changed.
+    ReconcileSteering {
         steering_id: String,
+        reason: String,
     },
     Observe {
         ordinal: u32,
@@ -300,6 +338,7 @@ pub struct CriterionTerms {
     pub depends_on: Vec<u32>,
     pub milestone: Option<String>,
     pub artifacts: Vec<String>,
+    pub checker: Vec<String>,
     pub check_command: Option<String>,
     pub check_cwd: Option<String>,
     pub expected_observation: Option<String>,
@@ -311,6 +350,7 @@ pub struct TermsUpdate {
     pub depends_on: Option<Vec<u32>>,
     pub milestone: Option<String>,
     pub artifacts: Option<Vec<String>>,
+    pub checker: Option<Vec<String>>,
     pub check_command: Option<String>,
     pub check_cwd: Option<String>,
     pub expected_observation: Option<String>,
@@ -328,6 +368,7 @@ pub struct CommandEvidence {
     pub output_tail: String,
     pub output_digest: String,
     pub artifact_digest: Option<String>,
+    pub checker_digest: Option<String>,
     pub detail: Option<String>,
     pub start_generation: u64,
     pub source_id: String,
@@ -357,6 +398,8 @@ pub struct AcceptanceCommit {
     pub ledger_revision: u64,
     pub workspace_generation: u64,
     pub artifacts: BTreeMap<u32, ArtifactState>,
+    /// The host's reading of each criterion's checker files.
+    pub checkers: BTreeMap<u32, ArtifactState>,
     pub verification: VerificationClaim,
     /// The latest recorded obligation sequence the caller checked for open blockers.
     pub validated_obligation_sequence: Option<u64>,
@@ -365,7 +408,8 @@ pub struct AcceptanceCommit {
 /// How one criterion stands against the gate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CriterionVerdict {
-    /// A user-approved check passed against the current pinned artifacts.
+    /// A host receipt of the admitted check plan passed against the current pinned artifacts
+    /// and the frozen checker.
     SatisfiedByHost,
     /// A derived existence criterion: every declared artifact is present now.
     ArtifactsPresent,
@@ -392,6 +436,7 @@ pub fn criterion_verdict(
     criterion: &AcceptanceCriterion,
     workspace_generation: u64,
     artifacts: Option<&ArtifactState>,
+    checker: Option<&ArtifactState>,
 ) -> CriterionVerdict {
     match criterion.state {
         AcceptanceState::Proposed => {
@@ -399,6 +444,7 @@ pub fn criterion_verdict(
                 "omission proposal awaiting review: accept it as a criterion, or dismiss it only with a user steering receipt or a covering criterion".to_string(),
             );
         }
+        // A dismissal's receipt is re-validated by the ledger-level verdicts.
         AcceptanceState::Dismissed | AcceptanceState::Retired => {
             return CriterionVerdict::Closed(criterion.note.clone().unwrap_or_default());
         }
@@ -463,12 +509,10 @@ pub fn criterion_verdict(
                             "stale: the pinned artifacts changed after `{command}` started; run it again"
                         ))
                     }
-                    Ok(_) if criterion.approved_by_steering.is_none() => {
-                        CriterionVerdict::Unmet(format!(
-                            "`{command}` passed, but a passing exit only shows what ran; it settles nothing until the user approves it as this criterion's method (a steering instruction quoting the exact command, then approve). Without that approval, end the run blocked with a partial result"
-                        ))
-                    }
-                    Ok(_) => CriterionVerdict::SatisfiedByHost,
+                    Ok(_) => match plan_status(criterion, evidence, checker) {
+                        Ok(()) => CriterionVerdict::SatisfiedByHost,
+                        Err(reason) => CriterionVerdict::Unmet(reason),
+                    },
                 }
             }
         };
@@ -515,7 +559,7 @@ pub fn criterion_verdict(
         },
         AcceptanceKind::Existence | AcceptanceKind::Manual if !derived => unverified(
             criterion,
-            "a user requirement is settled only by a user-approved check".to_string(),
+            "a user requirement is settled only by a receipt of its host-admitted check plan".to_string(),
         ),
         AcceptanceKind::Deliverable
         | AcceptanceKind::Constraint
@@ -523,10 +567,47 @@ pub fn criterion_verdict(
         | AcceptanceKind::Existence
         | AcceptanceKind::Manual => unverified(
             criterion,
-            "no check: add a checkCommand pinned to the artifacts and have the user approve it"
+            "no check: add a checkCommand naming its checker files, pin the artifacts, and admit the plan"
                 .to_string(),
         ),
     }
+}
+
+/// Whether a passing receipt ran the criterion's current host-admitted plan with the frozen
+/// checker, and the checker is still unchanged now.
+fn plan_status(
+    criterion: &AcceptanceCriterion,
+    evidence: &AcceptanceEvidence,
+    checker: Option<&ArtifactState>,
+) -> Result<(), String> {
+    let command = criterion.check_command.as_deref().unwrap_or_default();
+    let Some(plan) = &criterion.plan else {
+        return Err(format!(
+            "`{command}` passed, but a passing exit only shows what ran; it settles the criterion only after the host admits its check plan (stateful_acceptance_update admit). Without an admitted plan, end the run blocked with a partial result"
+        ));
+    };
+    if plan.criterion_revision != criterion.revision {
+        return Err("the check plan changed after its admission; admit it again".to_string());
+    }
+    let current = match checker {
+        Some(ArtifactState::Observed { digest, missing }) if missing.is_empty() => digest,
+        Some(ArtifactState::Observed { missing, .. }) => {
+            return Err(format!("checker file {} is missing", missing.join(", ")));
+        }
+        Some(ArtifactState::Unavailable(reason)) => {
+            return Err(format!("the checker files could not be read: {reason}"));
+        }
+        None => return Err("the checker files were not read for this completion".to_string()),
+    };
+    if *current != plan.checker_digest {
+        return Err("the checker changed after its plan was admitted; admit it again".to_string());
+    }
+    if evidence.checker_digest.as_deref() != Some(plan.checker_digest.as_str()) {
+        return Err(format!(
+            "`{command}` did not run the admitted checker bytes; run it again"
+        ));
+    }
+    Ok(())
 }
 
 /// Unverified required work is unmet: disclosure is a partial outcome, never completion.
@@ -545,14 +626,25 @@ fn unverified(criterion: &AcceptanceCriterion, reason: String) -> CriterionVerdi
 pub fn ledger_verdicts(
     ledger: &AcceptanceLedger,
     artifacts: &BTreeMap<u32, ArtifactState>,
+    checkers: &BTreeMap<u32, ArtifactState>,
 ) -> Vec<(u32, CriterionVerdict)> {
     let mut verdicts: Vec<(u32, CriterionVerdict)> = Vec::with_capacity(ledger.criteria.len());
     for criterion in &ledger.criteria {
-        let verdict = criterion_verdict(
-            criterion,
-            ledger.workspace_generation,
-            artifacts.get(&criterion.ordinal),
-        );
+        let verdict = match (criterion.state, &criterion.dismissal) {
+            (AcceptanceState::Dismissed, Some(DismissalReceipt::CoveredBy(covering)))
+                if !crate::acceptance_coverage::covers(ledger, *covering, criterion) =>
+            {
+                CriterionVerdict::Unmet(format!(
+                    "its dismissal relied on C{covering}, which no longer covers it"
+                ))
+            }
+            _ => criterion_verdict(
+                criterion,
+                ledger.workspace_generation,
+                artifacts.get(&criterion.ordinal),
+                checkers.get(&criterion.ordinal),
+            ),
+        };
         let blocked_by = (criterion.state == AcceptanceState::Active)
             .then(|| {
                 criterion.depends_on.iter().copied().find(|dependency| {
@@ -579,8 +671,9 @@ pub fn ledger_verdicts(
 pub fn unmet_criteria(
     ledger: &AcceptanceLedger,
     artifacts: &BTreeMap<u32, ArtifactState>,
+    checkers: &BTreeMap<u32, ArtifactState>,
 ) -> Vec<(u32, String)> {
-    ledger_verdicts(ledger, artifacts)
+    ledger_verdicts(ledger, artifacts, checkers)
         .into_iter()
         .filter_map(|(ordinal, verdict)| match verdict {
             CriterionVerdict::Unmet(reason) => Some((ordinal, reason)),
@@ -662,6 +755,10 @@ pub enum AcceptanceError {
         "a checkCommand needs expectedObservation (what its passing output must show) and at least one pinned artifact"
     )]
     CheckWithoutExpectation,
+    #[error(
+        "checker may name at most {MAX_CRITERION_ARTIFACTS} files, none of them a pinned artifact"
+    )]
+    InvalidChecker,
     #[error(
         "dependsOn may name at most {MAX_CRITERION_DEPENDENCIES} distinct earlier criteria of this ledger (no duplicates, self or forward references)"
     )]

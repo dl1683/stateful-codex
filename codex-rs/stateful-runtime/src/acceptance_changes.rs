@@ -1,10 +1,11 @@
 //! Criterion changes applied inside one ledger revision. User criteria (and accepted
 //! omission proposals) come from the user's words: their requirement, statement and span are
-//! fixed, they are always required, cannot be retired, and their artifacts and dependencies
-//! can only grow. Only a host-validated receipt (a user steering instruction quoted exactly,
-//! or a covering user criterion) can dismiss a user-bound proposal; model prose cannot.
-//! Every change reports whether it changed durable state, so a no-op never counts as
-//! progress.
+//! fixed, they are always required, cannot be retired, and their artifacts, checker files and
+//! dependencies can only grow. A user-bound proposal can be dismissed only as covered by an
+//! active required user criterion; there is no model-interpreted waiver. Check plans are
+//! admitted by the host from the ledger's own terms and checker bytes, never from quoted
+//! text. Every change reports whether it changed durable state, so a no-op (including a
+//! repeated identical labelled observation) never counts as progress.
 
 use sqlx::SqliteConnection;
 
@@ -196,7 +197,7 @@ pub(crate) async fn apply_change(
                     "C{ordinal} is not an omission proposal; only proposals can be dismissed"
                 )));
             }
-            validate_receipt(connection, context, criterion, &receipt).await?;
+            validate_receipt(context, criterion, &receipt)?;
             dismiss_criterion(connection, context, criterion, &reason, &receipt).await?;
             Ok(true)
         }
@@ -222,41 +223,24 @@ pub(crate) async fn apply_change(
             retire_criterion(connection, context, criterion, &reason).await?;
             Ok(true)
         }
-        AcceptanceChange::Approve {
+        AcceptanceChange::Admit {
             ordinal,
-            steering_id,
+            checker_digest,
         } => {
-            let criterion = existing(ordinal)?;
-            let Some(command) = criterion.check_command.as_deref() else {
-                return Err(refused(format!(
-                    "C{ordinal} has no checkCommand to approve"
-                )));
-            };
-            if criterion.state != AcceptanceState::Active {
-                return Err(refused(format!("C{ordinal} is not active")));
-            }
-            let input = user_steering_text(connection, &context.run.id, &steering_id).await?;
-            if !input.contains(command) {
-                return Err(refused(format!(
-                    "steering {steering_id} does not quote C{ordinal}'s exact check command; only the user's own instruction naming the command approves it"
-                )));
-            }
-            if criterion.approved_by_steering.as_deref() == Some(steering_id.as_str()) {
-                return Ok(false);
-            }
-            sqlx::query(
-                "UPDATE stateful_acceptance_criteria
-                 SET approved_by_steering = ?, ledger_revision = ?, updated_at_ms = ?
-                 WHERE run_id = ? AND ordinal = ?",
+            crate::acceptance_plan::admit_plan(
+                connection,
+                context,
+                existing(ordinal)?,
+                checker_digest,
             )
-            .bind(&steering_id)
-            .bind(count(context.ledger_revision)?)
-            .bind(context.now)
-            .bind(context.run.id.as_str())
-            .bind(i64::from(ordinal))
-            .execute(&mut *connection)
-            .await?;
-            Ok(true)
+            .await
+        }
+        AcceptanceChange::ReconcileSteering {
+            steering_id,
+            reason,
+        } => {
+            crate::acceptance_plan::reconcile_steering(connection, context, &steering_id, &reason)
+                .await
         }
         AcceptanceChange::Observe {
             ordinal,
@@ -277,8 +261,7 @@ pub(crate) async fn apply_change(
                 &observation,
                 artifact_digest.as_deref(),
             )
-            .await?;
-            Ok(true)
+            .await
         }
         AcceptanceChange::NoCheck { ordinal, reason } => {
             record_labelled_evidence(
@@ -289,70 +272,26 @@ pub(crate) async fn apply_change(
                 &reason,
                 None,
             )
-            .await?;
-            Ok(true)
+            .await
         }
     }
 }
 
-/// The text of a user steering instruction on this run that has not been rejected.
-pub(crate) async fn user_steering_text(
-    connection: &mut SqliteConnection,
-    run_id: &StatefulRunId,
-    steering_id: &str,
-) -> Result<String, StatefulRunStoreError> {
-    let row = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT run_id, input, status FROM stateful_steering WHERE id = ?",
-    )
-    .bind(steering_id)
-    .fetch_optional(&mut *connection)
-    .await?;
-    match row {
-        Some((run, input, status)) if run == run_id.as_str() && status != "rejected" => Ok(input),
-        _ => Err(AcceptanceError::Refused(format!(
-            "steering {steering_id} is not an unrejected user instruction on this run"
-        ))
-        .into()),
-    }
-}
-
-async fn validate_receipt(
-    connection: &mut SqliteConnection,
+fn validate_receipt(
     context: &ChangeContext<'_>,
     proposal: &AcceptanceCriterion,
     receipt: &DismissalReceipt,
 ) -> Result<(), StatefulRunStoreError> {
-    let refused =
-        |message: String| -> StatefulRunStoreError { AcceptanceError::Refused(message).into() };
     match receipt {
-        DismissalReceipt::UserSteering { steering_id, quote } => {
-            validate_bounded(quote, MAX_REASON_BYTES)?;
-            let input = user_steering_text(connection, &context.run.id, steering_id).await?;
-            if !input.contains(quote.as_str()) {
-                return Err(refused(format!(
-                    "the quote is not exact text of steering {steering_id}"
-                )));
-            }
-            Ok(())
-        }
         DismissalReceipt::CoveredBy(covering) => {
-            let span = proposal.request_span.ok_or(AcceptanceError::InvalidSpan)?;
-            let covers = context.ledger.criterion(*covering).is_some_and(|other| {
-                other.ordinal != proposal.ordinal
-                    && other.is_user_bound()
-                    && other.state == AcceptanceState::Active
-                    && other.required
-                    && other
-                        .request_span
-                        .is_some_and(|other| other.start <= span.start && span.end <= other.end)
-            });
-            if covers {
+            if crate::acceptance_coverage::covers(context.ledger, *covering, proposal) {
                 Ok(())
             } else {
-                Err(refused(format!(
+                Err(AcceptanceError::Refused(format!(
                     "C{covering} is not an active required user criterion whose quote covers C{}'s text",
                     proposal.ordinal
-                )))
+                ))
+                .into())
             }
         }
     }
@@ -407,6 +346,11 @@ async fn weakening_refusal(
             "{alias} comes from the user's words; artifacts can be added but {artifact} cannot be removed"
         )));
     }
+    if let Some(file) = dropped(&criterion.checker, terms.checker.as_ref()) {
+        return Ok(Some(format!(
+            "{alias} comes from the user's words; checker files can be added but {file} cannot be removed"
+        )));
+    }
     if let Some(next) = &terms.depends_on
         && let Some(dependency) = criterion
             .depends_on
@@ -442,6 +386,14 @@ fn validate_terms(
     terms: &CriterionTerms,
 ) -> Result<(), StatefulRunStoreError> {
     validate_artifacts(&terms.artifacts)?;
+    validate_artifacts(&terms.checker).map_err(|_| AcceptanceError::InvalidChecker)?;
+    if terms
+        .checker
+        .iter()
+        .any(|file| terms.artifacts.contains(file))
+    {
+        return Err(AcceptanceError::InvalidChecker.into());
+    }
     if let Some(command) = terms.check_command.as_deref() {
         validate_check_command(command)?;
         if terms.expected_observation.is_none() || terms.artifacts.is_empty() {
@@ -480,7 +432,7 @@ async fn record_labelled_evidence(
     source: EvidenceSource,
     detail: &str,
     artifact_digest: Option<&str>,
-) -> Result<(), StatefulRunStoreError> {
+) -> Result<bool, StatefulRunStoreError> {
     validate_bounded(detail, MAX_REASON_BYTES)?;
     let alias = criterion.alias();
     let run = context.run;
@@ -504,6 +456,17 @@ async fn record_labelled_evidence(
         EvidenceSource::Manual => EvidenceOutcome::Observed,
         EvidenceSource::NoCheck | EvidenceSource::HostCommand => EvidenceOutcome::Unavailable,
     };
+    // Restating the same labelled evidence against the same state is not progress.
+    if criterion.evidence.as_ref().is_some_and(|evidence| {
+        evidence.criterion_revision == criterion.revision
+            && evidence.source == source
+            && evidence.outcome == outcome
+            && evidence.detail.as_deref() == Some(detail)
+            && evidence.artifact_digest.as_deref() == artifact_digest
+            && evidence.workspace_generation == context.ledger.workspace_generation
+    }) {
+        return Ok(false);
+    }
     insert_evidence(
         connection,
         &run.id,
@@ -516,13 +479,15 @@ async fn record_labelled_evidence(
             output_tail: None,
             output_digest: None,
             artifact_digest,
+            checker_digest: None,
             detail: Some(detail),
             workspace_generation: context.ledger.workspace_generation,
             source_id: context.source_id,
         },
         context.now,
     )
-    .await
+    .await?;
+    Ok(true)
 }
 
 struct NewCriterion<'a> {
@@ -535,7 +500,7 @@ struct NewCriterion<'a> {
     terms: &'a CriterionTerms,
 }
 
-fn count(value: impl TryInto<i64>) -> Result<i64, StatefulRunStoreError> {
+pub(crate) fn count(value: impl TryInto<i64>) -> Result<i64, StatefulRunStoreError> {
     value
         .try_into()
         .map_err(|_| StatefulRunStoreError::CountOverflow)
@@ -556,10 +521,10 @@ async fn insert_criterion(
         "INSERT INTO stateful_acceptance_criteria (
             run_id, ordinal, criterion_id, origin, kind, state, statement, requirement,
             required, depends_on_json, milestone, expected_observation, span_start, span_end,
-            artifacts_json, check_command, check_cwd, approved_by_steering,
-            dismissal_steering_id, dismissal_quote, dismissal_covered_by, note, revision,
+            artifacts_json, checker_json, check_command, check_cwd, plan_criterion_revision,
+            plan_checker_digest, plan_ledger_revision, dismissal_covered_by, note, revision,
             ledger_revision, created_at_ms, updated_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL,
                    NULL, 1, ?, ?, ?)",
     )
     .bind(run_id.as_str())
@@ -577,6 +542,7 @@ async fn insert_criterion(
     .bind(start)
     .bind(end)
     .bind(serde_json::to_string(&row.terms.artifacts)?)
+    .bind(serde_json::to_string(&row.terms.checker)?)
     .bind(row.terms.check_command.as_deref())
     .bind(row.terms.check_cwd.as_deref())
     .bind(count(context.ledger_revision)?)
@@ -621,6 +587,10 @@ async fn update_criterion(
             .terms
             .artifacts
             .unwrap_or_else(|| criterion.artifacts.clone()),
+        checker: update
+            .terms
+            .checker
+            .unwrap_or_else(|| criterion.checker.clone()),
         check_command: update
             .terms
             .check_command
@@ -645,6 +615,7 @@ async fn update_criterion(
         statement.clone()
     };
     let method_unchanged = terms.artifacts == criterion.artifacts
+        && terms.checker == criterion.checker
         && terms.check_command == criterion.check_command
         && terms.check_cwd == criterion.check_cwd
         && terms.expected_observation == criterion.expected_observation;
@@ -658,16 +629,13 @@ async fn update_criterion(
     if unchanged {
         return Ok(false);
     }
-    let approval = if method_unchanged {
-        criterion.approved_by_steering.clone()
-    } else {
-        None
-    };
+    // Any change bumps the criterion revision, so an admitted plan for the old revision
+    // no longer matches and the host must admit the new terms.
     sqlx::query(
         "UPDATE stateful_acceptance_criteria
          SET state = ?, kind = ?, statement = ?, requirement = ?, required = ?,
              depends_on_json = ?, milestone = ?, expected_observation = ?, artifacts_json = ?,
-             check_command = ?, check_cwd = ?, approved_by_steering = ?,
+             checker_json = ?, check_command = ?, check_cwd = ?,
              revision = revision + 1, ledger_revision = ?, updated_at_ms = ?
          WHERE run_id = ? AND ordinal = ?",
     )
@@ -680,9 +648,9 @@ async fn update_criterion(
     .bind(terms.milestone)
     .bind(terms.expected_observation)
     .bind(serde_json::to_string(&terms.artifacts)?)
+    .bind(serde_json::to_string(&terms.checker)?)
     .bind(terms.check_command)
     .bind(terms.check_cwd)
-    .bind(approval)
     .bind(count(context.ledger_revision)?)
     .bind(context.now)
     .bind(context.run.id.as_str())
@@ -699,23 +667,15 @@ async fn dismiss_criterion(
     reason: &str,
     receipt: &DismissalReceipt,
 ) -> Result<(), StatefulRunStoreError> {
-    let (steering_id, quote, covered_by) = match receipt {
-        DismissalReceipt::UserSteering { steering_id, quote } => {
-            (Some(steering_id.as_str()), Some(quote.as_str()), None)
-        }
-        DismissalReceipt::CoveredBy(ordinal) => (None, None, Some(i64::from(*ordinal))),
-    };
+    let DismissalReceipt::CoveredBy(covered_by) = receipt;
     sqlx::query(
         "UPDATE stateful_acceptance_criteria
-         SET state = 'dismissed', note = ?, dismissal_steering_id = ?, dismissal_quote = ?,
-             dismissal_covered_by = ?, revision = revision + 1, ledger_revision = ?,
-             updated_at_ms = ?
+         SET state = 'dismissed', note = ?, dismissal_covered_by = ?, revision = revision + 1,
+             ledger_revision = ?, updated_at_ms = ?
          WHERE run_id = ? AND ordinal = ?",
     )
     .bind(reason)
-    .bind(steering_id)
-    .bind(quote)
-    .bind(covered_by)
+    .bind(i64::from(*covered_by))
     .bind(count(context.ledger_revision)?)
     .bind(context.now)
     .bind(context.run.id.as_str())

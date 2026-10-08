@@ -82,6 +82,7 @@ async fn turn_runs_report_the_recorded_run_of_each_finished_turn() {
                 ledger_revision: ledger.revision,
                 workspace_generation: ledger.workspace_generation,
                 artifacts: std::collections::BTreeMap::new(),
+                checkers: std::collections::BTreeMap::new(),
                 verification: crate::VerificationClaim {
                     owner: "test-owner".to_string(),
                     attempt,
