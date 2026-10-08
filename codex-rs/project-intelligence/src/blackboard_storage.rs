@@ -31,6 +31,7 @@ use crate::storage::unix_timestamp_millis;
 mod capture_write;
 mod context_bounds;
 mod fence;
+mod identity;
 mod knowledge;
 mod query;
 mod relation;
@@ -39,8 +40,8 @@ mod root_projection;
 mod scopes;
 mod source_group_read;
 mod source_order;
-mod temporal;
 mod succession;
+mod temporal;
 mod update;
 mod writer_policy;
 
@@ -88,6 +89,9 @@ impl BlackboardStore {
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
         value.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if value.provenance.kind != BlackboardProvenanceKind::User {
+            identity::check_activation(&mut transaction, &value, /*context*/ None).await?;
+        }
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
             if existing.value != value
                 || existing.state != BlackboardEntryState::Active
@@ -500,6 +504,14 @@ async fn write_revision(
         .execute(&mut *connection)
         .await?;
     }
+    let context = context_bounds::read_context(
+        connection,
+        &value.project_id,
+        id.as_str(),
+        context_bounds::ContextFields::Identity,
+    )
+    .await?;
+    identity::register(connection, id, value, state, context.as_ref()).await?;
     Ok(())
 }
 

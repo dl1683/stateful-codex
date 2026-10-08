@@ -49,6 +49,9 @@ impl BlackboardStore {
     ) -> Result<(BlackboardEntry, CreateOutcome), BlackboardStoreError> {
         value.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if change.origin != crate::ChangeOrigin::DirectControl {
+            super::identity::check_activation(&mut transaction, &value, Some(&context)).await?;
+        }
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
             if existing.value != value
                 || existing.state != BlackboardEntryState::Active
@@ -253,6 +256,12 @@ pub(super) async fn write_context(
     if project_id.len() > 512 || id.as_str().len() > 512 {
         return Err(BlackboardStoreError::UnsupportedContext);
     }
+    if revision == 1 {
+        // The insert's provisional unknown-context alias has never been published when
+        // an initial context is attached in the same transaction. Keep historical fences.
+        sqlx::query("DELETE FROM capture_identity_aliases WHERE entry_id = ? AND retired = 0 AND authority IN ('user','agent','import','maintenance') AND NOT EXISTS(SELECT 1 FROM knowledge_context WHERE entry_id = ?)")
+            .bind(id.as_str()).bind(id.as_str()).execute(&mut *connection).await?;
+    }
     sqlx::query(
         "INSERT OR REPLACE INTO knowledge_context (
             entry_id, revision, project_id, category, authority, scope_id, end_condition,
@@ -279,6 +288,10 @@ pub(super) async fn write_context(
     .bind(&context.payload)
     .execute(&mut *connection)
     .await?;
+    let entry = load_entry(connection, project_id, id)
+        .await?
+        .ok_or(BlackboardStoreError::InvalidSource)?;
+    super::identity::register(connection, id, &entry.value, entry.state, Some(context)).await?;
     Ok(())
 }
 

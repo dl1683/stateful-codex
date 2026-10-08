@@ -41,6 +41,11 @@ pub(super) async fn check_model_target(
     if non_agent_revisions != 0 {
         return Err(BlackboardStoreError::ModelMutationRefused);
     }
+    if !super::identity::entry_source_eligible_on(connection, &entry.value.project_id, &entry.id)
+        .await?
+    {
+        return Err(BlackboardStoreError::ModelMutationRefused);
+    }
     let context = policy_of(connection, &entry.value.project_id, entry.id.as_str()).await?;
     if context.as_ref().is_some_and(|context| {
         matches!(

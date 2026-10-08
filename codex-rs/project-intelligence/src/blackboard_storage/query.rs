@@ -41,7 +41,14 @@ impl BlackboardStore {
         entry_id: &BlackboardEntryId,
     ) -> Result<Option<BlackboardHit>, BlackboardStoreError> {
         let mut transaction = self.pool.begin().await?;
-        let entry = load_entry(&mut transaction, project_id, entry_id).await?;
+        let entry =
+            if super::identity::entry_source_eligible_on(&mut transaction, project_id, entry_id)
+                .await?
+            {
+                load_entry(&mut transaction, project_id, entry_id).await?
+            } else {
+                None
+            };
         let hit = match entry {
             Some(entry) => {
                 let freshness = load_evidence_freshness(&mut transaction, &entry).await?;
@@ -369,13 +376,14 @@ pub(super) async fn query_entry_ids(
     query: &BlackboardQuery,
     limit: i64,
 ) -> Result<Vec<String>, BlackboardStoreError> {
+    let eligibility = super::identity::ENTRY_SOURCE_ELIGIBILITY;
     let promotion_filter = query.root_promotion.map(promotion_name);
     let entry_scope = entry_scope_name(query.entry_scope);
     match (&query.text, &query.within_node) {
         (Some(text), Some(node_id)) => {
             let expression =
                 literal_prefix_expression(text).ok_or(BlackboardError::NoSearchTerms)?;
-            sqlx::query_scalar(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "WITH RECURSIVE scoped_nodes(id) AS (
                     SELECT id FROM hierarchy_nodes WHERE project_id = ? AND id = ?
                     UNION ALL
@@ -392,9 +400,9 @@ pub(super) async fn query_entry_ids(
                    AND CASE ? WHEN 'active' THEN revision.state = 'active'
                               WHEN 'historical' THEN revision.state <> 'active'
                               ELSE 1 END
-                   AND (? IS NULL OR revision.root_promotion = ?)
-                 ORDER BY bm25(blackboard_search), entry.id LIMIT ?",
-            )
+                   AND (? IS NULL OR revision.root_promotion = ?) {eligibility}
+                 ORDER BY bm25(blackboard_search), entry.id LIMIT ?"
+            )))
             .bind(&query.project_id)
             .bind(node_id.as_str())
             .bind(&query.project_id)
@@ -411,7 +419,7 @@ pub(super) async fn query_entry_ids(
         (Some(text), None) => {
             let expression =
                 literal_prefix_expression(text).ok_or(BlackboardError::NoSearchTerms)?;
-            sqlx::query_scalar(
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT entry.id FROM blackboard_search
                  JOIN blackboard_entries AS entry ON entry.id = blackboard_search.entry_id
                  JOIN blackboard_entry_revisions AS revision
@@ -420,9 +428,9 @@ pub(super) async fn query_entry_ids(
                    AND CASE ? WHEN 'active' THEN revision.state = 'active'
                               WHEN 'historical' THEN revision.state <> 'active'
                               ELSE 1 END
-                   AND (? IS NULL OR revision.root_promotion = ?)
-                 ORDER BY bm25(blackboard_search), entry.id LIMIT ?",
-            )
+                   AND (? IS NULL OR revision.root_promotion = ?) {eligibility}
+                 ORDER BY bm25(blackboard_search), entry.id LIMIT ?"
+            )))
             .bind(expression)
             .bind(&query.project_id)
             .bind(entry_scope)
@@ -433,7 +441,7 @@ pub(super) async fn query_entry_ids(
             .await
             .map_err(Into::into)
         }
-        (None, Some(node_id)) => sqlx::query_scalar(
+        (None, Some(node_id)) => sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "WITH RECURSIVE scoped_nodes(id) AS (
                 SELECT id FROM hierarchy_nodes WHERE project_id = ? AND id = ?
                 UNION ALL
@@ -448,11 +456,11 @@ pub(super) async fn query_entry_ids(
                AND CASE ? WHEN 'active' THEN revision.state = 'active'
                           WHEN 'historical' THEN revision.state <> 'active'
                           ELSE 1 END
-               AND (? IS NULL OR revision.root_promotion = ?)
+               AND (? IS NULL OR revision.root_promotion = ?) {eligibility}
              ORDER BY CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
-                 WHEN 'normal' THEN 2 ELSE 3 END, entry.id LIMIT ?",
-        )
+                 WHEN 'normal' THEN 2 ELSE 3 END, entry.id LIMIT ?"
+        )))
         .bind(&query.project_id)
         .bind(node_id.as_str())
         .bind(&query.project_id)
@@ -464,7 +472,7 @@ pub(super) async fn query_entry_ids(
         .fetch_all(connection)
         .await
         .map_err(Into::into),
-        (None, None) => sqlx::query_scalar(
+        (None, None) => sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT entry.id FROM blackboard_entries AS entry
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
@@ -472,11 +480,11 @@ pub(super) async fn query_entry_ids(
                AND CASE ? WHEN 'active' THEN revision.state = 'active'
                           WHEN 'historical' THEN revision.state <> 'active'
                           ELSE 1 END
-               AND (? IS NULL OR revision.root_promotion = ?)
+               AND (? IS NULL OR revision.root_promotion = ?) {eligibility}
              ORDER BY CASE revision.importance
                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1
-                 WHEN 'normal' THEN 2 ELSE 3 END, entry.id LIMIT ?",
-        )
+                 WHEN 'normal' THEN 2 ELSE 3 END, entry.id LIMIT ?"
+        )))
         .bind(&query.project_id)
         .bind(entry_scope)
         .bind(promotion_filter)

@@ -124,6 +124,16 @@ impl BlackboardStore {
             },
         };
         value.validate()?;
+        if matches!(actor, WriterActor::Model) && update.state == BlackboardEntryState::Active {
+            let context = super::context_bounds::read_context(
+                &mut transaction,
+                project_id,
+                id.as_str(),
+                super::context_bounds::ContextFields::Identity,
+            )
+            .await?;
+            super::identity::check_activation(&mut transaction, &value, context.as_ref()).await?;
+        }
         let preserves_historical_evidence = value.evidence == current.value.evidence
             && (update.state != BlackboardEntryState::Active
                 || matches!(

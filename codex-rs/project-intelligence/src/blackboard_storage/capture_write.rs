@@ -52,9 +52,9 @@ impl BlackboardStore {
         &self,
         capture: CaptureWrite,
     ) -> Result<CaptureWriteResult, BlackboardStoreError> {
-        if capture.units.is_empty() || capture.units.len() > 1024 {
+        if capture.units.is_empty() || capture.units.len() > 24 {
             return Err(BlackboardStoreError::InvalidStoredKnowledge(
-                "a capture must contain 1-1024 recognized units".to_string(),
+                "a capture must contain 1-24 recognized units".to_string(),
             ));
         }
         let project_id = &capture.project_id;
@@ -103,22 +103,43 @@ impl BlackboardStore {
     }
 }
 
-async fn write_unit(
+pub(super) async fn write_unit(
     connection: &mut SqliteConnection,
     unit: CaptureEntryWrite,
     now: i64,
 ) -> Result<Option<(BlackboardEntry, MemberOutcome)>, BlackboardStoreError> {
     unit.value.validate()?;
+    if unit.change.origin == crate::ChangeOrigin::ModelTool
+        && (unit.value.provenance.kind != crate::BlackboardProvenanceKind::Agent
+            || unit.context.authority == crate::KnowledgeAuthority::HumanDirect)
+    {
+        return Err(BlackboardStoreError::ModelMutationRefused);
+    }
     if unit.candidates.is_empty() || unit.candidates.len() > 64 {
         return Err(BlackboardStoreError::InvalidStoredKnowledge(
             "capture identity bound".to_string(),
         ));
+    }
+    let mut unit = unit;
+    if unit.change.origin != crate::ChangeOrigin::DirectControl {
+        super::identity::check_activation(connection, &unit.value, Some(&unit.context)).await?;
+    }
+    if let Some(id) = super::identity::direct_match(connection, &unit.value, &unit.context).await? {
+        unit.candidates.insert(0, id);
     }
     for id in &unit.candidates {
         let existing = load_entry(connection, &unit.value.project_id, id).await?;
         if let Some(mut entry) = existing {
             if entry.state != BlackboardEntryState::Active {
                 continue;
+            }
+            if unit.change.origin != crate::ChangeOrigin::DirectControl {
+                super::writer_policy::check_model_target(
+                    connection,
+                    &entry,
+                    super::writer_policy::ModelOperation::Mutation,
+                )
+                .await?;
             }
             let context = read_context(
                 connection,
@@ -132,8 +153,8 @@ async fn write_unit(
                     || context.authority != unit.context.authority
                     || context.scope_id != unit.context.scope_id
             }) || entry.value.kind != unit.value.kind
-                || entry.value.content.split_whitespace().collect::<Vec<_>>()
-                    != unit.value.content.split_whitespace().collect::<Vec<_>>()
+                || crate::canonical_capture_words(&entry.value.content)
+                    != crate::canonical_capture_words(&unit.value.content)
             {
                 return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
             }

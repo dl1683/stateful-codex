@@ -70,8 +70,9 @@ impl BlackboardStore {
     ) -> Result<(RootBlackboardProjection, ThreadScopes), BlackboardStoreError> {
         query.validate()?;
         let mut transaction = self.pool.begin().await?;
+        let eligibility = super::identity::ENTRY_SOURCE_ELIGIBILITY;
         let scoped = format!("{UNSCOPED_CONTEXT} AND NOT ({LEGACY_LIMITED_RULE})");
-        let outside = format!("{ROOT_ELIGIBILITY}{scoped}");
+        let outside = format!("{ROOT_ELIGIBILITY}{scoped}{eligibility}");
         let mut counts = sqlx::query_as::<_, RootEntryCounts>(
             sqlx::AssertSqlSafe(format!("SELECT
                 COALESCE(SUM(CASE WHEN revision.root_promotion = 'promoted' THEN 1 ELSE 0 END), 0)
@@ -81,7 +82,7 @@ impl BlackboardStore {
              FROM blackboard_entries AS entry
              JOIN blackboard_entry_revisions AS revision
                ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             WHERE entry.project_id = ? AND revision.state = 'active'{ROOT_ELIGIBILITY} AND NOT ({LEGACY_LIMITED_RULE})")),
+             WHERE entry.project_id = ? AND revision.state = 'active'{ROOT_ELIGIBILITY}{eligibility} AND NOT ({LEGACY_LIMITED_RULE})")),
         )
         .bind(&query.project_id)
         .fetch_one(&mut *transaction)

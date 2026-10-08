@@ -172,6 +172,16 @@ impl BlackboardStore {
             value.root_promotion = RootPromotion::Promoted;
         }
         let now = unix_timestamp_millis()?;
+        if matches!(actor, WriterActor::Model) {
+            let context = super::context_bounds::read_context(
+                &mut transaction,
+                &value.project_id,
+                replaced[0].id.as_str(),
+                super::context_bounds::ContextFields::Identity,
+            )
+            .await?;
+            super::identity::check_activation(&mut transaction, &value, context.as_ref()).await?;
+        }
         insert_new_entry(&mut transaction, &id, &value, now).await?;
         if let Some(first) = replaced.first() {
             super::knowledge::carry_context(
@@ -422,9 +432,9 @@ impl BlackboardStore {
     ) -> Result<(Vec<BlackboardEntry>, bool), BlackboardStoreError> {
         let mut transaction = self.pool.begin().await?;
         let ids = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM blackboard_entries
-             WHERE project_id = ? AND updated_at_ms >= ?
-             ORDER BY updated_at_ms DESC, id LIMIT ?",
+            sqlx::AssertSqlSafe(format!("SELECT entry.id FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision
+             WHERE entry.project_id = ? AND entry.updated_at_ms >= ? {}
+             ORDER BY entry.updated_at_ms DESC, entry.id LIMIT ?", super::identity::ENTRY_SOURCE_ELIGIBILITY)),
         )
         .bind(project_id)
         .bind(since_ms)
