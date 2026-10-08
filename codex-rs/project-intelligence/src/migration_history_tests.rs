@@ -83,7 +83,7 @@ async fn check_integrity(pool: &sqlx::SqlitePool) {
 
 #[tokio::test]
 async fn migration_history_fresh_and_common_prefix_upgrade_reopen_preserves_legacy() {
-    for version in [0, 14, 16, 18, 21] {
+    for version in [0, 14, 16, 18, 21, 22] {
         let home = TempDir::new().unwrap();
         let sqlite = SqliteConfig::new_for_testing(home.path().abs());
         if version > 0 {
@@ -552,7 +552,7 @@ async fn migration_history_existing_empty_database_and_empty_ledger_migrate_norm
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
-        assert_eq!(applied, 22);
+        assert_eq!(applied, 23);
         check_integrity(&store.pool).await;
         store.pool.close().await;
     }
