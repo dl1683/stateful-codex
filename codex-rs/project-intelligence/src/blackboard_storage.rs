@@ -34,6 +34,7 @@ mod current_words;
 mod fence;
 mod identity;
 mod knowledge;
+mod proposal;
 mod proposal_time;
 mod query;
 mod relation;
