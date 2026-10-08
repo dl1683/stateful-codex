@@ -158,10 +158,12 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
         assert!(!output.contains("QX-704") && !output.contains("Meridian M-17"));
     }
     let recall = tool_output(&bodies[5], "recall").unwrap();
-    assert_eq!(recall["entries"][0]["applied"], json!(false));
-    assert_eq!(
-        recall["entries"][0]["proposal"]["status"],
-        json!("proposed")
+    assert_eq!(recall["entries"], json!([]));
+    assert!(
+        recall["unavailable"]
+            .as_str()
+            .unwrap()
+            .contains("proposal recall")
     );
     let forget = server.send_request("statefulMemory/forget",Some(json!({"threadId":thread,"expectedProjectId":project,"entryId":id.as_str(),"expectedRevision":1,"clientActionId":"forget-proposal"}))).await?;
     let _: StatefulMemoryForgetResponse = server.read_response(forget).await?;

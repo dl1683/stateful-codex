@@ -138,7 +138,7 @@ pub(super) async fn load_eligible_relations_for_entry(
     entry_id: &BlackboardEntryId,
     max_results: u32,
 ) -> Result<Vec<BlackboardRelation>, BlackboardStoreError> {
-    let eligibility = super::identity::ENTRY_SOURCE_ELIGIBILITY;
+    let eligibility = super::identity::automatic_entry_eligibility();
     let stored = sqlx::query_as::<_, StoredRelation>(sqlx::AssertSqlSafe(format!(
         "SELECT relation.* FROM blackboard_relations AS relation
          WHERE relation.project_id = ? AND (from_entry_id = ? OR to_entry_id = ?)

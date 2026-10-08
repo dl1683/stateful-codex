@@ -144,6 +144,7 @@ impl MemoryReadTool {
             "turns": [],
             "coverage": coverage,
             "use": "This evidence needs no confirmation read. Read more only when an omitted part is critical to the answer: conversation_read with a threadId and turnId for a full turn, evidence_read for an entry's source, git show for a commit.",
+            "unavailable": "automatic proposal recall and original-source search/exact recall",
         });
         let entry_limit = budget
             .saturating_sub(RESERVED_BYTES)
@@ -549,12 +550,7 @@ async fn entry_item(
             })
         })
         .collect::<Vec<_>>();
-    let proposal = store.proposal_context(project_id, &hit.entry.id).await;
-    let (proposal, metadata_status) = match proposal {
-        Ok(proposal) => (proposal, "supported"),
-        Err(_) => (None, "unsupported; original context withheld"),
-    };
-    let mut result = json!({
+    json!({
         "entryId": hit.entry.id.to_string(),
         "kind": value.kind,
         "status": current_status(hit),
@@ -567,18 +563,7 @@ async fn entry_item(
         "relations": relations,
         "relationsOmitted": hit.relations.len().saturating_sub(MAX_RELATIONS_PER_ENTRY),
         "evidence": evidence,
-    });
-    if let Some(proposal) = proposal {
-        result["source"] = json!(
-            "user-delivered source with model-derived interpretation; not standing rules, endorsement or settled decision"
-        );
-        result["proposal"] = json!(proposal);
-        result["temporal"] = json!(store.temporal_context(project_id, &hit.entry.id).await.ok());
-        result["applied"] = json!(false);
-    } else if metadata_status != "supported" {
-        result["metadataStatus"] = json!(metadata_status);
-    }
-    result
+    })
 }
 
 /// How many distinct terms `text` mentions.
@@ -704,7 +689,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Recall missing earlier work once: matching knowledge, status/history, sources/dates and turns. Evidence needs no confirmation read. Proposals are source recall, not settled decisions. Original-source search and exact-source recall are unavailable.".to_string(),
+            description: "Recall missing earlier work once: matching knowledge, status/history, sources/dates and turns. Evidence needs no confirmation read. Automatic proposal recall, original-source search and exact-source recall are unavailable.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

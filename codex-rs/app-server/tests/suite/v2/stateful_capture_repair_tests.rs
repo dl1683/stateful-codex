@@ -81,8 +81,7 @@ async fn malformed_proposal(delivery: ProposalDelivery) -> Result<()> {
 }
 
 #[tokio::test]
-async fn c3r1_public_proposal_query_small_budget_refuses_and_large_budget_delivers_cold()
--> Result<()> {
+async fn c3r2_public_automatic_proposal_recall_cut_and_storage_replay_cold() -> Result<()> {
     let (home, mut server, project, _, responses_server) = setup().await?;
     assert!(server.shutdown_gracefully().await?.success());
     let config = core_test_support::load_default_config_for_test(&home).await;
@@ -194,18 +193,32 @@ async fn c3r1_public_proposal_query_small_budget_refuses_and_large_budget_delive
             assert_eq!(requests.len(), 2);
             let output = requests[1].function_call_output_text(&call_id).unwrap();
             assert!(output.len() <= budget);
-            if model == "query-small" {
-                assert!(output.starts_with("budget_insufficient"), "{output}");
-            } else {
-                let output: Value = serde_json::from_str(&output)?;
+            let output: Value = serde_json::from_str(&output)?;
+            assert_eq!(
+                (output["data"].clone(), output["truncated"].clone()),
+                (json!([]), json!(false))
+            );
+            if model == "query-large" {
+                let output = model_output(
+                    &mut server,
+                    &responses_server,
+                    &thread,
+                    "blackboard_query",
+                    json!({"entryId":id}),
+                )
+                .await?;
+                assert!(output.contains("entry not found"), "{output}");
+                let output = model_call(
+                    &mut server,
+                    &responses_server,
+                    &thread,
+                    "memory_read",
+                    json!({"question":"budget witness", "includeHistory":false}),
+                )
+                .await?;
                 assert_eq!(
-                    (
-                        output["data"].as_array().unwrap().len(),
-                        output["data"][0]["entryId"].clone(),
-                        output["data"][0]["applied"].clone(),
-                        output["truncated"].clone()
-                    ),
-                    (1, json!(id), json!(false), json!(false))
+                    (output["entries"].clone(), output["turns"].clone()),
+                    (json!([]), json!([]))
                 );
             }
             assert_eq!(snapshot(&sqlite).await?, before);

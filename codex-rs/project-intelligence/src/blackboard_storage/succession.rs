@@ -446,7 +446,7 @@ impl BlackboardStore {
         let ids = sqlx::query_scalar::<_, String>(
             sqlx::AssertSqlSafe(format!("SELECT entry.id FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision
              WHERE entry.project_id = ? AND entry.updated_at_ms >= ? {}
-             ORDER BY entry.updated_at_ms DESC, entry.id LIMIT ?", super::identity::ENTRY_SOURCE_ELIGIBILITY)),
+             ORDER BY entry.updated_at_ms DESC, entry.id LIMIT ?", super::identity::automatic_entry_eligibility())),
         )
         .bind(project_id)
         .bind(since_ms)

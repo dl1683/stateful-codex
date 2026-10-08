@@ -250,10 +250,6 @@ impl BlackboardQueryTool {
         let mut data = Vec::new();
         let mut truncated = result.truncated;
         for (index, hit) in result.data.into_iter().enumerate() {
-            let proposal = blackboard
-                .proposal_context(&self.project_id, &hit.entry.id)
-                .await
-                .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
             let evidence_freshness = audited_blackboard_freshness(&hit, evidence_audit.as_ref());
             let premise_freshness = audited_premise_freshness(&hit, evidence_audit.as_ref());
             let effective_verification = audited_verification(
@@ -335,13 +331,6 @@ impl BlackboardQueryTool {
                     json!(["evidenceLocators", "relations"]),
                 );
             }
-            if let Some(proposal) = proposal {
-                item["proposal"] = json!(proposal);
-                item["applied"] = json!(false);
-                item["sourceLabel"] = json!(
-                    "source recall; model interpretation, never standing rules or settled decisions"
-                );
-            }
             data.push(item);
             let candidate_truncated = result.truncated || index + 1 < hit_count;
             let candidate_next_after_entry_id = if evidence_query && candidate_truncated {
@@ -414,7 +403,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query knowledge; historical includes retired. evidenceContextMapEntryIds finds dependents, paged by project revision/afterEntryId. entryId reads words, paged by expectedEntryRevision/contentOffset. Proposals never assert applicability.".to_string(),
+            description: "Query knowledge; historical includes retired. evidenceContextMapEntryIds finds dependents, paged by project revision/afterEntryId. entryId reads words, paged by expectedEntryRevision/contentOffset. Automatic proposal recall is unavailable.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

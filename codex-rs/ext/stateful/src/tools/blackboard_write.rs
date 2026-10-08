@@ -551,7 +551,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardBatchRecordTool {
         ToolSpec::Function(ResponsesApiTool {
             name: BATCH_RECORD_TOOL_NAME.to_string(),
             description: format!(
-                "Idempotent Agent findings (1-{MAX_BATCH_RECORDS}, {MAX_BATCH_RELATIONS} relations); sourceVerified needs evidence_read. Or type=sourceProposal: same-turn capture_sources handle, ordered UTF-8 detail/reason/time spans, interpretation <=512 bytes. Whole enclosure retained, never applies/promotes/settles. Unresolved dependencies stay pending."
+                "Idempotent Agent findings (1-{MAX_BATCH_RECORDS}, {MAX_BATCH_RELATIONS} relations); sourceVerified needs evidence_read. Or type=sourceProposal: same-turn capture_sources handle, ordered UTF-8 detail/reason/time spans, interpretation <=512 bytes. Whole enclosure retained, never applies/promotes/settles. Unresolved dependencies stay pending. Stored proposals require explicit review; automatic proposal recall is unavailable."
             ),
             strict: false,
             defer_loading: None,

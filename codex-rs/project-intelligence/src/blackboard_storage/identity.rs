@@ -43,6 +43,19 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
               OR NOT EXISTS(SELECT 1 FROM knowledge_scopes AS scope WHERE scope.project_id = entry.project_id AND scope.scope_id = current_alias.scope_id AND octet_length(scope.scope_id) <= 512 AND octet_length(scope.title) <= 512 AND (scope.end_condition IS NULL OR octet_length(scope.end_condition) <= 2000) AND octet_length(scope.opened_source) <= 512))
         )))";
 
+/// Automatic proposal recall is unavailable until publication after hooks is fenced.
+/// Check every stored revision so corrections cannot reopen a cut proposal identity.
+pub(super) fn automatic_entry_eligibility() -> String {
+    format!("{ENTRY_SOURCE_ELIGIBILITY} AND NOT EXISTS (
+        SELECT 1 FROM knowledge_context AS context
+        WHERE context.entry_id = entry.id
+          AND CASE
+              WHEN context.payload IS NULL THEN 0
+              WHEN octet_length(context.payload) > 8192 THEN 1
+              WHEN json_valid(context.payload) THEN json_type(context.payload, '$.proposal') IS NOT NULL
+              ELSE 1 END)")
+}
+
 impl BlackboardStore {
     /// Used by exact-entry, history and relation expansion before delivering automatic evidence.
     pub async fn entry_source_eligible(
@@ -75,6 +88,17 @@ impl BlackboardStore {
 }
 
 pub(super) async fn entry_source_eligible_on(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    id: &BlackboardEntryId,
+) -> Result<bool, BlackboardStoreError> {
+    let eligibility = automatic_entry_eligibility();
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT EXISTS(SELECT 1 FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision WHERE entry.project_id = ? AND entry.id = ? {eligibility})")))
+        .bind(project_id).bind(id.as_str()).fetch_one(connection).await?)
+}
+
+/// Storage replay retains the common retirement policy without enabling automatic recall.
+pub(super) async fn entry_storage_eligible_on(
     connection: &mut SqliteConnection,
     project_id: &str,
     id: &BlackboardEntryId,

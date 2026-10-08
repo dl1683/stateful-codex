@@ -43,7 +43,7 @@ pub(super) async fn check_model_target(
         return Err(BlackboardStoreError::ModelMutationRefused);
     }
     if !matches!(operation, ModelOperation::SuccessionReplay)
-        && !super::identity::entry_source_eligible_on(
+        && !super::identity::entry_storage_eligible_on(
             connection,
             &entry.value.project_id,
             &entry.id,

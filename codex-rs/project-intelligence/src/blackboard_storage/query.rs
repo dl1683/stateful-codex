@@ -162,7 +162,7 @@ impl BlackboardStore {
               WHEN 'historical' THEN revision.state <> 'active'
               ELSE 1 END",
         );
-        builder.push(super::identity::ENTRY_SOURCE_ELIGIBILITY);
+        builder.push(super::identity::automatic_entry_eligibility());
         if let Some(after_entry_id) = &query.after_entry_id {
             builder.push(" AND entry.id > ");
             builder.push_bind(after_entry_id.as_str());
@@ -255,7 +255,7 @@ impl BlackboardStore {
         );
         builder.push_bind(&query.project_id);
         builder.push(" AND revision.state = 'active'");
-        builder.push(super::identity::ENTRY_SOURCE_ELIGIBILITY);
+        builder.push(super::identity::automatic_entry_eligibility());
         builder.push(
             " GROUP BY requested_sources.context_map_entry_id
               ORDER BY requested_sources.context_map_entry_id",
@@ -361,7 +361,7 @@ pub(super) async fn query_entry_ids(
     query: &BlackboardQuery,
     limit: i64,
 ) -> Result<Vec<String>, BlackboardStoreError> {
-    let eligibility = super::identity::ENTRY_SOURCE_ELIGIBILITY;
+    let eligibility = super::identity::automatic_entry_eligibility();
     let promotion_filter = query.root_promotion.map(promotion_name);
     let entry_scope = entry_scope_name(query.entry_scope);
     match (&query.text, &query.within_node) {

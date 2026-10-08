@@ -47,7 +47,7 @@ pub(super) async fn record(
     let envelope = |results: serde_json::Value| {
         json!({
             "projectId":project,"applied":false,"results":results,
-            "use":"source recall; interpretations are model-derived, never standing rules or settled decisions",
+            "use":"stored for explicit review; automatic proposal recall is unavailable; never standing rules or settled decisions",
         })
     };
     preflight_receipts(

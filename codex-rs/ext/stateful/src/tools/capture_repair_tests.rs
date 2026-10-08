@@ -16,7 +16,7 @@ use tempfile::TempDir;
 const PROJECT: &str = "project-1";
 const THREAD: &str = "00000000-0000-0000-0000-000000000001";
 
-fn call(
+pub(super) fn call(
     tool: &str,
     arguments: serde_json::Value,
     budget: usize,
@@ -110,7 +110,7 @@ async fn c3r1_decoding_errors_fit_direct_and_code_mode_budgets_without_writes() 
 }
 
 #[tokio::test]
-async fn c3r1_proposal_query_budget_refuses_or_delivers_usable_item_cold() {
+async fn c3r2_automatic_proposal_recall_cut_keeps_storage_and_agent_control_cold() {
     let home = TempDir::new().unwrap();
     let sqlite = SqliteConfig::new_for_testing(home.path().abs());
     let project_id = crate::capture_test_support::thread_project(&sqlite, THREAD).await;
@@ -154,7 +154,7 @@ async fn c3r1_proposal_query_budget_refuses_or_delivers_usable_item_cold() {
         "category":"background", "interpretation":"needle prototype purchase"
     })).unwrap();
     let result = store
-        .propose_sources(&admission, node, "turn-1", vec![proposal])
+        .propose_sources(&admission, node.clone(), "turn-1", vec![proposal.clone()])
         .await
         .unwrap();
     let id = BlackboardEntryId::parse(result[0].entry_id.clone().unwrap()).unwrap();
@@ -183,6 +183,27 @@ async fn c3r1_proposal_query_budget_refuses_or_delivers_usable_item_cold() {
         .create_entry(BlackboardEntryId::parse("agent-control").unwrap(), agent)
         .await
         .unwrap();
+    store
+        .create_relation(
+            codex_project_intelligence::BlackboardRelationId::parse("proposal-link").unwrap(),
+            codex_project_intelligence::NewBlackboardRelation {
+                project_id: project_id.clone(),
+                from_entry_id: BlackboardEntryId::parse("agent-control").unwrap(),
+                to_entry_id: id.clone(),
+                kind: codex_project_intelligence::BlackboardRelationKind::RelatedTo,
+                note: Some("needle prototype purchase".into()),
+                confidence: codex_project_intelligence::ConfidenceScore::from_basis_points(
+                    /*value*/ 0,
+                )
+                .unwrap(),
+                provenance: codex_project_intelligence::BlackboardProvenance {
+                    kind: codex_project_intelligence::BlackboardProvenanceKind::Agent,
+                    source_id: "turn-1".into(),
+                },
+            },
+        )
+        .await
+        .unwrap();
     drop(admission);
     drop(services);
     for _ in 0..2 {
@@ -194,45 +215,88 @@ async fn c3r1_proposal_query_budget_refuses_or_delivers_usable_item_cold() {
             Arc::new(InMemoryThreadStore::default()),
             VisibleRootRegistry::default(),
         );
-        let mut refused = false;
-        let mut delivered = false;
-        for budget in [100, 200, 400, 600, 800, 1000, 1400, 2000, 4000, 9000] {
-            let call = call(
-                "blackboard_query",
-                json!({"text":"needle prototype"}),
-                budget,
-                ToolCallSource::Direct,
+        for budget in [400, 600, 1000, 2000, 9000] {
+            let output = tool
+                .handle(call(
+                    "blackboard_query",
+                    json!({"text":"needle prototype"}),
+                    budget,
+                    ToolCallSource::Direct,
+                ))
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
+            assert_eq!(
+                (value["data"].clone(), value["truncated"].clone()),
+                (json!([]), json!(false))
             );
-            match tool.handle(call.clone()).await {
-                Err(FunctionCallError::RespondToModel(message)) => {
-                    assert!(message.starts_with("budget_insufficient"), "{message}");
-                    assert!(
-                        serde_json::to_string(&message).unwrap().len()
-                            <= call.response_byte_budget(MAX_RESPONSE_BYTES)
-                    );
-                    refused = true;
-                }
-                Ok(output) => {
-                    let raw = output.log_output();
-                    assert!(raw.len() <= call.response_byte_budget(MAX_RESPONSE_BYTES));
-                    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
-                    assert_eq!(
-                        (
-                            value["data"].as_array().unwrap().len(),
-                            value["data"][0]["entryId"].clone(),
-                            value["data"][0]["applied"].clone(),
-                            value["truncated"].clone()
-                        ),
-                        (1, json!(id.as_str()), json!(false), json!(false))
-                    );
-                    delivered = true;
-                }
-                Err(error) => panic!("{error}"),
-            }
         }
-        assert!(refused && delivered);
+        assert!(
+            tool.handle(call(
+                "blackboard_query",
+                json!({"entryId":id.as_str()}),
+                /*budget*/ 9000,
+                ToolCallSource::Direct
+            ))
+            .await
+            .is_err()
+        );
+        let memory = memory_read::MemoryReadTool::new(
+            project_id.clone(),
+            services.clone(),
+            Arc::new(InMemoryThreadStore::default()),
+        );
+        for arguments in [
+            json!({"question":"needle", "includeHistory":false}),
+            json!({"question":"needle", "since":"2020-01-01"}),
+        ] {
+            let output = memory
+                .handle(call(
+                    "memory_read",
+                    arguments,
+                    /*budget*/ 9000,
+                    ToolCallSource::Direct,
+                ))
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
+            assert_eq!(
+                (value["entries"].clone(), value["turns"].clone()),
+                (json!([]), json!([]))
+            );
+            assert!(!output.log_output().contains("needle prototype purchase"));
+        }
         let store = services.blackboard().await.unwrap();
         assert_eq!(store.get_entry(&project_id, &id).await.unwrap(), before);
+        assert_eq!(
+            store
+                .get_source_eligible_entry(&project_id, &id)
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            store
+                .entry_source_links(&project_id, &id, /*after*/ None)
+                .await
+                .is_err()
+        );
+        let admission = codex_state::ThreadProjectAdmission::acquire(
+            &sqlite,
+            codex_protocol::ThreadId::from_string(THREAD).unwrap(),
+            &project_id,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            store
+                .propose_sources(&admission, node.clone(), "turn-1", vec![proposal.clone()])
+                .await
+                .unwrap(),
+            result
+        );
+        drop(admission);
         let output = tool
             .handle(call(
                 "blackboard_query",
@@ -267,5 +331,7 @@ async fn c3r1_proposal_query_budget_refuses_or_delivers_usable_item_cold() {
                 json!("independent Agent positive control")
             )
         );
+        assert_eq!(value["data"][0]["relations"], json!([]));
+        assert!(!output.log_output().contains("needle prototype purchase"));
     }
 }

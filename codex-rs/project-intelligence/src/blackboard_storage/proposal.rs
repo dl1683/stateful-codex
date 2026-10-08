@@ -286,7 +286,8 @@ impl BlackboardStore {
                         .ok_or(BlackboardStoreError::InvalidSource)?;
                     if entry.revision != 1
                         || entry.state != BlackboardEntryState::Active
-                        || !super::identity::entry_source_eligible_on(&mut tx, project, &id).await?
+                        || !super::identity::entry_storage_eligible_on(&mut tx, project, &id)
+                            .await?
                     {
                         return Err(BlackboardStoreError::RetiredIdentity);
                     }
