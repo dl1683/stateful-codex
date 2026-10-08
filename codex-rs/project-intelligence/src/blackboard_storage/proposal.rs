@@ -305,20 +305,15 @@ impl BlackboardStore {
             {
                 return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
             }
-            write.value.validate()?;
-            super::identity::check_activation(&mut tx, &write.value, Some(&write.context)).await?;
-            let id = &write.candidates[0];
-            super::insert_new_entry(&mut tx, id, &write.value, now).await?;
-            super::knowledge::write_context(
-                &mut tx,
-                project,
-                id,
-                /*revision*/ 1,
-                &write.context,
-            )
-            .await?;
-            super::knowledge::append_change(&mut tx, project, Some((id, 1)), &write.change, now)
-                .await?;
+            let id = write.candidates[0].clone();
+            let Some((entry, MemberOutcome::Pending)) =
+                super::capture_write::write_unit(&mut tx, write, now).await?
+            else {
+                return Err(BlackboardStoreError::InvalidSource);
+            };
+            if entry.id != id {
+                return Err(BlackboardStoreError::InvalidSource);
+            }
             sqlx::query("INSERT INTO capture_entry_sources(entry_id, source_id, start_byte, end_byte, role) VALUES (?, ?, ?, ?, ?)")
                 .bind(id.as_str()).bind(&results[ordinal].source_id).bind(i64::from(enclosure.start_byte))
                 .bind(i64::from(enclosure.end_byte)).bind("\"body\"").execute(&mut *tx).await?;
@@ -383,3 +378,7 @@ mod product_tests;
 #[cfg(test)]
 #[path = "proposal_boundaries_tests.rs"]
 mod boundary_tests;
+
+#[cfg(test)]
+#[path = "proposal_identity_tests.rs"]
+mod identity_tests;
