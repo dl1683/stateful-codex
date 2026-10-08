@@ -1,3 +1,4 @@
+mod batch_input;
 mod blackboard;
 mod blackboard_evidence;
 mod blackboard_premises;

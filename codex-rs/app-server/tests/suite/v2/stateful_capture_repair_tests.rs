@@ -12,6 +12,9 @@ use serde_json::json;
 #[path = "stateful_capture_repair2_tests.rs"]
 mod repair2_tests;
 
+#[path = "stateful_capture_input_repair3_tests.rs"]
+mod input_repair3_tests;
+
 #[tokio::test]
 async fn c3r1_public_large_proposal_decode_error_is_bounded_and_store_unchanged() -> Result<()> {
     malformed_proposal(ProposalDelivery::Direct).await
