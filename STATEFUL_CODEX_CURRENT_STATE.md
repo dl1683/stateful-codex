@@ -87,6 +87,17 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   whose every revision is assistant-authored. Verdict: landable with named
   limitations. Linux: 0 new failures.
 
+- **Capture C2, source/identity/storage foundation** (`7ae0a43b5`..`a7e0bb127`):
+  sealed user-turn sources with byte ranges and digests, durable source locators
+  and bounded source search, typed temporal context (unknown stays unknown),
+  canonical identity/aliases and one retirement fence shared by every writer and
+  automatic read, project-fenced source groups (forward PI migrations
+  `0020`-`0023`, native `0060`). No new user-authority producer yet (that is
+  C3/C4). Cut: root predecessor-content publication, legacy alias replay on
+  upgraded stores, historical-findings run completion, existing-entry reuse for
+  new source groups. Contract: `sc_dogfood/integrate/capture/CONTRACT.md`
+  (capture-c1-v3). Linux: 0 new failures.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
