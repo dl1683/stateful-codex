@@ -128,10 +128,18 @@ async fn model_lifecycle_refuses_old_origin_transfer_and_replay_after_reopen() {
         );
         // A committed old/host succession must not become a successful model replay.
         let replay_id = BlackboardEntryId::parse("old-replay-target").unwrap();
-        store
-            .create_entry(replay_id.clone(), imported.value)
-            .await
-            .unwrap();
+        // This is an already-existing old-binary record, not a new automatic delivery
+        // after Forget. C2 now refuses that new delivery through the public writer.
+        let mut legacy = store.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        super::super::insert_new_entry(
+            &mut legacy,
+            &replay_id,
+            &imported.value,
+            imported.created_at_ms,
+        )
+        .await
+        .unwrap();
+        legacy.commit().await.unwrap();
         let replay_target = store
             .update_entry(PROJECT, &replay_id, old_update)
             .await

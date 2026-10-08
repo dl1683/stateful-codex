@@ -272,3 +272,7 @@ impl BlackboardStore {
         Ok(false)
     }
 }
+
+#[cfg(test)]
+#[path = "identity_tests.rs"]
+mod tests;

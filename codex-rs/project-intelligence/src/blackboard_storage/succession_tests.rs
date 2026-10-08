@@ -68,7 +68,10 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
         store
             .create_entry(
                 id.clone(),
-                decision("Original short note.", RootPromotion::NotPromoted),
+                decision(
+                    &format!("Original short note {i}."),
+                    RootPromotion::NotPromoted,
+                ),
             )
             .await
             .unwrap();
@@ -95,7 +98,10 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
             let entry = store
                 .create_entry(
                     id.clone(),
-                    decision("Original short note.", RootPromotion::NotPromoted),
+                    decision(
+                        &format!("Original short note {i}."),
+                        RootPromotion::NotPromoted,
+                    ),
                 )
                 .await
                 .unwrap();
