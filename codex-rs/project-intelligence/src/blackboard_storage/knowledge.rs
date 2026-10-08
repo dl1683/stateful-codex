@@ -18,6 +18,11 @@ use crate::MemoryChange;
 use crate::NewBlackboardEntry;
 use crate::storage::unix_timestamp_millis;
 
+use super::context_bounds::ContextFields;
+pub(super) use super::context_bounds::context_of;
+use super::context_bounds::read_context;
+use super::context_bounds::validate_context;
+
 use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::insert_new_entry;
@@ -292,6 +297,10 @@ pub(super) async fn write_context(
     revision: i64,
     context: &KnowledgeContext,
 ) -> Result<(), BlackboardStoreError> {
+    validate_context(connection, context).await?;
+    if project_id.len() > 512 || id.as_str().len() > 512 {
+        return Err(BlackboardStoreError::UnsupportedContext);
+    }
     sqlx::query(
         "INSERT OR REPLACE INTO knowledge_context (
             entry_id, revision, project_id, category, authority, scope_id, end_condition,
@@ -330,7 +339,14 @@ pub(super) async fn carry_context(
     to: &BlackboardEntryId,
     revision: i64,
 ) -> Result<(), BlackboardStoreError> {
-    if let Some(context) = context_of(&mut *connection, project_id, from.as_str()).await? {
+    if let Some(context) = read_context(
+        &mut *connection,
+        project_id,
+        from.as_str(),
+        ContextFields::Successor,
+    )
+    .await?
+    {
         // The successor's words are new: what the payload said about the old words (who
         // spoke them) no longer holds, so it is not carried.
         let context = KnowledgeContext {
@@ -405,26 +421,6 @@ pub(super) fn bounded_preview(text: &str) -> &str {
     &text[..end]
 }
 
-pub(super) async fn context_of(
-    connection: &mut SqliteConnection,
-    project_id: &str,
-    entry_id: &str,
-) -> Result<Option<KnowledgeContext>, BlackboardStoreError> {
-    sqlx::query_as::<_, StoredContext>(
-        "SELECT context.* FROM knowledge_context AS context
-         JOIN blackboard_entries AS entry ON entry.id = context.entry_id
-         WHERE context.project_id = ? AND context.entry_id = ?
-           AND context.revision <= entry.revision
-         ORDER BY context.revision DESC LIMIT 1",
-    )
-    .bind(project_id)
-    .bind(entry_id)
-    .fetch_optional(&mut *connection)
-    .await?
-    .map(StoredContext::into_context)
-    .transpose()
-}
-
 pub(super) fn parse<T: std::str::FromStr<Err = String>>(
     value: &str,
 ) -> Result<T, BlackboardStoreError> {
@@ -435,40 +431,6 @@ pub(super) fn parse<T: std::str::FromStr<Err = String>>(
 
 fn unsigned(value: i64) -> Result<u64, BlackboardStoreError> {
     u64::try_from(value).map_err(|_| BlackboardStoreError::RevisionOverflow)
-}
-
-#[derive(FromRow)]
-struct StoredContext {
-    category: String,
-    authority: String,
-    scope_id: Option<String>,
-    end_condition: Option<String>,
-    source_sequence: Option<i64>,
-    unit_ordinal: Option<i64>,
-    group_id: Option<String>,
-    validity: String,
-    payload: Option<String>,
-}
-
-impl StoredContext {
-    fn into_context(self) -> Result<KnowledgeContext, BlackboardStoreError> {
-        Ok(KnowledgeContext {
-            category: parse(&self.category)?,
-            authority: parse(&self.authority)?,
-            scope_id: self.scope_id,
-            end_condition: self.end_condition,
-            source_sequence: self.source_sequence.map(unsigned).transpose()?,
-            unit_ordinal: self
-                .unit_ordinal
-                .map(|ordinal| {
-                    u32::try_from(ordinal).map_err(|_| BlackboardStoreError::RevisionOverflow)
-                })
-                .transpose()?,
-            group_id: self.group_id,
-            validity: parse(&self.validity)?,
-            payload: self.payload,
-        })
-    }
 }
 
 #[derive(FromRow)]
@@ -552,4 +514,4 @@ impl StoredChange {
 
 #[cfg(test)]
 #[path = "knowledge_tests.rs"]
-mod tests;
+pub(super) mod tests;

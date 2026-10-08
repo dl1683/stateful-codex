@@ -288,7 +288,7 @@ impl BlackboardUpdateTool {
             }));
         }
         let context = store
-            .knowledge_context(&self.project_id, &current.id)
+            .knowledge_policy(&self.project_id, &current.id)
             .await
             .map_err(respond)?;
         if (current.value.provenance.kind == BlackboardProvenanceKind::User

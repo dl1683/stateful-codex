@@ -73,7 +73,7 @@ pub(super) async fn committed_succession(
     for predecessor in &replaced {
         if predecessor.value.provenance.kind == BlackboardProvenanceKind::User
             || store
-                .knowledge_context(project_id, &predecessor.id)
+                .knowledge_policy(project_id, &predecessor.id)
                 .await
                 .map_err(respond)?
                 .is_some_and(|context| {
@@ -181,7 +181,7 @@ pub(super) async fn resolve_superseded(
             )));
         }
         let context = store
-            .knowledge_context(project_id, &id)
+            .knowledge_policy(project_id, &id)
             .await
             .map_err(respond)?;
         if current.value.provenance.kind == BlackboardProvenanceKind::User

@@ -11,7 +11,6 @@ use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::query::load_hit;
 use super::scopes::LEGACY_LIMITED_RULE;
-use super::scopes::OUTSIDE_THREAD_SCOPE;
 
 // Apply authority/category eligibility before either counts or LIMIT, using the latest
 // meaning visible at this entry revision. Legacy user instructions remain source-backed.
@@ -20,13 +19,25 @@ const ROOT_ELIGIBILITY: &str = "
         WHERE meaning.entry_id = entry.id AND meaning.revision = (
             SELECT MAX(latest.revision) FROM knowledge_context AS latest
             WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
-        AND meaning.category = 'attributed_context')
+        AND CASE WHEN octet_length(meaning.category) > 32 THEN 1
+                 ELSE meaning.category = 'attributed_context' END)
     AND (revision.kind != 'instruction' OR (revision.provenance_kind = 'user'
         AND NOT EXISTS (SELECT 1 FROM knowledge_context AS meaning
             WHERE meaning.entry_id = entry.id AND meaning.revision = (
                 SELECT MAX(latest.revision) FROM knowledge_context AS latest
                 WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
-            AND (meaning.category != 'rule' OR meaning.authority != 'human_direct'))))";
+            AND CASE WHEN octet_length(meaning.category) > 32
+                       OR octet_length(meaning.authority) > 32 THEN 1
+                     ELSE meaning.category != 'rule' OR meaning.authority != 'human_direct' END)))";
+
+// Root never applies historical scoped entries. Check presence without loading their IDs
+// or consulting bindings that cannot grant application here.
+const UNSCOPED_CONTEXT: &str = "
+    AND NOT EXISTS (SELECT 1 FROM knowledge_context AS scoped
+        WHERE scoped.entry_id = entry.id AND scoped.revision = (
+            SELECT MAX(latest.revision) FROM knowledge_context AS latest
+            WHERE latest.entry_id = entry.id AND latest.revision <= entry.revision)
+        AND scoped.scope_id IS NOT NULL)";
 
 #[derive(FromRow)]
 struct RootEntryCounts {
@@ -59,7 +70,7 @@ impl BlackboardStore {
     ) -> Result<(RootBlackboardProjection, ThreadScopes), BlackboardStoreError> {
         query.validate()?;
         let mut transaction = self.pool.begin().await?;
-        let scoped = format!("{OUTSIDE_THREAD_SCOPE} AND NOT ({LEGACY_LIMITED_RULE})");
+        let scoped = format!("{UNSCOPED_CONTEXT} AND NOT ({LEGACY_LIMITED_RULE})");
         let outside = format!("{ROOT_ELIGIBILITY}{scoped}");
         let mut counts = sqlx::query_as::<_, RootEntryCounts>(
             sqlx::AssertSqlSafe(format!("SELECT
@@ -85,7 +96,6 @@ impl BlackboardStore {
                    AND revision.root_promotion = 'promoted'{outside}"
             )))
             .bind(&query.project_id)
-            .bind(/*value*/ Option::<&str>::None)
             .fetch_one(&mut *transaction)
             .await?;
             let legacy = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
@@ -135,9 +145,8 @@ impl BlackboardStore {
                  WHEN 'normal' THEN 2 ELSE 3 END, entry.id
              LIMIT ?"
         );
-        let mut entry_ids =
+        let entry_ids =
             sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(list)).bind(&query.project_id);
-        entry_ids = entry_ids.bind(/*value*/ Option::<&str>::None);
         let entry_ids = entry_ids
             .bind(i64::from(query.max_entries))
             .fetch_all(&mut *transaction)

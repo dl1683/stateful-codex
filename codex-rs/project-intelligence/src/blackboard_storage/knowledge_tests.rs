@@ -31,7 +31,7 @@ use crate::SupersededEntry;
 
 const PROJECT_ID: &str = "project-1";
 
-fn rule(content: &str) -> NewBlackboardEntry {
+pub(in crate::blackboard_storage) fn rule(content: &str) -> NewBlackboardEntry {
     NewBlackboardEntry {
         project_id: PROJECT_ID.to_string(),
         node_id: HierarchyNodeId::parse("node-project").expect("node ID"),
@@ -51,7 +51,10 @@ fn rule(content: &str) -> NewBlackboardEntry {
     }
 }
 
-fn change(operation: ChangeOperation, preview: &str) -> ChangeRecord {
+pub(in crate::blackboard_storage) fn change(
+    operation: ChangeOperation,
+    preview: &str,
+) -> ChangeRecord {
     ChangeRecord {
         operation,
         origin: ChangeOrigin::HostCapture,
@@ -64,7 +67,7 @@ fn change(operation: ChangeOperation, preview: &str) -> ChangeRecord {
     }
 }
 
-async fn store(temp_dir: &TempDir) -> BlackboardStore {
+pub(in crate::blackboard_storage) async fn store(temp_dir: &TempDir) -> BlackboardStore {
     let sqlite = SqliteConfig::new_for_testing(temp_dir.path().abs());
     HierarchyStore::open(&sqlite)
         .await

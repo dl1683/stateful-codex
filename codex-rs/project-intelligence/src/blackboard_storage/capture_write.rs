@@ -14,6 +14,8 @@ use sqlx::SqliteConnection;
 
 use super::BlackboardStore;
 use super::BlackboardStoreError;
+use super::context_bounds::ContextFields;
+use super::context_bounds::read_context;
 use super::insert_new_entry;
 use super::knowledge::append_change;
 use super::knowledge::context_of;
@@ -118,7 +120,13 @@ async fn write_unit(
             if entry.state != BlackboardEntryState::Active {
                 continue;
             }
-            let context = context_of(connection, &unit.value.project_id, id.as_str()).await?;
+            let context = read_context(
+                connection,
+                &unit.value.project_id,
+                id.as_str(),
+                ContextFields::Identity,
+            )
+            .await?;
             if context.as_ref().is_some_and(|context| {
                 context.category != unit.context.category
                     || context.authority != unit.context.authority
@@ -154,7 +162,9 @@ async fn write_unit(
                     now,
                 )
                 .await?;
-                if let Some(context) = context {
+                if let Some(context) =
+                    context_of(connection, &unit.value.project_id, id.as_str()).await?
+                {
                     write_context(connection, &unit.value.project_id, id, revision, &context)
                         .await?;
                 }

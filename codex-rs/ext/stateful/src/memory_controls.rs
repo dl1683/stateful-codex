@@ -106,7 +106,7 @@ pub(crate) async fn entry_category(
     entry: &BlackboardEntry,
 ) -> KnowledgeCategory {
     if let Ok(Some(context)) = store
-        .knowledge_context(&entry.value.project_id, &entry.id)
+        .knowledge_policy(&entry.value.project_id, &entry.id)
         .await
     {
         return context.category;

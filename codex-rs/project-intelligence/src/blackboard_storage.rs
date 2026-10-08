@@ -29,6 +29,7 @@ use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
 mod capture_write;
+mod context_bounds;
 mod fence;
 mod knowledge;
 mod query;
@@ -43,6 +44,7 @@ mod update;
 pub use capture_write::CaptureEntryWrite;
 pub use capture_write::CaptureWrite;
 pub use capture_write::CaptureWriteResult;
+pub use context_bounds::ContextPolicy;
 pub use fence::CompletionFence;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;
@@ -567,6 +569,8 @@ pub enum BlackboardStoreError {
     ActionAlreadyRecorded(String),
     #[error("stored knowledge context is invalid: {0}")]
     InvalidStoredKnowledge(String),
+    #[error("unsupported or oversized knowledge context; original metadata remains stored")]
+    UnsupportedContext,
     #[error("blackboard entry ID was already used for different content: {0}")]
     EntryIdentityConflict(String),
     #[error("blackboard revision conflict: expected {expected}, found {actual}")]

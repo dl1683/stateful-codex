@@ -50,6 +50,7 @@ pub use blackboard::RootPromotion;
 pub use blackboard_storage::BlackboardStore;
 pub use blackboard_storage::BlackboardStoreError;
 pub use blackboard_storage::CompletionFence;
+pub use blackboard_storage::ContextPolicy;
 pub use blackboard_storage::CreateOutcome;
 pub use blackboard_storage::MAX_CHANGES_PAGE;
 pub use blackboard_storage::MAX_SUPERSEDED_ENTRIES;

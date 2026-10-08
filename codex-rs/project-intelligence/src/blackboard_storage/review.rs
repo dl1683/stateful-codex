@@ -105,7 +105,10 @@ impl BlackboardStore {
         id: &BlackboardEntryId,
     ) -> Result<Option<ReviewContext>, BlackboardStoreError> {
         let row = sqlx::query_as::<_, (String, bool)>(
-            "SELECT context.authority, context.scope_id IS NOT NULL
+            "SELECT CASE WHEN octet_length(context.authority) > 32 THEN 'legacy_unknown'
+                 WHEN context.authority IN ('human_direct','assistant_reported',
+                 'reported_third_party','host_observed','legacy_unknown')
+                 THEN context.authority ELSE 'legacy_unknown' END, context.scope_id IS NOT NULL
              FROM knowledge_context AS context
              JOIN blackboard_entries AS entry ON entry.id = context.entry_id
              WHERE context.project_id = ? AND context.entry_id = ?
