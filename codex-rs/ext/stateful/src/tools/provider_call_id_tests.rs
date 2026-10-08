@@ -16,8 +16,6 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
-use sha2::Digest;
-use sha2::Sha256;
 use tempfile::TempDir;
 
 use super::blackboard_write::BlackboardBatchRecordTool;
@@ -36,13 +34,6 @@ fn bridged_call_id() -> String {
     format!(
         "call_3f1c9a7e2b__thought__{}",
         "Q2lZQjQ0a2Z".repeat(/*n*/ 200)
-    )
-}
-
-fn oversized_source(call_id: &str) -> String {
-    format!(
-        "stateful:oversized-call-id:v1:sha256:{:x}",
-        Sha256::digest(call_id.as_bytes())
     )
 }
 
@@ -206,110 +197,89 @@ fn counts(output: &Value) -> (Value, Value, Value, Value) {
 }
 
 #[test]
-fn provenance_keeps_valid_ids_and_namespaces_only_oversized_ones() {
+fn provenance_keeps_every_store_valid_id_and_refuses_unrecordable_ones() {
     let bridged = bridged_call_id();
     let source = |call_id: &str| {
         provenance_source_id(&with_call_id("obligation_update", json!({}), call_id))
             .map_err(|error| error.to_string())
     };
-    let refused = |reason: &str| Err(format!("nothing was written: {reason}"));
-    let no_id = "this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded";
+    let no_id = Err("nothing was written: this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded".to_string());
+    let verbatim = [
+        "call_abc123".to_string(),
+        "c".repeat(/*n*/ 200),
+        "c".repeat(/*n*/ 512),
+        " call_padded".to_string(),
+        "stateful:oversized-call-id:legacy".to_string(),
+        "call-sha256:0123abcd".to_string(),
+    ];
 
     assert_eq!(
-        [
-            source("call_abc123"),
-            source(&"c".repeat(/*n*/ 200)),
-            source(&"c".repeat(/*n*/ 512)),
-            source(" call_padded"),
-            source(&bridged),
-            source(&oversized_source(&bridged)),
-            source(&format!(" {bridged}")),
-            source(""),
-            source("call\n1"),
-        ],
-        [
-            Ok("call_abc123".to_string()),
-            Ok("c".repeat(/*n*/ 200)),
-            Ok("c".repeat(/*n*/ 512)),
-            Ok(" call_padded".to_string()),
-            Ok(oversized_source(&bridged)),
-            refused(
-                "this tool call's ID uses the reserved stateful:oversized-call-id: namespace, so its provenance would be ambiguous"
-            ),
-            refused(
-                "this tool call's oversized ID has surrounding whitespace, so it does not identify one source"
-            ),
-            refused(no_id),
-            refused(no_id),
-        ]
+        verbatim
+            .iter()
+            .map(|call_id| source(call_id))
+            .chain([source(&bridged), source(""), source("call\n1")])
+            .collect::<Vec<_>>(),
+        verbatim
+            .iter()
+            .cloned()
+            .map(Ok)
+            .chain([
+                Err(format!(
+                    "nothing was written: this tool call's ID is {} bytes, over the 512-byte provenance limit, so Stateful cannot record its source. The model provider or its bridge issues oversized call IDs, which Stateful does not support yet; retrying the same call will not help.",
+                    bridged.len()
+                )),
+                no_id.clone(),
+                no_id,
+            ])
+            .collect::<Vec<_>>()
     );
 }
 
-/// A clean ID between the old 128-byte cut and the stores' 512-byte limit was stored verbatim
-/// before oversized-ID support; an exact retry must still match its stored values.
+/// IDs the stores accepted verbatim before (a 200-byte ID, and one that looks like a
+/// namespace earlier drafts reserved) still match their stored records, relations and
+/// obligations on an exact retry.
 #[tokio::test]
 async fn store_valid_ids_replay_records_relations_and_obligations_unchanged() {
-    let fixture = fixture().await;
-    let call_id = format!("call_{}", "7".repeat(/*n*/ 195));
+    for call_id in [
+        format!("call_{}", "7".repeat(/*n*/ 195)),
+        "stateful:oversized-call-id:v1:sha256:legacy".to_string(),
+    ] {
+        let fixture = fixture().await;
 
-    let first = fixture
-        .record(&call_id)
-        .await
-        .expect("the batch is accepted");
-    let replay = fixture
-        .record(&call_id)
-        .await
-        .expect("the retry is accepted");
-    fixture.update(&call_id).await.expect("obligation recorded");
-    fixture.update(&call_id).await.expect("obligation retry");
+        let first = fixture
+            .record(&call_id)
+            .await
+            .expect("the batch is accepted");
+        let replay = fixture
+            .record(&call_id)
+            .await
+            .expect("the retry is accepted");
+        fixture.update(&call_id).await.expect("obligation recorded");
+        fixture.update(&call_id).await.expect("obligation retry");
 
-    let expected = (json!(2), json!(0), json!(1), json!(0));
-    assert_eq!(
-        (
-            counts(&first),
-            counts(&replay),
-            fixture.findings().await,
-            fixture.obligation_sources().await
-        ),
-        (
-            expected.clone(),
-            expected,
-            vec![Some((call_id.clone(), 1)), Some((call_id.clone(), 1))],
-            vec![call_id],
-        )
-    );
+        let expected = (json!(2), json!(0), json!(1), json!(0));
+        assert_eq!(
+            (
+                counts(&first),
+                counts(&replay),
+                fixture.findings().await,
+                fixture.obligation_sources().await
+            ),
+            (
+                expected.clone(),
+                expected,
+                vec![Some((call_id.clone(), 1)), Some((call_id.clone(), 1))],
+                vec![call_id],
+            )
+        );
+    }
 }
 
+/// Oversized bridge IDs, empty IDs and control-containing IDs could never be stored; they
+/// are refused before any write instead of failing record by record.
 #[tokio::test]
-async fn bridged_call_ids_record_findings_and_obligations_under_the_digest_namespace() {
+async fn unrecordable_call_ids_write_nothing() {
     let fixture = fixture().await;
-    let bridged = bridged_call_id();
-
-    let output = fixture
-        .record(&bridged)
-        .await
-        .expect("the batch is accepted");
-    fixture.update(&bridged).await.expect("obligation recorded");
-
-    let source = oversized_source(&bridged);
-    assert_eq!(
-        (
-            counts(&output),
-            fixture.findings().await,
-            fixture.obligation_sources().await
-        ),
-        (
-            (json!(2), json!(0), json!(1), json!(0)),
-            vec![Some((source.clone(), 1)), Some((source.clone(), 1))],
-            vec![source],
-        )
-    );
-}
-
-#[tokio::test]
-async fn missing_or_aliasing_call_ids_write_nothing() {
-    let fixture = fixture().await;
-    let alias = oversized_source(&bridged_call_id());
     let before = fixture
         .services
         .blackboard()
@@ -320,7 +290,7 @@ async fn missing_or_aliasing_call_ids_write_nothing() {
         .expect("revision reads");
 
     let mut refusals = Vec::new();
-    for call_id in ["", "call\u{7}", alias.as_str()] {
+    for call_id in [bridged_call_id().as_str(), "", "call\u{7}"] {
         refusals.push((
             fixture.record(call_id).await.is_err(),
             matches!(

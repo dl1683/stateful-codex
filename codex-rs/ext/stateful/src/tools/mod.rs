@@ -263,38 +263,30 @@ fn fits_response(value: &serde_json::Value, byte_budget: usize) -> bool {
     serde_json::to_vec(value).is_ok_and(|serialized| serialized.len() <= byte_budget)
 }
 
-/// Provenance source limit shared by the blackboard and run stores. Call IDs up to this
-/// size are recorded exactly as before, so stored records still match their retries.
-const MAX_VERBATIM_SOURCE_BYTES: usize = 512;
-/// Namespace reserved for digests of oversized call IDs. Some provider bridges carry opaque
-/// reasoning state inside call IDs (LiteLLM appends Gemini thought signatures as
-/// `call_<id>__thought__<signature>`), which exceeds every stored identity bound.
-const OVERSIZED_SOURCE_NAMESPACE: &str = "stateful:oversized-call-id:";
-const OVERSIZED_SOURCE_PREFIX: &str = "stateful:oversized-call-id:v1:sha256:";
+/// Provenance source limit shared by the blackboard and run stores.
+const MAX_PROVENANCE_SOURCE_BYTES: usize = 512;
 
-/// The provenance source recorded for one tool call, decided before any write.
-///
-/// A call ID within the store limit is kept verbatim, so each store validates it exactly as
-/// before. Only a nonempty, trimmed, control-free ID above the limit is replaced, by a digest
-/// in a namespace verbatim IDs may not use, so a raw ID can never alias a digest. Missing,
-/// control-containing, padded oversized, and namespace-claiming IDs are refused.
+/// The provenance source recorded for one tool call: the call ID, verbatim, exactly as
+/// before. A call ID that no store could accept (empty, containing control characters, or
+/// over the stores' limit) is refused up front with an explicit reason instead of failing
+/// each write separately; every ID a store accepted before is passed through unchanged, and
+/// each store still applies its own validation. Some provider bridges carry opaque reasoning
+/// state inside call IDs (LiteLLM appends Gemini thought signatures as
+/// `call_<id>__thought__<signature>`); recording those needs a stored raw/digest source
+/// discriminator, which is not available yet.
 fn provenance_source_id(call: &ToolCall<'_>) -> Result<String, FunctionCallError> {
     let call_id = call.call_id.as_str();
     let refusal = if call_id.is_empty() || call_id.chars().any(char::is_control) {
-        "nothing was written: this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded"
-    } else if call_id.starts_with(OVERSIZED_SOURCE_NAMESPACE) {
-        "nothing was written: this tool call's ID uses the reserved stateful:oversized-call-id: namespace, so its provenance would be ambiguous"
-    } else if call_id.len() <= MAX_VERBATIM_SOURCE_BYTES {
-        return Ok(call_id.to_string());
-    } else if call_id.trim() != call_id {
-        "nothing was written: this tool call's oversized ID has surrounding whitespace, so it does not identify one source"
+        "nothing was written: this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded".to_string()
+    } else if call_id.len() > MAX_PROVENANCE_SOURCE_BYTES {
+        format!(
+            "nothing was written: this tool call's ID is {} bytes, over the {MAX_PROVENANCE_SOURCE_BYTES}-byte provenance limit, so Stateful cannot record its source. The model provider or its bridge issues oversized call IDs, which Stateful does not support yet; retrying the same call will not help.",
+            call_id.len()
+        )
     } else {
-        return Ok(format!(
-            "{OVERSIZED_SOURCE_PREFIX}{:x}",
-            Sha256::digest(call_id.as_bytes())
-        ));
+        return Ok(call_id.to_string());
     };
-    Err(bounded_respond(call, refusal))
+    Err(bounded_respond(call, &refusal))
 }
 
 fn stable_id(prefix: &str, project_id: &str, idempotency_key: &str) -> String {
