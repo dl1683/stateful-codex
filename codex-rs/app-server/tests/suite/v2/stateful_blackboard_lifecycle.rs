@@ -273,8 +273,7 @@ async fn model_cannot_self_award_user_confirmed_knowledge() -> Result<()> {
         .find(|tool| tool["name"] == "blackboard_record_batch")
         .expect("blackboard record batch tool should be available");
     assert_eq!(
-        batch_tool["parameters"]["anyOf"][0]["properties"]["records"]["items"]["properties"]["verification"]
-            ["enum"],
+        batch_tool["parameters"]["properties"]["records"]["items"]["properties"]["verification"]["enum"],
         json!(["unverified", "sourceVerified", "disputed", "stale"])
     );
 
