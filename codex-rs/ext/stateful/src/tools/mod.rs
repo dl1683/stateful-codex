@@ -158,7 +158,11 @@ fn parse_arguments<T: for<'de> serde::Deserialize<'de>>(
 /// Fits a terminal diagnostic, including JSON escaping, to the call's allowance.
 fn bounded_respond(call: &ToolCall<'_>, message: &str) -> FunctionCallError {
     let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
-    let mut message = message.to_string();
+    let mut message = if serde_json::to_string(message).is_ok_and(|text| text.len() <= budget) {
+        message.to_string()
+    } else {
+        "budget_insufficient".to_string()
+    };
     while serde_json::to_string(&message).is_ok_and(|text| text.len() > budget)
         && !message.is_empty()
     {
@@ -175,9 +179,12 @@ fn bounded_json_output(
 ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
     let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
     if value.to_string().len() > budget {
-        return Err(FunctionCallError::RespondToModel(format!(
-            "tool result withheld: it exceeded the {budget}-byte model item bound. Any change this call made was applied; query the affected state instead of retrying."
-        )));
+        return Err(bounded_respond(
+            call,
+            &format!(
+                "tool result withheld: it exceeded the {budget}-byte model item bound. Any change this call made was applied; query the affected state instead of retrying."
+            ),
+        ));
     }
     Ok(Box::new(codex_extension_api::JsonToolOutput::new(value)))
 }
@@ -205,9 +212,12 @@ fn preflight_receipts(
 ) -> Result<(), FunctionCallError> {
     let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
     if worst_case.to_string().len() > budget {
-        return Err(FunctionCallError::RespondToModel(format!(
-            "nothing was written: this batch's receipts might not fit one {budget}-byte result. Split it into smaller batches."
-        )));
+        return Err(bounded_respond(
+            call,
+            &format!(
+                "nothing was written: this batch's receipts might not fit one {budget}-byte result. Split it into smaller batches."
+            ),
+        ));
     }
     Ok(())
 }
@@ -273,3 +283,7 @@ mod roster_budget_tests;
 #[cfg(test)]
 #[path = "capture_repair_tests.rs"]
 mod capture_repair_tests;
+
+#[cfg(test)]
+#[path = "capture_repair2_tests.rs"]
+mod capture_repair2_tests;

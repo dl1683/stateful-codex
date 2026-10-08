@@ -363,7 +363,8 @@ impl BlackboardBatchRecordTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         if call.function_arguments()?.len() > 32768 {
-            return Err(respond(
+            return Err(super::bounded_respond(
+                &call,
                 "record batch exceeds the 32 KiB input bound; nothing written",
             ));
         }

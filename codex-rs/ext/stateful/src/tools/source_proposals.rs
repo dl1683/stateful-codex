@@ -1,8 +1,8 @@
 //! The discriminated nonbinding alternative on blackboard_record_batch.
 use super::bounded_json_output;
+use super::bounded_respond;
 use super::preflight_receipts;
 use super::receipt_error;
-use super::respond;
 use crate::services::ProjectIntelligenceServices;
 use codex_extension_api::FunctionCallError;
 use codex_extension_api::ToolCall;
@@ -42,7 +42,10 @@ pub(super) async fn record(
         records,
     } = batch;
     if records.is_empty() || records.len() > 24 {
-        return Err(respond("source proposals require 1-24 whole units"));
+        return Err(bounded_respond(
+            call,
+            "source proposals require 1-24 whole units",
+        ));
     }
     let envelope = |results: serde_json::Value| {
         json!({
@@ -64,14 +67,26 @@ pub(super) async fn record(
     )?;
     let admission = codex_state::ThreadProjectAdmission::acquire(
         services.sqlite(),
-        codex_protocol::ThreadId::from_string(thread).map_err(respond)?,
+        codex_protocol::ThreadId::from_string(thread)
+            .map_err(|error| bounded_respond(call, &error.to_string()))?,
         project,
     )
     .await
-    .map_err(respond)?
-    .ok_or_else(|| respond("source proposal refused: authoritative project binding missing"))?;
-    let node = services.project_node_id(project).await.map_err(respond)?;
-    let store = services.blackboard().await.map_err(respond)?;
+    .map_err(|error| bounded_respond(call, &error.to_string()))?
+    .ok_or_else(|| {
+        bounded_respond(
+            call,
+            "source proposal refused: authoritative project binding missing",
+        )
+    })?;
+    let node = services
+        .project_node_id(project)
+        .await
+        .map_err(|error| bounded_respond(call, &error))?;
+    let store = services
+        .blackboard()
+        .await
+        .map_err(|error| bounded_respond(call, &error.to_string()))?;
     // Preserve only bounded refusal handles before the writer consumes the request.
     let mut routes = Vec::with_capacity(records.len());
     for record in &records {
