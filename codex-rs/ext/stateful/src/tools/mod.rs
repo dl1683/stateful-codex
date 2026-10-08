@@ -36,6 +36,10 @@ use crate::visible_root::VisibleRootRegistry;
 const MAX_RESPONSE_BYTES: usize = MAX_MODEL_ITEM_BYTES;
 /// Serialized bound for one error string inside a result receipt.
 const MAX_RECEIPT_ERROR_BYTES: usize = 240;
+/// Serialized bound for a decoding diagnostic echoed to the model. Serde diagnostics can
+/// quote arbitrary input, such as a huge unknown key; a longer one is replaced by a
+/// generic statement.
+const MAX_DECODE_ERROR_BYTES: usize = 640;
 
 pub(super) fn project_intelligence_tools(
     project_id: String,
@@ -132,8 +136,13 @@ pub(super) fn project_intelligence_tools(
     tools
 }
 
+/// Decodes a tool's arguments. A rejection names the offending field path and what it
+/// accepts, then shows `example`, a minimal valid call, so a model can correct the call
+/// in one retry. Both parts are dropped, in that order, when the call's response
+/// allowance cannot hold them.
 fn parse_arguments<T: for<'de> serde::Deserialize<'de>>(
     call: &ToolCall<'_>,
+    example: &str,
 ) -> Result<T, codex_extension_api::FunctionCallError> {
     let arguments = call.function_arguments()?;
     let arguments = if arguments.trim().is_empty() {
@@ -141,17 +150,32 @@ fn parse_arguments<T: for<'de> serde::Deserialize<'de>>(
     } else {
         arguments
     };
-    serde_json::from_str(arguments).map_err(|error| {
-        // Serde diagnostics can contain arbitrary input, including a huge unknown key.
+    let mut deserializer = serde_json::Deserializer::from_str(arguments);
+    let decoded = match serde_path_to_error::deserialize(&mut deserializer) {
+        Ok(value) => deserializer
+            .end()
+            .map(|()| value)
+            .map_err(|error| error.to_string()),
+        Err(error) => Err(match error.path().to_string().as_str() {
+            "." => error.inner().to_string(),
+            path => format!("field `{path}`: {}", error.inner()),
+        }),
+    };
+    decoded.map_err(|message| {
         // Account for JSON escaping as well as the actual tool's response allowance.
         let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
-        let message = error.to_string();
-        if serde_json::to_string(&message)
-            .is_ok_and(|text| text.len() <= budget.min(MAX_RECEIPT_ERROR_BYTES))
+        let detail = if serde_json::to_string(&message)
+            .is_ok_and(|text| text.len() <= budget.min(MAX_DECODE_ERROR_BYTES))
         {
-            bounded_respond(call, &message)
+            message
         } else {
-            bounded_respond(call, "invalid tool arguments")
+            "invalid tool arguments".to_string()
+        };
+        let guided = format!("{detail}. Minimal valid call: {example}");
+        if serde_json::to_string(&guided).is_ok_and(|text| text.len() <= budget) {
+            FunctionCallError::RespondToModel(guided)
+        } else {
+            bounded_respond(call, &detail)
         }
     })
 }

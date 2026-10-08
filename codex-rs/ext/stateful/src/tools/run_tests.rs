@@ -218,3 +218,41 @@ async fn stale_revision_cannot_complete_a_lookup() {
     ));
     assert_eq!(stored_run(&fixture).await, fixture.run);
 }
+
+#[tokio::test]
+async fn rejected_completions_name_the_field_and_show_a_valid_call() {
+    let fixture = fixture().await;
+    let revision = fixture.run.revision;
+    let valid_lookup = format!(
+        r#"{{"expectedRevision":{revision},"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>"}}"#
+    );
+    let mut contradictory = lookup_completion(revision);
+    contradictory["rootRevision"] = json!(0);
+    contradictory["finalObligation"] = json!({"learning": [RESULT]});
+    let mut misspelled = lookup_completion(revision);
+    misspelled["status"] = json!("done");
+
+    let mut messages = Vec::new();
+    for arguments in [contradictory, misspelled] {
+        let Err(FunctionCallError::RespondToModel(message)) =
+            fixture.tool.handle_guided(call(&arguments)).await
+        else {
+            panic!("{arguments} must be rejected");
+        };
+        messages.push(message);
+    }
+
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| (
+                message.contains("remove rootRevision, finalObligation"),
+                message.contains("field `status`: unknown variant `done`, expected one of"),
+                message.contains(&valid_lookup),
+            ))
+            .collect::<Vec<_>>(),
+        vec![(true, false, true), (false, true, true)],
+        "{messages:#?}"
+    );
+    assert_eq!(stored_run(&fixture).await, fixture.run);
+}

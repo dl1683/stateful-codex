@@ -27,6 +27,10 @@ use super::parse_arguments;
 use super::respond;
 use super::thread_run;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const RECONCILE_EXAMPLE: &str =
+    r#"{"steeringId":"<steeringId>","expectedRevision":1,"action":"acknowledge"}"#;
+
 const QUERY_TOOL_NAME: &str = "steering_query";
 const RECONCILE_TOOL_NAME: &str = "steering_reconcile";
 const MAX_RETURNED_INPUT_BYTES: usize = 8 * 1024;
@@ -61,7 +65,7 @@ impl SteeringQueryTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: QueryArguments = parse_arguments(&call)?;
+        let arguments: QueryArguments = parse_arguments(&call, "{}")?;
         let run = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
         let cursor = arguments
             .cursor
@@ -198,7 +202,7 @@ impl SteeringReconcileTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: ReconcileArguments = parse_arguments(&call)?;
+        let arguments: ReconcileArguments = parse_arguments(&call, RECONCILE_EXAMPLE)?;
         let steering_id = SteeringId::parse(arguments.steering_id).map_err(respond)?;
         let store = self.services.runtime().await.map_err(respond)?;
         let current = store

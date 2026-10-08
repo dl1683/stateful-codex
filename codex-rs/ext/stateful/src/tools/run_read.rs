@@ -31,6 +31,9 @@ use super::parse_arguments;
 use super::respond;
 use super::thread_run;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const EXAMPLE: &str = r#"{"section":"obligation"}"#;
+
 const TOOL_NAME: &str = "stateful_run_read";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -218,7 +221,7 @@ impl StatefulRunReadTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: Arguments = parse_arguments(&call)?;
+        let arguments: Arguments = parse_arguments(&call, EXAMPLE)?;
         let section = arguments.section;
         let cursor = arguments
             .cursor

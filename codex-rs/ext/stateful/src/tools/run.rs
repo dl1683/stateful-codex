@@ -20,6 +20,7 @@ use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::completion::CompletionRequest;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
+use crate::completion::completion_root;
 use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
@@ -33,6 +34,9 @@ use super::run_read::obligation_cursor;
 use super::run_read::submitted_result_cursor;
 use super::stable_id;
 use super::thread_run;
+
+/// Minimal valid call shown with every argument decoding rejection.
+const EXAMPLE: &str = r#"{"expectedRevision":1,"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>"}"#;
 
 const COMPLETION_FENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const PAGED_RESULT_INSTRUCTION: &str = "The completed result is too large to return here. Read it exactly with stateful_run_read using section \"submittedResult\" and cursor submittedResultCursor, following nextCursor until it is null, then return it as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. Copy opaque evidence identifiers only from finalAnswerChecklist; if omittedChecklistItems is nonzero, read the complete final obligation with stateful_run_read using section \"obligation\" and cursor finalObligationCursor, following nextCursor until it is null.";
@@ -106,6 +110,50 @@ impl StatefulRunUpdateTool {
             })
     }
 
+    /// Runs one call; a rejected completion attempt also shows valid completion calls
+    /// filled with the run's current revisions, so the next attempt can succeed.
+    async fn handle_guided(
+        &self,
+        call: ToolCall<'_>,
+    ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        let completing = is_completion_attempt(&call);
+        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        match self.handle_call(call).await {
+            Err(FunctionCallError::RespondToModel(message)) if completing => {
+                let guided = format!("{message}. {}", self.completion_guide().await);
+                Err(FunctionCallError::RespondToModel(
+                    if serde_json::to_string(&guided).is_ok_and(|text| text.len() <= budget) {
+                        guided
+                    } else {
+                        message
+                    },
+                ))
+            }
+            outcome => outcome,
+        }
+    }
+
+    /// Valid completion calls for the run's current state, as copyable JSON.
+    async fn completion_guide(&self) -> String {
+        let Ok(run) = thread_run(&self.project_id, &self.thread_id, &self.services).await else {
+            return "Completion needs an active Stateful run on this thread.".to_string();
+        };
+        let revision = run.revision;
+        let lookup = format!(
+            r#"noReusableLearning (only when this run wrote no project knowledge): {{"expectedRevision":{revision},"status":"completed","completionDisposition":"noReusableLearning","result":"<final answer>"}}"#
+        );
+        let durable = match completion_root(&self.services, &self.project_id, &self.thread_id)
+            .await
+        {
+            Ok((root_revision, aliases)) if aliases > 0 => format!(
+                r#"durableLearning: {{"expectedRevision":{revision},"status":"completed","completionIdempotencyKey":"completion-{revision}","finalObligation":{{"learning":["<reusable conclusion>"]}},"result":"<final answer>","rootRevision":{root_revision},"materialRootFindings":["E1"]}} (E1..E{aliases} are the current root aliases)"#
+            ),
+            Ok(_) => "durableLearning first needs a root finding: record it with blackboard_record_batch rootPromotion promoted".to_string(),
+            Err(_) => "durableLearning needs rootRevision and materialRootFindings from the current World State".to_string(),
+        };
+        format!("Valid completion calls (replace the <...> text): {lookup}; {durable}.")
+    }
+
     async fn handle_call(
         &self,
         call: ToolCall<'_>,
@@ -121,7 +169,7 @@ impl StatefulRunUpdateTool {
             completion_idempotency_key,
             final_obligation,
             completion_disposition,
-        } = parse_arguments(&call)?;
+        } = parse_arguments(&call, EXAMPLE)?;
         if material_historical_findings
             .as_ref()
             .is_some_and(|items| !items.is_empty())
@@ -167,14 +215,23 @@ impl StatefulRunUpdateTool {
         // through the runtime commit, so no project mutation can land in between.
         let mut fence = None;
         let (completion, final_obligation) = if no_reusable_learning {
-            if material_root_findings.is_some()
-                || root_revision.is_some()
-                || completion_idempotency_key.is_some()
-                || final_obligation.is_some()
-            {
-                return Err(FunctionCallError::RespondToModel(
-                    "completionDisposition noReusableLearning takes only expectedRevision, status, completionDisposition, and result; omit rootRevision, materialRootFindings, completionIdempotencyKey, and finalObligation, or use durableLearning when the run produced reusable project knowledge".to_string(),
-                ));
+            let durable_fields = [
+                ("rootRevision", root_revision.is_some()),
+                ("materialRootFindings", material_root_findings.is_some()),
+                (
+                    "completionIdempotencyKey",
+                    completion_idempotency_key.is_some(),
+                ),
+                ("finalObligation", final_obligation.is_some()),
+            ]
+            .into_iter()
+            .filter_map(|(field, present)| present.then_some(field))
+            .collect::<Vec<_>>();
+            if !durable_fields.is_empty() {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "completionDisposition noReusableLearning takes only expectedRevision, status, completionDisposition, and result; remove {}, or use durableLearning when the run produced reusable project knowledge",
+                    durable_fields.join(", ")
+                )));
             }
             let knowledge_changed = fence
                 .insert(self.acquire_fence().await?)
@@ -441,8 +498,17 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
     where
         'call: 'a,
     {
-        Box::pin(self.handle_call(call))
+        Box::pin(self.handle_guided(call))
     }
+}
+
+/// Whether a call tries to complete the run. Undecodable arguments count too: a model
+/// repeating a malformed call is not converging either.
+fn is_completion_attempt(call: &ToolCall<'_>) -> bool {
+    call.function_arguments()
+        .ok()
+        .and_then(|arguments| serde_json::from_str::<Value>(arguments).ok())
+        .is_none_or(|arguments| arguments["status"] == "completed")
 }
 
 fn status_name(status: StatefulRunStatus) -> &'static str {

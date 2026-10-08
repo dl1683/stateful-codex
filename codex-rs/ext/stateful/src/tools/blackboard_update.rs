@@ -43,6 +43,9 @@ use super::receipt_error;
 use super::worst_identifier;
 use super::worst_receipt_error;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const EXAMPLE: &str = r#"{"mutations":[{"action":"setRootPromotion","entryId":"<entryId>","expectedRevision":1,"rootPromotion":"promoted"}]}"#;
+
 const UPDATE_TOOL_NAME: &str = "blackboard_update_batch";
 const MAX_MUTATIONS: usize = 24;
 /// Host-written disclosure attached to every successful retire or supersede result.
@@ -162,7 +165,7 @@ impl BlackboardUpdateTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let UpdateArguments { mutations } = parse_arguments(&call)?;
+        let UpdateArguments { mutations } = parse_arguments(&call, EXAMPLE)?;
         if mutations.is_empty() || mutations.len() > MAX_MUTATIONS {
             return Err(FunctionCallError::RespondToModel(format!(
                 "mutations must contain 1-{MAX_MUTATIONS} items"

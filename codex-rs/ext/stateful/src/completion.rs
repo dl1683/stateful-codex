@@ -150,6 +150,22 @@ pub(crate) async fn prepare_completion(
     })
 }
 
+/// The root blackboard revision completion validates `rootRevision` against, with the
+/// number of E aliases it currently offers.
+pub(crate) async fn completion_root(
+    services: &ProjectIntelligenceServices,
+    project_id: &str,
+    thread_id: &str,
+) -> Result<(u64, usize), FunctionCallError> {
+    let store = services.blackboard().await.map_err(respond)?;
+    let (mut projection, _) =
+        crate::rule_scope::applicable_projection(store, project_id, thread_id)
+            .await
+            .map_err(respond)?;
+    crate::root_blackboard::retain_applicable_rules(&mut projection);
+    Ok((projection.revision, projection.data.len()))
+}
+
 async fn material_root_checklist(
     project_id: &str,
     thread_id: &str,

@@ -65,7 +65,7 @@ async fn malformed_proposal(delivery: ProposalDelivery) -> Result<()> {
             arguments,
         )
         .await?;
-        assert_eq!(error, "invalid tool arguments");
+        assert!(error.starts_with("invalid tool arguments"), "{error}");
         assert!(serde_json::to_string(&error)?.len() <= 9000);
         assert_eq!(snapshot(&sqlite).await?, before);
     }

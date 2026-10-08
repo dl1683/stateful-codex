@@ -81,7 +81,7 @@ async fn c3r1_decoding_errors_fit_direct_and_code_mode_budgets_without_writes() 
                         <= call.response_byte_budget(MAX_RESPONSE_BYTES)
                 );
                 assert!(!message.contains(&key));
-                assert_eq!(message, "invalid tool arguments");
+                assert!(message.starts_with("invalid tool arguments"), "{message}");
             }
         }
     }

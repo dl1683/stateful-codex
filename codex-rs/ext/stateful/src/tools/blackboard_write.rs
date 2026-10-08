@@ -58,6 +58,10 @@ use super::stable_id;
 use super::worst_identifier;
 use super::worst_receipt_error;
 
+/// Minimal valid calls shown with every argument decoding rejection.
+const BATCH_EXAMPLE: &str = r#"{"records":[{"idempotencyKey":"finding-1","kind":"fact","content":"<finding>","confidenceBasisPoints":8000,"verification":"unverified","importance":"normal","rootPromotion":"notPromoted"}]}"#;
+const RELATE_EXAMPLE: &str = r#"{"idempotencyKey":"relation-1","fromEntryId":"<entryId>","toEntryId":"<entryId>","kind":"supports","confidenceBasisPoints":8000}"#;
+
 const BATCH_RECORD_TOOL_NAME: &str = "blackboard_record_batch";
 const RELATE_TOOL_NAME: &str = "blackboard_relate";
 const MAX_BATCH_RECORDS: usize = 24;
@@ -112,12 +116,14 @@ enum BatchArguments {
 impl<'de> Deserialize<'de> for BatchArguments {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
+        // Decoding the chosen shape through the path tracker keeps the offending field's
+        // path, such as `records[0]`, in the diagnostic.
         if value.get("type").is_some() {
-            serde_json::from_value(value)
+            serde_path_to_error::deserialize(value)
                 .map(Self::SourceProposal)
                 .map_err(serde::de::Error::custom)
         } else {
-            serde_json::from_value(value)
+            serde_path_to_error::deserialize(value)
                 .map(Self::Agent)
                 .map_err(serde::de::Error::custom)
         }
@@ -364,7 +370,7 @@ impl BlackboardBatchRecordTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         super::batch_input::preflight(&call)?;
-        let arguments: BatchArguments = parse_arguments(&call)?;
+        let arguments: BatchArguments = parse_arguments(&call, BATCH_EXAMPLE)?;
         let BatchRecordArguments { records, relations } = match arguments {
             BatchArguments::SourceProposal(batch) => {
                 return super::source_proposals::record(
@@ -682,7 +688,7 @@ impl BlackboardRelateTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: RelateArguments = parse_arguments(&call)?;
+        let arguments: RelateArguments = parse_arguments(&call, RELATE_EXAMPLE)?;
         let relation = self
             .relate(arguments, &provenance_source_id(&call.call_id))
             .await?;

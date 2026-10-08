@@ -32,6 +32,9 @@ use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const EXAMPLE: &str = r#"{"text":"release gate"}"#;
+
 const TOOL_NAME: &str = "blackboard_query";
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 50;
@@ -105,7 +108,7 @@ impl BlackboardQueryTool {
             after_entry_id,
             limit,
             detail,
-        } = parse_arguments(&call)?;
+        } = parse_arguments(&call, EXAMPLE)?;
         let visible_root = (detail == QueryDetail::Compact
             && evidence_context_map_entry_ids.is_none())
         .then(|| self.visible_root.get(&self.thread_id))

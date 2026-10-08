@@ -46,6 +46,9 @@ use super::fits_response;
 use super::parse_arguments;
 use super::respond;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const EXAMPLE: &str = r#"{"question":"How are the tests run?"}"#;
+
 const TOOL_NAME: &str = "memory_read";
 /// Enough for a multi-topic question ("why sign, and why mth and yr?").
 const MAX_TERMS: usize = 24;
@@ -113,7 +116,7 @@ impl MemoryReadTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: MemoryReadArguments = parse_arguments(&call)?;
+        let arguments: MemoryReadArguments = parse_arguments(&call, EXAMPLE)?;
         let terms = arguments
             .question
             .as_deref()

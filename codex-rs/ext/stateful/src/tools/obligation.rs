@@ -22,6 +22,9 @@ use super::respond;
 use super::stable_id;
 use super::thread_run;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const EXAMPLE: &str = r#"{"idempotencyKey":"progress-1","packet":{"learning":["<what was learned>"],"next":["<remaining work>"]}}"#;
+
 const TOOL_NAME: &str = "obligation_update";
 
 #[derive(Deserialize)]
@@ -57,7 +60,7 @@ impl ObligationUpdateTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: Arguments = parse_arguments(&call)?;
+        let arguments: Arguments = parse_arguments(&call, EXAMPLE)?;
         let has_forward_work = !arguments.packet.next.is_empty()
             || !arguments.packet.blockers.is_empty()
             || !arguments.packet.requested_judgment.is_empty();

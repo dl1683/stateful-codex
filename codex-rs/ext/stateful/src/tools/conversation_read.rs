@@ -88,7 +88,7 @@ impl ConversationReadTool {
                 "source/history read exceeds the 32 KiB input bound",
             ));
         }
-        let arguments: Arguments = parse_arguments(&call)?;
+        let arguments: Arguments = parse_arguments(&call, "{}")?;
         let Some(thread_id) = arguments.thread_id else {
             if arguments.turn_id.is_some() || arguments.part.is_some() {
                 return Err(respond("turnId and part require threadId"));

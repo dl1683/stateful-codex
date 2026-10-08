@@ -36,6 +36,9 @@ use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const EXAMPLE: &str = r#"{"relativePath":"src/calc.py","lineRange":{"start":1,"end":40}}"#;
+
 const TOOL_NAME: &str = "evidence_read";
 const DEFAULT_BYTES: u32 = 8 * 1024;
 const MAX_BYTES: u32 = 12 * 1024;
@@ -94,7 +97,7 @@ impl EvidenceReadTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: EvidenceArguments = parse_arguments(&call).map_err(|error| {
+        let arguments: EvidenceArguments = parse_arguments(&call, EXAMPLE).map_err(|error| {
             call.function_arguments()
                 .ok()
                 .filter(|arguments| is_route_item_wrapper(arguments))

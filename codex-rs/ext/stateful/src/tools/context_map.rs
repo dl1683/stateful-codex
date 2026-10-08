@@ -34,6 +34,9 @@ use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
 
+/// Minimal valid call shown with every argument decoding rejection.
+const QUERY_EXAMPLE: &str = r#"{"text":"calculator addition"}"#;
+
 const TOOL_NAME: &str = "context_map_query";
 const REFRESH_TOOL_NAME: &str = "context_map_refresh";
 const DEFAULT_LIMIT: u32 = 10;
@@ -80,7 +83,7 @@ impl ContextMapQueryTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let arguments: QueryArguments = parse_arguments(&call)?;
+        let arguments: QueryArguments = parse_arguments(&call, QUERY_EXAMPLE)?;
         let limit = arguments.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
         let query_text = arguments.text;
         let project = self
@@ -268,7 +271,7 @@ impl ContextMapRefreshTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
-        let _arguments: RefreshArguments = parse_arguments(&call)?;
+        let _arguments: RefreshArguments = parse_arguments(&call, "{}")?;
         let project = self
             .projects
             .read_project(self.project_id.clone())
