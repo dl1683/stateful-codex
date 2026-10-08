@@ -5,6 +5,129 @@ use super::mentions_any;
 use super::parse_utc_day;
 use super::question_terms;
 
+#[tokio::test]
+async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay() {
+    use codex_extension_api::ToolExecutor;
+    use codex_project_intelligence::BlackboardEntryId;
+    use codex_project_intelligence::RootPromotion;
+    use std::sync::Arc;
+
+    let home = tempfile::TempDir::new().unwrap();
+    let sqlite = codex_state::SqliteConfig::new_for_testing(
+        codex_utils_absolute_path::test_support::PathExt::abs(home.path()),
+    );
+    {
+        let services = crate::services::ProjectIntelligenceServices::new(sqlite.clone());
+        let node = services.project_node_id("project-1").await.unwrap();
+        let store = services.blackboard().await.unwrap();
+        let update = super::super::blackboard_update::BlackboardUpdateTool::new(
+            "project-1".into(),
+            "thread-1".into(),
+            services.clone(),
+            Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+            /*event_sink*/ None,
+        );
+        for (head, count) in [("first", 4096), ("second", 64)] {
+            let successor = BlackboardEntryId::parse(head).unwrap();
+            store
+                .create_entry(successor, decision(&node, "Current needle conclusion."))
+                .await
+                .unwrap();
+            let mut mutations = Vec::new();
+            for i in 0..count {
+                let id = BlackboardEntryId::parse(format!("{head}-predecessor-{i:04}")).unwrap();
+                let mut value = decision(&node, "Original short note.");
+                value.root_promotion = RootPromotion::NotPromoted;
+                store.create_entry(id.clone(), value).await.unwrap();
+                mutations.push(serde_json::json!({"action":"supersede","entryId":id.to_string(),"expectedRevision":1,"successorEntryId":head}));
+            }
+            for batch in mutations.chunks(/*chunk_size*/ 4) {
+                let output = update
+                    .handle(codex_extension_api::ToolCall {
+                        turn_id: "turn-1".into(),
+                        call_id: "fanin-update".into(),
+                        tool_name: codex_extension_api::ToolName::plain("blackboard_update_batch"),
+                        model: "test-model".into(),
+                        codex_turn_metadata: None,
+                        truncation_policy: codex_utils_output_truncation::TruncationPolicy::Bytes(
+                            20_000,
+                        ),
+                        source: codex_extension_api::ToolCallSource::Direct,
+                        conversation_history: codex_extension_api::ConversationHistory::default(),
+                        turn_item_emitter: Arc::new(codex_extension_api::NoopTurnItemEmitter),
+                        environments: Vec::new(),
+                        payload: codex_extension_api::ToolPayload::Function {
+                            arguments: serde_json::json!({"mutations":batch}).to_string(),
+                        },
+                    })
+                    .await
+                    .unwrap();
+                let result: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
+                assert_eq!(
+                    (result["updated"].as_u64(), result["failed"].as_u64()),
+                    (Some(batch.len() as u64), Some(0))
+                );
+            }
+        }
+    }
+    // Reopen services/stores. Inspect assembled entry/hit items BEFORE response byte trimming.
+    for _ in 0..2 {
+        let services = crate::services::ProjectIntelligenceServices::new(sqlite.clone());
+        let store = services.blackboard().await.unwrap();
+        let tool = super::MemoryReadTool::new(
+            "project-1".into(),
+            services.clone(),
+            Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+        );
+        for include_history in [false, true] {
+            let (groups, more) = tool
+                .knowledge(
+                    store,
+                    &question_terms("needle"),
+                    /*since_ms*/ None,
+                    include_history,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                (
+                    groups.len(),
+                    groups.iter().map(Vec::len).sum::<usize>(),
+                    more
+                ),
+                (2, if include_history { 32 } else { 2 }, include_history)
+            );
+        }
+        let successor = BlackboardEntryId::parse("first").unwrap();
+        let existing = store
+            .get_entry("project-1", &successor)
+            .await
+            .unwrap()
+            .unwrap();
+        let references = (0..4)
+            .map(
+                |i| super::super::blackboard_supersede::SupersedeReference::Entry {
+                    entry_id: format!("first-predecessor-{i:04}"),
+                    revision: 1,
+                },
+            )
+            .collect::<Vec<_>>();
+        assert!(
+            super::super::blackboard_supersede::committed_succession(
+                store,
+                &crate::visible_root::VisibleRootRegistry::default(),
+                "project-1",
+                "thread-1",
+                &successor,
+                &existing.value,
+                &references,
+            )
+            .await
+            .is_err()
+        );
+    }
+}
+
 #[test]
 fn question_terms_keep_content_words_only() {
     assert_eq!(

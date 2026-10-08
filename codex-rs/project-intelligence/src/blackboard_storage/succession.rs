@@ -249,25 +249,47 @@ impl BlackboardStore {
 #[path = "succession_tests.rs"]
 mod tests;
 
-/// The entries currently recorded as superseded by `successor_id`.
-async fn load_superseded_by(
+/// Select identifiers before loading any entry text or relations.
+async fn predecessor_ids(
     connection: &mut sqlx::SqliteConnection,
     project_id: &str,
     successor_id: &BlackboardEntryId,
-) -> Result<Vec<BlackboardEntry>, BlackboardStoreError> {
-    let ids = sqlx::query_scalar::<_, String>(
+    limit: u32,
+) -> Result<Vec<String>, BlackboardStoreError> {
+    Ok(sqlx::query_scalar::<_, String>(
         "SELECT entry.id
          FROM blackboard_entries AS entry
          JOIN blackboard_entry_revisions AS revision
            ON revision.entry_id = entry.id AND revision.revision = entry.revision
          WHERE entry.project_id = ? AND revision.state = 'superseded'
            AND revision.superseded_by = ?
-         ORDER BY entry.id",
+         ORDER BY entry.id LIMIT ?",
     )
     .bind(project_id)
     .bind(successor_id.as_str())
+    .bind(i64::from(limit))
     .fetch_all(&mut *connection)
+    .await?)
+}
+
+/// Replay must compare the complete set, or refuse before loading full entries.
+async fn load_superseded_by(
+    connection: &mut sqlx::SqliteConnection,
+    project_id: &str,
+    successor_id: &BlackboardEntryId,
+) -> Result<Vec<BlackboardEntry>, BlackboardStoreError> {
+    let ids = predecessor_ids(
+        connection,
+        project_id,
+        successor_id,
+        (MAX_SUPERSEDED_ENTRIES + 1) as u32,
+    )
     .await?;
+    if ids.len() > MAX_SUPERSEDED_ENTRIES {
+        return Err(BlackboardStoreError::EntryIdentityConflict(
+            successor_id.to_string(),
+        ));
+    }
     let mut entries = Vec::with_capacity(ids.len());
     for id in ids {
         let id = BlackboardEntryId::parse(id)?;
@@ -279,14 +301,55 @@ async fn load_superseded_by(
 }
 
 impl BlackboardStore {
-    /// The entries `successor_id` replaced, as currently recorded.
+    /// The complete replacement set for replay. Refuses sets exceeding the succession cap.
     pub async fn superseded_by(
         &self,
         project_id: &str,
         successor_id: &BlackboardEntryId,
     ) -> Result<Vec<BlackboardEntry>, BlackboardStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        load_superseded_by(&mut connection, project_id, successor_id).await
+        let mut transaction = self.pool.begin().await?;
+        let entries = load_superseded_by(&mut transaction, project_id, successor_id).await?;
+        transaction.commit().await?;
+        Ok(entries)
+    }
+
+    /// A bounded prefix of predecessors ordered by ID, and whether more exist.
+    /// Selects at most `limit` IDs and loads only those entries, in one snapshot.
+    /// The effective limit is capped at 200, including for historical stores.
+    pub async fn predecessor_page(
+        &self,
+        project_id: &str,
+        successor_id: &BlackboardEntryId,
+        limit: u32,
+    ) -> Result<(Vec<BlackboardEntry>, bool), BlackboardStoreError> {
+        let limit = limit.min(200);
+        let mut transaction = self.pool.begin().await?;
+        let ids = predecessor_ids(&mut transaction, project_id, successor_id, limit).await?;
+        // Probe for overflow without selecting another identifier or loading its entry.
+        let more = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (
+                SELECT 1 FROM blackboard_entries AS entry
+                JOIN blackboard_entry_revisions AS revision
+                  ON revision.entry_id = entry.id AND revision.revision = entry.revision
+                WHERE entry.project_id = ? AND revision.state = 'superseded'
+                  AND revision.superseded_by = ?
+                LIMIT 1 OFFSET ?
+             )",
+        )
+        .bind(project_id)
+        .bind(successor_id.as_str())
+        .bind(i64::from(limit))
+        .fetch_one(&mut *transaction)
+        .await?;
+        let mut entries = Vec::with_capacity(ids.len());
+        for id in ids {
+            let id = BlackboardEntryId::parse(id)?;
+            if let Some(entry) = load_entry(&mut transaction, project_id, &id).await? {
+                entries.push(entry);
+            }
+        }
+        transaction.commit().await?;
+        Ok((entries, more))
     }
 
     /// The newest entry each of `successor_ids` replaced, for showing what a current value
@@ -299,32 +362,10 @@ impl BlackboardStore {
         if successor_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-            "SELECT revision.superseded_by, entry.id
-             FROM blackboard_entries AS entry
-             JOIN blackboard_entry_revisions AS revision
-               ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             WHERE revision.state = 'superseded' AND entry.project_id = ",
-        );
-        builder.push_bind(project_id);
-        builder.push(" AND revision.superseded_by IN (");
-        let mut separated = builder.separated(", ");
-        for successor_id in successor_ids {
-            separated.push_bind(successor_id.as_str());
-        }
-        builder.push(") ORDER BY revision.superseded_by, entry.updated_at_ms DESC, entry.id");
         let mut transaction = self.pool.begin().await?;
-        // One pass over the project's superseded entries, newest first per successor.
-        let rows = builder
-            .build_query_as::<(String, String)>()
-            .fetch_all(&mut *transaction)
-            .await?;
+        let rows = newest_predecessor_ids(&mut transaction, project_id, successor_ids).await?;
         let mut predecessors = Vec::new();
-        let mut seen = HashSet::new();
         for (successor_id, predecessor_id) in rows {
-            if !seen.insert(successor_id.clone()) {
-                continue;
-            }
             let predecessor_id = BlackboardEntryId::parse(predecessor_id)?;
             if let Some(predecessor) =
                 load_entry(&mut transaction, project_id, &predecessor_id).await?
@@ -335,6 +376,39 @@ impl BlackboardStore {
         transaction.commit().await?;
         Ok(predecessors)
     }
+}
+
+async fn newest_predecessor_ids(
+    connection: &mut sqlx::SqliteConnection,
+    project_id: &str,
+    successor_ids: &[BlackboardEntryId],
+) -> Result<Vec<(String, String)>, BlackboardStoreError> {
+    let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new("WITH requested(id) AS (VALUES ");
+    let mut separated = builder.separated(", ");
+    for id in successor_ids {
+        separated
+            .push("(")
+            .push_bind_unseparated(id.as_str())
+            .push_unseparated(")");
+    }
+    builder.push(
+        ") SELECT DISTINCT requested.id, (
+             SELECT entry.id FROM blackboard_entries AS entry
+             JOIN blackboard_entry_revisions AS revision
+               ON revision.entry_id = entry.id AND revision.revision = entry.revision
+             WHERE entry.project_id = ",
+    );
+    builder.push_bind(project_id);
+    builder.push(
+        " AND revision.state = 'superseded' AND revision.superseded_by = requested.id
+          ORDER BY entry.updated_at_ms DESC, entry.id LIMIT 1
+         ) AS predecessor_id FROM requested
+         WHERE predecessor_id IS NOT NULL ORDER BY requested.id",
+    );
+    Ok(builder
+        .build_query_as::<(String, String)>()
+        .fetch_all(connection)
+        .await?)
 }
 
 impl BlackboardStore {

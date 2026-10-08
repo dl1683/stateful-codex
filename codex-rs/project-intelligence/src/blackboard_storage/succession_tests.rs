@@ -25,6 +25,245 @@ use crate::RootPromotion;
 
 const PROJECT_ID: &str = "project-1";
 
+// Complete logical bytes for every PI table in this bounded-text fixture.
+async fn database_rows(store: &BlackboardStore) -> Vec<Vec<String>> {
+    let mut transaction = store.pool.begin().await.unwrap();
+    let tables = sqlx::query_scalar::<_, String>("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name")
+        .fetch_all(&mut *transaction).await.unwrap();
+    let mut result = Vec::new();
+    for table in tables {
+        let columns =
+            sqlx::query_scalar::<_, String>("SELECT name FROM pragma_table_info(?) ORDER BY cid")
+                .bind(&table)
+                .fetch_all(&mut *transaction)
+                .await
+                .unwrap();
+        let fields = columns
+            .iter()
+            .map(|name| format!("quote(\"{name}\")"))
+            .collect::<Vec<_>>()
+            .join(",");
+        result.push(
+            sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+                "SELECT json_array({fields}) AS cells FROM \"{table}\" ORDER BY cells"
+            )))
+            .fetch_all(&mut *transaction)
+            .await
+            .unwrap(),
+        );
+    }
+    transaction.commit().await.unwrap();
+    result
+}
+
+#[tokio::test]
+async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reopen() {
+    let home = TempDir::new().unwrap();
+    let mut store = store(&home).await;
+    let successor = BlackboardEntryId::parse("successor").unwrap();
+    let value = decision("Current short note.", RootPromotion::Promoted);
+    let mut replaced = Vec::new();
+    for i in 0..4 {
+        let id = BlackboardEntryId::parse(format!("predecessor-{i:08}")).unwrap();
+        store
+            .create_entry(
+                id.clone(),
+                decision("Original short note.", RootPromotion::NotPromoted),
+            )
+            .await
+            .unwrap();
+        replaced.push(SupersededEntry {
+            id,
+            expected_revision: 1,
+        });
+    }
+    let initial = store
+        .create_successor_from_model(successor.clone(), value.clone(), replaced.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .create_successor_from_model(successor.clone(), value.clone(), replaced.clone())
+            .await
+            .unwrap(),
+        initial
+    );
+    let mut previous = 4;
+    for count in [64, 4096] {
+        for i in previous..count {
+            let id = BlackboardEntryId::parse(format!("predecessor-{i:08}")).unwrap();
+            let entry = store
+                .create_entry(
+                    id.clone(),
+                    decision("Original short note.", RootPromotion::NotPromoted),
+                )
+                .await
+                .unwrap();
+            let mut update = super::super::context_bounds::tests::retire(&entry);
+            update.state = BlackboardEntryState::Superseded;
+            update.superseded_by = Some(successor.clone());
+            store
+                .update_entry_from_model(PROJECT_ID, &id, update)
+                .await
+                .unwrap();
+        }
+        previous = count;
+        let before = database_rows(&store).await;
+        for attempt in 0..2 {
+            let mut connection = store.pool.acquire().await.unwrap();
+            // Actual production selectors, measured before full entry loads/dedup/display.
+            let root_ids = super::newest_predecessor_ids(
+                &mut connection,
+                PROJECT_ID,
+                &[
+                    successor.clone(),
+                    successor.clone(),
+                    BlackboardEntryId::parse("absent").unwrap(),
+                ],
+            )
+            .await
+            .unwrap();
+            let preview_ids =
+                super::predecessor_ids(&mut connection, PROJECT_ID, &successor, /*limit*/ 3)
+                    .await
+                    .unwrap();
+            let history_ids =
+                super::predecessor_ids(&mut connection, PROJECT_ID, &successor, /*limit*/ 30)
+                    .await
+                    .unwrap();
+            let replay_ids = super::predecessor_ids(
+                &mut connection,
+                PROJECT_ID,
+                &successor,
+                (super::MAX_SUPERSEDED_ENTRIES + 1) as u32,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                (
+                    root_ids.len(),
+                    preview_ids.len(),
+                    history_ids.len(),
+                    replay_ids.len()
+                ),
+                (1, 3, 30, 5)
+            );
+            drop(connection);
+            let packet = store
+                .root_projection(RootBlackboardQuery {
+                    project_id: PROJECT_ID.to_string(),
+                    max_entries: 1,
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                packet
+                    .data
+                    .iter()
+                    .map(|hit| &hit.entry.id)
+                    .collect::<Vec<_>>(),
+                vec![&successor]
+            );
+            let root = store
+                .newest_predecessors(PROJECT_ID, std::slice::from_ref(&successor))
+                .await
+                .unwrap();
+            let (preview, preview_more) = store
+                .predecessor_page(PROJECT_ID, &successor, /*limit*/ 3)
+                .await
+                .unwrap();
+            let (history, history_more) = store
+                .predecessor_page(PROJECT_ID, &successor, /*limit*/ 30)
+                .await
+                .unwrap();
+            assert_eq!(
+                (
+                    root.len(),
+                    preview.len(),
+                    history.len(),
+                    preview_more,
+                    history_more
+                ),
+                (1, 3, 30, true, true)
+            );
+            assert_eq!(
+                preview
+                    .iter()
+                    .map(|entry| entry.id.to_string())
+                    .collect::<Vec<_>>(),
+                preview_ids
+            );
+            assert_eq!(
+                history
+                    .iter()
+                    .map(|entry| entry.id.to_string())
+                    .collect::<Vec<_>>(),
+                history_ids
+            );
+            let newest = sqlx::query_scalar::<_, String>("SELECT id FROM blackboard_entries WHERE id LIKE 'predecessor-%' ORDER BY updated_at_ms DESC, id LIMIT 1").fetch_one(&store.pool).await.unwrap();
+            assert_eq!(root[0].1.id.as_str(), newest);
+            assert!(matches!(
+                store.superseded_by(PROJECT_ID, &successor).await,
+                Err(BlackboardStoreError::EntryIdentityConflict(_))
+            ));
+            for model in [false, true] {
+                let result = if model {
+                    store
+                        .create_successor_from_model(
+                            successor.clone(),
+                            value.clone(),
+                            replaced.clone(),
+                        )
+                        .await
+                } else {
+                    store
+                        .create_successor(successor.clone(), value.clone(), replaced.clone())
+                        .await
+                };
+                assert!(matches!(
+                    result,
+                    Err(BlackboardStoreError::EntryIdentityConflict(_))
+                ));
+            }
+            assert_eq!(database_rows(&store).await, before);
+            if attempt == 0 {
+                store.pool.close().await;
+                store = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+    assert_eq!(
+        store
+            .predecessor_page(PROJECT_ID, &successor, /*limit*/ 0)
+            .await
+            .unwrap(),
+        (Vec::new(), true)
+    );
+    assert_eq!(
+        store
+            .predecessor_page(
+                PROJECT_ID,
+                &BlackboardEntryId::parse("absent").unwrap(),
+                u32::MAX
+            )
+            .await
+            .unwrap(),
+        (Vec::new(), false)
+    );
+    assert_eq!(
+        store
+            .predecessor_page(PROJECT_ID, &successor, u32::MAX)
+            .await
+            .unwrap()
+            .0
+            .len(),
+        200
+    );
+    store.pool.close().await;
+}
+
 fn decision(content: &str, promotion: RootPromotion) -> NewBlackboardEntry {
     NewBlackboardEntry {
         project_id: PROJECT_ID.to_string(),

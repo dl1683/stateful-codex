@@ -50,6 +50,8 @@ const TOOL_NAME: &str = "memory_read";
 /// Enough for a multi-topic question ("why sign, and why mth and yr?").
 const MAX_TERMS: usize = 24;
 const MAX_SEARCH_HITS: u32 = 30;
+/// Full predecessor entries and hits loaded by history expansion across all groups.
+const MAX_HISTORY_PREDECESSORS: u32 = 30;
 /// Successor lookups one call may make while resolving matches to their current entries.
 const MAX_SUCCESSOR_LOOKUPS: usize = 64;
 const MAX_ENTRY_CONTENT_BYTES: usize = 600;
@@ -244,6 +246,7 @@ impl MemoryReadTool {
         let mut shown: HashSet<String> = HashSet::new();
         let mut groups: Vec<Vec<Value>> = Vec::new();
         let mut lookups = 0usize;
+        let mut history_remaining = MAX_HISTORY_PREDECESSORS;
         for hit in hits {
             let mut current = hit;
             let mut path = Vec::new();
@@ -287,10 +290,16 @@ impl MemoryReadTool {
                         entry_item(store, &self.project_id, &current, terms).await,
                     ]);
                     if include_history {
-                        let replaced = store
-                            .superseded_by(&self.project_id, &current.entry.id)
+                        let (replaced, more) = store
+                            .predecessor_page(
+                                &self.project_id,
+                                &current.entry.id,
+                                history_remaining,
+                            )
                             .await
                             .map_err(respond)?;
+                        history_remaining -= replaced.len() as u32;
+                        truncated |= more;
                         for predecessor in replaced {
                             if !shown.contains(&predecessor.id.to_string())
                                 && let Some(predecessor) = store

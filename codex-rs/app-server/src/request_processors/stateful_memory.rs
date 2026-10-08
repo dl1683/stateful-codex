@@ -313,13 +313,12 @@ async fn memory_item(
     entry: BlackboardEntry,
     sections: Sections,
 ) -> Result<StatefulMemoryItem, JSONRPCErrorError> {
-    let replaced = store
-        .superseded_by(&entry.value.project_id, &entry.id)
+    let (replaced, _) = store
+        .predecessor_page(&entry.value.project_id, &entry.id, MAX_REPLACED as u32)
         .await
         .map_err(blackboard_error)?;
     let replaces = replaced
         .into_iter()
-        .take(MAX_REPLACED)
         .map(|older| StatefulMemoryReplaced {
             entry_id: older.id.to_string(),
             content: bounded(&older.value.content, MAX_REPLACED_BYTES).0,
