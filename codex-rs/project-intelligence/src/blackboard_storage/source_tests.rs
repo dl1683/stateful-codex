@@ -13,6 +13,98 @@ use tempfile::TempDir;
 const PROJECT: &str = "project-1";
 
 #[tokio::test]
+async fn c2r1_unlinked_retired_words_cross_chunks_reopen_and_rebuild() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let words = format!("{} private receipt QX704", vec!["meridian"; 95].join(" "));
+    assert_eq!(words.len(), 876);
+    let mut value = rule(&words);
+    value.kind = BlackboardKind::Note;
+    let id = BlackboardEntryId::parse("unlinked-note").unwrap();
+    let entry = store.create_entry(id.clone(), value).await.unwrap();
+    store
+        .update_entry(PROJECT, &id, retire(&entry))
+        .await
+        .unwrap();
+    let links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM capture_entry_sources")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(links, 0);
+    let text = format!(
+        "{}{words} suffix independent cedar",
+        "prefix ".repeat(/*n*/ 500)
+    );
+    let seal = store
+        .observe_source(observation("new-event-new-digest", &text), &text)
+        .await
+        .unwrap();
+    let independent = "Independent Cedar kit report.";
+    let control = store
+        .observe_source(observation("independent", independent), independent)
+        .await
+        .unwrap();
+    store.pool.close().await;
+    for phase in 0..3 {
+        let reader = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+            .await
+            .unwrap();
+        if phase == 1 {
+            reader.begin_source_index_rebuild(PROJECT).await.unwrap();
+            while !reader.maintain_source_index(PROJECT).await.unwrap() {}
+        }
+        let before = snapshot(&reader).await;
+        for (start, end) in [(3500, 4376), (0, 4096), (3840, 4401), (3400, 4401)] {
+            assert!(matches!(
+                reader
+                    .read_source_range(
+                        PROJECT,
+                        &seal.exact_source_locator,
+                        &seal.digest,
+                        start,
+                        end
+                    )
+                    .await,
+                Err(BlackboardStoreError::SourceExcluded)
+            ));
+        }
+        assert_eq!(
+            reader
+                .search_source_ranges(PROJECT, "meridian QX704", /*after*/ None)
+                .await
+                .unwrap()
+                .ranges,
+            Vec::<SourceRangeRead>::new()
+        );
+        assert_eq!(
+            reader
+                .read_source_range(
+                    PROJECT,
+                    &control.exact_source_locator,
+                    &control.digest,
+                    /*start*/ 0,
+                    independent.len() as u32
+                )
+                .await
+                .unwrap()
+                .exact_text,
+            independent
+        );
+        assert_eq!(
+            reader
+                .search_source_ranges(PROJECT, "Cedar", /*after*/ None)
+                .await
+                .unwrap()
+                .ranges
+                .len(),
+            1
+        );
+        assert_eq!(snapshot(&reader).await, before);
+        reader.pool.close().await;
+    }
+}
+
+#[tokio::test]
 async fn c2_exact_source_survives_fault_reopen_redelivery_and_revision_tamper() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;

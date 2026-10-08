@@ -122,11 +122,25 @@ impl BlackboardStore {
         if text.is_empty() {
             return Ok(true);
         }
-        let normalized = format!(" {} ", crate::retirement_capture_words(text));
-        let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_source_exclusions WHERE project_id = ? AND digest = ?) OR EXISTS(SELECT 1 FROM capture_identity_aliases WHERE project_id = ? AND retired = 1 AND retirement_words != '' AND instr(?, ' ' || retirement_words || ' ') > 0) OR EXISTS(SELECT 1 FROM capture_source_exclusions AS excluded JOIN capture_sources AS source ON source.project_id = excluded.project_id AND source.digest = excluded.digest JOIN capture_source_chunks AS chunk ON chunk.source_id = source.source_id AND chunk.start_byte < excluded.end_byte AND chunk.end_byte > excluded.start_byte WHERE excluded.project_id = ? AND (instr(CAST(? AS BLOB), substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte))) > 0 OR instr(substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte)), CAST(? AS BLOB)) > 0))")
-            .bind(project_id).bind(digest(text)).bind(project_id).bind(normalized).bind(project_id).bind(text).bind(text).fetch_one(&self.pool).await?;
-        Ok(!excluded)
+        let mut tx = self.pool.begin().await?;
+        let eligible = text_eligible_on(&mut tx, project_id, text).await?;
+        tx.commit().await?;
+        Ok(eligible)
     }
+}
+
+pub(super) async fn text_eligible_on(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    text: &str,
+) -> Result<bool, BlackboardStoreError> {
+    if text.len() > 65536 {
+        return Ok(false);
+    }
+    let normalized = format!(" {} ", crate::retirement_capture_words(text));
+    let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_source_exclusions WHERE project_id = ? AND digest = ?) OR EXISTS(SELECT 1 FROM capture_identity_aliases WHERE project_id = ? AND retired = 1 AND retirement_words != '' AND instr(?, ' ' || retirement_words || ' ') > 0) OR EXISTS(SELECT 1 FROM capture_source_exclusions AS excluded JOIN capture_sources AS source ON source.project_id = excluded.project_id AND source.digest = excluded.digest JOIN capture_source_chunks AS chunk ON chunk.source_id = source.source_id AND chunk.start_byte < excluded.end_byte AND chunk.end_byte > excluded.start_byte WHERE excluded.project_id = ? AND (instr(CAST(? AS BLOB), substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte))) > 0 OR instr(substr(CAST(chunk.exact_bytes AS BLOB), MAX(excluded.start_byte, chunk.start_byte) - chunk.start_byte + 1, MIN(excluded.end_byte, chunk.end_byte) - MAX(excluded.start_byte, chunk.start_byte)), CAST(? AS BLOB)) > 0))")
+            .bind(project_id).bind(digest(text)).bind(project_id).bind(normalized).bind(project_id).bind(text).bind(text).fetch_one(connection).await?;
+    Ok(!excluded)
 }
 
 pub(super) async fn seal_on(
@@ -154,10 +168,11 @@ pub(super) async fn eligible(
     start: u32,
     end: u32,
 ) -> Result<bool, BlackboardStoreError> {
-    let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_sources AS source JOIN capture_source_exclusions AS exclusion ON exclusion.project_id = source.project_id AND exclusion.digest = source.digest WHERE source.project_id = ? AND source.source_id = ? AND exclusion.start_byte < ? AND exclusion.end_byte > ?) OR EXISTS(SELECT 1 FROM capture_source_chunks AS chunk JOIN capture_identity_aliases AS alias ON alias.project_id = ? AND alias.retired = 1 AND alias.retirement_words != '' WHERE chunk.source_id = ? AND chunk.start_byte < ? AND chunk.end_byte > ? AND instr(' ' || chunk.search_text || ' ', ' ' || alias.retirement_words || ' ') > 0)")
-        .bind(project_id).bind(locator).bind(i64::from(end)).bind(i64::from(start))
-        .bind(project_id).bind(locator).bind(i64::from(end)).bind(i64::from(start)).fetch_one(connection).await?;
-    Ok(!excluded)
+    let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_sources AS source JOIN capture_source_exclusions AS exclusion ON exclusion.project_id = source.project_id AND exclusion.digest = source.digest WHERE source.project_id = ? AND source.source_id = ? AND exclusion.start_byte < ? AND exclusion.end_byte > ?)")
+        .bind(project_id).bind(locator).bind(i64::from(end)).bind(i64::from(start)).fetch_one(&mut *connection).await?;
+    Ok(!excluded
+        && super::source_retirement::range_eligible(connection, project_id, locator, start, end)
+            .await?)
 }
 
 pub(super) async fn read_on(
