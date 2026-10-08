@@ -167,43 +167,6 @@ impl StatefulRunUpdateTool {
                     .to_string(),
             ));
         }
-        let acceptance = if status == StatefulRunStatus::Completed {
-            if current.revision != expected_revision {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "run revision conflict: expected {expected_revision}, found {}",
-                    current.revision
-                )));
-            }
-            match self
-                .acceptance_decision(&current, result.as_deref())
-                .await?
-            {
-                AcceptanceDecision::Proceed { commit, basis } => Some((commit, basis)),
-                AcceptanceDecision::Refused(message) => {
-                    return Err(FunctionCallError::RespondToModel(message));
-                }
-                AcceptanceDecision::Blocked(run) => {
-                    if let Some(event_sink) = &self.event_sink {
-                        event_sink.emit(StatefulEvent::RunUpdated {
-                            project_id: run.value.project_id.clone(),
-                            run_id: run.id.to_string(),
-                            revision: run.revision,
-                        });
-                    }
-                    return bounded_json_output(
-                        &call,
-                        json!({
-                            "runId": run.id.to_string(),
-                            "status": status_name(run.status),
-                            "revision": run.revision,
-                            "instruction": "Completion was refused repeatedly without acceptance progress, so the host moved this run to blocked as a partial result. Do not claim the work is complete: tell the user which acceptance gates remain unmet (read them with stateful_run_read section \"acceptance\") and what was delivered.",
-                        }),
-                    );
-                }
-            }
-        } else {
-            None
-        };
         // Terminal completion holds the project database's writer lock from validation
         // through the runtime commit, so no project mutation can land in between.
         let mut fence = None;
@@ -333,6 +296,46 @@ impl StatefulRunUpdateTool {
                 ));
             }
             (None, None)
+        };
+        // The acceptance gate runs under the completion fence, after the disposition's own
+        // validation, so its leased verification attempt and the terminal commit see one
+        // consistent project state.
+        let acceptance = if status == StatefulRunStatus::Completed {
+            if current.revision != expected_revision {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "run revision conflict: expected {expected_revision}, found {}",
+                    current.revision
+                )));
+            }
+            match self
+                .acceptance_decision(&current, result.as_deref())
+                .await?
+            {
+                AcceptanceDecision::Proceed { commit, basis } => Some((commit, basis)),
+                AcceptanceDecision::Refused(message) => {
+                    return Err(FunctionCallError::RespondToModel(message));
+                }
+                AcceptanceDecision::Blocked(run) => {
+                    if let Some(event_sink) = &self.event_sink {
+                        event_sink.emit(StatefulEvent::RunUpdated {
+                            project_id: run.value.project_id.clone(),
+                            run_id: run.id.to_string(),
+                            revision: run.revision,
+                        });
+                    }
+                    return bounded_json_output(
+                        &call,
+                        json!({
+                            "runId": run.id.to_string(),
+                            "status": status_name(run.status),
+                            "revision": run.revision,
+                            "instruction": "Completion was refused repeatedly without acceptance progress, so the host moved this run to blocked as a partial result. Do not claim the work is complete: tell the user which acceptance gates remain unmet (read them with stateful_run_read section \"acceptance\") and what was delivered.",
+                        }),
+                    );
+                }
+            }
+        } else {
+            None
         };
         let acceptance_basis = acceptance
             .as_ref()
