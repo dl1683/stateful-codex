@@ -764,3 +764,6 @@ async fn c2r1_public_conversation_fallbacks_exclude_forgotten_bytes_after_restar
     assert!(server.shutdown_gracefully().await?.success());
     Ok(())
 }
+
+#[path = "stateful_capture_repair3_tests.rs"]
+mod repair3_tests;

@@ -23,7 +23,7 @@ const ONE: &str = "Default rate formatting uses ONE decimal place.";
 const TWO: &str = "Default rate formatting uses TWO decimal places; the requirement changed.";
 
 #[tokio::test]
-async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced() -> Result<()> {
+async fn a_changed_decision_leaves_one_current_value_and_preserves_its_history() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
@@ -148,7 +148,6 @@ async fn a_changed_decision_leaves_one_current_value_and_shows_what_it_replaced(
         .collect::<Vec<_>>();
     assert_eq!(entry_lines.len(), 1, "{entry_lines:?}");
     assert!(entry_lines[0].contains(TWO));
-    assert!(entry_lines[0].contains(&format!("replaces: \\\"{ONE}\\\"")));
     Ok(())
 }
 

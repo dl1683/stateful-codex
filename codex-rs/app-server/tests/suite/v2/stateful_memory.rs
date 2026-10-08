@@ -240,8 +240,7 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
         vec![CORRECTED.to_string()]
     );
 
-    // A fresh thread's packet carries the corrected rule; the forgotten one is gone and the
-    // old wording appears only as what the correction replaced.
+    // A fresh thread's packet carries the corrected rule and withholds historical wording.
     let fresh = start_thread(&mut server, &project.project.id).await?;
     run_turn(&mut server, &fresh, "Rename the helper in utils.py").await?;
     let packet = log.requests()[1].body_json().to_string();
@@ -250,9 +249,8 @@ async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> 
             packet.contains(SUITE_RULE),
             packet.contains(CORRECTED),
             packet.matches(NEXT_RULE).count(),
-            packet.contains(&format!("replaces: \\\"{NEXT_RULE}\\\"")),
         ),
-        (false, true, 1, true)
+        (false, true, 0)
     );
     Ok(())
 }
