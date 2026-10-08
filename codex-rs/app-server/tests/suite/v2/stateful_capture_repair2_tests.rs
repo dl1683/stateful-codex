@@ -12,7 +12,7 @@ use wiremock::matchers::path;
 async fn c3r2_public_ordinary_agent_batch_above_32k_commits_and_replays_cold() -> Result<()> {
     let (home, mut server, project, thread, responses_server) = setup().await?;
     let records: Vec<_> = (0..9).map(|index| json!({
-        "idempotencyKey":format!("compat-{index}"), "kind":"note", "content":format!("{index}{}","a".repeat(3999)),
+        "idempotencyKey":format!("compat-{index}"), "kind":"note", "content":format!("{index}{}","a".repeat(/*n*/ 3999)),
         "confidenceBasisPoints":0,"verification":"unverified","importance":"normal","rootPromotion":"notPromoted"
     })).collect();
     let request = json!({"records":records,"relations":[]});
@@ -162,11 +162,11 @@ async fn c3r2_public_decoded_proposal_refusals_fit_tiny_budgets_without_writes()
                         "spans":[{"startByte":0,"endByte":handle[4],"role":"body"}],"category":"background","interpretation":"Cedar equipment is teal."});
                     let records=match variant {
                         ProposalRefusal::Valid=>vec![record],ProposalRefusal::Empty=>vec![],ProposalRefusal::TooMany=>vec![record;25],
-                        ProposalRefusal::Oversized=>{record["interpretation"]=json!("x".repeat(33000));vec![record]}
+                        ProposalRefusal::Oversized=>{record["interpretation"]=json!("x".repeat(/*n*/ 33000));vec![record]}
                     };
                     vec![responses::ev_function_call(&emitted_call_id,"blackboard_record_batch",&json!({"type":"sourceProposal","records":records}).to_string()),responses::ev_completed("request")]
                 } else {vec![responses::ev_completed("done")]};
-                ResponseTemplate::new(200).insert_header("content-type","text/event-stream").set_body_string(responses::sse(events))
+                ResponseTemplate::new(/*s*/ 200).insert_header("content-type","text/event-stream").set_body_string(responses::sse(events))
             }).mount(&responses_server).await;
             server
                 .start_turn_and_wait_for_completion(TurnStartParams {
@@ -240,7 +240,7 @@ async fn c3r2_public_memory_read_matching_entry_advances_or_terminally_refuses_c
         &responses_server,
         &thread,
         "blackboard_record_batch",
-        json!({"records":[record("memory-budget",&format!("equipment {}","a".repeat(3990)))]}),
+        json!({"records":[record("memory-budget",&format!("equipment {}","a".repeat(/*n*/ 3990)))]}),
     )
     .await?;
     assert_eq!(written["recorded"], json!(1));

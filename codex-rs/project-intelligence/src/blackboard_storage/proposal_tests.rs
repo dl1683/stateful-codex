@@ -50,7 +50,7 @@ async fn c3r2_durable_proposal_group_keeps_unsupported_context_out_of_automatic_
         .unwrap();
     let id = BlackboardEntryId::parse(result[0].entry_id.clone().unwrap()).unwrap();
     let archived = store.get_entry(PROJECT, &id).await.unwrap();
-    for payload in ["x".repeat(1048576), "not json".into(), "{}".into()] {
+    for payload in ["x".repeat(/*n*/ 1048576), "not json".into(), "{}".into()] {
         sqlx::query("UPDATE knowledge_context SET payload = ? WHERE entry_id = ?")
             .bind(payload)
             .bind(id.as_str())

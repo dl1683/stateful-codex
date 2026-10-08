@@ -24,7 +24,7 @@ async fn c3r2_decoded_proposal_refusals_and_backstops_fit_call_budgets() {
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
     );
-    let proposal = json!({"sourceId":"s".repeat(64),"digest":"a".repeat(64),
+    let proposal = json!({"sourceId":"s".repeat(/*n*/ 64),"digest":"a".repeat(/*n*/ 64),
         "sourceRevision":1,"partIndex":0,"spans":[{"startByte":0,"endByte":1,"role":"body"}],
         "category":"background","interpretation":"Cedar equipment is teal."});
     for source in [
@@ -41,7 +41,7 @@ async fn c3r2_decoded_proposal_refusals_and_backstops_fit_call_budgets() {
                 vec![proposal.clone(); 25],
                 vec![{
                     let mut oversized = proposal.clone();
-                    oversized["interpretation"] = json!("x".repeat(33000));
+                    oversized["interpretation"] = json!("x".repeat(/*n*/ 33000));
                     oversized
                 }],
             ] {
@@ -65,7 +65,7 @@ async fn c3r2_decoded_proposal_refusals_and_backstops_fit_call_budgets() {
                     assert_eq!(message, "budget_insufficient");
                 }
                 let Err(FunctionCallError::RespondToModel(message)) =
-                    bounded_json_output(&call, json!({"oversized":"x".repeat(10000)}))
+                    bounded_json_output(&call, json!({"oversized":"x".repeat(/*n*/ 10000)}))
                 else {
                     panic!("backstop refusal")
                 };
@@ -93,9 +93,9 @@ async fn c3r2_memory_read_omitted_matches_refuse_without_progress_cold() {
         VisibleRootRegistry::default(),
     );
     write.handle(call("blackboard_record_batch",json!({"records":[{
-        "idempotencyKey":"budget-entry","kind":"note","content":format!("equipment {}", "a".repeat(3990)),
+        "idempotencyKey":"budget-entry","kind":"note","content":format!("equipment {}", "a".repeat(/*n*/ 3990)),
         "confidenceBasisPoints":0,"verification":"unverified","importance":"normal","rootPromotion":"notPromoted"
-    }]}),9000,ToolCallSource::Direct)).await.unwrap();
+    }]}),/*budget*/ 9000,ToolCallSource::Direct)).await.unwrap();
     for _ in 0..2 {
         let services = ProjectIntelligenceServices::new(sqlite.clone());
         let store = services.blackboard().await.unwrap();
