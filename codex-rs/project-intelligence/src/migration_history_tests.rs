@@ -552,7 +552,7 @@ async fn migration_history_existing_empty_database_and_empty_ledger_migrate_norm
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
-        assert_eq!(applied, 19);
+        assert_eq!(applied, 21);
         check_integrity(&store.pool).await;
         store.pool.close().await;
     }

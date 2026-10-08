@@ -2,6 +2,7 @@
 
 mod blackboard;
 mod blackboard_storage;
+mod capture_identity;
 mod context_map;
 mod context_map_presence;
 mod context_map_storage;
@@ -131,3 +132,7 @@ pub use storage::HierarchyStoreError;
 pub use blackboard_storage::CaptureEntryWrite;
 pub use blackboard_storage::CaptureWrite;
 pub use blackboard_storage::CaptureWriteResult;
+
+pub use capture_identity::CAPTURE_NORMALIZER_VERSION;
+pub use capture_identity::canonical_capture_words;
+pub use capture_identity::retirement_capture_words;

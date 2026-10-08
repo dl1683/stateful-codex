@@ -552,6 +552,22 @@ enum_codec!(provenance_name, parse_provenance, BlackboardProvenanceKind, {
 
 #[derive(Debug, Error)]
 pub enum BlackboardStoreError {
+    #[error("invalid, unavailable or changed original source; nothing was admitted")]
+    InvalidSource,
+    #[error("source is excluded from automatic recall; archival history remains preserved")]
+    SourceExcluded,
+    #[error("identity was retired or superseded; a fresh explicit user action is required")]
+    RetiredIdentity,
+    #[error("identity aliases are ambiguous; nothing was merged")]
+    AmbiguousIdentity,
+    #[error("legacy identity coverage is incomplete or blocked; automatic insertion refused")]
+    IdentityCoverageIncomplete,
+    #[error("source index rebuild is incomplete; resume bounded maintenance")]
+    SourceIndexIncomplete,
+    #[error(
+        "source cursor no longer matches query, project or eligibility; restart from the first page"
+    )]
+    SourceCursorDrift,
     #[error(transparent)]
     InvalidEntry(#[from] BlackboardError),
     #[error(transparent)]
