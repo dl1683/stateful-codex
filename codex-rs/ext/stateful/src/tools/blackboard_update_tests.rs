@@ -708,9 +708,9 @@ async fn model_cannot_supersede_a_direct_user_rule() {
     );
 }
 
-/// Model retirement hides the entry without changing the user's retained wording or author.
+/// The model cannot retire the user's standing rule; its complete stored value stays current.
 #[tokio::test]
-async fn model_retirement_keeps_the_texts_authorship() {
+async fn model_retirement_refuses_the_users_standing_rule() {
     let (_temp_dir, tool, _entry_id, _successor_id, project_root, _receipt_id) = fixture().await;
     let node = tool
         .services
@@ -732,7 +732,7 @@ async fn model_retirement_keeps_the_texts_authorship() {
     .await
     .expect("add")
     .0;
-    let retired = tool
+    let error = tool
         .apply_mutation(
             mutation(json!({
                 "action": "retire",
@@ -743,13 +743,10 @@ async fn model_retirement_keeps_the_texts_authorship() {
             std::slice::from_ref(&project_root),
         )
         .await
-        .expect("retire");
+        .expect_err("model retirement must refuse");
+    assert!(error.to_string().contains("direct-human memory"));
     assert_eq!(
-        (retired.value, retired.state, retired.revision),
-        (
-            rule.value,
-            BlackboardEntryState::Tombstoned,
-            rule.revision + 1
-        )
+        store.get_entry(PROJECT_ID, &rule.id).await.unwrap(),
+        Some(rule)
     );
 }

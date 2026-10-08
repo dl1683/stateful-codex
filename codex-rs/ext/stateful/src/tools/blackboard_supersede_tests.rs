@@ -93,6 +93,8 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
         alias: "E1".to_string(),
     };
     let mut outcomes = Vec::new();
+    let mut retry_value = value("A and B.");
+    retry_value.provenance.source_id = "turn-2".to_string();
     for references in [
         vec![entry("a"), entry("b")],
         vec![alias(), entry("b")],
@@ -115,7 +117,7 @@ async fn retries_must_cover_the_committed_replacement_exactly_once() {
                 PROJECT_ID,
                 "thread-1",
                 &x,
-                &value("A and B."),
+                &retry_value,
                 &references,
             )
             .await

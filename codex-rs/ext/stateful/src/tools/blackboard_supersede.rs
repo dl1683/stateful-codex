@@ -130,7 +130,22 @@ pub(super) async fn committed_succession(
         })
     });
     if same_value && same_replacement {
-        return Ok(Some(existing));
+        let replaced = replaced
+            .into_iter()
+            .map(|entry| SupersededEntry {
+                id: entry.id,
+                expected_revision: entry.revision.saturating_sub(1),
+            })
+            .collect();
+        let value = NewBlackboardEntry {
+            provenance: existing.value.provenance,
+            ..value.clone()
+        };
+        return store
+            .create_successor_from_model(id.clone(), value, replaced)
+            .await
+            .map(|succession| Some(succession.successor))
+            .map_err(respond);
     }
     Err(respond(format!(
         "{id} was already recorded with a different value or replacement; read it with blackboard_query and record any change under a new idempotencyKey"

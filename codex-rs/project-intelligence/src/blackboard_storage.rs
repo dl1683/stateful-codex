@@ -40,6 +40,7 @@ mod scopes;
 mod source_order;
 mod succession;
 mod update;
+mod writer_policy;
 
 pub use capture_write::CaptureEntryWrite;
 pub use capture_write::CaptureWrite;
@@ -571,6 +572,10 @@ pub enum BlackboardStoreError {
     InvalidStoredKnowledge(String),
     #[error("unsupported or oversized knowledge context; original metadata remains stored")]
     UnsupportedContext,
+    #[error(
+        "model mutation requires assistant-owned memory without human authority or a ruled-out disposition; use explicit user memory controls"
+    )]
+    ModelMutationRefused,
     #[error("blackboard entry ID was already used for different content: {0}")]
     EntryIdentityConflict(String),
     #[error("blackboard revision conflict: expected {expected}, found {actual}")]

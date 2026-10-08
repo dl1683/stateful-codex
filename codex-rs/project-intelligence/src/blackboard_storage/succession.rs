@@ -16,6 +16,9 @@ use super::load_entry;
 use super::load_entry_by_id;
 use super::unix_timestamp_millis;
 use super::write_revision;
+use super::writer_policy::ModelOperation;
+use super::writer_policy::WriterActor;
+use super::writer_policy::check_model_target;
 
 /// Most entries one successor may replace.
 pub const MAX_SUPERSEDED_ENTRIES: usize = 4;
@@ -54,9 +57,44 @@ impl BlackboardStore {
     pub async fn create_successor_recorded(
         &self,
         id: BlackboardEntryId,
+        value: NewBlackboardEntry,
+        replaced: Vec<SupersededEntry>,
+        change: Option<&crate::ChangeRecord>,
+    ) -> Result<Succession, BlackboardStoreError> {
+        let actor = if change.is_some_and(|change| change.origin == crate::ChangeOrigin::ModelTool)
+        {
+            WriterActor::Model
+        } else {
+            WriterActor::Host
+        };
+        self.create_successor_as(id, value, replaced, change, actor)
+            .await
+    }
+
+    /// Creates or replays a model succession with authority checks inside the PI transaction.
+    pub async fn create_successor_from_model(
+        &self,
+        id: BlackboardEntryId,
+        value: NewBlackboardEntry,
+        replaced: Vec<SupersededEntry>,
+    ) -> Result<Succession, BlackboardStoreError> {
+        self.create_successor_as(
+            id,
+            value,
+            replaced,
+            /*change*/ None,
+            WriterActor::Model,
+        )
+        .await
+    }
+
+    async fn create_successor_as(
+        &self,
+        id: BlackboardEntryId,
         mut value: NewBlackboardEntry,
         replaced: Vec<SupersededEntry>,
         change: Option<&crate::ChangeRecord>,
+        actor: WriterActor,
     ) -> Result<Succession, BlackboardStoreError> {
         value.validate()?;
         let unique = replaced
@@ -71,6 +109,15 @@ impl BlackboardStore {
             return Err(BlackboardStoreError::InvalidSuccession);
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        // Check before either first-write or committed-successor replay can return success.
+        if matches!(actor, WriterActor::Model) {
+            for target in &replaced {
+                let current = load_entry(&mut transaction, &value.project_id, &target.id)
+                    .await?
+                    .ok_or_else(|| BlackboardStoreError::EntryNotFound(target.id.to_string()))?;
+                check_model_target(&mut transaction, &current, ModelOperation::Retirement).await?;
+            }
+        }
         if let Some(existing) = load_entry_by_id(&mut transaction, &id).await? {
             // A retry is accepted only when it is the same request against a successor that
             // is still current: same value (with the promotion it inherited), and exactly the

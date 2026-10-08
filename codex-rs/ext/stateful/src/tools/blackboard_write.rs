@@ -233,7 +233,7 @@ impl BlackboardRecorder {
             )
             .await?;
             let succession = store
-                .create_successor(id, value, replaced)
+                .create_successor_from_model(id, value, replaced)
                 .await
                 .map_err(respond)?;
             if let Some(event_sink) = &self.event_sink {

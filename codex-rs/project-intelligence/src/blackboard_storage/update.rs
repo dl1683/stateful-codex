@@ -11,6 +11,9 @@ use super::unix_timestamp_millis;
 use super::validate_evidence;
 use super::validate_premises;
 use super::write_revision;
+use super::writer_policy::ModelOperation;
+use super::writer_policy::WriterActor;
+use super::writer_policy::check_model_target;
 
 impl BlackboardStore {
     pub async fn update_entry(
@@ -31,6 +34,41 @@ impl BlackboardStore {
         update: BlackboardEntryUpdate,
         change: Option<&crate::ChangeRecord>,
     ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        let actor = if change.is_some_and(|change| change.origin == crate::ChangeOrigin::ModelTool)
+        {
+            WriterActor::Model
+        } else {
+            WriterActor::Host
+        };
+        self.update_entry_as(project_id, id, update, change, actor)
+            .await
+    }
+
+    /// Applies a model mutation after checking current authorship and authority under the writer lock.
+    pub async fn update_entry_from_model(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        update: BlackboardEntryUpdate,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
+        self.update_entry_as(
+            project_id,
+            id,
+            update,
+            /*change*/ None,
+            WriterActor::Model,
+        )
+        .await
+    }
+
+    async fn update_entry_as(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        update: BlackboardEntryUpdate,
+        change: Option<&crate::ChangeRecord>,
+        actor: WriterActor,
+    ) -> Result<BlackboardEntry, BlackboardStoreError> {
         update.validate(id)?;
         let expected_revision = i64::try_from(update.expected_revision)
             .map_err(|_| BlackboardStoreError::RevisionOverflow)?;
@@ -41,6 +79,14 @@ impl BlackboardStore {
         let current = load_entry(&mut transaction, project_id, id)
             .await?
             .ok_or_else(|| BlackboardStoreError::EntryNotFound(id.to_string()))?;
+        if matches!(actor, WriterActor::Model) {
+            let operation = if update.state == BlackboardEntryState::Active {
+                ModelOperation::Mutation
+            } else {
+                ModelOperation::Retirement
+            };
+            check_model_target(&mut transaction, &current, operation).await?;
+        }
         if current.revision != update.expected_revision {
             return Err(BlackboardStoreError::RevisionConflict {
                 expected: update.expected_revision,
