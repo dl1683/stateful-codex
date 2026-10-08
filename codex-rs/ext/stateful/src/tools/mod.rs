@@ -140,8 +140,31 @@ fn parse_arguments<T: for<'de> serde::Deserialize<'de>>(
     } else {
         arguments
     };
-    serde_json::from_str(arguments)
-        .map_err(|error| codex_extension_api::FunctionCallError::RespondToModel(error.to_string()))
+    serde_json::from_str(arguments).map_err(|error| {
+        // Serde diagnostics can contain arbitrary input, including a huge unknown key.
+        // Account for JSON escaping as well as the actual tool's response allowance.
+        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let message = error.to_string();
+        if serde_json::to_string(&message)
+            .is_ok_and(|text| text.len() <= budget.min(MAX_RECEIPT_ERROR_BYTES))
+        {
+            bounded_respond(call, &message)
+        } else {
+            bounded_respond(call, "invalid tool arguments")
+        }
+    })
+}
+
+/// Fits a terminal diagnostic, including JSON escaping, to the call's allowance.
+fn bounded_respond(call: &ToolCall<'_>, message: &str) -> FunctionCallError {
+    let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+    let mut message = message.to_string();
+    while serde_json::to_string(&message).is_ok_and(|text| text.len() > budget)
+        && !message.is_empty()
+    {
+        message.pop();
+    }
+    FunctionCallError::RespondToModel(message)
 }
 
 /// Emits a JSON result only when its serialized text fits the call's budget. Callers
@@ -246,3 +269,7 @@ fn respond(error: impl std::fmt::Display) -> FunctionCallError {
 #[cfg(test)]
 #[path = "roster_budget_tests.rs"]
 mod roster_budget_tests;
+
+#[cfg(test)]
+#[path = "capture_repair_tests.rs"]
+mod capture_repair_tests;

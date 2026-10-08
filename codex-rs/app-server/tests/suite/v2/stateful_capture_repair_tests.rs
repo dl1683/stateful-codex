@@ -9,6 +9,211 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 
+#[tokio::test]
+async fn c3r1_public_large_proposal_decode_error_is_bounded_and_store_unchanged() -> Result<()> {
+    malformed_proposal(ProposalDelivery::Direct).await
+}
+
+#[tokio::test]
+async fn c3r1_public_code_mode_session_large_proposal_decode_error_is_bounded() -> Result<()> {
+    malformed_proposal(ProposalDelivery::CodeModeSession).await
+}
+
+enum ProposalDelivery {
+    Direct,
+    CodeModeSession,
+}
+
+async fn malformed_proposal(delivery: ProposalDelivery) -> Result<()> {
+    let (home, mut server, project, mut thread, responses_server) = setup().await?;
+    if matches!(delivery, ProposalDelivery::CodeModeSession) {
+        assert!(server.shutdown_gracefully().await?.success());
+        MockResponsesConfig::new(&responses_server.uri())
+            .enable_feature(Feature::Sqlite)
+            .enable_feature(Feature::CodeModeOnly)
+            .write(home.path())?;
+        server = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .build_initialized()
+            .await?;
+        thread = start_thread(&mut server, &project).await?;
+    }
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let before = snapshot(&sqlite).await?;
+    for key in [
+        "!~@#$%^&*()-+=|:;<>?".repeat(1000),
+        "\"\\\n".repeat(2000),
+        "😀é".repeat(2500),
+    ] {
+        let mut arguments = json!({"type":"sourceProposal","records":[]});
+        arguments[&key] = json!(1);
+        assert!(arguments.to_string().len() < 32768);
+        let error = model_output(
+            &mut server,
+            &responses_server,
+            &thread,
+            "blackboard_record_batch",
+            arguments,
+        )
+        .await?;
+        assert_eq!(error, "invalid tool arguments");
+        assert!(serde_json::to_string(&error)?.len() <= 9000);
+        assert_eq!(snapshot(&sqlite).await?, before);
+    }
+    assert!(server.shutdown_gracefully().await?.success());
+    let reopened = pi::BlackboardStore::open(&sqlite).await?;
+    assert_eq!(snapshot(&sqlite).await?, before);
+    assert!(
+        reopened
+            .query(pi::BlackboardQuery {
+                project_id: project,
+                text: None,
+                within_node: None,
+                root_promotion: None,
+                entry_scope: pi::BlackboardEntryScope::Active,
+                max_results: 10,
+            })
+            .await?
+            .data
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn c3r1_public_proposal_query_small_budget_refuses_and_large_budget_delivers_cold()
+-> Result<()> {
+    let (home, mut server, project, _, responses_server) = setup().await?;
+    assert!(server.shutdown_gracefully().await?.success());
+    let config = core_test_support::load_default_config_for_test(&home).await;
+    let model = codex_core::test_support::construct_model_info_offline("mock-model", &config);
+    let catalog = home.path().join("query-models.json");
+    let models: Vec<_> = [("query-small", 300), ("query-large", 9000)]
+        .into_iter()
+        .map(|(slug, limit)| {
+            let mut model = model.clone();
+            model.slug = slug.into();
+            model.truncation_policy =
+                codex_protocol::openai_models::TruncationPolicyConfig::bytes(limit);
+            model
+        })
+        .collect();
+    std::fs::write(&catalog, serde_json::to_vec(&json!({"models":models}))?)?;
+    MockResponsesConfig::new(&responses_server.uri())
+        .enable_feature(Feature::Sqlite)
+        .with_model("query-large")
+        .with_root_config(&format!(
+            "model_catalog_json = {}",
+            serde_json::to_string(&catalog)?
+        ))
+        .write(home.path())?;
+    server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized()
+        .await?;
+    let thread = start_thread(&mut server, &project).await?;
+    let mock = responses::mount_sse_once(
+        &responses_server,
+        responses::sse(vec![responses::ev_completed("observe")]),
+    )
+    .await;
+    run_turn(
+        &mut server,
+        &thread,
+        "Mara bought the teal prototype; motor was not damaged.",
+    )
+    .await?;
+    assert_eq!(mock.requests().len(), 1);
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let pool = sqlite
+        .open_read_only_pool(
+            &home.path().join("project_intelligence_1.sqlite"),
+            /*busy_timeout*/ None,
+        )
+        .await?;
+    let metadata: String =
+        sqlx::query_scalar("SELECT metadata FROM capture_sources WHERE project_id = ? LIMIT 1")
+            .bind(&project)
+            .fetch_one(&pool)
+            .await?;
+    let seal: pi::SourceSeal = serde_json::from_str(&metadata)?;
+    let store = pi::BlackboardStore::open(&sqlite).await?;
+    let hierarchy = pi::HierarchyStore::open(&sqlite).await?;
+    let node = hierarchy.project_node(&project).await?.unwrap().id;
+    let admission = codex_state::ThreadProjectAdmission::acquire(
+        &sqlite,
+        codex_protocol::ThreadId::from_string(&thread)?,
+        &project,
+    )
+    .await?
+    .unwrap();
+    let proposal: pi::SourceProposal = serde_json::from_value(json!({
+        "sourceId":seal.exact_source_locator,"digest":seal.digest,"sourceRevision":1,"partIndex":0,
+        "spans":[{"startByte":0,"endByte":seal.original_utf8_length,"role":"body"}],
+        "category":"background","interpretation":"budget witness prototype purchase"
+    }))?;
+    let result = store
+        .propose_sources(&admission, node, &seal.observation.turn_id, vec![proposal])
+        .await?;
+    drop(admission);
+    let id = result[0].entry_id.as_ref().unwrap();
+    let before = snapshot(&sqlite).await?;
+    for round in 0..2 {
+        if round == 1 {
+            reopen(&mut server, &home, &thread).await?;
+        }
+        for (model, budget) in [("query-small", 360), ("query-large", 9000)] {
+            let call_id = format!("query-{round}-{model}");
+            let mock = responses::mount_sse_sequence(
+                &responses_server,
+                vec![
+                    responses::sse(vec![
+                        responses::ev_function_call(
+                            &call_id,
+                            "blackboard_query",
+                            &json!({"text":"budget witness"}).to_string(),
+                        ),
+                        responses::ev_completed("query"),
+                    ]),
+                    responses::sse(vec![responses::ev_completed("done")]),
+                ],
+            )
+            .await;
+            server
+                .start_turn_and_wait_for_completion(TurnStartParams {
+                    thread_id: thread.clone(),
+                    model: Some(model.into()),
+                    input: vec![UserInput::Text {
+                        text: "Query the retained proposal.".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                })
+                .await?;
+            let requests = mock.requests();
+            assert_eq!(requests.len(), 2);
+            let output = requests[1].function_call_output_text(&call_id).unwrap();
+            assert!(output.len() <= budget);
+            if model == "query-small" {
+                assert!(output.starts_with("budget_insufficient"), "{output}");
+            } else {
+                let output: Value = serde_json::from_str(&output)?;
+                assert_eq!(
+                    (
+                        output["data"].as_array().unwrap().len(),
+                        output["data"][0]["entryId"].clone(),
+                        output["data"][0]["applied"].clone(),
+                        output["truncated"].clone()
+                    ),
+                    (1, json!(id), json!(false), json!(false))
+                );
+            }
+            assert_eq!(snapshot(&sqlite).await?, before);
+        }
+    }
+    Ok(())
+}
+
 async fn model_call(
     server: &mut TestAppServer,
     responses_server: &wiremock::MockServer,

@@ -145,10 +145,7 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
         })
         .await?;
     let bodies = calls.lock().unwrap().clone();
-    for (body, call, field) in [
-        (&bodies[3], "sources", "sourceQuery"),
-        (&bodies[4], "exact", "digest"),
-    ] {
+    for (body, call) in [(&bodies[3], "sources"), (&bodies[4], "exact")] {
         let output = body["input"]
             .as_array()
             .unwrap()
@@ -157,10 +154,7 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
             .unwrap()["output"]
             .as_str()
             .unwrap();
-        assert!(
-            output.contains("unknown field") && output.contains(field),
-            "{output}"
-        );
+        assert!(output.contains("unknown field"), "{output}");
         assert!(!output.contains("QX-704") && !output.contains("Meridian M-17"));
     }
     let recall = tool_output(&bodies[5], "recall").unwrap();

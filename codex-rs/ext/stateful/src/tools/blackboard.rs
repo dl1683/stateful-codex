@@ -367,6 +367,12 @@ impl BlackboardQueryTool {
             }
             truncated = candidate_truncated;
         }
+        if data.is_empty() && truncated {
+            return Err(super::bounded_respond(
+                &call,
+                "budget_insufficient: increase response budget to fit one matching knowledge entry",
+            ));
+        }
         let next_after_entry_id = if evidence_query && truncated {
             Some(
                 data.last()
