@@ -64,6 +64,7 @@ use crate::context::HookAdditionalContext;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::event_mapping::parse_turn_item;
 use crate::guardian::GuardianReviewContext;
+use crate::hook_snapshot::turn_hooks;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -161,7 +162,7 @@ pub(crate) async fn run_pending_session_start_hooks(
             permission_mode: hook_permission_mode(turn_context.approval_policy()),
             target,
         };
-        let hooks = sess.hooks();
+        let hooks = turn_hooks(sess, turn_context);
         let preview_runs = hooks.preview_session_start(&request);
         if run_context_injecting_hook(
             sess,
@@ -206,7 +207,7 @@ pub(crate) async fn run_pre_tool_use_hooks(
         tool_use_id,
         tool_input: tool_input.clone(),
     };
-    let hooks = sess.hooks();
+    let hooks = turn_hooks(sess, turn_context);
     let preview_runs = hooks.preview_pre_tool_use(&request);
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
@@ -275,7 +276,7 @@ pub(crate) async fn run_permission_request_hooks(
         run_id_suffix: run_id_suffix.to_string(),
         tool_input: payload.tool_input,
     };
-    let hooks = sess.hooks();
+    let hooks = turn_hooks(sess, turn_context);
     let preview_runs = hooks.preview_permission_request(&request);
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
@@ -318,7 +319,7 @@ pub(crate) async fn run_post_tool_use_hooks(
         tool_input,
         tool_response,
     };
-    let hooks = sess.hooks();
+    let hooks = turn_hooks(sess, turn_context);
     let preview_runs = hooks.preview_post_tool_use(&request);
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
@@ -459,7 +460,7 @@ pub(crate) async fn run_turn_stop_hooks(
         target,
     };
     let executor_hook_sources = executor_hook_sources_for_step(step_context);
-    let hooks = sess.hooks().with_executor_hooks(executor_hook_sources);
+    let hooks = turn_hooks(sess, turn_context).with_executor_hooks(executor_hook_sources);
     emit_hook_started_events(sess, turn_context, hooks.preview_stop(&request)).await;
 
     let mut outcome = hooks.run_stop(request).await;
@@ -515,7 +516,7 @@ pub(crate) async fn run_turn_interrupt_hooks(
         .map(executor_hook_sources_for_step)
         .unwrap_or_default();
     let has_executor_hooks = !executor_hook_sources.is_empty();
-    let hooks = sess.hooks().with_executor_hooks(executor_hook_sources);
+    let hooks = turn_hooks(sess, turn_context).with_executor_hooks(executor_hook_sources);
     let preview_runs = hooks.preview_interrupt();
     if preview_runs.is_empty() && !has_executor_hooks {
         return;
@@ -556,10 +557,11 @@ pub(crate) async fn run_pre_compact_hooks(
         model: turn_context.model_info().slug.clone(),
         trigger: compaction_trigger_label(trigger).to_string(),
     };
-    let preview_runs = sess.hooks().preview_pre_compact(&request);
+    let hooks = turn_hooks(sess, turn_context);
+    let preview_runs = hooks.preview_pre_compact(&request);
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
-    let outcome = sess.hooks().run_pre_compact(request).await;
+    let outcome = hooks.run_pre_compact(request).await;
     emit_hook_completed_events(sess, turn_context, outcome.hook_events).await;
     if outcome.should_stop {
         PreCompactHookOutcome::Stopped
@@ -593,10 +595,11 @@ pub(crate) async fn run_post_compact_hooks(
         model: turn_context.model_info().slug.clone(),
         trigger: compaction_trigger_label(trigger).to_string(),
     };
-    let preview_runs = sess.hooks().preview_post_compact(&request);
+    let hooks = turn_hooks(sess, turn_context);
+    let preview_runs = hooks.preview_post_compact(&request);
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
-    let outcome = sess.hooks().run_post_compact(request).await;
+    let outcome = hooks.run_post_compact(request).await;
     emit_hook_completed_events(sess, turn_context, outcome.hook_events).await;
     if outcome.should_stop {
         PostCompactHookOutcome::Stopped
@@ -620,7 +623,7 @@ pub(crate) async fn run_legacy_after_agent_hook(
             _ => None,
         })
         .collect();
-    let hooks = sess.hooks();
+    let hooks = turn_hooks(sess, turn_context);
     for hook_outcome in hooks
         .dispatch(codex_hooks::HookPayload {
             session_id: sess.session_id().into(),
@@ -692,7 +695,7 @@ pub(crate) async fn inspect_pending_input(
                 permission_mode: hook_permission_mode(turn_context.approval_policy()),
                 prompt: UserMessageItem::new(content).message(),
             };
-            let hooks = sess.hooks();
+            let hooks = turn_hooks(sess, turn_context);
             let preview_runs = hooks.preview_user_prompt_submit(&request);
             run_context_injecting_hook(
                 sess,
