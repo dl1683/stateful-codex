@@ -71,7 +71,9 @@ impl StatefulRunUpdateTool {
         let runtime = self.services.runtime().await.map_err(respond)?;
         // Lifecycle hooks run commands around calls and turns outside any tool call; where they
         // could have run, or where a record of an observed call was lost, this run is not
-        // action-free.
+        // action-free. This call runs inside a turn whose hook set was fixed when the turn
+        // started, and publishing hooks records the fact first, so every hook that can still
+        // run around this completion or later in its turn is reflected here.
         if codex_extension_api::host_hooks_configured()
             || crate::host_actions::unrecorded_actions_possible()
         {

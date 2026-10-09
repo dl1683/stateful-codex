@@ -17,6 +17,12 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ConfigBatchWriteParams;
+use codex_app_server_protocol::ConfigEdit;
+use codex_app_server_protocol::ConfigWriteResponse;
+use codex_app_server_protocol::HooksListParams;
+use codex_app_server_protocol::HooksListResponse;
+use codex_app_server_protocol::MergeStrategy;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
@@ -132,6 +138,8 @@ struct Setup {
     hosted_web_search: bool,
     /// A gated streaming responses server used in place of the mock server.
     responses_uri: Option<String>,
+    /// User hook configuration (untrusted until a test trusts it); enables lifecycle hooks.
+    user_hooks: Option<String>,
 }
 
 impl Default for Setup {
@@ -143,6 +151,7 @@ impl Default for Setup {
             run_at_start: true,
             hosted_web_search: false,
             responses_uri: None,
+            user_hooks: None,
         }
     }
 }
@@ -175,6 +184,11 @@ async fn harness(setup: Setup) -> Result<Harness> {
     .enable_feature(Feature::Sqlite);
     if !setup.hosted_web_search {
         config = config.with_root_config("web_search = \"disabled\"");
+    }
+    if let Some(user_hooks) = &setup.user_hooks {
+        config = config
+            .enable_feature(Feature::CodexHooks)
+            .with_extra_config(user_hooks);
     }
     if setup.responses_uri.is_some() {
         config = config
@@ -584,9 +598,7 @@ async fn an_unwritable_action_record_fails_closed() -> Result<()> {
         .map(|error| error.message)
         .unwrap_or_default();
     assert!(
-        error.contains(
-            "the host could not durably record this response's tool calls before running them"
-        ),
+        error.contains("the host could not durably record a model call before dispatch"),
         "{error}"
     );
     // The failure replaced the call: Core never ran it, so no follow-up carried its output.
@@ -1046,6 +1058,132 @@ async fn a_rejected_completion_attempt_brings_the_ledger_back() -> Result<()> {
         harness
             .assert_refused(log.function_call_output_text("complete"))
             .await?;
+    }
+    Ok(())
+}
+
+/// A hook trusted while an exempt completion is pending cannot run around that completion or
+/// later in its turn: a turn's hooks are fixed when it starts, and publishing hooks records the
+/// host's hook fact first. The order is the confirmation review's: an untrusted PostToolUse and
+/// Stop hook, a lone completion waiting inside its acceptance decision (for a command held
+/// open), the hooks trusted through `config/batchWrite` with a user-config reload, then the
+/// completion released. No hook starts in that turn, whatever the completion's outcome; the
+/// next turn runs the now-trusted Stop hook, so the hooks were live.
+#[tokio::test]
+async fn a_hook_trusted_during_a_pending_completion_cannot_run_around_it() -> Result<()> {
+    let hook_home = TempDir::new()?;
+    let post_marker = hook_home.path().join("post.txt");
+    let stop_marker = hook_home.path().join("stop.txt");
+    let user_hooks = format!(
+        "[hooks]\n\n[[hooks.PostToolUse]]\n\n[[hooks.PostToolUse.hooks]]\ntype = 'command'\ncommand = 'echo hooked > \"{}\"'\n\n[[hooks.Stop]]\n\n[[hooks.Stop.hooks]]\ntype = 'command'\ncommand = 'echo stopped > \"{}\"'\n",
+        post_marker.display(),
+        stop_marker.display()
+    );
+    let mut harness = harness(Setup {
+        mode: StatefulWorkflowMode::Collaborative,
+        user_hooks: Some(user_hooks),
+        ..Setup::default()
+    })
+    .await?;
+    let revision = harness.run().revision;
+    // A text-only first turn binds the run to this process (its first binding clears pending
+    // commands); it records no action.
+    harness
+        .turn(vec![message("first", "Looking at it.")])
+        .await?;
+    // A started command keeps the completion waiting inside its acceptance decision, after it
+    // read the hook fact, until the test settles the command.
+    harness
+        .ledger_sql(&format!(
+            "INSERT INTO stateful_acceptance_pending (run_id, call_id, started_at_ms) VALUES ('{}', 'held-command', 0)",
+            harness.run().id
+        ))
+        .await?;
+    let log = responses::mount_sse_sequence(
+        &harness.responses_server,
+        vec![complete(revision), message("done", ANSWER)],
+    )
+    .await;
+    let turn_id = harness.begin_turn().await?;
+    timeout(READ_TIMEOUT, async {
+        while log.requests().is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    let cwd = harness.project_root.path().to_path_buf();
+    let listed: HooksListResponse = harness
+        .server
+        .request(|request_id| ClientRequest::HooksList {
+            request_id,
+            params: HooksListParams { cwds: vec![cwd] },
+        })
+        .await?;
+    let trusted = listed
+        .data
+        .iter()
+        .flat_map(|entry| entry.hooks.iter())
+        .map(|hook| (hook.key.clone(), json!({"trusted_hash": hook.current_hash})))
+        .collect::<serde_json::Map<String, Value>>();
+    assert_eq!(trusted.len(), 2, "both hooks are listed");
+    let _: ConfigWriteResponse = harness
+        .server
+        .request(|request_id| ClientRequest::ConfigBatchWrite {
+            request_id,
+            params: ConfigBatchWriteParams {
+                edits: vec![ConfigEdit {
+                    key_path: "hooks.state".to_string(),
+                    value: Value::Object(trusted),
+                    merge_strategy: MergeStrategy::Upsert,
+                }],
+                file_path: None,
+                expected_version: None,
+                reload_user_config: true,
+            },
+        })
+        .await?;
+    harness
+        .ledger_sql("DELETE FROM stateful_acceptance_pending")
+        .await?;
+    harness.wait_for_turn(&turn_id).await?;
+
+    assert!(
+        !harness
+            .server
+            .pending_notification_methods()
+            .iter()
+            .any(|method| method == "hook/started"),
+        "no hook started in the completion's turn"
+    );
+    assert!(!post_marker.exists() && !stop_marker.exists());
+    // Whatever the completion read, the run is truthful: exempt with no hook run, or refused.
+    let output = log
+        .function_call_output_text("complete")
+        .unwrap_or_default();
+    let run = harness.read().await?;
+    let exempt = run.status == StatefulRunStatus::Completed
+        && run
+            .result
+            .as_deref()
+            .is_some_and(|result| result.contains("no-tool exemption"));
+    let refused = run.status == StatefulRunStatus::Running && output.contains("completion refused");
+    assert!(exempt || refused, "{run:?}: {output}");
+
+    // The trusted hooks are live from the next turn on.
+    harness.server.clear_message_buffer();
+    harness.turn(vec![message("later", "Later.")]).await?;
+    assert!(
+        harness
+            .server
+            .pending_notification_methods()
+            .iter()
+            .any(|method| method == "hook/started"),
+        "the Stop hook runs in the next turn"
+    );
+    if cfg!(not(target_os = "windows")) {
+        assert!(stop_marker.exists(), "the Stop hook ran in the next turn");
     }
     Ok(())
 }
