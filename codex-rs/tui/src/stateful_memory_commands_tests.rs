@@ -113,3 +113,51 @@ fn numeric_entry_identity_keeps_its_explicit_revision() {
         }))
     );
 }
+
+#[test]
+fn apply_and_undo_name_exact_targets() {
+    use codex_app_server_protocol::StatefulMemoryApplyCategory;
+    assert_eq!(
+        [
+            "apply proposal-a@1 decision",
+            "apply proposal-b@2 ruled-out",
+            "apply proposal-c@1 rule",
+            "undo rules-abc",
+            "apply proposal-a@1",
+            "apply proposal-a decision",
+            "apply proposal-a@1 note",
+            "undo",
+            "undo rules-abc extra",
+        ]
+        .map(parse),
+        [
+            Ok(MemoryCommand::Apply(
+                super::EntryTarget {
+                    entry_id: "proposal-a".to_string(),
+                    revision: 1
+                },
+                StatefulMemoryApplyCategory::Decision
+            )),
+            Ok(MemoryCommand::Apply(
+                super::EntryTarget {
+                    entry_id: "proposal-b".to_string(),
+                    revision: 2
+                },
+                StatefulMemoryApplyCategory::RuledOut
+            )),
+            Ok(MemoryCommand::Apply(
+                super::EntryTarget {
+                    entry_id: "proposal-c".to_string(),
+                    revision: 1
+                },
+                StatefulMemoryApplyCategory::Rule
+            )),
+            Ok(MemoryCommand::Undo("rules-abc".to_string())),
+            Err(USAGE.to_string()),
+            Err(USAGE.to_string()),
+            Err(USAGE.to_string()),
+            Err(USAGE.to_string()),
+            Err(USAGE.to_string()),
+        ]
+    );
+}

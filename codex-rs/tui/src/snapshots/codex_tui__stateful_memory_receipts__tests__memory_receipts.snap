@@ -1,0 +1,24 @@
+---
+source: tui/src/stateful_memory_receipts_tests.rs
+expression: rendered
+---
+• Saved 2 project rules in your words: "Always end each reply with Next:" · "Don't touch vendor/ or any changelog."
+  1 already saved before
+  Undo: /memory undo rules-1
+---
+• Not restored (you forgot these earlier): "Don't touch vendor/ or any changelog."
+  Held back with them, nothing saved: "Never push."
+  To use a forgotten rule again: /memory add rule <text>
+---
+• Kept for your review, not applied:
+  decision: "Use SQLite, not Postgres: must run offline on a laptop." (assistant's reading)
+    Apply: /memory apply proposal-d@1 decision
+  ruled-out approach: "The cache is not the cause." (assistant's reading)
+    Apply: /memory apply proposal-r@1 ruled-out
+  note: "Timing measured on the CI runner." (assistant's reading)
+  Undo: /memory undo proposal-1
+---
+• Applied as your decision: "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop."
+  Undo: /memory undo promotion-1
+---
+• Undone: 1 no longer used, 1 saved earlier left as it was

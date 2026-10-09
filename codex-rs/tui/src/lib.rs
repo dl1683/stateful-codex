@@ -209,6 +209,7 @@ mod startup_presentation;
 mod startup_recovery;
 mod stateful_memory;
 mod stateful_memory_commands;
+mod stateful_memory_receipts;
 mod stateful_ui;
 mod status;
 mod status_indicator_widget;

@@ -16,6 +16,7 @@ use codex_app_server_protocol::StatefulMemoryAddKind;
 use codex_app_server_protocol::StatefulMemoryAddOutcome;
 use codex_app_server_protocol::StatefulMemoryAddParams;
 use codex_app_server_protocol::StatefulMemoryAddResponse;
+use codex_app_server_protocol::StatefulMemoryApplyCategory;
 use codex_app_server_protocol::StatefulMemoryCorrectParams;
 use codex_app_server_protocol::StatefulMemoryCorrectResponse;
 use codex_app_server_protocol::StatefulMemoryForgetParams;
@@ -41,7 +42,7 @@ use crate::stateful_memory::section_rank;
 
 /// Entries one page shows.
 const PAGE_SIZE: u32 = 50;
-const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory help";
+const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory apply <ID@REV> <rule|decision|ruled-out>, /memory undo <receipt-id>, /memory help";
 
 /// What the user asked `/memory` to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,6 +53,10 @@ pub(crate) enum MemoryCommand {
     Add(Addition),
     Forget(EntryTarget),
     Correct(EntryTarget, String),
+    /// Apply a kept proposal as the user's own rule, decision or ruled-out approach.
+    Apply(EntryTarget, StatefulMemoryApplyCategory),
+    /// Undo one receipt by its exact ID.
+    Undo(String),
 }
 
 /// An entry the user adds.
@@ -81,6 +86,14 @@ pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
     let (target, text) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     match verb.to_ascii_lowercase().as_str() {
         "forget" if text.trim().is_empty() => Ok(MemoryCommand::Forget(entry_target(target)?)),
+        "undo" if !target.is_empty() && text.trim().is_empty() => {
+            Ok(MemoryCommand::Undo(target.to_string()))
+        }
+        "apply" => {
+            let category = crate::stateful_memory_receipts::apply_category(text.trim())
+                .ok_or_else(|| USAGE.to_string())?;
+            Ok(MemoryCommand::Apply(entry_target(target)?, category))
+        }
         "correct" if !text.trim().is_empty() => Ok(MemoryCommand::Correct(
             entry_target(target)?,
             text.trim().to_string(),
@@ -173,6 +186,8 @@ pub(crate) const HELP: &[&str] = &[
     "/memory add note <text> - add anything else worth keeping",
     "/memory correct <ID@REV> <text> - replace an entry with your words",
     "/memory forget <ID@REV> - stop using an entry (it stays in history)",
+    "/memory apply <ID@REV> <rule|decision|ruled-out> - make a kept proposal yours (shown on its receipt)",
+    "/memory undo <receipt-id> - undo one receipt: what it saved stops applying",
     "List numbers are display conveniences; mutations require explicit IDs. Outside the TUI: codex memory --help",
 ];
 
@@ -377,6 +392,26 @@ async fn other(request: &Requests<'_>, command: MemoryCommand) -> Result<PlainHi
         MemoryCommand::Add(addition) => add(request, addition).await,
         MemoryCommand::Forget(target) => forget(request, target).await,
         MemoryCommand::Correct(target, text) => correct(request, target, text).await,
+        MemoryCommand::Apply(target, category) => {
+            crate::stateful_memory_receipts::apply(
+                request.handle,
+                request.thread_id,
+                request.project_id,
+                target.entry_id,
+                target.revision,
+                category,
+            )
+            .await
+        }
+        MemoryCommand::Undo(receipt_id) => {
+            crate::stateful_memory_receipts::undo(
+                request.handle,
+                request.thread_id,
+                request.project_id,
+                receipt_id,
+            )
+            .await
+        }
         MemoryCommand::List | MemoryCommand::More => Err(USAGE.to_string()),
     }
 }

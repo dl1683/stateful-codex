@@ -407,6 +407,20 @@ impl ChatWidget {
                     self.add_to_history(cell);
                 }
             }
+            // Turn-driven receipts only: an Apply or Undo shows its result where it was asked.
+            ServerNotification::StatefulMemoryCaptured(notification) => {
+                if replay_kind.is_none()
+                    && matches!(
+                        notification.receipt.kind,
+                        codex_app_server_protocol::StatefulMemoryReceiptKind::Rules
+                            | codex_app_server_protocol::StatefulMemoryReceiptKind::Proposals
+                    )
+                    && let Some(cell) =
+                        crate::stateful_memory_receipts::receipt_cell(&notification.receipt)
+                {
+                    self.add_to_history(cell);
+                }
+            }
             ServerNotification::ContextCompacted(_) => {}
         }
         // Tool and hook activity can recreate a hidden row with its default

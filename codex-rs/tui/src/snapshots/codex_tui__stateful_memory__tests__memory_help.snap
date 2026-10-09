@@ -10,4 +10,6 @@ expression: render(help.display_lines(180))
 /memory add note <text> - add anything else worth keeping
 /memory correct <ID@REV> <text> - replace an entry with your words
 /memory forget <ID@REV> - stop using an entry (it stays in history)
+/memory apply <ID@REV> <rule|decision|ruled-out> - make a kept proposal yours (shown on its receipt)
+/memory undo <receipt-id> - undo one receipt: what it saved stops applying
 List numbers are display conveniences; mutations require explicit IDs. Outside the TUI: codex memory --help
