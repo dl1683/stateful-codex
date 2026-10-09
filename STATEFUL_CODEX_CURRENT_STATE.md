@@ -126,6 +126,24 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   E1b restores a host-decided read-only exemption first. Checker adequacy is not
   independently judged.
 
+- **Checkpoint E1b, real-repository check qualification** (`056912335`..`179be19c4`):
+  checks settle in real Git repositories through bounded content identity (tracked
+  and untracked non-ignored files, HEAD and index; never size or mtime). Non-Git
+  roots and files inside embedded repositories fail closed. The read-only exemption
+  it was meant to restore was cut after review.
+
+- **Checkpoint E1c, no-tool completion exemption: CUT** (`0df6aedbd`..`668602bb8`):
+  three repair rounds closed each reviewed witness, but the final review found an
+  auxiliary user-shell command and an interrupt that could still coexist with an
+  exempt completion, so the code was restored to E1b's behaviour (migration 0012
+  stays as applied history, unused).
+  **Known limitation until E1d lands:** an Autonomous run that only answers a
+  question still ends Blocked, because every completion owes acceptance criteria
+  and an admitted check. Successor E1d ("host-ended Autonomous Q&A": the host
+  finalizes a text-only, no-tool turn inside its task under the task's cancellation
+  token, with user-shell submission refused or queued while an eligible run's turn
+  is active) is scheduled after the C4-C6 capture slice.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
