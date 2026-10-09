@@ -13,7 +13,9 @@
 //!   a record cannot be written, the response fails instead and nothing after it reaches Core.
 //!   Every event held, the completion itself and the event that releases it included, is
 //!   admitted only within the count and byte bounds; past either the response fails, nothing
-//!   held is released, no attempt is recorded and the upstream response is dropped.
+//!   held is released, no attempt is recorded and the upstream response is dropped. A call
+//!   is accounted before its admission is decided, so overflow never drops an observed call
+//!   unrecorded.
 //! - Provider-hosted calls (web search and the like) run at the provider, a read with no local
 //!   effect; each counts as an action once the host observes it, recorded like any other call
 //!   before a held completion can be released. A hosted call the provider never reports is not
@@ -259,12 +261,22 @@ impl FenceState {
                 self.ready.push_back(event);
                 self.finish();
             }
-            // Another call proves the response is not action-free: record it, then let
-            // everything held flow without further buffering.
+            // Another call proves the response is not action-free. It is accounted before any
+            // admission decision (a hosted call may already have run at the provider), then
+            // everything held flows without further buffering. A call that does not fit is
+            // dropped unretained once recorded, and the response fails.
             (Ok(_), OutputKind::Completion | OutputKind::Call) => {
-                if self.hold(event) && self.record(Record::Action).await {
-                    self.called = true;
-                    self.release();
+                let admitted = self.admission(&event).map(|size| (event, size));
+                if !self.record(Record::Action).await {
+                    return;
+                }
+                self.called = true;
+                match admitted {
+                    Some((event, size)) => {
+                        self.retain(event, size);
+                        self.release();
+                    }
+                    None => self.overflow(),
                 }
             }
             (Ok(_), OutputKind::Text) => {
@@ -276,18 +288,35 @@ impl FenceState {
     /// Holds `event` behind the completion if it fits both bounds; otherwise the response fails
     /// and nothing held is released.
     fn hold(&mut self, event: Event) -> bool {
+        match self.admission(&event) {
+            Some(size) => {
+                self.retain(event, size);
+                true
+            }
+            None => {
+                self.overflow();
+                false
+            }
+        }
+    }
+
+    /// The size `event` would take if it fits both bounds.
+    fn admission(&self, event: &Event) -> Option<usize> {
         let held = self.held.as_ref().map_or(0, Vec::len);
         let room = MAX_HELD_BYTES - self.held_bytes;
-        let size = held_size(&event, room);
-        if held >= MAX_HELD_EVENTS || size > room {
-            self.fail(format!(
-                "the response exceeded the host's bound ({MAX_HELD_EVENTS} events or {MAX_HELD_BYTES} bytes) held behind a completion call while it waited for the response to finish; the completion did not run"
-            ));
-            return false;
-        }
+        let size = held_size(event, room);
+        (held < MAX_HELD_EVENTS && size <= room).then_some(size)
+    }
+
+    fn retain(&mut self, event: Event, size: usize) {
         self.held_bytes += size;
         self.held.get_or_insert_with(Vec::new).push(event);
-        true
+    }
+
+    fn overflow(&mut self) {
+        self.fail(format!(
+            "the response exceeded the host's bound ({MAX_HELD_EVENTS} events or {MAX_HELD_BYTES} bytes) held behind a completion call while it waited for the response to finish; the completion did not run"
+        ));
     }
 
     fn release(&mut self) {

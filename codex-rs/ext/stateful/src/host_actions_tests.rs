@@ -484,8 +484,9 @@ async fn an_oversized_completion_is_never_held_or_released() {
 }
 
 /// The event that would release a hold is admitted within the bounds too. At exactly the
-/// event or byte bound, the response's `Completed` or a sibling call fails it without a record;
-/// with room for exactly that event, it is released as usual.
+/// event or byte bound, the response's `Completed` fails it without a record, and a sibling
+/// call fails it after the call is recorded (it was observed); with room for exactly that
+/// event, it is released as usual.
 #[tokio::test]
 async fn the_event_that_releases_a_hold_is_bounded_too() {
     let releasing = |sibling: bool| {
@@ -525,18 +526,19 @@ async fn the_event_that_releases_a_hold_is_bounded_too() {
                 } else {
                     assert_eq!(labels.len(), 1, "{case}: {labels:?}");
                     assert!(labels[0].contains("exceeded the host's bound"), "{case}");
-                    assert_eq!(fixture.counts().await, (0, 0), "{case}");
+                    let expected = if sibling { (1, 0) } else { (0, 0) };
+                    assert_eq!(fixture.counts().await, expected, "{case}");
                 }
             }
         }
     }
 }
 
-/// A sibling with room waits for its durable record (here blocked by another writer) before
-/// anything held is released; a sibling that does not fit fails the response at once, without
-/// waiting for a record.
+/// A sibling waits for its durable record (here blocked by another writer) before anything
+/// held is released, and before a sibling that does not fit fails the response: an observed
+/// call is accounted before any admission decision.
 #[tokio::test]
-async fn a_blocked_record_holds_everything_back_and_a_full_hold_needs_no_record() {
+async fn a_blocked_record_holds_everything_back_even_on_overflow() {
     let fixture = fixture().await;
     let pool = SqliteConfig::new_for_testing(fixture.home.path().abs())
         .open_read_write_pool(&fixture.home.path().join("stateful_runtime_1.sqlite"))
@@ -572,14 +574,56 @@ async fn a_blocked_record_holds_everything_back_and_a_full_hold_needs_no_record(
     let mut events = vec![Ok(completion())];
     events.extend((1..MAX_HELD_EVENTS).map(|_| delta("")));
     events.push(Ok(shell()));
-    let labels = tokio::time::timeout(Duration::from_secs(2), run_fence(&fixture.services, events))
-        .await
-        .expect("fails without waiting for the blocked record");
+    let mut fenced = fence(&fixture.services, Box::pin(futures::stream::iter(events)));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), fenced.next())
+            .await
+            .is_err(),
+        "the overflowing sibling is recorded before the response fails"
+    );
+    writer.rollback().await.expect("unblock");
+    let labels = fenced.map(|event| label(&event)).collect::<Vec<_>>().await;
     assert_eq!(labels.len(), 1, "{labels:?}");
     assert!(
         labels[0].contains("exceeded the host's bound"),
         "{labels:?}"
     );
-    writer.rollback().await.expect("unblock");
-    assert_eq!(fixture.counts().await, (0, 0));
+    assert_eq!(fixture.counts().await, (1, 0));
+}
+
+/// A hosted call first observed (added or done) when the hold is full by count or by bytes is
+/// recorded before the overflow fails the response: the held completion never runs, and a
+/// reopened store shows the run is no longer action-free.
+#[tokio::test]
+async fn a_hosted_call_that_overflows_the_hold_is_still_recorded() {
+    let hosted = |added: bool| {
+        if added {
+            Ok(ResponseEvent::OutputItemAdded(web_search("in_progress")))
+        } else {
+            Ok(ResponseEvent::OutputItemDone(web_search("completed")))
+        }
+    };
+    for added in [true, false] {
+        let mut by_count = vec![Ok(completion())];
+        by_count.extend((1..MAX_HELD_EVENTS).map(|_| delta("")));
+        by_count.push(hosted(added));
+        by_count.push(dropped());
+        let text_bytes = MAX_HELD_BYTES - size(Ok(completion())) - size(delta(""));
+        let by_bytes = vec![
+            Ok(completion()),
+            delta(&"x".repeat(text_bytes)),
+            hosted(added),
+            dropped(),
+        ];
+        for events in [by_count, by_bytes] {
+            let fixture = fixture().await;
+            let labels = run_fence(&fixture.services, events).await;
+            assert_eq!(labels.len(), 1, "added {added}: {labels:?}");
+            assert!(
+                labels[0].contains("exceeded the host's bound"),
+                "{labels:?}"
+            );
+            assert_eq!(fixture.counts().await, (1, 0), "added {added}");
+        }
+    }
 }
