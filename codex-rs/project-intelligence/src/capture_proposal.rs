@@ -11,6 +11,8 @@ pub enum ProposalCategory {
     AttributedContext,
     Decision,
     BrainstormOption,
+    /// An approach the user rejected, with the reason they gave.
+    RuledOut,
     OpenCheck,
     Note,
 }

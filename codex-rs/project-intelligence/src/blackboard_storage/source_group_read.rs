@@ -20,6 +20,16 @@ impl BlackboardStore {
         tx.commit().await?;
         Ok(result)
     }
+
+    /// The proposal group (the receipt) that committed proposal `entry_id`.
+    pub async fn proposal_group_id(
+        &self,
+        project_id: &str,
+        entry_id: &crate::BlackboardEntryId,
+    ) -> Result<Option<String>, BlackboardStoreError> {
+        Ok(sqlx::query_scalar("SELECT member.group_id FROM capture_group_members AS member JOIN capture_groups AS capture ON capture.project_id = member.project_id AND capture.group_id = member.group_id WHERE member.project_id = ? AND member.entry_id = ? AND capture.kind = 'proposal-v1' AND octet_length(member.group_id) <= 512 LIMIT 1")
+            .bind(project_id).bind(entry_id.as_str()).fetch_optional(&self.pool).await?)
+    }
 }
 
 pub(super) async fn capture_group_on(

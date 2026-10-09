@@ -41,6 +41,7 @@ fn request(seal: &SourceSeal, action: &str) -> SourceCaptureGroup {
                 }],
             })
             .collect(),
+        existing: ExistingWording::Refuse,
     }
 }
 

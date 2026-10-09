@@ -206,6 +206,7 @@ impl BlackboardStore {
                 ProposalCategory::AttributedContext => KnowledgeCategory::AttributedContext,
                 ProposalCategory::Decision => KnowledgeCategory::Decision,
                 ProposalCategory::BrainstormOption => KnowledgeCategory::BrainstormOption,
+                ProposalCategory::RuledOut => KnowledgeCategory::RuledOut,
                 ProposalCategory::OpenCheck => KnowledgeCategory::OpenCheck,
                 ProposalCategory::Note => KnowledgeCategory::Note,
             };

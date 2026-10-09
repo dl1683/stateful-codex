@@ -46,9 +46,19 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
 /// Automatic proposal recall is unavailable until publication after hooks is fenced.
 /// Durable group membership covers proposals even when their context is unsupported.
 /// Bounded historical payload checks also cover linked copies of proposal context.
+/// The single exception is a proposal the user explicitly applied: its current revision
+/// carries the user's own quoted words under a bounded HumanDirect promotion context, which
+/// is ordinary admitted knowledge (an Undo or Forget removes that current revision again).
 pub(super) fn automatic_entry_eligibility() -> String {
     format!(
-        "{ENTRY_SOURCE_ELIGIBILITY} AND NOT EXISTS (
+        "{ENTRY_SOURCE_ELIGIBILITY} AND (EXISTS (
+        SELECT 1 FROM knowledge_context AS applied
+        WHERE applied.entry_id = entry.id AND applied.revision = entry.revision
+          AND applied.authority = 'human_direct'
+          AND octet_length(applied.payload) <= 8192 AND json_valid(applied.payload)
+          AND json_type(applied.payload, '$.promotion') = 'object'
+          AND json_type(applied.payload, '$.proposal') IS NULL)
+        OR (NOT EXISTS (
         SELECT 1 FROM capture_group_members AS member
         JOIN capture_groups AS capture
           ON capture.project_id = member.project_id AND capture.group_id = member.group_id
@@ -61,7 +71,7 @@ pub(super) fn automatic_entry_eligibility() -> String {
                   WHEN json_valid(context.payload)
                     THEN json_type(context.payload, '$.proposal') IS NOT NULL
                   ELSE 0 END
-              ELSE 0 END)"
+              ELSE 0 END)))"
     )
 }
 

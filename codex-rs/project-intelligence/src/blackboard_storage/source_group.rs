@@ -1,4 +1,5 @@
-//! Source-linked group transaction foundation. No automatic admission producer is exposed.
+//! Source-linked group transaction: the host's automatic admission of supported direct
+//! declarations commits through it (see the extension's capture admission).
 use super::BlackboardStore;
 use super::BlackboardStoreError;
 use crate::BlackboardEntryState;
@@ -24,12 +25,24 @@ pub struct SourceCaptureMember {
     pub spans: Vec<SourceSpan>,
 }
 
+/// What a new group does with a member whose wording is already a current entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExistingWording {
+    /// Refuse the whole group; nothing is written.
+    Refuse,
+    /// Acknowledge an identical current applied member as already present, without writing
+    /// to it. Any difference in kind, typed value, category, authority, scope or application
+    /// still refuses the whole group.
+    AcknowledgeIdentical,
+}
+
 /// One host action binds the whole group, not each member's journal row.
 pub struct SourceCaptureGroup {
     pub project_id: String,
     pub action_id: String,
     pub group_id: String,
     pub members: Vec<SourceCaptureMember>,
+    pub existing: ExistingWording,
 }
 
 impl BlackboardStore {
@@ -264,15 +277,47 @@ impl BlackboardStore {
             failed: 0,
             members: Vec::new(),
         };
+        let existing = group.existing;
         for (ordinal, mut member) in group.members.into_iter().enumerate() {
-            // Committed-action replay above is the only permitted reuse. Arbitrate
-            // collisions under this writer lock before write_unit can reconcile or
-            // promote an existing entry. Any earlier members roll back with the group.
+            // Committed-action replay and an identical acknowledgement are the only permitted
+            // reuse. Arbitrate collisions under this writer lock before write_unit can
+            // reconcile or promote an existing entry. Earlier members roll back with the group.
             if let Some(id) =
                 super::identity::direct_match(&mut tx, &member.write.value, &member.write.context)
                     .await?
             {
-                return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
+                let current = super::load_entry(&mut tx, &group.project_id, &id).await?;
+                let identical = match (&current, existing) {
+                    (Some(current), ExistingWording::AcknowledgeIdentical) => {
+                        current.state == BlackboardEntryState::Active
+                            && current.value.kind == member.write.value.kind
+                            && current.value.structured_value.is_none()
+                            && member.write.value.structured_value.is_none()
+                            && current.value.root_promotion == member.write.value.root_promotion
+                            && current.value.provenance.kind == member.write.value.provenance.kind
+                            && super::knowledge::context_of(&mut tx, &group.project_id, id.as_str())
+                                .await?
+                                .is_some_and(|context| {
+                                    context.category == member.write.context.category
+                                        && context.authority == member.write.context.authority
+                                        && context.scope_id == member.write.context.scope_id
+                                })
+                    }
+                    (Some(_), ExistingWording::Refuse) | (None, _) => false,
+                };
+                let Some(current) = current.filter(|_| identical) else {
+                    return Err(BlackboardStoreError::EntryIdentityConflict(id.to_string()));
+                };
+                receipt.already_present += 1;
+                receipt.members.push(CaptureGroupMember {
+                    ordinal: ordinal as u32,
+                    entry_id: Some(current.id.to_string()),
+                    revision: Some(current.revision),
+                    outcome: MemberOutcome::AlreadyPresent,
+                    preview: super::knowledge::bounded_preview(&current.value.content).to_string(),
+                    reason: None,
+                });
+                continue;
             }
             for id in &member.write.candidates {
                 let exists: bool = sqlx::query_scalar(
