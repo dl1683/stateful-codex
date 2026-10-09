@@ -77,6 +77,7 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
         | ServerNotification::BlackboardUpdated(_)
         | ServerNotification::StatefulAttributionCompleted(_)
         | ServerNotification::StatefulKnowledgeCaptured(_)
+        | ServerNotification::StatefulMemoryCaptured(_)
         | ServerNotification::EnvironmentConnected(_)
         | ServerNotification::EnvironmentDisconnected(_)
         | ServerNotification::ThreadSettingsUpdated(_)

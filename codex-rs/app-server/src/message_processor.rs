@@ -1599,6 +1599,12 @@ impl MessageProcessor {
             ClientRequest::StatefulMemoryScope { params, .. } => {
                 Box::pin(self.blackboard_processor.memory_scope(params)).await
             }
+            ClientRequest::StatefulMemoryApply { params, .. } => {
+                Box::pin(self.blackboard_processor.memory_apply(params)).await
+            }
+            ClientRequest::StatefulMemoryUndo { params, .. } => {
+                Box::pin(self.blackboard_processor.memory_undo(params)).await
+            }
             ClientRequest::StatefulRunStart { params, .. } => {
                 self.stateful_processor.run_start(params).await
             }

@@ -4341,6 +4341,32 @@
         }
       ]
     },
+    "StatefulMemoryApplyCategory": {
+      "description": "What the user applies a proposal as. Applied words take project scope.",
+      "oneOf": [
+        {
+          "description": "A standing project rule in the user's quoted words.",
+          "enum": [
+            "rule"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The user's settled decision with its quoted reason.",
+          "enum": [
+            "decision"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "An approach the user ruled out, with its quoted reason.",
+          "enum": [
+            "ruledOut"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "StatefulMemoryScopeAction": {
       "description": "Legacy actions decoded solely to return an explicit unsupported error.",
       "oneOf": [

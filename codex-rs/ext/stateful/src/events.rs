@@ -42,6 +42,9 @@ pub enum StatefulEvent {
         /// The entry's content, at most `MAX_RECEIPT_TEXT_BYTES` bytes.
         text: String,
     },
+    /// A committed (or refused) capture of the user's words, an Apply or an Undo, so clients
+    /// can show what was saved, proposed or refused and offer its one-step Undo.
+    MemoryReceipt(crate::memory_receipts::MemoryReceipt),
 }
 
 /// Longest content excerpt carried by a receipt.

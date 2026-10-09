@@ -265,3 +265,161 @@ pub enum StatefulMemoryScopeState {
     Ended,
     Unknown,
 }
+
+/// What a memory receipt reports.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryReceiptKind {
+    /// Standing project rules the user stated in a supported declaration.
+    Rules,
+    /// Material kept for review; nothing was applied.
+    Proposals,
+    /// A proposal the user applied.
+    Promotion,
+    /// A receipt the user undid.
+    Undo,
+}
+
+/// What became of one unit of a receipt.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryReceiptStatus {
+    Saved,
+    AlreadyPresent,
+    /// Kept for review, not applied.
+    Proposed,
+    /// Kept, not applied, with an unresolved dependency.
+    Pending,
+    /// Recognized but not stored whole; the exact source remains.
+    Omitted,
+    /// Words the user forgot earlier; a later statement does not restore them.
+    NotRestored,
+    /// Held back with the rest of a refused declaration.
+    Refused,
+    /// Retired by an Undo.
+    Undone,
+    /// An Undo returned an applied proposal to review.
+    ProposalRestored,
+    /// Existed before the undone receipt; left as it was.
+    Untouched,
+}
+
+/// The kind of knowledge a receipt member holds.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryReceiptCategory {
+    Rule,
+    Background,
+    AttributedContext,
+    Decision,
+    BrainstormOption,
+    RuledOut,
+    OpenCheck,
+    Note,
+    Other,
+}
+
+/// One unit of a memory receipt.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryReceiptMember {
+    /// Absent when nothing was stored for this unit.
+    pub entry_id: Option<String>,
+    #[ts(type = "number | null")]
+    pub revision: Option<u64>,
+    pub category: StatefulMemoryReceiptCategory,
+    pub status: StatefulMemoryReceiptStatus,
+    /// At most 240 bytes. For proposals this is the assistant's labelled reading, not the
+    /// user's words; applied and stated entries show the user's exact words.
+    pub text: String,
+    /// Whether `text` is shorter than the stored words.
+    pub text_shortened: bool,
+}
+
+/// A committed (or refused) memory capture, Apply or Undo. Counts are by member status:
+/// saved rules are not proposals, and a refusal never reports a save.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryReceipt {
+    pub project_id: String,
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    /// Pass to `statefulMemory/undo`.
+    pub receipt_id: String,
+    pub kind: StatefulMemoryReceiptKind,
+    /// At most 24.
+    pub members: Vec<StatefulMemoryReceiptMember>,
+    /// Whether one Undo can reverse what this receipt saved or proposed.
+    pub undoable: bool,
+}
+
+/// Sent when a turn's words were captured, or a capture was refused, or the user applied a
+/// proposal or undid a receipt.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryCapturedNotification {
+    pub receipt: StatefulMemoryReceipt,
+}
+
+/// What the user applies a proposal as. Applied words take project scope.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulMemoryApplyCategory {
+    /// A standing project rule in the user's quoted words.
+    Rule,
+    /// The user's settled decision with its quoted reason.
+    Decision,
+    /// An approach the user ruled out, with its quoted reason.
+    RuledOut,
+}
+
+/// Applies a kept proposal as the user's own words, with no model turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryApplyParams {
+    pub thread_id: String,
+    /// The project observed by the client at submission; mismatch refuses the operation.
+    pub expected_project_id: String,
+    pub entry_id: String,
+    #[ts(type = "number")]
+    pub expected_revision: u64,
+    pub category: StatefulMemoryApplyCategory,
+    /// Identifies this user action; a retry returns the recorded receipt.
+    pub client_action_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryApplyResponse {
+    pub receipt: StatefulMemoryReceipt,
+}
+
+/// Undoes one receipt with no model turn: what it newly saved is retired, an applied
+/// proposal returns to review, and anything changed since conflicts without partial undo.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryUndoParams {
+    pub thread_id: String,
+    /// The project observed by the client at submission; mismatch refuses the operation.
+    pub expected_project_id: String,
+    pub receipt_id: String,
+    /// Identifies this user action; a retry returns the recorded result.
+    pub client_action_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulMemoryUndoResponse {
+    pub receipt: StatefulMemoryReceipt,
+}

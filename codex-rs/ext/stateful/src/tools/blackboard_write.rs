@@ -377,6 +377,7 @@ impl BlackboardBatchRecordTool {
                     &self.recorder.services,
                     &self.recorder.project_id,
                     &self.recorder.thread_id,
+                    self.recorder.event_sink.as_deref(),
                     &call,
                     batch,
                 )

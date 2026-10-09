@@ -47,6 +47,7 @@ const KNOWLEDGE_HEADER: &str = "Other promoted knowledge:";
 /// Lays out root entries in a chosen order while keeping their projection aliases.
 struct EntryLayout<'a> {
     entry_aliases: &'a HashMap<String, String>,
+    contexts: &'a HashMap<String, codex_project_intelligence::KnowledgeContext>,
     identity_aliases: HashMap<String, String>,
     identity_evidence: HashMap<ContextMapEntryId, String>,
     evidence_audit: Option<&'a EvidenceAudit>,
@@ -64,13 +65,14 @@ impl EntryLayout<'_> {
         evidence_aliases: &HashMap<ContextMapEntryId, String>,
     ) {
         let alias = format!("E{}", index + 1);
+        let said = said_by_user(self.contexts.get(hit.entry.id.as_str()));
         let plain = render_hit(
             &alias,
             hit,
             self.entry_aliases,
             evidence_aliases,
             self.evidence_audit,
-        );
+        ) + &said;
         let plain = bounded_entry_line(plain, &alias);
         if try_append_line(output, &plain, ROOT_FOOTER_RESERVE_BYTES) {
             if !plain.ends_with(TRUNCATED_ENTRY_SUFFIX) {
@@ -82,7 +84,7 @@ impl EntryLayout<'_> {
                 &self.identity_aliases,
                 &self.identity_evidence,
                 self.evidence_audit,
-            );
+            ) + &said;
             self.entries.push(LaidOutLine {
                 key: short_digest(hit.entry.id.as_str()),
                 digest: short_digest(&canonical),
@@ -242,6 +244,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         .collect::<HashMap<_, _>>();
     let mut layout = EntryLayout {
         entry_aliases: &entry_aliases,
+        contexts: &projection.contexts,
         identity_aliases: projection
             .data
             .iter()
@@ -530,6 +533,71 @@ fn render_hit(
         premises,
         relations,
     )
+}
+
+/// When and by whom the user's words were said, for entries the user stated as a supported
+/// declaration or applied from a proposal: ` said=2026-10-09T14:03Z by=user`. Other entries,
+/// and entries whose time is unknown, render nothing (unknown is never stamped with a time).
+fn said_by_user(context: Option<&codex_project_intelligence::KnowledgeContext>) -> String {
+    use codex_project_intelligence::KnowledgeAuthority;
+    use codex_project_intelligence::SourceTime;
+    use codex_project_intelligence::TemporalContext;
+    let Some(context) =
+        context.filter(|context| context.authority == KnowledgeAuthority::HumanDirect)
+    else {
+        return String::new();
+    };
+    let Some(payload) = context
+        .payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+    else {
+        return String::new();
+    };
+    let how = if payload.get("admission").is_some() {
+        "user"
+    } else if payload.get("promotion").is_some() {
+        "user (applied)"
+    } else {
+        return String::new();
+    };
+    let said = payload
+        .get("temporal")
+        .cloned()
+        .and_then(|temporal| serde_json::from_value::<TemporalContext>(temporal).ok())
+        .and_then(|temporal| match temporal.source_time {
+            SourceTime::HostObserved { unix_ms, .. } => utc_minute(unix_ms),
+            SourceTime::Unknown | SourceTime::Attributed { .. } => None,
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    format!(" said={said} by={how}")
+}
+
+/// `YYYY-MM-DDTHH:MMZ` for a Unix millisecond time (proleptic Gregorian, UTC).
+fn utc_minute(unix_ms: i64) -> Option<String> {
+    let minutes = unix_ms.div_euclid(60_000);
+    let days = minutes.div_euclid(1_440);
+    let minute_of_day = minutes.rem_euclid(1_440);
+    // Civil-from-days (Howard Hinnant), valid across the i64 day range used here.
+    let shifted = days.checked_add(719_468)?;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}Z",
+        minute_of_day / 60,
+        minute_of_day % 60
+    ))
 }
 
 /// Bounds a rendered entry line for display. Change detection must digest the

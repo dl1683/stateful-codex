@@ -5043,6 +5043,26 @@
           "properties": {
             "method": {
               "enum": [
+                "statefulMemory/captured"
+              ],
+              "title": "StatefulMemory/capturedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/StatefulMemoryCapturedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "StatefulMemory/capturedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/project/updated"
               ],
               "title": "Thread/project/updatedNotificationMethod",
@@ -21812,6 +21832,32 @@
           }
         ]
       },
+      "StatefulMemoryApplyCategory": {
+        "description": "What the user applies a proposal as. Applied words take project scope.",
+        "oneOf": [
+          {
+            "description": "A standing project rule in the user's quoted words.",
+            "enum": [
+              "rule"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "The user's settled decision with its quoted reason.",
+            "enum": [
+              "decision"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "An approach the user ruled out, with its quoted reason.",
+            "enum": [
+              "ruledOut"
+            ],
+            "type": "string"
+          }
+        ]
+      },
       "StatefulMemoryAuthority": {
         "description": "On whose authority a memory entry rests.",
         "oneOf": [
@@ -21850,6 +21896,20 @@
             "type": "string"
           }
         ]
+      },
+      "StatefulMemoryCapturedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Sent when a turn's words were captured, or a capture was refused, or the user applied a proposal or undid a receipt.",
+        "properties": {
+          "receipt": {
+            "$ref": "#/definitions/v2/StatefulMemoryReceipt"
+          }
+        },
+        "required": [
+          "receipt"
+        ],
+        "title": "StatefulMemoryCapturedNotification",
+        "type": "object"
       },
       "StatefulMemoryItem": {
         "description": "One active retained entry; its presence does not assert current applicability.",
@@ -21937,6 +21997,207 @@
           "updatedAt"
         ],
         "type": "object"
+      },
+      "StatefulMemoryReceipt": {
+        "description": "A committed (or refused) memory capture, Apply or Undo. Counts are by member status: saved rules are not proposals, and a refusal never reports a save.",
+        "properties": {
+          "kind": {
+            "$ref": "#/definitions/v2/StatefulMemoryReceiptKind"
+          },
+          "members": {
+            "description": "At most 24.",
+            "items": {
+              "$ref": "#/definitions/v2/StatefulMemoryReceiptMember"
+            },
+            "type": "array"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "receiptId": {
+            "description": "Pass to `statefulMemory/undo`.",
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "undoable": {
+            "description": "Whether one Undo can reverse what this receipt saved or proposed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "members",
+          "projectId",
+          "receiptId",
+          "threadId",
+          "undoable"
+        ],
+        "type": "object"
+      },
+      "StatefulMemoryReceiptCategory": {
+        "description": "The kind of knowledge a receipt member holds.",
+        "enum": [
+          "rule",
+          "background",
+          "attributedContext",
+          "decision",
+          "brainstormOption",
+          "ruledOut",
+          "openCheck",
+          "note",
+          "other"
+        ],
+        "type": "string"
+      },
+      "StatefulMemoryReceiptKind": {
+        "description": "What a memory receipt reports.",
+        "oneOf": [
+          {
+            "description": "Standing project rules the user stated in a supported declaration.",
+            "enum": [
+              "rules"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Material kept for review; nothing was applied.",
+            "enum": [
+              "proposals"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "A proposal the user applied.",
+            "enum": [
+              "promotion"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "A receipt the user undid.",
+            "enum": [
+              "undo"
+            ],
+            "type": "string"
+          }
+        ]
+      },
+      "StatefulMemoryReceiptMember": {
+        "description": "One unit of a memory receipt.",
+        "properties": {
+          "category": {
+            "$ref": "#/definitions/v2/StatefulMemoryReceiptCategory"
+          },
+          "entryId": {
+            "description": "Absent when nothing was stored for this unit.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/definitions/v2/StatefulMemoryReceiptStatus"
+          },
+          "text": {
+            "description": "At most 240 bytes. For proposals this is the assistant's labelled reading, not the user's words; applied and stated entries show the user's exact words.",
+            "type": "string"
+          },
+          "textShortened": {
+            "description": "Whether `text` is shorter than the stored words.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category",
+          "status",
+          "text",
+          "textShortened"
+        ],
+        "type": "object"
+      },
+      "StatefulMemoryReceiptStatus": {
+        "description": "What became of one unit of a receipt.",
+        "oneOf": [
+          {
+            "enum": [
+              "saved",
+              "alreadyPresent"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Kept for review, not applied.",
+            "enum": [
+              "proposed"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Kept, not applied, with an unresolved dependency.",
+            "enum": [
+              "pending"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Recognized but not stored whole; the exact source remains.",
+            "enum": [
+              "omitted"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Words the user forgot earlier; a later statement does not restore them.",
+            "enum": [
+              "notRestored"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Held back with the rest of a refused declaration.",
+            "enum": [
+              "refused"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Retired by an Undo.",
+            "enum": [
+              "undone"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "An Undo returned an applied proposal to review.",
+            "enum": [
+              "proposalRestored"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Existed before the undone receipt; left as it was.",
+            "enum": [
+              "untouched"
+            ],
+            "type": "string"
+          }
+        ]
       },
       "StatefulMemoryReplaced": {
         "description": "An earlier entry that a memory item replaced.",

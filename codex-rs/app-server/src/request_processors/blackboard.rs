@@ -59,6 +59,10 @@ use crate::error_code::method_not_found;
 mod memory_admission;
 #[path = "stateful_memory.rs"]
 mod stateful_memory;
+#[path = "stateful_memory_receipts.rs"]
+mod stateful_memory_receipts;
+
+pub(crate) use stateful_memory_receipts::api_memory_receipt;
 
 const DEFAULT_QUERY_LIMIT: u32 = 20;
 

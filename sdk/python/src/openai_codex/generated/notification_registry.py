@@ -56,6 +56,7 @@ from .v2_all import ServerRequestResolvedNotification
 from .v2_all import SkillsChangedNotification
 from .v2_all import StatefulAttributionCompletedNotification
 from .v2_all import StatefulKnowledgeCapturedNotification
+from .v2_all import StatefulMemoryCapturedNotification
 from .v2_all import StatefulRunUpdatedNotification
 from .v2_all import SteeringUpdatedNotification
 from .v2_all import StrictReviewRequiredNotification
@@ -147,6 +148,7 @@ KnownNotificationPayload: TypeAlias = (
     | SkillsChangedNotification
     | StatefulAttributionCompletedNotification
     | StatefulKnowledgeCapturedNotification
+    | StatefulMemoryCapturedNotification
     | StatefulRunUpdatedNotification
     | SteeringUpdatedNotification
     | StrictReviewRequiredNotification
@@ -240,6 +242,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "skills/changed": SkillsChangedNotification,
     "statefulAttribution/completed": StatefulAttributionCompletedNotification,
     "statefulKnowledge/captured": StatefulKnowledgeCapturedNotification,
+    "statefulMemory/captured": StatefulMemoryCapturedNotification,
     "statefulRun/updated": StatefulRunUpdatedNotification,
     "steering/updated": SteeringUpdatedNotification,
     "thread/archived": ThreadArchivedNotification,

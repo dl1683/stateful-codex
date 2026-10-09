@@ -931,6 +931,18 @@ client_request_definitions! {
         serialization: global("project-intelligence"),
         response: v2::StatefulMemoryAddResponse,
     },
+    #[experimental("statefulMemory/apply")]
+    StatefulMemoryApply => "statefulMemory/apply" {
+        params: v2::StatefulMemoryApplyParams,
+        serialization: global("project-intelligence"),
+        response: v2::StatefulMemoryApplyResponse,
+    },
+    #[experimental("statefulMemory/undo")]
+    StatefulMemoryUndo => "statefulMemory/undo" {
+        params: v2::StatefulMemoryUndoParams,
+        serialization: global("project-intelligence"),
+        response: v2::StatefulMemoryUndoResponse,
+    },
     #[experimental("statefulMeasurement/list")]
     StatefulMeasurementList => "statefulMeasurement/list" {
         params: v2::StatefulMeasurementListParams,
@@ -2102,6 +2114,8 @@ server_notification_definitions! {
     StatefulAttributionCompleted => "statefulAttribution/completed" (v2::StatefulAttributionCompletedNotification),
     #[experimental("statefulKnowledge/captured")]
     StatefulKnowledgeCaptured => "statefulKnowledge/captured" (v2::StatefulKnowledgeCapturedNotification),
+    #[experimental("statefulMemory/captured")]
+    StatefulMemoryCaptured => "statefulMemory/captured" (v2::StatefulMemoryCapturedNotification),
     #[experimental("thread/project/updated")]
     ThreadProjectUpdated => "thread/project/updated" (v2::ThreadProjectUpdatedNotification),
     #[experimental("thread/environment/connected")]

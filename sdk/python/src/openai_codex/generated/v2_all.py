@@ -5256,12 +5256,72 @@ class StatefulMemoryAddOutcome(Enum):
     already_done = "alreadyDone"
 
 
+class StatefulMemoryApplyCategory(Enum):
+    rule = "rule"
+    decision = "decision"
+    ruled_out = "ruledOut"
+
+
 class StatefulMemoryAuthority(Enum):
     legacy_unknown = "legacyUnknown"
     human_direct = "humanDirect"
     assistant_reported = "assistantReported"
     reported_third_party = "reportedThirdParty"
     host_observed = "hostObserved"
+
+
+class StatefulMemoryReceiptCategory(Enum):
+    rule = "rule"
+    background = "background"
+    attributed_context = "attributedContext"
+    decision = "decision"
+    brainstorm_option = "brainstormOption"
+    ruled_out = "ruledOut"
+    open_check = "openCheck"
+    note = "note"
+    other = "other"
+
+
+class StatefulMemoryReceiptKind(Enum):
+    rules = "rules"
+    proposals = "proposals"
+    promotion = "promotion"
+    undo = "undo"
+
+
+class StatefulMemoryReceiptStatusValue(Enum):
+    saved = "saved"
+    already_present = "alreadyPresent"
+
+
+class StatefulMemoryReceiptStatus(
+    RootModel[
+        StatefulMemoryReceiptStatusValue
+        | Literal["proposed"]
+        | Literal["pending"]
+        | Literal["omitted"]
+        | Literal["notRestored"]
+        | Literal["refused"]
+        | Literal["undone"]
+        | Literal["proposalRestored"]
+        | Literal["untouched"]
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        StatefulMemoryReceiptStatusValue
+        | Literal["proposed"]
+        | Literal["pending"]
+        | Literal["omitted"]
+        | Literal["notRestored"]
+        | Literal["refused"]
+        | Literal["undone"]
+        | Literal["proposalRestored"]
+        | Literal["untouched"],
+        Field(description="What became of one unit of a receipt."),
+    ]
 
 
 class StatefulMemoryReplaced(BaseModel):
@@ -10406,6 +10466,31 @@ class StatefulMemoryItem(BaseModel):
     updated_at: Annotated[int, Field(alias="updatedAt", description="Unix seconds.")]
 
 
+class StatefulMemoryReceiptMember(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    category: StatefulMemoryReceiptCategory
+    entry_id: Annotated[
+        str | None,
+        Field(alias="entryId", description="Absent when nothing was stored for this unit."),
+    ] = None
+    revision: Annotated[int | None, Field(ge=0)] = None
+    status: StatefulMemoryReceiptStatus
+    text: Annotated[
+        str,
+        Field(
+            description="At most 240 bytes. For proposals this is the assistant's labelled reading, not the user's words; applied and stated entries show the user's exact words."
+        ),
+    ]
+    text_shortened: Annotated[
+        bool,
+        Field(
+            alias="textShortened", description="Whether `text` is shorter than the stored words."
+        ),
+    ]
+
+
 class StatefulObligation(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12231,6 +12316,23 @@ class SessionSource(RootModel[SessionSourceValue | CustomSessionSource | SubAgen
     root: SessionSourceValue | CustomSessionSource | SubAgentSessionSource
 
 
+class StatefulMemoryReceipt(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: StatefulMemoryReceiptKind
+    members: Annotated[list[StatefulMemoryReceiptMember], Field(description="At most 24.")]
+    project_id: Annotated[str, Field(alias="projectId")]
+    receipt_id: Annotated[
+        str, Field(alias="receiptId", description="Pass to `statefulMemory/undo`.")
+    ]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str | None, Field(alias="turnId")] = None
+    undoable: Annotated[
+        bool, Field(description="Whether one Undo can reverse what this receipt saved or proposed.")
+    ]
+
+
 class FunctionCallOutputThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12837,6 +12939,13 @@ class ItemCompletedServerNotification(BaseModel):
     ] = None
     method: Annotated[Literal["item/completed"], Field(title="Item/completedNotificationMethod")]
     params: ItemCompletedNotification
+
+
+class StatefulMemoryCapturedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    receipt: StatefulMemoryReceipt
 
 
 class Thread(BaseModel):
@@ -13717,6 +13826,23 @@ class ThreadStartedServerNotification(BaseModel):
     params: ThreadStartedNotification
 
 
+class StatefulMemoryCapturedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["statefulMemory/captured"], Field(title="StatefulMemory/capturedNotificationMethod")
+    ]
+    params: StatefulMemoryCapturedNotification
+
+
 class ItemAutoApprovalReviewStartedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13777,6 +13903,7 @@ class ServerNotification(
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
         | StatefulKnowledgeCapturedServerNotification
+        | StatefulMemoryCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification
@@ -13874,6 +14001,7 @@ class ServerNotification(
         | BlackboardUpdatedServerNotification
         | StatefulAttributionCompletedServerNotification
         | StatefulKnowledgeCapturedServerNotification
+        | StatefulMemoryCapturedServerNotification
         | ThreadProjectUpdatedServerNotification
         | ThreadEnvironmentConnectedServerNotification
         | ThreadEnvironmentDisconnectedServerNotification

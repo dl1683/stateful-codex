@@ -337,6 +337,11 @@ impl StatefulEventSink for AppServerStatefulEventSink {
                     text,
                 },
             ),
+            StatefulEvent::MemoryReceipt(receipt) => ServerNotification::StatefulMemoryCaptured(
+                codex_app_server_protocol::StatefulMemoryCapturedNotification {
+                    receipt: crate::request_processors::api_memory_receipt(receipt),
+                },
+            ),
             StatefulEvent::AttributionCompleted { summary } => {
                 let notification = StatefulAttributionCompletedNotification {
                     project_id: summary.project_id,

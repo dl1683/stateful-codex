@@ -585,6 +585,7 @@ mod windows_sandbox_processor;
 pub(crate) use account_processor::AccountRequestProcessor;
 pub(crate) use apps_processor::AppsRequestProcessor;
 pub(crate) use blackboard::BlackboardRequestProcessor;
+pub(crate) use blackboard::api_memory_receipt;
 pub(crate) use catalog_processor::CatalogRequestProcessor;
 pub(crate) use command_exec_processor::CommandExecRequestProcessor;
 pub(crate) use config_processor::ConfigRequestProcessor;

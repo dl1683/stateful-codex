@@ -131,6 +131,9 @@ impl StatefulExtension {
             };
             match store.observe_source(observation, text).await {
                 Ok(seal) => {
+                    // Observation is durable first; admission can fail without losing it.
+                    self.admit_declaration(services, &admission, &seal, text)
+                        .await;
                     let mut handles = turn_store
                         .get::<SourceHandles>()
                         .map(|handles| (*handles).clone())

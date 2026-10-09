@@ -7,6 +7,7 @@ mod acceptance_workspace;
 mod attributed_text;
 mod attribution;
 mod autonomy;
+mod capture_admission;
 mod capture_sources;
 #[cfg(test)]
 mod capture_test_support;
@@ -20,6 +21,7 @@ mod events;
 mod limits;
 mod memory_add;
 mod memory_controls;
+mod memory_receipts;
 mod quotation;
 mod read_receipts;
 mod relayed;
@@ -91,6 +93,12 @@ pub use memory_controls::MemorySection;
 pub use memory_controls::correct_entry;
 pub use memory_controls::forget_entry;
 pub use memory_controls::memory_section;
+pub use memory_receipts::MemoryReceipt;
+pub use memory_receipts::ReceiptKind;
+pub use memory_receipts::ReceiptMember;
+pub use memory_receipts::ReceiptStatus;
+pub use memory_receipts::apply_proposal;
+pub use memory_receipts::undo_receipt;
 
 /// Bytes of Stateful developer content a fresh context window carries across the project
 /// packet, the run packet and the conversation record (about 3k tokens).

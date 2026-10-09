@@ -204,3 +204,21 @@ fn quarantine_keeps_aliases_contiguous_and_rules_are_never_evicted() {
     );
     assert!(output.contains("root entries omitted by the context bound"));
 }
+
+#[test]
+fn user_statement_times_render_as_utc_minutes() {
+    assert_eq!(
+        [
+            super::utc_minute(/*unix_ms*/ 0),
+            super::utc_minute(/*unix_ms*/ 951_782_400_000),
+            super::utc_minute(/*unix_ms*/ 1_791_554_580_000),
+            super::utc_minute(/*unix_ms*/ -60_000),
+        ],
+        [
+            Some("1970-01-01T00:00Z".to_string()),
+            Some("2000-02-29T00:00Z".to_string()),
+            Some("2026-10-09T14:03Z".to_string()),
+            Some("1969-12-31T23:59Z".to_string()),
+        ]
+    );
+}
