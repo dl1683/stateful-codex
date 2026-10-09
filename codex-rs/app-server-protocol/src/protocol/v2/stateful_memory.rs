@@ -336,8 +336,14 @@ pub struct StatefulMemoryReceiptMember {
     /// At most 240 bytes. For proposals this is the assistant's labelled reading, not the
     /// user's words; applied and stated entries show the user's exact words.
     pub text: String,
-    /// Whether `text` is shorter than the stored words.
+    /// Whether `text` is shorter than the stored words; the exact words stay readable under
+    /// `entryId`@`revision` in `statefulMemory/read`.
     pub text_shortened: bool,
+    /// For a kept proposal that can be applied: the user's exact words an Apply would make
+    /// theirs, at most 240 bytes, separate from the assistant's reading in `text`. Absent when
+    /// an Apply would refuse (partial citation, unresolved scope or other dependency).
+    pub applies_text: Option<String>,
+    pub applies_text_shortened: bool,
 }
 
 /// A committed (or refused) memory capture, Apply or Undo. Counts are by member status:

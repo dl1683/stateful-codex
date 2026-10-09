@@ -61,6 +61,11 @@ pub struct ReceiptMember {
     pub text: String,
     /// Whether `text` is shorter than the stored words.
     pub shortened: bool,
+    /// For a kept proposal that can be applied: the user's exact words an Apply would settle
+    /// (at most `MAX_RECEIPT_TEXT_BYTES` bytes), distinct from the assistant's reading in
+    /// `text`. Absent when Apply would refuse.
+    pub applies: Option<String>,
+    pub applies_shortened: bool,
 }
 
 /// One committed (or refused) capture, as the user's clients show it.
@@ -92,7 +97,16 @@ impl ReceiptMember {
             status,
             text: receipt_text(content),
             shortened: content.len() > MAX_RECEIPT_TEXT_BYTES,
+            applies: None,
+            applies_shortened: false,
         }
+    }
+
+    /// The exact words an Apply would settle.
+    pub(crate) fn with_applies(mut self, words: &str) -> Self {
+        self.applies = Some(receipt_text(words));
+        self.applies_shortened = words.len() > MAX_RECEIPT_TEXT_BYTES;
+        self
     }
 }
 
@@ -127,12 +141,21 @@ impl MemoryReceipt {
                     (_, MemberOutcome::NotRestored) => ReceiptStatus::NotRestored,
                     (_, MemberOutcome::Failed) => ReceiptStatus::Refused,
                 };
-                ReceiptMember::new(
+                // The committed preview is cropped; its durable whole length says whether.
+                let length = member
+                    .reason
+                    .as_deref()
+                    .and_then(|reason| serde_json::from_str::<serde_json::Value>(reason).ok())
+                    .and_then(|reason| reason.get("length").and_then(serde_json::Value::as_u64));
+                let mut receipt = ReceiptMember::new(
                     member.entry_id.clone().zip(member.revision),
                     category,
                     status,
                     &member.preview,
-                )
+                );
+                receipt.shortened = receipt.shortened
+                    || length.is_none_or(|length| length > member.preview.len() as u64);
+                receipt
             })
             .collect::<Vec<_>>();
         let undoable = kind != ReceiptKind::Undo
@@ -227,10 +250,10 @@ fn refusal(error: BlackboardStoreError, action: &str) -> MemoryControlError {
             format!("the same words are already current as {id}")
         }
         BlackboardStoreError::InvalidSource => match action {
-            "apply" => "only a retained proposal of the user's own words, at its current revision and within 4,096 bytes, can be applied".to_string(),
+            "apply" => "only a kept proposal that cites the user's whole message (at most 4,096 bytes), with no unresolved scope or other dependency, at its current revision, can be applied".to_string(),
             _ => "this receipt has nothing left that its Undo can reverse".to_string(),
         },
-        BlackboardStoreError::EntryNotActive(id) => format!("entry {id} is no longer active"),
+        BlackboardStoreError::EntryNotActive(what) => format!("{what} is no longer current"),
         BlackboardStoreError::EntryNotFound(what) => format!("not found: {what}"),
         BlackboardStoreError::ActionAlreadyRecorded(_) => {
             "this action identity was already used for something else".to_string()

@@ -18,6 +18,13 @@ entryId: string | null, revision: number | null, category: StatefulMemoryReceipt
  */
 text: string,
 /**
- * Whether `text` is shorter than the stored words.
+ * Whether `text` is shorter than the stored words; the exact words stay readable under
+ * `entryId`@`revision` in `statefulMemory/read`.
  */
-textShortened: boolean, };
+textShortened: boolean,
+/**
+ * For a kept proposal that can be applied: the user's exact words an Apply would make
+ * theirs, at most 240 bytes, separate from the assistant's reading in `text`. Absent when
+ * an Apply would refuse (partial citation, unresolved scope or other dependency).
+ */
+appliesText: string | null, appliesTextShortened: boolean, };

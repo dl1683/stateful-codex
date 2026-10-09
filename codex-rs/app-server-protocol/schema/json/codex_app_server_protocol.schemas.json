@@ -22093,6 +22093,16 @@
       "StatefulMemoryReceiptMember": {
         "description": "One unit of a memory receipt.",
         "properties": {
+          "appliesText": {
+            "description": "For a kept proposal that can be applied: the user's exact words an Apply would make theirs, at most 240 bytes, separate from the assistant's reading in `text`. Absent when an Apply would refuse (partial citation, unresolved scope or other dependency).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "appliesTextShortened": {
+            "type": "boolean"
+          },
           "category": {
             "$ref": "#/definitions/v2/StatefulMemoryReceiptCategory"
           },
@@ -22119,11 +22129,12 @@
             "type": "string"
           },
           "textShortened": {
-            "description": "Whether `text` is shorter than the stored words.",
+            "description": "Whether `text` is shorter than the stored words; the exact words stay readable under `entryId`@`revision` in `statefulMemory/read`.",
             "type": "boolean"
           }
         },
         "required": [
+          "appliesTextShortened",
           "category",
           "status",
           "text",

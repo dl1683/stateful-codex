@@ -298,6 +298,7 @@ async fn c456_public_capture_to_use_journey_survives_a_cold_new_session_and_forg
         format!("content={DECISION}"),
         format!("content={RULED_OUT}"),
         "rejectedApproach".to_string(),
+        " said=".to_string(),
         " by=user (applied)".to_string(),
     ] {
         assert!(cold.contains(&expected), "cold session lacks {expected}");

@@ -117,14 +117,40 @@ pub(super) async fn record(
                         .unwrap_or_default(),
                     None => String::new(),
                 };
-                sink.emit(crate::StatefulEvent::MemoryReceipt(proposal_receipt(
-                    project,
-                    thread,
-                    &call.turn_id,
-                    receipt_id,
-                    &results,
-                    &shown,
-                )));
+                let mut receipt =
+                    proposal_receipt(project, thread, &call.turn_id, receipt_id, &results, &shown);
+                // Offer Apply only with the exact words it would settle, checked as Apply checks.
+                for member in &mut receipt.members {
+                    let category = match member.category {
+                        codex_project_intelligence::KnowledgeCategory::Rule => {
+                            codex_project_intelligence::PromotionCategory::Rule
+                        }
+                        codex_project_intelligence::KnowledgeCategory::Decision => {
+                            codex_project_intelligence::PromotionCategory::Decision
+                        }
+                        codex_project_intelligence::KnowledgeCategory::RuledOut => {
+                            codex_project_intelligence::PromotionCategory::RuledOut
+                        }
+                        codex_project_intelligence::KnowledgeCategory::Background
+                        | codex_project_intelligence::KnowledgeCategory::AttributedContext
+                        | codex_project_intelligence::KnowledgeCategory::BrainstormOption
+                        | codex_project_intelligence::KnowledgeCategory::OpenCheck
+                        | codex_project_intelligence::KnowledgeCategory::Recipe
+                        | codex_project_intelligence::KnowledgeCategory::CodeObservation
+                        | codex_project_intelligence::KnowledgeCategory::CommitObservation
+                        | codex_project_intelligence::KnowledgeCategory::Note
+                        | codex_project_intelligence::KnowledgeCategory::Legacy => continue,
+                    };
+                    let Some(id) = member.entry_id.as_deref().and_then(|id| {
+                        codex_project_intelligence::BlackboardEntryId::parse(id).ok()
+                    }) else {
+                        continue;
+                    };
+                    if let Ok(words) = store.proposal_application(project, &id, category).await {
+                        *member = member.clone().with_applies(&words);
+                    }
+                }
+                sink.emit(crate::StatefulEvent::MemoryReceipt(receipt));
             }
             bounded_json_output(call, envelope(json!(results)))
         }

@@ -178,6 +178,8 @@ pub(crate) fn api_memory_receipt(receipt: MemoryReceipt) -> StatefulMemoryReceip
                 },
                 text: member.text,
                 text_shortened: member.shortened,
+                applies_text: member.applies,
+                applies_text_shortened: member.applies_shortened,
             })
             .collect(),
         undoable: receipt.undoable,

@@ -10470,6 +10470,14 @@ class StatefulMemoryReceiptMember(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    applies_text: Annotated[
+        str | None,
+        Field(
+            alias="appliesText",
+            description="For a kept proposal that can be applied: the user's exact words an Apply would make theirs, at most 240 bytes, separate from the assistant's reading in `text`. Absent when an Apply would refuse (partial citation, unresolved scope or other dependency).",
+        ),
+    ] = None
+    applies_text_shortened: Annotated[bool, Field(alias="appliesTextShortened")]
     category: StatefulMemoryReceiptCategory
     entry_id: Annotated[
         str | None,
@@ -10486,7 +10494,8 @@ class StatefulMemoryReceiptMember(BaseModel):
     text_shortened: Annotated[
         bool,
         Field(
-            alias="textShortened", description="Whether `text` is shorter than the stored words."
+            alias="textShortened",
+            description="Whether `text` is shorter than the stored words; the exact words stay readable under `entryId`@`revision` in `statefulMemory/read`.",
         ),
     ]
 
