@@ -125,7 +125,6 @@ impl StatefulRunStore {
             .execute(&mut *transaction)
             .await?;
         }
-        crate::acceptance_exemption::begin_observation(&mut transaction, &id, now).await?;
         let run = load_run(&mut transaction, &id)
             .await?
             .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;

@@ -1976,37 +1976,6 @@ async fn held_runtime_transaction(
     Ok((runtime_pool, transaction))
 }
 
-/// Leaves a started command open for the run. A completion then waits for it inside the
-/// project fence, so the test can take the runtime lock after the response fence durably
-/// recorded the completion attempt (a runtime write) and before the completion commits.
-#[cfg(not(target_os = "windows"))]
-async fn hold_open_command(codex_home: &TempDir, run_id: &str) -> Result<()> {
-    let (runtime_pool, mut transaction) = held_runtime_transaction(codex_home).await?;
-    sqlx::query(
-        "INSERT INTO stateful_acceptance_pending (run_id, call_id, started_at_ms)
-         VALUES (?, 'held-command', 0)",
-    )
-    .bind(run_id)
-    .execute(&mut *transaction)
-    .await?;
-    transaction.commit().await?;
-    runtime_pool.close().await;
-    Ok(())
-}
-
-/// Settles the command `hold_open_command` left open, inside the test's held transaction.
-#[cfg(not(target_os = "windows"))]
-async fn settle_open_command(
-    transaction: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
-    run_id: &str,
-) -> Result<()> {
-    sqlx::query("DELETE FROM stateful_acceptance_pending WHERE run_id = ?")
-        .bind(run_id)
-        .execute(&mut **transaction)
-        .await?;
-    Ok(())
-}
-
 #[cfg(not(target_os = "windows"))]
 async fn mount_delayed_sse_once(responses_server: &wiremock::MockServer, body: String) {
     wiremock::Mock::given(wiremock::matchers::method("POST"))
@@ -2067,7 +2036,6 @@ async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() 
         ),
         responses::ev_completed("complete-response"),
     ]);
-    hold_open_command(&codex_home, &run_id).await?;
     mount_delayed_sse_once(&responses_server, completion_call).await;
     let mut completion = Box::pin(server.start_turn_and_wait_for_completion(TurnStartParams {
         thread_id: thread_id.clone(),
@@ -2081,6 +2049,7 @@ async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() 
         result = &mut completion => panic!("completion finished before the runtime lock: {result:?}"),
         () = wait_for_response_request(&responses_server) => {}
     }
+    let (_runtime_pool, runtime_transaction) = held_runtime_transaction(&codex_home).await?;
     responses_server.reset().await;
     let completion_log = responses::mount_sse_sequence(
         &responses_server,
@@ -2091,8 +2060,6 @@ async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() 
     )
     .await;
     wait_until_completion_holds_fence(&blackboard).await?;
-    let (_runtime_pool, mut runtime_transaction) = held_runtime_transaction(&codex_home).await?;
-    settle_open_command(&mut runtime_transaction, &run_id).await?;
     let mutation = blackboard.create_entry(
         BlackboardEntryId::parse("completion-fence-agent-mutation")?,
         agent_entry(&project_id, &node_id, "completion-fence-agent-mutation")?,
@@ -2154,7 +2121,6 @@ async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> R
         ),
         responses::ev_completed("conflict-response"),
     ]);
-    hold_open_command(&codex_home, &run_id).await?;
     mount_delayed_sse_once(&responses_server, completion_call).await;
     let mut completion = Box::pin(server.start_turn_and_wait_for_completion(TurnStartParams {
         thread_id: thread_id.clone(),
@@ -2168,6 +2134,7 @@ async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> R
         result = &mut completion => panic!("completion finished before the runtime lock: {result:?}"),
         () = wait_for_response_request(&responses_server) => {}
     }
+    let (_runtime_pool, mut runtime_transaction) = held_runtime_transaction(&codex_home).await?;
     responses_server.reset().await;
     let completion_log = responses::mount_sse_sequence(
         &responses_server,
@@ -2178,8 +2145,6 @@ async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> R
     )
     .await;
     wait_until_completion_holds_fence(&blackboard).await?;
-    let (_runtime_pool, mut runtime_transaction) = held_runtime_transaction(&codex_home).await?;
-    settle_open_command(&mut runtime_transaction, &run_id).await?;
     sqlx::query("UPDATE stateful_runs SET revision = revision + 1 WHERE id = ?")
         .bind(&run_id)
         .execute(&mut *runtime_transaction)

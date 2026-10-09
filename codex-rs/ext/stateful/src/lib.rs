@@ -17,8 +17,6 @@ mod continuity;
 mod continuity_source;
 mod conversation_summaries;
 mod events;
-mod exempt_completion;
-mod host_actions;
 mod limits;
 mod memory_add;
 mod memory_controls;
@@ -585,9 +583,9 @@ impl StatefulExtension {
                     .map_or(0, |duration| {
                         i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
                     });
-                let mut view = acceptance_render::AcceptanceView::new(&run, ledger, now_ms);
-                view.completion_pending = crate::exempt_completion::is_pending(&run.id);
-                Some(Box::new(view))
+                Some(Box::new(acceptance_render::AcceptanceView::new(
+                    &run, ledger, now_ms,
+                )))
             }
             Err(error) => {
                 tracing::warn!(run_id = %run.id, %error, "failed to load the acceptance ledger");
@@ -637,15 +635,9 @@ pub fn install<C: Sync>(
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     autonomous: Option<AutonomousContinuation>,
 ) {
-    let services = sqlite.map(ProjectIntelligenceServices::new);
-    if let Some(services) = &services {
-        registry.model_request_contributor(Arc::new(host_actions::HostActionObserver {
-            services: services.clone(),
-        }));
-    }
     let extension = Arc::new(StatefulExtension {
         projects,
-        services,
+        services: sqlite.map(ProjectIntelligenceServices::new),
         event_sink,
         autonomous,
         attribution: attribution::StatefulAttributionTracker::default(),

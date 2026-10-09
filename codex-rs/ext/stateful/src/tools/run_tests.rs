@@ -12,7 +12,6 @@ use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
-use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -104,19 +103,6 @@ fn lookup_completion(expected_revision: u64) -> Value {
     })
 }
 
-/// Records the completion attempt the response fence writes before releasing a lone
-/// completion call.
-async fn record_attempt(fixture: &Fixture) {
-    fixture
-        .services
-        .runtime()
-        .await
-        .expect("runtime")
-        .record_completion_attempt_for_thread(THREAD_ID)
-        .await
-        .expect("attempt");
-}
-
 async fn stored_run(fixture: &Fixture) -> StatefulRun {
     fixture
         .services
@@ -130,38 +116,19 @@ async fn stored_run(fixture: &Fixture) -> StatefulRun {
 }
 
 #[tokio::test]
-async fn a_no_tool_lookup_completion_persists_once_without_an_obligation() {
+async fn a_criterion_free_lookup_completion_is_refused() {
     let fixture = fixture().await;
-    // The host recorded no action of the run before this lone completion call, only its
-    // attempt (as the response fence does before releasing it), so the lookup completes under
-    // the no-tool exemption once its turn ends, and says so in its result.
-    record_attempt(&fixture).await;
-    let pending = fixture
+    // No request is exempt from acceptance: without a covering criterion and a current
+    // receipt of its admitted check plan, the run stays running and nothing is persisted.
+    let refused = fixture
         .tool
         .handle_guided(call(&lookup_completion(fixture.run.revision)))
-        .await
-        .expect("lookup completion is accepted");
-    let pending: Value = serde_json::from_str(&pending.log_output()).expect("JSON output");
-    assert_eq!(
-        (&pending["status"], &pending["completionPending"]),
-        (&json!("running"), &json!(true))
-    );
-    assert_eq!(
-        stored_run(&fixture).await,
-        fixture.run,
-        "nothing commits before the turn ends"
-    );
-    crate::exempt_completion::finish_turn(&fixture.services, /*event_sink*/ None, "turn-1").await;
-    let completed = stored_run(&fixture).await;
-    assert_eq!(completed.status, StatefulRunStatus::Completed);
-    assert!(
-        completed
-            .result
-            .as_deref()
-            .is_some_and(|result| result.starts_with(RESULT)
-                && result.contains("no-tool exemption: the host recorded no tool call")),
-        "{completed:?}"
-    );
+        .await;
+    let Err(FunctionCallError::RespondToModel(message)) = refused else {
+        panic!("a criterion-free completion must be refused");
+    };
+    assert!(message.contains("completion refused"), "{message}");
+    assert_eq!(stored_run(&fixture).await, fixture.run);
     let obligations = fixture
         .services
         .runtime()
@@ -175,89 +142,6 @@ async fn a_no_tool_lookup_completion_persists_once_without_an_obligation() {
         .await
         .expect("obligations list");
     assert_eq!(obligations, Vec::new());
-    let repeated = fixture
-        .tool
-        .handle_guided(call(&lookup_completion(completed.revision)))
-        .await;
-    assert!(matches!(
-        repeated,
-        Err(FunctionCallError::RespondToModel(_))
-    ));
-    assert_eq!(stored_run(&fixture).await, completed);
-}
-
-/// Hooks configured in this process could have run around the run's turns and calls (the
-/// completion call included), so the lone completion owes the ledger. Nextest runs each test
-/// in its own process, so the sticky process fact does not leak into other tests.
-#[tokio::test]
-async fn a_completion_where_hooks_were_configured_owes_the_ledger() {
-    let fixture = fixture().await;
-    record_attempt(&fixture).await;
-    codex_extension_api::record_host_hooks_configured();
-    let refused = fixture
-        .tool
-        .handle_guided(call(&lookup_completion(fixture.run.revision)))
-        .await;
-    let Err(FunctionCallError::RespondToModel(message)) = refused else {
-        panic!("a completion where hooks could run must be refused");
-    };
-    assert!(message.contains("completion refused"), "{message}");
-    assert_eq!(stored_run(&fixture).await, fixture.run);
-}
-
-/// When the record of an observed call fails (here: another host's store cannot be opened),
-/// that call may have run unrecorded, so a later lone completion in this process owes the
-/// ledger. Nextest runs each test in its own process.
-#[tokio::test]
-async fn a_completion_after_a_lost_call_record_owes_the_ledger() {
-    use codex_extension_api::ModelRequestContributor;
-    use futures::StreamExt;
-
-    let fixture = fixture().await;
-    record_attempt(&fixture).await;
-    let broken_home = TempDir::new().expect("tempdir");
-    let not_a_directory = broken_home.path().join("state-file");
-    std::fs::write(&not_a_directory, "not a directory").expect("file");
-    let mut metadata = None;
-    let search: codex_protocol::models::ResponseItem = serde_json::from_value(
-        json!({"type": "web_search_call", "id": "search", "status": "completed"}),
-    )
-    .expect("web search item");
-    let failed = crate::host_actions::HostActionObserver {
-        services: ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(
-            not_a_directory.abs(),
-        )),
-    }
-    .request(codex_extension_api::ModelRequestInput {
-        kind: codex_extension_api::ModelRequestKind::Generation,
-        thread_id: "another-thread",
-        client_metadata: &mut metadata,
-        model: "test-model",
-    })
-    .expect("generation requests are fenced")
-    .intercept(Box::pin(futures::stream::iter(vec![Ok(
-        codex_extension_api::ResponseEvent::OutputItemDone(search),
-    )])))
-    .collect::<Vec<_>>()
-    .await;
-    assert!(matches!(failed.as_slice(), [Err(_)]), "{failed:?}");
-    let refused = fixture
-        .tool
-        .handle_guided(call(&lookup_completion(fixture.run.revision)))
-        .await;
-    let Err(FunctionCallError::RespondToModel(message)) = refused else {
-        panic!("a completion after a lost call record must be refused");
-    };
-    assert!(message.contains("completion refused"), "{message}");
-    let ledger = fixture
-        .services
-        .runtime()
-        .await
-        .expect("runtime")
-        .acceptance_ledger(&fixture.run.id)
-        .await
-        .expect("ledger");
-    assert_eq!(ledger.host_actions, 1);
 }
 
 #[tokio::test]
@@ -340,71 +224,4 @@ async fn rejected_completions_name_the_field_and_show_a_valid_call() {
         "{messages:#?}"
     );
     assert_eq!(stored_run(&fixture).await, fixture.run);
-}
-
-/// A call recorded after the completion, later in its turn, leaves the run running when the
-/// turn ends; an interrupted turn never commits the pending completion.
-#[tokio::test]
-async fn a_pending_no_tool_completion_commits_only_if_its_turn_stays_action_free() {
-    for interrupted in [false, true] {
-        let fixture = fixture().await;
-        record_attempt(&fixture).await;
-        fixture
-            .tool
-            .handle_guided(call(&lookup_completion(fixture.run.revision)))
-            .await
-            .expect("lookup completion is accepted");
-        if interrupted {
-            crate::exempt_completion::discard("turn-1");
-        } else {
-            fixture
-                .services
-                .runtime()
-                .await
-                .expect("runtime")
-                .record_host_action_for_thread(THREAD_ID)
-                .await
-                .expect("a later call of the turn");
-        }
-        crate::exempt_completion::finish_turn(
-            &fixture.services,
-            /*event_sink*/ None,
-            "turn-1",
-        )
-        .await;
-        assert_eq!(
-            stored_run(&fixture).await,
-            fixture.run,
-            "interrupted {interrupted}"
-        );
-    }
-}
-
-/// A lone completion whose result does not fit in its response is not exempt: reading it back
-/// would be a further call. It is refused, and the ledger then applies.
-#[tokio::test]
-async fn an_oversized_no_tool_result_is_not_exempt() {
-    let fixture = fixture().await;
-    record_attempt(&fixture).await;
-    let mut completion = lookup_completion(fixture.run.revision);
-    completion["result"] = json!("x".repeat(30_000));
-    let refused = fixture.tool.handle_guided(call(&completion)).await;
-    let Err(FunctionCallError::RespondToModel(message)) = refused else {
-        panic!("an oversized no-tool result must be refused");
-    };
-    assert!(
-        message.contains("does not fit in this response"),
-        "{message}"
-    );
-    crate::exempt_completion::finish_turn(&fixture.services, /*event_sink*/ None, "turn-1").await;
-    assert_eq!(stored_run(&fixture).await, fixture.run);
-    let ledger = fixture
-        .services
-        .runtime()
-        .await
-        .expect("runtime")
-        .acceptance_ledger(&fixture.run.id)
-        .await
-        .expect("ledger");
-    assert_eq!(ledger.host_actions, 1);
 }

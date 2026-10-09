@@ -125,13 +125,6 @@ pub(crate) async fn execute_user_shell_command(
         session.emit_turn_started(&turn_context).await;
     }
 
-    if let Some(reason) =
-        crate::tools::lifecycle::enforce_user_shell_policy(&session, &turn_context).await
-    {
-        send_user_shell_error(&session, turn_context.as_ref(), &reason).await;
-        return;
-    }
-
     let Some((turn_environment, environment_shell)) = turn_context
         .initial_environments
         .local()

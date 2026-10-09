@@ -241,19 +241,6 @@ pub struct AcceptanceLedger {
     pub stalled_completions: u32,
     /// Commands started for this run whose effects are not accounted for yet.
     pub pending_commands: u64,
-    /// Actions the host recorded for this run before they could run: every model call item
-    /// other than a lone completion call (hosted ones as soon as they are observed), user shell
-    /// commands, and completions where lifecycle hooks could have run or a call record was lost.
-    /// Any one ends the no-tool exemption.
-    pub host_actions: u64,
-    /// Completion calls the host released to dispatch for this run. The no-tool exemption
-    /// admits only a run whose sole attempt is the completion being judged.
-    pub completion_attempts: u64,
-    /// Whether this process created the run, so every action of the run passed through this
-    /// process's host fences. False after a restart and for runs created before observation.
-    pub observed_by_this_process: bool,
-    /// Set when the terminal transaction completed the run under the no-tool exemption.
-    pub no_tool_exemption: bool,
     /// Applied steering instructions this ledger has reconciled, with the agent's reason.
     pub reconciled_steering: Vec<SteeringReconciliation>,
     /// Completion verification attempts started for this run.
@@ -272,10 +259,6 @@ impl AcceptanceLedger {
             observed_executions: 0,
             stalled_completions: 0,
             pending_commands: 0,
-            host_actions: 0,
-            completion_attempts: 0,
-            observed_by_this_process: false,
-            no_tool_exemption: false,
             reconciled_steering: Vec::new(),
             verification_attempt: 0,
             verification_lease_expires_at_ms: None,

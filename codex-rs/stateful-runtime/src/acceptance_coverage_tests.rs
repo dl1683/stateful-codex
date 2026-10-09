@@ -113,23 +113,9 @@ fn derived_retired_and_optional_overlaps_do_not_cover_user_text() {
 }
 
 #[test]
-fn only_a_run_observed_without_any_action_owes_no_coverage() {
-    // The no-tool exemption rests on host-recorded facts, never on the request's length.
+fn even_a_short_one_sentence_request_owes_coverage() {
+    // No request is exempt: a short in-chat request still needs a covering criterion.
     let goal = "Compute the totals for a, b and c and write a summary.";
-    let mut observed = ledger();
-    observed.observed_by_this_process = true;
-    observed.completion_attempts = 1;
-    assert_eq!(uncovered_sentences(goal, &observed), Vec::new());
-    let mut acted = observed.clone();
-    acted.host_actions = 1;
-    assert_eq!(quotes(goal, uncovered_sentences(goal, &acted)), vec![goal]);
-    let mut retried = observed;
-    retried.completion_attempts = 2;
-    assert_eq!(
-        quotes(goal, uncovered_sentences(goal, &retried)),
-        vec![goal]
-    );
-    // A run this process did not observe from its start owes coverage however short.
     assert_eq!(
         quotes(goal, uncovered_sentences(goal, &ledger())),
         vec![goal]

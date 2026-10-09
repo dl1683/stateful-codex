@@ -10,7 +10,6 @@ use codex_extension_api::ToolFinishInput;
 use codex_extension_api::ToolPolicyDecision;
 use codex_extension_api::ToolPolicyInput;
 use codex_extension_api::ToolStartInput;
-use codex_extension_api::UserShellPolicyInput;
 use codex_file_system::ExecutorFileSystem;
 use codex_protocol::mcp::CallToolResult;
 use codex_tools::ToolName;
@@ -38,28 +37,6 @@ pub(crate) async fn enforce_tool_policy(invocation: &ToolInvocation) -> Option<S
                 turn_id: invocation.turn.sub_id.as_str(),
                 tool_name: &invocation.tool_name,
                 source: extension_tool_call_source(invocation.source.clone()),
-            })
-            .await;
-        if let ToolPolicyDecision::Block { reason } = decision {
-            return Some(reason);
-        }
-    }
-    None
-}
-
-/// Extension policy for a user shell command, evaluated before it is spawned.
-pub(crate) async fn enforce_user_shell_policy(
-    session: &Session,
-    turn: &TurnContext,
-) -> Option<String> {
-    for contributor in session.services.extensions.tool_policy_contributors() {
-        let decision = contributor
-            .evaluate_user_shell(UserShellPolicyInput {
-                thread_id: session.thread_id,
-                session_store: &session.services.session_extension_data,
-                thread_store: &session.services.thread_extension_data,
-                turn_store: turn.extension_data.as_ref(),
-                turn_id: turn.sub_id.as_str(),
             })
             .await;
         if let ToolPolicyDecision::Block { reason } = decision {

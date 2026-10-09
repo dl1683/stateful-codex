@@ -295,8 +295,6 @@ impl Session {
         task: T,
     ) {
         self.activate_plugin_selection(&turn_context).await;
-        // The turn's hooks are fixed from here, after its plugin selection refreshed them.
-        crate::hook_snapshot::pin_turn_hooks(self, &turn_context);
         // Inherited or recovered roots are applied before task start. Otherwise this
         // task owns its turn, including background work. Later mail cannot change it.
         turn_context

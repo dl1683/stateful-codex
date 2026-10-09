@@ -4671,7 +4671,6 @@ dependencies = [
  "codex-utils-absolute-path",
  "codex-utils-output-truncation",
  "codex-utils-string",
- "futures",
  "pretty_assertions",
  "serde",
  "serde_json",

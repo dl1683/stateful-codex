@@ -345,19 +345,6 @@ impl TurnLifecycleContributor for StatefulExtension {
 
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
-            // A no-tool completion left pending by this turn commits only now that the turn
-            // ended, and only if the run is still action-free.
-            if let (Some(turn), Some(services)) = (
-                input.turn_store.get::<crate::capture_sources::SourceTurn>(),
-                self.services.as_ref(),
-            ) {
-                crate::exempt_completion::finish_turn(
-                    services,
-                    self.event_sink.as_deref(),
-                    &turn.turn_id,
-                )
-                .await;
-            }
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Completed);
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
@@ -365,9 +352,6 @@ impl TurnLifecycleContributor for StatefulExtension {
 
     fn on_turn_abort<'a>(&'a self, input: TurnAbortInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
-            if let Some(turn) = input.turn_store.get::<crate::capture_sources::SourceTurn>() {
-                crate::exempt_completion::discard(&turn.turn_id);
-            }
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
@@ -375,7 +359,6 @@ impl TurnLifecycleContributor for StatefulExtension {
 
     fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
-            crate::exempt_completion::discard(input.turn_id);
             fail_turn_attribution(self, input.turn_id);
             if !matches!(input.error_details, CodexErrorDetails::TaskPanicked(_)) {
                 return;

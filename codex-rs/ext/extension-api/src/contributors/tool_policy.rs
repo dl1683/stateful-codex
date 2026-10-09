@@ -16,16 +16,6 @@ pub struct ToolPolicyInput<'a> {
     pub source: ToolCallSource,
 }
 
-/// Identity of a user-initiated shell command (not a model tool call), supplied before the
-/// host spawns it, during a turn or between turns.
-pub struct UserShellPolicyInput<'a> {
-    pub thread_id: ThreadId,
-    pub session_store: &'a ExtensionData,
-    pub thread_store: &'a ExtensionData,
-    pub turn_store: &'a ExtensionData,
-    pub turn_id: &'a str,
-}
-
 /// Decision returned by one extension tool policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolPolicyDecision {
@@ -42,13 +32,4 @@ pub trait ToolPolicyContributor: Send + Sync {
         &'a self,
         input: ToolPolicyInput<'a>,
     ) -> ExtensionFuture<'a, ToolPolicyDecision>;
-
-    /// Evaluated before the host spawns a user shell command. All contributors must allow
-    /// it; a blocked command never starts. Contributors without a user-shell policy allow.
-    fn evaluate_user_shell<'a>(
-        &'a self,
-        _input: UserShellPolicyInput<'a>,
-    ) -> ExtensionFuture<'a, ToolPolicyDecision> {
-        Box::pin(std::future::ready(ToolPolicyDecision::Allow))
-    }
 }

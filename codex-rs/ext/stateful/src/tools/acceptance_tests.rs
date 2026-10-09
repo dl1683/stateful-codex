@@ -107,18 +107,6 @@ fn call(tool: &str, arguments: &Value) -> ToolCall<'static> {
 }
 
 impl Fixture {
-    /// The host recorded an action of the run (a tool call), so the no-tool exemption no
-    /// longer applies.
-    async fn action(&self) {
-        self.services
-            .runtime()
-            .await
-            .expect("runtime")
-            .record_host_action(&self.run.id)
-            .await
-            .expect("action");
-    }
-
     async fn update(&self, revision: u64, changes: Value) -> Result<Value, String> {
         match self
             .acceptance
@@ -417,7 +405,6 @@ async fn a_dismissal_without_a_covering_criterion_is_refused() {
         WorkflowMode::Autonomous,
     )
     .await;
-    fixture.action().await;
     fixture.complete().await.expect_err("proposals created");
     let ledger = fixture.ledger().await;
     let refused = fixture
@@ -541,37 +528,15 @@ async fn failed_check_cannot_be_disclosed_away_and_keeps_the_run_running() {
 }
 
 #[tokio::test]
-async fn a_no_tool_lookup_completes_and_a_recorded_action_brings_the_ledger_back() {
-    let exempt = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
-    // The response fence records the lone completion's attempt before releasing it.
-    exempt
-        .services
-        .runtime()
-        .await
-        .expect("runtime")
-        .record_completion_attempt_for_thread(THREAD_ID)
-        .await
-        .expect("attempt");
-    exempt
+async fn a_trivial_lookup_owes_a_covering_criterion() {
+    let fixture = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
+    let refused = fixture
         .complete()
         .await
-        .expect("a run without any action completes");
-    crate::exempt_completion::finish_turn(&exempt.services, /*event_sink*/ None, "turn-1").await;
-    assert_eq!(
-        exempt.stored_run().await.status,
-        StatefulRunStatus::Completed
-    );
-    assert!(exempt.ledger().await.no_tool_exemption);
-
-    let effected = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
-    effected.action().await;
-    let refused = effected
-        .complete()
-        .await
-        .expect_err("an action requires the ledger");
+        .expect_err("no request is exempt from acceptance");
     assert!(refused.contains("Answer a lookup."), "{refused}");
     assert_eq!(
-        effected.stored_run().await.status,
+        fixture.stored_run().await.status,
         StatefulRunStatus::Running
     );
 }
@@ -757,9 +722,8 @@ async fn a_long_request_with_budget_left_requires_the_independent_omission_check
         WorkflowMode::Autonomous,
     )
     .await;
-    // Nothing declared, a tool call recorded, nearly the whole budget left: the agent still
+    // Nothing declared, nothing changed, nearly the whole budget left: the agent still
     // cannot complete before the host's goal-derived check has been reviewed.
-    fixture.action().await;
     let refused = fixture
         .complete()
         .await
