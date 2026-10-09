@@ -21,6 +21,8 @@ fn member(
         status,
         text: text.to_string(),
         text_shortened: false,
+        applies_text: None,
+        applies_text_shortened: false,
     }
 }
 
@@ -101,17 +103,24 @@ fn memory_receipts_show_saved_kept_applied_refused_and_undone() {
         Kind::Proposals,
         "proposal-1",
         vec![
-            member(
-                Some(("proposal-d", 1)),
-                Category::Decision,
-                Status::Proposed,
-                "Use SQLite, not Postgres: must run offline on a laptop.",
-            ),
+            StatefulMemoryReceiptMember {
+                applies_text: Some(
+                    "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop."
+                        .to_string(),
+                ),
+                ..member(
+                    Some(("proposal-d", 1)),
+                    Category::Decision,
+                    Status::Proposed,
+                    "Use SQLite, not Postgres: must run offline on a laptop.",
+                )
+            },
+            // Scope unresolved (or a partial citation): kept, but no Apply is offered.
             member(
                 Some(("proposal-r", 1)),
                 Category::RuledOut,
-                Status::Proposed,
-                "The cache is not the cause.",
+                Status::Pending,
+                "For this task only, the cache is not the cause.",
             ),
             member(
                 Some(("proposal-n", 1)),
@@ -125,12 +134,15 @@ fn memory_receipts_show_saved_kept_applied_refused_and_undone() {
     let applied = receipt(
         Kind::Promotion,
         "promotion-1",
-        vec![member(
-            Some(("proposal-d", 2)),
-            Category::Decision,
-            Status::Saved,
-            "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop.",
-        )],
+        vec![StatefulMemoryReceiptMember {
+            text_shortened: true,
+            ..member(
+                Some(("proposal-d", 2)),
+                Category::Decision,
+                Status::Saved,
+                "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop.",
+            )
+        }],
         /*undoable*/ true,
     );
     let undone = receipt(

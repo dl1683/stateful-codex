@@ -12,13 +12,15 @@ expression: rendered
 ---
 • Kept for your review, not applied:
   decision: "Use SQLite, not Postgres: must run offline on a laptop." (assistant's reading)
+    Apply makes these your words: "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop."
     Apply: /memory apply proposal-d@1 decision
-  ruled-out approach: "The cache is not the cause." (assistant's reading)
-    Apply: /memory apply proposal-r@1 ruled-out
+  ruled-out approach: "For this task only, the cache is not the cause." (assistant's reading)
+    Not applicable as kept (it does not cite your whole message, or its scope is unresolved); /memory add saves your own words
   note: "Timing measured on the CI runner." (assistant's reading)
   Undo: /memory undo proposal-1
 ---
-• Applied as your decision: "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop."
+• Applied as your decision: "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop." (shortened)
+  Shortened above; exact words in /memory under proposal-d@2
   Undo: /memory undo promotion-1
 ---
 • Undone: 1 no longer used, 1 saved earlier left as it was

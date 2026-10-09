@@ -36,7 +36,7 @@ pub(crate) fn receipt_cell(receipt: &StatefulMemoryReceipt) -> Option<PlainHisto
             .members
             .iter()
             .filter(|member| member.status == status)
-            .map(|member| preview(&member.text))
+            .map(|member| quote(&member.text, member.text_shortened))
             .collect::<Vec<_>>()
             .join(" · ")
     };
@@ -107,13 +107,29 @@ pub(crate) fn receipt_cell(receipt: &StatefulMemoryReceipt) -> Option<PlainHisto
                 lines.push(
                     vec![
                         format!("  {}: ", category_noun(member.category)).dim(),
-                        preview(&member.text).into(),
+                        quote(&member.text, member.text_shortened).into(),
                         " (assistant's reading)".dim(),
                     ]
                     .into(),
                 );
-                if let Some(command) = apply_command(member) {
-                    lines.push(format!("    Apply: {command}").cyan().into());
+                // Apply settles the user's exact words, shown here; never the reading above.
+                match (apply_command(member), &member.applies_text) {
+                    (Some(command), Some(words)) => {
+                        lines.push(
+                            vec![
+                                "    Apply makes these your words: ".dim(),
+                                quote(words, member.applies_text_shortened).into(),
+                            ]
+                            .into(),
+                        );
+                        lines.push(format!("    Apply: {command}").cyan().into());
+                    }
+                    (Some(_), None) => lines.push(
+                        "    Not applicable as kept (it does not cite your whole message, or its scope is unresolved); /memory add saves your own words"
+                            .dim()
+                            .into(),
+                    ),
+                    (None, _) => {}
                 }
             }
         }
@@ -123,7 +139,7 @@ pub(crate) fn receipt_cell(receipt: &StatefulMemoryReceipt) -> Option<PlainHisto
                 vec![
                     "• ".dim(),
                     format!("Applied as your {}: ", category_noun(member.category)).into(),
-                    preview(&member.text).into(),
+                    quote(&member.text, member.text_shortened).into(),
                 ]
                 .into(),
             );
@@ -148,6 +164,28 @@ pub(crate) fn receipt_cell(receipt: &StatefulMemoryReceipt) -> Option<PlainHisto
     if lines.is_empty() {
         return None;
     }
+    let shortened = receipt
+        .members
+        .iter()
+        .filter(|member| member.text_shortened)
+        .filter_map(|member| {
+            Some(format!(
+                "{}@{}",
+                member.entry_id.as_ref()?,
+                member.revision?
+            ))
+        })
+        .collect::<Vec<_>>();
+    if !shortened.is_empty() {
+        lines.push(
+            format!(
+                "  Shortened above; exact words in /memory under {}",
+                shortened.join(", ")
+            )
+            .dim()
+            .into(),
+        );
+    }
     if receipt.undoable {
         lines.push(
             format!("  Undo: /memory undo {}", receipt.receipt_id)
@@ -156,6 +194,15 @@ pub(crate) fn receipt_cell(receipt: &StatefulMemoryReceipt) -> Option<PlainHisto
         );
     }
     Some(PlainHistoryCell::new(lines))
+}
+
+/// A quoted preview, marked when the receipt text is shorter than the stored words.
+fn quote(text: &str, shortened: bool) -> String {
+    if shortened {
+        format!("{} (shortened)", preview(text))
+    } else {
+        preview(text)
+    }
 }
 
 fn category_noun(category: StatefulMemoryReceiptCategory) -> &'static str {
