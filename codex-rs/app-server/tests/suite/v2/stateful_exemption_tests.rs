@@ -142,6 +142,8 @@ struct Setup {
     responses_uri: Option<String>,
     /// User hook configuration (untrusted until a test trusts it); enables lifecycle hooks.
     user_hooks: Option<String>,
+    /// Model commands may write the workspace (otherwise the sandbox is read-only).
+    workspace_write: bool,
 }
 
 impl Default for Setup {
@@ -154,6 +156,7 @@ impl Default for Setup {
             hosted_web_search: false,
             responses_uri: None,
             user_hooks: None,
+            workspace_write: false,
         }
     }
 }
@@ -182,7 +185,11 @@ async fn harness(setup: Setup) -> Result<Harness> {
             .as_deref()
             .unwrap_or(&responses_server.uri()),
     )
-    .with_sandbox_mode("read-only")
+    .with_sandbox_mode(if setup.workspace_write {
+        "workspace-write"
+    } else {
+        "read-only"
+    })
     .enable_feature(Feature::Sqlite);
     if !setup.hosted_web_search {
         config = config.with_root_config("web_search = \"disabled\"");
@@ -1309,14 +1316,16 @@ async fn a_call_after_the_completion_in_its_turn_ends_the_exemption() -> Result<
 async fn a_command_after_the_completion_in_its_turn_ends_the_exemption() -> Result<()> {
     let mut harness = harness(Setup {
         mode: StatefulWorkflowMode::Collaborative,
+        workspace_write: true,
         ..Setup::default()
     })
     .await?;
     let revision = harness.run().revision;
     let marker = harness.project_root.path().join("after.txt");
     let root = harness.project_root.path().to_string_lossy().to_string();
-    harness
-        .turn(vec![
+    let log = responses::mount_sse_sequence(
+        &harness.responses_server,
+        vec![
             complete(revision),
             call(
                 "write",
@@ -1324,8 +1333,13 @@ async fn a_command_after_the_completion_in_its_turn_ends_the_exemption() -> Resu
                 json!({"cmd": write_command(&marker), "workdir": root, "yield_time_ms": 10_000}),
             ),
             message("done", ANSWER),
-        ])
-        .await?;
+        ],
+    )
+    .await;
+    let turn_id = harness.begin_turn().await?;
+    harness.wait_for_turn(&turn_id).await?;
+    // The later command was dispatched: its output went back to the model.
+    assert!(log.function_call_output_text("write").is_some());
     if cfg!(not(target_os = "windows")) {
         assert!(marker.exists(), "the later command ran");
     }
