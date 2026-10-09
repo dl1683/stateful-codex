@@ -176,6 +176,67 @@ fn submodules_and_nested_repositories_make_the_identity_unavailable() {
 }
 
 #[test]
+fn a_parent_tracked_file_inside_an_embedded_repository_is_unavailable() {
+    // The parent tracks `child/input.csv` as a regular file before `child` becomes a
+    // repository of its own, whose state the parent's identity would otherwise omit.
+    let project = repository();
+    let root = project.path();
+    let child = root.join("child");
+    std::fs::create_dir_all(child.join("deep")).expect("child");
+    std::fs::write(
+        child.join("input.csv"),
+        "1,2
+",
+    )
+    .expect("child input");
+    std::fs::write(
+        child.join("deep/data.csv"),
+        "3
+",
+    )
+    .expect("deep input");
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "child inputs"]);
+    assert!(
+        identify(&canonical(root), LIMITS).is_some(),
+        "an ordinary hierarchy"
+    );
+
+    git(&child, &["init", "--quiet"]);
+    git(&child, &["add", "input.csv"]);
+    git(&child, &["commit", "--quiet", "-m", "child"]);
+    assert_eq!(
+        identify(&canonical(root), LIMITS),
+        None,
+        "an embedded repository"
+    );
+
+    // A `.git` file (a linked work tree or separated repository) is a boundary too.
+    let linked = repository();
+    let deep = linked.path().join("a/b");
+    std::fs::create_dir_all(&deep).expect("deep");
+    std::fs::write(
+        deep.join("data.csv"),
+        "3
+",
+    )
+    .expect("deep input");
+    git(linked.path(), &["add", "."]);
+    git(linked.path(), &["commit", "--quiet", "-m", "deep input"]);
+    std::fs::write(
+        linked.path().join("a/.git"),
+        "gitdir: elsewhere
+",
+    )
+    .expect("git file");
+    assert_eq!(
+        identify(&canonical(linked.path()), LIMITS),
+        None,
+        "a .git file"
+    );
+}
+
+#[test]
 fn enumeration_stops_at_its_bounds() {
     let project = repository();
     let root = project.path();

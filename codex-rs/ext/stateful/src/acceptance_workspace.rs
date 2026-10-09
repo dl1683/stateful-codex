@@ -9,7 +9,12 @@
 //! typed part of the identity that no file pin excludes. Outside git, or on any git failure,
 //! the identity is unavailable, which fails the check closed. It is also unavailable for
 //! anything it cannot represent exactly: submodules (gitlinks), nested repositories or other
-//! non-regular entries, and path names that are not exact on this platform. Enumeration is
+//! non-regular entries, and path names that are not exact on this platform. A listed path
+//! inside an embedded repository (any directory strictly below the root, between the root and
+//! the path, that holds a `.git` file or directory) is refused too, even when the parent
+//! tracks it as a regular file: the embedded repository's own state is not part of the
+//! identity. Each such directory is examined once; a boundary that cannot be determined is
+//! also unavailable. Enumeration is
 //! streamed and bounded in paths, output bytes, hashed bytes and time, and it runs in one of
 //! the shared reader slots, held until the worker exits.
 
@@ -149,12 +154,35 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits) -> Option<Manifest> {
     let deadline = Instant::now() + limits.budget;
     let mut manifest = Manifest::default();
     let mut hashed = 0_u64;
+    // Directories below a root already known to hold no `.git` entry, with all their ancestors.
+    let mut outside_embedded = HashSet::new();
     for root in roots {
         let (state, listed) = git_listing(root, limits, deadline)?;
         manifest.repositories.insert(root.clone(), state);
         for relative in listed {
             if manifest.files.len() >= limits.entries || Instant::now() >= deadline {
                 return None;
+            }
+            // Deepest first: once a directory is known, so are all of its ancestors.
+            for directory in relative.ancestors().skip(1) {
+                if directory.as_os_str().is_empty() {
+                    break;
+                }
+                let directory = root.join(directory);
+                if outside_embedded.contains(&directory) {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                let absent = matches!(
+                    std::fs::symlink_metadata(directory.join(".git")),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                );
+                if !absent {
+                    return None;
+                }
+                outside_embedded.insert(directory);
             }
             let path = root.join(relative);
             let digest = content_digest(&path, &mut hashed, limits, deadline)?;
