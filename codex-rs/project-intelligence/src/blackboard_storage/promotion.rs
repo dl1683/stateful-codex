@@ -46,7 +46,7 @@ pub struct PromotionRequest {
     pub action_id: String,
 }
 
-/// Longest quotation an applied entry carries; longer sources stay proposals.
+/// Largest sealed part an Apply can take whole; longer sources stay proposals.
 const MAX_APPLIED_BYTES: u32 = 4096;
 
 impl BlackboardStore {
@@ -85,6 +85,22 @@ impl BlackboardStore {
         if let Some(receipt) =
             recorded_action(&mut tx, project, &request.action_id, &fingerprint).await?
         {
+            // A recorded Apply is acknowledged only while what it applied is still current;
+            // after a Forget, Undo or correction the retry refuses and restores nothing.
+            for member in &receipt.members {
+                let (Some(id), Some(revision)) = (&member.entry_id, member.revision) else {
+                    continue;
+                };
+                let id = BlackboardEntryId::parse(id.clone())?;
+                let current = super::load_entry(&mut tx, project, &id).await?;
+                if !current.is_some_and(|current| {
+                    current.revision == revision && current.state == BlackboardEntryState::Active
+                }) {
+                    return Err(BlackboardStoreError::EntryNotActive(format!(
+                        "{id}@{revision}: this action applied it earlier, but it has since been forgotten, undone or corrected; nothing was restored"
+                    )));
+                }
+            }
             tx.commit().await?;
             return Ok(receipt);
         }
@@ -100,91 +116,16 @@ impl BlackboardStore {
         if entry.state != BlackboardEntryState::Active {
             return Err(BlackboardStoreError::EntryNotActive(entry.id.to_string()));
         }
-        let previous = super::knowledge::context_of(&mut tx, project, entry.id.as_str())
-            .await?
-            .ok_or(BlackboardStoreError::InvalidSource)?;
-        let payload: serde_json::Value = previous
-            .payload
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(|_| BlackboardStoreError::UnsupportedContext)?
-            .ok_or(BlackboardStoreError::InvalidSource)?;
-        let proposal: ProposalContext = payload
-            .get("proposal")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|_| BlackboardStoreError::UnsupportedContext)?
-            .ok_or(BlackboardStoreError::InvalidSource)?;
-        let member: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_group_members AS member JOIN capture_groups AS capture ON capture.project_id = member.project_id AND capture.group_id = member.group_id WHERE member.project_id = ? AND member.entry_id = ? AND capture.kind = 'proposal-v1')")
-            .bind(project).bind(entry.id.as_str()).fetch_one(&mut *tx).await?;
-        if !member
-            || proposal.version != 1
-            || entry.value.provenance.kind != BlackboardProvenanceKind::User
-            || !matches!(
-                proposal.status,
-                ProposalStatus::Proposed | ProposalStatus::Pending
-            )
-        {
-            return Err(BlackboardStoreError::InvalidSource);
-        }
-        proposal.source.validate_bounds()?;
-        // Someone else's words become a standing rule only through a reviewed delegation.
-        if request.category == PromotionCategory::Rule
-            && (proposal
-                .source
-                .attribution
-                .is_some_and(|attribution| attribution != ProposalAttribution::Unknown)
-                || proposal.source.dependency == Some(ProposalDependency::Scope))
-        {
-            return Err(BlackboardStoreError::InvalidSource);
-        }
-        let seal = super::source::seal_on(&mut tx, project, &proposal.source.source_id)
-            .await?
-            .ok_or(BlackboardStoreError::InvalidSource)?;
-        if seal.digest != proposal.source.digest
-            || seal.observation.source_revision != proposal.source.source_revision
-        {
-            return Err(BlackboardStoreError::InvalidSource);
-        }
-        let start = proposal
-            .source
-            .spans
-            .iter()
-            .map(|span| span.start_byte)
-            .min()
-            .ok_or(BlackboardStoreError::InvalidSource)?;
-        let end = proposal
-            .source
-            .spans
-            .iter()
-            .map(|span| span.end_byte)
-            .max()
-            .ok_or(BlackboardStoreError::InvalidSource)?;
-        if end <= start || end - start > MAX_APPLIED_BYTES {
-            return Err(BlackboardStoreError::InvalidSource);
-        }
-        let read = super::source::read_on(
-            &mut tx,
-            project,
-            &seal.exact_source_locator,
-            &seal.digest,
-            start,
-            end,
-        )
-        .await?;
-        if read.next_offset.is_some() {
-            return Err(BlackboardStoreError::InvalidSource);
-        }
-        // Exact bytes, without the surrounding whitespace a cited range may include.
-        let quoted = read.exact_text.trim();
-        if quoted.is_empty() {
-            return Err(BlackboardStoreError::InvalidSource);
-        }
-        let quoted_start =
-            start + (read.exact_text.len() - read.exact_text.trim_start().len()) as u32;
-        let quoted_end = quoted_start + quoted.len() as u32;
+        let Applicable {
+            previous,
+            payload,
+            proposal,
+            seal,
+            quoted,
+            quoted_start,
+            quoted_end,
+        } = applicable(&mut tx, project, &entry, request.category).await?;
+        let quoted = quoted.as_str();
         let (kind, category) = request.category.knowledge();
         let now = super::unix_timestamp_millis()?;
         let mut temporal: TemporalContext = payload
@@ -268,8 +209,9 @@ impl BlackboardStore {
         .await?;
         super::knowledge::write_context(&mut tx, project, &entry.id, revision, &context).await?;
         let preview = super::knowledge::bounded_preview(quoted).to_string();
-        let reason =
-            json!({"fromRevision": entry.revision, "category": category.as_str()}).to_string();
+        let reason = json!({"fromRevision": entry.revision, "category": category.as_str(),
+            "length": quoted.len()})
+        .to_string();
         let member = CaptureGroupMember {
             ordinal: 0,
             entry_id: Some(entry.id.to_string()),
@@ -310,6 +252,27 @@ impl BlackboardStore {
         .await?;
         tx.commit().await?;
         Ok(receipt)
+    }
+
+    /// The exact words an Apply of `entry_id` as `category` would make the user's, or the
+    /// refusal it would return. Read-only, with the same checks as `promote_proposal`, so a
+    /// client shows the user exactly what an Apply settles before offering it.
+    pub async fn proposal_application(
+        &self,
+        project_id: &str,
+        entry_id: &BlackboardEntryId,
+        category: PromotionCategory,
+    ) -> Result<String, BlackboardStoreError> {
+        let mut tx = self.pool.begin().await?;
+        let entry = super::load_entry(&mut tx, project_id, entry_id)
+            .await?
+            .ok_or_else(|| BlackboardStoreError::EntryNotFound(entry_id.to_string()))?;
+        if entry.state != BlackboardEntryState::Active {
+            return Err(BlackboardStoreError::EntryNotActive(entry.id.to_string()));
+        }
+        let applicable = applicable(&mut tx, project_id, &entry, category).await?;
+        tx.commit().await?;
+        Ok(applicable.quoted)
     }
 
     /// Undoes one committed receipt: retires what it newly saved or proposed, and returns an
@@ -385,8 +348,13 @@ impl BlackboardStore {
                 .position(|(ordinal, _)| *ordinal == member.ordinal);
             let Some(index) = undone else {
                 receipt.already_present += 1;
+                let length = member
+                    .reason
+                    .as_deref()
+                    .and_then(|reason| serde_json::from_str::<serde_json::Value>(reason).ok())
+                    .and_then(|reason| reason.get("length").and_then(serde_json::Value::as_u64));
                 receipt.members.push(CaptureGroupMember {
-                    reason: Some(json!({"undo": "untouched"}).to_string()),
+                    reason: Some(json!({"undo": "untouched", "length": length}).to_string()),
                     ..member.clone()
                 });
                 continue;
@@ -446,8 +414,9 @@ impl BlackboardStore {
                 outcome: MemberOutcome::Saved,
                 preview: super::knowledge::bounded_preview(&value.content).to_string(),
                 reason: Some(
-                    json!({"undo": if restores { "proposalRestored" } else { "retired" }})
-                        .to_string(),
+                    json!({"undo": if restores { "proposalRestored" } else { "retired" },
+                        "length": value.content.len()})
+                    .to_string(),
                 ),
             });
         }
@@ -478,6 +447,114 @@ impl BlackboardStore {
         tx.commit().await?;
         Ok(receipt)
     }
+}
+
+/// What one proposal revision would apply, after every Apply check.
+struct Applicable {
+    previous: KnowledgeContext,
+    payload: serde_json::Value,
+    proposal: ProposalContext,
+    seal: SourceSeal,
+    quoted: String,
+    quoted_start: u32,
+    quoted_end: u32,
+}
+
+/// Only a complete, unqualified unit is applicable. An unresolved dependency (scope,
+/// attribution, referent) keeps it a proposal for every category, and the applied words are
+/// the whole bounded sealed part, which the proposal must cite in full: a partial citation
+/// could drop a reason, negation or qualifier the user saw in the model's reading.
+async fn applicable(
+    tx: &mut SqliteConnection,
+    project: &str,
+    entry: &BlackboardEntry,
+    category: PromotionCategory,
+) -> Result<Applicable, BlackboardStoreError> {
+    let previous = super::knowledge::context_of(tx, project, entry.id.as_str())
+        .await?
+        .ok_or(BlackboardStoreError::InvalidSource)?;
+    let payload: serde_json::Value = previous
+        .payload
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| BlackboardStoreError::UnsupportedContext)?
+        .ok_or(BlackboardStoreError::InvalidSource)?;
+    let proposal: ProposalContext = payload
+        .get("proposal")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|_| BlackboardStoreError::UnsupportedContext)?
+        .ok_or(BlackboardStoreError::InvalidSource)?;
+    let member: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_group_members AS member JOIN capture_groups AS capture ON capture.project_id = member.project_id AND capture.group_id = member.group_id WHERE member.project_id = ? AND member.entry_id = ? AND capture.kind = 'proposal-v1')")
+        .bind(project).bind(entry.id.as_str()).fetch_one(&mut *tx).await?;
+    if !member
+        || proposal.version != 1
+        || entry.value.provenance.kind != BlackboardProvenanceKind::User
+        || proposal.status != ProposalStatus::Proposed
+        || proposal.source.dependency.is_some()
+    {
+        return Err(BlackboardStoreError::InvalidSource);
+    }
+    proposal.source.validate_bounds()?;
+    // Someone else's words become a standing rule only through a reviewed delegation.
+    if category == PromotionCategory::Rule
+        && proposal
+            .source
+            .attribution
+            .is_some_and(|attribution| attribution != ProposalAttribution::Unknown)
+    {
+        return Err(BlackboardStoreError::InvalidSource);
+    }
+    let seal = super::source::seal_on(tx, project, &proposal.source.source_id)
+        .await?
+        .ok_or(BlackboardStoreError::InvalidSource)?;
+    if seal.digest != proposal.source.digest
+        || seal.observation.source_revision != proposal.source.source_revision
+        || !seal.observation.complete_envelope
+        || seal.original_utf8_length > MAX_APPLIED_BYTES
+    {
+        return Err(BlackboardStoreError::InvalidSource);
+    }
+    let read = super::source::read_on(
+        tx,
+        project,
+        &seal.exact_source_locator,
+        &seal.digest,
+        /*start*/ 0,
+        seal.original_utf8_length,
+    )
+    .await?;
+    if read.next_offset.is_some() {
+        return Err(BlackboardStoreError::InvalidSource);
+    }
+    let text = read.exact_text;
+    let quoted_start = (text.len() - text.trim_start().len()) as u32;
+    let quoted = text.trim().to_string();
+    let quoted_end = quoted_start + quoted.len() as u32;
+    let cited_start = proposal
+        .source
+        .spans
+        .iter()
+        .map(|span| span.start_byte)
+        .min();
+    let cited_end = proposal.source.spans.iter().map(|span| span.end_byte).max();
+    if quoted.is_empty()
+        || cited_start.is_none_or(|start| start > quoted_start)
+        || cited_end.is_none_or(|end| end < quoted_end)
+    {
+        return Err(BlackboardStoreError::InvalidSource);
+    }
+    Ok(Applicable {
+        previous,
+        payload,
+        proposal,
+        seal,
+        quoted,
+        quoted_start,
+        quoted_end,
+    })
 }
 
 /// The receipt an identical earlier action committed, or a refusal when the action identity

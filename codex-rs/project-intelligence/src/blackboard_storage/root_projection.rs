@@ -73,7 +73,7 @@ impl BlackboardStore {
         if !super::identity::coverage_available(&mut transaction, &query.project_id).await? {
             return Err(BlackboardStoreError::IdentityCoverageIncomplete);
         }
-        let eligibility = super::identity::automatic_entry_eligibility();
+        let eligibility = super::identity::root_entry_eligibility();
         let scoped = format!("{UNSCOPED_CONTEXT} AND NOT ({LEGACY_LIMITED_RULE})");
         let outside = format!("{ROOT_ELIGIBILITY}{scoped}{eligibility}");
         let mut counts = sqlx::query_as::<_, RootEntryCounts>(

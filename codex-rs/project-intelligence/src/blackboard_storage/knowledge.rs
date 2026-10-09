@@ -375,6 +375,12 @@ pub(super) async fn append_change(
     u64::try_from(sequence).map_err(|_| BlackboardStoreError::RevisionOverflow)
 }
 
+/// A committed member's durable whole-text length, so a receipt can say its 240-byte preview
+/// is shortened.
+pub(super) fn length_reason(text: &str) -> String {
+    serde_json::json!({ "length": text.len() }).to_string()
+}
+
 pub(super) fn bounded_preview(text: &str) -> &str {
     if text.len() <= MAX_CHANGE_PREVIEW_BYTES {
         return text;

@@ -315,7 +315,7 @@ impl BlackboardStore {
                     revision: Some(current.revision),
                     outcome: MemberOutcome::AlreadyPresent,
                     preview: super::knowledge::bounded_preview(&current.value.content).to_string(),
-                    reason: None,
+                    reason: Some(super::knowledge::length_reason(&current.value.content)),
                 });
                 continue;
             }
@@ -357,7 +357,7 @@ impl BlackboardStore {
                 revision: Some(entry.revision),
                 outcome,
                 preview: super::knowledge::bounded_preview(&entry.value.content).to_string(),
-                reason: None,
+                reason: Some(super::knowledge::length_reason(&entry.value.content)),
             });
         }
         let members_json = receipt.members.iter().map(|member| serde_json::json!({ "id": member.entry_id, "revision": member.revision, "outcome": member.outcome.as_str(), "preview": member.preview })).collect::<Vec<_>>();
