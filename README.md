@@ -39,7 +39,7 @@ unchanged harness across OpenAI, Google and DeepSeek models. With the same model
 each model's or benchmark's own published harness on Terminal-Bench 2.1, SWE-bench Verified and DeepSWE. It is ahead
 on several of them, for example Luna on TB2.1: 76.6% against 75.7% for released Codex. The exception is DeepSeek V4.1
 Flash, which trails DeepSeek's own 1M-context harness at max effort: 83.9% against 90.6% on TB2.1, and 61.1% against
-74.2% on DeepSWE. Most of that gap is timeouts from long reasoning. On memory-native MemoryArena it leads every
+74.2% on DeepSWE. Most of that gap is timeouts from long reasoning. On memory-native MemoryArena it leads or ties every
 published number we found. Details, caveats and judges: [SC-EVAL-037](./STATEFUL_CODEX_EVALUATION.md).
 
 | Evaluation | Observed result | Important limitation |
