@@ -6,8 +6,8 @@
 //! never on the model's claim or the request's wording:
 //! - the host records an action against the thread's open runs (`side_effects`) before a model
 //!   call item reaches dispatch (hosted ones as soon as they are observed), before a user shell
-//!   command is spawned, and before a completion that lifecycle hooks or provider-hosted tools
-//!   could surround; a lone completion call is the only call it leaves out;
+//!   command is spawned, and before a completion that lifecycle hooks could surround or that
+//!   follows a lost call record; a lone completion call is the only call it leaves out;
 //! - the host records a completion attempt (`completion_attempts`) before it releases a lone
 //!   completion call; only the run's sole attempt, the completion being judged, is exempt, so a
 //!   rejected earlier attempt brings the ledger back;

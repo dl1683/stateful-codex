@@ -13,11 +13,13 @@
 //!   a record cannot be written, the response fails instead and nothing after it reaches Core.
 //!   The held events are bounded in count and bytes; past either bound the response fails and
 //!   the completion is never released.
-//! - Provider-hosted tools run at the provider before any event of their response reaches the
-//!   host, so no record can precede them. Whenever a request offers one (decided before the
-//!   request is sent), and whenever a record failed or was abandoned mid-write, the process
-//!   notes that actions may have gone unrecorded; every later completion in it then records an
-//!   action first (`tools::run_acceptance`), so none is exempt.
+//! - Provider-hosted calls (web search and the like) run at the provider, a read with no local
+//!   effect; each counts as an action once the host observes it, recorded like any other call
+//!   before a held completion can be released. A hosted call the provider never reports is not
+//!   accounted.
+//! - Whenever a record failed or was abandoned mid-write, an observed call may have gone
+//!   unrecorded, so the process notes it; every later completion in it then records an action
+//!   first (`tools::run_acceptance`), so none is exempt.
 //! - User shell commands are recorded by the tool policy before they are spawned, and refused
 //!   if the record cannot be written.
 //! - Lifecycle hooks run around calls and turns; a completion in a process where hooks were
@@ -51,8 +53,8 @@ type Event = Result<ResponseEvent, ModelResponseError>;
 /// Set once this process may have let an action run that no run recorded.
 static UNRECORDED_ACTIONS_POSSIBLE: AtomicBool = AtomicBool::new(false);
 
-/// Whether an action may have run in this process without a record: a provider-hosted tool was
-/// offered, or a record failed or was abandoned. Sticky for the life of the process.
+/// Whether an observed call may have gone unrecorded in this process: a record failed or was
+/// abandoned. Sticky for the life of the process.
 pub(crate) fn unrecorded_actions_possible() -> bool {
     UNRECORDED_ACTIONS_POSSIBLE.load(Ordering::SeqCst)
 }
@@ -76,9 +78,6 @@ impl std::fmt::Debug for HostActionObserver {
 
 impl ModelRequestContributor for HostActionObserver {
     fn request(&self, input: ModelRequestInput<'_>) -> Option<Box<dyn ModelResponseInterceptor>> {
-        if input.provider_executed_tools {
-            note_unrecorded_actions_possible();
-        }
         match input.kind {
             ModelRequestKind::Generation => Some(Box::new(ResponseFence {
                 services: self.services.clone(),

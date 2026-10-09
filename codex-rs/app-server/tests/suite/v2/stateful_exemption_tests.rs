@@ -3,12 +3,13 @@
 //! a read; a call beside the completion in the same response, in either order; an earlier
 //! bookkeeping call; a hosted call, even in a response that then failed; a call after the run
 //! was admitted mid-response; a rejected earlier completion attempt; a user shell command,
-//! even while the thread shows no project; a configured hook; a provider-hosted tool offered
-//! to the model) brings E's ledger back, and so does a run this process did not observe from
-//! its start. Records that cannot be written fail closed: the action does not run.
+//! even while the thread shows no project; a configured hook) brings E's ledger back, and so
+//! does a run this process did not observe from its start. A provider-hosted tool that is
+//! offered but not called changes nothing. Records that cannot be written fail closed: the
+//! action does not run.
 //!
-//! Hosted web search is offered by default, which alone makes a run not exempt, so the tests
-//! disable it unless they exercise it.
+//! Hosted web search is offered by default; the tests disable it except where they show that
+//! merely offering it keeps the exemption.
 
 use std::path::Path;
 
@@ -791,11 +792,10 @@ async fn a_hosted_call_in_a_failed_response_ends_the_exemption() -> Result<()> {
     Ok(())
 }
 
-/// Provider-hosted tools run at the provider before any event reaches the host, so a request
-/// that offers one (decided before it is sent) ends the exemption. Web search is offered by
-/// default.
+/// Offering a provider-hosted tool is not a call: with web search offered, as it is by default,
+/// a run that never calls it completes without a ledger.
 #[tokio::test]
-async fn an_offered_provider_hosted_tool_ends_the_exemption() -> Result<()> {
+async fn an_offered_but_uncalled_hosted_tool_keeps_the_exemption() -> Result<()> {
     let mut harness = harness(Setup {
         hosted_web_search: true,
         ..Setup::default()
@@ -804,7 +804,7 @@ async fn an_offered_provider_hosted_tool_ends_the_exemption() -> Result<()> {
     let revision = harness.run().revision;
     let log = responses::mount_sse_sequence(
         &harness.responses_server,
-        vec![complete(revision), message("done", "Refused.")],
+        vec![complete(revision), message("done", ANSWER)],
     )
     .await;
     let turn_id = harness.begin_turn().await?;
@@ -813,9 +813,19 @@ async fn an_offered_provider_hosted_tool_ends_the_exemption() -> Result<()> {
         .as_array()
         .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"));
     assert!(offered, "the request offered hosted web search");
-    harness
-        .assert_refused(log.function_call_output_text("complete"))
-        .await
+    let output = log
+        .function_call_output_text("complete")
+        .unwrap_or_default();
+    assert!(output.contains("\"status\":\"completed\""), "{output}");
+    let run = harness.read().await?;
+    assert_eq!(run.status, StatefulRunStatus::Completed);
+    assert!(
+        run.result
+            .unwrap_or_default()
+            .contains("no-tool exemption: the host recorded no tool call"),
+        "the durable result carries the exemption basis"
+    );
+    Ok(())
 }
 
 /// A run admitted through `statefulRun/start` while a response is still streaming is charged

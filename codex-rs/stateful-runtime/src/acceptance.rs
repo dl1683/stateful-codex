@@ -243,7 +243,7 @@ pub struct AcceptanceLedger {
     pub pending_commands: u64,
     /// Actions the host recorded for this run before they could run: every model call item
     /// other than a lone completion call (hosted ones as soon as they are observed), user shell
-    /// commands, and completions where lifecycle hooks or provider-hosted tools could have run.
+    /// commands, and completions where lifecycle hooks could have run or a call record was lost.
     /// Any one ends the no-tool exemption.
     pub host_actions: u64,
     /// Completion calls the host released to dispatch for this run. The no-tool exemption

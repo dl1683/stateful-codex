@@ -225,7 +225,7 @@ fn an_empty_ledger_renders_the_actual_exemption_status() {
     let exempt = AcceptanceView::new(&run(0), ledger(0, 0, Vec::new()), 0).ledger_lines();
     assert!(
         exempt[0].contains(
-            "This run has made no tool call: unless a provider-hosted tool such as web search is offered to you, a pure text answer may complete without criteria"
+            "This run has made no tool call: a pure text answer may complete without criteria"
         ),
         "{exempt:?}"
     );

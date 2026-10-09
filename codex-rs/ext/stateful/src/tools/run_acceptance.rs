@@ -35,7 +35,7 @@ use crate::tools::bounded_json_output;
 use crate::tools::respond;
 
 /// The basis of a completion under the no-tool exemption.
-const NO_TOOL_BASIS: &str = "no-tool exemption: the host recorded no tool call, command, hook or other action in this run and offered no provider-hosted tool, and the completion was its only call, so it completed without acceptance criteria; the text answer is judged by the user, not host-verified";
+const NO_TOOL_BASIS: &str = "no-tool exemption: the host recorded no tool call, command, hook or other action in this run (provider-hosted calls such as web search count once observed), and the completion was its only call, so it completed without acceptance criteria; the text answer is judged by the user, not host-verified";
 /// Lease of one completion verification attempt (artifact reads are bounded to seconds).
 const VERIFICATION_LEASE_MS: u32 = 120_000;
 /// How long completion waits for pending commands to be accounted before refusing.
@@ -69,9 +69,9 @@ impl StatefulRunUpdateTool {
         validated_obligation_sequence: Option<u64>,
     ) -> Result<AcceptanceDecision, FunctionCallError> {
         let runtime = self.services.runtime().await.map_err(respond)?;
-        // Lifecycle hooks run commands around calls and turns outside any tool call, and
-        // provider-hosted tools run before the host sees them; where either could have run, or
-        // a record of an action was lost, this run is not action-free.
+        // Lifecycle hooks run commands around calls and turns outside any tool call; where they
+        // could have run, or where a record of an observed call was lost, this run is not
+        // action-free.
         if codex_extension_api::host_hooks_configured()
             || crate::host_actions::unrecorded_actions_possible()
         {

@@ -89,7 +89,6 @@ fn contributor_metadata_preserves_core_fields_and_existing_values() {
             &contributors,
             "thread",
             "model",
-            &[],
             ModelRequestKind::Generation,
             &mut metadata
         )
@@ -103,38 +102,4 @@ fn contributor_metadata_preserves_core_fields_and_existing_values() {
             ("x-request-id".into(), "request".into()),
         ]))
     );
-}
-
-#[derive(Debug, Default)]
-struct ToolsContributor(std::sync::Mutex<Vec<bool>>);
-impl ModelRequestContributor for ToolsContributor {
-    fn request(&self, input: ModelRequestInput<'_>) -> Option<Box<dyn ModelResponseInterceptor>> {
-        self.0.lock().unwrap().push(input.provider_executed_tools);
-        None
-    }
-}
-
-#[test]
-fn contributors_learn_whether_the_provider_executes_offered_tools() {
-    let contributor = Arc::new(ToolsContributor::default());
-    let contributors: Vec<Arc<dyn ModelRequestContributor>> = vec![contributor.clone()];
-    let web_search = ToolSpec::WebSearch {
-        external_web_access: Some(false),
-        indexed_web_access: None,
-        filters: None,
-        user_location: None,
-        search_context_size: None,
-        search_content_types: None,
-    };
-    for tools in [Vec::new(), vec![web_search]] {
-        prepare(
-            &contributors,
-            "thread",
-            "model",
-            &tools,
-            ModelRequestKind::Generation,
-            &mut None,
-        );
-    }
-    assert_eq!(*contributor.0.lock().unwrap(), vec![false, true]);
 }

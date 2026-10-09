@@ -1758,7 +1758,6 @@ impl ModelClientSession {
                 &self.client.request_contributors,
                 &self.client.state.thread_id.to_string(),
                 &model_info.slug,
-                &prompt.tools,
                 codex_extension_api::ModelRequestKind::Generation,
                 &mut request.client_metadata,
             );
@@ -2046,7 +2045,6 @@ impl ModelClientSession {
                 &self.client.request_contributors,
                 &self.client.state.thread_id.to_string(),
                 &model_info.slug,
-                &prompt.tools,
                 if warmup {
                     codex_extension_api::ModelRequestKind::Warmup
                 } else {

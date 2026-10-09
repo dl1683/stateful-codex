@@ -194,32 +194,48 @@ async fn a_completion_where_hooks_were_configured_owes_the_ledger() {
     assert_eq!(stored_run(&fixture).await, fixture.run);
 }
 
-/// A request that offered a provider-hosted tool (decided before it was sent) may have run it
-/// before any event reached the host, so a later lone completion in this process owes the
+/// When the record of an observed call fails (here: another host's store cannot be opened),
+/// that call may have run unrecorded, so a later lone completion in this process owes the
 /// ledger. Nextest runs each test in its own process.
 #[tokio::test]
-async fn a_completion_after_a_provider_hosted_tool_was_offered_owes_the_ledger() {
+async fn a_completion_after_a_lost_call_record_owes_the_ledger() {
     use codex_extension_api::ModelRequestContributor;
+    use futures::StreamExt;
 
     let fixture = fixture().await;
     record_attempt(&fixture).await;
+    let broken_home = TempDir::new().expect("tempdir");
+    let not_a_directory = broken_home.path().join("state-file");
+    std::fs::write(&not_a_directory, "not a directory").expect("file");
     let mut metadata = None;
-    let _fence = crate::host_actions::HostActionObserver {
-        services: fixture.services.clone(),
+    let search: codex_protocol::models::ResponseItem = serde_json::from_value(
+        json!({"type": "web_search_call", "id": "search", "status": "completed"}),
+    )
+    .expect("web search item");
+    let failed = crate::host_actions::HostActionObserver {
+        services: ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(
+            not_a_directory.abs(),
+        )),
     }
     .request(codex_extension_api::ModelRequestInput {
         kind: codex_extension_api::ModelRequestKind::Generation,
         thread_id: "another-thread",
         client_metadata: &mut metadata,
         model: "test-model",
-        provider_executed_tools: true,
-    });
+    })
+    .expect("generation requests are fenced")
+    .intercept(Box::pin(futures::stream::iter(vec![Ok(
+        codex_extension_api::ResponseEvent::OutputItemDone(search),
+    )])))
+    .collect::<Vec<_>>()
+    .await;
+    assert!(matches!(failed.as_slice(), [Err(_)]), "{failed:?}");
     let refused = fixture
         .tool
         .handle_guided(call(&lookup_completion(fixture.run.revision)))
         .await;
     let Err(FunctionCallError::RespondToModel(message)) = refused else {
-        panic!("a completion after a hosted tool was offered must be refused");
+        panic!("a completion after a lost call record must be refused");
     };
     assert!(message.contains("completion refused"), "{message}");
     let ledger = fixture
