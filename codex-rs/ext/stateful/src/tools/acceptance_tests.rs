@@ -543,6 +543,15 @@ async fn failed_check_cannot_be_disclosed_away_and_keeps_the_run_running() {
 #[tokio::test]
 async fn a_no_tool_lookup_completes_and_a_recorded_action_brings_the_ledger_back() {
     let exempt = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
+    // The response fence records the lone completion's attempt before releasing it.
+    exempt
+        .services
+        .runtime()
+        .await
+        .expect("runtime")
+        .record_completion_attempt_for_thread(THREAD_ID)
+        .await
+        .expect("attempt");
     exempt
         .complete()
         .await

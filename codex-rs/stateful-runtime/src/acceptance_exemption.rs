@@ -4,9 +4,13 @@
 //!
 //! The decision rests only on durable facts the host recorded before each action could run,
 //! never on the model's claim or the request's wording:
-//! - the host records an action against the run (`side_effects`) before a model tool call
-//!   reaches dispatch, before a user shell command is spawned, and before a completion that
-//!   lifecycle hooks could surround; a lone completion call is the only call it leaves out;
+//! - the host records an action against the thread's open runs (`side_effects`) before a model
+//!   call item reaches dispatch (hosted ones as soon as they are observed), before a user shell
+//!   command is spawned, and before a completion that lifecycle hooks or provider-hosted tools
+//!   could surround; a lone completion call is the only call it leaves out;
+//! - the host records a completion attempt (`completion_attempts`) before it releases a lone
+//!   completion call; only the run's sole attempt, the completion being judged, is exempt, so a
+//!   rejected earlier attempt brings the ledger back;
 //! - the run was created by this process (`observation_version` holds the creating process's
 //!   epoch), so every one of its actions passed through this process's fences. A restart, a
 //!   run created elsewhere or before observation existed is not exempt;
@@ -40,8 +44,18 @@ static OBSERVER_EPOCH: LazyLock<i64> = LazyLock::new(|| {
     i64::try_from(hasher.finish() >> 2).unwrap_or_default() + 2
 });
 
-/// Whether the host may complete the run without acceptance criteria.
+/// Whether the host may complete the run without acceptance criteria: nothing but the
+/// completion being judged, its sole recorded attempt, happened in the run.
 pub fn no_tool_exempt(ledger: &AcceptanceLedger) -> bool {
+    action_free(ledger) && ledger.completion_attempts == 1
+}
+
+/// Whether the run may still end under the exemption: no action and no completion attempt yet.
+pub fn no_tool_eligible(ledger: &AcceptanceLedger) -> bool {
+    action_free(ledger) && ledger.completion_attempts == 0
+}
+
+fn action_free(ledger: &AcceptanceLedger) -> bool {
     ledger.observed_by_this_process
         && ledger.host_actions == 0
         && ledger.criteria.is_empty()
@@ -64,22 +78,41 @@ impl StatefulRunStore {
             .await
     }
 
-    /// Records one action against every nonterminal run bound to `thread_id`, in one
+    /// Records one action against every nonterminal run bound to `thread_id` now, in one
     /// statement, before the action runs. A thread without such a run records nothing.
     pub async fn record_host_action_for_thread(
         &self,
         thread_id: &str,
     ) -> Result<(), StatefulRunStoreError> {
-        sqlx::query(
+        self.record_for_thread(thread_id, "side_effects = side_effects + 1")
+            .await
+    }
+
+    /// Records one completion attempt against every nonterminal run bound to `thread_id` now,
+    /// before a lone completion call is released to dispatch.
+    pub async fn record_completion_attempt_for_thread(
+        &self,
+        thread_id: &str,
+    ) -> Result<(), StatefulRunStoreError> {
+        self.record_for_thread(thread_id, "completion_attempts = completion_attempts + 1")
+            .await
+    }
+
+    async fn record_for_thread(
+        &self,
+        thread_id: &str,
+        assignment: &'static str,
+    ) -> Result<(), StatefulRunStoreError> {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE stateful_acceptance_ledgers
-             SET side_effects = side_effects + 1, updated_at_ms = ?
+             SET {assignment}, updated_at_ms = ?
              WHERE run_id IN (
                  SELECT run.id FROM stateful_runs AS run
                  JOIN stateful_run_threads AS thread ON thread.run_id = run.id
                  WHERE thread.thread_id = ?
                    AND run.status NOT IN ('completed', 'cancelled', 'failed')
-             )",
-        )
+             )"
+        )))
         .bind(unix_timestamp_millis()?)
         .bind(thread_id)
         .execute(&self.pool)

@@ -54,7 +54,22 @@ async fn open_run(goal: &str) -> (TempDir, StatefulRunStore, StatefulRunId) {
     (home, store, id)
 }
 
+/// Completes the run as the host does: its fence records the completion attempt on every
+/// bound thread before the call is released, then the terminal transaction judges it.
 async fn complete(
+    store: &StatefulRunStore,
+    id: &StatefulRunId,
+) -> Result<StatefulRun, StatefulRunStoreError> {
+    let run = store.get_run(id).await?.expect("run");
+    for thread_id in &run.value.thread_ids {
+        store
+            .record_completion_attempt_for_thread(thread_id)
+            .await?;
+    }
+    complete_without_attempt(store, id).await
+}
+
+async fn complete_without_attempt(
     store: &StatefulRunStore,
     id: &StatefulRunId,
 ) -> Result<StatefulRun, StatefulRunStoreError> {
@@ -96,7 +111,8 @@ async fn a_run_without_any_action_completes_and_records_the_exemption() {
     let (_home, store, id) = open_run(LOOKUP).await;
     let ledger = store.acceptance_ledger(&id).await.expect("ledger");
     assert!(ledger.observed_by_this_process);
-    assert!(crate::no_tool_exempt(&ledger));
+    assert!(crate::no_tool_eligible(&ledger));
+    assert!(!crate::no_tool_exempt(&ledger), "no completion attempt yet");
     assert_eq!(
         complete(&store, &id).await.expect("exempt").status,
         StatefulRunStatus::Completed
@@ -221,4 +237,29 @@ async fn a_run_this_process_did_not_create_is_not_exempt() {
         assert!(!ledger.observed_by_this_process, "marker {marker}");
         assert!(complete(&store, &id).await.is_err(), "marker {marker}");
     }
+}
+
+/// Only the run's sole completion attempt is exempt: a completion the fence never released
+/// (no attempt) and a completion after an earlier attempt (rejected or not) owe the ledger.
+#[tokio::test]
+async fn only_the_sole_completion_attempt_is_exempt() {
+    let (_home, store, id) = open_run(LOOKUP).await;
+    assert!(
+        complete_without_attempt(&store, &id).await.is_err(),
+        "no recorded attempt"
+    );
+
+    let (_home, store, id) = open_run(LOOKUP).await;
+    store
+        .record_completion_attempt_for_thread("thread-1")
+        .await
+        .expect("earlier attempt");
+    let ledger = store.acceptance_ledger(&id).await.expect("ledger");
+    assert!(!crate::no_tool_eligible(&ledger));
+    assert!(complete(&store, &id).await.is_err(), "a second attempt");
+    let ledger = store.acceptance_ledger(&id).await.expect("ledger");
+    assert_eq!(
+        (ledger.completion_attempts, ledger.no_tool_exemption),
+        (2, false)
+    );
 }

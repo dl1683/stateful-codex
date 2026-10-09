@@ -46,14 +46,14 @@ impl AcceptanceView {
     pub(crate) fn ledger_lines(&self) -> Vec<String> {
         let ledger = &self.ledger;
         if ledger.criteria.is_empty() {
-            let line = if codex_stateful_runtime::no_tool_exempt(ledger) {
+            let line = if codex_stateful_runtime::no_tool_eligible(ledger) {
                 format!(
-                    "Acceptance ledger: empty (revision {}). This run has made no tool call: a pure text answer may complete without criteria, with the completion call as its only call. Any other tool call (command, file read or edit, MCP, plan or Stateful update) brings the ledger back: then record each requirement early with stateful_acceptance_update.",
+                    "Acceptance ledger: empty (revision {}). This run has made no tool call: unless a provider-hosted tool such as web search is offered to you, a pure text answer may complete without criteria, with one completion call as its only call. Any other tool call (command, file read or edit, MCP, plan or Stateful update) or a rejected completion brings the ledger back: then record each requirement early with stateful_acceptance_update.",
                     ledger.revision
                 )
             } else {
                 format!(
-                    "Acceptance ledger: empty (revision {}). This run made a tool call or was not observed from its start, so completion needs criteria covering the request, each settled by its admitted check: record them early with stateful_acceptance_update.",
+                    "Acceptance ledger: empty (revision {}). This run made a tool call or a completion attempt, or was not observed from its start, so completion needs criteria covering the request, each settled by its admitted check: record them early with stateful_acceptance_update.",
                     ledger.revision
                 )
             };

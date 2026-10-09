@@ -50,6 +50,7 @@ pub use acceptance::unmet_criteria;
 pub use acceptance_coverage::MAX_OMISSION_PROPOSALS;
 pub use acceptance_coverage::sentences;
 pub use acceptance_coverage::uncovered_sentences;
+pub use acceptance_exemption::no_tool_eligible;
 pub use acceptance_exemption::no_tool_exempt;
 pub use measurement::NewStatefulTurnMeasurement;
 pub use measurement::StatefulAttributionCounters;

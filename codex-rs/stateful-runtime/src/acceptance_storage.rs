@@ -543,6 +543,7 @@ struct StoredLedger {
     verification_attempt: i64,
     verification_lease_expires_at_ms: Option<i64>,
     side_effects: i64,
+    completion_attempts: i64,
     exemption: Option<String>,
     observation_version: i64,
 }
@@ -600,8 +601,8 @@ pub(crate) async fn load_ledger(
 ) -> Result<AcceptanceLedger, StatefulRunStoreError> {
     let Some(stored) = sqlx::query_as::<_, StoredLedger>(
         "SELECT revision, workspace_generation, observed_executions, stalled_completions,
-                verification_attempt, verification_lease_expires_at_ms, side_effects, exemption,
-                observation_version
+                verification_attempt, verification_lease_expires_at_ms, side_effects,
+                completion_attempts, exemption, observation_version
          FROM stateful_acceptance_ledgers WHERE run_id = ?",
     )
     .bind(run_id.as_str())
@@ -722,6 +723,8 @@ pub(crate) async fn load_ledger(
         )
         .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         host_actions: u64::try_from(stored.side_effects)
+            .map_err(|_| StatefulRunStoreError::CorruptCount)?,
+        completion_attempts: u64::try_from(stored.completion_attempts)
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         observed_by_this_process: crate::acceptance_exemption::observed_by_this_process(
             stored.observation_version,

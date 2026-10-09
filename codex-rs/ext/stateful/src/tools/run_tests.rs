@@ -104,6 +104,19 @@ fn lookup_completion(expected_revision: u64) -> Value {
     })
 }
 
+/// Records the completion attempt the response fence writes before releasing a lone
+/// completion call.
+async fn record_attempt(fixture: &Fixture) {
+    fixture
+        .services
+        .runtime()
+        .await
+        .expect("runtime")
+        .record_completion_attempt_for_thread(THREAD_ID)
+        .await
+        .expect("attempt");
+}
+
 async fn stored_run(fixture: &Fixture) -> StatefulRun {
     fixture
         .services
@@ -119,8 +132,10 @@ async fn stored_run(fixture: &Fixture) -> StatefulRun {
 #[tokio::test]
 async fn a_no_tool_lookup_completion_persists_once_without_an_obligation() {
     let fixture = fixture().await;
-    // The host recorded no action of the run before this lone completion call, so the lookup
-    // completes under the no-tool exemption and says so in its result.
+    // The host recorded no action of the run before this lone completion call, only its
+    // attempt (as the response fence does before releasing it), so the lookup completes under
+    // the no-tool exemption and says so in its result.
+    record_attempt(&fixture).await;
     fixture
         .tool
         .handle_guided(call(&lookup_completion(fixture.run.revision)))
@@ -166,6 +181,7 @@ async fn a_no_tool_lookup_completion_persists_once_without_an_obligation() {
 #[tokio::test]
 async fn a_completion_where_hooks_were_configured_owes_the_ledger() {
     let fixture = fixture().await;
+    record_attempt(&fixture).await;
     codex_extension_api::record_host_hooks_configured();
     let refused = fixture
         .tool
@@ -176,6 +192,45 @@ async fn a_completion_where_hooks_were_configured_owes_the_ledger() {
     };
     assert!(message.contains("completion refused"), "{message}");
     assert_eq!(stored_run(&fixture).await, fixture.run);
+}
+
+/// A request that offered a provider-hosted tool (decided before it was sent) may have run it
+/// before any event reached the host, so a later lone completion in this process owes the
+/// ledger. Nextest runs each test in its own process.
+#[tokio::test]
+async fn a_completion_after_a_provider_hosted_tool_was_offered_owes_the_ledger() {
+    use codex_extension_api::ModelRequestContributor;
+
+    let fixture = fixture().await;
+    record_attempt(&fixture).await;
+    let mut metadata = None;
+    let _fence = crate::host_actions::HostActionObserver {
+        services: fixture.services.clone(),
+    }
+    .request(codex_extension_api::ModelRequestInput {
+        kind: codex_extension_api::ModelRequestKind::Generation,
+        thread_id: "another-thread",
+        client_metadata: &mut metadata,
+        model: "test-model",
+        provider_executed_tools: true,
+    });
+    let refused = fixture
+        .tool
+        .handle_guided(call(&lookup_completion(fixture.run.revision)))
+        .await;
+    let Err(FunctionCallError::RespondToModel(message)) = refused else {
+        panic!("a completion after a hosted tool was offered must be refused");
+    };
+    assert!(message.contains("completion refused"), "{message}");
+    let ledger = fixture
+        .services
+        .runtime()
+        .await
+        .expect("runtime")
+        .acceptance_ledger(&fixture.run.id)
+        .await
+        .expect("ledger");
+    assert_eq!(ledger.host_actions, 1);
 }
 
 #[tokio::test]

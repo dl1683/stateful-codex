@@ -1,3 +1,7 @@
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use codex_extension_api::ModelRequestContributor;
@@ -20,21 +24,26 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 
 use super::HostActionObserver;
+use super::MAX_HELD_BYTES;
+use super::MAX_HELD_EVENTS;
 use crate::services::ProjectIntelligenceServices;
 
 const THREAD_ID: &str = "thread-1";
 
+type Event = Result<ResponseEvent, ModelResponseError>;
+
 struct Fixture {
-    _home: TempDir,
+    home: TempDir,
     services: ProjectIntelligenceServices,
     run_id: StatefulRunId,
 }
 
-async fn fixture() -> Fixture {
-    let home = TempDir::new().expect("temporary state home");
-    let services =
-        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.path().abs()));
-    let run_id = StatefulRunId::parse("run-1").expect("run id");
+fn services_at(home: &Path) -> ProjectIntelligenceServices {
+    ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.abs()))
+}
+
+async fn create_run(services: &ProjectIntelligenceServices, id: &str) -> StatefulRunId {
+    let run_id = StatefulRunId::parse(id).expect("run id");
     services
         .runtime()
         .await
@@ -54,23 +63,31 @@ async fn fixture() -> Fixture {
         )
         .await
         .expect("run created");
+    run_id
+}
+
+async fn fixture() -> Fixture {
+    let home = TempDir::new().expect("temporary state home");
+    let services = services_at(home.path());
+    let run_id = create_run(&services, "run-1").await;
     Fixture {
-        _home: home,
+        home,
         services,
         run_id,
     }
 }
 
 impl Fixture {
-    async fn actions(&self) -> u64 {
-        self.services
+    /// The run's (actions, completion attempts), read through a freshly opened store.
+    async fn counts(&self) -> (u64, u64) {
+        let ledger = services_at(self.home.path())
             .runtime()
             .await
-            .expect("runtime")
+            .expect("runtime reopens")
             .acceptance_ledger(&self.run_id)
             .await
-            .expect("ledger")
-            .host_actions
+            .expect("ledger");
+        (ledger.host_actions, ledger.completion_attempts)
     }
 }
 
@@ -91,6 +108,15 @@ fn fence(
     })
     .expect("generation requests are fenced")
     .intercept(upstream)
+}
+
+/// An upstream response the test feeds event by event.
+fn channel() -> (mpsc::UnboundedSender<Event>, ModelResponseStream) {
+    let (sender, receiver) = mpsc::unbounded_channel();
+    let upstream = futures::stream::unfold(receiver, |mut receiver| async move {
+        receiver.recv().await.map(|event| (event, receiver))
+    });
+    (sender, Box::pin(upstream))
 }
 
 fn function_call(call_id: &str, name: &str, arguments: serde_json::Value) -> ResponseEvent {
@@ -117,6 +143,11 @@ fn shell() -> ResponseEvent {
     function_call("shell", "exec_command", json!({"cmd": "cat README.md"}))
 }
 
+fn web_search(status: &str) -> ResponseItem {
+    serde_json::from_value(json!({"type": "web_search_call", "id": "search", "status": status}))
+        .expect("web search item")
+}
+
 fn completed() -> ResponseEvent {
     ResponseEvent::Completed {
         response_id: "response-1".to_string(),
@@ -126,10 +157,20 @@ fn completed() -> ResponseEvent {
     }
 }
 
-fn label(event: &Result<ResponseEvent, ModelResponseError>) -> String {
+fn dropped() -> Event {
+    Err(ModelResponseError::Stream("dropped".to_string()))
+}
+
+fn label(event: &Event) -> String {
     match event {
         Ok(ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { call_id, .. })) => {
             format!("call:{call_id}")
+        }
+        Ok(ResponseEvent::OutputItemDone(ResponseItem::WebSearchCall { .. })) => {
+            "search:done".to_string()
+        }
+        Ok(ResponseEvent::OutputItemAdded(ResponseItem::WebSearchCall { .. })) => {
+            "search:added".to_string()
         }
         Ok(ResponseEvent::Completed { .. }) => "completed".to_string(),
         Ok(other) => format!("{other:?}"),
@@ -137,10 +178,7 @@ fn label(event: &Result<ResponseEvent, ModelResponseError>) -> String {
     }
 }
 
-async fn run_fence(
-    services: &ProjectIntelligenceServices,
-    events: Vec<Result<ResponseEvent, ModelResponseError>>,
-) -> Vec<String> {
+async fn run_fence(services: &ProjectIntelligenceServices, events: Vec<Event>) -> Vec<String> {
     fence(services, Box::pin(futures::stream::iter(events)))
         .map(|event| label(&event))
         .collect()
@@ -148,40 +186,42 @@ async fn run_fence(
 }
 
 #[tokio::test]
-async fn a_lone_completion_passes_unrecorded_after_its_response_completes() {
+async fn a_lone_completion_is_released_after_its_attempt_is_recorded() {
     let fixture = fixture().await;
     assert_eq!(
         run_fence(&fixture.services, vec![Ok(completion()), Ok(completed())]).await,
         vec!["call:complete", "completed"]
     );
-    assert_eq!(fixture.actions().await, 0);
+    assert_eq!(fixture.counts().await, (0, 1));
 }
 
 #[tokio::test]
 async fn any_other_call_in_the_response_is_recorded_in_either_order() {
-    for events in [
-        vec![Ok(completion()), Ok(shell()), Ok(completed())],
-        vec![Ok(shell()), Ok(completion()), Ok(completed())],
-        vec![Ok(completion()), Ok(completion()), Ok(completed())],
+    for (events, expected_counts) in [
+        // The sibling is recorded once; the completion flows with it.
+        (vec![Ok(completion()), Ok(shell()), Ok(completed())], (1, 0)),
+        // Each call is recorded against the bindings current when it arrives.
+        (vec![Ok(shell()), Ok(completion()), Ok(completed())], (2, 0)),
+        (
+            vec![Ok(completion()), Ok(completion()), Ok(completed())],
+            (1, 0),
+        ),
     ] {
         let fixture = fixture().await;
         let expected = events.iter().map(label).collect::<Vec<_>>();
         assert_eq!(run_fence(&fixture.services, events).await, expected);
-        assert_eq!(fixture.actions().await, 1);
+        assert_eq!(fixture.counts().await, expected_counts);
     }
 }
 
-/// The completion is withheld until its response completes, and a call before it is recorded
-/// before Core can see it.
+/// The completion is withheld while its response may still carry other calls; a call after it
+/// is recorded and everything flows at once, before the response completes. A call before it
+/// is recorded before Core can see it.
 #[tokio::test]
 async fn calls_reach_core_only_after_their_record() {
     let fixture = fixture().await;
-    let (sender, receiver) = mpsc::unbounded_channel();
-    let upstream = futures::stream::unfold(receiver, |mut receiver| async move {
-        receiver.recv().await.map(|event| (event, receiver))
-    });
-    let mut fenced = fence(&fixture.services, Box::pin(upstream));
-
+    let (sender, upstream) = channel();
+    let mut fenced = fence(&fixture.services, upstream);
     sender.send(Ok(completion())).expect("send");
     assert!(
         tokio::time::timeout(Duration::from_millis(200), fenced.next())
@@ -190,58 +230,186 @@ async fn calls_reach_core_only_after_their_record() {
         "a completion is held while its response may still carry other calls"
     );
     sender.send(Ok(shell())).expect("send");
-    sender.send(Ok(completed())).expect("send");
     let first = fenced.next().await.expect("released");
-    assert_eq!(label(&first), "call:complete");
-    assert_eq!(fixture.actions().await, 1, "recorded before release");
+    let second = fenced.next().await.expect("released");
+    assert_eq!(
+        (label(&first), label(&second), fixture.counts().await),
+        (
+            "call:complete".to_string(),
+            "call:shell".to_string(),
+            (1, 0)
+        ),
+        "recorded and flushed without waiting for the response to complete"
+    );
 
     let fixture = self::fixture().await;
-    let (sender, receiver) = mpsc::unbounded_channel();
-    let upstream = futures::stream::unfold(receiver, |mut receiver| async move {
-        receiver.recv().await.map(|event| (event, receiver))
-    });
-    let mut fenced = fence(&fixture.services, Box::pin(upstream));
+    let (sender, upstream) = channel();
+    let mut fenced = fence(&fixture.services, upstream);
     sender.send(Ok(shell())).expect("send");
     let first = fenced.next().await.expect("released");
     assert_eq!(
-        (label(&first), fixture.actions().await),
-        ("call:shell".to_string(), 1)
+        (label(&first), fixture.counts().await),
+        ("call:shell".to_string(), (1, 0))
     );
+}
+
+/// A hosted call is recorded as soon as it is first observed, added or done, before its event
+/// passes on, and the record survives the response failing: a reopened store still shows it.
+#[tokio::test]
+async fn a_hosted_call_is_recorded_when_first_observed_and_survives_failure() {
+    let fixture = fixture().await;
+    assert_eq!(
+        run_fence(
+            &fixture.services,
+            vec![
+                Ok(ResponseEvent::OutputItemAdded(web_search("in_progress"))),
+                dropped(),
+            ],
+        )
+        .await,
+        vec!["search:added", "error:stream error: dropped"]
+    );
+    assert_eq!(fixture.counts().await, (1, 0));
+
+    let fixture = self::fixture().await;
+    assert_eq!(
+        run_fence(
+            &fixture.services,
+            vec![
+                Ok(completion()),
+                Ok(ResponseEvent::OutputItemDone(web_search("completed"))),
+                dropped(),
+            ],
+        )
+        .await,
+        vec![
+            "call:complete",
+            "search:done",
+            "error:stream error: dropped"
+        ]
+    );
+    assert_eq!(fixture.counts().await, (1, 0));
+}
+
+/// Records follow the run bindings current at each call, so a run admitted while the response
+/// is open is charged for the calls that follow.
+#[tokio::test]
+async fn a_run_admitted_mid_response_is_charged_for_later_calls() {
+    let home = TempDir::new().expect("temporary state home");
+    let services = services_at(home.path());
+    let (sender, upstream) = channel();
+    let mut fenced = fence(&services, upstream);
+    sender
+        .send(Ok(function_call(
+            "plan",
+            "update_plan",
+            json!({"plan": []}),
+        )))
+        .expect("send");
+    assert_eq!(label(&fenced.next().await.expect("plan")), "call:plan");
+    let run_id = create_run(&services, "run-late").await;
+    let fixture = Fixture {
+        home,
+        services,
+        run_id,
+    };
+    sender
+        .send(Ok(function_call(
+            "plan-2",
+            "update_plan",
+            json!({"plan": []}),
+        )))
+        .expect("send");
+    sender.send(Ok(completion())).expect("send");
+    sender.send(Ok(completed())).expect("send");
+    drop(sender);
+    let rest = fenced.map(|event| label(&event)).collect::<Vec<_>>().await;
+    assert_eq!(rest, vec!["call:plan-2", "call:complete", "completed"]);
+    assert_eq!(fixture.counts().await, (2, 0));
 }
 
 #[tokio::test]
 async fn a_failed_or_unfinished_response_never_releases_a_held_completion() {
     let fixture = fixture().await;
     assert_eq!(
-        run_fence(
-            &fixture.services,
-            vec![
-                Ok(completion()),
-                Err(ModelResponseError::Stream("dropped".to_string())),
-            ],
-        )
-        .await,
+        run_fence(&fixture.services, vec![Ok(completion()), dropped()]).await,
         vec!["error:stream error: dropped"]
     );
     assert_eq!(
         run_fence(&fixture.services, vec![Ok(completion())]).await,
         Vec::<String>::new()
     );
-    assert_eq!(fixture.actions().await, 0);
+    assert_eq!(fixture.counts().await, (0, 0));
+}
+
+/// Dropping the response (cancellation) while a completion is held drops the upstream response
+/// too, and the completion never runs.
+#[tokio::test]
+async fn cancelling_a_held_response_releases_upstream_and_never_the_completion() {
+    let fixture = fixture().await;
+    let (sender, upstream) = channel();
+    let mut fenced = fence(&fixture.services, upstream);
+    sender.send(Ok(completion())).expect("send");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), fenced.next())
+            .await
+            .is_err()
+    );
+    drop(fenced);
+    assert!(sender.is_closed(), "upstream is dropped with the fence");
+    assert_eq!(fixture.counts().await, (0, 0));
+}
+
+/// Events held behind a completion are bounded in count and bytes. Past either bound the
+/// response fails, the completion never runs, and upstream is no longer read.
+#[tokio::test]
+async fn held_events_are_bounded_in_count_and_bytes() {
+    let fixture = fixture().await;
+    let pulled = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&pulled);
+    let endless_deltas = futures::stream::iter(std::iter::once(Ok(completion())))
+        .chain(futures::stream::repeat_with(|| {
+            Ok(ResponseEvent::OutputTextDelta(String::new()))
+        }))
+        .inspect(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+    let labels = fence(&fixture.services, Box::pin(endless_deltas))
+        .map(|event| label(&event))
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(labels.len(), 1, "{labels:?}");
+    assert!(labels[0].contains("past the host's bound"), "{labels:?}");
+    assert_eq!(pulled.load(Ordering::SeqCst), MAX_HELD_EVENTS + 1);
+
+    let large = "x".repeat(MAX_HELD_BYTES + 1);
+    let labels = run_fence(
+        &fixture.services,
+        vec![
+            Ok(completion()),
+            Ok(ResponseEvent::OutputTextDelta(large)),
+            Ok(completed()),
+        ],
+    )
+    .await;
+    assert_eq!(labels.len(), 1, "{labels:?}");
+    assert!(labels[0].contains("past the host's bound"), "{labels:?}");
+    assert_eq!(fixture.counts().await, (0, 0));
 }
 
 /// Fault injection: the run store cannot be opened, so no record can be written. The response
-/// fails in place of every call, in either position.
+/// fails in place of every call, in either position, and in place of a lone completion whose
+/// attempt cannot be recorded.
 #[tokio::test]
 async fn an_unwritable_record_fails_the_response_instead_of_dispatching() {
     let home = TempDir::new().expect("tempdir");
     let not_a_directory = home.path().join("state-file");
     std::fs::write(&not_a_directory, "not a directory").expect("file");
-    let services =
-        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(not_a_directory.abs()));
+    let services = services_at(&not_a_directory);
     for events in [
         vec![Ok(shell()), Ok(completion()), Ok(completed())],
         vec![Ok(completion()), Ok(shell()), Ok(completed())],
+        vec![Ok(completion()), Ok(completed())],
     ] {
         let labels = run_fence(&services, events).await;
         assert_eq!(labels.len(), 1, "{labels:?}");
@@ -250,9 +418,5 @@ async fn an_unwritable_record_fails_the_response_instead_of_dispatching() {
             "{labels:?}"
         );
     }
-    // A text-only response with a lone completion needs no record and still passes.
-    assert_eq!(
-        run_fence(&services, vec![Ok(completion()), Ok(completed())]).await,
-        vec!["call:complete", "completed"]
-    );
+    assert!(super::unrecorded_actions_possible());
 }
