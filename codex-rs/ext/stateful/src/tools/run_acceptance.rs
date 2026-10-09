@@ -37,7 +37,7 @@ use crate::tools::respond;
 /// Lease of one completion verification attempt (artifact reads are bounded to seconds).
 const VERIFICATION_LEASE_MS: u32 = 120_000;
 /// How long completion waits for pending commands to be accounted before refusing.
-const PENDING_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+const PENDING_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 /// Consecutive refused completions without ledger progress before the host blocks the run.
 pub(super) const MAX_STALLED_COMPLETIONS: u32 = 3;
 /// The runtime's bound on a stored run result.

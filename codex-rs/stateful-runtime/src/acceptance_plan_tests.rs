@@ -90,9 +90,18 @@ fn admit(ordinal: u32) -> AcceptanceChange {
 }
 
 fn receipt(ledger: &AcceptanceLedger, exit_code: i32, checker: Option<&str>) -> CommandEvidence {
-    let criterion = ledger.criterion(1).expect("C1");
+    receipt_of(ledger, 1, exit_code, checker)
+}
+
+fn receipt_of(
+    ledger: &AcceptanceLedger,
+    ordinal: u32,
+    exit_code: i32,
+    checker: Option<&str>,
+) -> CommandEvidence {
+    let criterion = ledger.criterion(ordinal).expect("criterion");
     CommandEvidence {
-        ordinal: 1,
+        ordinal,
         criterion_revision: criterion.revision,
         outcome: if exit_code == 0 {
             EvidenceOutcome::Passed
@@ -111,14 +120,19 @@ fn receipt(ledger: &AcceptanceLedger, exit_code: i32, checker: Option<&str>) -> 
     }
 }
 
+/// The same observed digest for the first few criteria.
 fn state(digest: &str) -> BTreeMap<u32, ArtifactState> {
-    BTreeMap::from([(
-        1,
-        ArtifactState::Observed {
-            digest: digest.to_string(),
-            missing: Vec::new(),
-        },
-    )])
+    (1..=4)
+        .map(|ordinal| {
+            (
+                ordinal,
+                ArtifactState::Observed {
+                    digest: digest.to_string(),
+                    missing: Vec::new(),
+                },
+            )
+        })
+        .collect()
 }
 
 async fn complete(
@@ -155,8 +169,47 @@ async fn complete(
         .map(|(run, _)| run)
 }
 
+#[test]
+fn only_an_execution_of_a_declared_checker_is_admissible() {
+    let checker = ["verify.sh".to_string(), "tests/test_out.py".to_string()];
+    for (command, cwd) in [
+        ("sh verify.sh", None),
+        ("bash ./verify.sh --strict", None),
+        ("./verify.sh", None),
+        ("python3 tests/test_out.py", None),
+        ("python3.12 test_out.py", Some("tests")),
+        ("../verify.sh", Some("tests")),
+    ] {
+        assert_eq!(
+            crate::acceptance_plan::executed_checker(command, cwd, &checker),
+            Ok(()),
+            "{command}"
+        );
+    }
+    for command in [
+        "echo verify.sh",
+        "cat verify.sh",
+        "true # verify.sh",
+        "sh -c verify.sh",
+        "sh other/verify.sh",
+        "sh verify.sh; true",
+        "sh verify.sh || true",
+        "FORCE=1 sh verify.sh",
+        "sh /tmp/verify.sh",
+        "sh /verify.sh",
+        "sh ../verify.sh",
+        "verify.sh",
+        "pytest tests/test_out.py",
+    ] {
+        assert!(
+            crate::acceptance_plan::executed_checker(command, None, &checker).is_err(),
+            "{command}"
+        );
+    }
+}
+
 #[tokio::test]
-async fn the_host_admits_only_plans_that_run_a_named_checker() {
+async fn the_host_admits_only_plans_that_execute_a_declared_checker() {
     let (_home, store, id) = store(GOAL, WorkflowMode::Autonomous).await;
     let ledger = store
         .revise_acceptance(
@@ -168,7 +221,7 @@ async fn the_host_admits_only_plans_that_run_a_named_checker() {
         .await
         .expect("criterion");
     for (change, why) in [
-        (admit(1), "an echo names no checker"),
+        (admit(1), "an echo runs no checker"),
         (
             AcceptanceChange::Admit {
                 ordinal: 1,
@@ -402,7 +455,7 @@ async fn applied_steering_blocks_until_reconciled_and_withdraws_admissions() {
         "{error}"
     );
     let ledger = store.acceptance_ledger(&id).await.expect("ledger");
-    let reconciled = store
+    let not_incorporated = store
         .revise_acceptance(
             &id,
             ledger.revision,
@@ -413,10 +466,85 @@ async fn applied_steering_blocks_until_reconciled_and_withdraws_admissions() {
             "call-reconcile",
         )
         .await
-        .expect("reconciled");
+        .expect_err("a claimed criterion that does not exist incorporates nothing");
+    assert!(
+        not_incorporated
+            .to_string()
+            .contains("\"Also write out2.txt.\" is covered by no criterion"),
+        "{not_incorporated}"
+    );
+    // Re-running the old check does not complete the changed scope.
+    store
+        .record_command_evidence(&id, vec![receipt(&ledger, 0, Some(CHECKER))])
+        .await
+        .expect("rerun");
+    assert!(complete(&store, &id, state(CHECKER)).await.is_err());
+    let request = store.acceptance_request(&id).await.expect("request");
+    assert_eq!(request, "Write out.txt.\nAlso write out2.txt.");
+    let ledger = store.acceptance_ledger(&id).await.expect("ledger");
+    let start = GOAL.len() + 1;
+    let reconciled = store
+        .revise_acceptance(
+            &id,
+            ledger.revision,
+            vec![
+                AcceptanceChange::Add {
+                    origin: AcceptanceOrigin::User,
+                    kind: AcceptanceKind::Deliverable,
+                    statement: "out2.txt is written.".to_string(),
+                    request_span: Some(RequestSpan {
+                        start,
+                        end: request.len(),
+                    }),
+                    terms: CriterionTerms {
+                        required: true,
+                        artifacts: vec!["out2.txt".to_string()],
+                        checker: vec!["verify2.sh".to_string()],
+                        check_command: Some("sh verify2.sh".to_string()),
+                        expected_observation: Some("exit 0".to_string()),
+                        ..CriterionTerms::default()
+                    },
+                },
+                AcceptanceChange::ReconcileSteering {
+                    steering_id: steering_id.to_string(),
+                    reason: "Adds out2.txt as C2.".to_string(),
+                },
+            ],
+            "call-reconcile",
+        )
+        .await
+        .expect("incorporated and reconciled");
     assert_eq!(reconciled.criteria[0].plan, None);
     assert!(reconciled.workspace_generation > ledger.workspace_generation);
-    assert!(complete(&store, &id, state(CHECKER)).await.is_err());
+    let readmitted = store
+        .revise_acceptance(
+            &id,
+            reconciled.revision,
+            vec![admit(1), admit(2)],
+            "call-readmit",
+        )
+        .await
+        .expect("readmitted");
+    store
+        .record_command_evidence(&id, vec![receipt(&readmitted, 0, Some(CHECKER))])
+        .await
+        .expect("C1 passes again");
+    let error = complete(&store, &id, state(CHECKER))
+        .await
+        .expect_err("the added output is unchecked");
+    assert!(error.to_string().contains("C2"), "{error}");
+    let ledger = store.acceptance_ledger(&id).await.expect("ledger");
+    store
+        .record_command_evidence(&id, vec![receipt_of(&ledger, 2, 0, Some(CHECKER))])
+        .await
+        .expect("C2 passes");
+    assert_eq!(
+        complete(&store, &id, state(CHECKER))
+            .await
+            .expect("both outputs verified")
+            .status,
+        StatefulRunStatus::Completed
+    );
 }
 
 #[tokio::test]
@@ -450,6 +578,58 @@ async fn pending_commands_fence_completion_and_reentry_clears_them() {
     // A cheap lookup with nothing pending completes; the host records the admission.
     let ledger_before = store.acceptance_ledger(&id).await.expect("ledger");
     assert!(!ledger_before.cheap_lookup);
+}
+
+#[tokio::test]
+async fn an_exited_command_without_an_end_closes_as_terminated_unknown() {
+    let (_home, store, id) = store(GOAL, WorkflowMode::Autonomous).await;
+    let ledger = store
+        .revise_acceptance(
+            &id,
+            0,
+            vec![checked("sh verify.sh", &["verify.sh"]), admit(1)],
+            "call-1",
+        )
+        .await
+        .expect("admitted");
+    store
+        .record_command_evidence(&id, vec![receipt(&ledger, 0, Some(CHECKER))])
+        .await
+        .expect("passed");
+    store
+        .begin_command(&id, "call-denied")
+        .await
+        .expect("pending");
+    assert!(
+        store
+            .command_pending(&id, "call-denied")
+            .await
+            .expect("read")
+    );
+    assert!(
+        store
+            .close_unaccounted_command(&id, "call-denied")
+            .await
+            .expect("closed")
+    );
+    // Its partial effects are unknown: nothing is pending, and the earlier pass is stale.
+    let closed = store.acceptance_ledger(&id).await.expect("ledger");
+    assert_eq!(
+        (closed.pending_commands, closed.workspace_generation),
+        (0, ledger.workspace_generation + 1)
+    );
+    assert!(
+        ledger_verdicts(&closed, &state(PINNED), &state(CHECKER))[0]
+            .1
+            .is_unmet()
+    );
+    // A command already accounted for is not closed again.
+    assert!(
+        !store
+            .close_unaccounted_command(&id, "call-denied")
+            .await
+            .expect("no-op")
+    );
 }
 
 #[tokio::test]

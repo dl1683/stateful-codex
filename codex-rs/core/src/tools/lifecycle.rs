@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use codex_extension_api::CommandExitedInput;
 use codex_extension_api::CommandStartInput;
 use codex_extension_api::McpToolContext;
 use codex_extension_api::McpToolResultInput;
@@ -105,6 +106,20 @@ pub(crate) async fn notify_command_start(
                 command,
                 cwd,
                 file_system,
+            })
+            .await;
+    }
+}
+
+pub(crate) async fn notify_command_exited(session: &Session, turn: &TurnContext, call_id: &str) {
+    for contributor in session.services.extensions.tool_lifecycle_contributors() {
+        contributor
+            .on_command_exited(CommandExitedInput {
+                session_store: &session.services.session_extension_data,
+                thread_store: &session.services.thread_extension_data,
+                turn_store: turn.extension_data.as_ref(),
+                turn_id: &turn.sub_id,
+                call_id,
             })
             .await;
     }

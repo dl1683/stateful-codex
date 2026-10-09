@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
+use codex_extension_api::CommandExitedInput;
 use codex_extension_api::CommandStartInput;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ToolCallOutcome;
@@ -300,6 +301,31 @@ impl ToolLifecycleContributor for StatefulExtension {
                 &input.cwd.to_path_buf(),
             )
             .await;
+        })
+    }
+
+    fn on_command_exited<'a>(&'a self, input: CommandExitedInput<'a>) -> ToolLifecycleFuture<'a> {
+        Box::pin(async move {
+            let (Some(binding), Some(services)) = (
+                input
+                    .turn_store
+                    .get::<crate::acceptance_observation::TurnRunBinding>(),
+                self.services.clone(),
+            ) else {
+                return;
+            };
+            // The end item usually follows; wait for it off the tool's path.
+            let run_id = binding.run_id.clone();
+            let call_id = input.call_id.to_string();
+            tokio::spawn(async move {
+                crate::acceptance_observation::command_exited(
+                    &services,
+                    &run_id,
+                    &call_id,
+                    crate::acceptance_observation::END_ITEM_GRACE,
+                )
+                .await;
+            });
         })
     }
 

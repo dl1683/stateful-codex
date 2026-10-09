@@ -16,7 +16,10 @@
 //! pinned content changed while it ran, when another mutation was observed meanwhile, or when
 //! no start snapshot exists. A check that changed any criterion's pinned files is itself a
 //! mutation: earlier evidence becomes stale and only its own unchanged post-write state is
-//! qualified. Every other observed mutation (unmatched commands that are not read-only, input
+//! qualified. The host also lists the project's files around a check; a check that changed
+//! any file no criterion pins (or whose effects could not be listed) leaves every receipt,
+//! its own included, stale. A command that returned with no live process and whose end item
+//! never arrives is closed as terminated with unknown effects. Every other observed mutation (unmatched commands that are not read-only, input
 //! written into a running session, applied or partially applied patches) advances the
 //! workspace generation.
 
@@ -61,6 +64,24 @@ const ARTIFACT_READ_BUDGET: Duration = Duration::from_secs(5);
 const MAX_HASHED_ARTIFACT_BYTES: u64 = 16 * 1024 * 1024;
 /// Artifact reader workers that may run at once, abandoned ones included.
 const MAX_OUTSTANDING_READERS: usize = 4;
+/// Larger workspaces cannot be listed around a check; its effects are then unknown.
+const MAX_MANIFEST_ENTRIES: usize = 50_000;
+/// Version-control metadata and dependency or build caches: changes inside them do not make
+/// a check a mutation (pin a file there to make it governing).
+const SKIPPED_DIRECTORIES: &[&str] = &[
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "target",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    ".tox",
+];
 /// Shell flags whose next (final) argument is the script the model asked to run.
 const SCRIPT_FLAGS: &[&str] = &["-c", "-lc", "-Command", "-command", "/c", "/C"];
 
@@ -76,18 +97,31 @@ struct CheckStarts(Mutex<HashMap<String, CheckStart>>);
 
 struct CheckStart {
     generation: u64,
+    /// Every file under the project roots at start; `None` when it could not be listed.
+    manifest: Option<Manifest>,
     /// Matched criteria: revision, pinned-artifact digest and checker digest at start.
     criteria: BTreeMap<u32, (u64, Option<String>, Option<String>)>,
     /// Every active criterion's pinned artifacts and checker files at start.
     governing: Governing,
 }
 
+/// Size and modification time of every file under the project roots, outside skipped
+/// directories.
+type Manifest = BTreeMap<PathBuf, (u64, Option<std::time::SystemTime>)>;
 /// Digests of every active criterion's pinned artifacts and checker files.
 type Governing = BTreeMap<u32, (Option<String>, Option<String>)>;
 /// Runs this process has bound a turn to; the first binding is a cold re-entry.
 static ENTERED_RUNS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 static OUTSTANDING_READERS: AtomicUsize = AtomicUsize::new(0);
+/// Commands whose end item arrived and is being accounted for right now.
+static ENDS_IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+/// How long an exited command's end item may take to arrive before the command is closed as
+/// terminated with unknown effects.
+pub(crate) const END_ITEM_GRACE: Duration = Duration::from_secs(10);
+/// Upper bound on waiting for an end item whose accounting is already under way.
+const END_ACCOUNTING_LIMIT: Duration = Duration::from_secs(60);
 
 /// Records the run binding of a turn that is starting, and, the first time this process sees
 /// the run, invalidates evidence recorded before (changes made while no observer ran are
@@ -132,6 +166,44 @@ pub(crate) async fn forget_command(
     }
 }
 
+/// A command returned with no live process. Its end item normally follows within moments
+/// and accounts for it; a sandbox denial or a failure before launch emits none. After the
+/// grace period an unaccounted command is closed as terminated with unknown effects: no
+/// evidence, and every earlier receipt becomes stale. A command still running in the
+/// background never reaches this path, and neither does an aborted one.
+pub(crate) async fn command_exited(
+    services: &ProjectIntelligenceServices,
+    run_id: &StatefulRunId,
+    call_id: &str,
+    grace: Duration,
+) {
+    let Ok(store) = services.runtime().await else {
+        return;
+    };
+    let started = Instant::now();
+    loop {
+        match store.command_pending(run_id, call_id).await {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(error) => {
+                tracing::warn!(%run_id, %error, "failed to read a pending command");
+                return;
+            }
+        }
+        let accounting = ENDS_IN_FLIGHT
+            .lock()
+            .is_ok_and(|in_flight| in_flight.contains(call_id));
+        let waited = started.elapsed();
+        if waited >= END_ACCOUNTING_LIMIT || (!accounting && waited >= grace) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    if let Err(error) = store.close_unaccounted_command(run_id, call_id).await {
+        tracing::warn!(%run_id, %error, "failed to close an unaccounted command");
+    }
+}
+
 /// A builtin command is about to execute: record it as pending and snapshot the checks it
 /// runs.
 pub(crate) async fn command_started(
@@ -159,8 +231,10 @@ pub(crate) async fn command_started(
         return;
     }
     let governing = governing_digests(roots, &ledger).await;
+    let manifest = workspace_manifest(roots).await;
     let start = CheckStart {
         generation: ledger.workspace_generation,
+        manifest,
         criteria: matched
             .iter()
             .map(|criterion| {
@@ -217,18 +291,25 @@ pub(crate) async fn observe_item(
         TurnItem::CommandExecution(command) => {
             // Pending is cleared only after the effects are durably accounted for; a
             // failure leaves it pending, which fails completion closed.
-            match observe_command(services, run_id, roots, turn_store, command).await {
-                Ok(()) if command.status != CommandExecutionStatus::InProgress => {
-                    match services.runtime().await {
-                        Ok(store) => store
-                            .finish_command(run_id, &command.id)
-                            .await
-                            .map_err(|error| error.to_string()),
-                        Err(error) => Err(error.to_string()),
-                    }
-                }
-                outcome => outcome,
+            let ended = command.status != CommandExecutionStatus::InProgress;
+            if ended && let Ok(mut in_flight) = ENDS_IN_FLIGHT.lock() {
+                in_flight.insert(command.id.clone());
             }
+            let outcome = match observe_command(services, run_id, roots, turn_store, command).await
+            {
+                Ok(()) if ended => match services.runtime().await {
+                    Ok(store) => store
+                        .finish_command(run_id, &command.id)
+                        .await
+                        .map_err(|error| error.to_string()),
+                    Err(error) => Err(error.to_string()),
+                },
+                outcome => outcome,
+            };
+            if ended && let Ok(mut in_flight) = ENDS_IN_FLIGHT.lock() {
+                in_flight.remove(&command.id);
+            }
+            outcome
         }
         // A failed patch may have applied a prefix; only a declined one changed nothing.
         TurnItem::FileChange(change)
@@ -302,16 +383,27 @@ async fn observe_command(
     });
     let output_digest = format!("sha256:{:x}", Sha256::digest(output.as_bytes()));
     let end = governing_digests(roots, &ledger).await;
-    // A check that changed any criterion's pinned files is a mutation: earlier evidence
-    // becomes stale, and only a receipt whose own pinned state is unchanged is qualified
-    // against the post-write state.
+    let end_manifest = workspace_manifest(roots).await;
+    // A check that changed any file outside every criterion's pins (or whose effects could
+    // not be listed) changed inputs nothing pins: all earlier evidence becomes stale, its
+    // own receipt included. A check that changed only pinned files is a mutation too:
+    // earlier evidence becomes stale, and only a receipt whose own pinned state is
+    // unchanged is qualified against the post-write state.
     let mut stamp_generation = None;
     if let Some(start) = &start
         && start.generation == ledger.workspace_generation
-        && start.governing != end
     {
-        bump(services, run_id).await?;
-        stamp_generation = Some(ledger.workspace_generation + 1);
+        if changed_unpinned(
+            roots,
+            &ledger,
+            start.manifest.as_ref(),
+            end_manifest.as_ref(),
+        ) {
+            bump(services, run_id).await?;
+        } else if start.governing != end {
+            bump(services, run_id).await?;
+            stamp_generation = Some(ledger.workspace_generation + 1);
+        }
     }
     let evidence = matched
         .iter()
@@ -383,6 +475,94 @@ async fn observe_command(
         .await
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+/// Whether files outside every active criterion's pins changed between two listings; an
+/// unavailable listing counts as a change.
+fn changed_unpinned(
+    roots: &[String],
+    ledger: &AcceptanceLedger,
+    start: Option<&Manifest>,
+    end: Option<&Manifest>,
+) -> bool {
+    let (Some(start), Some(end)) = (start, end) else {
+        return true;
+    };
+    let Some(root) = roots
+        .first()
+        .and_then(|root| std::fs::canonicalize(root).ok())
+    else {
+        return true;
+    };
+    let pinned = ledger
+        .criteria
+        .iter()
+        .filter(|criterion| criterion.state == AcceptanceState::Active)
+        .flat_map(|criterion| criterion.artifacts.iter().chain(&criterion.checker))
+        .map(|path| {
+            let path = Path::new(path);
+            if path.is_absolute() {
+                path.components().collect::<PathBuf>()
+            } else {
+                root.join(path).components().collect::<PathBuf>()
+            }
+        })
+        .collect::<HashSet<_>>();
+    let unpinned = |path: &PathBuf| !pinned.contains(path);
+    start
+        .iter()
+        .filter(|(path, entry)| end.get(*path) != Some(*entry))
+        .any(|(path, _)| unpinned(path))
+        || end
+            .keys()
+            .filter(|path| !start.contains_key(*path))
+            .any(unpinned)
+}
+
+/// Lists every file under the project roots (outside `SKIPPED_DIRECTORIES`, without
+/// following directory links) with its size and modification time, within the read budget.
+async fn workspace_manifest(roots: &[String]) -> Option<Manifest> {
+    let roots = roots
+        .iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .collect::<Vec<_>>();
+    if roots.is_empty() {
+        return None;
+    }
+    let deadline = Instant::now() + ARTIFACT_READ_BUDGET;
+    let walk = tokio::task::spawn_blocking(move || {
+        let mut manifest = Manifest::new();
+        let mut directories = roots;
+        while let Some(directory) = directories.pop() {
+            if Instant::now() >= deadline {
+                return None;
+            }
+            for entry in std::fs::read_dir(&directory).ok()? {
+                let entry = entry.ok()?;
+                let metadata = entry.metadata().ok()?;
+                let path = entry.path();
+                if metadata.is_dir() {
+                    let skipped = entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| SKIPPED_DIRECTORIES.contains(&name));
+                    if !skipped {
+                        directories.push(path);
+                    }
+                    continue;
+                }
+                if manifest.len() >= MAX_MANIFEST_ENTRIES {
+                    return None;
+                }
+                manifest.insert(path, (metadata.len(), metadata.modified().ok()));
+            }
+        }
+        Some(manifest)
+    });
+    tokio::time::timeout(ARTIFACT_READ_BUDGET, walk)
+        .await
+        .ok()?
+        .ok()?
 }
 
 /// Active checks this execution runs verbatim, in their pinned directory.

@@ -7,11 +7,17 @@ use app_test_support::create_mock_responses_server_repeating_assistant;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ObligationListParams;
 use codex_app_server_protocol::ObligationListResponse;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
+#[cfg(not(target_os = "windows"))]
+use codex_app_server_protocol::ProjectRoot;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulAttributionCompletedNotification;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulAttributionCounters;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulAttributionStatus;
 use codex_app_server_protocol::StatefulMeasurementListParams;
 use codex_app_server_protocol::StatefulMeasurementListResponse;
@@ -31,6 +37,7 @@ use codex_app_server_protocol::StatefulRunStartParams;
 use codex_app_server_protocol::StatefulRunStartResponse;
 use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::StatefulRunUpdatedNotification;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulSteeringStatus;
 use codex_app_server_protocol::StatefulTurnStatus;
 use codex_app_server_protocol::StatefulWorkflowMode;
@@ -67,6 +74,8 @@ use codex_project_intelligence::RootBlackboardQuery;
 use codex_project_intelligence::RootPromotion;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::ObligationPacket;
+#[cfg(not(target_os = "windows"))]
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
@@ -539,10 +548,19 @@ async fn stateful_run_preserves_explicit_mode_and_reconciles_live_controls() -> 
     Ok(())
 }
 
+/// The applied steering joins the acceptance request, so the run completes only after a
+/// criterion quoting it is checked (`sh` runs the checker, so not on Windows).
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    std::fs::write(
+        project_root.path().join("report.md"),
+        "The deployment risk is triggered by the source constraint.\n",
+    )?;
+    std::fs::write(project_root.path().join("verify.sh"), "test -s report.md\n")?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -555,7 +573,10 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             request_id,
             params: ProjectCreateParams {
                 name: "Steerable investigation".to_string(),
-                roots: Vec::new(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root is absolute"),
+                }],
                 metadata: None,
                 idempotency_key: "steerable-project".to_string(),
             },
@@ -696,19 +717,47 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
             ]),
             responses::sse(vec![
                 responses::ev_function_call(
-                    "reconcile-acceptance",
+                    "declare-acceptance",
                     "stateful_acceptance_update",
                     &json!({
                         "expectedLedgerRevision": 0,
-                        "changes": [{
-                            "action": "reconcileSteering",
-                            "steeringId": submitted.steering.id.clone(),
-                            "text": "The direction changes the investigation order, not what is accepted."
-                        }]
+                        "changes": [
+                            {"action": "add", "origin": "user", "kind": "deliverable", "statement": "The decisive source connection is found and verified.", "requestQuote": "Find and verify the decisive source connection.", "checkCommand": "sh verify.sh", "expectedObservation": "the report exists", "artifacts": ["report.md"], "checker": ["verify.sh"]},
+                            {"action": "add", "origin": "user", "kind": "deliverable", "statement": "The report connects the constraint to deployment risk.", "requestQuote": "Connect the source constraint to deployment risk.", "checkCommand": "sh verify.sh", "expectedObservation": "the report exists", "artifacts": ["report.md"], "checker": ["verify.sh"]}
+                        ]
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("declare-acceptance-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "reconcile-acceptance",
+                    "stateful_acceptance_update",
+                    &json!({
+                        "expectedLedgerRevision": 1,
+                        "changes": [
+                            {"action": "reconcileSteering", "steeringId": submitted.steering.id.clone(), "text": "The direction adds C2."},
+                            {"action": "admit", "criterion": "C1"},
+                            {"action": "admit", "criterion": "C2"}
+                        ]
                     })
                     .to_string(),
                 ),
                 responses::ev_completed("reconcile-acceptance-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "run-check",
+                    "exec_command",
+                    &json!({
+                        "cmd": "sh verify.sh",
+                        "workdir": project_root.path().to_string_lossy(),
+                        "yield_time_ms": 10_000
+                    })
+                    .to_string(),
+                ),
+                responses::ev_completed("run-check-response"),
             ]),
             responses::sse(vec![
                 responses::ev_function_call(
@@ -807,7 +856,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     );
 
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 6);
+    assert_eq!(requests.len(), 8);
     assert!(requests[0].body_contains_text("<stateful_run>"));
     assert!(requests[0].body_contains_text("check only what the task depends on"));
     assert!(requests[0].body_contains_text("completed only after all other durable writes"));
@@ -819,23 +868,23 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(requests[0].body_contains_text(material_finding_reference));
     assert!(requests[0].body_contains_text("Connect the source constraint to deployment risk."));
     assert!(requests[0].body_contains_text(&submitted.steering.id));
-    assert!(requests[5].body_contains_text("finalAnswerChecklist"));
-    assert!(requests[5].body_contains_text("submittedResult"));
-    assert!(requests[5].body_contains_text(
+    assert!(requests[7].body_contains_text("finalAnswerChecklist"));
+    assert!(requests[7].body_contains_text("submittedResult"));
+    assert!(requests[7].body_contains_text(
         "Verified the decisive connection and incorporated the user's direction."
     ));
-    assert!(requests[5].body_contains_text("rootFinding"));
-    assert!(requests[5].body_contains_text(material_finding_reference));
+    assert!(requests[7].body_contains_text("rootFinding"));
+    assert!(requests[7].body_contains_text(material_finding_reference));
     assert!(
-        requests[5].body_contains_text(
+        requests[7].body_contains_text(
             "The decisive project constraint must remain in the durable result."
         )
     );
     assert!(
-        requests[5]
+        requests[7]
             .body_contains_text("The deployment risk is triggered by the source constraint.")
     );
-    assert!(requests[5].body_contains_text("Return submittedResult as the final answer"));
+    assert!(requests[7].body_contains_text("Return submittedResult as the final answer"));
     let obligations: ObligationListResponse = server
         .request(|request_id| ClientRequest::ObligationList {
             request_id,
@@ -881,6 +930,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
     assert!(result.contains("The decisive project constraint must remain in the durable result."));
     assert!(result.contains("The deployment risk is triggered by the source constraint."));
     assert!(result.contains("reconciled by the agent (agent-written, not host-verified)"));
+    assert!(result.contains("ran its host-admitted plan"));
     Ok(())
 }
 

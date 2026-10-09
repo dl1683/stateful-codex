@@ -23,7 +23,6 @@ use codex_stateful_runtime::MAX_ACCEPTANCE_CHANGES;
 use codex_stateful_runtime::MAX_CRITERION_ARTIFACTS;
 use codex_stateful_runtime::MAX_CRITERION_DEPENDENCIES;
 use codex_stateful_runtime::RequestSpan;
-use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::TermsUpdate;
 use serde::Deserialize;
 use serde_json::json;
@@ -146,13 +145,14 @@ impl AcceptanceUpdateTool {
         let arguments: Arguments = parse_arguments(&call, EXAMPLE)?;
         let source_id = provenance_source_id(&call)?;
         let run = thread_run(&self.project_id, &self.thread_id, &self.services).await?;
+        let runtime = self.services.runtime().await.map_err(respond)?;
+        let request = runtime.acceptance_request(&run.id).await.map_err(respond)?;
         let mut changes = arguments
             .changes
             .into_iter()
             .enumerate()
-            .map(|(index, change)| convert(&run, index, change))
+            .map(|(index, change)| convert(&request, index, change))
             .collect::<Result<Vec<_>, _>>()?;
-        let runtime = self.services.runtime().await.map_err(respond)?;
         // A manual observation is pinned to the content of the criterion's artifacts, and a
         // plan admission to the checker bytes, both read by the host now; outside the local
         // executor nothing can be pinned.
@@ -240,7 +240,7 @@ impl AcceptanceUpdateTool {
 }
 
 fn convert(
-    run: &StatefulRun,
+    request: &str,
     index: usize,
     change: ChangeArguments,
 ) -> Result<AcceptanceChange, FunctionCallError> {
@@ -355,7 +355,7 @@ fn convert(
             ])?;
             let request_span = request_quote
                 .as_deref()
-                .map(|quote| span_of(run, index, quote))
+                .map(|quote| span_of(request, index, quote))
                 .transpose()?;
             Ok(AcceptanceChange::Add {
                 origin: origin.ok_or_else(|| field("origin"))?,
@@ -455,19 +455,17 @@ fn convert(
     }
 }
 
-/// The byte span of the first exact occurrence of `quote` in the run goal.
-fn span_of(run: &StatefulRun, index: usize, quote: &str) -> Result<RequestSpan, FunctionCallError> {
+/// The byte span of the first exact occurrence of `quote` in the acceptance request (the
+/// goal followed by every applied steering input).
+fn span_of(request: &str, index: usize, quote: &str) -> Result<RequestSpan, FunctionCallError> {
     let quote = quote.trim();
-    match (!quote.is_empty())
-        .then(|| run.value.goal.find(quote))
-        .flatten()
-    {
+    match (!quote.is_empty()).then(|| request.find(quote)).flatten() {
         Some(start) => Ok(RequestSpan {
             start,
             end: start + quote.len(),
         }),
         None => Err(FunctionCallError::RespondToModel(format!(
-            "nothing changed: changes[{index}].requestQuote is not exact text of the run goal; copy it verbatim from the goal (stateful_run_read section \"goal\")"
+            "nothing changed: changes[{index}].requestQuote is not exact text of the run goal or of an applied steering instruction; copy it verbatim"
         ))),
     }
 }
@@ -485,7 +483,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AcceptanceUpdateTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Acceptance ledger. add (user: requestQuote, exact goal text), refine, accept, dismiss (coveredBy), retire derived, admit (host freezes the plan: checkCommand naming its checker files), reconcileSteering, observe, noCheck. Run checkCommand verbatim in checkCwd.".to_string(),
+            description: "Acceptance ledger. add (user: requestQuote, exact goal/steering text), refine, accept, dismiss (coveredBy), retire derived, admit (checkCommand: `sh <checker>` or `./<checker>`), reconcileSteering, observe, noCheck. Run checkCommand verbatim in checkCwd.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

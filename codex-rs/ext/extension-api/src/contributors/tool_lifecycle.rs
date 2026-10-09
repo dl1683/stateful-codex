@@ -172,6 +172,22 @@ pub struct CommandStartInput<'a> {
     pub file_system: &'a dyn ExecutorFileSystem,
 }
 
+/// A builtin command whose start was reported has ended with no live process: it exited,
+/// was denied by the sandbox, or failed. Its completed command item may arrive later or,
+/// for a denial or failure before launch, never; the call ID matches the start callback.
+pub struct CommandExitedInput<'a> {
+    /// Store scoped to the host session runtime.
+    pub session_store: &'a ExtensionData,
+    /// Store scoped to this thread runtime.
+    pub thread_store: &'a ExtensionData,
+    /// Store scoped to this turn runtime.
+    pub turn_store: &'a ExtensionData,
+    /// Current turn submission id.
+    pub turn_id: &'a str,
+    /// Host tool call id.
+    pub call_id: &'a str,
+}
+
 /// Input supplied after an MCP server responds, before the host reports completion.
 pub struct McpToolResultInput<'a> {
     /// Store scoped to the host session runtime.

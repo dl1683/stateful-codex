@@ -98,3 +98,13 @@ CREATE TABLE stateful_acceptance_pending (
     started_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, call_id)
 );
+
+-- The acceptance request is the goal followed by every applied steering input, appended in
+-- the order the ledger first saw it applied, so request spans never shift.
+CREATE TABLE stateful_acceptance_request_parts (
+    run_id TEXT NOT NULL REFERENCES stateful_acceptance_ledgers(run_id) ON DELETE CASCADE,
+    part INTEGER NOT NULL CHECK (part > 0),
+    steering_id TEXT NOT NULL,
+    PRIMARY KEY (run_id, part),
+    UNIQUE (run_id, steering_id)
+);

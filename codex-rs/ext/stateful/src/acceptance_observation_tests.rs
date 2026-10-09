@@ -29,6 +29,7 @@ use super::MAX_OUTSTANDING_READERS;
 use super::OUTSTANDING_READERS;
 use super::artifact_states;
 use super::bind_turn;
+use super::command_exited;
 use super::command_started;
 use super::forget_command;
 use super::hash_bounded;
@@ -194,6 +195,63 @@ impl Fixture {
             "unknown",
         )
         .await;
+    }
+
+    /// Adds C2, a declared generator check `sh gen.sh` pinning only `out.txt`.
+    async fn add_generator(&self) {
+        let root = self.project.path();
+        std::fs::write(root.join("gen.sh"), "generator").expect("generator");
+        std::fs::write(root.join("out.txt"), "out").expect("output");
+        let ledger = self
+            .store
+            .acceptance_ledger(&self.run_id)
+            .await
+            .expect("ledger");
+        self.store
+            .revise_acceptance(
+                &self.run_id,
+                ledger.revision,
+                vec![AcceptanceChange::Add {
+                    origin: AcceptanceOrigin::Derived,
+                    kind: AcceptanceKind::Check,
+                    statement: "The generator runs.".to_string(),
+                    request_span: None,
+                    terms: CriterionTerms {
+                        required: true,
+                        artifacts: vec!["out.txt".to_string()],
+                        checker: vec!["gen.sh".to_string()],
+                        check_command: Some("sh gen.sh".to_string()),
+                        expected_observation: Some("exit 0".to_string()),
+                        ..CriterionTerms::default()
+                    },
+                }],
+                "call-c2",
+            )
+            .await
+            .expect("C2");
+    }
+
+    /// (outcome, evidence generation) of each criterion's newest receipt, and the ledger's
+    /// generation.
+    async fn receipts(&self) -> (Vec<Option<(EvidenceOutcome, u64)>>, u64) {
+        let ledger = self
+            .store
+            .acceptance_ledger(&self.run_id)
+            .await
+            .expect("ledger");
+        (
+            ledger
+                .criteria
+                .iter()
+                .map(|criterion| {
+                    criterion
+                        .evidence
+                        .as_ref()
+                        .map(|evidence| (evidence.outcome, evidence.workspace_generation))
+                })
+                .collect(),
+            ledger.workspace_generation,
+        )
     }
 
     async fn pending(&self) -> u64 {
@@ -581,6 +639,94 @@ async fn a_declared_check_that_mutates_governing_files_invalidates_earlier_evide
         (c2.outcome, c2.workspace_generation),
         (EvidenceOutcome::Passed, 1)
     );
+}
+
+#[tokio::test]
+async fn a_declared_check_that_rewrites_an_unpinned_input_stales_every_receipt() {
+    let fixture = fixture("run-unpinned-mutator").await;
+    let root = fixture.project.path().to_path_buf();
+    std::fs::write(root.join("input.csv"), "1,2").expect("input");
+    fixture.add_generator().await;
+    fixture.check("c1-pass", "completed", 0).await;
+    // C2 pins only its output, yet rewrites an input no criterion pins.
+    fixture.start("c2", "sh gen.sh", &root).await;
+    std::fs::write(root.join("input.csv"), "3,4,5").expect("rewritten");
+    fixture
+        .finish("c2", "sh gen.sh", &root, "completed", 0, "unknown")
+        .await;
+    assert_eq!(
+        fixture.receipts().await,
+        (
+            vec![
+                Some((EvidenceOutcome::Passed, 0)),
+                Some((EvidenceOutcome::Unavailable, 0))
+            ],
+            1
+        ),
+        "C1's pass is stale and C2's own receipt does not qualify"
+    );
+}
+
+#[tokio::test]
+async fn read_only_checks_keep_each_other_current() {
+    let fixture = fixture("run-read-only-checks").await;
+    let root = fixture.project.path().to_path_buf();
+    fixture.add_generator().await;
+    fixture.check("c1-pass", "completed", 0).await;
+    fixture.start("c2", "sh gen.sh", &root).await;
+    fixture
+        .finish("c2", "sh gen.sh", &root, "completed", 0, "unknown")
+        .await;
+    assert_eq!(
+        fixture.receipts().await,
+        (
+            vec![
+                Some((EvidenceOutcome::Passed, 0)),
+                Some((EvidenceOutcome::Passed, 0))
+            ],
+            0
+        )
+    );
+}
+
+#[tokio::test]
+async fn an_exited_command_is_closed_only_when_its_end_never_arrives() {
+    let fixture = fixture("run-exited").await;
+    let root = fixture.project.path().to_path_buf();
+    fixture.check("c1-pass", "completed", 0).await;
+    // Its end item arrives and is accounted for: nothing to close.
+    fixture.start("ended", "cat f", &root).await;
+    fixture
+        .finish("ended", "cat f", &root, "completed", 0, "read")
+        .await;
+    command_exited(
+        &fixture.services,
+        &fixture.run_id,
+        "ended",
+        std::time::Duration::from_millis(50),
+    )
+    .await;
+    assert_eq!(
+        (fixture.pending().await, fixture.latest().await),
+        (0, (Some(EvidenceOutcome::Passed), 0))
+    );
+    // A sandbox denial emits no end item: closed as terminated with unknown effects.
+    fixture.start("denied", "touch /etc/denied", &root).await;
+    command_exited(
+        &fixture.services,
+        &fixture.run_id,
+        "denied",
+        std::time::Duration::from_millis(50),
+    )
+    .await;
+    assert_eq!(
+        (fixture.pending().await, fixture.latest().await),
+        (0, (Some(EvidenceOutcome::Passed), 1)),
+        "the earlier pass is stale"
+    );
+    // A live background process never reports an exit: it stays pending.
+    fixture.start("background", "sleep 100", &root).await;
+    assert_eq!(fixture.pending().await, 1);
 }
 
 #[tokio::test]

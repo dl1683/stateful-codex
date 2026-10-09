@@ -45,6 +45,8 @@ use crate::acceptance_storage::state_name;
 /// The ledger revision a change is applied in, stamped on every criterion it touches.
 pub(crate) struct ChangeContext<'a> {
     pub(crate) run: &'a StatefulRun,
+    /// The acceptance request: the goal followed by every applied steering input.
+    pub(crate) request: &'a str,
     pub(crate) ledger: &'a AcceptanceLedger,
     pub(crate) ledger_revision: u64,
     pub(crate) source_id: &'a str,
@@ -85,7 +87,7 @@ pub(crate) async fn apply_change(
                 }
                 (AcceptanceOrigin::User, None) => {
                     return Err(refused(
-                        "a user criterion must quote the exact goal text it comes from (requestQuote)"
+                        "a user criterion must quote the exact request text (goal or applied steering) it comes from (requestQuote)"
                             .to_string(),
                     ));
                 }
@@ -96,7 +98,7 @@ pub(crate) async fn apply_change(
                     ));
                 }
                 (_, Some(span)) => span
-                    .quote(&context.run.value.goal)
+                    .quote(context.request)
                     .ok_or(AcceptanceError::InvalidSpan)?
                     .to_string(),
                 (AcceptanceOrigin::Derived, None) => statement.clone(),
@@ -307,7 +309,7 @@ pub(crate) async fn insert_omission_proposal(
 ) -> Result<(), StatefulRunStoreError> {
     validate_bounded(statement, MAX_STATEMENT_BYTES)?;
     let requirement = span
-        .quote(&context.run.value.goal)
+        .quote(context.request)
         .ok_or(AcceptanceError::InvalidSpan)?
         .to_string();
     insert_criterion(
@@ -562,8 +564,8 @@ struct CriterionUpdate {
 }
 
 /// Applies a refinement or acceptance; any change of what the criterion checks bumps its
-/// revision (earlier evidence becomes non-current) and clears the user's approval of the
-/// previous check. Returns whether anything changed.
+/// revision (earlier evidence becomes non-current), which also invalidates its admitted check
+/// plan. Returns whether anything changed.
 async fn update_criterion(
     connection: &mut SqliteConnection,
     context: &ChangeContext<'_>,

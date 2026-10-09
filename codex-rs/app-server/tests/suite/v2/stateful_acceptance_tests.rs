@@ -66,11 +66,15 @@ fn message(id: &str, text: &str) -> String {
 }
 
 fn declare(command: &str) -> String {
+    declare_for(GOAL, command, "out.txt")
+}
+
+fn declare_for(quote: &str, command: &str, artifact: &str) -> String {
     call(
         "declare",
         "stateful_acceptance_update",
         json!({"expectedLedgerRevision": 0, "changes": [
-            {"action": "add", "origin": "user", "kind": "deliverable", "statement": "out.txt is written.", "requestQuote": GOAL, "checkCommand": command, "expectedObservation": "verify.sh exits 0 once out.txt exists", "artifacts": ["out.txt"], "checker": ["verify.sh"]}
+            {"action": "add", "origin": "user", "kind": "deliverable", "statement": quote, "requestQuote": quote, "checkCommand": command, "expectedObservation": "verify.sh exits 0 once the output is correct", "artifacts": [artifact], "checker": ["verify.sh"]}
         ]}),
     )
 }
@@ -93,14 +97,30 @@ struct Harness {
     run: StatefulRun,
 }
 
-async fn harness(mode: StatefulWorkflowMode) -> Result<Harness> {
+async fn harness(mode: StatefulWorkflowMode, sandbox_mode: &str) -> Result<Harness> {
+    harness_for(
+        mode,
+        sandbox_mode,
+        GOAL,
+        &[("verify.sh", "test -f out.txt\n")],
+    )
+    .await
+}
+
+async fn harness_for(
+    mode: StatefulWorkflowMode,
+    sandbox_mode: &str,
+    goal: &str,
+    files: &[(&str, &str)],
+) -> Result<Harness> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
-    std::fs::write(project_root.path().join("verify.sh"), "test -f out.txt\n")?;
-    // The run writes its outputs; a read-only sandbox would deny them.
+    for (name, content) in files {
+        std::fs::write(project_root.path().join(name), content)?;
+    }
     MockResponsesConfig::new(&responses_server.uri())
-        .with_sandbox_mode("danger-full-access")
+        .with_sandbox_mode(sandbox_mode)
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
     let mut server = TestAppServer::builder()
@@ -124,6 +144,7 @@ async fn harness(mode: StatefulWorkflowMode) -> Result<Harness> {
     let thread = server
         .start_thread(ThreadStartParams {
             project_id: Some(project.project.id.clone()),
+            cwd: Some(project_root.path().to_string_lossy().to_string()),
             ..Default::default()
         })
         .await?;
@@ -133,7 +154,7 @@ async fn harness(mode: StatefulWorkflowMode) -> Result<Harness> {
             params: StatefulRunStartParams {
                 project_id: project.project.id,
                 thread_id: thread.thread.id.clone(),
-                goal: GOAL.to_string(),
+                goal: goal.to_string(),
                 mode,
                 budget: StatefulRunBudget {
                     max_continuations: 1,
@@ -184,14 +205,15 @@ impl Harness {
     }
 }
 
-/// Through the public API, unattended and without any steering: the host admits the check
-/// plan, a failing check refuses completion, the repair and a passing check of the frozen
-/// checker complete the run; editing the checker after admission invalidates it until the
-/// host admits the new bytes.
-#[cfg(not(target_os = "windows"))]
+/// Through the public API, unattended, without any steering or approval, under the
+/// workspace-write sandbox: a write the sandbox denies leaves no command item and is closed as
+/// terminated with unknown effects, a failing check refuses completion, the repair and a
+/// passing check of the frozen checker complete the run; editing the checker after admission
+/// invalidates it until the host admits the new bytes.
+#[cfg(target_os = "linux")]
 #[tokio::test]
-async fn autonomous_run_completes_unattended_on_its_admitted_plan() -> Result<()> {
-    let mut harness = harness(StatefulWorkflowMode::Autonomous).await?;
+async fn autonomous_run_repairs_and_completes_unattended_in_the_sandbox() -> Result<()> {
+    let mut harness = harness(StatefulWorkflowMode::Autonomous, "workspace-write").await?;
     let root = harness.project_root.path().to_path_buf();
     let revision = harness.run.revision;
     let response_log = responses::mount_sse_sequence(
@@ -199,6 +221,7 @@ async fn autonomous_run_completes_unattended_on_its_admitted_plan() -> Result<()
         vec![
             declare("sh verify.sh"),
             admit("admit", 1),
+            exec("denied", "touch /etc/stateful-acceptance-denied", &root),
             exec("check-fails", "sh verify.sh", &root),
             complete("premature", revision),
             exec("repair", "echo done > out.txt", &root),
@@ -214,18 +237,22 @@ async fn autonomous_run_completes_unattended_on_its_admitted_plan() -> Result<()
     .await;
     harness.turn("Write out.txt.").await?;
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 12);
+    assert_eq!(requests.len(), 13);
     let admitted = requests[2].function_call_output("admit").to_string();
     assert!(admitted.contains("plan admitted"), "{admitted}");
-    let premature = requests[4].function_call_output("premature").to_string();
-    assert!(premature.contains("`sh verify.sh` failed"), "{premature}");
-    let weakened = requests[8].function_call_output("weakened").to_string();
+    let denied = requests[4].function_call_output("denied").to_string();
+    assert!(denied.contains("Read-only file system"), "{denied}");
+    let premature = requests[5].function_call_output("premature").to_string();
+    assert!(premature.contains("completion refused"), "{premature}");
+    assert!(!premature.contains("not accounted for"), "{premature}");
+    let weakened = requests[9].function_call_output("weakened").to_string();
     assert!(
         weakened.contains("the checker changed after its plan was admitted"),
         "{weakened}"
     );
-    let verified = requests[11].function_call_output("verified").to_string();
+    let verified = requests[12].function_call_output("verified").to_string();
     assert!(verified.contains("acceptanceBasis"), "{verified}");
+    assert_eq!(std::fs::read_to_string(root.join("out.txt"))?, "done\n");
     let run = harness.read_run().await?;
     assert_eq!(run.status, StatefulRunStatus::Completed);
     assert!(
@@ -238,15 +265,15 @@ async fn autonomous_run_completes_unattended_on_its_admitted_plan() -> Result<()
     Ok(())
 }
 
-/// A command that runs no checker file is refused as a plan, so its passing receipt can never
-/// settle the requirement (Collaborative run, all platforms).
+/// A command that only mentions the checker file does not execute it, so it is refused as a
+/// plan and its passing receipt can never settle the requirement (Collaborative run).
 #[tokio::test]
-async fn a_superficial_check_cannot_be_admitted() -> Result<()> {
-    let mut harness = harness(StatefulWorkflowMode::Collaborative).await?;
+async fn a_checker_mention_cannot_be_admitted() -> Result<()> {
+    let mut harness = harness(StatefulWorkflowMode::Collaborative, "read-only").await?;
     let response_log = responses::mount_sse_sequence(
         &harness.responses_server,
         vec![
-            declare("echo suite-ok"),
+            declare("echo verify.sh"),
             admit("admit-echo", 1),
             message("refused", "The echo cannot verify out.txt."),
         ],
@@ -257,9 +284,50 @@ async fn a_superficial_check_cannot_be_admitted() -> Result<()> {
     assert_eq!(requests.len(), 3);
     let refusal = requests[2].function_call_output("admit-echo").to_string();
     assert!(
-        refusal.contains("names none of C1's checker files"),
+        refusal.contains("does not execute one of C1's checker files"),
         "{refusal}"
     );
     assert_eq!(harness.read_run().await?.status, StatefulRunStatus::Running);
+    Ok(())
+}
+
+/// NAMED LIMITATION: the host proves that the admitted checker ran unchanged against the
+/// pinned artifacts, not that the checker is adequate. A superficial checker passes a wrong
+/// answer, and the run completes with the check disclosed as agent-written.
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn an_inadequate_admitted_checker_passes_a_wrong_answer() -> Result<()> {
+    const SUM_GOAL: &str = "Write the sum of 2 and 3 to total.txt.";
+    let mut harness = harness_for(
+        StatefulWorkflowMode::Autonomous,
+        "read-only",
+        SUM_GOAL,
+        &[("total.txt", "6\n"), ("verify.sh", "test -s total.txt\n")],
+    )
+    .await?;
+    let root = harness.project_root.path().to_path_buf();
+    let revision = harness.run.revision;
+    let response_log = responses::mount_sse_sequence(
+        &harness.responses_server,
+        vec![
+            declare_for(SUM_GOAL, "sh verify.sh", "total.txt"),
+            admit("admit", 1),
+            exec("check", "sh verify.sh", &root),
+            complete("complete", revision),
+            message("done", "total.txt is written."),
+        ],
+    )
+    .await;
+    harness.turn(SUM_GOAL).await?;
+    assert_eq!(response_log.requests().len(), 5);
+    let run = harness.read_run().await?;
+    assert_eq!(run.status, StatefulRunStatus::Completed);
+    assert!(
+        run.result
+            .as_deref()
+            .is_some_and(|result| result.contains("agent-written check `sh verify.sh`")),
+        "{:?}",
+        run.result
+    );
     Ok(())
 }

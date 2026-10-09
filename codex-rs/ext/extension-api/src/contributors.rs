@@ -45,6 +45,7 @@ pub use thread_lifecycle::ThreadReadyInput;
 pub use thread_lifecycle::ThreadResumeInput;
 pub use thread_lifecycle::ThreadStartInput;
 pub use thread_lifecycle::ThreadStopInput;
+pub use tool_lifecycle::CommandExitedInput;
 pub use tool_lifecycle::CommandStartInput;
 pub use tool_lifecycle::McpToolContext;
 pub use tool_lifecycle::McpToolResultInput;
@@ -400,6 +401,14 @@ pub trait ToolLifecycleContributor: Send + Sync {
     /// This includes commands issued by code mode. It does not imply that
     /// subsequent approval or process creation will succeed.
     fn on_command_start<'a>(&'a self, _input: CommandStartInput<'a>) -> ToolLifecycleFuture<'a> {
+        Box::pin(std::future::ready(()))
+    }
+
+    /// Called when a command reported by `on_command_start` returns with no live process.
+    ///
+    /// Not called while the process keeps running in the background or when the handler
+    /// is cancelled. The completed command item may still arrive after this callback.
+    fn on_command_exited<'a>(&'a self, _input: CommandExitedInput<'a>) -> ToolLifecycleFuture<'a> {
         Box::pin(std::future::ready(()))
     }
 

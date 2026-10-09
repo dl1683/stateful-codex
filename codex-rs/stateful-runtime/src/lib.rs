@@ -5,6 +5,7 @@ mod acceptance_changes;
 mod acceptance_coverage;
 mod acceptance_lifecycle;
 mod acceptance_plan;
+mod acceptance_request;
 mod acceptance_storage;
 mod measurement;
 mod measurement_storage;

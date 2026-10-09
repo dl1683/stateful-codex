@@ -442,6 +442,18 @@ impl ExecCommandHandler {
             }
             None => manager.exec_command(request, &context).await,
         };
+        // Every result except a still-running process is terminal for this command.
+        if !result
+            .as_ref()
+            .is_ok_and(|response| response.process_id.is_some())
+        {
+            crate::tools::lifecycle::notify_command_exited(
+                context.session.as_ref(),
+                context.step_context.turn.as_ref(),
+                &context.call_id,
+            )
+            .await;
+        }
         match result {
             Ok(response) => Ok(boxed_tool_output(response)),
             Err(UnifiedExecError::SandboxDenied {

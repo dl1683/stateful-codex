@@ -35,6 +35,7 @@ use crate::acceptance_changes::insert_omission_proposal;
 use crate::acceptance_changes::next_ordinal;
 use crate::acceptance_coverage::MAX_OMISSION_PROPOSALS;
 use crate::acceptance_coverage::uncovered_sentences;
+use crate::acceptance_request::acceptance_request;
 use crate::storage::load_run;
 use crate::storage::unix_timestamp_millis;
 
@@ -79,11 +80,13 @@ impl StatefulRunStore {
             });
         }
         let now = unix_timestamp_millis()?;
+        let request = acceptance_request(&mut transaction, &run).await?;
         let mut changed = false;
         for change in changes {
             let ledger = load_ledger(&mut transaction, run_id).await?;
             let context = ChangeContext {
                 run: &run,
+                request: &request.text,
                 ledger: &ledger,
                 ledger_revision: expected_revision + 1,
                 source_id,
@@ -117,15 +120,16 @@ impl StatefulRunStore {
         if run.status.is_terminal() {
             return Err(StatefulRunStoreError::AcceptanceRunState(run.status));
         }
-        ensure_ledger(&mut transaction, run_id).await?;
+        let request = acceptance_request(&mut transaction, &run).await?;
         let ledger = load_ledger(&mut transaction, run_id).await?;
-        let uncovered = uncovered_sentences(&run.value.goal, &ledger);
+        let uncovered = uncovered_sentences(&request.text, &ledger);
         let slots = MAX_ACCEPTANCE_CRITERIA
             .saturating_sub(ledger.criteria.len())
             .min(MAX_OMISSION_PROPOSALS);
         let now = unix_timestamp_millis()?;
         let context = ChangeContext {
             run: &run,
+            request: &request.text,
             ledger: &ledger,
             ledger_revision: ledger.revision + 1,
             source_id: "host-omission-check",
@@ -134,7 +138,7 @@ impl StatefulRunStore {
         let mut added = 0;
         for (ordinal, span) in (next_ordinal(&ledger)..).zip(uncovered.iter().take(slots)) {
             let quote = span
-                .quote(&run.value.goal)
+                .quote(&request.text)
                 .ok_or(AcceptanceError::InvalidSpan)?;
             insert_omission_proposal(
                 &mut transaction,
@@ -358,7 +362,8 @@ pub(crate) async fn enforce_acceptance_gate(
         .into_iter()
         .map(|(ordinal, reason)| format!("C{ordinal}: {reason}"))
         .collect::<Vec<_>>();
-    let uncovered = uncovered_sentences(&run.value.goal, &ledger).len();
+    let request = acceptance_request(connection, run).await?;
+    let uncovered = uncovered_sentences(&request.text, &ledger).len();
     if uncovered > 0 {
         unmet.push(format!(
             "{uncovered} request sentences are covered by no criterion or proposal"
@@ -368,7 +373,7 @@ pub(crate) async fn enforce_acceptance_gate(
         return Err(StatefulRunStoreError::AcceptanceGate(unmet.join("; ")));
     }
     // The cheap-lookup admission is recorded, so the completed run shows it owed no coverage.
-    if crate::acceptance_coverage::coverage_exempt(&run.value.goal, &ledger) {
+    if crate::acceptance_coverage::coverage_exempt(&request.text, &ledger) {
         ensure_ledger(connection, &run.id).await?;
         sqlx::query(
             "UPDATE stateful_acceptance_ledgers SET exemption = 'cheapLookup' WHERE run_id = ?",

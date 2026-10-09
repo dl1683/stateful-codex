@@ -60,7 +60,7 @@ impl AcceptanceView {
             .filter(|(_, verdict)| !verdict.is_unmet())
             .count();
         let mut lines = vec![format!(
-            "Acceptance ledger (revision {}; pass expectedLedgerRevision: {} to stateful_acceptance_update): {current} of {} criteria settled. Completion needs every goal sentence covered, every proposal reviewed, applied steering reconciled, and every required criterion satisfied by a current receipt of its host-admitted check plan; otherwise set the run blocked with a partial result.",
+            "Acceptance ledger (revision {}; pass expectedLedgerRevision: {} to stateful_acceptance_update): {current} of {} criteria settled. Completion needs every request sentence (goal and applied steering) covered, every proposal reviewed, applied steering reconciled, and every required criterion satisfied by a current receipt of its host-admitted check plan; otherwise set the run blocked with a partial result.",
             ledger.revision,
             ledger.revision,
             ledger.criteria.len()

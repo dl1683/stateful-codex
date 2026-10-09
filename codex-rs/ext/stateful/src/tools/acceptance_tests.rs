@@ -316,13 +316,13 @@ async fn superficial_or_foreign_executor_receipts_are_observational() {
         )
         .await
         .expect("criterion added");
-    // An echo names no checker file, so the host refuses to admit it as the method.
+    // An echo executes no checker file, so the host refuses to admit it as the method.
     let superficial = fixture
         .update(1, json!([{"action": "admit", "criterion": "C1"}]))
         .await
         .expect_err("an echo is no check of its checker");
     assert!(
-        superficial.contains("names none of C1's checker files"),
+        superficial.contains("does not execute one of C1's checker files"),
         "{superficial}"
     );
     fixture.record_check(1, 0).await;
@@ -347,7 +347,7 @@ async fn admission_outside_the_local_executor_cannot_freeze_checker_bytes() {
     fixture
         .update(
             0,
-            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "pytest -q tests/test_parser.py", "expectedObservation": "every test passes", "artifacts": ["src/parser.py"], "checker": ["tests/test_parser.py"]}]),
+            json!([{"action": "add", "origin": "user", "kind": "check", "statement": "All tests pass.", "requestQuote": "All tests must pass.", "checkCommand": "python3 tests/test_parser.py", "expectedObservation": "every test passes", "artifacts": ["src/parser.py"], "checker": ["tests/test_parser.py"]}]),
         )
         .await
         .expect("criterion added");

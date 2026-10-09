@@ -441,7 +441,7 @@ pub fn criterion_verdict(
     match criterion.state {
         AcceptanceState::Proposed => {
             return CriterionVerdict::Unmet(
-                "omission proposal awaiting review: accept it as a criterion, or dismiss it only with a user steering receipt or a covering criterion".to_string(),
+                "omission proposal awaiting review: accept it as a criterion, or dismiss it only as coveredBy a user criterion".to_string(),
             );
         }
         // A dismissal's receipt is re-validated by the ledger-level verdicts.

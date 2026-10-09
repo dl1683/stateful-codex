@@ -53,6 +53,7 @@ pub use codex_tools::parse_tool_input_schema_without_compaction;
 pub use contributors::ApprovalDecision;
 pub use contributors::ApprovalDecisionInput;
 pub use contributors::ApprovalReviewContributor;
+pub use contributors::CommandExitedInput;
 pub use contributors::CommandStartInput;
 pub use contributors::ConfigContributor;
 pub use contributors::ContextContributor;

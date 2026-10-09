@@ -63,6 +63,55 @@ impl StatefulRunStore {
         Ok(())
     }
 
+    /// Whether a started command's effects are still unaccounted for.
+    pub async fn command_pending(
+        &self,
+        run_id: &StatefulRunId,
+        call_id: &str,
+    ) -> Result<bool, StatefulRunStoreError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM stateful_acceptance_pending WHERE run_id = ? AND call_id = ?",
+        )
+        .bind(run_id.as_str())
+        .bind(call_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .is_some())
+    }
+
+    /// A command ended with no live process and no accountable end (a sandbox denial or a
+    /// failure that emits no command item). Its partial effects are unknown, so it is closed
+    /// as terminated-unknown: it contributes no evidence, and every earlier receipt becomes
+    /// stale. Returns whether the command was still pending.
+    pub async fn close_unaccounted_command(
+        &self,
+        run_id: &StatefulRunId,
+        call_id: &str,
+    ) -> Result<bool, StatefulRunStoreError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let removed =
+            sqlx::query("DELETE FROM stateful_acceptance_pending WHERE run_id = ? AND call_id = ?")
+                .bind(run_id.as_str())
+                .bind(call_id)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected()
+                > 0;
+        if removed {
+            sqlx::query(
+                "UPDATE stateful_acceptance_ledgers
+                 SET workspace_generation = workspace_generation + 1, updated_at_ms = ?
+                 WHERE run_id = ?",
+            )
+            .bind(unix_timestamp_millis()?)
+            .bind(run_id.as_str())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(removed)
+    }
+
     /// Cold re-entry of a run (a new process): commands of the previous process ended with
     /// it and their effects are unknown, and mutations while no observer ran are unknown, so
     /// pending entries are cleared and every earlier receipt and observation becomes stale.
