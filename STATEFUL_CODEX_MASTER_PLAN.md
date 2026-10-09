@@ -82,3 +82,24 @@ The full candidate list and status are kept in the evaluation ledger.
 3. Capture done by the host (not left to the model) for exact facts and event time, plus abstaining when memory does not support an answer.
 4. A portable tool layer: provider-neutral web search, tolerant argument parsing, a relaxed provenance rule, a model capability registry.
 5. Deliverable-first pacing, and trimming bookkeeping on single-session tasks.
+
+## Build order after E1c (step-back review, 2026-10-09; `sc_dogfood/council/council_20261009_stepback.md`)
+Memory usefulness goes ahead of general agent reliability. Each slice is followed by a hands-on user check before the next one starts.
+1. **E1c:** finish its bounded repair (cap of 3) without widening the exemption.
+2. **C4–C6 capture-to-use slice:**
+   - capture two rules, a conversation-only decision with its full reason, a rejected hypothesis, and the event time;
+   - then, from a cold start in a new session, verify exact recall, correct application, attribution and Forget.
+3. **Within-run continuity (priority 2):** the capsule's remaining review and Gate B. Keep the next action, the working test route and the values already given to the user through compaction. Target the within1 replay at no more than plain cost and 18 compactions.
+4. **File-level freshness next to recall:** mark remembered status as unknown or needs-check unless it was qualified (the SC-EVAL-034 stale-status failure).
+5. **Narrow cross-app slice:**
+   - the shared operation contract plus a minimal CLI and MCP adapter;
+   - the journey Codex → Droid → Codex, with attributed findings and Forget.
+   - K3 is split. Only what this journey needs comes now; neutral web search, provider metadata and bridge polish are deferred.
+6. **Deferred until after the first user session:** E2 (coverage ledger), P1 (pacing) and optional integration polish. Necessary safety and compatibility gates stay.
+
+Alternatives that stay live and are tested narrowly:
+- exact-source and topic recall against summary-heavy memory;
+- model-assisted capture against host-sealed sources;
+- full root plus capsule against a separately authorised thinner-root experiment.
+
+One final integrated-build acceptance gate remains.
