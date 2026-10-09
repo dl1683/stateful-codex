@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "windows"))]
 use std::time::Duration;
 
 use anyhow::Result;
@@ -56,33 +57,55 @@ use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardEntryId;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardImportance;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardKind;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardProvenance;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardProvenanceKind;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardStore;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardVerification;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::ConfidenceScore;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::HierarchyNodeId;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::HierarchyStore;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::NewBlackboardEntry;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::NewHierarchyNode;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::NodeKind;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::ProjectRelativePath;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::RootBlackboardQuery;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::RootPromotion;
+#[cfg(not(target_os = "windows"))]
 use codex_state::SqliteConfig;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::ObligationPacket;
 #[cfg(not(target_os = "windows"))]
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(target_os = "windows"))]
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+#[cfg(not(target_os = "windows"))]
 use sqlx::SqlitePool;
+#[cfg(not(target_os = "windows"))]
 use sqlx::sqlite::SqliteConnectOptions;
+#[cfg(not(target_os = "windows"))]
 use sqlx::sqlite::SqlitePoolOptions;
 use tempfile::TempDir;
 
@@ -1405,10 +1428,13 @@ async fn run_read_rejects_stale_and_tampered_cursors_at_the_handler() -> Result<
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    super::stateful_acceptance_support::write_acceptance_files(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -1421,7 +1447,10 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
             request_id,
             params: ProjectCreateParams {
                 name: "Oversized result".to_string(),
-                roots: Vec::new(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root is absolute"),
+                }],
                 metadata: None,
                 idempotency_key: "oversized-result-project".to_string(),
             },
@@ -1449,6 +1478,8 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
             },
         })
         .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
+        .await?;
     let result = "The \"indemnity\" cap is 15%; the DOE renewal is unresolved.\n"
         .repeat(300)
         .trim_end()
@@ -1456,6 +1487,7 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
     let complete_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
+            super::stateful_acceptance_support::run_check("acceptance-check", project_root.path()),
             responses::sse(vec![
                 responses::ev_function_call(
                     "complete",
@@ -1511,10 +1543,14 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
         })
         .await?;
     let run = read.run.expect("run remains readable");
-    assert_eq!(
-        (run.status, run.result.as_deref()),
-        (StatefulRunStatus::Completed, Some(result.as_str()))
-    );
+    let stored = run.result.unwrap_or_default();
+    assert_eq!(run.status, StatefulRunStatus::Completed);
+    // The durable result is the submitted result followed by its acceptance basis.
+    assert!(stored.starts_with(&format!(
+        "{result}
+
+Acceptance basis:"
+    )));
 
     let read_log = responses::mount_sse_sequence(
         &responses_server,
@@ -1556,10 +1592,13 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn oversized_durable_completion_pages_result_and_final_obligation_exactly() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    super::stateful_acceptance_support::write_acceptance_files(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -1572,7 +1611,10 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
             request_id,
             params: ProjectCreateParams {
                 name: "Oversized durable completion".to_string(),
-                roots: Vec::new(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root is absolute"),
+                }],
                 metadata: None,
                 idempotency_key: "oversized-durable-project".to_string(),
             },
@@ -1647,6 +1689,8 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
             },
         })
         .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
+        .await?;
     let result =
         "The \"indemnity\" cap is 15%; the DOE renewal remains unresolved. “Priority 1.”\n"
             .repeat(150)
@@ -1663,6 +1707,7 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
     let complete_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
+            super::stateful_acceptance_support::run_check("acceptance-check", project_root.path()),
             responses::sse(vec![
                 responses::ev_function_call(
                     "complete",
@@ -1726,7 +1771,8 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
     let durable_suffix = format!(
         "\n\nDurable completion basis:\n- Root finding: E1 [critical; verification=userConfirmed; evidence=notApplicable; premises=notApplicable] The indemnity cap is 15% of the purchase price.{bounded_learning}"
     );
-    assert_eq!(stored, format!("{result}{durable_suffix}"));
+    assert!(stored.starts_with(&format!("{result}{durable_suffix}")));
+    assert!(stored.contains("Acceptance basis:"));
 
     let paged_result = read_every_page(
         &responses_server,
@@ -1774,6 +1820,7 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn completion_fence_fixture(
     responses_server: &wiremock::MockServer,
 ) -> Result<(
@@ -1787,6 +1834,10 @@ async fn completion_fence_fixture(
     HierarchyNodeId,
 )> {
     let codex_home = TempDir::new()?;
+    // A project root holding only the files the completion's acceptance check pins.
+    let project_root = codex_home.path().join("project");
+    std::fs::create_dir(&project_root)?;
+    super::stateful_acceptance_support::write_acceptance_files(&project_root)?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -1799,7 +1850,10 @@ async fn completion_fence_fixture(
             request_id,
             params: ProjectCreateParams {
                 name: "Completion fence".to_string(),
-                roots: Vec::new(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.clone())
+                        .expect("temporary project root is absolute"),
+                }],
                 metadata: None,
                 idempotency_key: "completion-fence-project".to_string(),
             },
@@ -1852,6 +1906,21 @@ async fn completion_fence_fixture(
             },
         })
         .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
+        .await?;
+    responses::mount_sse_sequence(
+        responses_server,
+        vec![
+            super::stateful_acceptance_support::run_check("acceptance-check", &project_root),
+            responses::sse(vec![
+                responses::ev_assistant_message("checked", "Checked."),
+                responses::ev_completed("checked-response"),
+            ]),
+        ],
+    )
+    .await;
+    run_simple_turn(&mut server, &thread.thread.id).await?;
+    responses_server.reset().await;
     Ok((
         codex_home,
         server,
@@ -1864,6 +1933,7 @@ async fn completion_fence_fixture(
     ))
 }
 
+#[cfg(not(target_os = "windows"))]
 fn agent_entry(
     project_id: &str,
     node_id: &HierarchyNodeId,
@@ -1888,6 +1958,7 @@ fn agent_entry(
     })
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn held_runtime_transaction(
     codex_home: &TempDir,
 ) -> Result<(SqlitePool, sqlx::Transaction<'static, sqlx::Sqlite>)> {
@@ -1904,6 +1975,7 @@ async fn held_runtime_transaction(
     Ok((runtime_pool, transaction))
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn mount_delayed_sse_once(responses_server: &wiremock::MockServer, body: String) {
     wiremock::Mock::given(wiremock::matchers::method("POST"))
         .and(wiremock::matchers::path_regex(".*/responses$"))
@@ -1918,6 +1990,7 @@ async fn mount_delayed_sse_once(responses_server: &wiremock::MockServer, body: S
         .await;
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn wait_for_response_request(responses_server: &wiremock::MockServer) {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -1936,6 +2009,7 @@ async fn wait_for_response_request(responses_server: &wiremock::MockServer) {
     .expect("initial model request arrives");
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -2020,6 +2094,7 @@ async fn completion_holds_pi_fence_until_runtime_commit_before_agent_mutation() 
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn completion_revision_conflict_releases_pi_fence_and_preserves_run() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -2353,6 +2428,7 @@ async fn long_goal_and_strategy_survive_compaction_and_restart_exactly() -> Resu
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 /// Probes the project fence until the in-flight completion demonstrably holds it: a
 /// probe that still acquires the fence proves nothing yet, so it is released and
 /// retried; a probe that times out does. Avoids a timing guess under load.

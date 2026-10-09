@@ -39,10 +39,16 @@ use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
+use super::stateful_acceptance_support::run_check;
+use super::stateful_acceptance_support::seed_admitted_plan;
+use super::stateful_acceptance_support::write_acceptance_files;
+
 #[tokio::test]
 async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
+    let project_root = TempDir::new()?;
+    write_acceptance_files(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -55,7 +61,10 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
             request_id,
             params: ProjectCreateParams {
                 name: "Steering completion guard".to_string(),
-                roots: Vec::new(),
+                roots: vec![ProjectRoot {
+                    path: AbsolutePathBuf::try_from(project_root.path().to_path_buf())
+                        .expect("temporary project root should be absolute"),
+                }],
                 metadata: None,
                 idempotency_key: "steering-completion-project".to_string(),
             },
@@ -83,6 +92,7 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
             },
         })
         .await?;
+    seed_admitted_plan(codex_home.path(), &started.run.id, &[]).await?;
     let submitted: SteeringSubmitResponse = server
         .request(|request_id| ClientRequest::SteeringSubmit {
             request_id,
@@ -97,6 +107,7 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
+            run_check("acceptance-check", project_root.path()),
             responses::sse(vec![
                 responses::ev_function_call(
                     "premature-completion",
@@ -141,8 +152,8 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
         .await?;
 
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 2);
-    let rejection = requests[1].function_call_output("premature-completion");
+    assert_eq!(requests.len(), 3);
+    let rejection = requests[2].function_call_output("premature-completion");
     assert!(rejection.to_string().contains(&submitted.steering.id));
     assert!(rejection.to_string().contains("is submitted"));
     assert!(rejection.to_string().contains("apply or reject"));
@@ -310,13 +321,19 @@ async fn lookup_turn_with_completion(
     name: &str,
     completion: impl FnOnce(u64) -> Value,
 ) -> Result<(usize, String, StatefulRunStatus, Option<String>, usize)> {
-    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+    let (responses_server, codex_home, project_root, mut server, project_id) =
         indexed_project(name).await?;
-    let (thread_id, run_id, run_revision) =
-        start_lookup_run(&mut server, &project_id, &format!("{name}-run")).await?;
+    let (thread_id, run_id, run_revision) = start_lookup_run(
+        &mut server,
+        codex_home.path(),
+        &project_id,
+        &format!("{name}-run"),
+    )
+    .await?;
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
+            run_check("acceptance-check", project_root.path()),
             responses::sse(vec![
                 responses::ev_function_call(
                     "lookup-complete",
@@ -392,15 +409,19 @@ async fn model_completes_a_lookup_in_one_call_without_durable_learning_ceremony(
             output["status"].clone(),
             output["submittedResult"].clone(),
             status,
-            result,
+            result.is_some_and(|result| result.starts_with(
+                "The release gate is build C7-42.
+
+Acceptance basis:"
+            )),
             obligations,
         ),
         (
-            2,
+            3,
             json!("completed"),
             json!("The release gate is build C7-42."),
             StatefulRunStatus::Completed,
-            Some("The release gate is build C7-42.".to_string()),
+            true,
             0,
         )
     );
@@ -429,7 +450,7 @@ async fn model_lookup_completion_with_durable_fields_is_rejected() -> Result<()>
     ));
     assert_eq!(
         (requests, status, result, obligations),
-        (2, StatefulRunStatus::Running, None, 0)
+        (3, StatefulRunStatus::Running, None, 0)
     );
     Ok(())
 }
@@ -467,6 +488,7 @@ async fn complete_lookup_after_recording(
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
+    write_acceptance_files(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -523,9 +545,11 @@ async fn complete_lookup_after_recording(
             },
         })
         .await?;
+    seed_admitted_plan(codex_home.path(), &started.run.id, &[]).await?;
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
+            run_check("acceptance-check", project_root.path()),
             responses::sse(vec![
                 responses::ev_function_call(
                     "record-gate",
@@ -578,7 +602,7 @@ async fn complete_lookup_after_recording(
         .await?;
 
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     let read: StatefulRunReadResponse = server
         .request(|request_id| ClientRequest::StatefulRunRead {
             request_id,
@@ -589,7 +613,7 @@ async fn complete_lookup_after_recording(
         })
         .await?;
     Ok((
-        requests[2]
+        requests[3]
             .function_call_output("lookup-complete")
             .to_string(),
         read.run.expect("run remains readable").status,
@@ -598,10 +622,15 @@ async fn complete_lookup_after_recording(
 
 #[tokio::test]
 async fn user_confirmation_does_not_hide_the_runs_own_write() -> Result<()> {
-    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+    let (responses_server, codex_home, project_root, mut server, project_id) =
         indexed_project("confirmed-write").await?;
-    let (thread_id, run_id, run_revision) =
-        start_lookup_run(&mut server, &project_id, "confirmed-write-run").await?;
+    let (thread_id, run_id, run_revision) = start_lookup_run(
+        &mut server,
+        codex_home.path(),
+        &project_id,
+        "confirmed-write-run",
+    )
+    .await?;
     let record_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -641,8 +670,14 @@ async fn user_confirmation_does_not_hide_the_runs_own_write() -> Result<()> {
         })
         .await?;
 
-    let output =
-        complete_without_learning(&responses_server, &mut server, &thread_id, run_revision).await?;
+    let output = complete_without_learning(
+        &responses_server,
+        &mut server,
+        project_root.path(),
+        &thread_id,
+        run_revision,
+    )
+    .await?;
 
     assert!(
         output.contains("agent-written project knowledge changed in this project during this run")
@@ -656,12 +691,22 @@ async fn user_confirmation_does_not_hide_the_runs_own_write() -> Result<()> {
 
 #[tokio::test]
 async fn another_runs_agent_write_conservatively_requires_durable_learning() -> Result<()> {
-    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+    let (responses_server, codex_home, project_root, mut server, project_id) =
         indexed_project("other-run-write").await?;
-    let (writer_thread, _, _) =
-        start_lookup_run(&mut server, &project_id, "other-run-writer").await?;
-    let (lookup_thread, lookup_run, lookup_revision) =
-        start_lookup_run(&mut server, &project_id, "other-run-lookup").await?;
+    let (writer_thread, _, _) = start_lookup_run(
+        &mut server,
+        codex_home.path(),
+        &project_id,
+        "other-run-writer",
+    )
+    .await?;
+    let (lookup_thread, lookup_run, lookup_revision) = start_lookup_run(
+        &mut server,
+        codex_home.path(),
+        &project_id,
+        "other-run-lookup",
+    )
+    .await?;
     responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -685,6 +730,7 @@ async fn another_runs_agent_write_conservatively_requires_durable_learning() -> 
     let output = complete_without_learning(
         &responses_server,
         &mut server,
+        project_root.path(),
         &lookup_thread,
         lookup_revision,
     )
@@ -726,6 +772,7 @@ async fn indexed_project(
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
+    write_acceptance_files(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
@@ -766,6 +813,7 @@ async fn indexed_project(
 
 async fn start_lookup_run(
     server: &mut TestAppServer,
+    codex_home: &std::path::Path,
     project_id: &str,
     key: &str,
 ) -> Result<(String, String, u64)> {
@@ -791,6 +839,7 @@ async fn start_lookup_run(
             },
         })
         .await?;
+    seed_admitted_plan(codex_home, &started.run.id, &[]).await?;
     Ok((thread.thread.id, started.run.id, started.run.revision))
 }
 
@@ -813,12 +862,14 @@ async fn run_lookup_turn(server: &mut TestAppServer, thread_id: &str) -> Result<
 async fn complete_without_learning(
     responses_server: &wiremock::MockServer,
     server: &mut TestAppServer,
+    project_root: &std::path::Path,
     thread_id: &str,
     expected_revision: u64,
 ) -> Result<String> {
     let log = responses::mount_sse_sequence(
         responses_server,
         vec![
+            run_check("acceptance-check", project_root),
             responses::sse(vec![
                 responses::ev_function_call(
                     "lookup-complete",
@@ -862,14 +913,25 @@ async fn run_status(server: &mut TestAppServer, run_id: String) -> Result<Statef
 
 #[tokio::test]
 async fn public_agent_write_before_completion_requires_durable_learning() -> Result<()> {
-    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+    let (responses_server, codex_home, project_root, mut server, project_id) =
         indexed_project("public-write-first").await?;
-    let (thread_id, run_id, run_revision) =
-        start_lookup_run(&mut server, &project_id, "public-write-first-run").await?;
+    let (thread_id, run_id, run_revision) = start_lookup_run(
+        &mut server,
+        codex_home.path(),
+        &project_id,
+        "public-write-first-run",
+    )
+    .await?;
     upsert_agent_note(&mut server, &project_id, "public-write-first-note").await?;
 
-    let output =
-        complete_without_learning(&responses_server, &mut server, &thread_id, run_revision).await?;
+    let output = complete_without_learning(
+        &responses_server,
+        &mut server,
+        project_root.path(),
+        &thread_id,
+        run_revision,
+    )
+    .await?;
 
     assert!(
         output.contains("agent-written project knowledge changed in this project during this run")
@@ -883,13 +945,24 @@ async fn public_agent_write_before_completion_requires_durable_learning() -> Res
 
 #[tokio::test]
 async fn completion_before_a_public_agent_write_stands() -> Result<()> {
-    let (responses_server, _codex_home, _project_root, mut server, project_id) =
+    let (responses_server, codex_home, project_root, mut server, project_id) =
         indexed_project("completion-first").await?;
-    let (thread_id, run_id, run_revision) =
-        start_lookup_run(&mut server, &project_id, "completion-first-run").await?;
+    let (thread_id, run_id, run_revision) = start_lookup_run(
+        &mut server,
+        codex_home.path(),
+        &project_id,
+        "completion-first-run",
+    )
+    .await?;
 
-    let output =
-        complete_without_learning(&responses_server, &mut server, &thread_id, run_revision).await?;
+    let output = complete_without_learning(
+        &responses_server,
+        &mut server,
+        project_root.path(),
+        &thread_id,
+        run_revision,
+    )
+    .await?;
     upsert_agent_note(&mut server, &project_id, "completion-first-note").await?;
 
     assert!(output.contains(r#""status":"completed""#), "{output}");

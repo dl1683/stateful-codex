@@ -99,7 +99,6 @@ fn ledger(revision: u64, generation: u64, criteria: Vec<AcceptanceCriterion>) ->
         observed_executions: 0,
         pending_commands: 0,
         reconciled_steering: Vec::new(),
-        cheap_lookup: false,
         stalled_completions: 0,
         verification_attempt: 0,
         verification_lease_expires_at_ms: None,

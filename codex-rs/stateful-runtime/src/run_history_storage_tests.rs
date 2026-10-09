@@ -64,11 +64,8 @@ async fn turn_runs_report_the_recorded_run_of_each_finished_turn() {
         .await
         .expect("run loads")
         .expect("run exists");
-    let attempt = store
-        .begin_verification(&first, "test-owner", 60_000)
-        .await
-        .expect("verification starts");
-    let ledger = store.acceptance_ledger(&first).await.expect("ledger reads");
+    let commit =
+        crate::acceptance_test_support::settled_commit(&store, &first, "test-owner", None).await;
     store
         .complete_run_with_acceptance(
             &first,
@@ -78,17 +75,7 @@ async fn turn_runs_report_the_recorded_run_of_each_finished_turn() {
                 strategy: None,
                 result: Some("Done.".to_string()),
             },
-            &crate::AcceptanceCommit {
-                ledger_revision: ledger.revision,
-                workspace_generation: ledger.workspace_generation,
-                artifacts: std::collections::BTreeMap::new(),
-                checkers: std::collections::BTreeMap::new(),
-                verification: crate::VerificationClaim {
-                    owner: "test-owner".to_string(),
-                    attempt,
-                },
-                validated_obligation_sequence: None,
-            },
+            &commit,
             /*obligation*/ None,
         )
         .await

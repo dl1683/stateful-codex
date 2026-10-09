@@ -243,8 +243,6 @@ pub struct AcceptanceLedger {
     pub pending_commands: u64,
     /// Applied steering instructions this ledger has reconciled, with the agent's reason.
     pub reconciled_steering: Vec<SteeringReconciliation>,
-    /// Set when the host admitted the run as a cheap lookup that owes no coverage.
-    pub cheap_lookup: bool,
     /// Completion verification attempts started for this run.
     pub verification_attempt: u64,
     /// Lease of the attempt in progress; the run stays `Running` meanwhile.
@@ -262,7 +260,6 @@ impl AcceptanceLedger {
             stalled_completions: 0,
             pending_commands: 0,
             reconciled_steering: Vec::new(),
-            cheap_lookup: false,
             verification_attempt: 0,
             verification_lease_expires_at_ms: None,
             criteria: Vec::new(),

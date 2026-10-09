@@ -35,6 +35,7 @@ use super::forget_command;
 use super::hash_bounded;
 use super::observe_item;
 use super::runs_check;
+use super::workspace_manifest;
 use crate::services::ProjectIntelligenceServices;
 
 fn file_uri(path: &Path) -> String {
@@ -645,12 +646,14 @@ async fn a_declared_check_that_mutates_governing_files_invalidates_earlier_evide
 async fn a_declared_check_that_rewrites_an_unpinned_input_stales_every_receipt() {
     let fixture = fixture("run-unpinned-mutator").await;
     let root = fixture.project.path().to_path_buf();
-    std::fs::write(root.join("input.csv"), "1,2").expect("input");
     fixture.add_generator().await;
     fixture.check("c1-pass", "completed", 0).await;
-    // C2 pins only its output, yet rewrites an input no criterion pins.
+    // An input appears that no criterion pins; C2 replaces it with same-length bytes (its
+    // metadata may well look unchanged). File metadata is no identity, so C2 cannot qualify
+    // and C1's earlier pass becomes stale.
+    std::fs::write(root.join("input.csv"), "1,2").expect("input");
     fixture.start("c2", "sh gen.sh", &root).await;
-    std::fs::write(root.join("input.csv"), "3,4,5").expect("rewritten");
+    std::fs::write(root.join("input.csv"), "3,4").expect("rewritten");
     fixture
         .finish("c2", "sh gen.sh", &root, "completed", 0, "unknown")
         .await;
@@ -664,6 +667,55 @@ async fn a_declared_check_that_rewrites_an_unpinned_input_stales_every_receipt()
             1
         ),
         "C1's pass is stale and C2's own receipt does not qualify"
+    );
+    // While the unpinned file exists, no check qualifies.
+    fixture.check("c1-again", "completed", 0).await;
+    assert_eq!(
+        fixture.latest().await,
+        (Some(EvidenceOutcome::Unavailable), 2)
+    );
+}
+
+#[tokio::test]
+async fn a_check_overlapping_another_change_invalidates_receipts_made_meanwhile() {
+    let fixture = fixture("run-overlap").await;
+    let root = fixture.project.path().to_path_buf();
+    fixture.add_generator().await;
+    // C2 starts at generation 0 and is still running when another change is observed.
+    fixture.start("c2", "sh gen.sh", &root).await;
+    fixture
+        .store
+        .bump_workspace_generation(&fixture.run_id)
+        .await
+        .expect("change");
+    fixture.check("c1-pass", "completed", 0).await;
+    assert_eq!(fixture.latest().await, (Some(EvidenceOutcome::Passed), 1));
+    fixture
+        .finish("c2", "sh gen.sh", &root, "completed", 0, "unknown")
+        .await;
+    assert_eq!(
+        fixture.receipts().await,
+        (
+            vec![
+                Some((EvidenceOutcome::Passed, 1)),
+                Some((EvidenceOutcome::Unavailable, 0))
+            ],
+            2
+        ),
+        "the overlapping check's end makes C1's pass, minted meanwhile, stale"
+    );
+}
+
+#[tokio::test]
+async fn a_listing_without_a_free_worker_slot_is_unavailable() {
+    let fixture = fixture("run-listing-slots").await;
+    OUTSTANDING_READERS.store(MAX_OUTSTANDING_READERS, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(workspace_manifest(&fixture.roots).await, None);
+    OUTSTANDING_READERS.store(0, std::sync::atomic::Ordering::SeqCst);
+    assert!(workspace_manifest(&fixture.roots).await.is_some());
+    assert_eq!(
+        OUTSTANDING_READERS.load(std::sync::atomic::Ordering::SeqCst),
+        0
     );
 }
 

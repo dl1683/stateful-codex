@@ -2,33 +2,53 @@ use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::ContextMapRefreshParams;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunBudget;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunReadParams;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunReadResponse;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunStartParams;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunStartResponse;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunStatus as ApiRunStatus;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::BlackboardStore;
+#[cfg(not(target_os = "windows"))]
 use codex_project_intelligence::RootBlackboardQuery;
+#[cfg(not(target_os = "windows"))]
 use codex_state::SqliteConfig;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::NewStatefulRun;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::RunBudget;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::StatefulRunId;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::StatefulRunStatus;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::StatefulRunStore;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::StatefulRunUpdate;
+#[cfg(not(target_os = "windows"))]
 use codex_stateful_runtime::WorkflowMode;
 use codex_utils_absolute_path::AbsolutePathBuf;
+#[cfg(not(target_os = "windows"))]
 use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
@@ -36,18 +56,23 @@ use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
+#[cfg(not(target_os = "windows"))]
 const ORIENTATION_PROMPT: &str = "ORIENTATION_TRANSCRIPT_MARKER Orient yourself in this project.";
+#[cfg(not(target_os = "windows"))]
 const ORIENTATION_RESULT: &str = "ORIENTATION_RESULT_MARKER The orientation is complete.";
+#[cfg(not(target_os = "windows"))]
 const CAPTURED_FINDING: &str = "Textkit normalizes text: textkit/cli.py parses arguments and delegates to textkit/core.py; the README documents `python -m pytest` as the test command (not executed).";
 
 /// An orientation that reads sources without changing them captures its reusable
 /// findings and completes with durableLearning; a fresh thread receives those findings and
 /// the orientation request itself, while run results without conversation are not recalled.
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
+    super::stateful_acceptance_support::write_acceptance_files(project_root.path())?;
     std::fs::write(
         project_root.path().join("README.md"),
         "# Textkit\n\nTextkit normalizes text. `textkit/cli.py` parses arguments and delegates to `textkit/core.py`.\n\nRun the tests with `python -m pytest`.\n",
@@ -105,6 +130,12 @@ async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<
             },
         })
         .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(
+        codex_home.path(),
+        &started.run.id,
+        &["README.md"],
+    )
+    .await?;
 
     // Read the source; the host issues a read receipt.
     let read_log = responses::mount_sse_sequence(
@@ -182,6 +213,7 @@ async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<
     let complete_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
+            super::stateful_acceptance_support::run_check("acceptance-check", project_root.path()),
             tool_call(
                 "complete-orientation",
                 "stateful_run_update",
@@ -747,6 +779,7 @@ fn assistant(text: &str) -> String {
     ])
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn read_run(
     server: &mut TestAppServer,
     run_id: &str,
@@ -778,6 +811,7 @@ async fn run_turn(server: &mut TestAppServer, thread_id: &str, text: &str) -> Re
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 /// Seeds a completed run through the host completion decision, as the product does.
 async fn complete_seeded_run(
     store: &codex_stateful_runtime::StatefulRunStore,
@@ -785,26 +819,16 @@ async fn complete_seeded_run(
     update: StatefulRunUpdate,
     obligation: Option<(String, codex_stateful_runtime::NewObligation)>,
 ) -> Result<()> {
-    let attempt = store.begin_verification(run_id, "seed", 60_000).await?;
-    let ledger = store.acceptance_ledger(run_id).await?;
     let latest = store.latest_obligation(run_id).await?;
+    let commit = super::stateful_acceptance_support::seeded_commit(
+        store,
+        run_id,
+        "seed",
+        latest.map(|obligation| obligation.sequence),
+    )
+    .await?;
     store
-        .complete_run_with_acceptance(
-            run_id,
-            update,
-            &codex_stateful_runtime::AcceptanceCommit {
-                ledger_revision: ledger.revision,
-                workspace_generation: ledger.workspace_generation,
-                artifacts: std::collections::BTreeMap::new(),
-                checkers: std::collections::BTreeMap::new(),
-                verification: codex_stateful_runtime::VerificationClaim {
-                    owner: "seed".to_string(),
-                    attempt,
-                },
-                validated_obligation_sequence: latest.map(|obligation| obligation.sequence),
-            },
-            obligation,
-        )
+        .complete_run_with_acceptance(run_id, update, &commit, obligation)
         .await?;
     Ok(())
 }

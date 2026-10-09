@@ -47,6 +47,32 @@ async fn c2cut_historical_completion_refuses_without_mutation_and_current_root_c
             },
         })
         .await?;
+    // A project root holding only the files the completion's acceptance check pins.
+    let acceptance_root = home.path().join("project");
+    std::fs::create_dir(&acceptance_root)?;
+    crate::suite::v2::stateful_acceptance_support::write_acceptance_files(&acceptance_root)?;
+    let _: codex_app_server_protocol::ProjectUpdateResponse = server
+        .request(|request_id| ClientRequest::ProjectUpdate {
+            request_id,
+            params: codex_app_server_protocol::ProjectUpdateParams {
+                project_id: project.clone(),
+                name: None,
+                roots: Some(vec![codex_app_server_protocol::ProjectRoot {
+                    path: codex_utils_absolute_path::AbsolutePathBuf::try_from(
+                        acceptance_root.clone(),
+                    )
+                    .expect("temporary project root is absolute"),
+                }]),
+                metadata: None,
+            },
+        })
+        .await?;
+    crate::suite::v2::stateful_acceptance_support::seed_admitted_plan(
+        home.path(),
+        &started.run.id,
+        &[],
+    )
+    .await?;
     let recorded = model_call(
         &mut server,
         &responses_server,
@@ -149,6 +175,18 @@ async fn c2cut_historical_completion_refuses_without_mutation_and_current_root_c
         })
         .await?;
     assert_eq!(root.data.len(), 1);
+    model_output(
+        &mut server,
+        &responses_server,
+        &thread,
+        "exec_command",
+        json!({
+            "cmd": crate::suite::v2::stateful_acceptance_support::CHECK_COMMAND,
+            "workdir": acceptance_root.to_string_lossy(),
+            "yield_time_ms": 10_000
+        }),
+    )
+    .await?;
     let completed = model_call(
         &mut server,
         &responses_server,

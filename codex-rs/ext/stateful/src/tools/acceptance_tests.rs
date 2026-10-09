@@ -528,22 +528,16 @@ async fn failed_check_cannot_be_disclosed_away_and_keeps_the_run_running() {
 }
 
 #[tokio::test]
-async fn trivial_lookup_completes_without_acceptance_busywork() {
+async fn a_trivial_lookup_owes_a_covering_criterion() {
     let fixture = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
-    let output = fixture.complete().await.expect("lookup completes");
-    assert_eq!(output.get("acceptanceBasis"), None);
-    let ledger = fixture
-        .services
-        .runtime()
+    let refused = fixture
+        .complete()
         .await
-        .expect("runtime")
-        .acceptance_ledger(&fixture.run.id)
-        .await
-        .expect("ledger");
-    assert_eq!(ledger.criteria, Vec::new());
+        .expect_err("no request is exempt from acceptance");
+    assert!(refused.contains("Answer a lookup."), "{refused}");
     assert_eq!(
-        fixture.stored_run().await.result.as_deref(),
-        Some("The parser is fixed.")
+        fixture.stored_run().await.status,
+        StatefulRunStatus::Running
     );
 }
 

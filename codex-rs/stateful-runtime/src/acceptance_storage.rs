@@ -372,16 +372,6 @@ pub(crate) async fn enforce_acceptance_gate(
     if !unmet.is_empty() {
         return Err(StatefulRunStoreError::AcceptanceGate(unmet.join("; ")));
     }
-    // The cheap-lookup admission is recorded, so the completed run shows it owed no coverage.
-    if crate::acceptance_coverage::coverage_exempt(&request.text, &ledger) {
-        ensure_ledger(connection, &run.id).await?;
-        sqlx::query(
-            "UPDATE stateful_acceptance_ledgers SET exemption = 'cheapLookup' WHERE run_id = ?",
-        )
-        .bind(run.id.as_str())
-        .execute(&mut *connection)
-        .await?;
-    }
     Ok(())
 }
 
@@ -549,7 +539,6 @@ struct StoredLedger {
     stalled_completions: i64,
     verification_attempt: i64,
     verification_lease_expires_at_ms: Option<i64>,
-    exemption: Option<String>,
 }
 
 #[derive(FromRow)]
@@ -605,7 +594,7 @@ pub(crate) async fn load_ledger(
 ) -> Result<AcceptanceLedger, StatefulRunStoreError> {
     let Some(stored) = sqlx::query_as::<_, StoredLedger>(
         "SELECT revision, workspace_generation, observed_executions, stalled_completions,
-                verification_attempt, verification_lease_expires_at_ms, exemption
+                verification_attempt, verification_lease_expires_at_ms
          FROM stateful_acceptance_ledgers WHERE run_id = ?",
     )
     .bind(run_id.as_str())
@@ -738,7 +727,6 @@ pub(crate) async fn load_ledger(
             reason,
         })
         .collect(),
-        cheap_lookup: stored.exemption.is_some(),
         verification_attempt: u64::try_from(stored.verification_attempt)
             .map_err(|_| StatefulRunStoreError::CorruptCount)?,
         verification_lease_expires_at_ms: stored.verification_lease_expires_at_ms,

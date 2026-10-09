@@ -16,9 +16,10 @@
 //! pinned content changed while it ran, when another mutation was observed meanwhile, or when
 //! no start snapshot exists. A check that changed any criterion's pinned files is itself a
 //! mutation: earlier evidence becomes stale and only its own unchanged post-write state is
-//! qualified. The host also lists the project's files around a check; a check that changed
-//! any file no criterion pins (or whose effects could not be listed) leaves every receipt,
-//! its own included, stale. A command that returned with no live process and whose end item
+//! qualified. The host also lists the project's files around a check; when either listing
+//! holds a file no active criterion pins (or is unavailable), or another change was observed
+//! while the check ran, its own receipt cannot qualify and every receipt made before or
+//! during it becomes stale. A command that returned with no live process and whose end item
 //! never arrives is closed as terminated with unknown effects. Every other observed mutation (unmatched commands that are not read-only, input
 //! written into a running session, applied or partially applied patches) advances the
 //! workspace generation.
@@ -105,9 +106,8 @@ struct CheckStart {
     governing: Governing,
 }
 
-/// Size and modification time of every file under the project roots, outside skipped
-/// directories.
-type Manifest = BTreeMap<PathBuf, (u64, Option<std::time::SystemTime>)>;
+/// Every file under the project roots, outside skipped directories.
+type Manifest = std::collections::BTreeSet<PathBuf>;
 /// Digests of every active criterion's pinned artifacts and checker files.
 type Governing = BTreeMap<u32, (Option<String>, Option<String>)>;
 /// Runs this process has bound a turn to; the first binding is a cold re-entry.
@@ -384,22 +384,30 @@ async fn observe_command(
     let output_digest = format!("sha256:{:x}", Sha256::digest(output.as_bytes()));
     let end = governing_digests(roots, &ledger).await;
     let end_manifest = workspace_manifest(roots).await;
-    // A check that changed any file outside every criterion's pins (or whose effects could
-    // not be listed) changed inputs nothing pins: all earlier evidence becomes stale, its
-    // own receipt included. A check that changed only pinned files is a mutation too:
-    // earlier evidence becomes stale, and only a receipt whose own pinned state is
-    // unchanged is qualified against the post-write state.
+    // A check's effects are accounted for only when its whole run is known: it started at
+    // the current generation, and the project holds no file outside the active criteria's
+    // content-hashed pins (file metadata is no identity). Otherwise its own receipt cannot
+    // qualify and every receipt made before or during it becomes stale. A check that changed
+    // pinned files is a mutation too: earlier evidence becomes stale, and only a receipt whose
+    // own pinned state is unchanged is qualified against the post-write state.
     let mut stamp_generation = None;
-    if let Some(start) = &start
-        && start.generation == ledger.workspace_generation
-    {
-        if changed_unpinned(
+    let mut refused = None;
+    if let Some(start) = &start {
+        if start.generation != ledger.workspace_generation {
+            bump(services, run_id).await?;
+            refused = Some(
+                "another workspace change was observed while the check ran, so its effects overlap other evidence",
+            );
+        } else if unpinned_present(
             roots,
             &ledger,
             start.manifest.as_ref(),
             end_manifest.as_ref(),
         ) {
             bump(services, run_id).await?;
+            refused = Some(
+                "the project holds files no criterion pins (or could not be listed), so the check's effects on them are unknown",
+            );
         } else if start.governing != end {
             bump(services, run_id).await?;
             stamp_generation = Some(ledger.workspace_generation + 1);
@@ -437,6 +445,10 @@ async fn observe_command(
                         (CommandExecutionStatus::Declined, _) => (
                             EvidenceOutcome::Unavailable,
                             Some("the session's approval policy declined the check, so it did not run".to_string()),
+                        ),
+                        (CommandExecutionStatus::Completed, Some(0)) if refused.is_some() => (
+                            EvidenceOutcome::Unavailable,
+                            refused.map(str::to_string),
                         ),
                         (CommandExecutionStatus::Completed, Some(0)) if !unchanged => (
                             EvidenceOutcome::Unavailable,
@@ -477,9 +489,9 @@ async fn observe_command(
         .map_err(|error| error.to_string())
 }
 
-/// Whether files outside every active criterion's pins changed between two listings; an
-/// unavailable listing counts as a change.
-fn changed_unpinned(
+/// Whether either listing holds a file outside every active criterion's pins; an unavailable
+/// listing counts as one.
+fn unpinned_present(
     roots: &[String],
     ledger: &AcceptanceLedger,
     start: Option<&Manifest>,
@@ -508,19 +520,13 @@ fn changed_unpinned(
             }
         })
         .collect::<HashSet<_>>();
-    let unpinned = |path: &PathBuf| !pinned.contains(path);
-    start
-        .iter()
-        .filter(|(path, entry)| end.get(*path) != Some(*entry))
-        .any(|(path, _)| unpinned(path))
-        || end
-            .keys()
-            .filter(|path| !start.contains_key(*path))
-            .any(unpinned)
+    start.iter().chain(end).any(|path| !pinned.contains(path))
 }
 
 /// Lists every file under the project roots (outside `SKIPPED_DIRECTORIES`, without
-/// following directory links) with its size and modification time, within the read budget.
+/// following directory links) within the read budget. The listing worker takes one of the
+/// `MAX_OUTSTANDING_READERS` slots and holds it until it actually exits, even after its
+/// caller gave up; without a free slot the listing is unavailable.
 async fn workspace_manifest(roots: &[String]) -> Option<Manifest> {
     let roots = roots
         .iter()
@@ -529,35 +535,44 @@ async fn workspace_manifest(roots: &[String]) -> Option<Manifest> {
     if roots.is_empty() {
         return None;
     }
+    if OUTSTANDING_READERS.fetch_add(1, Ordering::SeqCst) >= MAX_OUTSTANDING_READERS {
+        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
+        return None;
+    }
     let deadline = Instant::now() + ARTIFACT_READ_BUDGET;
     let walk = tokio::task::spawn_blocking(move || {
-        let mut manifest = Manifest::new();
-        let mut directories = roots;
-        while let Some(directory) = directories.pop() {
-            if Instant::now() >= deadline {
-                return None;
-            }
-            for entry in std::fs::read_dir(&directory).ok()? {
-                let entry = entry.ok()?;
-                let metadata = entry.metadata().ok()?;
-                let path = entry.path();
-                if metadata.is_dir() {
-                    let skipped = entry
-                        .file_name()
-                        .to_str()
-                        .is_some_and(|name| SKIPPED_DIRECTORIES.contains(&name));
-                    if !skipped {
-                        directories.push(path);
-                    }
-                    continue;
-                }
-                if manifest.len() >= MAX_MANIFEST_ENTRIES {
+        let list = || -> Option<Manifest> {
+            let mut manifest = Manifest::new();
+            let mut directories = roots.clone();
+            while let Some(directory) = directories.pop() {
+                if Instant::now() >= deadline {
                     return None;
                 }
-                manifest.insert(path, (metadata.len(), metadata.modified().ok()));
+                for entry in std::fs::read_dir(&directory).ok()? {
+                    let entry = entry.ok()?;
+                    let metadata = entry.metadata().ok()?;
+                    let path = entry.path();
+                    if metadata.is_dir() {
+                        let skipped = entry
+                            .file_name()
+                            .to_str()
+                            .is_some_and(|name| SKIPPED_DIRECTORIES.contains(&name));
+                        if !skipped {
+                            directories.push(path);
+                        }
+                        continue;
+                    }
+                    if manifest.len() >= MAX_MANIFEST_ENTRIES {
+                        return None;
+                    }
+                    manifest.insert(path);
+                }
             }
-        }
-        Some(manifest)
+            Some(manifest)
+        };
+        let manifest = list();
+        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
+        manifest
     });
     tokio::time::timeout(ARTIFACT_READ_BUDGET, walk)
         .await

@@ -17,24 +17,6 @@ use crate::RequestSpan;
 /// Proposals one omission pass may add.
 pub const MAX_OMISSION_PROPOSALS: usize = 8;
 
-/// Longest request the cheap-lookup admission accepts.
-pub const MAX_CHEAP_LOOKUP_BYTES: usize = 240;
-
-/// Whether the host may admit the run as a cheap lookup that owes no request coverage: a
-/// request (goal plus applied steering) of one short sentence, no criteria, no observed
-/// command execution or workspace mutation, and nothing pending, that is a read-only answer
-/// given in chat. Any executed command, patch or written file, and any applied steering (it
-/// adds request sentences), ends the exemption. The terminal transaction records the
-/// admission on the ledger. Anything else owes coverage of every request sentence.
-pub fn coverage_exempt(request: &str, ledger: &AcceptanceLedger) -> bool {
-    request.len() <= MAX_CHEAP_LOOKUP_BYTES
-        && sentences(request).len() <= 1
-        && ledger.criteria.is_empty()
-        && ledger.observed_executions == 0
-        && ledger.workspace_generation == 0
-        && ledger.pending_commands == 0
-}
-
 /// Whether `covering` is an active required user-bound criterion whose span contains the
 /// span of `proposal`.
 pub(crate) fn covers(
@@ -58,9 +40,6 @@ pub(crate) fn covers(
 
 /// Goal sentences not fully covered by binding criteria or proposals, in goal order.
 pub fn uncovered_sentences(goal: &str, ledger: &AcceptanceLedger) -> Vec<RequestSpan> {
-    if coverage_exempt(goal, ledger) {
-        return Vec::new();
-    }
     let binding = ledger
         .criteria
         .iter()

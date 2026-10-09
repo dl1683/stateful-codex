@@ -129,6 +129,7 @@ mod server_diagnostics;
 mod session_end;
 mod skills_list;
 mod sleep;
+mod stateful_acceptance_support;
 mod stateful_acceptance_tests;
 mod stateful_blackboard_lifecycle;
 mod stateful_cancel;
@@ -137,6 +138,8 @@ mod stateful_checkout;
 mod stateful_checkpoint;
 mod stateful_code_mode;
 mod stateful_compaction;
+// Completion requires an executed `sh` check.
+#[cfg(not(target_os = "windows"))]
 mod stateful_completion;
 mod stateful_decisions;
 mod stateful_evidence_routes;

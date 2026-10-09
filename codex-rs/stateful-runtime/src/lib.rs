@@ -7,6 +7,8 @@ mod acceptance_lifecycle;
 mod acceptance_plan;
 mod acceptance_request;
 mod acceptance_storage;
+#[cfg(test)]
+mod acceptance_test_support;
 mod measurement;
 mod measurement_storage;
 mod run;
@@ -44,9 +46,7 @@ pub use acceptance::VerificationClaim;
 pub use acceptance::criterion_verdict;
 pub use acceptance::ledger_verdicts;
 pub use acceptance::unmet_criteria;
-pub use acceptance_coverage::MAX_CHEAP_LOOKUP_BYTES;
 pub use acceptance_coverage::MAX_OMISSION_PROPOSALS;
-pub use acceptance_coverage::coverage_exempt;
 pub use acceptance_coverage::sentences;
 pub use acceptance_coverage::uncovered_sentences;
 pub use measurement::NewStatefulTurnMeasurement;

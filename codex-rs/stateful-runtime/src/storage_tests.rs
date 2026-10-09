@@ -801,27 +801,15 @@ async fn complete(
     update: StatefulRunUpdate,
     obligation: Option<(String, NewObligation)>,
 ) -> Result<(crate::StatefulRun, Option<crate::StatefulObligation>), StatefulRunStoreError> {
-    let attempt = store
-        .begin_verification(run_id, "test-owner", 60_000)
-        .await?;
-    let ledger = store.acceptance_ledger(run_id).await?;
     let latest = store.latest_obligation(run_id).await?;
+    let commit = crate::acceptance_test_support::settled_commit(
+        store,
+        run_id,
+        "test-owner",
+        latest.map(|obligation| obligation.sequence),
+    )
+    .await;
     store
-        .complete_run_with_acceptance(
-            run_id,
-            update,
-            &crate::AcceptanceCommit {
-                ledger_revision: ledger.revision,
-                workspace_generation: ledger.workspace_generation,
-                artifacts: std::collections::BTreeMap::new(),
-                checkers: std::collections::BTreeMap::new(),
-                verification: crate::VerificationClaim {
-                    owner: "test-owner".to_string(),
-                    attempt,
-                },
-                validated_obligation_sequence: latest.map(|obligation| obligation.sequence),
-            },
-            obligation,
-        )
+        .complete_run_with_acceptance(run_id, update, &commit, obligation)
         .await
 }

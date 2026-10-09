@@ -104,11 +104,14 @@ pub(crate) fn executed_checker(
     if first.contains('=') {
         return Err("it starts with an environment assignment".to_string());
     }
-    let program = first.rsplit('/').next().unwrap_or(first);
-    let interpreter = SCRIPT_INTERPRETERS.contains(&program)
-        || program.strip_prefix("python3.").is_some_and(|minor| {
-            !minor.is_empty() && minor.chars().all(|character| character.is_ascii_digit())
-        });
+    // Only a bare interpreter name is an interpreter: a path to an executable that is merely
+    // named like one (`./fake/sh`) is a direct program, so it must itself be the checker.
+    let program = *first;
+    let interpreter = !program.contains(['/', '\\'])
+        && (SCRIPT_INTERPRETERS.contains(&program)
+            || program.strip_prefix("python3.").is_some_and(|minor| {
+                !minor.is_empty() && minor.chars().all(|character| character.is_ascii_digit())
+            }));
     let script = if interpreter {
         match argv.get(1) {
             Some(script) if !script.starts_with('-') => *script,

@@ -1015,5 +1015,7 @@ mod repair3_tests;
 #[path = "stateful_capture_route_repair3_tests.rs"]
 mod route_repair3_tests;
 
+// The completion witness runs an `sh` acceptance check.
+#[cfg(not(target_os = "windows"))]
 #[path = "stateful_capture_cut_tests.rs"]
 mod cut_tests;

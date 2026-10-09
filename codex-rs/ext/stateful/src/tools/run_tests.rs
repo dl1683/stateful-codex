@@ -12,7 +12,6 @@ use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
-use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -117,40 +116,19 @@ async fn stored_run(fixture: &Fixture) -> StatefulRun {
 }
 
 #[tokio::test]
-async fn minimal_lookup_completion_persists_once_without_an_obligation() {
+async fn a_criterion_free_lookup_completion_is_refused() {
     let fixture = fixture().await;
-
-    let output = fixture
+    // No request is exempt from acceptance: without a covering criterion and a current
+    // receipt of its admitted check plan, the run stays running and nothing is persisted.
+    let refused = fixture
         .tool
         .handle_guided(call(&lookup_completion(fixture.run.revision)))
-        .await
-        .expect("lookup completion succeeds");
-
-    let output: Value = serde_json::from_str(&output.log_output()).expect("JSON output");
-    let completed = stored_run(&fixture).await;
-    assert_eq!(
-        completed,
-        StatefulRun {
-            status: StatefulRunStatus::Completed,
-            result: Some(RESULT.to_string()),
-            revision: fixture.run.revision + 1,
-            updated_at_ms: completed.updated_at_ms,
-            ..fixture.run.clone()
-        }
-    );
-    assert_eq!(
-        output,
-        json!({
-            "runId": fixture.run.id.as_str(),
-            "status": "completed",
-            "revision": completed.revision,
-            "strategyRevision": completed.strategy_revision,
-            "finalAnswerChecklist": [],
-            "omittedChecklistItems": 0,
-            "submittedResult": RESULT,
-            "finalAnswerInstruction": output["finalAnswerInstruction"],
-        })
-    );
+        .await;
+    let Err(FunctionCallError::RespondToModel(message)) = refused else {
+        panic!("a criterion-free completion must be refused");
+    };
+    assert!(message.contains("completion refused"), "{message}");
+    assert_eq!(stored_run(&fixture).await, fixture.run);
     let obligations = fixture
         .services
         .runtime()
@@ -164,16 +142,6 @@ async fn minimal_lookup_completion_persists_once_without_an_obligation() {
         .await
         .expect("obligations list");
     assert_eq!(obligations, Vec::new());
-
-    let repeated = fixture
-        .tool
-        .handle_guided(call(&lookup_completion(completed.revision)))
-        .await;
-    assert!(matches!(
-        repeated,
-        Err(FunctionCallError::RespondToModel(_))
-    ));
-    assert_eq!(stored_run(&fixture).await, completed);
 }
 
 #[tokio::test]

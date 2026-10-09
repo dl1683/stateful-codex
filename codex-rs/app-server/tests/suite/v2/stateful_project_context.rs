@@ -1667,26 +1667,16 @@ async fn complete_seeded_run(
     update: StatefulRunUpdate,
     obligation: Option<(String, NewObligation)>,
 ) -> Result<()> {
-    let attempt = store.begin_verification(run_id, "seed", 60_000).await?;
-    let ledger = store.acceptance_ledger(run_id).await?;
     let latest = store.latest_obligation(run_id).await?;
+    let commit = super::stateful_acceptance_support::seeded_commit(
+        store,
+        run_id,
+        "seed",
+        latest.map(|obligation| obligation.sequence),
+    )
+    .await?;
     store
-        .complete_run_with_acceptance(
-            run_id,
-            update,
-            &codex_stateful_runtime::AcceptanceCommit {
-                ledger_revision: ledger.revision,
-                workspace_generation: ledger.workspace_generation,
-                artifacts: std::collections::BTreeMap::new(),
-                checkers: std::collections::BTreeMap::new(),
-                verification: codex_stateful_runtime::VerificationClaim {
-                    owner: "seed".to_string(),
-                    attempt,
-                },
-                validated_obligation_sequence: latest.map(|obligation| obligation.sequence),
-            },
-            obligation,
-        )
+        .complete_run_with_acceptance(run_id, update, &commit, obligation)
         .await?;
     Ok(())
 }

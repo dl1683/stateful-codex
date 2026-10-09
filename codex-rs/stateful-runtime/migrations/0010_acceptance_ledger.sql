@@ -11,7 +11,6 @@ CREATE TABLE stateful_acceptance_ledgers (
     verification_attempt INTEGER NOT NULL CHECK (verification_attempt >= 0),
     verification_owner TEXT,
     verification_lease_expires_at_ms INTEGER,
-    exemption TEXT CHECK (exemption IS NULL OR exemption = 'cheapLookup'),
     updated_at_ms INTEGER NOT NULL,
     CHECK ((verification_owner IS NULL) = (verification_lease_expires_at_ms IS NULL))
 );

@@ -197,6 +197,9 @@ fn only_an_execution_of_a_declared_checker_is_admissible() {
         "FORCE=1 sh verify.sh",
         "sh /tmp/verify.sh",
         "sh /verify.sh",
+        "./fake/sh verify.sh",
+        "/bin/sh verify.sh",
+        "bin/python3 tests/test_out.py",
         "sh ../verify.sh",
         "verify.sh",
         "pytest tests/test_out.py",
@@ -575,9 +578,14 @@ async fn pending_commands_fence_completion_and_reentry_clears_them() {
         .finish_command(&id, "call-done")
         .await
         .expect("accounted");
-    // A cheap lookup with nothing pending completes; the host records the admission.
-    let ledger_before = store.acceptance_ledger(&id).await.expect("ledger");
-    assert!(!ledger_before.cheap_lookup);
+    assert_eq!(
+        store
+            .acceptance_ledger(&id)
+            .await
+            .expect("ledger")
+            .pending_commands,
+        0
+    );
 }
 
 #[tokio::test]
@@ -633,17 +641,16 @@ async fn an_exited_command_without_an_end_closes_as_terminated_unknown() {
 }
 
 #[tokio::test]
-async fn a_cheap_lookup_admission_is_recorded() {
+async fn a_short_request_without_criteria_cannot_complete() {
     let (_home, store, id) = store("Answer a lookup.", WorkflowMode::Collaborative).await;
-    complete(&store, &id, BTreeMap::new())
+    let error = complete(&store, &id, BTreeMap::new())
         .await
-        .expect("completes");
+        .expect_err("no request is exempt from coverage");
     assert!(
-        store
-            .acceptance_ledger(&id)
-            .await
-            .expect("ledger")
-            .cheap_lookup
+        error
+            .to_string()
+            .contains("1 request sentences are covered by no criterion"),
+        "{error}"
     );
 }
 

@@ -234,10 +234,33 @@ async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::R
     Ok(())
 }
 
+// The admitted acceptance check runs `sh`.
+#[cfg(not(target_os = "windows"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_autonomous_stateful_follows_continuations_until_completion() -> anyhow::Result<()> {
     let test = test_codex_exec();
     let server = responses::start_mock_server().await;
+    // Completion needs a covering criterion settled by its admitted check; the project root
+    // (the working directory) holds only the files that check pins.
+    let goal = "Finish a task that requires another model turn";
+    let root = test.cwd_path().to_path_buf();
+    std::fs::write(
+        root.join("accepted.txt"),
+        "accepted
+",
+    )?;
+    std::fs::write(
+        root.join("verify.sh"),
+        "test -s accepted.txt
+",
+    )?;
+    let call = |id: &str, tool: &str, arguments: serde_json::Value| {
+        responses::sse(vec![
+            responses::ev_response_created(id),
+            responses::ev_function_call(id, tool, &arguments.to_string()),
+            responses::ev_completed(id),
+        ])
+    };
     let response_mock = responses::mount_sse_sequence(
         &server,
         vec![
@@ -249,6 +272,28 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
                 ),
                 responses::ev_completed("response-1"),
             ]),
+            call(
+                "declare",
+                "stateful_acceptance_update",
+                serde_json::json!({"expectedLedgerRevision": 0, "changes": [{
+                    "action": "add", "origin": "user", "kind": "deliverable",
+                    "statement": "The task is finished.", "requestQuote": goal,
+                    "checkCommand": "sh verify.sh", "expectedObservation": "exit 0",
+                    "artifacts": ["accepted.txt"], "checker": ["verify.sh"]
+                }]}),
+            ),
+            call(
+                "admit",
+                "stateful_acceptance_update",
+                serde_json::json!({"expectedLedgerRevision": 1, "changes": [
+                    {"action": "admit", "criterion": "C1"}
+                ]}),
+            ),
+            call(
+                "check",
+                "exec_command",
+                serde_json::json!({"cmd": "sh verify.sh", "workdir": root.to_string_lossy(), "yield_time_ms": 10_000}),
+            ),
             responses::sse(vec![
                 responses::ev_response_created("response-2"),
                 responses::ev_function_call(
@@ -276,16 +321,16 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(test.cwd_path())
-        .arg("Finish a task that requires another model turn")
+        .arg(goal)
         .assert()
         .success();
 
     let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 6);
     assert!(!requests[0].body_contains_text("Continue Autonomous Stateful run"));
     assert!(requests[1].body_contains_text("Continue Autonomous Stateful run"));
-    assert!(requests[2].body_contains_text("finalAnswerInstruction"));
-    assert!(requests[2].body_contains_text("The autonomous investigation is complete."));
+    assert!(requests[5].body_contains_text("finalAnswerInstruction"));
+    assert!(requests[5].body_contains_text("The autonomous investigation is complete."));
     Ok(())
 }
 

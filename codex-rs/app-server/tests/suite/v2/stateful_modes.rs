@@ -5,16 +5,20 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::StatefulRunBudget;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunReadParams;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_app_server_protocol::StatefulRunResumeParams;
 use codex_app_server_protocol::StatefulRunResumeResponse;
 use codex_app_server_protocol::StatefulRunStartParams;
 use codex_app_server_protocol::StatefulRunStartResponse;
 use codex_app_server_protocol::StatefulRunStatus;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::StatefulRunUpdatedNotification;
 use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadStartParams;
+#[cfg(not(target_os = "windows"))]
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
@@ -24,6 +28,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
 
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -44,6 +49,27 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
         "autonomous-run",
     )
     .await?;
+    // A project root holding only the files the completion's acceptance check pins.
+    let project_root = TempDir::new()?;
+    super::stateful_acceptance_support::write_acceptance_files(project_root.path())?;
+    let _: codex_app_server_protocol::ProjectUpdateResponse = server
+        .request(|request_id| ClientRequest::ProjectUpdate {
+            request_id,
+            params: codex_app_server_protocol::ProjectUpdateParams {
+                project_id: started.run.project_id.clone(),
+                name: None,
+                roots: Some(vec![codex_app_server_protocol::ProjectRoot {
+                    path: codex_utils_absolute_path::AbsolutePathBuf::try_from(
+                        project_root.path().to_path_buf(),
+                    )
+                    .expect("temporary project root is absolute"),
+                }]),
+                metadata: None,
+            },
+        })
+        .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
+        .await?;
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -54,6 +80,7 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
                 ),
                 responses::ev_completed("initial-response"),
             ]),
+            super::stateful_acceptance_support::run_check("acceptance-check", project_root.path()),
             responses::sse(vec![
                 responses::ev_function_call(
                     "complete-autonomous-run",
@@ -122,7 +149,7 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
     )
     .await?;
     let requests = response_log.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 5);
     assert!(requests[1].body_contains_text("Continue Autonomous Stateful run"));
     assert!(requests[1].body_contains_text(
         "do not repeat completed work or reopen unchanged host-audited sourceVerified evidence"
@@ -287,6 +314,7 @@ async fn start_turn(server: &mut TestAppServer, thread_id: String, text: &str) -
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn read_run(server: &mut TestAppServer, run_id: String) -> Result<StatefulRunReadResponse> {
     let response: StatefulRunReadResponse = server
         .request(|request_id| ClientRequest::StatefulRunRead {

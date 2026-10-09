@@ -190,6 +190,22 @@ async fn complete(
         .map(|(run, _)| run)
 }
 
+/// Completes through a host-admitted plan that settles the whole request.
+async fn complete_settled(store: &StatefulRunStore, id: &StatefulRunId) -> crate::StatefulRun {
+    let run = store
+        .get_run(id)
+        .await
+        .expect("run reads")
+        .expect("run exists");
+    let commit =
+        crate::acceptance_test_support::settled_commit(store, id, "test-owner", None).await;
+    store
+        .complete_run_with_acceptance(id, completion(run.revision), &commit, None)
+        .await
+        .expect("settled request completes")
+        .0
+}
+
 #[tokio::test]
 async fn acceptance_ledger_persists_across_restart_with_spans_and_evidence() {
     let (_home, sqlite, store, id) = store_with_run(WorkflowMode::Autonomous).await;
@@ -242,12 +258,9 @@ async fn every_generic_terminal_writer_refuses_a_new_completed() {
         Err(StatefulRunStoreError::CompletionRequiresAcceptanceDecision)
     ));
     assert_eq!(store.get_run(&id).await.expect("run reads"), Some(run));
-    // A coverage-exempt lookup completes through the host decision.
+    // A settled request completes through the host decision.
     assert_eq!(
-        complete(&store, &id, BTreeMap::new(), None)
-            .await
-            .expect("decision completes")
-            .status,
+        complete_settled(&store, &id).await.status,
         StatefulRunStatus::Completed
     );
 }
@@ -768,9 +781,7 @@ async fn admitted_blockers_are_checked_inside_the_terminal_transaction() {
 async fn obligations_cannot_be_appended_after_completion() {
     let (_home, _sqlite, store, id) =
         store_with_goal("Answer a lookup.", WorkflowMode::Collaborative).await;
-    complete(&store, &id, BTreeMap::new(), None)
-        .await
-        .expect("completes");
+    complete_settled(&store, &id).await;
     let late = store
         .append_obligation(
             "after-terminal".to_string(),
@@ -918,10 +929,7 @@ async fn completion_consumes_a_held_verification_lease_and_the_run_stays_running
         .await
         .expect("refusal ends the attempt");
     assert_eq!(
-        complete(&store, &id, BTreeMap::new(), None)
-            .await
-            .expect("held lease completes")
-            .status,
+        complete_settled(&store, &id).await.status,
         StatefulRunStatus::Completed
     );
 }
