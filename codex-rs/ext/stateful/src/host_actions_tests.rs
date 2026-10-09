@@ -378,7 +378,10 @@ async fn held_events_are_bounded_in_count_and_bytes() {
         .collect::<Vec<_>>()
         .await;
     assert_eq!(labels.len(), 1, "{labels:?}");
-    assert!(labels[0].contains("past the host's bound"), "{labels:?}");
+    assert!(
+        labels[0].contains("exceeded the host's bound"),
+        "{labels:?}"
+    );
     assert_eq!(pulled.load(Ordering::SeqCst), MAX_HELD_EVENTS + 1);
 
     let large = "x".repeat(MAX_HELD_BYTES + 1);
@@ -392,7 +395,10 @@ async fn held_events_are_bounded_in_count_and_bytes() {
     )
     .await;
     assert_eq!(labels.len(), 1, "{labels:?}");
-    assert!(labels[0].contains("past the host's bound"), "{labels:?}");
+    assert!(
+        labels[0].contains("exceeded the host's bound"),
+        "{labels:?}"
+    );
     assert_eq!(fixture.counts().await, (0, 0));
 }
 
@@ -413,9 +419,167 @@ async fn an_unwritable_record_fails_the_response_instead_of_dispatching() {
         let labels = run_fence(&services, events).await;
         assert_eq!(labels.len(), 1, "{labels:?}");
         assert!(
-            labels[0].starts_with("error:stream error: the host could not durably record"),
+            labels[0].starts_with(
+                "error:stream error: the host could not durably record a model call before dispatch"
+            ) && labels[0].ends_with(
+                "this call and the following local calls were not dispatched; earlier or provider-hosted actions may already have run"
+            ),
             "{labels:?}"
         );
     }
     assert!(super::unrecorded_actions_possible());
+}
+
+fn large_completion(bytes: usize) -> ResponseEvent {
+    function_call(
+        "complete",
+        "stateful_run_update",
+        json!({"expectedRevision": 1, "status": "completed", "openIssues": [], "result": "x".repeat(bytes)}),
+    )
+}
+
+fn delta(text: &str) -> Event {
+    Ok(ResponseEvent::OutputTextDelta(text.to_string()))
+}
+
+/// The bytes an event takes against the bound.
+fn size(event: Event) -> usize {
+    super::held_size(&event, usize::MAX)
+}
+
+/// A completion too large for the bound is never held, released or counted as an attempt,
+/// whether the response stays open or completes at once, and the upstream response is
+/// dropped.
+#[tokio::test]
+async fn an_oversized_completion_is_never_held_or_released() {
+    let fixture = fixture().await;
+    let (sender, upstream) = channel();
+    let mut fenced = fence(&fixture.services, upstream);
+    sender
+        .send(Ok(large_completion(MAX_HELD_BYTES)))
+        .expect("send");
+    let first = tokio::time::timeout(Duration::from_secs(5), fenced.next())
+        .await
+        .expect("the response fails at once")
+        .expect("an error");
+    assert!(
+        label(&first).contains("exceeded the host's bound"),
+        "{}",
+        label(&first)
+    );
+    assert!(fenced.next().await.is_none());
+    assert!(sender.is_closed(), "upstream is dropped");
+
+    let labels = run_fence(
+        &fixture.services,
+        vec![Ok(large_completion(MAX_HELD_BYTES)), Ok(completed())],
+    )
+    .await;
+    assert_eq!(labels.len(), 1, "{labels:?}");
+    assert!(
+        labels[0].contains("exceeded the host's bound"),
+        "{labels:?}"
+    );
+    assert_eq!(fixture.counts().await, (0, 0));
+}
+
+/// The event that would release a hold is admitted within the bounds too. At exactly the
+/// event or byte bound, the response's `Completed` or a sibling call fails it without a record;
+/// with room for exactly that event, it is released as usual.
+#[tokio::test]
+async fn the_event_that_releases_a_hold_is_bounded_too() {
+    let releasing = |sibling: bool| {
+        if sibling {
+            Ok(shell())
+        } else {
+            Ok(completed())
+        }
+    };
+    for sibling in [false, true] {
+        for room in [false, true] {
+            // Count edge: the completion and text deltas fill the hold, leaving `room`.
+            let mut events = vec![Ok(completion())];
+            events.extend((1..MAX_HELD_EVENTS - usize::from(room)).map(|_| delta("")));
+            events.push(releasing(sibling));
+            // Byte edge: one delta fills the bytes, leaving exactly the releasing event's size.
+            let spare = if room { size(releasing(sibling)) } else { 0 };
+            let text_bytes = MAX_HELD_BYTES - size(Ok(completion())) - size(delta("")) - spare;
+            let bytes_events = vec![
+                Ok(completion()),
+                delta(&"x".repeat(text_bytes)),
+                releasing(sibling),
+            ];
+            for events in [events, bytes_events] {
+                let fixture = fixture().await;
+                let labels = run_fence(&fixture.services, events).await;
+                let case = format!("sibling {sibling}, room {room}");
+                if room {
+                    assert_eq!(labels[0], "call:complete", "{case}");
+                    assert_eq!(
+                        labels.last().map(String::as_str),
+                        Some(if sibling { "call:shell" } else { "completed" }),
+                        "{case}"
+                    );
+                    let expected = if sibling { (1, 0) } else { (0, 1) };
+                    assert_eq!(fixture.counts().await, expected, "{case}");
+                } else {
+                    assert_eq!(labels.len(), 1, "{case}: {labels:?}");
+                    assert!(labels[0].contains("exceeded the host's bound"), "{case}");
+                    assert_eq!(fixture.counts().await, (0, 0), "{case}");
+                }
+            }
+        }
+    }
+}
+
+/// A sibling with room waits for its durable record (here blocked by another writer) before
+/// anything held is released; a sibling that does not fit fails the response at once, without
+/// waiting for a record.
+#[tokio::test]
+async fn a_blocked_record_holds_everything_back_and_a_full_hold_needs_no_record() {
+    let fixture = fixture().await;
+    let pool = SqliteConfig::new_for_testing(fixture.home.path().abs())
+        .open_read_write_pool(&fixture.home.path().join("stateful_runtime_1.sqlite"))
+        .await
+        .expect("runtime database");
+
+    let writer = pool.begin_with("BEGIN IMMEDIATE").await.expect("writer");
+    let (sender, upstream) = channel();
+    let mut fenced = fence(&fixture.services, upstream);
+    sender.send(Ok(completion())).expect("send");
+    sender.send(Ok(shell())).expect("send");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), fenced.next())
+            .await
+            .is_err(),
+        "nothing passes while the sibling's record is blocked"
+    );
+    writer.rollback().await.expect("unblock");
+    let first = fenced.next().await.expect("released");
+    let second = fenced.next().await.expect("released");
+    assert_eq!(
+        (label(&first), label(&second)),
+        ("call:complete".to_string(), "call:shell".to_string())
+    );
+    assert_eq!(fixture.counts().await, (1, 0));
+
+    let fixture = self::fixture().await;
+    let pool = SqliteConfig::new_for_testing(fixture.home.path().abs())
+        .open_read_write_pool(&fixture.home.path().join("stateful_runtime_1.sqlite"))
+        .await
+        .expect("runtime database");
+    let writer = pool.begin_with("BEGIN IMMEDIATE").await.expect("writer");
+    let mut events = vec![Ok(completion())];
+    events.extend((1..MAX_HELD_EVENTS).map(|_| delta("")));
+    events.push(Ok(shell()));
+    let labels = tokio::time::timeout(Duration::from_secs(2), run_fence(&fixture.services, events))
+        .await
+        .expect("fails without waiting for the blocked record");
+    assert_eq!(labels.len(), 1, "{labels:?}");
+    assert!(
+        labels[0].contains("exceeded the host's bound"),
+        "{labels:?}"
+    );
+    writer.rollback().await.expect("unblock");
+    assert_eq!(fixture.counts().await, (0, 0));
 }

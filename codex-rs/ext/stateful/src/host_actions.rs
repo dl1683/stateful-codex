@@ -11,8 +11,9 @@
 //!   one completion attempt is recorded and it is released. A call after it proves the
 //!   response is not action-free: the call is recorded and everything held flows at once. If
 //!   a record cannot be written, the response fails instead and nothing after it reaches Core.
-//!   The held events are bounded in count and bytes; past either bound the response fails and
-//!   the completion is never released.
+//!   Every event held, the completion itself and the event that releases it included, is
+//!   admitted only within the count and byte bounds; past either the response fails, nothing
+//!   held is released, no attempt is recorded and the upstream response is dropped.
 //! - Provider-hosted calls (web search and the like) run at the provider, a read with no local
 //!   effect; each counts as an action once the host observes it, recorded like any other call
 //!   before a held completion can be released. A hosted call the provider never reports is not
@@ -23,7 +24,9 @@
 //! - User shell commands are recorded by the tool policy before they are spawned, and refused
 //!   if the record cannot be written.
 //! - Lifecycle hooks run around calls and turns; a completion in a process where hooks were
-//!   configured records an action first (`tools::run_acceptance`).
+//!   configured records an action first (`tools::run_acceptance`). A turn's hook set is fixed
+//!   when its task starts, and publishing hooks records that fact first, so a hook installed
+//!   after the completion read the fact cannot run around it or later in its turn.
 
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicBool;
@@ -45,7 +48,7 @@ use crate::services::ProjectIntelligenceServices;
 const COMPLETION_TOOL: &str = "stateful_run_update";
 /// Most events held behind a completion while its response may still carry other calls.
 const MAX_HELD_EVENTS: usize = 1_024;
-/// Most bytes (as rendered for debugging) held behind a completion.
+/// Most bytes (as rendered for debugging) held behind a completion, the completion included.
 const MAX_HELD_BYTES: usize = 1024 * 1024;
 
 type Event = Result<ResponseEvent, ModelResponseError>;
@@ -229,11 +232,10 @@ impl FenceState {
 
     async fn accept(&mut self, event: Event) {
         let kind = observe(&event);
-        let Some(held) = self.held.as_mut() else {
+        if self.held.is_none() {
             match kind {
                 OutputKind::Completion if !self.called => {
-                    self.held_bytes = held_size(&event);
-                    self.held = Some(vec![event]);
+                    self.hold(event);
                 }
                 OutputKind::Completion | OutputKind::Call => {
                     if self.record(Record::Action).await {
@@ -244,11 +246,10 @@ impl FenceState {
                 OutputKind::Text => self.ready.push_back(event),
             }
             return;
-        };
+        }
         match (&event, kind) {
             (Ok(ResponseEvent::Completed { .. }), _) => {
-                held.push(event);
-                if self.record(Record::CompletionAttempt).await {
+                if self.hold(event) && self.record(Record::CompletionAttempt).await {
                     self.release();
                 }
             }
@@ -261,23 +262,32 @@ impl FenceState {
             // Another call proves the response is not action-free: record it, then let
             // everything held flow without further buffering.
             (Ok(_), OutputKind::Completion | OutputKind::Call) => {
-                held.push(event);
-                if self.record(Record::Action).await {
+                if self.hold(event) && self.record(Record::Action).await {
                     self.called = true;
                     self.release();
                 }
             }
             (Ok(_), OutputKind::Text) => {
-                self.held_bytes = self.held_bytes.saturating_add(held_size(&event));
-                if held.len() >= MAX_HELD_EVENTS || self.held_bytes > MAX_HELD_BYTES {
-                    self.fail(format!(
-                        "the response kept streaming past the host's bound ({MAX_HELD_EVENTS} events or {MAX_HELD_BYTES} bytes) while a completion call waited for it to finish; the completion did not run"
-                    ));
-                } else {
-                    held.push(event);
-                }
+                self.hold(event);
             }
         }
+    }
+
+    /// Holds `event` behind the completion if it fits both bounds; otherwise the response fails
+    /// and nothing held is released.
+    fn hold(&mut self, event: Event) -> bool {
+        let held = self.held.as_ref().map_or(0, Vec::len);
+        let room = MAX_HELD_BYTES - self.held_bytes;
+        let size = held_size(&event, room);
+        if held >= MAX_HELD_EVENTS || size > room {
+            self.fail(format!(
+                "the response exceeded the host's bound ({MAX_HELD_EVENTS} events or {MAX_HELD_BYTES} bytes) held behind a completion call while it waited for the response to finish; the completion did not run"
+            ));
+            return false;
+        }
+        self.held_bytes += size;
+        self.held.get_or_insert_with(Vec::new).push(event);
+        true
     }
 
     fn release(&mut self) {
@@ -322,7 +332,7 @@ impl FenceState {
                 note_unrecorded_actions_possible();
                 tracing::warn!(thread_id = %self.thread_id, %error, "failed to record a model call before dispatch");
                 self.fail(format!(
-                    "the host could not durably record this response's tool calls before running them ({error}); none of them ran"
+                    "the host could not durably record a model call before dispatch ({error}); this call and the following local calls were not dispatched; earlier or provider-hosted actions may already have run"
                 ));
                 false
             }
@@ -331,8 +341,27 @@ impl FenceState {
 }
 
 /// The size an event holds while buffered, as rendered for debugging (at least its text).
-fn held_size(event: &Event) -> usize {
-    format!("{event:?}").len()
+/// Counting stops once it passes `limit`, without copying the event, so a result above
+/// `limit` only says the event does not fit.
+fn held_size(event: &Event, limit: usize) -> usize {
+    struct Counter {
+        bytes: usize,
+        limit: usize,
+    }
+    impl std::fmt::Write for Counter {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.bytes = self.bytes.saturating_add(text.len());
+            if self.bytes > self.limit {
+                Err(std::fmt::Error)
+            } else {
+                Ok(())
+            }
+        }
+    }
+    let mut counter = Counter { bytes: 0, limit };
+    // An error only means the count passed `limit`.
+    let _ = std::fmt::write(&mut counter, format_args!("{event:?}"));
+    counter.bytes
 }
 
 /// Records a user shell command against the thread's open runs before it is spawned.
