@@ -119,6 +119,7 @@ async fn harness_for(
     for (name, content) in files {
         std::fs::write(project_root.path().join(name), content)?;
     }
+    super::stateful_acceptance_support::init_repository(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
         .with_sandbox_mode(sandbox_mode)
         .enable_feature(Feature::Sqlite)

@@ -3,15 +3,15 @@
 //! outside the active criteria's pins makes the check a mutation of inputs nothing pins. File
 //! metadata (size, modification time) is never identity.
 //!
-//! In a git work tree the listed files are those git tracks or would track (untracked files
-//! that `.gitignore` does not exclude), and the repository state (the commit `HEAD` names and
-//! the staged index) is a separate typed part of the identity that no file pin excludes.
-//! Elsewhere every file outside version-control metadata and dependency or build caches is
-//! listed. The identity fails closed (is unavailable) for anything it cannot represent
-//! exactly: submodules (gitlinks), nested repositories or other non-regular entries, and path
-//! names that are not exact on this platform. Enumeration is streamed and bounded in paths,
-//! output bytes, queued directories, hashed bytes and time, and it runs in one of the shared
-//! reader slots, held until the worker exits.
+//! Every project root must be inside a git work tree. The listed files are those git tracks or
+//! would track (untracked files that `.gitignore` does not exclude), and the repository state
+//! (the commit `HEAD` names, or a verified unborn `HEAD`, and the staged index) is a separate
+//! typed part of the identity that no file pin excludes. Outside git, or on any git failure,
+//! the identity is unavailable, which fails the check closed. It is also unavailable for
+//! anything it cannot represent exactly: submodules (gitlinks), nested repositories or other
+//! non-regular entries, and path names that are not exact on this platform. Enumeration is
+//! streamed and bounded in paths, output bytes, hashed bytes and time, and it runs in one of
+//! the shared reader slots, held until the worker exits.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -63,8 +63,6 @@ pub(crate) struct Limits {
     pub(crate) bytes: u64,
     /// Bytes read from one git enumeration.
     pub(crate) git_output: u64,
-    /// Directories queued at once while walking.
-    pub(crate) directories: usize,
     /// Time for the whole identity.
     pub(crate) budget: Duration,
 }
@@ -73,25 +71,8 @@ pub(crate) const LIMITS: Limits = Limits {
     entries: 50_000,
     bytes: 512 * 1024 * 1024,
     git_output: 16 * 1024 * 1024,
-    directories: 10_000,
     budget: Duration::from_secs(10),
 };
-
-/// Directories skipped outside git: version-control metadata and dependency or build caches.
-const SKIPPED_DIRECTORIES: &[&str] = &[
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    "target",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".venv",
-    "venv",
-    ".tox",
-];
 
 /// Git file mode of a submodule entry.
 const GITLINK_MODE: &[u8] = b"160000";
@@ -169,13 +150,8 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits) -> Option<Manifest> {
     let mut manifest = Manifest::default();
     let mut hashed = 0_u64;
     for root in roots {
-        let listed = match git_listing(root, limits, deadline)? {
-            Some((state, files)) => {
-                manifest.repositories.insert(root.clone(), state);
-                files
-            }
-            None => walk_files(root, limits, deadline)?,
-        };
+        let (state, listed) = git_listing(root, limits, deadline)?;
+        manifest.repositories.insert(root.clone(), state);
         for relative in listed {
             if manifest.files.len() >= limits.entries || Instant::now() >= deadline {
                 return None;
@@ -188,45 +164,45 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits) -> Option<Manifest> {
     Some(manifest)
 }
 
-/// In a git work tree: the repository state and the tracked and untracked non-ignored paths
-/// under `root`, relative to it. `Some(None)` outside a work tree; `None` when the listing
-/// cannot be taken exactly (a submodule, an inexact name, or a bound exceeded).
+/// The repository state and the tracked and untracked non-ignored paths under `root`,
+/// relative to it; `None` outside a git work tree or when the listing cannot be taken exactly
+/// (a git failure, a submodule, an inexact name, or a bound exceeded).
 fn git_listing(
     root: &Path,
     limits: Limits,
     deadline: Instant,
-) -> Option<Option<(RepositoryState, BTreeSet<PathBuf>)>> {
-    let mut inside = Vec::new();
-    let in_work_tree = git_records(
-        root,
-        &["rev-parse", "--is-inside-work-tree"],
-        b'\n',
-        limits,
-        deadline,
-        |record| {
-            inside.extend_from_slice(record);
+) -> Option<(RepositoryState, BTreeSet<PathBuf>)> {
+    let collect = |arguments: &[&str]| {
+        let mut output = Vec::new();
+        let succeeded = git_records(root, arguments, b'\n', limits, deadline, |record| {
+            output.extend_from_slice(record);
             Some(())
-        },
-    );
-    if in_work_tree.is_none() || inside != b"true" {
-        return Some(None);
+        })?;
+        Some((succeeded, output))
+    };
+    if collect(&["rev-parse", "--is-inside-work-tree"])? != (true, b"true".to_vec()) {
+        return None;
     }
-    let mut head = Vec::new();
-    // A repository without commits has no HEAD; that is its state.
-    let _ = git_records(
-        root,
-        &["rev-parse", "--verify", "--quiet", "HEAD"],
-        b'\n',
-        limits,
-        deadline,
-        |record| {
-            head.extend_from_slice(record);
-            Some(())
-        },
-    );
+    let head = match collect(&["rev-parse", "--verify", "--quiet", "HEAD"])? {
+        (true, head) if !head.is_empty() => String::from_utf8(head).ok()?,
+        // `HEAD` names no commit: qualified only when it is a branch that does not exist yet.
+        (false, _) => {
+            let (symbolic, branch) = collect(&["symbolic-ref", "--quiet", "HEAD"])?;
+            if !symbolic || branch.is_empty() {
+                return None;
+            }
+            let branch = String::from_utf8(branch).ok()?;
+            let (exists, _) = collect(&["show-ref", "--verify", "--quiet", &branch])?;
+            if exists {
+                return None;
+            }
+            format!("unborn:{branch}")
+        }
+        (true, _) => return None,
+    };
     let mut index = Sha256::new();
     let mut paths = BTreeSet::new();
-    git_records(
+    let staged = git_records(
         root,
         &["ls-files", "-z", "--stage"],
         0,
@@ -242,7 +218,7 @@ fn git_listing(
             add_path(&mut paths, &path[1..], limits)
         },
     )?;
-    git_records(
+    let untracked = git_records(
         root,
         &["ls-files", "-z", "--others", "--exclude-standard"],
         0,
@@ -250,13 +226,16 @@ fn git_listing(
         deadline,
         |record| add_path(&mut paths, record, limits),
     )?;
-    Some(Some((
+    if !staged || !untracked {
+        return None;
+    }
+    Some((
         RepositoryState {
-            head: String::from_utf8_lossy(&head).to_string(),
+            head,
             index: format!("sha256:{:x}", index.finalize()),
         },
         paths,
-    )))
+    ))
 }
 
 /// Adds one git path, exactly as git names it, within the entry bound.
@@ -283,8 +262,9 @@ fn exact_path(name: &[u8]) -> Option<PathBuf> {
 }
 
 /// Streams the `terminator`-separated records of a read-only git query in `root` to
-/// `on_record`, within the output-byte bound and the deadline; `None` when git fails, the
-/// callback refuses a record, or a bound is exceeded (the process is then killed).
+/// `on_record`, within the output-byte bound and the deadline, and returns whether git
+/// succeeded; `None` when git cannot run, the callback refuses a record, or a bound is
+/// exceeded (the process is then killed).
 /// Repository configuration cannot start helper programs: the file-system monitor is disabled
 /// and optional locks are off.
 fn git_records(
@@ -294,7 +274,7 @@ fn git_records(
     limits: Limits,
     deadline: Instant,
     mut on_record: impl FnMut(&[u8]) -> Option<()>,
-) -> Option<()> {
+) -> Option<bool> {
     let mut child = Command::new("git")
         .arg("-c")
         .arg("core.fsmonitor=false")
@@ -334,42 +314,7 @@ fn git_records(
         let _ = child.wait();
         return None;
     }
-    child.wait().ok()?.success().then_some(())
-}
-
-/// Outside git: every path under `root` (relative to it) except skipped directories, without
-/// following links, within the entry, queued-directory and time bounds.
-fn walk_files(root: &Path, limits: Limits, deadline: Instant) -> Option<BTreeSet<PathBuf>> {
-    let mut files = BTreeSet::new();
-    let mut directories = vec![PathBuf::new()];
-    while let Some(directory) = directories.pop() {
-        for entry in std::fs::read_dir(root.join(&directory)).ok()? {
-            if Instant::now() >= deadline {
-                return None;
-            }
-            let entry = entry.ok()?;
-            let metadata = entry.metadata().ok()?;
-            let relative = directory.join(entry.file_name());
-            if metadata.is_dir() {
-                let skipped = entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| SKIPPED_DIRECTORIES.contains(&name));
-                if !skipped {
-                    if directories.len() >= limits.directories {
-                        return None;
-                    }
-                    directories.push(relative);
-                }
-                continue;
-            }
-            files.insert(relative);
-            if files.len() > limits.entries {
-                return None;
-            }
-        }
-    }
-    Some(files)
+    Some(child.wait().ok()?.success())
 }
 
 /// The content digest of one listed path: file bytes, a link's target, or a marker for an

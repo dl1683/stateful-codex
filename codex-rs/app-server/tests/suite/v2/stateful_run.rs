@@ -584,6 +584,7 @@ async fn model_updates_semantic_progress_and_applies_user_steering() -> Result<(
         "The deployment risk is triggered by the source constraint.\n",
     )?;
     std::fs::write(project_root.path().join("verify.sh"), "test -s report.md\n")?;
+    super::stateful_acceptance_support::init_repository(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;

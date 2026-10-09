@@ -70,33 +70,42 @@ fn repository() -> TempDir {
 }
 
 #[tokio::test]
-async fn content_not_metadata_identifies_a_plain_workspace() {
-    let project = TempDir::new().expect("project");
-    let root = project.path();
-    std::fs::write(root.join("input.csv"), "1,2").expect("input");
-    std::fs::create_dir(root.join("target")).expect("cache");
-    let before = workspace_manifest(&roots(root)).await.expect("identity");
-    assert_eq!(workspace_manifest(&roots(root)).await, Some(before.clone()));
-    // A cache directory is not identity.
-    std::fs::write(root.join("target/build.log"), "built").expect("cache write");
-    let cached = workspace_manifest(&roots(root)).await.expect("identity");
-    assert!(!changed_unpinned(
-        &roots(root),
-        &ledger(),
-        Some(&before),
-        Some(&cached)
-    ));
-    // Same length, same modification time, different bytes: still a change.
-    rewrite_preserving_metadata(&root.join("input.csv"), "3,4");
-    let after = workspace_manifest(&roots(root)).await.expect("identity");
+async fn only_a_git_work_tree_can_be_identified() {
+    // A plain project root is unavailable, even when a normal repository is nested in it.
+    let plain = TempDir::new().expect("plain");
+    std::fs::write(plain.path().join("input.csv"), "1,2").expect("input");
+    assert_eq!(workspace_manifest(&roots(plain.path())).await, None);
+    let child = plain.path().join("child");
+    std::fs::create_dir(&child).expect("child");
+    git(&child, &["init", "--quiet"]);
+    assert_eq!(workspace_manifest(&roots(plain.path())).await, None);
+
+    // A git failure (here a broken `.git` link) is unavailable, never a plain workspace.
+    let broken = TempDir::new().expect("broken");
+    std::fs::write(broken.path().join(".git"), "gitdir: missing-directory\n").expect("link");
+    assert_eq!(workspace_manifest(&roots(broken.path())).await, None);
+
+    // A repository without commits is identified, its unborn HEAD verified; the first commit
+    // changes its state.
+    let unborn = TempDir::new().expect("unborn");
+    git(unborn.path(), &["init", "--quiet"]);
+    std::fs::write(unborn.path().join("input.csv"), "1,2").expect("input");
+    let before = workspace_manifest(&roots(unborn.path()))
+        .await
+        .expect("unborn identity");
+    git(unborn.path(), &["add", "."]);
+    git(unborn.path(), &["commit", "--quiet", "-m", "first"]);
+    let after = workspace_manifest(&roots(unborn.path()))
+        .await
+        .expect("identity");
     assert!(changed_unpinned(
-        &roots(root),
+        &roots(unborn.path()),
         &ledger(),
         Some(&before),
         Some(&after)
     ));
     assert!(changed_unpinned(
-        &roots(root),
+        &roots(unborn.path()),
         &ledger(),
         None,
         Some(&after)
@@ -195,21 +204,6 @@ fn enumeration_stops_at_its_bounds() {
         ..LIMITS
     };
     assert_eq!(identify(&canonical(root), no_time), None, "deadline");
-
-    let plain = TempDir::new().expect("plain");
-    for directory in ["a", "b", "c"] {
-        std::fs::create_dir(plain.path().join(directory)).expect("directory");
-    }
-    let one_directory = Limits {
-        directories: 1,
-        ..LIMITS
-    };
-    assert_eq!(
-        identify(&canonical(plain.path()), one_directory),
-        None,
-        "queued directories"
-    );
-    assert!(identify(&canonical(plain.path()), LIMITS).is_some());
 }
 
 /// A tracked name that is not UTF-8 is identified by its exact bytes.
@@ -236,7 +230,7 @@ fn raw_byte_names_are_identified_exactly() {
 
 #[tokio::test]
 async fn an_identity_without_a_free_worker_slot_is_unavailable() {
-    let project = TempDir::new().expect("project");
+    let project = repository();
     OUTSTANDING_READERS.store(MAX_OUTSTANDING_READERS, std::sync::atomic::Ordering::SeqCst);
     assert_eq!(workspace_manifest(&roots(project.path())).await, None);
     OUTSTANDING_READERS.store(0, std::sync::atomic::Ordering::SeqCst);

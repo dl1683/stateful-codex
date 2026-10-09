@@ -244,16 +244,14 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
     // (the working directory) holds only the files that check pins.
     let goal = "Finish a task that requires another model turn";
     let root = test.cwd_path().to_path_buf();
-    std::fs::write(
-        root.join("accepted.txt"),
-        "accepted
-",
-    )?;
-    std::fs::write(
-        root.join("verify.sh"),
-        "test -s accepted.txt
-",
-    )?;
+    std::fs::write(root.join("accepted.txt"), "accepted\n")?;
+    std::fs::write(root.join("verify.sh"), "test -s accepted.txt\n")?;
+    // The host identifies a check's workspace only inside a git work tree.
+    let initialized = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&root)
+        .status()?;
+    anyhow::ensure!(initialized.success(), "git init failed");
     let call = |id: &str, tool: &str, arguments: serde_json::Value| {
         responses::sse(vec![
             responses::ev_response_created(id),
