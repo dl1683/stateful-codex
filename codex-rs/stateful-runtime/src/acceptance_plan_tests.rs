@@ -641,11 +641,12 @@ async fn an_exited_command_without_an_end_closes_as_terminated_unknown() {
 }
 
 #[tokio::test]
-async fn a_short_request_without_criteria_cannot_complete() {
+async fn a_short_request_without_criteria_cannot_complete_after_an_action() {
     let (_home, store, id) = store("Answer a lookup.", WorkflowMode::Collaborative).await;
+    store.record_host_action(&id).await.expect("action");
     let error = complete(&store, &id, BTreeMap::new())
         .await
-        .expect_err("no request is exempt from coverage");
+        .expect_err("a run with an action owes coverage");
     assert!(
         error
             .to_string()

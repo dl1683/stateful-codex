@@ -38,8 +38,12 @@ pub(crate) fn covers(
     })
 }
 
-/// Goal sentences not fully covered by binding criteria or proposals, in goal order.
+/// Goal sentences not fully covered by binding criteria or proposals, in goal order. A run
+/// under the no-tool exemption owes no coverage.
 pub fn uncovered_sentences(goal: &str, ledger: &AcceptanceLedger) -> Vec<RequestSpan> {
+    if crate::acceptance_exemption::no_tool_exempt(ledger) {
+        return Vec::new();
+    }
     let binding = ledger
         .criteria
         .iter()
