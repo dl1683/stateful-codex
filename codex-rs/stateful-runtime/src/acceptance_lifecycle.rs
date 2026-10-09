@@ -100,8 +100,7 @@ impl StatefulRunStore {
         if removed {
             sqlx::query(
                 "UPDATE stateful_acceptance_ledgers
-                 SET workspace_generation = workspace_generation + 1,
-                     side_effects = side_effects + 1, updated_at_ms = ?
+                 SET workspace_generation = workspace_generation + 1, updated_at_ms = ?
                  WHERE run_id = ?",
             )
             .bind(unix_timestamp_millis()?)

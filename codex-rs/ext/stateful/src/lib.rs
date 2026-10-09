@@ -1,6 +1,5 @@
 //! Project-scoped Stateful Codex integration.
 
-mod acceptance_effects;
 mod acceptance_observation;
 mod acceptance_policy;
 mod acceptance_render;

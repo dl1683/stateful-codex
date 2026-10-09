@@ -40,9 +40,6 @@ pub(crate) fn covers(
 
 /// Goal sentences not fully covered by binding criteria or proposals, in goal order.
 pub fn uncovered_sentences(goal: &str, ledger: &AcceptanceLedger) -> Vec<RequestSpan> {
-    if crate::acceptance_exemption::read_only_exempt(ledger) {
-        return Vec::new();
-    }
     let binding = ledger
         .criteria
         .iter()

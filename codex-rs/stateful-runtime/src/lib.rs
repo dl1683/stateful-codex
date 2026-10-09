@@ -3,7 +3,6 @@
 mod acceptance;
 mod acceptance_changes;
 mod acceptance_coverage;
-mod acceptance_exemption;
 mod acceptance_lifecycle;
 mod acceptance_plan;
 mod acceptance_request;
@@ -50,7 +49,6 @@ pub use acceptance::unmet_criteria;
 pub use acceptance_coverage::MAX_OMISSION_PROPOSALS;
 pub use acceptance_coverage::sentences;
 pub use acceptance_coverage::uncovered_sentences;
-pub use acceptance_exemption::read_only_exempt;
 pub use measurement::NewStatefulTurnMeasurement;
 pub use measurement::StatefulAttributionCounters;
 pub use measurement::StatefulMeasurementSummary;

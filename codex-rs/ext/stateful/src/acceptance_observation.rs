@@ -20,8 +20,8 @@
 //! `acceptance_workspace`); when a file no active criterion pins changed (or the identity is
 //! unavailable), or another change was observed while the check ran, its own receipt cannot
 //! qualify and every receipt made before or during it becomes stale. A command that returned with no live process and whose end item
-//! never arrives is closed as terminated with unknown effects. Every other observed mutation (every other executed command,
-//! input written into a running session, applied or partially applied patches) advances the
+//! never arrives is closed as terminated with unknown effects. Every other observed mutation (unmatched commands that are not read-only, input
+//! written into a running session, applied or partially applied patches) advances the
 //! workspace generation.
 
 use std::collections::BTreeMap;
@@ -43,6 +43,7 @@ use codex_extension_api::ExtensionData;
 use codex_protocol::items::CommandExecutionItem;
 use codex_protocol::items::CommandExecutionStatus;
 use codex_protocol::items::TurnItem;
+use codex_protocol::parse_command::ParsedCommand;
 use codex_protocol::protocol::ExecCommandSource;
 use codex_protocol::protocol::PatchApplyStatus;
 use codex_stateful_runtime::AcceptanceCriterion;
@@ -336,11 +337,7 @@ async fn observe_command(
         | ExecCommandSource::UnifiedExecStartup
         | ExecCommandSource::UserShell => {}
     }
-    // One classification decides both the run's side effects and workspace invalidation:
-    // the host cannot attest what a command executes, so every executed command is an effect.
-    let executed = command.status != CommandExecutionStatus::Declined;
-    let effectful = executed;
-    if executed {
+    if command.status != CommandExecutionStatus::Declined {
         store
             .record_execution(run_id)
             .await
@@ -355,17 +352,10 @@ async fn observe_command(
         .get::<CheckStarts>()
         .and_then(|starts| starts.0.lock().ok()?.remove(&command.id));
     if matched.is_empty() {
-        if effectful {
+        if command.status != CommandExecutionStatus::Declined && mutates(command) {
             return bump(services, run_id).await;
         }
         return Ok(());
-    }
-    // A matched check's mutation accounting follows below; it is still a side effect.
-    if effectful {
-        store
-            .record_side_effect(run_id)
-            .await
-            .map_err(|error| error.to_string())?;
     }
     let output = command.aggregated_output.clone().unwrap_or_else(|| {
         format!(
@@ -521,21 +511,14 @@ pub(crate) fn check_directory(roots: &[String], check_cwd: Option<&str>) -> Opti
         .then_some(directory)
 }
 
-/// An observed workspace mutation: earlier evidence becomes stale, and the run has a side
-/// effect (it is no longer exempt as read-only).
 async fn bump(
     services: &ProjectIntelligenceServices,
     run_id: &StatefulRunId,
 ) -> Result<(), String> {
-    let store = services
+    services
         .runtime()
         .await
-        .map_err(|error| error.to_string())?;
-    store
-        .record_side_effect(run_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    store
+        .map_err(|error| error.to_string())?
         .bump_workspace_generation(run_id)
         .await
         .map_err(|error| error.to_string())
@@ -549,6 +532,16 @@ pub(crate) fn runs_check(argv: &[String], check: &str) -> bool {
         _ => None,
     };
     script == Some(check) || argv.join(" ") == check
+}
+
+/// A command whose parsed form is entirely reads, listings or searches does not change the
+/// workspace; anything else (including an unparsed command) is treated as a mutation.
+fn mutates(command: &CommandExecutionItem) -> bool {
+    command.parsed_cmd.is_empty()
+        || command
+            .parsed_cmd
+            .iter()
+            .any(|parsed| matches!(parsed, ParsedCommand::Unknown { .. }))
 }
 
 fn tail(output: &str) -> String {

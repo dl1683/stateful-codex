@@ -113,19 +113,13 @@ fn derived_retired_and_optional_overlaps_do_not_cover_user_text() {
 }
 
 #[test]
-fn only_a_fully_observed_effect_free_run_owes_no_coverage() {
-    // The read-only exemption rests on observed facts, not on the request's length.
+fn even_a_short_one_sentence_request_owes_coverage() {
+    // No request is exempt: a short in-chat request still needs a covering criterion.
     let goal = "Compute the totals for a, b and c and write a summary.";
-    assert_eq!(uncovered_sentences(goal, &ledger()), Vec::new());
-    let mut effected = ledger();
-    effected.side_effects = 1;
     assert_eq!(
-        quotes(goal, uncovered_sentences(goal, &effected)),
+        quotes(goal, uncovered_sentences(goal, &ledger())),
         vec![goal]
     );
-    let mut legacy = ledger();
-    legacy.observations_complete = false;
-    assert_eq!(quotes(goal, uncovered_sentences(goal, &legacy)), vec![goal]);
 }
 
 #[test]

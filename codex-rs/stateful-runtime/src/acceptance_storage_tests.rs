@@ -268,10 +268,6 @@ async fn every_generic_terminal_writer_refuses_a_new_completed() {
 #[tokio::test]
 async fn a_substantial_empty_ledger_cannot_complete_through_the_decision() {
     let (_home, _sqlite, store, id) = store_with_run(WorkflowMode::Autonomous).await;
-    store
-        .record_side_effect(&id)
-        .await
-        .expect("the run changed files");
     let error = complete(&store, &id, BTreeMap::new(), None)
         .await
         .expect_err("uncovered sentences gate");
@@ -403,10 +399,6 @@ async fn user_criteria_cannot_be_weakened_and_revisions_conflict() {
 #[tokio::test]
 async fn only_a_covering_user_criterion_dismisses_a_proposal() {
     let (_home, _sqlite, store, id) = store_with_run(WorkflowMode::Autonomous).await;
-    store
-        .record_side_effect(&id)
-        .await
-        .expect("the run changed files");
     let (ledger, remaining) = store.propose_uncovered(&id).await.expect("omission pass");
     assert_eq!((ledger.criteria.len(), remaining), (3, 0));
     // There is no quote-based waiver; a proposal does not cover another proposal.
@@ -483,10 +475,6 @@ async fn omission_overflow_persists_across_restart_and_blocks() {
         .collect::<Vec<_>>()
         .join(" ");
     let (_home, sqlite, store, id) = store_with_goal(&goal, WorkflowMode::Autonomous).await;
-    store
-        .record_side_effect(&id)
-        .await
-        .expect("the run wrote something");
     let (ledger, remaining) = store.propose_uncovered(&id).await.expect("first batch");
     assert_eq!((ledger.criteria.len(), remaining), (8, 3));
     store.pool.close().await;

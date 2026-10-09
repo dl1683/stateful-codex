@@ -545,8 +545,7 @@ async fn patches_and_reads_affect_the_generation_conservatively() {
     fixture
         .finish("read", "cat setup.py", &root, "completed", 0, "read")
         .await;
-    // The host cannot attest what a command executes: even a read is an effect.
-    assert_eq!(fixture.latest().await.1, 1);
+    assert_eq!(fixture.latest().await.1, 0);
     let patch = |status: PatchApplyStatus| {
         TurnItem::FileChange(FileChangeItem {
             id: "patch".to_string(),
@@ -564,7 +563,7 @@ async fn patches_and_reads_affect_the_generation_conservatively() {
         &patch(PatchApplyStatus::Declined),
     )
     .await;
-    assert_eq!(fixture.latest().await.1, 1);
+    assert_eq!(fixture.latest().await.1, 0);
     // A failed patch may have applied a prefix.
     observe_item(
         &fixture.services,
@@ -573,7 +572,7 @@ async fn patches_and_reads_affect_the_generation_conservatively() {
         &patch(PatchApplyStatus::Failed),
     )
     .await;
-    assert_eq!(fixture.latest().await.1, 2);
+    assert_eq!(fixture.latest().await.1, 1);
     let ledger = fixture
         .store
         .acceptance_ledger(&fixture.run_id)
@@ -749,10 +748,9 @@ async fn an_exited_command_is_closed_only_when_its_end_never_arrives() {
         std::time::Duration::from_millis(50),
     )
     .await;
-    // An accounted end is not closed again (the executed command is itself an effect).
     assert_eq!(
         (fixture.pending().await, fixture.latest().await),
-        (0, (Some(EvidenceOutcome::Passed), 1))
+        (0, (Some(EvidenceOutcome::Passed), 0))
     );
     // A sandbox denial emits no end item: closed as terminated with unknown effects.
     fixture.start("denied", "touch /etc/denied", &root).await;
@@ -765,8 +763,8 @@ async fn an_exited_command_is_closed_only_when_its_end_never_arrives() {
     .await;
     assert_eq!(
         (fixture.pending().await, fixture.latest().await),
-        (0, (Some(EvidenceOutcome::Passed), 2)),
-        "closing it advances the generation again"
+        (0, (Some(EvidenceOutcome::Passed), 1)),
+        "the earlier pass is stale"
     );
     // A live background process never reports an exit: it stays pending.
     fixture.start("background", "sleep 100", &root).await;

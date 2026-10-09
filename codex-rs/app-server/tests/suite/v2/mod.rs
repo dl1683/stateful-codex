@@ -143,7 +143,6 @@ mod stateful_compaction;
 mod stateful_completion;
 mod stateful_decisions;
 mod stateful_evidence_routes;
-mod stateful_exemption_tests;
 mod stateful_memory;
 mod stateful_memory_read;
 mod stateful_modes;

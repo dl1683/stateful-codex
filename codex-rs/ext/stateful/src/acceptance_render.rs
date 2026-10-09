@@ -46,24 +46,10 @@ impl AcceptanceView {
     pub(crate) fn ledger_lines(&self) -> Vec<String> {
         let ledger = &self.ledger;
         if ledger.criteria.is_empty() {
-            let line = if codex_stateful_runtime::read_only_exempt(ledger) {
-                format!(
-                    "Acceptance ledger: empty (revision {}); read-only so far, so the run may complete without criteria. Any file change, command the host cannot prove read-only, effectful tool (project-memory writes included) or declared criterion ends this: then record each requirement early with stateful_acceptance_update.",
-                    ledger.revision
-                )
-            } else {
-                format!(
-                    "Acceptance ledger: empty (revision {}); not read-only ({} side effects observed, workspace generation {}{}), so completion needs criteria covering the request, each settled by its admitted check: record them with stateful_acceptance_update.",
-                    ledger.revision,
-                    ledger.side_effects,
-                    ledger.workspace_generation,
-                    if ledger.observations_complete {
-                        ""
-                    } else {
-                        "; effects before observation began are unknown"
-                    }
-                )
-            };
+            let line = format!(
+                "Acceptance ledger: empty (revision {}). When work changes files or has several requirements, record each early with stateful_acceptance_update; a one-sentence lookup needs none.",
+                ledger.revision
+            );
             return vec![line];
         }
         // The packet judges with the gate's own policy, assuming the files are unchanged since
