@@ -26,6 +26,9 @@ pub struct ModelRequestInput<'a> {
     pub client_metadata: &'a mut Option<HashMap<String, String>>,
     /// Requested model identifier.
     pub model: &'a str,
+    /// Whether the request offers tools the provider executes itself (hosted web search or
+    /// server-side tool search). Their calls run before any response event reaches the host.
+    pub provider_executed_tools: bool,
 }
 
 /// Creates request-scoped interceptors without delaying inference.

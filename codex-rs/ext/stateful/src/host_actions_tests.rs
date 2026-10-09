@@ -87,6 +87,7 @@ fn fence(
         thread_id: THREAD_ID,
         client_metadata: &mut metadata,
         model: "test-model",
+        provider_executed_tools: false,
     })
     .expect("generation requests are fenced")
     .intercept(upstream)
