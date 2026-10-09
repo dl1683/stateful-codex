@@ -70,3 +70,15 @@ These follow the selection rules in the evaluation ledger's "External benchmark 
 - never Harvey LAB.
 
 The full candidate list and status are kept in the evaluation ledger.
+
+## Market study update (2026-10-08; `sc_dogfood/insights/MARKET_STUDY.md`, 500 classified benchmark failures)
+- Coding is on par with each model's published numbers (Luna, Gemini 3.7, DeepSeek), so the harness is not overfit to OpenAI on scores.
+- Largest weakness: premature completion on long, all-or-nothing work (TB4.0 8.6% vs 58% best; Harvey 0.86 per-criterion but 5.3% all-pass).
+- Memory leads on memory-native tasks (MemoryArena) but Luna under-captures and loses event time (LoCoMo 84 vs 93-95 for other models).
+
+**Ranked improvements (these refine priorities 2-4):**
+1. Evidence-bound completion (checkpoint E). Admitted doubts block `Completed`, and an independent check runs when most of the budget remains.
+2. Coverage ledger for document work, verified before completion.
+3. Capture done by the host (not left to the model) for exact facts and event time, plus abstaining when memory does not support an answer.
+4. A portable tool layer: provider-neutral web search, tolerant argument parsing, a relaxed provenance rule, a model capability registry.
+5. Deliverable-first pacing, and trimming bookkeeping on single-session tasks.
