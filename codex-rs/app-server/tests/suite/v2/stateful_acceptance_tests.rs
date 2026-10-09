@@ -346,6 +346,9 @@ fn commit_repository(root: &std::path::Path) -> Result<()> {
     std::fs::write(root.join("docs/guide.md"), "# Guide\n")?;
     std::fs::write(root.join("README.md"), "# Parser\n")?;
     std::fs::write(root.join(".gitignore"), "build/\n")?;
+    // Ordinary files whose names mimic repository-state keys cannot mask repository state.
+    std::fs::write(root.join(".git#HEAD"), "ordinary\n")?;
+    std::fs::write(root.join(".git#index"), "ordinary\n")?;
     for arguments in [
         &["init", "--quiet"][..],
         &["add", "."][..],
@@ -395,17 +398,27 @@ async fn autonomous_run_completes_in_a_repository_with_unpinned_files() -> Resul
     Ok(())
 }
 
-/// A check that rewrites a tracked unpinned file, or creates an untracked one, is refused.
+/// A check that rewrites a tracked unpinned file, creates an untracked one, commits, or
+/// changes only the staged index is refused.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_check_that_changes_unpinned_repository_files_is_refused() -> Result<()> {
     for (checker, case) in [
         ("test -f out.txt && echo checked >> README.md\n", "tracked"),
         ("test -f out.txt && echo checked > check.log\n", "untracked"),
+        (
+            "test -f out.txt && git -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m checked\n",
+            "empty commit",
+        ),
+        (
+            "test -f out.txt && git rm -q --cached docs/guide.md\n",
+            "index only",
+        ),
     ] {
         let mut harness = harness_for(
             StatefulWorkflowMode::Autonomous,
-            "workspace-write",
+            // The checker writes the repository itself, which the workspace sandbox protects.
+            "danger-full-access",
             GOAL,
             &[("verify.sh", checker)],
         )
