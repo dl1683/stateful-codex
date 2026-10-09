@@ -154,6 +154,11 @@ impl Hooks {
         self.engine.command_runtime.shutdown().await;
     }
 
+    /// Whether any configured hook (lifecycle handler or legacy notify) could run.
+    pub fn has_configured_hooks(&self) -> bool {
+        !self.after_agent.is_empty() || !self.engine.handlers.is_empty()
+    }
+
     pub fn startup_warnings(&self) -> &[String] {
         self.engine.warnings()
     }

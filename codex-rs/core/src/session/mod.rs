@@ -2077,6 +2077,9 @@ impl Session {
         ) && state.active_disabled_plugin_ids == disabled_plugin_ids
         {
             let hooks = self.hooks().reconfigured(hooks_config);
+            if hooks.has_configured_hooks() {
+                codex_extension_api::record_host_hooks_configured();
+            }
             self.services.hooks.store(Arc::new(hooks));
         }
     }

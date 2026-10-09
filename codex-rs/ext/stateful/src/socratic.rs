@@ -2,6 +2,7 @@ use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ToolPolicyContributor;
 use codex_extension_api::ToolPolicyDecision;
 use codex_extension_api::ToolPolicyInput;
+use codex_extension_api::UserShellPolicyInput;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 
@@ -46,6 +47,32 @@ impl ToolPolicyContributor for StatefulExtension {
                     "tool {} is blocked while Socratic run {} is pending; ask and synthesize first, then wait for the user to explicitly resume the run",
                     input.tool_name, run.id
                 ),
+            }
+        })
+    }
+
+    /// A user shell command is an action of the thread's open runs: it is recorded before it
+    /// is spawned, and refused when the record cannot be written.
+    fn evaluate_user_shell<'a>(
+        &'a self,
+        input: UserShellPolicyInput<'a>,
+    ) -> ExtensionFuture<'a, ToolPolicyDecision> {
+        Box::pin(async move {
+            let (Some(_), Some(services)) = (
+                input.thread_store.get::<SelectedProject>(),
+                self.services.as_ref(),
+            ) else {
+                return ToolPolicyDecision::Allow;
+            };
+            match crate::host_actions::record_user_shell(services, &input.thread_id.to_string())
+                .await
+            {
+                Ok(()) => ToolPolicyDecision::Allow,
+                Err(error) => ToolPolicyDecision::Block {
+                    reason: format!(
+                        "the shell command was not run: the host could not durably record it against this thread's Stateful run first ({error})"
+                    ),
+                },
             }
         })
     }

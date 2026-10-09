@@ -34,6 +34,8 @@ use crate::acceptance_render::completion_basis;
 use crate::tools::bounded_json_output;
 use crate::tools::respond;
 
+/// The basis of a completion under the no-tool exemption.
+const NO_TOOL_BASIS: &str = "no-tool exemption: the host recorded no tool call, command, hook or other action in this run, so it completed without acceptance criteria; the text answer is judged by the user, not host-verified";
 /// Lease of one completion verification attempt (artifact reads are bounded to seconds).
 const VERIFICATION_LEASE_MS: u32 = 120_000;
 /// How long completion waits for pending commands to be accounted before refusing.
@@ -67,6 +69,14 @@ impl StatefulRunUpdateTool {
         validated_obligation_sequence: Option<u64>,
     ) -> Result<AcceptanceDecision, FunctionCallError> {
         let runtime = self.services.runtime().await.map_err(respond)?;
+        // Lifecycle hooks run commands around calls and turns outside any tool call; where
+        // they could have run, this run is not action-free.
+        if codex_extension_api::host_hooks_configured() {
+            runtime
+                .record_host_action(&current.id)
+                .await
+                .map_err(respond)?;
+        }
         // Command end events are delivered asynchronously; give commands that already exited a
         // bounded moment to have their effects accounted before judging.
         let settle_deadline = std::time::Instant::now() + PENDING_SETTLE_WAIT;
@@ -173,10 +183,11 @@ impl StatefulRunUpdateTool {
             ));
         }
         if unmet.is_empty() {
-            return Ok(AcceptanceDecision::Proceed {
-                basis: completion_basis(&ledger, &verdicts),
-                commit,
-            });
+            let mut basis = completion_basis(&ledger, &verdicts);
+            if codex_stateful_runtime::no_tool_exempt(&ledger) {
+                basis.push(NO_TOOL_BASIS.to_string());
+            }
+            return Ok(AcceptanceDecision::Proceed { basis, commit });
         }
         let gates = gate_list(&unmet);
         runtime

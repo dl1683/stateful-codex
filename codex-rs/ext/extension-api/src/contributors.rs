@@ -59,6 +59,7 @@ pub use tool_lifecycle::ToolTimingInput;
 pub use tool_policy::ToolPolicyContributor;
 pub use tool_policy::ToolPolicyDecision;
 pub use tool_policy::ToolPolicyInput;
+pub use tool_policy::UserShellPolicyInput;
 pub use turn_input::TurnInputContext;
 pub use turn_input::TurnInputEnvironment;
 pub use turn_lifecycle::TurnAbortInput;

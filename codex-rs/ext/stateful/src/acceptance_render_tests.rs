@@ -98,6 +98,9 @@ fn ledger(revision: u64, generation: u64, criteria: Vec<AcceptanceCriterion>) ->
         workspace_generation: generation,
         observed_executions: 0,
         pending_commands: 0,
+        host_actions: 0,
+        observed_by_this_process: true,
+        no_tool_exemption: false,
         reconciled_steering: Vec::new(),
         stalled_completions: 0,
         verification_attempt: 0,
@@ -214,4 +217,26 @@ fn the_settled_count_uses_the_gate_policy() {
         header(observed(AcceptanceOrigin::Derived, Some("sha256:out")))
             .contains("1 of 1 criteria settled")
     );
+}
+
+#[test]
+fn an_empty_ledger_renders_the_actual_exemption_status() {
+    let exempt = AcceptanceView::new(&run(0), ledger(0, 0, Vec::new()), 0).ledger_lines();
+    assert!(
+        exempt[0].contains(
+            "This run has made no tool call: a pure text answer may complete without criteria"
+        ),
+        "{exempt:?}"
+    );
+    let mut acted = ledger(0, 0, Vec::new());
+    acted.host_actions = 1;
+    let mut unobserved = ledger(0, 0, Vec::new());
+    unobserved.observed_by_this_process = false;
+    for ledger in [acted, unobserved] {
+        let owed = AcceptanceView::new(&run(0), ledger, 0).ledger_lines();
+        assert!(
+            owed[0].contains("This run made a tool call or was not observed from its start, so completion needs criteria"),
+            "{owed:?}"
+        );
+    }
 }

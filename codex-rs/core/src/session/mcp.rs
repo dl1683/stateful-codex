@@ -492,6 +492,10 @@ impl Session {
             // Root selection is unchanged, but recovered manifests can change MCP servers.
             self.mark_mcp_runtime_dirty();
         }
+        // Executor plugins can contribute hooks for this step; record that before any runs.
+        if !discovery.roots().is_empty() {
+            codex_extension_api::record_host_hooks_configured();
+        }
         Some(Arc::new(discovery))
     }
 

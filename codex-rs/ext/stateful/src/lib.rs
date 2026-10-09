@@ -17,6 +17,7 @@ mod continuity;
 mod continuity_source;
 mod conversation_summaries;
 mod events;
+mod host_actions;
 mod limits;
 mod memory_add;
 mod memory_controls;
@@ -635,9 +636,15 @@ pub fn install<C: Sync>(
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     autonomous: Option<AutonomousContinuation>,
 ) {
+    let services = sqlite.map(ProjectIntelligenceServices::new);
+    if let Some(services) = &services {
+        registry.model_request_contributor(Arc::new(host_actions::HostActionObserver {
+            services: services.clone(),
+        }));
+    }
     let extension = Arc::new(StatefulExtension {
         projects,
-        services: sqlite.map(ProjectIntelligenceServices::new),
+        services,
         event_sink,
         autonomous,
         attribution: attribution::StatefulAttributionTracker::default(),

@@ -46,10 +46,17 @@ impl AcceptanceView {
     pub(crate) fn ledger_lines(&self) -> Vec<String> {
         let ledger = &self.ledger;
         if ledger.criteria.is_empty() {
-            let line = format!(
-                "Acceptance ledger: empty (revision {}). When work changes files or has several requirements, record each early with stateful_acceptance_update; a one-sentence lookup needs none.",
-                ledger.revision
-            );
+            let line = if codex_stateful_runtime::no_tool_exempt(ledger) {
+                format!(
+                    "Acceptance ledger: empty (revision {}). This run has made no tool call: a pure text answer may complete without criteria, with the completion call as its only call. Any other tool call (command, file read or edit, MCP, plan or Stateful update) brings the ledger back: then record each requirement early with stateful_acceptance_update.",
+                    ledger.revision
+                )
+            } else {
+                format!(
+                    "Acceptance ledger: empty (revision {}). This run made a tool call or was not observed from its start, so completion needs criteria covering the request, each settled by its admitted check: record them early with stateful_acceptance_update.",
+                    ledger.revision
+                )
+            };
             return vec![line];
         }
         // The packet judges with the gate's own policy, assuming the files are unchanged since

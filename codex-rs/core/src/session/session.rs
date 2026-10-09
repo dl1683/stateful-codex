@@ -1628,6 +1628,9 @@ impl Session {
                     thread_id,
                 }),
             )?;
+            if hooks.has_configured_hooks() {
+                codex_extension_api::record_host_hooks_configured();
+            }
             for warning in hooks.startup_warnings() {
                 post_session_configured_events.push(Event {
                     id: INITIAL_SUBMIT_ID.to_owned(),

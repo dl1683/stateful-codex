@@ -12,6 +12,7 @@ use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -116,19 +117,25 @@ async fn stored_run(fixture: &Fixture) -> StatefulRun {
 }
 
 #[tokio::test]
-async fn a_criterion_free_lookup_completion_is_refused() {
+async fn a_no_tool_lookup_completion_persists_once_without_an_obligation() {
     let fixture = fixture().await;
-    // No request is exempt from acceptance: without a covering criterion and a current
-    // receipt of its admitted check plan, the run stays running and nothing is persisted.
-    let refused = fixture
+    // The host recorded no action of the run before this lone completion call, so the lookup
+    // completes under the no-tool exemption and says so in its result.
+    fixture
         .tool
         .handle_guided(call(&lookup_completion(fixture.run.revision)))
-        .await;
-    let Err(FunctionCallError::RespondToModel(message)) = refused else {
-        panic!("a criterion-free completion must be refused");
-    };
-    assert!(message.contains("completion refused"), "{message}");
-    assert_eq!(stored_run(&fixture).await, fixture.run);
+        .await
+        .expect("lookup completion succeeds");
+    let completed = stored_run(&fixture).await;
+    assert_eq!(completed.status, StatefulRunStatus::Completed);
+    assert!(
+        completed
+            .result
+            .as_deref()
+            .is_some_and(|result| result.starts_with(RESULT)
+                && result.contains("no-tool exemption: the host recorded no tool call")),
+        "{completed:?}"
+    );
     let obligations = fixture
         .services
         .runtime()
@@ -142,6 +149,33 @@ async fn a_criterion_free_lookup_completion_is_refused() {
         .await
         .expect("obligations list");
     assert_eq!(obligations, Vec::new());
+    let repeated = fixture
+        .tool
+        .handle_guided(call(&lookup_completion(completed.revision)))
+        .await;
+    assert!(matches!(
+        repeated,
+        Err(FunctionCallError::RespondToModel(_))
+    ));
+    assert_eq!(stored_run(&fixture).await, completed);
+}
+
+/// Hooks configured in this process could have run around the run's turns and calls (the
+/// completion call included), so the lone completion owes the ledger. Nextest runs each test
+/// in its own process, so the sticky process fact does not leak into other tests.
+#[tokio::test]
+async fn a_completion_where_hooks_were_configured_owes_the_ledger() {
+    let fixture = fixture().await;
+    codex_extension_api::record_host_hooks_configured();
+    let refused = fixture
+        .tool
+        .handle_guided(call(&lookup_completion(fixture.run.revision)))
+        .await;
+    let Err(FunctionCallError::RespondToModel(message)) = refused else {
+        panic!("a completion where hooks could run must be refused");
+    };
+    assert!(message.contains("completion refused"), "{message}");
+    assert_eq!(stored_run(&fixture).await, fixture.run);
 }
 
 #[tokio::test]
