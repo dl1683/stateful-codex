@@ -1,58 +1,30 @@
-//! Host classification of observed actions for the read-only exemption. Only what the host can
-//! prove has no effect counts as read-only: a single plain invocation of a small allowlist of
-//! programs that cannot write, run other programs, read effect-capable configuration or
-//! interpret callbacks (no shell operators, redirection, expansion or substitution), and tools
-//! that only read or keep the run's own bookkeeping. Everything else, unknown included, is a
-//! side effect; one classification serves both effect recording and workspace invalidation.
+//! Host classification of actions for the read-only exemption. The host cannot attest what a
+//! command executes (program resolution, shell startup, functions and environment are outside
+//! its control, and no per-command read-only sandbox policy is recorded), so every executed
+//! command is an effect: only runs without commands can be exempt. A tool call is effect-free
+//! only when it is one of the host's own reading or run-bookkeeping tools; every other tool,
+//! unknown, namespaced and command tools included, is an effect.
+//!
+//! An effect-capable tool's effect is recorded durably as an intent before the tool is allowed
+//! to run (see `record_effect_intent`); if the intent cannot be recorded the call is blocked,
+//! so no tool action can go unaccounted.
 
+use codex_extension_api::ExtensionData;
 use codex_extension_api::ToolName;
-use codex_protocol::items::CommandExecutionItem;
 
-/// Shell flags whose next (final) argument is the script the model asked to run.
-const SCRIPT_FLAGS: &[&str] = &["-c", "-lc", "-Command", "-command", "/c", "/C"];
+use crate::acceptance_observation::TurnRunBinding;
+use crate::services::ProjectIntelligenceServices;
 
-/// Programs that only read and have no option that writes a file or runs another program,
-/// reads configuration that could, or interprets a callback (so no `git`, `rg`, `find`,
-/// `diff`, `sed` or `awk`).
-const READ_ONLY_PROGRAMS: &[&str] = &[
-    "basename",
-    "cat",
-    "cmp",
-    "cut",
-    "df",
-    "dirname",
-    "du",
-    "echo",
-    "grep",
-    "head",
-    "ls",
-    "md5sum",
-    "nl",
-    "pwd",
-    "readlink",
-    "realpath",
-    "sha256sum",
-    "stat",
-    "tail",
-    "true",
-    "uname",
-    "wc",
-    "whoami",
-];
-
-/// Tools that only read, or that keep the run's own bookkeeping (its obligations, steering
-/// and acceptance records). Project-memory writers and index refreshes are effects. Commands
-/// and patches are classified from their observed items instead.
+/// The host's own tools that only read, or that keep the run's own bookkeeping (its
+/// obligations, steering and acceptance records). Project-memory writers, index refreshes and
+/// MCP calls are effects.
 const READ_ONLY_TOOLS: &[&str] = &[
     "blackboard_query",
     "context_map_query",
     "conversation_read",
     "evidence_read",
-    "list_mcp_resource_templates",
-    "list_mcp_resources",
     "memory_read",
     "obligation_update",
-    "read_mcp_resource",
     "request_user_input",
     "stateful_acceptance_update",
     "stateful_run_read",
@@ -62,79 +34,33 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "tool_search",
     "update_plan",
     "view_image",
-    "web_search",
 ];
 
-/// Command tools whose effects are classified from the command items they produce (an
-/// execution that never produces an item is closed as a side effect).
-const COMMAND_TOOLS: &[&str] = &["exec_command", "shell", "shell_command", "local_shell"];
-
-/// Whether a finished command is proven read-only.
-pub(crate) fn proven_read_only(command: &CommandExecutionItem) -> bool {
-    let script = match command.command.as_slice() {
-        [.., flag, script] if SCRIPT_FLAGS.contains(&flag.as_str()) => script.clone(),
-        argv => argv.join(" "),
-    };
-    read_only_script(&script)
-}
-
-/// Whether a script is one plain invocation of a read-only program.
-pub(crate) fn read_only_script(script: &str) -> bool {
-    // No operators, redirection, expansion, substitution, escapes or line breaks anywhere,
-    // quoted or not.
-    if script
-        .chars()
-        .any(|character| ";&|<>$`(){}\\!\n\r#~".contains(character))
-    {
-        return false;
-    }
-    let Some(argv) = split_words(script) else {
-        return false;
-    };
-    argv.first()
-        .is_some_and(|program| READ_ONLY_PROGRAMS.contains(&program.as_str()))
-}
-
-/// Splits on whitespace, honoring single and double quotes; `None` for an unterminated quote.
-fn split_words(script: &str) -> Option<Vec<String>> {
-    let mut words = Vec::new();
-    let mut current = String::new();
-    let mut in_word = false;
-    let mut quote = None;
-    for character in script.chars() {
-        match (quote, character) {
-            (Some(open), character) if character == open => quote = None,
-            (Some(_), character) => current.push(character),
-            (None, '\'' | '"') => {
-                quote = Some(character);
-                in_word = true;
-            }
-            (None, character) if character.is_whitespace() => {
-                if in_word {
-                    words.push(std::mem::take(&mut current));
-                    in_word = false;
-                }
-            }
-            (None, character) => {
-                current.push(character);
-                in_word = true;
-            }
-        }
-    }
-    if quote.is_some() {
-        return None;
-    }
-    if in_word {
-        words.push(current);
-    }
-    Some(words)
-}
-
-/// Whether a finished tool call may have had effects outside the run's own bookkeeping.
+/// Whether a tool call may have effects outside the run's own bookkeeping.
 pub(crate) fn tool_has_effects(tool_name: &ToolName) -> bool {
-    !(tool_name.is_default_namespace()
-        && (READ_ONLY_TOOLS.contains(&tool_name.name.as_str())
-            || COMMAND_TOOLS.contains(&tool_name.name.as_str())))
+    !(tool_name.is_default_namespace() && READ_ONLY_TOOLS.contains(&tool_name.name.as_str()))
+}
+
+/// Before an effect-capable tool runs, durably records its (possible) effect against the run
+/// of the turn. An error means the intent is not durable, and the caller must block the call.
+pub(crate) async fn record_effect_intent(
+    services: &ProjectIntelligenceServices,
+    turn_store: &ExtensionData,
+    tool_name: &ToolName,
+) -> Result<(), String> {
+    if !tool_has_effects(tool_name) {
+        return Ok(());
+    }
+    let Some(binding) = turn_store.get::<TurnRunBinding>() else {
+        return Ok(());
+    };
+    services
+        .runtime()
+        .await
+        .map_err(|error| error.to_string())?
+        .record_side_effect(&binding.run_id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

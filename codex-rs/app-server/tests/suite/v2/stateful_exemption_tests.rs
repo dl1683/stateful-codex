@@ -1,7 +1,7 @@
-//! The host-decided read-only exemption through the public API: an effect-free answer
-//! completes without an acceptance ledger; any observed effect, unproven command, effectful
-//! tool or declared criterion brings the ledger back, whatever the model claims. The request's
-//! wording is no authority either way.
+//! The host-decided read-only exemption through the public API: an answer given without any
+//! command or effectful tool completes without an acceptance ledger; any executed command
+//! (the host cannot attest what it runs), effectful tool or declared criterion brings the
+//! ledger back, whatever the model claims. The request's wording is no authority either way.
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
@@ -183,6 +183,10 @@ impl Harness {
     }
 
     async fn status(&mut self) -> Result<StatefulRunStatus> {
+        Ok(self.read().await?.status)
+    }
+
+    async fn read(&mut self) -> Result<StatefulRun> {
         let run_id = self.run.id.clone();
         let read: StatefulRunReadResponse = self
             .server
@@ -194,20 +198,22 @@ impl Harness {
                 },
             })
             .await?;
-        Ok(read.run.expect("run remains readable").status)
+        Ok(read.run.expect("run remains readable"))
     }
 }
 
-/// A lookup that only reads (an allowlisted read-only command) completes without a ledger.
-#[cfg(not(target_os = "windows"))]
+/// A lookup answered with reading and bookkeeping tools only completes without a ledger.
 #[tokio::test]
 async fn a_read_only_lookup_completes_without_a_ledger() -> Result<()> {
     let mut harness = harness(LOOKUP, "read-only").await?;
-    let root = harness.project_root.path().to_path_buf();
     let revision = harness.run.revision;
     let outputs = harness
         .turn(vec![
-            exec("read", "cat README.md", &root),
+            call(
+                "plan",
+                "update_plan",
+                json!({"plan": [{"step": "Answer from the README", "status": "completed"}]}),
+            ),
             complete("complete", revision, &[], "It turns tokens into an AST."),
             message("done", "It turns tokens into an AST."),
         ])
@@ -246,16 +252,17 @@ async fn a_file_write_brings_the_ledger_back_whatever_the_model_claims() -> Resu
     Ok(())
 }
 
-/// A command the host cannot prove read-only ends the exemption even if it wrote nothing.
+/// Any executed command ends the exemption, even a plain read under the read-only sandbox:
+/// the host cannot attest what a command name resolves to or what the shell runs first.
 #[cfg(not(target_os = "windows"))]
 #[tokio::test]
-async fn an_unknown_command_is_not_exempt() -> Result<()> {
+async fn any_command_ends_the_exemption() -> Result<()> {
     let mut harness = harness(LOOKUP, "read-only").await?;
     let root = harness.project_root.path().to_path_buf();
     let revision = harness.run.revision;
     let outputs = harness
         .turn(vec![
-            exec("unknown", "python3 --version", &root),
+            exec("read", "cat README.md", &root),
             complete("complete", revision, &[], "It turns tokens into an AST."),
             message("done", "Refused."),
         ])
@@ -466,6 +473,21 @@ async fn open_issues_still_block_an_exempt_run() -> Result<()> {
             message("done", "Blocked."),
         ])
         .await?;
-    assert_ne!(harness.status().await?, StatefulRunStatus::Completed);
+    let run = harness.read().await?;
+    assert_eq!(run.status, StatefulRunStatus::Blocked);
+    let result = run.result.unwrap_or_default();
+    assert!(
+        result.starts_with("Partial result: the completion declared unresolved issues"),
+        "{result}"
+    );
+    assert!(
+        result.contains("- The vendor has not confirmed the API."),
+        "{result}"
+    );
+    assert!(
+        result
+            .contains("Submitted result (not accepted as complete): It turns tokens into an AST."),
+        "{result}"
+    );
     Ok(())
 }

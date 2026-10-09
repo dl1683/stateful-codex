@@ -1,54 +1,9 @@
 use codex_extension_api::ToolName;
 
-use super::read_only_script;
 use super::tool_has_effects;
 
 #[test]
-fn only_plain_allowlisted_reads_are_read_only() {
-    for script in [
-        "cat README.md",
-        "ls -la src",
-        "grep -rn \"fn main\" src",
-        "head -n 20 src/lib.rs",
-        "wc -l src/lib.rs",
-    ] {
-        assert!(read_only_script(script), "{script}");
-    }
-    for script in [
-        "echo x > notes.txt",
-        "cat a >> b",
-        "ls; rm -rf build",
-        "cat a | tee b",
-        "rg 'TODO|FIXME' src",
-        "cat $(ls)",
-        "grep -r foo . && touch done",
-        "rm notes.txt",
-        "python3 -c print",
-        "make",
-        "sed -i s/a/b/ file",
-        "git commit -m wip",
-        "git status",
-        "git grep --open=./mutator Codex README.md",
-        "git log --oneline -5",
-        "rg TODO src",
-        "find . -name '*.py'",
-        "diff a b",
-        "git -C repo status",
-        "git diff --output=patch.txt",
-        "rg --pre ./decode foo",
-        "find . -delete",
-        "find . -exec rm {} ;",
-        "/bin/cat README.md",
-        "cat 'unterminated",
-        "Get-Content README.md",
-        "",
-    ] {
-        assert!(!read_only_script(script), "{script}");
-    }
-}
-
-#[test]
-fn only_reading_and_bookkeeping_tools_have_no_effects() {
+fn only_the_hosts_reading_and_bookkeeping_tools_have_no_effects() {
     for name in [
         "update_plan",
         "view_image",
@@ -56,11 +11,12 @@ fn only_reading_and_bookkeeping_tools_have_no_effects() {
         "obligation_update",
         "steering_reconcile",
         "blackboard_query",
-        "exec_command",
     ] {
         assert!(!tool_has_effects(&ToolName::plain(name)), "{name}");
     }
     for name in [
+        "exec_command",
+        "shell",
         "apply_patch",
         "write_stdin",
         "spawn_agent",
@@ -70,6 +26,7 @@ fn only_reading_and_bookkeeping_tools_have_no_effects() {
         "blackboard_update_batch",
         "blackboard_relate",
         "context_map_refresh",
+        "read_mcp_resource",
     ] {
         assert!(tool_has_effects(&ToolName::plain(name)), "{name}");
     }

@@ -20,9 +20,9 @@
 //! `acceptance_workspace`); when a file no active criterion pins changed (or the identity is
 //! unavailable), or another change was observed while the check ran, its own receipt cannot
 //! qualify and every receipt made before or during it becomes stale. A command that returned with no live process and whose end item
-//! never arrives is closed as terminated with unknown effects. Every other observed mutation (unmatched commands the host
-//! cannot prove read-only, input written into a running session, applied or partially applied
-//! patches) advances the workspace generation.
+//! never arrives is closed as terminated with unknown effects. Every other observed mutation (every other executed command,
+//! input written into a running session, applied or partially applied patches) advances the
+//! workspace generation.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -337,9 +337,9 @@ async fn observe_command(
         | ExecCommandSource::UserShell => {}
     }
     // One classification decides both the run's side effects and workspace invalidation:
-    // only a command the host proves read-only has no effect.
+    // the host cannot attest what a command executes, so every executed command is an effect.
     let executed = command.status != CommandExecutionStatus::Declined;
-    let effectful = executed && !crate::acceptance_effects::proven_read_only(command);
+    let effectful = executed;
     if executed {
         store
             .record_execution(run_id)

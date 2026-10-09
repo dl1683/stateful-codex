@@ -14,6 +14,23 @@ impl ToolPolicyContributor for StatefulExtension {
         input: ToolPolicyInput<'a>,
     ) -> ExtensionFuture<'a, ToolPolicyDecision> {
         Box::pin(async move {
+            // An effect-capable tool runs only once its effect is durably recorded against the
+            // run, so no tool action can escape the read-only exemption's accounting.
+            if let Some(services) = self.services.as_ref()
+                && let Err(error) = crate::acceptance_effects::record_effect_intent(
+                    services,
+                    input.turn_store,
+                    input.tool_name,
+                )
+                .await
+            {
+                return ToolPolicyDecision::Block {
+                    reason: format!(
+                        "tool {} is blocked because the host could not durably record its possible effects ({error}); retry the call",
+                        input.tool_name
+                    ),
+                };
+            }
             let (Some(selected), Some(services)) = (
                 input.thread_store.get::<SelectedProject>(),
                 self.services.as_ref(),

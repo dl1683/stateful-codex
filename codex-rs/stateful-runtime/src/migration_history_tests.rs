@@ -215,6 +215,10 @@ async fn a_run_that_began_before_effect_observation_is_not_exempt() {
         .execute(&pool)
         .await
         .unwrap();
+    sqlx::query("INSERT INTO stateful_run_threads VALUES ('legacy', 0, 'thread')")
+        .execute(&pool)
+        .await
+        .unwrap();
     pool.close().await;
     let store = StatefulRunStore::open(&sqlite).await.unwrap();
     let legacy = crate::StatefulRunId::parse("legacy").unwrap();
@@ -241,4 +245,51 @@ async fn a_run_that_began_before_effect_observation_is_not_exempt() {
     assert!(crate::read_only_exempt(
         &store.acceptance_ledger(&fresh).await.unwrap()
     ));
+    // Completion itself: the legacy run owes acceptance, the fresh one completes.
+    let attempt = |id: crate::StatefulRunId| {
+        let store = &store;
+        async move {
+            let run = store.get_run(&id).await.unwrap().unwrap();
+            let attempt = store
+                .begin_verification(&id, "owner", 60_000)
+                .await
+                .unwrap();
+            let ledger = store.acceptance_ledger(&id).await.unwrap();
+            store
+                .complete_run_with_acceptance(
+                    &id,
+                    crate::StatefulRunUpdate {
+                        expected_revision: run.revision,
+                        status: crate::StatefulRunStatus::Completed,
+                        strategy: None,
+                        result: Some("Done.".to_string()),
+                    },
+                    &crate::AcceptanceCommit {
+                        ledger_revision: ledger.revision,
+                        workspace_generation: ledger.workspace_generation,
+                        artifacts: std::collections::BTreeMap::new(),
+                        checkers: std::collections::BTreeMap::new(),
+                        verification: crate::VerificationClaim {
+                            owner: "owner".to_string(),
+                            attempt,
+                        },
+                        validated_obligation_sequence: None,
+                    },
+                    None,
+                )
+                .await
+                .map(|(run, _)| run.status)
+        }
+    };
+    let refused = attempt(legacy)
+        .await
+        .expect_err("legacy run owes acceptance");
+    assert!(
+        refused.to_string().contains("covered by no criterion"),
+        "{refused}"
+    );
+    assert_eq!(
+        attempt(fresh).await.unwrap(),
+        crate::StatefulRunStatus::Completed
+    );
 }
