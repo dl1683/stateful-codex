@@ -359,6 +359,13 @@ async fn observe_command(
             .record_execution(run_id)
             .await
             .map_err(|error| error.to_string())?;
+        // Only a command the host proves read-only keeps the run exempt.
+        if !crate::acceptance_effects::proven_read_only(command) {
+            store
+                .record_side_effect(run_id)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
     }
     let ledger = store
         .acceptance_ledger(run_id)
@@ -619,14 +626,21 @@ pub(crate) fn check_directory(roots: &[String], check_cwd: Option<&str>) -> Opti
         .then_some(directory)
 }
 
+/// An observed workspace mutation: earlier evidence becomes stale, and the run has a side
+/// effect (it is no longer exempt as read-only).
 async fn bump(
     services: &ProjectIntelligenceServices,
     run_id: &StatefulRunId,
 ) -> Result<(), String> {
-    services
+    let store = services
         .runtime()
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    store
+        .record_side_effect(run_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    store
         .bump_workspace_generation(run_id)
         .await
         .map_err(|error| error.to_string())

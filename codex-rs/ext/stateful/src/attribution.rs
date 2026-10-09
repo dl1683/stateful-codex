@@ -348,6 +348,27 @@ impl ToolLifecycleContributor for StatefulExtension {
                 )
                 .await;
             }
+            // A tool that may act outside the run's own bookkeeping ends the read-only
+            // exemption, unless the host proved it never ran.
+            if crate::acceptance_effects::tool_has_effects(input.tool_name)
+                && !matches!(
+                    input.outcome,
+                    ToolCallOutcome::Blocked
+                        | ToolCallOutcome::Failed {
+                            handler_executed: false
+                        }
+                )
+                && let (Some(binding), Some(services)) = (
+                    input
+                        .turn_store
+                        .get::<crate::acceptance_observation::TurnRunBinding>(),
+                    self.services.as_ref(),
+                )
+                && let Ok(store) = services.runtime().await
+                && let Err(error) = store.record_side_effect(&binding.run_id).await
+            {
+                tracing::warn!(run_id = %binding.run_id, %error, "failed to record a side effect");
+            }
             if let Some(thread) = input.thread_store.get::<SelectedThread>() {
                 self.run_activity.for_thread(&thread.thread_id).record(
                     matches!(input.source, ToolCallSource::Direct),

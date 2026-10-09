@@ -241,6 +241,12 @@ pub struct AcceptanceLedger {
     pub stalled_completions: u32,
     /// Commands started for this run whose effects are not accounted for yet.
     pub pending_commands: u64,
+    /// Side-effecting actions the host observed for this run: file changes, commands it
+    /// cannot prove read-only, tool calls with possible external effects, commands closed
+    /// with unknown effects. Any one ends the read-only exemption.
+    pub side_effects: u64,
+    /// Set when the terminal transaction completed the run under the read-only exemption.
+    pub read_only_exemption: bool,
     /// Applied steering instructions this ledger has reconciled, with the agent's reason.
     pub reconciled_steering: Vec<SteeringReconciliation>,
     /// Completion verification attempts started for this run.
@@ -259,6 +265,8 @@ impl AcceptanceLedger {
             observed_executions: 0,
             stalled_completions: 0,
             pending_commands: 0,
+            side_effects: 0,
+            read_only_exemption: false,
             reconciled_steering: Vec::new(),
             verification_attempt: 0,
             verification_lease_expires_at_ms: None,

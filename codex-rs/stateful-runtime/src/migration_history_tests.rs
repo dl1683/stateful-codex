@@ -16,7 +16,7 @@ use super::StatefulRunStore;
 
 #[tokio::test]
 async fn migration_history_runtime_common_prefix_reopens_with_integrity() {
-    for version in [0, 3, 4, 10] {
+    for version in [0, 3, 4, 10, 11] {
         let home = TempDir::new().unwrap();
         let sqlite = SqliteConfig::new_for_testing(home.path().abs());
         if version > 0 {

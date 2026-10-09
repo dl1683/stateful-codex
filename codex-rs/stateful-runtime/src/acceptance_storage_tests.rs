@@ -475,6 +475,10 @@ async fn omission_overflow_persists_across_restart_and_blocks() {
         .collect::<Vec<_>>()
         .join(" ");
     let (_home, sqlite, store, id) = store_with_goal(&goal, WorkflowMode::Autonomous).await;
+    store
+        .record_side_effect(&id)
+        .await
+        .expect("the run wrote something");
     let (ledger, remaining) = store.propose_uncovered(&id).await.expect("first batch");
     assert_eq!((ledger.criteria.len(), remaining), (8, 3));
     store.pool.close().await;

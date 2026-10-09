@@ -98,6 +98,8 @@ fn ledger(revision: u64, generation: u64, criteria: Vec<AcceptanceCriterion>) ->
         workspace_generation: generation,
         observed_executions: 0,
         pending_commands: 0,
+        side_effects: 0,
+        read_only_exemption: false,
         reconciled_steering: Vec::new(),
         stalled_completions: 0,
         verification_attempt: 0,

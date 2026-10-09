@@ -12,6 +12,7 @@ use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -116,19 +117,18 @@ async fn stored_run(fixture: &Fixture) -> StatefulRun {
 }
 
 #[tokio::test]
-async fn a_criterion_free_lookup_completion_is_refused() {
+async fn a_read_only_lookup_completion_persists_once_without_an_obligation() {
     let fixture = fixture().await;
-    // No request is exempt from acceptance: without a covering criterion and a current
-    // receipt of its admitted check plan, the run stays running and nothing is persisted.
-    let refused = fixture
+    // The host observed no artifact, change or external action and the request states no
+    // criteria, so the lookup completes under the read-only exemption.
+    fixture
         .tool
         .handle_guided(call(&lookup_completion(fixture.run.revision)))
-        .await;
-    let Err(FunctionCallError::RespondToModel(message)) = refused else {
-        panic!("a criterion-free completion must be refused");
-    };
-    assert!(message.contains("completion refused"), "{message}");
-    assert_eq!(stored_run(&fixture).await, fixture.run);
+        .await
+        .expect("lookup completion succeeds");
+    let completed = stored_run(&fixture).await;
+    assert_eq!(completed.status, StatefulRunStatus::Completed);
+    assert_eq!(completed.result.as_deref(), Some(RESULT));
     let obligations = fixture
         .services
         .runtime()
@@ -142,6 +142,15 @@ async fn a_criterion_free_lookup_completion_is_refused() {
         .await
         .expect("obligations list");
     assert_eq!(obligations, Vec::new());
+    let repeated = fixture
+        .tool
+        .handle_guided(call(&lookup_completion(completed.revision)))
+        .await;
+    assert!(matches!(
+        repeated,
+        Err(FunctionCallError::RespondToModel(_))
+    ));
+    assert_eq!(stored_run(&fixture).await, completed);
 }
 
 #[tokio::test]

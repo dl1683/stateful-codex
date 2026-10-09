@@ -107,6 +107,18 @@ fn call(tool: &str, arguments: &Value) -> ToolCall<'static> {
 }
 
 impl Fixture {
+    /// The host observed a side effect (the run wrote something), so the read-only exemption
+    /// no longer applies.
+    async fn side_effect(&self) {
+        self.services
+            .runtime()
+            .await
+            .expect("runtime")
+            .record_side_effect(&self.run.id)
+            .await
+            .expect("side effect");
+    }
+
     async fn update(&self, revision: u64, changes: Value) -> Result<Value, String> {
         match self
             .acceptance
@@ -405,6 +417,7 @@ async fn a_dismissal_without_a_covering_criterion_is_refused() {
         WorkflowMode::Autonomous,
     )
     .await;
+    fixture.side_effect().await;
     fixture.complete().await.expect_err("proposals created");
     let ledger = fixture.ledger().await;
     let refused = fixture
@@ -528,15 +541,27 @@ async fn failed_check_cannot_be_disclosed_away_and_keeps_the_run_running() {
 }
 
 #[tokio::test]
-async fn a_trivial_lookup_owes_a_covering_criterion() {
-    let fixture = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
-    let refused = fixture
+async fn a_read_only_lookup_completes_and_an_observed_effect_brings_the_ledger_back() {
+    let exempt = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
+    exempt
         .complete()
         .await
-        .expect_err("no request is exempt from acceptance");
+        .expect("host-observed read-only run completes");
+    assert_eq!(
+        exempt.stored_run().await.status,
+        StatefulRunStatus::Completed
+    );
+    assert!(exempt.ledger().await.read_only_exemption);
+
+    let effected = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
+    effected.side_effect().await;
+    let refused = effected
+        .complete()
+        .await
+        .expect_err("a side effect requires the ledger");
     assert!(refused.contains("Answer a lookup."), "{refused}");
     assert_eq!(
-        fixture.stored_run().await.status,
+        effected.stored_run().await.status,
         StatefulRunStatus::Running
     );
 }
@@ -722,8 +747,9 @@ async fn a_long_request_with_budget_left_requires_the_independent_omission_check
         WorkflowMode::Autonomous,
     )
     .await;
-    // Nothing declared, nothing changed, nearly the whole budget left: the agent still
+    // Nothing declared, a write observed, nearly the whole budget left: the agent still
     // cannot complete before the host's goal-derived check has been reviewed.
+    fixture.side_effect().await;
     let refused = fixture
         .complete()
         .await

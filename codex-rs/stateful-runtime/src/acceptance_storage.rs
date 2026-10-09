@@ -167,7 +167,7 @@ impl StatefulRunStore {
             .await
     }
 
-    async fn adjust_counters(
+    pub(crate) async fn adjust_counters(
         &self,
         run_id: &StatefulRunId,
         assignment: &'static str,
@@ -372,6 +372,9 @@ pub(crate) async fn enforce_acceptance_gate(
     if !unmet.is_empty() {
         return Err(StatefulRunStoreError::AcceptanceGate(unmet.join("; ")));
     }
+    if crate::acceptance_exemption::read_only_exempt(&request.text, &ledger) {
+        crate::acceptance_exemption::record_exemption(connection, &run.id).await?;
+    }
     Ok(())
 }
 
@@ -539,6 +542,8 @@ struct StoredLedger {
     stalled_completions: i64,
     verification_attempt: i64,
     verification_lease_expires_at_ms: Option<i64>,
+    side_effects: i64,
+    exemption: Option<String>,
 }
 
 #[derive(FromRow)]
@@ -594,7 +599,7 @@ pub(crate) async fn load_ledger(
 ) -> Result<AcceptanceLedger, StatefulRunStoreError> {
     let Some(stored) = sqlx::query_as::<_, StoredLedger>(
         "SELECT revision, workspace_generation, observed_executions, stalled_completions,
-                verification_attempt, verification_lease_expires_at_ms
+                verification_attempt, verification_lease_expires_at_ms, side_effects, exemption
          FROM stateful_acceptance_ledgers WHERE run_id = ?",
     )
     .bind(run_id.as_str())
@@ -714,6 +719,9 @@ pub(crate) async fn load_ledger(
             .await?,
         )
         .map_err(|_| StatefulRunStoreError::CorruptCount)?,
+        side_effects: u64::try_from(stored.side_effects)
+            .map_err(|_| StatefulRunStoreError::CorruptCount)?,
+        read_only_exemption: stored.exemption.is_some(),
         reconciled_steering: sqlx::query_as::<_, (String, String)>(
             "SELECT steering_id, reason FROM stateful_acceptance_steering
              WHERE run_id = ? ORDER BY reconciled_at_ms, steering_id LIMIT 64",

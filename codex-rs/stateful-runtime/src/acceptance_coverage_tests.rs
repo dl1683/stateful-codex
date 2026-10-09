@@ -113,12 +113,20 @@ fn derived_retired_and_optional_overlaps_do_not_cover_user_text() {
 }
 
 #[test]
-fn even_a_short_one_sentence_request_owes_coverage() {
-    // No request is exempt: a short in-chat request still needs a covering criterion.
+fn only_an_effect_free_run_without_stated_criteria_owes_no_coverage() {
+    // The read-only exemption rests on observed facts, not on the request's length.
     let goal = "Compute the totals for a, b and c and write a summary.";
+    assert_eq!(uncovered_sentences(goal, &ledger()), Vec::new());
+    let mut effected = ledger();
+    effected.side_effects = 1;
     assert_eq!(
-        quotes(goal, uncovered_sentences(goal, &ledger())),
+        quotes(goal, uncovered_sentences(goal, &effected)),
         vec![goal]
+    );
+    let stated = "Compute the totals; they must match the ledger.";
+    assert_eq!(
+        quotes(stated, uncovered_sentences(stated, &ledger())),
+        vec!["Compute the totals", "they must match the ledger."]
     );
 }
 
