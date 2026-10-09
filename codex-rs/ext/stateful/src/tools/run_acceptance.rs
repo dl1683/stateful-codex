@@ -35,7 +35,7 @@ use crate::tools::bounded_json_output;
 use crate::tools::respond;
 
 /// The basis of a completion under the no-tool exemption.
-const NO_TOOL_BASIS: &str = "no-tool exemption: the host recorded no tool call, command, hook or other action in this run (provider-hosted calls such as web search count once observed), and the completion was its only call, so it completed without acceptance criteria; the text answer is judged by the user, not host-verified";
+const NO_TOOL_BASIS: &str = "no-tool exemption: the host recorded no tool call, command, hook or other action in this run (provider-hosted calls such as web search count once observed), and the completion was its only call through the end of its turn, so it completed without acceptance criteria; the text answer is judged by the user, not host-verified";
 /// Lease of one completion verification attempt (artifact reads are bounded to seconds).
 const VERIFICATION_LEASE_MS: u32 = 120_000;
 /// How long completion waits for pending commands to be accounted before refusing.
@@ -50,9 +50,12 @@ const MAX_GATE_REASON_BYTES: usize = 320;
 
 pub(super) enum AcceptanceDecision {
     /// Commit with this validated snapshot; `basis` lines are disclosed in the result.
+    /// `no_tool` marks a run the host recorded no action for: its commit waits for the end
+    /// of the completing turn.
     Proceed {
         commit: AcceptanceCommit,
         basis: Vec<String>,
+        no_tool: bool,
     },
     /// The run stays Running; the message lists the unmet gates and how to settle each.
     Refused(String),
@@ -189,10 +192,15 @@ impl StatefulRunUpdateTool {
         }
         if unmet.is_empty() {
             let mut basis = completion_basis(&ledger, &verdicts);
-            if codex_stateful_runtime::no_tool_exempt(&ledger) {
+            let no_tool = codex_stateful_runtime::no_tool_exempt(&ledger);
+            if no_tool {
                 basis.push(NO_TOOL_BASIS.to_string());
             }
-            return Ok(AcceptanceDecision::Proceed { basis, commit });
+            return Ok(AcceptanceDecision::Proceed {
+                basis,
+                commit,
+                no_tool,
+            });
         }
         let gates = gate_list(&unmet);
         runtime

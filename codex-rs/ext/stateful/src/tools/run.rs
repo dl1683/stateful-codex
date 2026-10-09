@@ -350,7 +350,11 @@ impl StatefulRunUpdateTool {
                 )
                 .await?
             {
-                AcceptanceDecision::Proceed { commit, basis } => Some((commit, basis)),
+                AcceptanceDecision::Proceed {
+                    commit,
+                    basis,
+                    no_tool,
+                } => Some((commit, basis, no_tool)),
                 AcceptanceDecision::Refused(message) => {
                     return Err(FunctionCallError::RespondToModel(message));
                 }
@@ -367,7 +371,7 @@ impl StatefulRunUpdateTool {
         };
         let acceptance_basis = acceptance
             .as_ref()
-            .map(|(_, basis)| basis.clone())
+            .map(|(_, basis, _)| basis.clone())
             .unwrap_or_default();
         let durable_result = completion
             .as_ref()
@@ -376,15 +380,31 @@ impl StatefulRunUpdateTool {
         let update = StatefulRunUpdate {
             expected_revision,
             status,
-            strategy: strategy.or(current.strategy),
+            strategy: strategy.or_else(|| current.strategy.clone()),
             result: match &acceptance {
-                Some((_, basis)) => durable_result
+                Some((_, basis, _)) => durable_result
                     .map(|durable| run_acceptance::with_acceptance_basis(durable, basis)),
                 None => durable_result,
             }
-            .or(current.result),
+            .or_else(|| current.result.clone()),
         };
-        let (run, final_obligation) = if let Some((commit, _)) = &acceptance {
+        if let Some((commit, basis, true)) = &acceptance {
+            return self
+                .defer_exempt_completion(
+                    &call,
+                    run_exempt::ExemptCompletion {
+                        current: &current,
+                        update,
+                        commit,
+                        basis,
+                        submitted: submitted_result.as_deref(),
+                        no_reusable_learning,
+                        fence,
+                    },
+                )
+                .await;
+        }
+        let (run, final_obligation) = if let Some((commit, _, _)) = &acceptance {
             runtime
                 .complete_run_with_acceptance(&current.id, update, commit, final_obligation)
                 .await
@@ -585,6 +605,9 @@ mod guard;
 
 #[path = "run_acceptance.rs"]
 mod run_acceptance;
+
+#[path = "run_exempt.rs"]
+mod run_exempt;
 
 #[cfg(test)]
 #[path = "run_tests.rs"]

@@ -27,6 +27,8 @@ pub(crate) struct AcceptanceView {
     pub(crate) reserve: VerificationReserve,
     /// Elapsed run time, rounded down to 15-minute steps so the packet does not churn.
     pub(crate) elapsed_seconds: u64,
+    /// A no-tool completion is pending until the current turn ends.
+    pub(crate) completion_pending: bool,
 }
 
 impl AcceptanceView {
@@ -39,6 +41,7 @@ impl AcceptanceView {
             ledger,
             risk,
             elapsed_seconds: elapsed - elapsed % ELAPSED_STEP_SECONDS,
+            completion_pending: false,
         }
     }
 
@@ -46,9 +49,14 @@ impl AcceptanceView {
     pub(crate) fn ledger_lines(&self) -> Vec<String> {
         let ledger = &self.ledger;
         if ledger.criteria.is_empty() {
-            let line = if codex_stateful_runtime::no_tool_eligible(ledger) {
+            let line = if self.completion_pending {
                 format!(
-                    "Acceptance ledger: empty (revision {}). This run has made no tool call: a pure text answer may complete without criteria, with one completion call as its only call. Any other tool call (command, file read or edit, web search or another hosted tool, MCP, plan or Stateful update) or a rejected completion brings the ledger back: then record each requirement early with stateful_acceptance_update.",
+                    "Acceptance ledger: empty (revision {}). A no-tool completion is pending: give the final answer now with no further tool call; the host completes the run when this turn ends. Any further tool call leaves it running, and completion then needs criteria recorded with stateful_acceptance_update.",
+                    ledger.revision
+                )
+            } else if codex_stateful_runtime::no_tool_eligible(ledger) {
+                format!(
+                    "Acceptance ledger: empty (revision {}). This run has made no tool call: a pure text answer may complete without criteria, with one completion call as its only call; the host completes it when the turn ends, so give the final answer right after it with no further tool call. Any other tool call (command, file read or edit, web search or another hosted tool, MCP, plan or Stateful update) or a rejected completion brings the ledger back: then record each requirement early with stateful_acceptance_update.",
                     ledger.revision
                 )
             } else {

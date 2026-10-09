@@ -17,6 +17,7 @@ mod continuity;
 mod continuity_source;
 mod conversation_summaries;
 mod events;
+mod exempt_completion;
 mod host_actions;
 mod limits;
 mod memory_add;
@@ -584,9 +585,9 @@ impl StatefulExtension {
                     .map_or(0, |duration| {
                         i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
                     });
-                Some(Box::new(acceptance_render::AcceptanceView::new(
-                    &run, ledger, now_ms,
-                )))
+                let mut view = acceptance_render::AcceptanceView::new(&run, ledger, now_ms);
+                view.completion_pending = crate::exempt_completion::is_pending(&run.id);
+                Some(Box::new(view))
             }
             Err(error) => {
                 tracing::warn!(run_id = %run.id, %error, "failed to load the acceptance ledger");

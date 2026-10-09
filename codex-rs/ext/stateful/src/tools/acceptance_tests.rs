@@ -556,6 +556,7 @@ async fn a_no_tool_lookup_completes_and_a_recorded_action_brings_the_ledger_back
         .complete()
         .await
         .expect("a run without any action completes");
+    crate::exempt_completion::finish_turn(&exempt.services, /*event_sink*/ None, "turn-1").await;
     assert_eq!(
         exempt.stored_run().await.status,
         StatefulRunStatus::Completed
