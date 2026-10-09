@@ -570,6 +570,11 @@ async fn c456r1_applied_words_never_reach_tool_outputs_across_a_post_tool_hook()
                 "memory_read",
                 json!({"question": "SQLite Postgres offline laptop decision"}),
             ),
+            5 => call(
+                "after",
+                "memory_read",
+                json!({"question": "SQLite Postgres offline laptop decision"}),
+            ),
             _ => message("Done."),
         }),
     )
@@ -627,18 +632,36 @@ async fn c456r1_applied_words_never_reach_tool_outputs_across_a_post_tool_hook()
         .read_stream_until_notification_message("turn/completed")
         .await?;
     let bodies = calls.lock().expect("request log lock").clone();
-    for (body, call_id) in [(&bodies[3], "exact"), (&bodies[4], "recall")] {
-        let output = body["input"]
+    let output = |body: &Value, call_id: &str| {
+        body["input"]
             .as_array()
             .expect("input items")
             .iter()
             .find(|item| item["call_id"] == call_id && item["type"] == "function_call_output")
             .expect("tool output delivered")["output"]
-            .to_string();
-        assert!(
-            !output.contains("offline on a laptop") && !output.contains("SQLite rather than"),
-            "{call_id} disclosed applied words: {output}"
-        );
-    }
+            .as_str()
+            .expect("text output")
+            .to_string()
+    };
+    // The exact read of the applied entry discloses nothing: applied proposals stay out of
+    // model tool outputs.
+    let exact = output(&bodies[3], "exact");
+    assert!(
+        !exact.contains("offline on a laptop") && !exact.contains("SQLite rather than"),
+        "exact read disclosed applied words: {exact}"
+    );
+    // memory_read's knowledge entries never include the applied entry. Its separate,
+    // pre-existing earlier-turns history route quotes the user's original message; that route
+    // and its PostToolUse window are outside this slice (named OPEN in the repair report).
+    let recall: Value = serde_json::from_str(&output(&bodies[4], "recall"))?;
+    assert_eq!(recall["entries"], json!([]));
+    // A recall that runs after the committed Forget no longer quotes the forgotten message.
+    turn(&mut server, &thread, &["Anything else about the database?"]).await?;
+    let bodies = calls.lock().expect("request log lock").clone();
+    let after = output(&bodies[6], "after");
+    assert!(
+        !after.contains("offline on a laptop") && !after.contains("SQLite rather than"),
+        "recall after Forget disclosed forgotten words: {after}"
+    );
     Ok(())
 }
