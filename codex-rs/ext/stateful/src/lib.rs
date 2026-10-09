@@ -4,6 +4,7 @@ mod acceptance_effects;
 mod acceptance_observation;
 mod acceptance_policy;
 mod acceptance_render;
+mod acceptance_workspace;
 mod attributed_text;
 mod attribution;
 mod autonomy;

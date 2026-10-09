@@ -331,3 +331,110 @@ async fn an_inadequate_admitted_checker_passes_a_wrong_answer() -> Result<()> {
     );
     Ok(())
 }
+
+/// Commits the harness's project root as an ordinary repository: several unpinned source
+/// files, an ignored build directory, and the checker.
+#[cfg(target_os = "linux")]
+fn commit_repository(root: &std::path::Path) -> Result<()> {
+    std::fs::create_dir_all(root.join("src"))?;
+    std::fs::create_dir_all(root.join("docs"))?;
+    std::fs::write(
+        root.join("src/parser.py"),
+        "def parse(text):\n    return text.split()\n",
+    )?;
+    std::fs::write(root.join("src/cli.py"), "from parser import parse\n")?;
+    std::fs::write(root.join("docs/guide.md"), "# Guide\n")?;
+    std::fs::write(root.join("README.md"), "# Parser\n")?;
+    std::fs::write(root.join(".gitignore"), "build/\n")?;
+    for arguments in [
+        &["init", "--quiet"][..],
+        &["add", "."][..],
+        &["commit", "--quiet", "-m", "initial"][..],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+            .args(arguments)
+            .current_dir(root)
+            .status()?;
+        anyhow::ensure!(status.success(), "git {arguments:?} failed");
+    }
+    Ok(())
+}
+
+/// In a real repository with many unpinned files, unattended Autonomous work repairs the
+/// output, runs its admitted check and completes: unpinned files that the check leaves
+/// unchanged do not stop it qualifying.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn autonomous_run_completes_in_a_repository_with_unpinned_files() -> Result<()> {
+    let mut harness = harness(StatefulWorkflowMode::Autonomous, "workspace-write").await?;
+    let root = harness.project_root.path().to_path_buf();
+    commit_repository(&root)?;
+    let revision = harness.run.revision;
+    let response_log = responses::mount_sse_sequence(
+        &harness.responses_server,
+        vec![
+            declare("sh verify.sh"),
+            admit("admit", 1),
+            exec("repair", "echo done > out.txt", &root),
+            exec("check", "sh verify.sh", &root),
+            complete("verified", revision),
+            message("done", "out.txt is written."),
+        ],
+    )
+    .await;
+    harness.turn("Write out.txt.").await?;
+    let requests = response_log.requests();
+    assert_eq!(requests.len(), 6);
+    let verified = requests[5].function_call_output("verified").to_string();
+    assert!(verified.contains("acceptanceBasis"), "{verified}");
+    assert_eq!(
+        harness.read_run().await?.status,
+        StatefulRunStatus::Completed
+    );
+    Ok(())
+}
+
+/// A check that rewrites a tracked unpinned file, or creates an untracked one, is refused.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_check_that_changes_unpinned_repository_files_is_refused() -> Result<()> {
+    for (checker, case) in [
+        ("test -f out.txt && echo checked >> README.md\n", "tracked"),
+        ("test -f out.txt && echo checked > check.log\n", "untracked"),
+    ] {
+        let mut harness = harness_for(
+            StatefulWorkflowMode::Autonomous,
+            "workspace-write",
+            GOAL,
+            &[("verify.sh", checker)],
+        )
+        .await?;
+        let root = harness.project_root.path().to_path_buf();
+        commit_repository(&root)?;
+        let revision = harness.run.revision;
+        let response_log = responses::mount_sse_sequence(
+            &harness.responses_server,
+            vec![
+                declare("sh verify.sh"),
+                admit("admit", 1),
+                exec("repair", "echo done > out.txt", &root),
+                exec("check", "sh verify.sh", &root),
+                complete("refused", revision),
+                message("done", "The check changed the repository."),
+            ],
+        )
+        .await;
+        harness.turn("Write out.txt.").await?;
+        let refused = response_log.requests()[5]
+            .function_call_output("refused")
+            .to_string();
+        assert!(refused.contains("completion refused"), "{case}: {refused}");
+        assert_eq!(
+            harness.read_run().await?.status,
+            StatefulRunStatus::Running,
+            "{case}"
+        );
+    }
+    Ok(())
+}

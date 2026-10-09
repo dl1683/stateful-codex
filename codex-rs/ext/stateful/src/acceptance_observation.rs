@@ -16,10 +16,10 @@
 //! pinned content changed while it ran, when another mutation was observed meanwhile, or when
 //! no start snapshot exists. A check that changed any criterion's pinned files is itself a
 //! mutation: earlier evidence becomes stale and only its own unchanged post-write state is
-//! qualified. The host also lists the project's files around a check; when either listing
-//! holds a file no active criterion pins (or is unavailable), or another change was observed
-//! while the check ran, its own receipt cannot qualify and every receipt made before or
-//! during it becomes stale. A command that returned with no live process and whose end item
+//! qualified. The host also takes the workspace's content identity around a check (see
+//! `acceptance_workspace`); when a file no active criterion pins changed (or the identity is
+//! unavailable), or another change was observed while the check ran, its own receipt cannot
+//! qualify and every receipt made before or during it becomes stale. A command that returned with no live process and whose end item
 //! never arrives is closed as terminated with unknown effects. Every other observed mutation (unmatched commands that are not read-only, input
 //! written into a running session, applied or partially applied patches) advances the
 //! workspace generation.
@@ -57,6 +57,9 @@ use codex_stateful_runtime::StatefulRunId;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::acceptance_workspace::Manifest;
+use crate::acceptance_workspace::changed_unpinned;
+use crate::acceptance_workspace::workspace_manifest;
 use crate::services::ProjectIntelligenceServices;
 
 /// Whole-ledger bound for reading declared artifacts.
@@ -64,25 +67,7 @@ const ARTIFACT_READ_BUDGET: Duration = Duration::from_secs(5);
 /// Larger files cannot be content-pinned within the budget; they are unavailable.
 const MAX_HASHED_ARTIFACT_BYTES: u64 = 16 * 1024 * 1024;
 /// Artifact reader workers that may run at once, abandoned ones included.
-const MAX_OUTSTANDING_READERS: usize = 4;
-/// Larger workspaces cannot be listed around a check; its effects are then unknown.
-const MAX_MANIFEST_ENTRIES: usize = 50_000;
-/// Version-control metadata and dependency or build caches: changes inside them do not make
-/// a check a mutation (pin a file there to make it governing).
-const SKIPPED_DIRECTORIES: &[&str] = &[
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    "target",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".venv",
-    "venv",
-    ".tox",
-];
+pub(crate) const MAX_OUTSTANDING_READERS: usize = 4;
 /// Shell flags whose next (final) argument is the script the model asked to run.
 const SCRIPT_FLAGS: &[&str] = &["-c", "-lc", "-Command", "-command", "/c", "/C"];
 
@@ -98,7 +83,7 @@ struct CheckStarts(Mutex<HashMap<String, CheckStart>>);
 
 struct CheckStart {
     generation: u64,
-    /// Every file under the project roots at start; `None` when it could not be listed.
+    /// Content identity of the workspace at start; `None` when it could not be taken.
     manifest: Option<Manifest>,
     /// Matched criteria: revision, pinned-artifact digest and checker digest at start.
     criteria: BTreeMap<u32, (u64, Option<String>, Option<String>)>,
@@ -106,14 +91,12 @@ struct CheckStart {
     governing: Governing,
 }
 
-/// Every file under the project roots, outside skipped directories.
-type Manifest = std::collections::BTreeSet<PathBuf>;
 /// Digests of every active criterion's pinned artifacts and checker files.
 type Governing = BTreeMap<u32, (Option<String>, Option<String>)>;
 /// Runs this process has bound a turn to; the first binding is a cold re-entry.
 static ENTERED_RUNS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
-static OUTSTANDING_READERS: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static OUTSTANDING_READERS: AtomicUsize = AtomicUsize::new(0);
 /// Commands whose end item arrived and is being accounted for right now.
 static ENDS_IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -392,9 +375,9 @@ async fn observe_command(
     let end = governing_digests(roots, &ledger).await;
     let end_manifest = workspace_manifest(roots).await;
     // A check's effects are accounted for only when its whole run is known: it started at
-    // the current generation, and the project holds no file outside the active criteria's
-    // content-hashed pins (file metadata is no identity). Otherwise its own receipt cannot
-    // qualify and every receipt made before or during it becomes stale. A check that changed
+    // the current generation, and the workspace's content identity outside the active
+    // criteria's pins is unchanged (file metadata is no identity). Otherwise its own receipt
+    // cannot qualify and every receipt made before or during it becomes stale. A check that changed
     // pinned files is a mutation too: earlier evidence becomes stale, and only a receipt whose
     // own pinned state is unchanged is qualified against the post-write state.
     let mut stamp_generation = None;
@@ -405,7 +388,7 @@ async fn observe_command(
             refused = Some(
                 "another workspace change was observed while the check ran, so its effects overlap other evidence",
             );
-        } else if unpinned_present(
+        } else if changed_unpinned(
             roots,
             &ledger,
             start.manifest.as_ref(),
@@ -413,7 +396,7 @@ async fn observe_command(
         ) {
             bump(services, run_id).await?;
             refused = Some(
-                "the project holds files no criterion pins (or could not be listed), so the check's effects on them are unknown",
+                "the check changed files no criterion pins, or the workspace could not be identified, so its effects are unknown",
             );
         } else if start.governing != end {
             bump(services, run_id).await?;
@@ -494,97 +477,6 @@ async fn observe_command(
         .await
         .map(|_| ())
         .map_err(|error| error.to_string())
-}
-
-/// Whether either listing holds a file outside every active criterion's pins; an unavailable
-/// listing counts as one.
-fn unpinned_present(
-    roots: &[String],
-    ledger: &AcceptanceLedger,
-    start: Option<&Manifest>,
-    end: Option<&Manifest>,
-) -> bool {
-    let (Some(start), Some(end)) = (start, end) else {
-        return true;
-    };
-    let Some(root) = roots
-        .first()
-        .and_then(|root| std::fs::canonicalize(root).ok())
-    else {
-        return true;
-    };
-    let pinned = ledger
-        .criteria
-        .iter()
-        .filter(|criterion| criterion.state == AcceptanceState::Active)
-        .flat_map(|criterion| criterion.artifacts.iter().chain(&criterion.checker))
-        .map(|path| {
-            let path = Path::new(path);
-            if path.is_absolute() {
-                path.components().collect::<PathBuf>()
-            } else {
-                root.join(path).components().collect::<PathBuf>()
-            }
-        })
-        .collect::<HashSet<_>>();
-    start.iter().chain(end).any(|path| !pinned.contains(path))
-}
-
-/// Lists every file under the project roots (outside `SKIPPED_DIRECTORIES`, without
-/// following directory links) within the read budget. The listing worker takes one of the
-/// `MAX_OUTSTANDING_READERS` slots and holds it until it actually exits, even after its
-/// caller gave up; without a free slot the listing is unavailable.
-async fn workspace_manifest(roots: &[String]) -> Option<Manifest> {
-    let roots = roots
-        .iter()
-        .filter_map(|root| std::fs::canonicalize(root).ok())
-        .collect::<Vec<_>>();
-    if roots.is_empty() {
-        return None;
-    }
-    if OUTSTANDING_READERS.fetch_add(1, Ordering::SeqCst) >= MAX_OUTSTANDING_READERS {
-        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
-        return None;
-    }
-    let deadline = Instant::now() + ARTIFACT_READ_BUDGET;
-    let walk = tokio::task::spawn_blocking(move || {
-        let list = || -> Option<Manifest> {
-            let mut manifest = Manifest::new();
-            let mut directories = roots.clone();
-            while let Some(directory) = directories.pop() {
-                if Instant::now() >= deadline {
-                    return None;
-                }
-                for entry in std::fs::read_dir(&directory).ok()? {
-                    let entry = entry.ok()?;
-                    let metadata = entry.metadata().ok()?;
-                    let path = entry.path();
-                    if metadata.is_dir() {
-                        let skipped = entry
-                            .file_name()
-                            .to_str()
-                            .is_some_and(|name| SKIPPED_DIRECTORIES.contains(&name));
-                        if !skipped {
-                            directories.push(path);
-                        }
-                        continue;
-                    }
-                    if manifest.len() >= MAX_MANIFEST_ENTRIES {
-                        return None;
-                    }
-                    manifest.insert(path);
-                }
-            }
-            Some(manifest)
-        };
-        let manifest = list();
-        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
-        manifest
-    });
-    tokio::time::timeout(ARTIFACT_READ_BUDGET, walk)
-        .await
-        .ok()?
-        .ok()?
 }
 
 /// Active checks this execution runs verbatim, in their pinned directory.
@@ -857,7 +749,7 @@ fn file_digest(
 }
 
 /// Opens a file for reading without blocking on special files where the platform allows it.
-fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(any(target_os = "linux", target_os = "android"))]

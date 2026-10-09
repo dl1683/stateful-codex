@@ -35,7 +35,6 @@ use super::forget_command;
 use super::hash_bounded;
 use super::observe_item;
 use super::runs_check;
-use super::workspace_manifest;
 use crate::services::ProjectIntelligenceServices;
 
 fn file_uri(path: &Path) -> String {
@@ -668,12 +667,9 @@ async fn a_declared_check_that_rewrites_an_unpinned_input_stales_every_receipt()
         ),
         "C1's pass is stale and C2's own receipt does not qualify"
     );
-    // While the unpinned file exists, no check qualifies.
+    // An unpinned file that a later check leaves unchanged does not stop it qualifying.
     fixture.check("c1-again", "completed", 0).await;
-    assert_eq!(
-        fixture.latest().await,
-        (Some(EvidenceOutcome::Unavailable), 2)
-    );
+    assert_eq!(fixture.latest().await, (Some(EvidenceOutcome::Passed), 1));
 }
 
 #[tokio::test]
@@ -703,19 +699,6 @@ async fn a_check_overlapping_another_change_invalidates_receipts_made_meanwhile(
             2
         ),
         "the overlapping check's end makes C1's pass, minted meanwhile, stale"
-    );
-}
-
-#[tokio::test]
-async fn a_listing_without_a_free_worker_slot_is_unavailable() {
-    let fixture = fixture("run-listing-slots").await;
-    OUTSTANDING_READERS.store(MAX_OUTSTANDING_READERS, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(workspace_manifest(&fixture.roots).await, None);
-    OUTSTANDING_READERS.store(0, std::sync::atomic::Ordering::SeqCst);
-    assert!(workspace_manifest(&fixture.roots).await.is_some());
-    assert_eq!(
-        OUTSTANDING_READERS.load(std::sync::atomic::Ordering::SeqCst),
-        0
     );
 }
 
