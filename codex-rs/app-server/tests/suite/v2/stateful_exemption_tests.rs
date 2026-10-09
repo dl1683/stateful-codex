@@ -43,6 +43,8 @@ use codex_app_server_protocol::ThreadShellCommandResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnCompletedNotification;
+use codex_app_server_protocol::TurnInterruptParams;
+use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
@@ -467,6 +469,32 @@ impl Harness {
         Ok(actions)
     }
 
+    /// Whether the run's ledger durably records the no-tool exemption, through a fresh store.
+    async fn recorded_exemption(&self) -> Result<bool> {
+        let pool = self.open_runtime_store().await?;
+        let exemption = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT exemption FROM stateful_acceptance_ledgers WHERE run_id = ?",
+        )
+        .bind(self.run().id.clone())
+        .fetch_one(&pool)
+        .await?;
+        pool.close().await;
+        Ok(exemption.is_some())
+    }
+
+    /// Asserts, through a reopened store, that the run is still running, holds no result or
+    /// exemption, and has recorded actions.
+    async fn assert_left_running_with_actions(&mut self) -> Result<()> {
+        let run = self.read().await?;
+        assert_eq!(
+            (run.status, run.result.clone()),
+            (StatefulRunStatus::Running, None)
+        );
+        assert!(!self.recorded_exemption().await?);
+        assert!(self.recorded_actions().await? > 0);
+        Ok(())
+    }
+
     async fn open_runtime_store(&self) -> Result<sqlx::SqlitePool> {
         let sqlite = SqliteConfig::new_for_testing(AbsolutePathBuf::try_from(
             self.codex_home.path().to_path_buf(),
@@ -487,7 +515,8 @@ async fn a_text_only_answer_completes_without_a_ledger() -> Result<()> {
         .turn(vec![complete(revision), message("done", ANSWER)])
         .await?;
     let output = output.unwrap_or_default();
-    assert!(output.contains("\"status\":\"completed\""), "{output}");
+    assert!(output.contains("\"completionPending\":true"), "{output}");
+    // The completion commits when its turn ends, which happened before turn/completed.
     let run = harness.read().await?;
     assert_eq!(run.status, StatefulRunStatus::Completed);
     let result = run.result.unwrap_or_default();
@@ -828,7 +857,7 @@ async fn an_offered_but_uncalled_hosted_tool_keeps_the_exemption() -> Result<()>
     let output = log
         .function_call_output_text("complete")
         .unwrap_or_default();
-    assert!(output.contains("\"status\":\"completed\""), "{output}");
+    assert!(output.contains("\"completionPending\":true"), "{output}");
     let run = harness.read().await?;
     assert_eq!(run.status, StatefulRunStatus::Completed);
     assert!(
@@ -1168,8 +1197,8 @@ async fn a_hook_trusted_during_a_pending_completion_cannot_run_around_it() -> Re
             .result
             .as_deref()
             .is_some_and(|result| result.contains("no-tool exemption"));
-    let refused = run.status == StatefulRunStatus::Running && output.contains("completion refused");
-    assert!(exempt || refused, "{run:?}: {output}");
+    let not_exempt = run.status == StatefulRunStatus::Running && run.result.is_none();
+    assert!(exempt || not_exempt, "{run:?}: {output}");
 
     // The trusted hooks are live from the next turn on.
     harness.server.clear_message_buffer();
@@ -1185,5 +1214,229 @@ async fn a_hook_trusted_during_a_pending_completion_cannot_run_around_it() -> Re
     if cfg!(not(target_os = "windows")) {
         assert!(stop_marker.exists(), "the Stop hook ran in the next turn");
     }
+    Ok(())
+}
+
+/// A response whose hold overflows by count or by bytes on a hosted call (added or done) fails
+/// without releasing its completion, and the hosted call is still recorded first: a reopened
+/// store shows the run is no longer action-free, and a later lone completion owes the ledger.
+#[tokio::test]
+async fn a_hosted_call_that_overflows_the_hold_still_ends_the_exemption() -> Result<()> {
+    const HOLD_EVENTS: usize = 1_024;
+    const HOLD_BYTES: usize = 1024 * 1024;
+    for (by_count, added) in [(true, true), (true, false), (false, true), (false, false)] {
+        let mut harness = harness(Setup {
+            mode: StatefulWorkflowMode::Collaborative,
+            ..Setup::default()
+        })
+        .await?;
+        let revision = harness.run().revision;
+        let mut events = vec![
+            responses::ev_response_created("overflow"),
+            responses::ev_function_call(
+                "early",
+                "stateful_run_update",
+                &completion_arguments(revision, &[]).to_string(),
+            ),
+        ];
+        let long = "q".repeat(6_000);
+        if by_count {
+            events.extend((1..HOLD_EVENTS).map(|_| responses::ev_output_text_delta("")));
+        } else {
+            events.push(responses::ev_output_text_delta(
+                &"x".repeat(HOLD_BYTES - 5_000),
+            ));
+        }
+        let hosted_id = if by_count { "search" } else { long.as_str() };
+        events.push(if added {
+            responses::ev_web_search_call_added_partial(hosted_id, "in_progress")
+        } else {
+            responses::ev_web_search_call_done(hosted_id, "completed", &long)
+        });
+        let case = format!("by count {by_count}, added {added}");
+        let log =
+            responses::mount_sse_sequence(&harness.responses_server, vec![responses::sse(events)])
+                .await;
+        let turn_id = harness.begin_turn().await?;
+        let completed = harness.wait_for_turn(&turn_id).await?;
+        assert_eq!(completed.turn.status, TurnStatus::Failed, "{case}");
+        // The held completion never ran: no follow-up request carried its output.
+        assert_eq!(log.requests().len(), 1, "{case}");
+        assert!(harness.recorded_actions().await? > 0, "{case}");
+        let (_, output) = harness
+            .turn(vec![complete(revision), message("done", "Refused.")])
+            .await?;
+        harness.assert_refused(output).await?;
+    }
+    Ok(())
+}
+
+/// A call later in the completing turn, after the lone completion, keeps the run from
+/// completing under the exemption: the completion only became pending, the later call was
+/// recorded against the still-open run and actually ran, and when the turn ended the run
+/// stayed running without an exemption.
+#[tokio::test]
+async fn a_call_after_the_completion_in_its_turn_ends_the_exemption() -> Result<()> {
+    let mut harness = harness(Setup {
+        mode: StatefulWorkflowMode::Collaborative,
+        ..Setup::default()
+    })
+    .await?;
+    let revision = harness.run().revision;
+    let log = responses::mount_sse_sequence(
+        &harness.responses_server,
+        vec![
+            complete(revision),
+            call("read", "stateful_run_read", json!({"section": "goal"})),
+            message("done", ANSWER),
+        ],
+    )
+    .await;
+    let turn_id = harness.begin_turn().await?;
+    harness.wait_for_turn(&turn_id).await?;
+    let pending = log
+        .function_call_output_text("complete")
+        .unwrap_or_default();
+    assert!(pending.contains("\"completionPending\":true"), "{pending}");
+    let read = log.function_call_output_text("read").unwrap_or_default();
+    assert!(read.contains(LOOKUP), "the later call ran: {read}");
+    harness.assert_left_running_with_actions().await
+}
+
+/// The same with a shell command after the completion: it is recorded before it runs (on
+/// Linux it writes its marker), and the run stays running.
+#[tokio::test]
+async fn a_command_after_the_completion_in_its_turn_ends_the_exemption() -> Result<()> {
+    let mut harness = harness(Setup {
+        mode: StatefulWorkflowMode::Collaborative,
+        ..Setup::default()
+    })
+    .await?;
+    let revision = harness.run().revision;
+    let marker = harness.project_root.path().join("after.txt");
+    let root = harness.project_root.path().to_string_lossy().to_string();
+    harness
+        .turn(vec![
+            complete(revision),
+            call(
+                "write",
+                "exec_command",
+                json!({"cmd": write_command(&marker), "workdir": root, "yield_time_ms": 10_000}),
+            ),
+            message("done", ANSWER),
+        ])
+        .await?;
+    if cfg!(not(target_os = "windows")) {
+        assert!(marker.exists(), "the later command ran");
+    }
+    harness.assert_left_running_with_actions().await
+}
+
+/// A hosted call observed in a later response of the completing turn is recorded, and the run
+/// stays running.
+#[tokio::test]
+async fn a_hosted_call_after_the_completion_in_its_turn_ends_the_exemption() -> Result<()> {
+    let mut harness = harness(Setup {
+        mode: StatefulWorkflowMode::Collaborative,
+        ..Setup::default()
+    })
+    .await?;
+    let revision = harness.run().revision;
+    harness
+        .turn(vec![
+            complete(revision),
+            responses::sse(vec![
+                responses::ev_response_created("searched"),
+                responses::ev_web_search_call_done("search", "completed", "parser"),
+                responses::ev_assistant_message("done", ANSWER),
+                responses::ev_completed("searched"),
+            ]),
+        ])
+        .await?;
+    harness.assert_left_running_with_actions().await
+}
+
+/// A lone completion whose result does not fit in its response is not exempt (reading it back
+/// would be a further call): it is refused and the run stays running.
+#[tokio::test]
+async fn an_oversized_result_is_not_exempt() -> Result<()> {
+    let mut harness = harness(Setup {
+        mode: StatefulWorkflowMode::Collaborative,
+        ..Setup::default()
+    })
+    .await?;
+    let revision = harness.run().revision;
+    let mut arguments = completion_arguments(revision, &[]);
+    arguments["result"] = json!("x".repeat(30_000));
+    let (_, output) = harness
+        .turn(vec![
+            call("complete", "stateful_run_update", arguments),
+            message("done", "Refused."),
+        ])
+        .await?;
+    let output = output.unwrap_or_default();
+    assert!(output.contains("does not fit in this response"), "{output}");
+    harness.assert_left_running_with_actions().await
+}
+
+/// An interrupted turn never commits the completion it left pending.
+#[tokio::test]
+async fn an_interrupted_completing_turn_is_not_exempt() -> Result<()> {
+    let (_never, gate) = oneshot::channel();
+    let (streaming, _) = start_streaming_sse_server(vec![
+        vec![chunk(
+            None,
+            vec![
+                responses::ev_response_created("lone"),
+                responses::ev_function_call(
+                    "complete",
+                    "stateful_run_update",
+                    &completion_arguments(/*revision*/ 1, &[]).to_string(),
+                ),
+                responses::ev_completed("lone"),
+            ],
+        )],
+        vec![chunk(
+            Some(gate),
+            vec![
+                responses::ev_assistant_message("done", ANSWER),
+                responses::ev_completed("done"),
+            ],
+        )],
+    ])
+    .await;
+    let mut harness = harness(Setup {
+        mode: StatefulWorkflowMode::Collaborative,
+        responses_uri: Some(streaming.uri().to_string()),
+        ..Setup::default()
+    })
+    .await?;
+    assert_eq!(harness.run().revision, 1);
+    let turn_id = harness.begin_turn().await?;
+    // The completion ran and the turn is waiting for the final answer.
+    timeout(READ_TIMEOUT, streaming.wait_for_request_count(2)).await?;
+    let thread_id = harness.thread_id.clone();
+    let interrupted_turn = turn_id.clone();
+    let _: TurnInterruptResponse = harness
+        .server
+        .request(|request_id| ClientRequest::TurnInterrupt {
+            request_id,
+            params: TurnInterruptParams {
+                thread_id,
+                turn_id: interrupted_turn,
+            },
+        })
+        .await?;
+    harness.wait_for_turn(&turn_id).await?;
+    assert!(
+        streamed_output(&streaming, "complete")
+            .await
+            .unwrap_or_default()
+            .contains("\"completionPending\":true")
+    );
+    let run = harness.read().await?;
+    assert_eq!((run.status, run.result), (StatefulRunStatus::Running, None));
+    assert!(!harness.recorded_exemption().await?);
+    streaming.shutdown().await;
     Ok(())
 }
