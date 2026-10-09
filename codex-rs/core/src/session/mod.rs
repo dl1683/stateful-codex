@@ -3896,6 +3896,10 @@ impl Session {
             selected_plugins,
         ) = prepared_tools??;
         turn_context.extension_data.insert(selected_plugins);
+        crate::hook_snapshot::pin_turn_executor_discovery(
+            turn_context.as_ref(),
+            executor_capability_discovery.as_ref(),
+        );
         Ok(Arc::new(StepContext {
             preempt: turn_context
                 .config

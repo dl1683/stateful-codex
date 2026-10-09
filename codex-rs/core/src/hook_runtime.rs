@@ -64,6 +64,7 @@ use crate::context::HookAdditionalContext;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::event_mapping::parse_turn_item;
 use crate::guardian::GuardianReviewContext;
+use crate::hook_snapshot::turn_executor_discovery;
 use crate::hook_snapshot::turn_hooks;
 use crate::session::TurnInput;
 use crate::session::session::Session;
@@ -328,9 +329,9 @@ pub(crate) async fn run_post_tool_use_hooks(
     outcome
 }
 
+/// Executor-plugin hook sources of the turn, from its first step's capability-root discovery.
 fn executor_hook_sources_for_step(step_context: &StepContext) -> Vec<ExecutorPluginHookSource> {
-    step_context
-        .executor_capability_discovery
+    turn_executor_discovery(step_context)
         .as_deref()
         .map(|snapshot| {
             let app_tool_policy =
