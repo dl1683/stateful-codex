@@ -1,8 +1,9 @@
 //! Host classification of observed actions for the read-only exemption. Only what the host can
 //! prove has no effect counts as read-only: a single plain invocation of a small allowlist of
-//! read-only programs (no shell operators, redirection, expansion or substitution, and none of
-//! the options that make them write or run other programs), and tools known to read or to keep
-//! the run's own bookkeeping. Everything else, unknown included, is a side effect.
+//! programs that cannot write, run other programs, read effect-capable configuration or
+//! interpret callbacks (no shell operators, redirection, expansion or substitution), and tools
+//! that only read or keep the run's own bookkeeping. Everything else, unknown included, is a
+//! side effect; one classification serves both effect recording and workspace invalidation.
 
 use codex_extension_api::ToolName;
 use codex_protocol::items::CommandExecutionItem;
@@ -10,19 +11,18 @@ use codex_protocol::items::CommandExecutionItem;
 /// Shell flags whose next (final) argument is the script the model asked to run.
 const SCRIPT_FLAGS: &[&str] = &["-c", "-lc", "-Command", "-command", "/c", "/C"];
 
-/// Programs that only read, given none of the options in `WRITING_OPTIONS`.
+/// Programs that only read and have no option that writes a file or runs another program,
+/// reads configuration that could, or interprets a callback (so no `git`, `rg`, `find`,
+/// `diff`, `sed` or `awk`).
 const READ_ONLY_PROGRAMS: &[&str] = &[
     "basename",
     "cat",
     "cmp",
     "cut",
     "df",
-    "diff",
     "dirname",
     "du",
     "echo",
-    "egrep",
-    "fgrep",
     "grep",
     "head",
     "ls",
@@ -31,7 +31,6 @@ const READ_ONLY_PROGRAMS: &[&str] = &[
     "pwd",
     "readlink",
     "realpath",
-    "rg",
     "sha256sum",
     "stat",
     "tail",
@@ -41,33 +40,12 @@ const READ_ONLY_PROGRAMS: &[&str] = &[
     "whoami",
 ];
 
-/// Options that make an otherwise read-only program write a file or run another program.
-const WRITING_OPTIONS: &[&str] = &["--output", "--pre", "--open-files-in-pager", "-O"];
-
-/// `git` subcommands that only read the repository.
-const READ_ONLY_GIT: &[&str] = &[
-    "blame",
-    "describe",
-    "diff",
-    "grep",
-    "log",
-    "ls-files",
-    "rev-parse",
-    "shortlog",
-    "show",
-    "status",
-];
-
-/// Tools that only read, or that keep the run's own Stateful bookkeeping (memory, obligations,
-/// steering and acceptance records, which are not deliverables). Commands and patches are
-/// classified from their observed items instead.
+/// Tools that only read, or that keep the run's own bookkeeping (its obligations, steering
+/// and acceptance records). Project-memory writers and index refreshes are effects. Commands
+/// and patches are classified from their observed items instead.
 const READ_ONLY_TOOLS: &[&str] = &[
     "blackboard_query",
-    "blackboard_record_batch",
-    "blackboard_relate",
-    "blackboard_update_batch",
     "context_map_query",
-    "context_map_refresh",
     "conversation_read",
     "evidence_read",
     "list_mcp_resource_templates",
@@ -113,29 +91,8 @@ pub(crate) fn read_only_script(script: &str) -> bool {
     let Some(argv) = split_words(script) else {
         return false;
     };
-    let Some((program, arguments)) = argv.split_first() else {
-        return false;
-    };
-    if arguments.iter().any(|argument| {
-        WRITING_OPTIONS
-            .iter()
-            .any(|option| argument.starts_with(option))
-    }) {
-        return false;
-    }
-    match program.as_str() {
-        "git" => arguments
-            .first()
-            .is_some_and(|subcommand| READ_ONLY_GIT.contains(&subcommand.as_str())),
-        "find" => !arguments.iter().any(|argument| {
-            argument.starts_with("-exec")
-                || argument.starts_with("-ok")
-                || argument.starts_with("-fprint")
-                || argument == "-delete"
-                || argument == "-fls"
-        }),
-        program => READ_ONLY_PROGRAMS.contains(&program),
-    }
+    argv.first()
+        .is_some_and(|program| READ_ONLY_PROGRAMS.contains(&program.as_str()))
 }
 
 /// Splits on whitespace, honoring single and double quotes; `None` for an unterminated quote.

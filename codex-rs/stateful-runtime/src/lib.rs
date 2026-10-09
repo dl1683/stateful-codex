@@ -51,7 +51,6 @@ pub use acceptance_coverage::MAX_OMISSION_PROPOSALS;
 pub use acceptance_coverage::sentences;
 pub use acceptance_coverage::uncovered_sentences;
 pub use acceptance_exemption::read_only_exempt;
-pub use acceptance_exemption::states_criteria;
 pub use measurement::NewStatefulTurnMeasurement;
 pub use measurement::StatefulAttributionCounters;
 pub use measurement::StatefulMeasurementSummary;

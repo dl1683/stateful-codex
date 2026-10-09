@@ -100,6 +100,7 @@ fn ledger(revision: u64, generation: u64, criteria: Vec<AcceptanceCriterion>) ->
         pending_commands: 0,
         side_effects: 0,
         read_only_exemption: false,
+        observations_complete: true,
         reconciled_steering: Vec::new(),
         stalled_completions: 0,
         verification_attempt: 0,
@@ -215,5 +216,25 @@ fn the_settled_count_uses_the_gate_policy() {
     assert!(
         header(observed(AcceptanceOrigin::Derived, Some("sha256:out")))
             .contains("1 of 1 criteria settled")
+    );
+}
+
+#[test]
+fn an_empty_ledger_renders_the_actual_exemption_status() {
+    let exempt = AcceptanceView::new(&run(0), ledger(0, 0, Vec::new()), 0).ledger_lines();
+    assert!(exempt[0].contains("read-only so far"), "{exempt:?}");
+    let mut effected = ledger(0, 1, Vec::new());
+    effected.side_effects = 2;
+    let refused = AcceptanceView::new(&run(0), effected, 0).ledger_lines();
+    assert!(
+        refused[0].contains("not read-only (2 side effects observed, workspace generation 1)"),
+        "{refused:?}"
+    );
+    let mut legacy = ledger(0, 0, Vec::new());
+    legacy.observations_complete = false;
+    let legacy = AcceptanceView::new(&run(0), legacy, 0).ledger_lines();
+    assert!(
+        legacy[0].contains("effects before observation began are unknown"),
+        "{legacy:?}"
     );
 }

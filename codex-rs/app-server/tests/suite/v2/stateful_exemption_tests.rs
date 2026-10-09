@@ -1,6 +1,7 @@
 //! The host-decided read-only exemption through the public API: an effect-free answer
-//! completes without an acceptance ledger; any observed effect, unproven command or stated
-//! criterion brings the ledger back, whatever the model claims.
+//! completes without an acceptance ledger; any observed effect, unproven command, effectful
+//! tool or declared criterion brings the ledger back, whatever the model claims. The request's
+//! wording is no authority either way.
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
@@ -63,6 +64,16 @@ fn complete(call_id: &str, revision: u64, open_issues: &[&str], result: &str) ->
     )
 }
 
+fn declare(quote: &str, revision: u64) -> String {
+    call(
+        "declare",
+        "stateful_acceptance_update",
+        json!({"expectedLedgerRevision": revision, "changes": [
+            {"action": "add", "origin": "user", "kind": "manual", "statement": quote, "requestQuote": quote}
+        ]}),
+    )
+}
+
 fn message(id: &str, text: &str) -> String {
     responses::sse(vec![
         responses::ev_assistant_message(id, text),
@@ -71,7 +82,7 @@ fn message(id: &str, text: &str) -> String {
 }
 
 struct Harness {
-    _codex_home: TempDir,
+    codex_home: TempDir,
     #[cfg_attr(target_os = "windows", allow(dead_code))]
     project_root: TempDir,
     responses_server: wiremock::MockServer,
@@ -81,6 +92,14 @@ struct Harness {
 }
 
 async fn harness(goal: &str, sandbox_mode: &str) -> Result<Harness> {
+    harness_with(goal, sandbox_mode, StatefulWorkflowMode::Autonomous).await
+}
+
+async fn harness_with(
+    goal: &str,
+    sandbox_mode: &str,
+    mode: StatefulWorkflowMode,
+) -> Result<Harness> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -124,7 +143,7 @@ async fn harness(goal: &str, sandbox_mode: &str) -> Result<Harness> {
                 project_id: project.project.id,
                 thread_id: thread.thread.id.clone(),
                 goal: goal.to_string(),
-                mode: StatefulWorkflowMode::Autonomous,
+                mode,
                 budget: StatefulRunBudget {
                     max_continuations: 1,
                     max_elapsed_seconds: 3_600,
@@ -134,7 +153,7 @@ async fn harness(goal: &str, sandbox_mode: &str) -> Result<Harness> {
         })
         .await?;
     Ok(Harness {
-        _codex_home: codex_home,
+        codex_home,
         project_root,
         responses_server,
         server,
@@ -246,27 +265,36 @@ async fn an_unknown_command_is_not_exempt() -> Result<()> {
     Ok(())
 }
 
-/// Acceptance criteria stated in the request bring the ledger back.
+/// A declared criterion brings the ledger back; criteria stated only in prose are not host
+/// authority, and a read-only answer to such a request is judged by the user.
 #[tokio::test]
-async fn stated_criteria_are_not_exempt() -> Result<()> {
-    let mut harness = harness(
-        "Explain the parser module; the answer must cover error recovery.",
-        "read-only",
-    )
-    .await?;
-    let revision = harness.run.revision;
-    let outputs = harness
+async fn a_declared_criterion_ends_the_exemption_and_prose_does_not() -> Result<()> {
+    let mut declared = harness(LOOKUP, "read-only").await?;
+    let revision = declared.run.revision;
+    let outputs = declared
         .turn(vec![
+            declare(LOOKUP, 0),
             complete("complete", revision, &[], "It turns tokens into an AST."),
             message("done", "Refused."),
         ])
         .await?;
     assert!(outputs[0].contains("completion refused"), "{outputs:?}");
-    assert_eq!(harness.status().await?, StatefulRunStatus::Running);
+    assert_eq!(declared.status().await?, StatefulRunStatus::Running);
+
+    let prose = "Explain the parser module; the answer must cover error recovery.";
+    let mut stated = harness(prose, "read-only").await?;
+    let revision = stated.run.revision;
+    stated
+        .turn(vec![
+            complete("complete", revision, &[], "It turns tokens into an AST."),
+            message("done", "Answered."),
+        ])
+        .await?;
+    assert_eq!(stated.status().await?, StatefulRunStatus::Completed);
     Ok(())
 }
 
-/// Steering applied mid-run that states a criterion ends the exemption.
+/// Steering applied mid-run whose requirement is declared as a criterion ends the exemption.
 #[tokio::test]
 async fn steering_that_adds_criteria_ends_the_exemption() -> Result<()> {
     let mut harness = harness(LOOKUP, "read-only").await?;
@@ -297,7 +325,123 @@ async fn steering_that_adds_criteria_ends_the_exemption() -> Result<()> {
                 json!({"steeringId": submitted.steering.id, "expectedRevision": 2, "action": "apply",
                     "expectedRunRevision": revision, "strategy": "Name every public function."}),
             ),
+            declare("The answer must name every public function.", 0),
+            call(
+                "reconcile",
+                "stateful_acceptance_update",
+                json!({"expectedLedgerRevision": 1, "changes": [
+                    {"action": "reconcileSteering", "steeringId": submitted.steering.id, "text": "Adds C1."}
+                ]}),
+            ),
             complete("complete", revision + 1, &[], "It turns tokens into an AST."),
+            message("done", "Refused."),
+        ])
+        .await?;
+    assert!(outputs[0].contains("completion refused"), "{outputs:?}");
+    assert_eq!(harness.status().await?, StatefulRunStatus::Running);
+    Ok(())
+}
+
+/// Searches that can run callbacks or read effect-capable configuration are not proven
+/// read-only: here `git grep --open` (an abbreviation of --open-files-in-pager) runs a helper
+/// that writes a file.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn callback_capable_searches_are_not_exempt() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut harness = harness(LOOKUP, "workspace-write").await?;
+    let root = harness.project_root.path().to_path_buf();
+    let mutator = root.join("mutator");
+    std::fs::write(&mutator, "#!/bin/sh\necho changed > notes.txt\n")?;
+    std::fs::set_permissions(&mutator, std::fs::Permissions::from_mode(0o755))?;
+    for arguments in [&["init", "--quiet"][..], &["add", "."][..]] {
+        std::process::Command::new("git")
+            .args(arguments)
+            .current_dir(&root)
+            .status()?;
+    }
+    let revision = harness.run.revision;
+    let outputs = harness
+        .turn(vec![
+            exec(
+                "search",
+                "git grep --open=./mutator parser README.md",
+                &root,
+            ),
+            exec("rg", "rg parser README.md", &root),
+            complete("complete", revision, &[], "It turns tokens into an AST."),
+            message("done", "Refused."),
+        ])
+        .await?;
+    assert!(outputs[0].contains("completion refused"), "{outputs:?}");
+    assert_eq!(harness.status().await?, StatefulRunStatus::Running);
+    Ok(())
+}
+
+/// A project-memory write is an effect: completing a run that recorded knowledge, even
+/// through a valid durable-learning completion, owes the ledger.
+#[tokio::test]
+async fn a_project_memory_write_brings_the_ledger_back() -> Result<()> {
+    let mut harness = harness_with(
+        "Record the parser's purpose in project memory.",
+        "read-only",
+        StatefulWorkflowMode::Collaborative,
+    )
+    .await?;
+    let project_id = harness.run.project_id.clone();
+    let _: codex_app_server_protocol::ContextMapRefreshResponse = harness
+        .server
+        .request(|request_id| ClientRequest::ContextMapRefresh {
+            request_id,
+            params: codex_app_server_protocol::ContextMapRefreshParams {
+                project_id: project_id.clone(),
+            },
+        })
+        .await?;
+    harness
+        .turn(vec![
+            call(
+                "record",
+                "blackboard_record_batch",
+                json!({"records": [{"idempotencyKey": "parser-purpose", "kind": "note",
+                    "content": "The parser turns tokens into an AST.", "confidenceBasisPoints": 9000,
+                    "verification": "unverified", "importance": "high", "rootPromotion": "promoted",
+                    "evidence": [], "premises": [], "supersedes": []}]}),
+            ),
+            message("recorded", "Recorded."),
+        ])
+        .await?;
+    let sqlite = codex_state::SqliteConfig::new_for_testing(
+        codex_utils_absolute_path::AbsolutePathBuf::try_from(
+            harness.codex_home.path().to_path_buf(),
+        )
+        .expect("absolute home"),
+    );
+    let root_revision = codex_project_intelligence::BlackboardStore::open(&sqlite)
+        .await?
+        .root_projection(codex_project_intelligence::RootBlackboardQuery {
+            project_id,
+            max_entries: 256,
+        })
+        .await?
+        .revision;
+    let revision = harness.run.revision;
+    let outputs = harness
+        .turn(vec![
+            call(
+                "complete",
+                "stateful_run_update",
+                json!({
+                    "expectedRevision": revision,
+                    "status": "completed",
+                    "openIssues": [],
+                    "result": "Recorded the parser's purpose.",
+                    "rootRevision": root_revision,
+                    "materialRootFindings": ["E1"],
+                    "completionIdempotencyKey": "memory-final",
+                    "finalObligation": {"learning": ["The parser turns tokens into an AST."]}
+                }),
+            ),
             message("done", "Refused."),
         ])
         .await?;

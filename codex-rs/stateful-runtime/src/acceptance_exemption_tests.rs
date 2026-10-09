@@ -5,7 +5,6 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
-use super::states_criteria;
 use crate::AcceptanceCommit;
 use crate::NewStatefulRun;
 use crate::RunBudget;
@@ -79,27 +78,6 @@ async fn complete(
     result
 }
 
-#[test]
-fn criteria_words_are_recognized_case_insensitively() {
-    for request in [
-        "Summarize the parser; it must cover errors.",
-        "Make sure the answer cites the module.",
-        "Acceptance: the list is complete.",
-        "Verify the totals.",
-        "The output is REQUIRED to be sorted.",
-    ] {
-        assert!(states_criteria(request), "{request}");
-    }
-    for request in [
-        "What does the parser module do?",
-        "Explain how the cache is invalidated and which files own it.",
-        "Which library should I use for retries?",
-        "Customs rules (mustard imports) in the docs.",
-    ] {
-        assert!(!states_criteria(request), "{request}");
-    }
-}
-
 #[tokio::test]
 async fn an_effect_free_answer_completes_without_a_ledger() {
     let (_home, store, id) = open_run("What does the parser module do?").await;
@@ -135,12 +113,36 @@ async fn any_observed_effect_or_stated_criterion_brings_the_ledger_back() {
     store.begin_command(&id, "call-1").await.expect("pending");
     assert!(complete(&store, &id).await.is_err(), "a pending command");
 
+    // The request's wording is no authority; a declared criterion is.
     let (_home, store, id) = open_run("Explain the parser; it must cover errors.").await;
-    let error = complete(&store, &id).await.expect_err("stated criteria");
     assert!(
-        error.to_string().contains("covered by no criterion"),
-        "{error}"
+        complete(&store, &id).await.is_ok(),
+        "prose is not a criterion"
     );
+    let (_home, store, id) = open_run("What does the parser module do?").await;
+    let request = store.acceptance_request(&id).await.expect("request");
+    store
+        .revise_acceptance(
+            &id,
+            0,
+            vec![crate::AcceptanceChange::Add {
+                origin: crate::AcceptanceOrigin::User,
+                kind: crate::AcceptanceKind::Manual,
+                statement: "Name every public function.".to_string(),
+                request_span: Some(crate::RequestSpan {
+                    start: 0,
+                    end: request.len(),
+                }),
+                terms: crate::CriterionTerms {
+                    required: true,
+                    ..crate::CriterionTerms::default()
+                },
+            }],
+            "call-criterion",
+        )
+        .await
+        .expect("criterion declared");
+    assert!(complete(&store, &id).await.is_err(), "a declared criterion");
     assert!(
         !store
             .acceptance_ledger(&id)

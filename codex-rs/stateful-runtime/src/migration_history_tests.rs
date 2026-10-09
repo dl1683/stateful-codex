@@ -189,3 +189,56 @@ async fn migration_history_runtime_nonempty_untracked_database_refuses_unchanged
         assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 }
+
+/// A run that began before effect observation existed has unknown earlier effects, so it is
+/// never exempt from acceptance; a run that begins afterwards can be.
+#[tokio::test]
+async fn a_run_that_began_before_effect_observation_is_not_exempt() {
+    let home = TempDir::new().unwrap();
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let prefix = Migrator {
+        migrations: Cow::Owned(
+            MIGRATOR
+                .iter()
+                .filter(|m| m.version <= 10)
+                .cloned()
+                .collect(),
+        ),
+        ..Migrator::DEFAULT
+    };
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
+        .await
+        .unwrap();
+    sqlite.run_migrations(&pool, &prefix).await.unwrap();
+    sqlx::query("INSERT INTO stateful_runs (id, project_id, goal, mode, status, strategy_revision, revision, created_at_ms, updated_at_ms) VALUES ('legacy', 'project', 'Publish the report.', 'autonomous', 'running', 0, 1, 1, 1)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let store = StatefulRunStore::open(&sqlite).await.unwrap();
+    let legacy = crate::StatefulRunId::parse("legacy").unwrap();
+    let ledger = store.acceptance_ledger(&legacy).await.unwrap();
+    assert!(!ledger.observations_complete);
+    assert!(!crate::read_only_exempt(&ledger));
+    let fresh = crate::StatefulRunId::parse("fresh").unwrap();
+    store
+        .create_run(
+            fresh.clone(),
+            crate::NewStatefulRun {
+                project_id: "project".to_string(),
+                thread_ids: vec!["thread".to_string()],
+                goal: "What does the parser do?".to_string(),
+                mode: crate::WorkflowMode::Autonomous,
+                budget: crate::RunBudget {
+                    max_continuations: 1,
+                    max_elapsed_seconds: 60,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    assert!(crate::read_only_exempt(
+        &store.acceptance_ledger(&fresh).await.unwrap()
+    ));
+}

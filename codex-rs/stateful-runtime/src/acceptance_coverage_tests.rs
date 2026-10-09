@@ -113,7 +113,7 @@ fn derived_retired_and_optional_overlaps_do_not_cover_user_text() {
 }
 
 #[test]
-fn only_an_effect_free_run_without_stated_criteria_owes_no_coverage() {
+fn only_a_fully_observed_effect_free_run_owes_no_coverage() {
     // The read-only exemption rests on observed facts, not on the request's length.
     let goal = "Compute the totals for a, b and c and write a summary.";
     assert_eq!(uncovered_sentences(goal, &ledger()), Vec::new());
@@ -123,11 +123,9 @@ fn only_an_effect_free_run_without_stated_criteria_owes_no_coverage() {
         quotes(goal, uncovered_sentences(goal, &effected)),
         vec![goal]
     );
-    let stated = "Compute the totals; they must match the ledger.";
-    assert_eq!(
-        quotes(stated, uncovered_sentences(stated, &ledger())),
-        vec!["Compute the totals", "they must match the ledger."]
-    );
+    let mut legacy = ledger();
+    legacy.observations_complete = false;
+    assert_eq!(quotes(goal, uncovered_sentences(goal, &legacy)), vec![goal]);
 }
 
 #[test]

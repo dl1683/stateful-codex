@@ -9,12 +9,7 @@ fn only_plain_allowlisted_reads_are_read_only() {
         "cat README.md",
         "ls -la src",
         "grep -rn \"fn main\" src",
-        "rg TODO --glob '*.rs'",
         "head -n 20 src/lib.rs",
-        "git status",
-        "git log --oneline -5",
-        "git diff HEAD -- src/lib.rs",
-        "find . -name '*.py'",
         "wc -l src/lib.rs",
     ] {
         assert!(read_only_script(script), "{script}");
@@ -32,6 +27,12 @@ fn only_plain_allowlisted_reads_are_read_only() {
         "make",
         "sed -i s/a/b/ file",
         "git commit -m wip",
+        "git status",
+        "git grep --open=./mutator Codex README.md",
+        "git log --oneline -5",
+        "rg TODO src",
+        "find . -name '*.py'",
+        "diff a b",
         "git -C repo status",
         "git diff --output=patch.txt",
         "rg --pre ./decode foo",
@@ -52,6 +53,8 @@ fn only_reading_and_bookkeeping_tools_have_no_effects() {
         "update_plan",
         "view_image",
         "stateful_run_update",
+        "obligation_update",
+        "steering_reconcile",
         "blackboard_query",
         "exec_command",
     ] {
@@ -63,6 +66,10 @@ fn only_reading_and_bookkeeping_tools_have_no_effects() {
         "spawn_agent",
         "exec",
         "unknown_tool",
+        "blackboard_record_batch",
+        "blackboard_update_batch",
+        "blackboard_relate",
+        "context_map_refresh",
     ] {
         assert!(tool_has_effects(&ToolName::plain(name)), "{name}");
     }
