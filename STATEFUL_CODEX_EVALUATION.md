@@ -53,6 +53,7 @@ pre-cleanup documents at `46d9071051445583c00b21e0163d373372d1a966`.
 | SC-EVAL-034 | 09-30 | 25-question model eval | -13.4% cost; same-day negative findings |
 | SC-EVAL-035 | 10-02/03 | Hands-on campaign | Helps across fresh threads; not yet within one run |
 | SC-EVAL-036 | 10-07 | Cloud benchmark program, first pass (Stateful only) | TB2.1 76.6%, SWE-bench Verified 91.6%, GAIA 81.2%, LoCoMo J 84.1% (proxy judge); no regression, no Stateful advantage shown |
+| SC-EVAL-037 | 10-08 | Multi-model cloud results + cross-model harness check (Stateful only) | Luna, Gemini 3.7, DeepSeek; TB2.1 qemu exclusion, model-label fix, self-judged scores withdrawn; market-study headline |
 
 Unnumbered records: live interface validation (09-21/22), project-state
 instrumentation (09-22), fresh rendered browser validation (09-22), the
@@ -2821,3 +2822,114 @@ DolphinBench (official runner, 3 personas), MemoryArena (travel 270, math 40, ph
 stack; progressive search blocked by its OpenAI Embeddings dependency), SWE-bench Pro public V1, TB4.0, DeepSWE, Harvey
 LAB (preregistered 72-task stratified subset, Luna proxy judge through unmodified rewardkit), Horizon public examples;
 LongMemEval-S, BEAM, MemoryAgentBench and MINTEval adapters are ready and queued against the weekly quota budget.
+
+## SC-EVAL-037: multi-model cloud benchmark results and cross-model harness check (2026-10-08)
+
+Status: DRAFT for the ledger. External public benchmarks, Stateful Codex only (no ordinary-Codex arm). Every
+comparison with a published number is descriptive. Published rows come from other agents, harnesses, judges, model
+settings and sometimes subsets, so none is a matched control and no difference is claimed as an effect of Stateful.
+Partial and proxy-judged scores are labelled. Builds on SC-EVAL-036 (Luna first pass). The program closes here by user
+decision (2026-10-08): no benchmark-suite reruns, because parity with standard Codex is considered established and the
+focus moves to product development. Unscored tasks stay unscored. The 36h redeploy cadence is suspended.
+
+**Setup.** Build `stateful/main` 83eee86b6 (codex-cli 0.159.2), portable bundle (x86_64 gnu `d3efa073...`, static
+musl `bd975933...` for Alpine task images, aarch64 `a4b8a63f...`). Harbor `15da91c1`, agent
+`stateful_harbor.stateful_codex:StatefulCodex` (`codex exec --stateful autonomous`). Each trial gets a fresh container
+and a fresh Stateful store. Memory benchmarks use snapshot-per-question isolation, with memory writable within each
+question. Arms differ only in the model:
+
+| Arm | Model access | Effort | Notes |
+|---|---|---|---|
+| Luna | `gpt-5.6-luna` via ChatGPT login (access-only token copy) | max (coding), high (memory) | runs paused by user once the weekly quota was spent |
+| Gemini 3.7 Flash | Vertex AI through a LiteLLM 1.104.2 Responses-to-Vertex bridge on each worker | high (top level the bridge exposes) | no hosted web search (Vertex refuses search plus function tools) |
+| Gemini 3.8 Flash | same bridge | high | stopped by user, partial |
+| DeepSeek V4.1 Flash | self-hosted vLLM (8 GPUs, TP8, official checkpoint) through the same bridge; run by a separate agent with the same runner | high (max for TB2.1-max) | |
+
+Common memory judge: Gemini 3.8 Flash on Vertex AI, using the official prompts and settings
+(`judge_g38.py`; packets under `runs/<run>/<bench>/judge_g38/`). Luna-judge numbers are kept and labelled.
+Vertex usage was fully offset by the Google AI credit.
+
+### Results by model
+
+| Benchmark (public split) | Luna | Gemini 3.7 Flash | DeepSeek V4.1 Flash | Gemini 3.8 Flash (partial) |
+|---|---|---|---|---|
+| Terminal-Bench 2.1, 87 scorable tasks (all-89 basis) | 78.4% (341/435, 5 trials) (76.6%) | 87.4% (76/87) (85.4%) | 78.2% (68/87) (76.4%); effort max 83.9% (73/87) (82.0%) | 76.7% (66/86) (74.2%) |
+| SWE-bench Verified, 500 | 91.6% (458/500) | 81.7% (407/498) | - | - |
+| SWE-bench Verified, stratified 100 | 87/100 | 79/100 | 94/100 | 61/77 |
+| DeepSWE 1.1, 113 | 71.2% (79/111) | 61.5% (64/104) | 61.1% (69/113, effort max) | - |
+| GAIA validation, 165 | 81.2% (134/165) | 72.7% (120/165) | - | 58.2% (96/165) |
+| Terminal-Bench 4.0, 63 runnable | 8.6% (5/58) | 11.5% (7/61) | - | - |
+| SWE-bench Pro V1 | 88.4% (510/577, partial; 154 unscored) | - | - | - |
+| Harvey LAB (all-pass / mean criterion pass) | strat subset: 1/54 (1.9%) / 0.851 | FULL 1,251: 66/1,243 (5.3%) / 0.864 | - | - |
+| LoCoMo J, cat 1-4 (G3.8 judge) | 84.0% (Luna judge 84.1%); F1 0.490; adversarial 50.2% | 94.7% (94.7%); F1 0.595 | 93.3% (Luna judge 93.1%); F1 0.293; adversarial 68.8% | - |
+| LongMemEval-S, stratified 102 (G3.8 judge) | 83.3% (Luna judge 81.2%) | 93.1% (94/101; 1 unanswered) | - | - |
+| MemoryArena physics, 20 (G3.8 judge, SR / PS) | 0.65 / 0.521 | 0.80 / 0.727 | - | - |
+| MemoryArena math, 40 (G3.8 judge, SR / PS) | 0.25 / 0.438 | 0.825 / 0.891 (not leakage, see note) | - | - |
+| MemoryArena travel, 270 (SR / PS / sPS; deterministic scorer) | 0.026 / 38.4 / 86.0 | 0.522 / 84.7 / 98.6 (about 5.6x Luna's tokens) | - | - |
+
+Harvey uses a proxy judge (Luna for the Luna subset, Gemini 3.8 Flash for the full Gemini run) running Harvey's own
+rewardkit grader and rubrics unchanged. The official judges are Claude Sonnet 4.6 and GPT-5.5. The published Harvey
+index numbers (Kimi K3 94.6, Opus 5 93.5) use a different metric and are not comparable.
+
+### Cross-model harness check (is the Stateful harness overfit to OpenAI models?)
+
+| Model | Benchmark | Ours | Published (same model, other harness) | Gap |
+|---|---|---|---|---|
+| gpt-5.6-luna | TB2.1, all-89 basis | 76.6% | 75.73% (released Codex 0.144.1, TB2.1 leaderboard) | +0.9 |
+| gpt-5.6-luna | SWE-bench Verified 500 | 91.6% | 93.0% (mini-SWE-agent; not re-verified) | -1.4 |
+| gemini-3.7-flash | TB2.1, all-89 basis | 85.4% | 81.6-85.8% | -0.4 to +3.8 |
+| gemini-3.7-flash | SWE-bench Verified 500 | 81.7% | 80.8% | +0.9 |
+| gemini-3.7-flash | DeepSWE | 61.5% (104 scored) | 65.3% | -3.8 |
+
+Every gap is within 5 points. On scores, the harness is not overfit to OpenAI models. The cross-model problems are in
+the tool surface (see the market study, item 7), not in the scores.
+
+### Corrections made in this round (integrity)
+
+1. **TB2.1 qemu tasks.** `qemu-startup` and `qemu-alpine-ssh` cannot be scored by any model: the task's own verifier
+   runs an apt install that gets 404 from the Debian mirror. This was confirmed in `verifier/test-stdout.txt` for Luna,
+   Gemini 3.7 and Gemini 3.8 trials. Their trials are now infra-invalid in every arm (`verifier_broken_tasks` in
+   `benchmarks.json`, applied by `collect`), and TB2.1 is reported over 87 scorable tasks. The all-89 basis is kept
+   for leaderboard comparisons. SC-EVAL-036's 76.6% is unchanged on that basis; over the 87 scorable tasks it is 78.4%.
+2. **Model labels.** `collect`/`memcollect` wrote the global default model into every summary, so the DeepSeek and
+   Gemini summaries said `gpt-5.6-luna`. This is fixed at the source (`arm_model`). The summaries were re-collected, and
+   no score changed except through the qemu exclusion.
+3. **Luna Harvey.** The subset count went from "8 judged, 0 pass, criterion 0.834" to 54 valid judged trials, 1
+   all-pass, criterion 0.851. 13 trials that hit the rate limit during the agent phase are excluded as infra-invalid.
+4. **Gemini 3.7 MemoryArena "Luna judge".** The inline judge calls in the Gemini runs inherited the agent model, so
+   they were Gemini 3.7 judging itself. Those figures (physics PS 0.758) are withdrawn, and only the Gemini 3.8 Flash
+   judge is reported. Fixed for future runs: judge calls set an explicit judge flag.
+
+### Market-study headline (insights/MARKET_STUDY.md, descriptive)
+
+- **Coding parity holds on every model.** See the harness-check table.
+- **Biggest weakness: stopping too early.** TB4.0 is 8.6% (Luna) against a best published 58.2%. Agents stop at a
+  median of about 14 min out of an 8 h budget. In Harvey, 16% of Gemini trials miss all-pass by only 1-2 of about 57
+  criteria, mostly issues that were never raised.
+- **Memory works, and the answering model decides how well.** LoCoMo J under one judge: Luna 84.0, DeepSeek 93.3,
+  Gemini 3.7 94.7. Luna writes about 1.5 memory entries per ingested session, against 9.9 for DeepSeek. Luna's misses
+  are mostly about time and specifics (temporal 75.1%) and over-answering (adversarial 50.2%).
+- **Memory-native benchmarks lead.** MemoryArena travel sPS 0.86 (Luna) and 0.99 (Gemini 3.7; SR 52% against a best published 6%) against a best published 0.62. Math and physics
+  success rates tie the best published.
+- **Cross-model friction is in the tool surface.** There is no neutral web search: Gemini scraped GAIA with curl and
+  hit timeouts. Stateful tool schemas reject some non-OpenAI calls; the K2 portable-schema fix is in 8925d0ea6, built
+  but not benchmarked.
+- **Top fixes.** Evidence-bound completion that uses the time budget; a coverage ledger built from the source
+  documents; exact facts, event time and abstention in memory; a portable tool layer; always having a deliverable
+  written.
+
+### Limitations
+
+Harness bug that can affect any arm: Harbor's Codex adapter passes the task instruction in argv, so an agent that runs `pkill -f <word from the task>` kills its own codex process. This caused 5 NonZeroAgentExitCode trials on the DeepSeek TB2.1 runs. Such trials are scored as failures here.
+
+MemoryArena math on Gemini 3.7 (SR 0.825 vs Luna 0.25 under the same judge) was checked for leakage and none was found. Gemini passes 37/40 first subtasks (no memory dependency) against Luna's 25/40, and 89% of the memory-dependent later subtasks against 37%. Both arms had open network access, and in 3 of 40 Gemini tasks the agent searched for the benchmark's repo or problem text. Treat the score as indicative.
+
+Single trial per task for all non-Luna arms. Gemini effort `high` vs Luna `max`. Proxy judges throughout the memory and
+Harvey tracks. Vertex 429s left 9 DeepSWE and 2 SWE-bench Verified tasks unscored for Gemini 3.7, and they are not
+rerun. Luna's LongMemEval full-500, DolphinBench, AMA-Bench, MemoryAgentBench, BEAM and MINTEval runs are partial and
+paused, so they are not reported. Blocked (reasons recorded in RESULTS.md): Horizon, MemoryArena search, BixBench, the
+GPU tasks of TB4.0 and SWE-Marathon.
+
+Sources: `cloud/RESULTS.md`, `cloud/STATUS.md`, `cloud/RUN_LOG.md`, `campaign2/FINDINGS.md`, `deepseek/RUN_LOG.md`,
+`insights/MARKET_STUDY.md`. Per-benchmark summaries are in `gs://sc-bench-iqidis-artifacts/results/` and
+`.../deepseek/results/`.

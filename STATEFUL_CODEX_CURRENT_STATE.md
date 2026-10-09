@@ -116,6 +116,16 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   are refused rather than supported, and there is no host-enforced cap on a model
   that never produces a valid completion.
 
+- **Checkpoint E, evidence-bound completion** (`fb148cb38`..`0a83b1f58`): a run-owned
+  acceptance ledger (criteria linked to request text, required/optional,
+  dependencies, revisions), host-observed check evidence and one completion gate
+  for every writer of Completed; admitted open issues end the run Blocked with a
+  partial result. Autonomous runs can complete unattended against a host-admitted
+  frozen checker. **Not shippable alone:** after the final cut a trivial lookup
+  cannot complete and checks settle only in fully pinned workspaces; checkpoint
+  E1b restores a host-decided read-only exemption first. Checker adequacy is not
+  independently judged.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
