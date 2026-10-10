@@ -1,3 +1,5 @@
+import { visibleAnswer } from "./outcome-trailer.mjs";
+
 const packetSections = [
   ["examined", "Examined"],
   ["rationale", "Why it matters"],
@@ -27,17 +29,21 @@ export function renderWorkspace(state) {
           ${renderSourceRouting(state)}
         </aside>
         <section class="stack-panel main-work">
-          ${renderObligation(latestObligation)}
+          ${
+            state.ask
+              ? renderAnswer(state)
+              : `${renderObligation(latestObligation)}
           ${renderStrategy(state)}
           ${renderResult(state)}
-          ${renderLive(state)}
+          ${renderLive(state)}`
+          }
           ${renderActivity(state.activity)}
           ${renderInstructionForm(state)}
         </section>
         <aside class="stack-panel controls-panel">
-          ${renderControls(state)}
+          ${state.ask ? renderAskControls() : renderControls(state)}
           ${renderMeasuredWork(state.measurementSummary)}
-          ${renderSteering(state)}
+          ${state.ask ? "" : renderSteering(state)}
         </aside>
         <section class="findings-work">
           ${renderFindings(state)}
@@ -54,6 +60,12 @@ function renderLoading(state) {
 
 function renderHeader(state) {
   const run = state.run;
+  if (state.ask) {
+    return `<header class="workspace-header">
+    <div><p class="eyebrow">Stateful Codex · ask</p><h1>${escapeHtml(state.project?.name ?? "Project")}</h1><p class="path">${escapeHtml(state.project?.roots?.map((root) => root.path).join(" · ") ?? "")}</p></div>
+    <div class="run-summary"><span class="badge ask">ask · no run</span><button class="text-button" data-action="refresh">Refresh</button></div>
+  </header>`;
+  }
   return `<header class="workspace-header">
     <div><p class="eyebrow">Stateful Codex · ${escapeHtml(run?.mode ?? "preparing")}</p><h1>${escapeHtml(state.project?.name ?? "Project")}</h1><p class="path">${escapeHtml(state.project?.roots?.map((root) => root.path).join(" · ") ?? "")}</p></div>
     <div class="run-summary"><span class="badge ${escapeHtml(run?.status ?? "pending")}">${escapeHtml(run ? runStatusLabel(run.status) : "preparing")}</span><span>strategy r${run?.strategyRevision ?? 0}</span><span>${run?.continuationsUsed ?? 0}/${run?.budget?.maxContinuations ?? 0} continuations</span><button class="text-button" data-action="refresh">Refresh</button></div>
@@ -178,12 +190,37 @@ function renderResult(state) {
 }
 
 function renderLive(state) {
-  return state.liveText
+  const live = visibleAnswer(state.liveText, { streaming: true });
+  return live
     ? panel(
         "Live response",
-        `<p class="live-copy">${escapeHtml(state.liveText)}</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p>`,
+        `<p class="live-copy">${escapeHtml(live)}</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p>`,
       )
     : "";
+}
+
+// Ask: the latest answer, streaming or from the thread's history after a refresh.
+function renderAnswer(state) {
+  const latest = state.activity
+    .map(normalizeThreadItem)
+    .filter((item) => item?.type === "agentMessage")
+    .at(-1);
+  const answer = state.liveText
+    ? visibleAnswer(state.liveText, { streaming: true })
+    : visibleAnswer(latest?.text ?? "");
+  return panel(
+    "Answer",
+    answer
+      ? `<p class="live-copy">${escapeHtml(answer)}</p><p class="microcopy">Answered from the project's memory and sources; not verified by the host.</p>`
+      : empty("Your answer appears here."),
+  );
+}
+
+function renderAskControls() {
+  return panel(
+    "Ask",
+    `<p class="microcopy">This thread answers from the project's memory: its rules, decisions and findings. It has no run, so there is nothing to verify, block or steer. Start Work from setup when you want sustained, checked work.</p>${newOutcomeLink()}`,
+  );
 }
 
 function renderActivity(items) {
@@ -301,6 +338,12 @@ function renderInstructionForm(state) {
     return panel(
       "Continue the work",
       `<p class="microcopy">Create a new outcome to continue or fork this thread with a fresh explicit goal.</p>${newOutcomeLink()}`,
+    );
+  }
+  if (state.ask) {
+    return panel(
+      "Ask another question",
+      `<form id="message-form" class="inline-form"><textarea name="message" placeholder="What else do you want to know about this project?" required></textarea><button class="primary">Ask</button></form>`,
     );
   }
   return panel(

@@ -1,3 +1,4 @@
+import { askRefusal, isAskWorkspace, sendInitialQuestion } from "./ask-route.mjs";
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
@@ -13,9 +14,12 @@ if (!projectId || !threadId || !selectedMode || !initialGoal) {
   window.location.replace("/");
 }
 
+const ask = isAskWorkspace(selectedMode);
+
 const state = {
   projectId,
   threadId,
+  ask,
   project: null,
   run: null,
   recovery: null,
@@ -43,22 +47,22 @@ const refresh = createRefreshGate(refreshWorkspace);
 async function boot() {
   subscribe(handleEvent, { threadId, projectId });
   try {
-    await ensureRun();
+    // The route was chosen at setup, before any run existed: Ask never enters ensureRun.
+    if (ask) await openAsk();
+    else await ensureRun();
     await refresh();
   } catch (error) {
     fail(error);
   }
 }
 
-async function ensureRun() {
-  const [projectResponse, runResponse, status] = await Promise.all([
+async function openProject() {
+  const [projectResponse, status] = await Promise.all([
     rpc("project/read", { projectId }),
-    rpc("statefulRun/read", runReadParams()),
     rpc("projectIntelligence/status", { projectId }),
   ]);
   state.project = projectResponse.project;
   state.status = status;
-  state.recovery = runResponse.recovery;
   if (needsProjectRefresh(status)) {
     state.busyAction = status.initialized
       ? "Retrying the incomplete project index"
@@ -66,6 +70,32 @@ async function ensureRun() {
     render();
     await rpc("contextMap/refresh", { projectId });
   }
+}
+
+// Ask: a run-less thread with the project's memory. It never creates or adopts a run.
+async function openAsk() {
+  const [runResponse] = await Promise.all([
+    rpc("statefulRun/read", { threadId }),
+    openProject(),
+  ]);
+  const refusal = askRefusal(runResponse.run);
+  if (refusal) throw new Error(refusal);
+  state.busyAction = "Asking your question";
+  render();
+  await sendInitialQuestion({
+    storage: sessionStorage,
+    threadId,
+    question: initialGoal,
+    sendTurn,
+  });
+}
+
+async function ensureRun() {
+  const [runResponse] = await Promise.all([
+    rpc("statefulRun/read", runReadParams()),
+    openProject(),
+  ]);
+  state.recovery = runResponse.recovery;
   if (runResponse.run) {
     state.run = runResponse.run;
     if (
@@ -134,7 +164,7 @@ async function refreshWorkspace() {
     activity,
   ] = await Promise.all([
     rpc("project/read", { projectId }),
-    rpc("statefulRun/read", runReadParams()),
+    ask ? { run: null, recovery: null } : rpc("statefulRun/read", runReadParams()),
     rpc("projectIntelligence/status", { projectId }),
     readHierarchy(),
     rpc("blackboard/query", { projectId, text: null, limit: 50 }),

@@ -12,7 +12,8 @@ const state = {
   rootPath: "",
   threadAction: "create",
   threadId: "",
-  mode: "collaborative",
+  // Ask is the default: a question needs no run.
+  mode: "ask",
   goal: "",
   maxContinuations: 24,
   maxElapsedSeconds: 14400,
@@ -155,6 +156,7 @@ async function openWorkspace() {
   sessionStorage.removeItem("stateful-created-run-id");
   sessionStorage.removeItem("stateful-initial-turn-sent");
   sessionStorage.removeItem("stateful-run-key");
+  sessionStorage.removeItem("stateful-ask-sent");
   sessionStorage.setItem(
     "stateful-max-continuations",
     String(state.maxContinuations),

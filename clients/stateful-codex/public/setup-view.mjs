@@ -38,11 +38,12 @@ export function renderSetup(state) {
           <section class="card wide stack">
             <h2><span class="step">03</span> Working mode</h2>
             <div class="choice-row">
+              ${choice("mode", "ask", "Ask", "Answer from the project's memory. Starts no run, so there is nothing to verify, block or steer.", state.mode)}
               ${choice("mode", "autonomous", "Autonomous", "Keep working within the explicit budget; update me at meaningful changes.", state.mode)}
               ${choice("mode", "collaborative", "Collaborative", "Execute normally while making learning and strategy easy to steer.", state.mode)}
               ${choice("mode", "socratic", "Socratic", "Question and synthesize first; wait for my explicit transition to execution.", state.mode)}
             </div>
-            <label>Desired outcome<textarea name="goal" placeholder="What should this work accomplish?" required>${escapeHtml(state.goal)}</textarea></label>
+            ${state.mode === "ask" ? `<label>Question<textarea name="goal" placeholder="What do you want to know about this project?" required>${escapeHtml(state.goal)}</textarea></label>` : `<label>Desired outcome<textarea name="goal" placeholder="What should this work accomplish?" required>${escapeHtml(state.goal)}</textarea></label>`}
             ${state.mode === "autonomous" ? `<div class="setup-grid"><label>Maximum continuations<input name="maxContinuations" type="number" min="1" max="1000" value="${state.maxContinuations}" /></label><label>Maximum elapsed seconds<input name="maxElapsedSeconds" type="number" min="60" max="604800" value="${state.maxElapsedSeconds}" /></label></div>` : ""}
           </section>
         </div>
