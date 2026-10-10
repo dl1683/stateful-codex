@@ -63,8 +63,6 @@ pub use turn_input::TurnInputContext;
 pub use turn_input::TurnInputEnvironment;
 pub use turn_lifecycle::TurnAbortInput;
 pub use turn_lifecycle::TurnErrorInput;
-pub use turn_lifecycle::TurnFinalizeInput;
-pub use turn_lifecycle::TurnFinalizeOutcome;
 pub use turn_lifecycle::TurnStartInput;
 pub use turn_lifecycle::TurnStartPhase;
 pub use turn_lifecycle::TurnStopInput;
@@ -277,22 +275,6 @@ pub trait TurnLifecycleContributor: Send + Sync {
             let _self = self;
             let _input = input;
         })
-    }
-
-    /// Decides whether a finalizing turn ends its run with the turn's final answer.
-    ///
-    /// Called inside the task, after its last model response, only for a turn whose store
-    /// holds a [`crate::HostAnswerReservation`] that entered finalization. Implementations
-    /// that own the reservation re-check their own state, call
-    /// [`crate::HostAnswerReservation::authorize_commit`] immediately before the durable
-    /// commit (rolling back when it returns false), resolve the commit with its durable
-    /// outcome, and must not dispatch tools, hooks or model requests. Contributors that do
-    /// not own the reservation return [`TurnFinalizeOutcome::NotHandled`].
-    fn on_turn_finalize<'a>(
-        &'a self,
-        _input: TurnFinalizeInput<'a>,
-    ) -> ExtensionFuture<'a, TurnFinalizeOutcome> {
-        Box::pin(std::future::ready(TurnFinalizeOutcome::NotHandled))
     }
 }
 

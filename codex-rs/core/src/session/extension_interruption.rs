@@ -100,12 +100,6 @@ impl Session {
             if !turn.turn_state.lock().await.pending_input.is_empty()
                 || self.input_queue.has_pending_mailbox_items().await
                 || reply.is_closed()
-                // A turn whose terminal commit won is not interrupted; it ends as completed.
-                || turn
-                    .task
-                    .as_ref()
-                    .and_then(crate::host_answer::arbitrate_abort)
-                    .is_some()
             {
                 let _ = reply.send(false);
                 return;

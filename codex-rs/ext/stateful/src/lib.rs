@@ -18,7 +18,6 @@ mod continuity;
 mod continuity_source;
 mod conversation_summaries;
 mod events;
-mod host_answer;
 mod limits;
 mod memory_add;
 mod memory_controls;
@@ -84,7 +83,6 @@ pub use events::KnowledgeCategory;
 pub use events::MAX_RECEIPT_TEXT_BYTES;
 pub use events::StatefulEvent;
 pub use events::StatefulEventSink;
-pub use host_answer::HostAnswerCandidates;
 pub use memory_add::AddOutcome;
 pub use memory_add::MemoryAddition;
 pub use memory_add::add_entry;
@@ -288,15 +286,7 @@ impl ContextContributor for StatefulExtension {
                     .get::<capture_sources::SourceHandles>()
                     .as_deref(),
             );
-            let (pure_answer_bytes, pure_answer) = host_answer::guidance_section(
-                input
-                    .previous_world_state
-                    .and_then(|previous| previous.get("stateful_pure_answer")),
-                input.turn_id,
-                input.turn_store,
-            );
-            let packet_bytes = pure_answer_bytes
-                + source_handles.as_ref().map_or(0, |(bytes, _)| *bytes)
+            let packet_bytes = source_handles.as_ref().map_or(0, |(bytes, _)| *bytes)
                 + world_state::START_MARKER.len()
                 + status.render().0.len()
                 + world_state::END_MARKER.len()
@@ -337,7 +327,6 @@ impl ContextContributor for StatefulExtension {
             if let Some(run_status) = run_status {
                 sections.push(run_world_state_section(run_status));
             }
-            sections.push(pure_answer);
             sections
         })
     }

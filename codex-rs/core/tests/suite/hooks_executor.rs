@@ -244,7 +244,6 @@ async fn executor_interrupt_hook_skips_turn_without_step_context() -> Result<()>
         .submit(Op::RunUserShellCommand {
             command: "sleep 60".to_string(),
             timeout_ms: None,
-            reply: None,
         })
         .await?;
     fixture.interrupt_running_command().await?;

@@ -1481,10 +1481,6 @@ async fn run_auto_compact(
     phase: CompactionPhase,
 ) -> CodexResult<()> {
     let turn_context = &step_context.turn;
-    crate::host_answer::disqualify(
-        turn_context,
-        codex_extension_api::HostAnswerDisqualifier::Compaction,
-    );
     let _profile_guard = turn_context.turn_timing_state.begin_compaction();
     let _compaction_span = trace_span!(
         "codex.compaction",
@@ -1720,10 +1716,6 @@ async fn run_sampling_request(
             },
         };
 
-        crate::host_answer::disqualify(
-            &turn_context,
-            codex_extension_api::HostAnswerDisqualifier::ResponseFailed,
-        );
         let original_input = original_input.get_or_insert(prompt.input);
 
         let retry = handle_response_stream_error(
@@ -2659,10 +2651,6 @@ async fn try_run_sampling_request(
         let event = match event {
             Ok(Ok(event)) => event,
             Ok(Err(_)) => {
-                crate::host_answer::disqualify(
-                    &turn_context,
-                    codex_extension_api::HostAnswerDisqualifier::ResponseFailed,
-                );
                 if let Some(interrupt) = stream.interrupt.take() {
                     if step_context.settings.model_info.use_responses_lite {
                         let _ = interrupt.send(());
@@ -2706,7 +2694,6 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::OutputItemDone(mut item) => {
-                crate::host_answer::observe_output_item(&turn_context, &item);
                 assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
@@ -2838,7 +2825,6 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::OutputItemAdded(mut item) => {
-                crate::host_answer::observe_output_item(&turn_context, &item);
                 assign_missing_streamed_response_item_id(&mut item, /*active_item*/ None);
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;

@@ -11,8 +11,6 @@ use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::ThreadReadyInput;
 use codex_extension_api::TurnAbortInput;
 use codex_extension_api::TurnErrorInput;
-use codex_extension_api::TurnFinalizeInput;
-use codex_extension_api::TurnFinalizeOutcome;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
 use codex_extension_api::TurnStopInput;
@@ -70,22 +68,12 @@ pub trait AutonomousContinuationSink: Send + Sync {
 /// it from reading the run's active turns through the cancelled status write and their
 /// interruption. Either cancellation sees the started turn, or the claim sees the
 /// cancelled status, so no continuation starts after a cancel in this process.
-///
-/// It also carries the process-local host-answer candidacy, which run creation grants and
-/// the first turn bound to the run consumes.
 #[derive(Clone, Default)]
-pub struct RunAdmissionFence {
-    lock: Arc<tokio::sync::Mutex<()>>,
-    host_answers: crate::host_answer::HostAnswerCandidates,
-}
+pub struct RunAdmissionFence(Arc<tokio::sync::Mutex<()>>);
 
 impl RunAdmissionFence {
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.lock.lock().await
-    }
-
-    pub fn host_answer_candidates(&self) -> &crate::host_answer::HostAnswerCandidates {
-        &self.host_answers
+        self.0.lock().await
     }
 }
 
@@ -299,13 +287,6 @@ impl TurnLifecycleContributor for StatefulExtension {
             };
             match store.run_for_thread(&thread.thread_id).await {
                 Ok(Some(run)) if run.value.project_id == selected.project_id() => {
-                    crate::host_answer::reserve_for_turn(
-                        self,
-                        input.turn_store,
-                        &run,
-                        &thread.thread_id,
-                        input.turn_id,
-                    );
                     self.attribution.bind_run(input.turn_id, run.id.clone());
                     crate::acceptance_observation::bind_turn(services, input.turn_store, &run.id)
                         .await;
@@ -374,13 +355,6 @@ impl TurnLifecycleContributor for StatefulExtension {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
-    }
-
-    fn on_turn_finalize<'a>(
-        &'a self,
-        input: TurnFinalizeInput<'a>,
-    ) -> ExtensionFuture<'a, TurnFinalizeOutcome> {
-        Box::pin(crate::host_answer::finalize(self, input))
     }
 
     fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
@@ -562,7 +536,7 @@ fn recovery_delay(lease_expires_at_ms: i64) -> std::time::Duration {
     std::time::Duration::from_millis(remaining as u64)
 }
 
-pub(crate) fn emit_run_updated(
+fn emit_run_updated(
     sink: Option<&dyn StatefulEventSink>,
     run: &codex_stateful_runtime::StatefulRun,
 ) {

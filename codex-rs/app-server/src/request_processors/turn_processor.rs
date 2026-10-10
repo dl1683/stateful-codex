@@ -1469,11 +1469,6 @@ impl TurnRequestProcessor {
                 "paginated threads do not support detached review",
             ));
         }
-        if parent_thread.refuses_auxiliary_work().await {
-            return Err(invalid_request(
-                "A Stateful run is answering in this thread's current turn, so no review can start beside it. Start the review after the turn ends, or interrupt the turn first.",
-            ));
-        }
         let mut config = parent_thread.config().await.as_ref().clone();
         if let Some(review_model) = &config.review_model {
             config.model = Some(review_model.clone());

@@ -37,10 +37,6 @@ impl SessionTask for RegularTask {
         "session_task.turn"
     }
 
-    fn answers_with_model(&self) -> bool {
-        true
-    }
-
     async fn run(
         self: Arc<Self>,
         sess: Arc<Session>,
@@ -122,10 +118,7 @@ impl SessionTask for RegularTask {
             if ctx.terminal_error.lock().await.is_some() {
                 return Ok(last_agent_message);
             }
-            // Input that arrives before the closure is this task's; later input starts a
-            // later turn. A closed task may let its run's owner end the run with this answer.
-            if crate::host_answer::close_input(&sess, &ctx).await {
-                crate::host_answer::finalize(&sess, &ctx, last_agent_message.as_deref()).await?;
+            if !sess.input_queue.has_pending_input(&sess.active_turn).await {
                 return Ok(last_agent_message);
             }
             next_input = Vec::new();

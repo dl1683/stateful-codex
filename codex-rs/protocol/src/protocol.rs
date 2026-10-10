@@ -762,9 +762,6 @@ pub enum Op {
         command: String,
         /// Maximum execution time in milliseconds. Defaults to one hour.
         timeout_ms: Option<u64>,
-        /// When present, receives whether the command was admitted (an error when it was
-        /// refused) instead of an error event being emitted for a refusal.
-        reply: Option<oneshot::Sender<CodexResult<()>>>,
     },
 }
 

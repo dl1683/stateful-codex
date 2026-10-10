@@ -114,8 +114,6 @@ impl StatefulRequestProcessor {
                 active.id
             )));
         }
-        let newly_created = store.get_run(&id).await.map_err(runtime_error)?.is_none();
-        let thread_id = params.thread_id.clone();
         let run = store
             .create_run(
                 id,
@@ -132,29 +130,8 @@ impl StatefulRequestProcessor {
             )
             .await
             .map_err(runtime_error)?;
-        // A new Autonomous run on an idle thread may end with its first answering task's
-        // answer; an idempotent replay, a busy thread or any other mode never may.
-        if newly_created
-            && run.value.mode == codex_stateful_runtime::WorkflowMode::Autonomous
-            && self.thread_is_idle(&thread_id).await
-        {
-            self.run_admission
-                .host_answer_candidates()
-                .grant(run.id.as_str(), &thread_id);
-        }
         self.notify_run(&run).await;
         Ok(Some(StatefulRunStartResponse { run: api_run(run) }.into()))
-    }
-
-    /// Whether the thread is loaded here and has no running turn.
-    async fn thread_is_idle(&self, thread_id: &str) -> bool {
-        let Ok(thread_id) = ThreadId::from_string(thread_id) else {
-            return false;
-        };
-        match self.thread_manager.get_thread(thread_id).await {
-            Ok(thread) => thread.active_turn_id().await.is_none(),
-            Err(_) => false,
-        }
     }
 
     pub(crate) async fn run_read(

@@ -22,10 +22,10 @@ use crate::StatefulRunUpdate;
 use crate::WorkflowMode;
 use crate::run::StatefulRunError;
 
-pub(crate) const DATABASE_NAME: &str = "stateful_runtime_1.sqlite";
+const DATABASE_NAME: &str = "stateful_runtime_1.sqlite";
 const INITIAL_REVISION: i64 = 1;
 const MAX_LEASE_DURATION_MS: u32 = 10 * 60 * 1_000;
-pub(crate) static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutonomousClaimRequest {
