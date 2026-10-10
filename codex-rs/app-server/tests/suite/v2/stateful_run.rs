@@ -1769,8 +1769,9 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
         .iter()
         .map(|item| format!("\n- Learning: {}…", &item[..637]))
         .collect::<String>();
+    // The finding is the user's own memory: the basis names it without quoting its words.
     let durable_suffix = format!(
-        "\n\nDurable completion basis:\n- Root finding: E1 [critical; verification=userConfirmed; evidence=notApplicable; premises=notApplicable] The indemnity cap is 15% of the purchase price.{bounded_learning}"
+        "\n\nDurable completion basis:\n- Root finding: E1 [critical; verification=userConfirmed; evidence=notApplicable; premises=notApplicable] (user-stated; content as shown in the root packet){bounded_learning}"
     );
     assert!(stored.starts_with(&format!("{result}{durable_suffix}")));
     assert!(stored.contains("Acceptance basis:"));
