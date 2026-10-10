@@ -116,6 +116,13 @@ relation the user recorded. That memory reaches the model only through the
 thread-start root packet. `statefulMemory/read` remains the user's `/memory`
 view.
 
+This exclusion governs the model's memory tools only. It is not a boundary against
+a model that runs shell or network commands with the user's permissions. Such a
+model can reach anything the user can, including this endpoint through a local
+client gateway (for example the Stateful Web gateway, which serves its session
+token to local requests) and the project store files themselves. Do not rely on
+the exclusion to keep the user's memory from a model granted those permissions.
+
 # Thread removal
 
 `thread/archive` and `thread/delete` reject attempts to remove a live internal
