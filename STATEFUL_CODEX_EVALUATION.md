@@ -2970,3 +2970,32 @@ ended Blocked: the model called the completion tool, was refused for an unmet ac
 blocked. The other ended answered, but only after ten unnecessary Code Mode cells, and the raw outcome block was
 visible in the answer. No calm "answered" label appeared in the TUI. The requirement "a plain question ends answered,
 never Blocked" is not met. Evidence: sc_dogfood/integrate/handson/e1dfb_journey.md.
+
+## SC-EVAL-040: frozen long-thread baseline, restricted-read (2026-10-10)
+
+This is a baseline, not a claim. The binary was frozen and runtime-identical to stateful/main 30c8b2791.
+The model was gpt-6-luna at high effort. The workload was the unchanged within1 12-turn script with a
+50k compaction limit. Plain and Stateful collaborative ran on the same binary, n=1 per arm. The
+condition was **restricted-read**: model tools cannot read past conversation or user memory.
+
+Harness-log denial was detection-only. Real deny-read needs the elevated Windows sandbox, which is not
+set up. An audit of all 373 tool calls found no access to homes, rollouts, logs, stores or ground truth.
+
+| | Plain | Stateful |
+| --- | --- | --- |
+| Requests | 195 | 225 |
+| Units | 1.94M | 2.27M (1.17x) |
+| Compactions | 10 | 13 |
+| Needles kept (N1-N7) | N3, N6; N2 and N4 re-derived; N5 inferred | N3, N4 |
+| Deliverable | all 12 steps; the better PR description | skipped t10, continued the wrong step at t07, one help-default bug |
+
+On this run, plain beats Stateful on cost and quality. Stateful's extra cost comes from a prefix of about
+2.5k tokens, which makes requests after each compaction about 4.5k larger and so causes more compactions.
+Its recall losses came from four places:
+- `memory_read` reaches only the project store.
+- The compaction packet drops older values.
+- Thread-start continuity truncated the t05 answer before its "Next step".
+- The checkout notice lists file names only.
+
+These are the targets of the turn-boundary Forget work with restored reads, and of slices A and B. The
+baseline is repeated after reads return. Evidence: sc_dogfood/campaign2/baseline_rr1/NOTES.md.
