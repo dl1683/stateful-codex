@@ -2953,3 +2953,12 @@ Open product issues: the model never proposes a ruled-out item. After a re-paste
 reply contradicts the host's "Not restored" receipt. A one-line edit in a collaborative run took 2m29s of
 acceptance ceremony and left a temporary checker script in the user's repository. Evidence:
 sc_dogfood/integrate/handson/c456_journey.md and c456r2_journey.md.
+
+C4-C6 outcome (2026-10-10): landed with a cut after three repairs (final review
+reviews/c456_confirm3_review.md). Rules capture, receipts, Apply of whole
+messages of at most 240 bytes, Undo, Forget and the cold root remain. Automatic
+disclosure of user memory and past conversation through model tools was removed.
+The model now sees them only through thread-start continuity and the root, which
+is a usefulness loss until the turn-boundary Forget contract restores those reads.
+The SC-EVAL-038 hands-on rows were run on pre-cut builds. The cold-recall row
+("cache ruled out", from conversation history) would not reproduce after the cut.

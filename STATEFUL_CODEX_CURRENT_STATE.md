@@ -144,6 +144,26 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   token, with user-shell submission refused or queued while an eligible run's turn
   is active) is scheduled after the C4-C6 capture slice.
 
+- **Capture slice C4-C6, capture-to-use: LANDED WITH A CUT** (`11a08f976`..`92efdff9f`):
+  stated project rules are saved word for word at ingress with a receipt and
+  Undo. A model-proposed decision or ruled-out approach can be applied with
+  `/memory apply`, but only for the user's whole single message of at most 240
+  bytes. Forget and Undo hold across restarts and are never silently restored,
+  and a cold new thread receives the rules and decisions in its root, with the
+  time the user said them.
+  After four reviews and three repairs, the automatic tool-result publication
+  fence was removed. Cut with it: model tools no longer return the user's own
+  memory (rules, decisions, corrections), and the model can no longer read past
+  conversation (`conversation_read` is removed, and so is `memory_read`'s
+  earlier-turn route).
+  **Usefulness loss, until the turn-boundary Forget contract restores it:** the
+  model sees past conversation and user memory only through thread-start
+  continuity and the root.
+  Hands-on (SC-EVAL-038): rules, decision, cold recall and Forget pass. A
+  rejected hypothesis is still never proposed by the model (OPEN).
+  Inherited, OPEN: a held read of an agent finding can still be delivered after
+  another thread's model retires it.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
