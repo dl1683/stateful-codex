@@ -100,6 +100,8 @@ pub use contributors::ToolTimingInput;
 pub use contributors::TurnAbortInput;
 pub use contributors::TurnContextContributionInput;
 pub use contributors::TurnErrorInput;
+pub use contributors::TurnFinalizeInput;
+pub use contributors::TurnFinalizeOutcome;
 pub use contributors::TurnInputContext;
 pub use contributors::TurnInputContributor;
 pub use contributors::TurnInputEnvironment;

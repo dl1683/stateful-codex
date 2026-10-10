@@ -184,6 +184,7 @@ pub use thread_rollout_truncation::truncate_rollout_after_turn_id;
 pub use thread_rollout_truncation::truncate_rollout_before_turn_id;
 mod tools;
 pub(crate) mod turn_diff_tracker;
+mod turn_finalization;
 mod turn_metadata;
 mod turn_timing;
 pub use rollout::ARCHIVED_SESSIONS_SUBDIR;

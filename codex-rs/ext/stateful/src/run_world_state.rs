@@ -191,7 +191,10 @@ impl RunWorldStateStatus {
                 match run.value.mode {
                     WorkflowMode::Autonomous => line(
                         &mut output,
-                        "Mode obligation: continue useful authorized work without routine checkpoints; emit semantic updates at meaningful changes and stop only at a genuine terminal condition.",
+                        &format!(
+                            "Mode obligation: continue useful authorized work without routine checkpoints; emit semantic updates at meaningful changes and stop only at a genuine terminal condition. {}",
+                            crate::answered::ANSWER_OUTCOME_GUIDANCE
+                        ),
                     ),
                     WorkflowMode::Collaborative => line(
                         &mut output,

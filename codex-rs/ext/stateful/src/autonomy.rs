@@ -11,6 +11,8 @@ use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::ThreadReadyInput;
 use codex_extension_api::TurnAbortInput;
 use codex_extension_api::TurnErrorInput;
+use codex_extension_api::TurnFinalizeInput;
+use codex_extension_api::TurnFinalizeOutcome;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
 use codex_extension_api::TurnStopInput;
@@ -317,6 +319,9 @@ impl TurnLifecycleContributor for StatefulExtension {
         item: &'a TurnItem,
     ) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
+            if let TurnItem::AgentMessage(message) = item {
+                turn_store.insert(crate::answered::LastAgentMessage::from_item(message));
+            }
             if let TurnItem::UserMessage(message) = item
                 && thread_store.get::<SelectedProject>().is_some()
             {
@@ -354,6 +359,39 @@ impl TurnLifecycleContributor for StatefulExtension {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
             self.observe_checkout_at_turn_end(input.thread_store).await;
+        })
+    }
+
+    fn on_turn_finalize<'a>(
+        &'a self,
+        input: TurnFinalizeInput<'a>,
+    ) -> ExtensionFuture<'a, TurnFinalizeOutcome> {
+        Box::pin(async move {
+            let (Some(active_turn), Some(thread), Some(services)) = (
+                input.thread_store.get::<ActiveRunTurn>(),
+                input.thread_store.get::<SelectedThread>(),
+                self.services.as_ref(),
+            ) else {
+                return TurnFinalizeOutcome::NotHandled;
+            };
+            if active_turn.turn_id != input.turn_id {
+                return TurnFinalizeOutcome::NotHandled;
+            }
+            let store = match services.runtime().await {
+                Ok(store) => store,
+                Err(error) => {
+                    tracing::warn!(%error, "failed to open the Stateful run store to finalize a turn");
+                    return TurnFinalizeOutcome::NotHandled;
+                }
+            };
+            crate::answered::finalize(
+                store,
+                self.event_sink.as_deref(),
+                active_turn.run_id.clone(),
+                &thread.thread_id,
+                &input,
+            )
+            .await
         })
     }
 
@@ -536,7 +574,7 @@ fn recovery_delay(lease_expires_at_ms: i64) -> std::time::Duration {
     std::time::Duration::from_millis(remaining as u64)
 }
 
-fn emit_run_updated(
+pub(crate) fn emit_run_updated(
     sink: Option<&dyn StatefulEventSink>,
     run: &codex_stateful_runtime::StatefulRun,
 ) {

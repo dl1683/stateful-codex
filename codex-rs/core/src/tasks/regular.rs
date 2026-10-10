@@ -119,6 +119,15 @@ impl SessionTask for RegularTask {
                 return Ok(last_agent_message);
             }
             if !sess.input_queue.has_pending_input(&sess.active_turn).await {
+                // Still registered and interruptible: extensions may record the turn's
+                // terminal outcome now; see `turn_finalization`.
+                crate::turn_finalization::finalize(
+                    &sess,
+                    &ctx,
+                    last_agent_message.as_deref(),
+                    &cancellation_token,
+                )
+                .await;
                 return Ok(last_agent_message);
             }
             next_input = Vec::new();

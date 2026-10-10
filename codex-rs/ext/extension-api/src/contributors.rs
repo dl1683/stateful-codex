@@ -63,6 +63,8 @@ pub use turn_input::TurnInputContext;
 pub use turn_input::TurnInputEnvironment;
 pub use turn_lifecycle::TurnAbortInput;
 pub use turn_lifecycle::TurnErrorInput;
+pub use turn_lifecycle::TurnFinalizeInput;
+pub use turn_lifecycle::TurnFinalizeOutcome;
 pub use turn_lifecycle::TurnStartInput;
 pub use turn_lifecycle::TurnStartPhase;
 pub use turn_lifecycle::TurnStopInput;
@@ -275,6 +277,15 @@ pub trait TurnLifecycleContributor: Send + Sync {
             let _self = self;
             let _input = input;
         })
+    }
+    /// Lets the contributor record a terminal outcome for a regular task after its last model
+    /// response; see [`TurnFinalizeInput`]. The host stops at the first contributor that does
+    /// not return [`TurnFinalizeOutcome::NotHandled`].
+    fn on_turn_finalize<'a>(
+        &'a self,
+        _input: TurnFinalizeInput<'a>,
+    ) -> ExtensionFuture<'a, TurnFinalizeOutcome> {
+        Box::pin(std::future::ready(TurnFinalizeOutcome::NotHandled))
     }
 }
 

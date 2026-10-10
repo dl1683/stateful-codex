@@ -272,6 +272,15 @@ where
     }
 }
 
+/// Marks a task's end when its future completes or is dropped.
+struct TaskFinishedSignal(tokio::sync::watch::Sender<bool>);
+
+impl Drop for TaskFinishedSignal {
+    fn drop(&mut self) {
+        self.0.send_replace(true);
+    }
+}
+
 impl Session {
     pub async fn spawn_task<T: SessionTask>(
         self: &Arc<Self>,
@@ -355,6 +364,7 @@ impl Session {
         let mut active = self.active_turn.lock().await;
         let turn = active.get_or_insert_with(ActiveTurn::default);
         debug_assert!(turn.task.is_none());
+        let (finished_tx, finished) = tokio::sync::watch::channel(false);
         let agent_execution_guard = self.services.agent_control.admit_turn(
             turn_context.multi_agent_version,
             &turn_context.session_source,
@@ -385,6 +395,8 @@ impl Session {
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
         let task_future = async move {
+            // Signals the task's end even if this future is dropped.
+            let _finished = TaskFinishedSignal(finished_tx);
             let ctx_for_finish = Arc::clone(&ctx);
             let run_session = Arc::clone(&session);
             let run_cancellation_token = task_cancellation_token.child_token();
@@ -441,6 +453,7 @@ impl Session {
             .ok();
         let running_task = RunningTask {
             done,
+            finished,
             handle: AbortOnDropHandle::new(handle),
             kind: task_kind,
             task,
@@ -603,22 +616,33 @@ impl Session {
         reason: TurnAbortReason,
         error: Option<ErrorEvent>,
     ) -> bool {
-        let active_turn = {
+        let taken = {
             let mut active = self.active_turn.lock().await;
-            if active
+            let arbitration = active
                 .as_ref()
                 .and_then(|active_turn| active_turn.task.as_ref())
-                .is_some_and(|task| task.turn_context.sub_id == turn_id)
-            {
-                if matches!(
-                    reason,
-                    TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
-                ) {
-                    self.mark_interrupted();
+                .filter(|task| task.turn_context.sub_id == turn_id)
+                .map(crate::turn_finalization::arbitrate_abort);
+            match arbitration {
+                // The task's terminal commit won; it ends on its own as a completed turn.
+                Some(Some(finished)) => Err(finished),
+                Some(None) => {
+                    if matches!(
+                        reason,
+                        TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
+                    ) {
+                        self.mark_interrupted();
+                    }
+                    Ok(active.take())
                 }
-                active.take()
-            } else {
-                None
+                None => Ok(None),
+            }
+        };
+        let active_turn = match taken {
+            Ok(active_turn) => active_turn,
+            Err(finished) => {
+                crate::turn_finalization::await_task_end(finished).await;
+                return false;
             }
         };
         let Some(active_turn) = active_turn else {
@@ -914,17 +938,32 @@ impl Session {
     }
 
     async fn take_active_turn(&self, reason: &TurnAbortReason) -> Option<ActiveTurn> {
-        let mut active = self.active_turn.lock().await;
-        if matches!(
-            reason,
-            TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
-        ) && active
-            .as_ref()
-            .is_some_and(|active_turn| active_turn.task.is_some())
-        {
-            self.mark_interrupted();
-        }
-        active.take()
+        let finished = {
+            let mut active = self.active_turn.lock().await;
+            match active
+                .as_ref()
+                .and_then(|active_turn| active_turn.task.as_ref())
+                .and_then(crate::turn_finalization::arbitrate_abort)
+            {
+                Some(finished) => finished,
+                None => {
+                    if matches!(
+                        reason,
+                        TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
+                    ) && active
+                        .as_ref()
+                        .is_some_and(|active_turn| active_turn.task.is_some())
+                    {
+                        self.mark_interrupted();
+                    }
+                    return active.take();
+                }
+            }
+        };
+        // The task's terminal commit won: let it end on its own as a completed turn. Take
+        // nothing afterwards; whatever runs then is a later turn this abort did not target.
+        crate::turn_finalization::await_task_end(finished).await;
+        None
     }
 
     pub(crate) async fn close_unified_exec_processes(&self) {

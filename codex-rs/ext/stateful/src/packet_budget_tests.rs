@@ -58,8 +58,9 @@ use crate::world_state::project_world_state_section;
 /// Answering rule questions from the packet and one whole-question memory_read (horizon2
 /// S17 made 19 conversation reads) took it to 13,741 (project 7,368); truncated-rule,
 /// strategy-supersession and root-relative path guidance to 13,866 (project 7,493); a
-/// background entry and the guidance on relayed words (tui8) to 14,129 (project 7,756).
-const MAX_FIXTURE_PACKET_BYTES: usize = 14_250;
+/// background entry and the guidance on relayed words (tui8) to 14,129 (project 7,756). The
+/// Autonomous pure-answer outcome guidance took it to 14,333 (project 7,684, run 3,944).
+const MAX_FIXTURE_PACKET_BYTES: usize = 14_350;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010. The recall,
 /// truncated-rule, strategy and root-relative path guidance (field evidence from horizon2,

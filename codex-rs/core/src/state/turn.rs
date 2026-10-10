@@ -73,6 +73,8 @@ pub(crate) enum TaskKind {
 
 pub(crate) struct RunningTask {
     pub(crate) done: Arc<Notify>,
+    /// Becomes true when the task's future ends or is dropped.
+    pub(crate) finished: tokio::sync::watch::Receiver<bool>,
     pub(crate) kind: TaskKind,
     pub(crate) task: Arc<dyn AnySessionTask>,
     pub(crate) cancellation_token: CancellationToken,
