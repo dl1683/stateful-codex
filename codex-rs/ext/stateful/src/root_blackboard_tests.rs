@@ -222,3 +222,31 @@ fn user_statement_times_render_as_utc_minutes() {
         ]
     );
 }
+
+/// Candidates the user wrote or confirmed are counted but cannot be listed by tools, so the
+/// packet's candidate hint must not promise their retrieval.
+#[test]
+fn candidate_hint_does_not_promise_user_candidates_through_tools() {
+    let status = RootBlackboardStatus::Available(ResolvedRootBlackboard::new(
+        RootBlackboardProjection {
+            project_id: "project-1".to_string(),
+            revision: 1,
+            data: Vec::new(),
+            contexts: Default::default(),
+            omitted_entries: 0,
+            candidate_entries: 2,
+        },
+        Default::default(),
+        None,
+    ));
+    let mut output = String::new();
+    render_root_blackboard(&mut output, &status);
+    let hint = output
+        .lines()
+        .find(|line| line.contains("candidate entries"))
+        .expect("candidate hint");
+    assert_eq!(
+        hint,
+        "- 2 active candidate entries await promotion and are not shown; blackboard_query with rootPromotion=candidate lists the agent-recorded ones if the task needs them. Tools never return candidates the user wrote or confirmed: ask the user, whose /memory shows them."
+    );
+}
