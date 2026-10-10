@@ -432,7 +432,7 @@ impl App {
             )
         {
             color_eyre::eyre::bail!(
-                "--stateful starts a new run; resume an existing Stateful thread without this flag"
+                "--stateful starts a new Stateful thread; resume an existing Stateful thread without this flag"
             );
         }
         let (mut chat_widget, initial_started_thread) = match session_selection {

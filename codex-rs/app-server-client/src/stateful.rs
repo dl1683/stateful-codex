@@ -33,10 +33,17 @@ pub const DEFAULT_STATEFUL_MAX_CONTINUATIONS: u32 = 24;
 pub const DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS: u32 = 14_400;
 static NEXT_STATEFUL_RUN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+/// A Stateful thread start: the project it attaches, and the run it starts, if any. Ask
+/// attaches the project's memory and starts no run.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatefulStartup {
-    mode: StatefulWorkflowMode,
     project_id: Option<String>,
+    run: Option<RunStartup>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RunStartup {
+    mode: StatefulWorkflowMode,
     goal: String,
     idempotency_key: String,
 }
@@ -52,20 +59,29 @@ impl StatefulStartup {
             return Err(StatefulStartupError::EmptyGoal);
         }
         Ok(Self {
-            mode,
             project_id,
-            goal,
-            idempotency_key: new_run_idempotency_key(),
+            run: Some(RunStartup {
+                mode,
+                goal,
+                idempotency_key: new_run_idempotency_key(),
+            }),
         })
+    }
+
+    /// Ask: the thread gets the project's memory and no run, so nothing in a run's lifecycle
+    /// applies to it.
+    pub fn ask(project_id: Option<String>) -> Self {
+        Self {
+            project_id,
+            run: None,
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct PreparedStatefulStartup {
     project_id: String,
-    mode: StatefulWorkflowMode,
-    goal: String,
-    idempotency_key: String,
+    run: Option<RunStartup>,
 }
 
 pub async fn prepare_stateful_startup(
@@ -83,33 +99,35 @@ pub async fn prepare_stateful_startup(
     thread_params.project_id = Some(project_id.clone());
     Ok(PreparedStatefulStartup {
         project_id,
-        mode: startup.mode,
-        goal: startup.goal,
-        idempotency_key: startup.idempotency_key,
+        run: startup.run,
     })
 }
 
+/// Starts the prepared run on a new thread; an Ask startup starts none.
 pub async fn start_stateful_run(
     request_handle: &AppServerRequestHandle,
     startup: &PreparedStatefulStartup,
     thread_id: &str,
 ) -> Result<(), StatefulStartupError> {
+    let Some(run) = startup.run.as_ref() else {
+        return Ok(());
+    };
     let _: StatefulRunStartResponse = request_handle
         .request_typed(ClientRequest::StatefulRunStart {
             request_id: RequestId::String(format!(
                 "stateful-run-{thread_id}-{}",
-                startup.idempotency_key
+                run.idempotency_key
             )),
             params: StatefulRunStartParams {
                 project_id: startup.project_id.clone(),
                 thread_id: thread_id.to_string(),
-                goal: startup.goal.clone(),
-                mode: startup.mode,
+                goal: run.goal.clone(),
+                mode: run.mode,
                 budget: StatefulRunBudget {
                     max_continuations: DEFAULT_STATEFUL_MAX_CONTINUATIONS,
                     max_elapsed_seconds: DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS,
                 },
-                idempotency_key: startup.idempotency_key.clone(),
+                idempotency_key: run.idempotency_key.clone(),
             },
         })
         .await
@@ -128,11 +146,14 @@ pub async fn start_stateful_run_on_resumed_thread(
     startup: &PreparedStatefulStartup,
     thread_id: &str,
 ) -> Result<(), StatefulStartupError> {
+    let Some(startup_run) = startup.run.as_ref() else {
+        return Err(StatefulStartupError::AskOnResume);
+    };
     let read: StatefulRunReadResponse = request_handle
         .request_typed(ClientRequest::StatefulRunRead {
             request_id: RequestId::String(format!(
                 "stateful-run-read-{thread_id}-{}",
-                startup.idempotency_key
+                startup_run.idempotency_key
             )),
             params: StatefulRunReadParams {
                 run_id: None,
@@ -149,7 +170,7 @@ pub async fn start_stateful_run_on_resumed_thread(
     };
     let guidance = if run.project_id != startup.project_id {
         "it belongs to another project; resume the thread without --stateful".to_string()
-    } else if run.mode != startup.mode {
+    } else if run.mode != startup_run.mode {
         format!(
             "it runs in {} mode; change its mode or cancel it in the web workspace, or resume without --stateful",
             mode_name(run.mode)
@@ -324,8 +345,12 @@ fn project_name(root: &Path) -> String {
 
 #[derive(Debug, Error)]
 pub enum StatefulStartupError {
-    #[error("--stateful requires a non-empty goal prompt")]
+    #[error("a --stateful run mode requires a non-empty goal prompt")]
     EmptyGoal,
+    #[error(
+        "--stateful ask starts a new thread; resume the thread without --stateful, it keeps its project"
+    )]
+    AskOnResume,
     #[error("--stateful requires an explicit project directory")]
     MissingProjectDirectory,
     #[error("--stateful requires an absolute project directory: {0}")]

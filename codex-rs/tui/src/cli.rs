@@ -18,12 +18,16 @@ pub struct Cli {
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
 
-    /// Start a Stateful Codex run for the current project directory in the selected workflow mode.
+    /// Use Stateful Codex for the current project directory. A bare `--stateful` (or `ask`)
+    /// answers with the project's memory and starts no run, which suits questions; autonomous,
+    /// collaborative and socratic start a run for the prompt's goal. Write
+    /// `--stateful ask "<question>"` when the prompt follows the flag.
     #[arg(
         long = "stateful",
         value_name = "MODE",
         value_enum,
-        requires = "prompt"
+        num_args = 0..=1,
+        default_missing_value = "ask"
     )]
     pub stateful_mode: Option<StatefulModeCliArg>,
 

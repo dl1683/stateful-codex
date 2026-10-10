@@ -336,8 +336,13 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
 
     if stateful_mode.is_some() && !matches!(command.as_ref(), None | Some(ExecCommand::Resume(_))) {
         anyhow::bail!(
-            "--stateful starts a new run and is supported only for a new or resumed thread"
+            "--stateful starts a new Stateful thread or run and is supported only for a new or resumed thread"
         );
+    }
+    if stateful_mode == Some(StatefulModeCliArg::Ask)
+        && matches!(command.as_ref(), Some(ExecCommand::Resume(_)))
+    {
+        return Err(codex_app_server_client::StatefulStartupError::AskOnResume.into());
     }
     if stateful_project.is_some() && stateful_mode.is_none() {
         anyhow::bail!("--stateful-project requires --stateful");
@@ -1043,12 +1048,9 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     };
     let follow_autonomous_continuations = stateful_mode == Some(StatefulModeCliArg::Autonomous);
     let stateful_startup = stateful_mode
-        .map(|mode| {
-            StatefulStartup::new(
-                stateful_workflow_mode(mode),
-                stateful_project,
-                prompt_summary.clone(),
-            )
+        .map(|mode| match stateful_workflow_mode(mode) {
+            Some(mode) => StatefulStartup::new(mode, stateful_project, prompt_summary.clone()),
+            None => Ok(StatefulStartup::ask(stateful_project)),
         })
         .transpose()?;
 
@@ -1833,11 +1835,13 @@ async fn start_stateful_run_for_existing_thread(
         .map_err(|error| error.to_string())
 }
 
-fn stateful_workflow_mode(mode: StatefulModeCliArg) -> StatefulWorkflowMode {
+/// The run mode `--stateful` selected; Ask starts no run.
+fn stateful_workflow_mode(mode: StatefulModeCliArg) -> Option<StatefulWorkflowMode> {
     match mode {
-        StatefulModeCliArg::Autonomous => StatefulWorkflowMode::Autonomous,
-        StatefulModeCliArg::Collaborative => StatefulWorkflowMode::Collaborative,
-        StatefulModeCliArg::Socratic => StatefulWorkflowMode::Socratic,
+        StatefulModeCliArg::Ask => None,
+        StatefulModeCliArg::Autonomous => Some(StatefulWorkflowMode::Autonomous),
+        StatefulModeCliArg::Collaborative => Some(StatefulWorkflowMode::Collaborative),
+        StatefulModeCliArg::Socratic => Some(StatefulWorkflowMode::Socratic),
     }
 }
 

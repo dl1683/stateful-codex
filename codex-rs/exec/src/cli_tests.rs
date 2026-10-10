@@ -145,3 +145,40 @@ fn worktree_flag_is_accepted_before_fork_subcommand() {
     assert!(cli.worktree);
     assert!(matches!(cli.command, Some(Command::Fork(_))));
 }
+
+#[test]
+fn a_bare_stateful_flag_selects_ask() {
+    let parsed = [
+        vec!["codex-exec", "What did we decide?", "--stateful"],
+        vec!["codex-exec", "--stateful", "ask", "What did we decide?"],
+        vec![
+            "codex-exec",
+            "--stateful",
+            "collaborative",
+            "Refactor the parser.",
+        ],
+    ]
+    .into_iter()
+    .map(|args| {
+        let cli = Cli::parse_from(args);
+        (cli.stateful_mode, cli.prompt)
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(
+        parsed,
+        vec![
+            (
+                Some(StatefulModeCliArg::Ask),
+                Some("What did we decide?".to_string())
+            ),
+            (
+                Some(StatefulModeCliArg::Ask),
+                Some("What did we decide?".to_string())
+            ),
+            (
+                Some(StatefulModeCliArg::Collaborative),
+                Some("Refactor the parser.".to_string())
+            ),
+        ]
+    );
+}

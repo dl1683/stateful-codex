@@ -150,6 +150,46 @@ async fn exec_stateful_starts_the_run_before_the_first_model_request() -> anyhow
     Ok(())
 }
 
+/// Ask (a bare `--stateful`, here after the prompt) attaches the project's memory and starts
+/// no run: the request carries the project section and the memory tool but no run section and
+/// no run-bound tool.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_stateful_ask_attaches_project_memory_without_a_run() -> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    let response_mock = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("ask"),
+            responses::ev_assistant_message("ask-message", "Paris."),
+            responses::ev_completed("ask"),
+        ]),
+    )
+    .await;
+
+    test.cmd_with_server(&server)
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("What is the capital of France?")
+        .arg("--stateful")
+        .assert()
+        .success();
+
+    let request = response_mock.single_request();
+    assert_eq!(
+        (
+            request.body_contains_text("<stateful_project>"),
+            request.body_contains_text("memory_read"),
+            request.body_contains_text("<stateful_run>"),
+            request.body_contains_text("stateful_run_update"),
+            request.body_contains_text("stateful_acceptance_update"),
+        ),
+        (true, true, false, false, false)
+    );
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::Result<()> {
     let test = test_codex_exec();

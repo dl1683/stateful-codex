@@ -25,8 +25,18 @@ pub struct Cli {
     #[clap(flatten)]
     pub shared: ExecSharedCliOptions,
 
-    /// Start a Stateful Codex run for the selected project directory.
-    #[arg(long = "stateful", value_name = "MODE", value_enum, global = true)]
+    /// Use Stateful Codex for the selected project directory. A bare `--stateful` (or `ask`)
+    /// answers with the project's memory and starts no run, which suits questions; autonomous,
+    /// collaborative and socratic start a run for the prompt's goal. Write
+    /// `--stateful ask "<question>"` when the prompt follows the flag.
+    #[arg(
+        long = "stateful",
+        value_name = "MODE",
+        value_enum,
+        num_args = 0..=1,
+        default_missing_value = "ask",
+        global = true
+    )]
     pub stateful_mode: Option<StatefulModeCliArg>,
 
     /// Use an existing Stateful project when more than one project has the selected directory.

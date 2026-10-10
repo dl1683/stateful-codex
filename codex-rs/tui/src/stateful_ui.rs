@@ -36,9 +36,18 @@ use ratatui::text::Line;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StatefulStartup {
-    mode: StatefulWorkflowMode,
     project_id: Option<String>,
-    goal: String,
+    route: StatefulRoute,
+}
+
+/// Ask attaches the project and starts no run; a run mode starts a run for the goal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum StatefulRoute {
+    Ask,
+    Run {
+        mode: StatefulWorkflowMode,
+        goal: String,
+    },
 }
 
 impl StatefulStartup {
@@ -50,14 +59,27 @@ impl StatefulStartup {
         let Some(mode) = mode else {
             return Ok(None);
         };
+        let mode = match mode {
+            StatefulModeCliArg::Ask => {
+                return Ok(Some(Self {
+                    project_id,
+                    route: StatefulRoute::Ask,
+                }));
+            }
+            StatefulModeCliArg::Autonomous => StatefulWorkflowMode::Autonomous,
+            StatefulModeCliArg::Collaborative => StatefulWorkflowMode::Collaborative,
+            StatefulModeCliArg::Socratic => StatefulWorkflowMode::Socratic,
+        };
         let goal = prompt
             .map(str::trim)
             .filter(|goal| !goal.is_empty())
-            .context("--stateful requires a non-empty goal prompt")?;
+            .context("a --stateful run mode requires a non-empty goal prompt")?;
         Ok(Some(Self {
-            mode: workflow_mode(mode),
             project_id,
-            goal: goal.to_string(),
+            route: StatefulRoute::Run {
+                mode,
+                goal: goal.to_string(),
+            },
         }))
     }
 }
@@ -70,7 +92,12 @@ pub(crate) async fn prepare_startup(
     thread_params: &mut ThreadStartParams,
     startup: StatefulStartup,
 ) -> Result<PreparedStatefulStartup> {
-    let startup = ClientStatefulStartup::new(startup.mode, startup.project_id, startup.goal)?;
+    let startup = match startup.route {
+        StatefulRoute::Ask => ClientStatefulStartup::ask(startup.project_id),
+        StatefulRoute::Run { mode, goal } => {
+            ClientStatefulStartup::new(mode, startup.project_id, goal)?
+        }
+    };
     Ok(PreparedStatefulStartup(
         prepare_stateful_startup(request_handle, thread_params, startup).await?,
     ))
@@ -83,14 +110,6 @@ pub(crate) async fn start_run(
 ) -> Result<()> {
     start_stateful_run(request_handle, &startup.0, &thread_id.to_string()).await?;
     Ok(())
-}
-
-fn workflow_mode(mode: StatefulModeCliArg) -> StatefulWorkflowMode {
-    match mode {
-        StatefulModeCliArg::Autonomous => StatefulWorkflowMode::Autonomous,
-        StatefulModeCliArg::Collaborative => StatefulWorkflowMode::Collaborative,
-        StatefulModeCliArg::Socratic => StatefulWorkflowMode::Socratic,
-    }
 }
 
 pub(crate) async fn handle_app_scoped_notification(

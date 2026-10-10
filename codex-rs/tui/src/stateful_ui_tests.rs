@@ -29,9 +29,19 @@ fn cli_selection_requires_a_goal_and_preserves_the_selected_mode() {
         )
         .unwrap(),
         Some(StatefulStartup {
-            mode: StatefulWorkflowMode::Collaborative,
             project_id: Some("project-1".to_string()),
-            goal: "investigate the evidence".to_string(),
+            route: StatefulRoute::Run {
+                mode: StatefulWorkflowMode::Collaborative,
+                goal: "investigate the evidence".to_string(),
+            },
+        })
+    );
+    // Ask needs no goal: the prompt, if any, is just the first question.
+    assert_eq!(
+        StatefulStartup::from_cli(Some(StatefulModeCliArg::Ask), None, None).unwrap(),
+        Some(StatefulStartup {
+            project_id: None,
+            route: StatefulRoute::Ask,
         })
     );
 }
@@ -271,6 +281,77 @@ async fn native_startup_attaches_the_selected_project_and_starts_the_run() -> Re
     assert_eq!(second_run.project_id, run.project_id);
     assert_ne!(second_run.id, run.id);
     assert_eq!(second_run.mode, StatefulWorkflowMode::Socratic);
+    app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_ask_attaches_the_project_and_starts_no_run() -> Result<()> {
+    let codex_home = tempfile::tempdir()?;
+    let project = tempfile::tempdir()?;
+    let mut config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .harness_overrides(ConfigOverrides {
+            cwd: Some(project.path().to_path_buf()),
+            ..ConfigOverrides::default()
+        })
+        .build()
+        .await?;
+    config.sqlite =
+        SqliteConfig::new_for_testing(AbsolutePathBuf::from_absolute_path(codex_home.path())?);
+    let local_settings = LocalSettings::from(&config);
+    let app_server = crate::start_embedded_app_server_for_picker(&config).await?;
+
+    let started = crate::app_server_session::start_thread_with_request_handle(
+        app_server.request_handle(),
+        &local_settings,
+        config,
+        ThreadParamsMode::Embedded,
+        /*remote_cwd_override*/ None,
+        ThreadToolTransport::Disabled,
+        /*model_provider_override*/ None,
+        StatefulStartup::from_cli(Some(StatefulModeCliArg::Ask), None, None)?,
+    )
+    .await?;
+    let thread_id = started.session.thread_id.to_string();
+    let handle = app_server.request_handle();
+    // The thread's binding stays staged until its first turn, so the project is read by root.
+    let projects: codex_app_server_protocol::ProjectListResponse = handle
+        .request_typed(ClientRequest::ProjectList {
+            request_id: RequestId::String("list-ask-projects".to_string()),
+            params: codex_app_server_protocol::ProjectListParams {
+                cursor: None,
+                limit: Some(10),
+                sort_key: None,
+                sort_direction: None,
+            },
+        })
+        .await?;
+    let run: StatefulRunReadResponse = handle
+        .request_typed(ClientRequest::StatefulRunRead {
+            request_id: RequestId::String("read-ask-run".to_string()),
+            params: StatefulRunReadParams {
+                run_id: None,
+                thread_id: Some(thread_id),
+            },
+        })
+        .await?;
+    assert_eq!(
+        (
+            projects
+                .data
+                .into_iter()
+                .map(|project| project.roots)
+                .collect::<Vec<_>>(),
+            run.run
+        ),
+        (
+            vec![vec![ProjectRoot {
+                path: AbsolutePathBuf::from_absolute_path(project.path())?,
+            }]],
+            None
+        )
+    );
     app_server.shutdown().await?;
     Ok(())
 }
