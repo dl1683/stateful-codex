@@ -131,3 +131,16 @@ New order:
 4. File-level freshness.
 5. The narrow cross-app slice.
 6. Freeze, then acceptance.
+
+### Long-running redesign (council 2026-10-10c, Codex and Droid converged; sc_dogfood/council/council_20261010c_longrun_FINAL.md)
+
+The within-run continuity step now means the following:
+- **Host-side capture** replaces routine writes made by the main model.
+- **A deterministic working-set capsule** is installed on every compaction path. It starts at 512 tokens and holds the next action, the test route, the files in play, open and rejected hypotheses, and values already delivered.
+- **A stable request:** append-only amendments.
+- **An operation journal** (add, revise, supersede, merge, retire) whose every mutation advances the epoch.
+- **Two-speed maintenance:**
+  - instant hygiene, applied automatically;
+  - a batched maintainer that runs in shadow mode first. It may auto-change only agent-origin derived entries; user rules and decisions need adoption. Batching is offline only, via optional Gemini or DeepSeek adapters, since there is no OpenAI Batch API.
+
+The order is unchanged: E1d, then Forget plus reads, then continuity slice A (capture, journal, writer-turn removal), then slice B (capsule, prefix), then batched maintenance, then freshness, then cross-app, then freeze. Every slice passes the frozen long-thread gate against plain Codex at no more than 3.70M units and 18 compactions.
