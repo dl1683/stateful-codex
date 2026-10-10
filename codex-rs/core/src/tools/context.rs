@@ -50,6 +50,8 @@ pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
 pub(crate) struct ToolCallState {
     pub(crate) terminal_outcome_reached: AtomicBool,
     pub(crate) delivered_assistant_message: OnceLock<String>,
+    /// A result's publication still pending until the sampling loop records it.
+    pub(crate) publication: std::sync::Mutex<Option<super::publication::PendingPublication>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

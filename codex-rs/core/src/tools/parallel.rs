@@ -22,6 +22,7 @@ use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolCallState;
 use crate::tools::context::ToolPayload;
 use crate::tools::lifecycle::notify_tool_aborted;
+use crate::tools::publication::ToolDelivery;
 use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolCall;
@@ -78,7 +79,7 @@ impl ToolCallRuntime {
         self,
         call: ToolCall,
         cancellation_token: CancellationToken,
-    ) -> impl std::future::Future<Output = Result<ResponseItemEnvelope, CodexErr>> {
+    ) -> impl std::future::Future<Output = Result<ToolDelivery, CodexErr>> {
         let error_call = call.clone();
         let source = call.direct_source();
         let recorder = self.session.services.executed_tool_calls.clone();
@@ -117,7 +118,10 @@ impl ToolCallRuntime {
                     .delivered_assistant_message = Some(text.clone());
             }
             recorder.attach_direct_call_to_output(&mut response.item, recorded_call);
-            Ok(response)
+            Ok(ToolDelivery {
+                envelope: response,
+                publication: super::publication::take(&call_state),
+            })
         }
     }
 
@@ -797,7 +801,7 @@ mod tests {
         };
         assert_eq!(
             ResponseItemEnvelope::new(expected_response.into()),
-            response
+            response.envelope
         );
 
         let actual = records

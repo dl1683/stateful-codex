@@ -141,7 +141,10 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
         .and_then(|tool| tool["description"].as_str())
         .unwrap_or_default()
         .to_string();
-    assert!(nested.contains("blackboard_query("));
+    // Memory-bearing Stateful outputs are delivered only to direct calls, where the host
+    // checks them against Forget, Undo and correction as they are recorded.
+    assert!(!nested.contains("blackboard_query("));
+    assert!(!nested.contains("evidence_read("));
     assert!(!nested.contains("obligation_update("));
     assert!(!nested.contains("blackboard_record("));
 
@@ -166,10 +169,10 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
     Ok(())
 }
 
-/// Code mode receives evidence_read's typed result, so the line-numbered content a
-/// script prints must carry the same absolute labels and counters as a direct call.
+/// Nested Code Mode cells cannot call Stateful tools: a cell can hold a result before printing
+/// it, outside the recording where the host checks memory outputs. The tools stay direct.
 #[tokio::test]
-async fn code_mode_evidence_read_returns_line_numbered_source() -> Result<()> {
+async fn code_mode_cells_cannot_reach_stateful_memory_tools() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -221,17 +224,7 @@ async fn code_mode_evidence_read_returns_line_numbered_source() -> Result<()> {
                     "evidence-exec",
                     "exec",
                     r#"
-const r = await tools.evidence_read({ relativePath: "amounts.py", lineRange: { start: 2, end: 4 } });
-text(JSON.stringify({
-  contentFormat: r.contentFormat,
-  content: r.content,
-  bytesReturned: r.bytesReturned,
-  firstLine: r.firstLine,
-  lastLine: r.lastLine,
-  lastLinePartial: r.lastLinePartial,
-  truncated: r.truncated,
-  hasReceipt: r.blackboardEvidence !== null,
-}));
+text(JSON.stringify([typeof tools.evidence_read, typeof tools.blackboard_query, typeof tools.memory_read]));
 "#,
                 ),
                 responses::ev_completed("evidence-response"),
@@ -265,18 +258,17 @@ text(JSON.stringify({
         .filter_map(|item| item["text"].as_str())
         .find_map(|text| serde_json::from_str::<Value>(text).ok())
         .unwrap_or_else(|| panic!("the script should print the evidence result: {output}"));
-    assert_eq!(
-        printed,
-        json!({
-            "contentFormat": "lineNumbered",
-            "content": "L2: \nL3: \nL4: def parse_amount(text):\n",
-            "bytesReturned": "\n\ndef parse_amount(text):\n".len(),
-            "firstLine": 2,
-            "lastLine": 4,
-            "lastLinePartial": false,
-            "truncated": false,
-            "hasReceipt": true,
-        })
+    assert_eq!(printed, json!(["undefined", "undefined", "undefined"]));
+    let direct = requests[0].body_json()["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    assert!(
+        direct.iter().any(|name| name == "evidence_read"),
+        "evidence_read stays a direct model tool; saw {direct:?}"
     );
     Ok(())
 }

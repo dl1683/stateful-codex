@@ -69,12 +69,8 @@ impl ToolExecutor<ToolInvocation> for ExtensionToolAdapter {
         Box::pin(async move { self.0.handle(to_extension_call(&invocation).await).await })
     }
 
-    fn revalidate_for_publication<'a>(
-        &'a self,
-        call_id: &'a str,
-        output: Box<dyn codex_tools::ToolOutput>,
-    ) -> codex_tools::ToolPublicationFuture<'a> {
-        self.0.revalidate_for_publication(call_id, output)
+    fn publication_check(&self, call_id: &str) -> Option<codex_tools::ToolPublicationCheck> {
+        self.0.publication_check(call_id)
     }
 }
 

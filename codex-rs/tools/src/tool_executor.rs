@@ -11,8 +11,32 @@ use std::pin::Pin;
 pub type ToolExecutorFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Box<dyn ToolOutput>, FunctionCallError>> + Send + 'a>>;
 
-/// The boxed future returned by [`ToolExecutor::revalidate_for_publication`].
-pub type ToolPublicationFuture<'a> = Pin<Box<dyn Future<Output = Box<dyn ToolOutput>> + Send + 'a>>;
+/// Held by the host while it records one call's output into model history; dropping it
+/// releases whatever the runtime ordered that recording against.
+pub type ToolPublicationGuard = Box<dyn Send>;
+
+/// Resolves a [`ToolPublicationCheck`]: `Some(guard)` when the output may be published as it
+/// is, `None` when it must be withheld.
+pub type ToolPublicationFuture = Pin<Box<dyn Future<Output = Option<ToolPublicationGuard>> + Send>>;
+
+/// A check a runtime attaches to one call's result (see [`ToolExecutor::publication_check`]).
+pub struct ToolPublicationCheck {
+    /// The text the host records instead of the output, and instead of every copy derived
+    /// from it (hook context or feedback), when `validate` withholds the output or the host
+    /// cannot run the check at a delivery boundary.
+    pub withheld: String,
+    /// Run once, immediately before the output is recorded into model history.
+    pub validate: Box<dyn FnOnce() -> ToolPublicationFuture + Send>,
+}
+
+impl std::fmt::Debug for ToolPublicationCheck {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ToolPublicationCheck")
+            .field("withheld", &self.withheld)
+            .finish_non_exhaustive()
+    }
+}
 
 bitflags::bitflags! {
     /// Independent model-facing surfaces supported by a tool.
@@ -131,17 +155,15 @@ pub trait ToolExecutor<Invocation>: Send + Sync {
     where
         Invocation: 'a;
 
-    /// The last step before a successful output of call `call_id` reaches the model: the host
-    /// awaits it once, after every PostToolUse hook accepted the output and immediately before
-    /// returning it for recording, and publishes whatever it returns instead. A runtime whose
-    /// outputs reflect state that can change while a hook holds them (memory a user can forget)
-    /// revalidates here and returns a bounded replacement when the output is stale.
-    /// The default publishes the output unchanged.
-    fn revalidate_for_publication<'a>(
-        &'a self,
-        _call_id: &'a str,
-        output: Box<dyn ToolOutput>,
-    ) -> ToolPublicationFuture<'a> {
-        Box::pin(std::future::ready(output))
+    /// A check for the result of call `call_id`, taken once when its handler returns
+    /// (successfully or not). The host keeps the result, and every PostToolUse copy derived
+    /// from it, pending until the result is recorded into model history; there it runs
+    /// `validate` and holds the returned guard until that recording is done, then drops it.
+    /// A runtime whose outputs reflect state that can change while the result waits (memory
+    /// a user can forget) orders that recording against its writers this way. Results that
+    /// never reach a direct delivery boundary (nested Code Mode) are always withheld.
+    /// The default attaches no check: the output is published unchanged.
+    fn publication_check(&self, _call_id: &str) -> Option<ToolPublicationCheck> {
+        None
     }
 }
