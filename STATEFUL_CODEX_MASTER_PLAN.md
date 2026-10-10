@@ -190,3 +190,25 @@ Each runs in real TUI, exec and Web, including reconnect and interrupt. The expl
 5. The rest of slice A. If it expands or shows little benefit, the capsule (slice B) moves ahead of the remaining capture work.
 6. Freshness. Honest "unknown / needs-check" status wording ships now.
 7. Cross-app.
+
+### Baseline result moves the capsule forward (SC-EVAL-040, 2026-10-10)
+
+The restricted-read within1 baseline (n=1) showed plain Codex ahead on cost and quality:
+- 1.94M vs 2.27M units;
+- 10 vs 13 compactions;
+- Stateful kept N3 and N4, against plain Codex's N3 and N6, plus N2, N4 and N5 recovered.
+
+The causes map directly onto slice B:
+- the prefix overhead;
+- the compaction packet dropping N1 and N2;
+- the thread-start continuity cut that removed the "Next step" sentence at 480 of 740 bytes.
+
+Order change: after Ask, land an immediate small fix so continuity truncation never drops the trailing next step. Then:
+1. journal foundation;
+2. Forget plus restored reads;
+3. **slice B (capsule and prefix trimming) before the rest of slice A**;
+4. the rest of slice A;
+5. freshness;
+6. cross-app.
+
+Re-run the frozen baseline after each.
