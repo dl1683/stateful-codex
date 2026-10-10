@@ -144,3 +144,21 @@ The within-run continuity step now means the following:
   - a batched maintainer that runs in shadow mode first. It may auto-change only agent-origin derived entries; user rules and decisions need adoption. Batching is offline only, via optional Gemini or DeepSeek adapters, since there is no OpenAI Batch API.
 
 The order is unchanged: E1d, then Forget plus reads, then continuity slice A (capture, journal, writer-turn removal), then slice B (capsule, prefix), then batched maintenance, then freshness, then cross-app, then freeze. Every slice passes the frozen long-thread gate against plain Codex at no more than 3.70M units and 18 compactions.
+
+### Order refinement (Codex step-back 2026-10-10d; sc_dogfood/council/council_20261010d_stepback.md)
+
+Order from here:
+1. E1d (bounded), plus the follow-up to the C4-C6 cut (web confirm-then-refresh fix; honest pending Forget receipt as the interim).
+2. Frozen long-thread baseline, labelled restricted-read; repeated after reads return.
+3. **Minimal shared journal and epoch foundation:** revision and retirement on the existing store, with instant tombstone and index hygiene.
+4. Turn-boundary Forget lifecycle on that foundation, covering agent findings, derived outputs, rules and conversations. Then restore direct reads incrementally, with Code Mode still excluded, and add the adopted rule and decision digest.
+5. The rest of slice A: host observations, then removal of routine writer turns where capture is non-inferior. Explicit model proposals for insights and rejected hypotheses stay.
+6. Slice B: the capsule on every compaction and resume path, then prefix trimming.
+7. File-level freshness.
+8. The narrow cross-app slice.
+9. Guarded semantic maintenance: shadow mode first. It now comes after freshness and cross-app.
+10. Freeze, then acceptance.
+
+Fallbacks:
+- If turn-boundary Forget stalls, keep restricted disclosure with honest pending semantics.
+- If E1d exceeds its repair bound, return "answered, unverified".
