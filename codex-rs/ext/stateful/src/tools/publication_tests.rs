@@ -248,11 +248,15 @@ async fn stateful_tools_are_never_exposed_to_nested_code_mode() {
             ToolExposure::Hidden,
         ]
     );
-    let fixture = Fixture::new().await;
+    let Fixture {
+        _home: _home_guard,
+        services,
+        ..
+    } = Fixture::new().await;
     let tools = super::super::project_intelligence_tools(
         PROJECT_ID.to_string(),
         "00000000-0000-0000-0000-000000000001".to_string(),
-        fixture.services.clone(),
+        services,
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),

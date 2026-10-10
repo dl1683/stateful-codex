@@ -6,12 +6,6 @@
 
 use super::*;
 use codex_app_server_protocol::StatefulMemoryCapturedNotification;
-use codex_app_server_protocol::StatefulRunReadParams;
-use codex_app_server_protocol::StatefulRunReadResponse;
-use codex_app_server_protocol::StatefulRunStartParams;
-use codex_app_server_protocol::StatefulRunStartResponse;
-use codex_app_server_protocol::StatefulRunStatus;
-use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::BlackboardStore;
 use codex_state::SqliteConfig;
@@ -37,6 +31,7 @@ use wiremock::matchers::path;
 /// Start of the text a withheld read is replaced by.
 const WITHHELD_READ: &str = "memory changed while this result was pending";
 /// Start of the text a withheld successful write is replaced by.
+#[cfg(not(target_os = "windows"))]
 const WITHHELD_COMMITTED: &str = "this call's change was committed, but its output was withheld";
 
 /// A PostToolUse command hook. A call whose ID starts with `free` passes at once; any other
@@ -432,6 +427,12 @@ async fn c456r3_held_coverage_and_completion_outputs_are_withheld_truthfully() -
     use super::super::stateful_acceptance_support::run_check;
     use super::super::stateful_acceptance_support::seed_admitted_plan;
     use super::super::stateful_acceptance_support::write_acceptance_files;
+    use codex_app_server_protocol::StatefulRunReadParams;
+    use codex_app_server_protocol::StatefulRunReadResponse;
+    use codex_app_server_protocol::StatefulRunStartParams;
+    use codex_app_server_protocol::StatefulRunStartResponse;
+    use codex_app_server_protocol::StatefulRunStatus;
+    use codex_app_server_protocol::StatefulWorkflowMode;
     let responses_server = responses::start_mock_server().await;
     let home = TempDir::new()?;
     let root = TempDir::new()?;
