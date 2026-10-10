@@ -320,7 +320,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         append_line(
             output,
             &format!(
-                "- {} active candidate entries await promotion and are not shown; blackboard_query with rootPromotion=candidate lists the agent-recorded ones if the task needs them. Tools never return candidates the user wrote or confirmed: ask the user, whose /memory shows them.",
+                "- {} candidate entries await promotion (not shown); blackboard_query rootPromotion=candidate lists agent-recorded ones. Ask the user about their own (in /memory).",
                 projection.candidate_entries
             ),
         );

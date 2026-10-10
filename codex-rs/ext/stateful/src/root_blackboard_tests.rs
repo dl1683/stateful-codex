@@ -247,6 +247,6 @@ fn candidate_hint_does_not_promise_user_candidates_through_tools() {
         .expect("candidate hint");
     assert_eq!(
         hint,
-        "- 2 active candidate entries await promotion and are not shown; blackboard_query with rootPromotion=candidate lists the agent-recorded ones if the task needs them. Tools never return candidates the user wrote or confirmed: ask the user, whose /memory shows them."
+        "- 2 candidate entries await promotion (not shown); blackboard_query rootPromotion=candidate lists agent-recorded ones. Ask the user about their own (in /memory)."
     );
 }
