@@ -345,6 +345,42 @@ class BixBenchRunnerTests(unittest.TestCase):
             ["offlineNotebookReplay", "terminalStatefulRun"],
         )
 
+    def test_answered_run_is_not_a_completed_terminal_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            with closing(sqlite3.connect(state_dir / "stateful_runtime_1.sqlite")) as runtime:
+                runtime.executescript(
+                    """
+                    CREATE TABLE stateful_runs (
+                        id TEXT, project_id TEXT, mode TEXT, status TEXT,
+                        revision INTEGER, strategy_revision INTEGER, result TEXT,
+                        continuations_used INTEGER, updated_at_ms INTEGER
+                    );
+                    CREATE TABLE stateful_obligations (id TEXT);
+                    CREATE TABLE stateful_host_answers (run_id TEXT);
+                    INSERT INTO stateful_runs VALUES
+                        ('run-1', 'project-1', 'autonomous', 'completed',
+                         3, 2, 'answer', 0, 1);
+                    INSERT INTO stateful_host_answers VALUES ('run-1');
+                    """
+                )
+            with closing(
+                sqlite3.connect(state_dir / "project_intelligence_1.sqlite")
+            ) as intelligence:
+                intelligence.executescript(
+                    """
+                    CREATE TABLE hierarchy_nodes (id TEXT, project_id TEXT);
+                    CREATE TABLE context_map_entries (id TEXT, project_id TEXT);
+                    CREATE TABLE blackboard_entries (id TEXT, project_id TEXT);
+                    CREATE TABLE blackboard_relations (id TEXT, project_id TEXT);
+                    """
+                )
+            inspected = inspect_stateful_state(state_dir)
+            self.assertEqual(
+                (inspected["status"], inspected["valid"], inspected["run"]["status"]),
+                ("invalid", False, "answered"),
+            )
+
     def test_inspects_terminal_stateful_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)

@@ -154,11 +154,23 @@ def _inspect_stateful_state(state_dir: Path) -> dict[str, object]:
         sqlite3.connect(f"file:{runtime_path.as_posix()}?mode=ro", uri=True)
     ) as runtime:
         runtime.row_factory = sqlite3.Row
+        # An answered run (migration 0013) is stored as completed with an answer record;
+        # read it as answered, as the runtime does, so it never passes the Completed gate.
+        has_answers = runtime.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stateful_host_answers'"
+        ).fetchone()
+        status = (
+            """CASE WHEN run.status = 'completed' AND EXISTS (
+                   SELECT 1 FROM stateful_host_answers AS answer WHERE answer.run_id = run.id
+               ) THEN 'answered' ELSE run.status END"""
+            if has_answers
+            else "run.status"
+        )
         run = runtime.execute(
-            """SELECT id, project_id, mode, status, revision, strategy_revision,
-                      result, continuations_used
-                 FROM stateful_runs
-             ORDER BY updated_at_ms DESC, id LIMIT 1"""
+            f"""SELECT run.id, run.project_id, run.mode, {status} AS status, run.revision,
+                      run.strategy_revision, run.result, run.continuations_used
+                 FROM stateful_runs AS run
+             ORDER BY run.updated_at_ms DESC, run.id LIMIT 1"""
         ).fetchone()
         run_count = runtime.execute("SELECT COUNT(*) FROM stateful_runs").fetchone()[0]
         obligation_count = runtime.execute(

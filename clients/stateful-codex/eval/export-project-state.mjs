@@ -198,23 +198,41 @@ export function stateArtifactHash(artifact) {
   return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
 }
 
-function selectRun(database, threadId, runId) {
+/// An answered run (migration 0013) is stored as `completed` with an answer record; it is
+/// read as `answered`, the same projection the runtime applies, never as an accepted completion.
+function runStatusExpression(database) {
+  const answers = database
+    .prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stateful_host_answers'",
+    )
+    .get();
+  return answers
+    ? `CASE WHEN run.status = 'completed' AND EXISTS (
+         SELECT 1 FROM stateful_host_answers AS answer WHERE answer.run_id = run.id
+       ) THEN 'answered' ELSE run.status END`
+    : "run.status";
+}
+
+export function selectRun(database, threadId, runId) {
+  const status = runStatusExpression(database);
   const selected = runId
     ? database
         .prepare(
-          `SELECT id, project_id AS projectId, goal, mode, status, strategy,
-                  strategy_revision AS strategyRevision, result, revision,
-                  max_continuations AS maxContinuations,
-                  max_elapsed_seconds AS maxElapsedSeconds,
-                  continuations_used AS continuationsUsed,
-                  created_at_ms AS createdAtMs, updated_at_ms AS updatedAtMs
-             FROM stateful_runs WHERE id = ?`,
+          `SELECT run.id, run.project_id AS projectId, run.goal, run.mode,
+                  ${status} AS status, run.strategy,
+                  run.strategy_revision AS strategyRevision, run.result,
+                  run.revision, run.max_continuations AS maxContinuations,
+                  run.max_elapsed_seconds AS maxElapsedSeconds,
+                  run.continuations_used AS continuationsUsed,
+                  run.created_at_ms AS createdAtMs,
+                  run.updated_at_ms AS updatedAtMs
+             FROM stateful_runs AS run WHERE run.id = ?`,
         )
         .get(runId)
     : database
         .prepare(
           `SELECT run.id, run.project_id AS projectId, run.goal, run.mode,
-                  run.status, run.strategy,
+                  ${status} AS status, run.strategy,
                   run.strategy_revision AS strategyRevision, run.result,
                   run.revision, run.max_continuations AS maxContinuations,
                   run.max_elapsed_seconds AS maxElapsedSeconds,
