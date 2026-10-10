@@ -5228,6 +5228,19 @@ class StatefulCaptureOutcome(Enum):
     already_stored = "alreadyStored"
 
 
+class StatefulHostAnswer(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    answer: Annotated[str, Field(description="The final answer exactly as the user received it.")]
+    basis: Annotated[
+        str,
+        Field(description="What the host observed; states that the answer is not host-verified."),
+    ]
+    committed_at: Annotated[int, Field(alias="committedAt")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class StatefulKnowledgeCategoryValue(Enum):
     decision = "decision"
     finding = "finding"

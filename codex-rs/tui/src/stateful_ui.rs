@@ -20,6 +20,7 @@ use codex_app_server_protocol::ObligationListResponse;
 use codex_app_server_protocol::ObligationUpdatedNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::StatefulHostAnswer;
 use codex_app_server_protocol::StatefulObligation;
 use codex_app_server_protocol::StatefulRun;
 use codex_app_server_protocol::StatefulRunReadParams;
@@ -114,14 +115,14 @@ pub(crate) async fn handle_app_scoped_notification(
             true
         }
         ServerNotification::StatefulRunUpdated(notification) => {
-            let result = read_run(&request_handle, &notification.run_id).await;
+            let result = read_run_with_host_answer(&request_handle, &notification.run_id).await;
             match result {
-                Ok(Some(run))
+                Ok((Some(run), host_answer))
                     if run_is_for_thread(&run, primary_thread_id)
                         && is_terminal_status(run.status) =>
                 {
                     app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                        StatefulSemanticHistoryCell::for_run(run),
+                        StatefulSemanticHistoryCell::for_run(run, host_answer),
                     )));
                 }
                 Ok(_) => {}
@@ -169,6 +170,13 @@ async fn read_run(
     request_handle: &AppServerRequestHandle,
     run_id: &str,
 ) -> Result<Option<StatefulRun>> {
+    Ok(read_run_with_host_answer(request_handle, run_id).await?.0)
+}
+
+async fn read_run_with_host_answer(
+    request_handle: &AppServerRequestHandle,
+    run_id: &str,
+) -> Result<(Option<StatefulRun>, Option<StatefulHostAnswer>)> {
     let response: StatefulRunReadResponse = request_handle
         .request_typed(ClientRequest::StatefulRunRead {
             request_id: RequestId::String(format!("stateful-tui-run-read-{run_id}")),
@@ -179,7 +187,7 @@ async fn read_run(
         })
         .await
         .context("failed to read the Stateful run")?;
-    Ok(response.run)
+    Ok((response.run, response.host_answer))
 }
 
 async fn read_obligation(
@@ -263,7 +271,7 @@ impl StatefulSemanticHistoryCell {
         }
     }
 
-    fn for_run(run: StatefulRun) -> Self {
+    fn for_run(run: StatefulRun, host_answer: Option<StatefulHostAnswer>) -> Self {
         let status = match run.status {
             StatefulRunStatus::Pending => "pending",
             StatefulRunStatus::Running => "running",
@@ -273,6 +281,14 @@ impl StatefulSemanticHistoryCell {
             StatefulRunStatus::Blocked => "blocked",
             StatefulRunStatus::Failed => "failed",
         };
+        // A host-ended answer was just shown in full; say what ended the run instead of
+        // repeating it.
+        if let Some(host_answer) = host_answer {
+            return Self {
+                title: format!("Stateful run · {status} · answer not verified"),
+                sections: vec![("Goal", vec![run.goal]), ("Basis", vec![host_answer.basis])],
+            };
+        }
         Self {
             title: format!("Stateful run · {status}"),
             sections: vec![

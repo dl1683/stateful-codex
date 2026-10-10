@@ -21606,6 +21606,33 @@
         ],
         "type": "string"
       },
+      "StatefulHostAnswer": {
+        "description": "A run the host ended with an answer that the user, not the host, judges.",
+        "properties": {
+          "answer": {
+            "description": "The final answer exactly as the user received it.",
+            "type": "string"
+          },
+          "basis": {
+            "description": "What the host observed; states that the answer is not host-verified.",
+            "type": "string"
+          },
+          "committedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer",
+          "basis",
+          "committedAt",
+          "turnId"
+        ],
+        "type": "object"
+      },
       "StatefulKnowledgeCapturedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "Receipt for one knowledge entry stored (or already stored) during a Stateful turn.",

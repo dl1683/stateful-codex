@@ -89,25 +89,30 @@ fn semantic_obligation_cell_renders_a_compact_structured_update() {
 
 #[test]
 fn completed_run_cell_renders_the_durable_result() {
-    let cell = StatefulSemanticHistoryCell::for_run(StatefulRun {
-        id: "run-1".to_string(),
-        project_id: "project-1".to_string(),
-        thread_ids: vec!["thread-1".to_string()],
-        goal: "Verify the public file count".to_string(),
-        mode: StatefulWorkflowMode::Collaborative,
-        status: StatefulRunStatus::Completed,
-        budget: StatefulRunBudget {
-            max_continuations: DEFAULT_MAX_CONTINUATIONS,
-            max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
+    let cell = StatefulSemanticHistoryCell::for_run(
+        StatefulRun {
+            id: "run-1".to_string(),
+            project_id: "project-1".to_string(),
+            thread_ids: vec!["thread-1".to_string()],
+            goal: "Verify the public file count".to_string(),
+            mode: StatefulWorkflowMode::Collaborative,
+            status: StatefulRunStatus::Completed,
+            budget: StatefulRunBudget {
+                max_continuations: DEFAULT_MAX_CONTINUATIONS,
+                max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
+            },
+            continuations_used: 0,
+            strategy: Some(
+                "Reuse accumulated evidence and verify only changed sources.".to_string(),
+            ),
+            result: Some("Verified eight files without changing source files.".to_string()),
+            strategy_revision: 1,
+            revision: 2,
+            created_at: 1,
+            updated_at: 2,
         },
-        continuations_used: 0,
-        strategy: Some("Reuse accumulated evidence and verify only changed sources.".to_string()),
-        result: Some("Verified eight files without changing source files.".to_string()),
-        strategy_revision: 1,
-        revision: 2,
-        created_at: 1,
-        updated_at: 2,
-    });
+        /*host_answer*/ None,
+    );
     let rendered = cell
         .display_lines(/*width*/ 56)
         .into_iter()
@@ -124,6 +129,53 @@ fn completed_run_cell_renders_the_durable_result() {
     Final strategy
       • Reuse accumulated evidence and verify only changed
         sources.
+    ");
+}
+
+#[test]
+fn host_ended_answer_cell_states_the_unverified_basis() {
+    let cell = StatefulSemanticHistoryCell::for_run(
+        StatefulRun {
+            id: "run-1".to_string(),
+            project_id: "project-1".to_string(),
+            thread_ids: vec!["thread-1".to_string()],
+            goal: "What does parse_config return?".to_string(),
+            mode: StatefulWorkflowMode::Autonomous,
+            status: StatefulRunStatus::Completed,
+            budget: StatefulRunBudget {
+                max_continuations: DEFAULT_MAX_CONTINUATIONS,
+                max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
+            },
+            continuations_used: 0,
+            strategy: None,
+            result: Some("It returns Result<Config, Error>.".to_string()),
+            strategy_revision: 0,
+            revision: 2,
+            created_at: 1,
+            updated_at: 2,
+        },
+        Some(StatefulHostAnswer {
+            turn_id: "turn-1".to_string(),
+            answer: "It returns Result<Config, Error>.".to_string(),
+            basis: "Host-ended answer: the answering task observed no tool call. The answer is judged by the user; it is not host-verified.".to_string(),
+            committed_at: 2,
+        }),
+    );
+    let rendered = cell
+        .display_lines(/*width*/ 56)
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    insta::assert_snapshot!(rendered, @r"
+    Stateful run · completed · answer not verified
+    Goal
+      • What does parse_config return?
+    Basis
+      • Host-ended answer: the answering task observed no
+        tool call. The answer is judged by the user; it is
+        not host-verified.
     ");
 }
 

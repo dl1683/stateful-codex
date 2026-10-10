@@ -96,6 +96,22 @@ pub struct StatefulRunReadParams {
 pub struct StatefulRunReadResponse {
     pub run: Option<StatefulRun>,
     pub recovery: Option<StatefulRunRecovery>,
+    /// Present when the host ended the run with its first answering task's answer.
+    pub host_answer: Option<StatefulHostAnswer>,
+}
+
+/// A run the host ended with an answer that the user, not the host, judges.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct StatefulHostAnswer {
+    pub turn_id: String,
+    /// The final answer exactly as the user received it.
+    pub answer: String,
+    /// What the host observed; states that the answer is not host-verified.
+    pub basis: String,
+    #[ts(type = "number")]
+    pub committed_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
