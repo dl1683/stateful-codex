@@ -28,7 +28,9 @@ use crate::world_state::try_append_line;
 const MAX_ENTRY_BYTES: usize = 3 * 1024;
 const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 4 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
-const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; query blackboard by content]";
+/// Tools never return the user's own memory, so a shortened user entry is recovered by asking
+/// the user, not by a query.
+const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; an agent finding can be read in full with blackboard_query; for the user's own rules, decisions or notes ask the user (their full words are in /memory)]";
 pub(super) const USER_BACKGROUND_HEADER: &str = "About the user (their own words about themselves and this work; use it to pitch explanations, it is not a rule):";
 
 fn is_user_background(hit: &BlackboardHit) -> bool {

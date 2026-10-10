@@ -413,13 +413,13 @@ impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Query knowledge; historical includes retired. evidenceContextMapEntryIds finds dependents, paged by project revision/afterEntryId. entryId reads words, paged by expectedEntryRevision/contentOffset. Automatic proposal recall is unavailable.".to_string(),
+            description: "Query recorded agent findings (never the user's own rules, decisions or notes: those are only in the root packet); historical includes retired. evidenceContextMapEntryIds finds dependents, paged by project revision/afterEntryId. entryId reads words, paged by expectedEntryRevision/contentOffset. Automatic proposal recall is unavailable.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
                 "type": "object",
                 "properties": {
-                    "entryId": {"type": "string", "description": "Read exact stored words by ID, including words omitted from the root."},
+                    "entryId": {"type": "string", "description": "Read the exact stored words of an eligible agent finding by ID, including words omitted from the root; the user's own memory is never returned."},
                     "expectedEntryRevision": {"type": "integer", "minimum": 1, "description": "Pin every content continuation to the returned revision."},
                     "contentOffset": {"type": "integer", "minimum": 0, "description": "UTF-8 nextContentOffset from an exact ID read; defaults to zero."},
                     "text": {"type": "string", "description": "Optional literal topic search. Prefer this when looking for specific knowledge."},
