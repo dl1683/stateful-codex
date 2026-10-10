@@ -535,3 +535,35 @@ fn turn_interrupted_clears_stale_final_message() {
     assert!(!processor.final_message_rendered);
     assert!(!processor.emit_final_message_on_shutdown);
 }
+
+#[test]
+fn answered_run_outcome_is_a_calm_stateful_line() {
+    let processor = EventProcessorWithHumanOutput {
+        bold: Style::new().bold(),
+        cyan: Style::new().cyan(),
+        dimmed: Style::new().dimmed(),
+        green: Style::new().green(),
+        italic: Style::new().italic(),
+        magenta: Style::new().magenta(),
+        red: Style::new().red(),
+        yellow: Style::new().yellow(),
+        show_agent_reasoning: true,
+        show_raw_agent_reasoning: false,
+        last_message_path: None,
+        final_message: None,
+        final_message_rendered: false,
+        emit_final_message_on_shutdown: false,
+        stateful_attribution: Default::default(),
+        memory_saved: Default::default(),
+    };
+
+    // The same cyan "stateful:" prefix as every other Stateful line; no warning colour.
+    assert_eq!(
+        processor.run_outcome_line(codex_app_server_protocol::StatefulRunStatus::Answered),
+        Some("\u{1b}[1m\u{1b}[36mstateful:\u{1b}[0m\u{1b}[0m run answered · not verified".to_string())
+    );
+    assert_eq!(
+        processor.run_outcome_line(codex_app_server_protocol::StatefulRunStatus::Completed),
+        None
+    );
+}

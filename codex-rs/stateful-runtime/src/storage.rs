@@ -22,10 +22,10 @@ use crate::StatefulRunUpdate;
 use crate::WorkflowMode;
 use crate::run::StatefulRunError;
 
-const DATABASE_NAME: &str = "stateful_runtime_1.sqlite";
+pub(crate) const DATABASE_NAME: &str = "stateful_runtime_1.sqlite";
 const INITIAL_REVISION: i64 = 1;
 const MAX_LEASE_DURATION_MS: u32 = 10 * 60 * 1_000;
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+pub(crate) static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutonomousClaimRequest {
@@ -742,11 +742,32 @@ struct StoredObligation {
     created_at_ms: i64,
 }
 
+/// The run status as read, for a `stateful_runs` row aliased `run`.
+///
+/// An answered run is stored as `completed` with its answer record (migration 0013), because
+/// the status column's CHECK predates it. Read back it is always `answered`, never
+/// `completed`, so no reader can mistake it for an accepted completion. No writer stores
+/// `answered`: the CHECK refuses it.
+macro_rules! run_status_column {
+    () => {
+        "CASE WHEN run.status = 'completed' AND EXISTS (
+            SELECT 1 FROM stateful_host_answers AS answer WHERE answer.run_id = run.id
+        ) THEN 'answered' ELSE run.status END"
+    };
+}
+pub(crate) use run_status_column;
+
 pub(crate) async fn load_run(
     connection: &mut SqliteConnection,
     id: &StatefulRunId,
 ) -> Result<Option<StatefulRun>, StatefulRunStoreError> {
-    let Some(stored) = sqlx::query_as::<_, StoredRun>("SELECT * FROM stateful_runs WHERE id = ?")
+    let Some(stored) = sqlx::query_as::<_, StoredRun>(concat!(
+        "SELECT id, project_id, goal, mode, ",
+        run_status_column!(),
+        " AS status, strategy, strategy_revision, result, revision, created_at_ms,
+                updated_at_ms, max_continuations, max_elapsed_seconds, continuations_used
+         FROM stateful_runs AS run WHERE id = ?"
+    ))
         .bind(id.as_str())
         .fetch_optional(&mut *connection)
         .await?
@@ -829,6 +850,10 @@ async fn load_obligation_by_sequence(
 }
 
 fn valid_transition(from: StatefulRunStatus, to: StatefulRunStatus) -> bool {
+    // An answered run ends only through its own transaction and never changes again.
+    if from == StatefulRunStatus::Answered || to == StatefulRunStatus::Answered {
+        return false;
+    }
     from == to
         || matches!(
             (from, to),
@@ -870,7 +895,7 @@ enum_codec!(status_name, parse_status, StatefulRunStatus, {
     StatefulRunStatus::Pending => "pending", StatefulRunStatus::Running => "running",
     StatefulRunStatus::Paused => "paused", StatefulRunStatus::Completed => "completed",
     StatefulRunStatus::Cancelled => "cancelled", StatefulRunStatus::Blocked => "blocked",
-    StatefulRunStatus::Failed => "failed",
+    StatefulRunStatus::Failed => "failed", StatefulRunStatus::Answered => "answered",
 });
 
 fn parse_count(value: i64) -> Result<u64, StatefulRunStoreError> {

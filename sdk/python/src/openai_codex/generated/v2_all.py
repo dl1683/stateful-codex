@@ -5234,8 +5234,7 @@ class StatefulHostAnswer(BaseModel):
     )
     answer: Annotated[str, Field(description="The final answer exactly as the user received it.")]
     basis: Annotated[
-        str,
-        Field(description="What the host observed; states that the answer is not host-verified."),
+        str, Field(description="States that neither the answer nor the run's work was verified.")
     ]
     committed_at: Annotated[int, Field(alias="committedAt")]
     turn_id: Annotated[str, Field(alias="turnId")]
@@ -5444,6 +5443,7 @@ class StatefulRunStatus(Enum):
     cancelled = "cancelled"
     blocked = "blocked"
     failed = "failed"
+    answered = "answered"
 
 
 class StatefulRunUpdatedNotification(BaseModel):

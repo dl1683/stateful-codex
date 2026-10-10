@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::StatefulRunStatus;
 use codex_core::config::Config;
 use codex_protocol::protocol::SessionConfiguredEvent;
 
@@ -26,6 +27,9 @@ pub(crate) trait EventProcessor {
     fn process_warning(&mut self, message: String) -> CodexStatus;
 
     fn print_final_output(&mut self) {}
+
+    /// Report how the Autonomous run exec follows ended, when that ending needs a label.
+    fn process_run_outcome(&mut self, _status: StatefulRunStatus) {}
 }
 
 pub(crate) fn handle_last_message(last_agent_message: Option<&str>, output_file: &Path) {

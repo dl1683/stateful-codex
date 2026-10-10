@@ -53,6 +53,7 @@ pub(super) fn api_run(value: StatefulRun) -> ApiRun {
             StatefulRunStatus::Cancelled => ApiRunStatus::Cancelled,
             StatefulRunStatus::Blocked => ApiRunStatus::Blocked,
             StatefulRunStatus::Failed => ApiRunStatus::Failed,
+            StatefulRunStatus::Answered => ApiRunStatus::Answered,
         },
         strategy: value.strategy,
         strategy_revision: value.strategy_revision,

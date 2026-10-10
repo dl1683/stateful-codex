@@ -111,7 +111,6 @@ fn completed_run_cell_renders_the_durable_result() {
             created_at: 1,
             updated_at: 2,
         },
-        /*host_answer*/ None,
     );
     let rendered = cell
         .display_lines(/*width*/ 56)
@@ -133,49 +132,46 @@ fn completed_run_cell_renders_the_durable_result() {
 }
 
 #[test]
-fn host_ended_answer_cell_states_the_unverified_basis() {
-    let cell = StatefulSemanticHistoryCell::for_run(
-        StatefulRun {
-            id: "run-1".to_string(),
-            project_id: "project-1".to_string(),
-            thread_ids: vec!["thread-1".to_string()],
-            goal: "What does parse_config return?".to_string(),
-            mode: StatefulWorkflowMode::Autonomous,
-            status: StatefulRunStatus::Completed,
-            budget: StatefulRunBudget {
-                max_continuations: DEFAULT_MAX_CONTINUATIONS,
-                max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
-            },
-            continuations_used: 0,
-            strategy: None,
-            result: Some("It returns Result<Config, Error>.".to_string()),
-            strategy_revision: 0,
-            revision: 2,
-            created_at: 1,
-            updated_at: 2,
+fn answered_run_cell_reads_as_a_calm_finished_answer() {
+    let cell = StatefulSemanticHistoryCell::for_run(StatefulRun {
+        id: "run-1".to_string(),
+        project_id: "project-1".to_string(),
+        thread_ids: vec!["thread-1".to_string()],
+        goal: "What does parse_config return?".to_string(),
+        mode: StatefulWorkflowMode::Autonomous,
+        status: StatefulRunStatus::Answered,
+        budget: StatefulRunBudget {
+            max_continuations: DEFAULT_MAX_CONTINUATIONS,
+            max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
         },
-        Some(StatefulHostAnswer {
-            turn_id: "turn-1".to_string(),
-            answer: "It returns Result<Config, Error>.".to_string(),
-            basis: "Host-ended answer: the answering task observed no tool call. The answer is judged by the user; it is not host-verified.".to_string(),
-            committed_at: 2,
-        }),
+        continuations_used: 0,
+        strategy: None,
+        result: Some("It returns Result<Config, Error>.".to_string()),
+        strategy_revision: 0,
+        revision: 2,
+        created_at: 1,
+        updated_at: 2,
+    });
+    let lines = cell.display_lines(/*width*/ 56);
+    // No warning or error colour anywhere in the cell.
+    assert!(
+        lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .all(|span| span.style.fg.is_none()),
+        "{lines:?}"
     );
-    let rendered = cell
-        .display_lines(/*width*/ 56)
+    let rendered = lines
         .into_iter()
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("
+");
 
     insta::assert_snapshot!(rendered, @r"
-    Stateful run · completed · answer not verified
+    Stateful run · answered · not verified
     Goal
       • What does parse_config return?
-    Basis
-      • Host-ended answer: the answering task observed no
-        tool call. The answer is judged by the user; it is
-        not host-verified.
     ");
 }
 

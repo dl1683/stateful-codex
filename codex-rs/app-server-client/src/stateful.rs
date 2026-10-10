@@ -168,7 +168,8 @@ pub async fn start_stateful_run_on_resumed_thread(
             }
             StatefulRunStatus::Completed
             | StatefulRunStatus::Cancelled
-            | StatefulRunStatus::Failed => {
+            | StatefulRunStatus::Failed
+            | StatefulRunStatus::Answered => {
                 return start_stateful_run(request_handle, startup, thread_id).await;
             }
         }
@@ -197,6 +198,7 @@ fn status_name(status: StatefulRunStatus) -> &'static str {
         StatefulRunStatus::Cancelled => "cancelled",
         StatefulRunStatus::Blocked => "blocked",
         StatefulRunStatus::Failed => "failed",
+        StatefulRunStatus::Answered => "answered",
     }
 }
 

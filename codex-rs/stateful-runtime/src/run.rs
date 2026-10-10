@@ -9,7 +9,7 @@ const MAX_PROJECT_ID_BYTES: usize = 512;
 const MAX_THREAD_IDS: usize = 64;
 const MAX_GOAL_BYTES: usize = 16 * 1024;
 const MAX_STRATEGY_BYTES: usize = 16 * 1024;
-const MAX_RESULT_BYTES: usize = 32 * 1024;
+pub(crate) const MAX_RESULT_BYTES: usize = 32 * 1024;
 const MAX_PACKET_FIELD_BYTES: usize = 8 * 1024;
 const MAX_PACKET_LIST_ITEMS: usize = 32;
 const MAX_CONTINUATIONS: u32 = 1_000;
@@ -75,11 +75,17 @@ pub enum StatefulRunStatus {
     Cancelled,
     Blocked,
     Failed,
+    /// Ended with the agent's final answer, which the host did not verify ("answered,
+    /// unverified"). Not Completed: no acceptance criterion was checked.
+    Answered,
 }
 
 impl StatefulRunStatus {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Cancelled | Self::Failed)
+        matches!(
+            self,
+            Self::Completed | Self::Cancelled | Self::Failed | Self::Answered
+        )
     }
 }
 

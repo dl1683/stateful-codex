@@ -6,6 +6,7 @@ use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunStore;
 use crate::StatefulRunStoreError;
+use crate::storage::run_status_column;
 use crate::storage::parse_status;
 use crate::storage::validate_list_limit;
 
@@ -32,13 +33,15 @@ impl StatefulRunStore {
         max_results: u32,
     ) -> Result<Vec<TurnRun>, StatefulRunStoreError> {
         validate_list_limit(max_results)?;
-        let rows = sqlx::query_as::<_, StoredTurnRun>(
-            "SELECT measurement.turn_id, measurement.run_id, run.status
+        let rows = sqlx::query_as::<_, StoredTurnRun>(concat!(
+            "SELECT measurement.turn_id, measurement.run_id, ",
+            run_status_column!(),
+            " AS status
              FROM stateful_turn_measurements AS measurement
              JOIN stateful_runs AS run ON run.id = measurement.run_id
              WHERE measurement.thread_id = ?
-             ORDER BY measurement.created_at_ms DESC, measurement.turn_id DESC LIMIT ?",
-        )
+             ORDER BY measurement.created_at_ms DESC, measurement.turn_id DESC LIMIT ?"
+        ))
         .bind(thread_id)
         .bind(i64::from(max_results))
         .fetch_all(&self.pool)

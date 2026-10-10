@@ -5,6 +5,7 @@ use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::StatefulRunStatus;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::TurnStatus;
 use codex_core::config::Config;
@@ -66,6 +67,24 @@ impl EventProcessorWithHumanOutput {
             emit_final_message_on_shutdown: false,
             stateful_attribution: StatefulAttributionAccumulator::default(),
             memory_saved: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// The line reporting how the followed Autonomous run ended, if that ending needs one. An
+    /// answered run reads as a normal finished answer: a calm label, never a warning.
+    fn run_outcome_line(&self, status: StatefulRunStatus) -> Option<String> {
+        match status {
+            StatefulRunStatus::Answered => Some(format!(
+                "{} run answered · not verified",
+                "stateful:".style(self.cyan).style(self.bold)
+            )),
+            StatefulRunStatus::Pending
+            | StatefulRunStatus::Running
+            | StatefulRunStatus::Paused
+            | StatefulRunStatus::Completed
+            | StatefulRunStatus::Cancelled
+            | StatefulRunStatus::Blocked
+            | StatefulRunStatus::Failed => None,
         }
     }
 
@@ -476,6 +495,12 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             "warning:".style(self.yellow).style(self.bold)
         );
         CodexStatus::Running
+    }
+
+    fn process_run_outcome(&mut self, status: StatefulRunStatus) {
+        if let Some(line) = self.run_outcome_line(status) {
+            eprintln!("{line}");
+        }
     }
 
     fn print_final_output(&mut self) {

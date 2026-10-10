@@ -141,6 +141,7 @@ fn run_line(run: &StatefulRun) -> String {
         StatefulRunStatus::Cancelled => "cancelled",
         StatefulRunStatus::Blocked => "blocked",
         StatefulRunStatus::Failed => "failed",
+        StatefulRunStatus::Answered => "answered · not verified",
     };
     match run.status {
         StatefulRunStatus::Pending | StatefulRunStatus::Running | StatefulRunStatus::Paused => {
@@ -149,7 +150,8 @@ fn run_line(run: &StatefulRun) -> String {
         StatefulRunStatus::Completed
         | StatefulRunStatus::Cancelled
         | StatefulRunStatus::Blocked
-        | StatefulRunStatus::Failed => format!("{mode} run {status}"),
+        | StatefulRunStatus::Failed
+        | StatefulRunStatus::Answered => format!("{mode} run {status}"),
     }
 }
 

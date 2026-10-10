@@ -27,6 +27,9 @@ pub enum StatefulRunStatus {
     Cancelled,
     Blocked,
     Failed,
+    // Ended with the agent's final answer, which the host did not verify ("answered, not
+    // verified"). Not Completed: no acceptance criterion was checked.
+    Answered,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
@@ -96,11 +99,11 @@ pub struct StatefulRunReadParams {
 pub struct StatefulRunReadResponse {
     pub run: Option<StatefulRun>,
     pub recovery: Option<StatefulRunRecovery>,
-    /// Present when the host ended the run with its first answering task's answer.
+    /// The exact answer an answered run ended with; null for every other run.
     pub host_answer: Option<StatefulHostAnswer>,
 }
 
-/// A run the host ended with an answer that the user, not the host, judges.
+/// The answer a run ended with. The user, not the host, judges it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -108,7 +111,7 @@ pub struct StatefulHostAnswer {
     pub turn_id: String,
     /// The final answer exactly as the user received it.
     pub answer: String,
-    /// What the host observed; states that the answer is not host-verified.
+    /// States that neither the answer nor the run's work was verified.
     pub basis: String,
     #[ts(type = "number")]
     pub committed_at: i64,

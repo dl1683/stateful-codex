@@ -576,6 +576,7 @@ fn status_name(status: StatefulRunStatus) -> &'static str {
         StatefulRunStatus::Cancelled => "cancelled",
         StatefulRunStatus::Blocked => "blocked",
         StatefulRunStatus::Failed => "failed",
+        StatefulRunStatus::Answered => "answered",
     }
 }
 use std::sync::Arc;

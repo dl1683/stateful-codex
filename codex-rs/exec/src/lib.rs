@@ -1395,7 +1395,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         continue;
                     }
                     Ok(AutonomousWaitState::Terminal(status)) => {
-                        error_seen |= status != StatefulRunStatus::Completed;
+                        error_seen |= !run_ended_well(status);
                         warn!(?status, %run_id, "Autonomous run ended while exec awaited its continuation");
                     }
                     Ok(AutonomousWaitState::Running) => {
@@ -1450,6 +1450,29 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     }
                 }
                 if follow_autonomous_continuations
+                    && !awaiting_autonomous_turn
+                    && let ServerNotification::StatefulRunUpdated(updated) = &notification
+                {
+                    match read_stateful_run(
+                        &client,
+                        &mut request_ids,
+                        StatefulRunLookup::Run(&updated.run_id),
+                    )
+                    .await
+                    {
+                        Ok(Some(run))
+                            if run.status == StatefulRunStatus::Answered
+                                && run.thread_ids.contains(&primary_thread_id_for_requests) =>
+                        {
+                            event_processor.process_run_outcome(run.status);
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            warn!("statefulRun/read failed while checking an Autonomous run update: {err}");
+                        }
+                    }
+                }
+                if follow_autonomous_continuations
                     && awaiting_autonomous_turn
                     && let ServerNotification::StatefulRunUpdated(updated) = &notification
                     && awaited_autonomous_run_id.as_deref() == Some(updated.run_id.as_str())
@@ -1472,7 +1495,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     };
                     if running_autonomous_run_id(run.clone()).is_none() {
                         if let Some(run) = run {
-                            error_seen |= run.status != StatefulRunStatus::Completed;
+                            error_seen |= !run_ended_well(run.status);
                             warn!(status = ?run.status, run_id = %run.id, "Autonomous run ended while exec awaited its continuation");
                         }
                         if let Err(err) = request_shutdown(
@@ -1562,7 +1585,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                                         Some(run.id)
                                     }
                                     Ok(Some(run)) => {
-                                        error_seen |= run.status != StatefulRunStatus::Completed;
+                                        error_seen |= !run_ended_well(run.status);
                                         None
                                     }
                                     Ok(None) => None,
@@ -1624,7 +1647,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                             );
                         }
                         Ok(AutonomousWaitState::Terminal(status)) => {
-                            error_seen |= status != StatefulRunStatus::Completed;
+                            error_seen |= !run_ended_well(status);
                             warn!(?status, %run_id, "Autonomous run ended after exec event loss");
                             if let Err(err) = request_shutdown(
                                 &client,
@@ -1661,6 +1684,15 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 enum StatefulRunLookup<'a> {
     Run(&'a str),
     Thread(&'a str),
+}
+
+/// Whether an Autonomous run ended without a failure exec must report: completed, or answered
+/// (the agent's final answer, unverified).
+fn run_ended_well(status: StatefulRunStatus) -> bool {
+    matches!(
+        status,
+        StatefulRunStatus::Completed | StatefulRunStatus::Answered
+    )
 }
 
 async fn read_stateful_run(

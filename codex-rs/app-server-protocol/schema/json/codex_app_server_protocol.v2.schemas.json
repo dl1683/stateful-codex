@@ -19321,14 +19321,14 @@
       "type": "string"
     },
     "StatefulHostAnswer": {
-      "description": "A run the host ended with an answer that the user, not the host, judges.",
+      "description": "The answer a run ended with. The user, not the host, judges it.",
       "properties": {
         "answer": {
           "description": "The final answer exactly as the user received it.",
           "type": "string"
         },
         "basis": {
-          "description": "What the host observed; states that the answer is not host-verified.",
+          "description": "States that neither the answer nor the run's work was verified.",
           "type": "string"
         },
         "committedAt": {
@@ -20322,7 +20322,8 @@
         "completed",
         "cancelled",
         "blocked",
-        "failed"
+        "failed",
+        "answered"
       ],
       "type": "string"
     },
