@@ -162,3 +162,31 @@ Order from here:
 Fallbacks:
 - If turn-boundary Forget stalls, keep restricted disclosure with honest pending semantics.
 - If E1d exceeds its repair bound, return "answered, unverified".
+
+### Ask and Work split (Codex step-back 2026-10-10e; sc_dogfood/council/council_20261010e_stepback.md)
+
+**Ask** is a run-less, project-attached thread:
+- root, rules, decisions and capture;
+- no run or acceptance tools and no obligation guidance;
+- ends through ordinary turn completion.
+
+It becomes the default for plain `--stateful` if compatibility permits; otherwise it ships as explicit Ask.
+
+**Runs** exist only for explicitly started sustained Work. Truthful Blocked stays for Work. No more terminal exemptions or final-message classifiers.
+
+**One bounded Ask acceptance packet, then advance:**
+- the Paris and leap-year prompts;
+- a project-memory question;
+- a source-reading question;
+- one with an adjacent open Work run.
+
+Each runs in real TUI, exec and Web, including reconnect and interrupt. The explicit-Autonomous-question answered rate and the Code Mode flailing are recorded as separate findings; neither gates memory progress.
+
+**Memory order after Ask:**
+1. Finish the restricted-read baseline, plus a small Ask comparison.
+2. Minimal journal and epoch foundation. It must work without a run id, and it carries the first-class answered status debt.
+3. Forget plus restored reads plus the digest.
+4. Prove cold-session recall.
+5. The rest of slice A. If it expands or shows little benefit, the capsule (slice B) moves ahead of the remaining capture work.
+6. Freshness. Honest "unknown / needs-check" status wording ships now.
+7. Cross-app.
