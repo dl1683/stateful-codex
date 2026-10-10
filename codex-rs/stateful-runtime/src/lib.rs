@@ -9,6 +9,7 @@ mod acceptance_request;
 mod acceptance_storage;
 #[cfg(test)]
 mod acceptance_test_support;
+mod host_answer;
 mod measurement;
 mod measurement_storage;
 mod run;
@@ -49,6 +50,10 @@ pub use acceptance::unmet_criteria;
 pub use acceptance_coverage::MAX_OMISSION_PROPOSALS;
 pub use acceptance_coverage::sentences;
 pub use acceptance_coverage::uncovered_sentences;
+pub use host_answer::HOST_ANSWER_BASIS;
+pub use host_answer::HostAnswerCommit;
+pub use host_answer::HostAnswerOutcome;
+pub use host_answer::HostAnswerRecord;
 pub use measurement::NewStatefulTurnMeasurement;
 pub use measurement::StatefulAttributionCounters;
 pub use measurement::StatefulMeasurementSummary;
