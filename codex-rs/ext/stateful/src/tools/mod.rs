@@ -12,6 +12,7 @@ mod entry_read;
 mod evidence;
 mod memory_read;
 mod obligation;
+mod publication;
 mod run;
 mod run_read;
 mod source_proposals;
@@ -50,14 +51,22 @@ pub(super) fn project_intelligence_tools(
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
+    // Every output that can quote stored memory or earlier turns passes the publication fence.
+    let fenced = |tool: Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>| {
+        Arc::new(publication::Fenced::new(
+            tool,
+            project_id.clone(),
+            services.clone(),
+        )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>
+    };
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
-        Arc::new(blackboard::BlackboardQueryTool::new(
+        fenced(Arc::new(blackboard::BlackboardQueryTool::new(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
             projects.clone(),
             visible_root.clone(),
-        )),
+        ))),
         Arc::new(blackboard_write::BlackboardBatchRecordTool::new(
             project_id.clone(),
             thread_id.clone(),
@@ -78,16 +87,16 @@ pub(super) fn project_intelligence_tools(
             services.clone(),
             event_sink.clone(),
         )),
-        Arc::new(conversation_read::ConversationReadTool::new(
+        fenced(Arc::new(conversation_read::ConversationReadTool::new(
             project_id.clone(),
             projects.clone(),
             services.clone(),
-        )),
-        Arc::new(memory_read::MemoryReadTool::new(
+        ))),
+        fenced(Arc::new(memory_read::MemoryReadTool::new(
             project_id.clone(),
             services.clone(),
             projects.clone(),
-        )),
+        ))),
         Arc::new(context_map::ContextMapQueryTool::new(
             project_id.clone(),
             services.clone(),
@@ -98,12 +107,12 @@ pub(super) fn project_intelligence_tools(
             services.clone(),
             projects.clone(),
         )),
-        Arc::new(evidence::EvidenceReadTool::new(
+        fenced(Arc::new(evidence::EvidenceReadTool::new(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
             projects.clone(),
-        )),
+        ))),
     ];
     tools.extend([
         Arc::new(obligation::ObligationUpdateTool::new(
@@ -126,11 +135,11 @@ pub(super) fn project_intelligence_tools(
             services.clone(),
             projects,
         )),
-        Arc::new(run_read::StatefulRunReadTool::new(
+        fenced(Arc::new(run_read::StatefulRunReadTool::new(
             project_id.clone(),
             thread_id.clone(),
             services.clone(),
-        )),
+        ))),
         Arc::new(steering::SteeringQueryTool::new(
             project_id.clone(),
             thread_id.clone(),

@@ -21,6 +21,20 @@ impl BlackboardStore {
         Ok(result)
     }
 
+    /// A value that grows whenever memory stops applying in the project: a user's Forget, an
+    /// Undo, a correction (which retires its predecessor), a scope end, or any retirement that
+    /// excludes a captured source (both only ever grow). Outputs read before a later
+    /// retirement may quote words that no longer apply; publication fences compare this
+    /// generation with the one captured before their read.
+    pub async fn retirement_generation(
+        &self,
+        project_id: &str,
+    ) -> Result<u64, BlackboardStoreError> {
+        let generation: i64 = sqlx::query_scalar("SELECT COALESCE((SELECT MAX(sequence) FROM memory_changes WHERE project_id = ? AND operation IN ('forgotten', 'corrected', 'invalidated', 'scope_ended')), 0) + (SELECT COUNT(*) FROM capture_source_exclusions WHERE project_id = ?)")
+            .bind(project_id).bind(project_id).fetch_one(&self.pool).await?;
+        unsigned(generation)
+    }
+
     /// The proposal group (the receipt) that committed proposal `entry_id`.
     pub async fn proposal_group_id(
         &self,
