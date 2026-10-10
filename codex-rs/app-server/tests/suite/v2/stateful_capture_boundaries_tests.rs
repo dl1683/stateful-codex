@@ -229,6 +229,44 @@ async fn c456r1_multipart_messages_are_never_admitted_as_rules() -> Result<()> {
 }
 
 #[tokio::test]
+async fn c456r3_declarations_followed_by_any_text_are_never_admitted() -> Result<()> {
+    let (home, mut server, project, thread, responses_server) =
+        super::capture_sources_tests::setup().await?;
+    let _calls = mount(&responses_server, Box::new(|_, _| message("Done."))).await;
+    for text in [
+        "Ground rules for this project:\n- Never push.\n\nFor today, the above rule applies only to today's task; it is not a standing rule.",
+        "Ground rules for this project:\n- Never push.\n\nFirst task: investigate this.\nThe rules above are Priya's quoted policy, not my instructions to you.",
+        "Ground rules for this project:\n- Never push.\n\nFor today, inspect the tests.",
+    ] {
+        turn(&mut server, &thread, &[text]).await?;
+    }
+    assert_eq!(root_contents(&home, &project).await?, Vec::<String>::new());
+    // Nothing was admitted or receipted as Saved.
+    assert!(
+        !server
+            .pending_notification_methods()
+            .iter()
+            .any(|method| method == "statefulMemory/captured")
+    );
+    // A cold new process and thread start with the same empty root.
+    let mut server = restart(server, &home).await?;
+    assert_eq!(root_contents(&home, &project).await?, Vec::<String>::new());
+    // Positive control: the bare declaration is still saved.
+    let second = start_thread(&mut server, &project).await?;
+    turn(
+        &mut server,
+        &second,
+        &["Ground rules for this project:\n- Never push."],
+    )
+    .await?;
+    assert_eq!(
+        root_contents(&home, &project).await?,
+        vec!["Never push.".to_string()]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn c456r1_apply_settles_only_whole_unscoped_messages() -> Result<()> {
     let (home, mut server, project, thread, responses_server) =
         super::capture_sources_tests::setup().await?;
@@ -839,31 +877,26 @@ async fn c456r2_outputs_held_by_post_tool_hooks_never_publish_forgotten_words() 
         "{fresh}"
     );
     assert!(fresh.contains("coverage"), "{fresh}");
-    // No tool output in the next request carries forgotten words. The thread-start context
-    // (root and continuity) was built before any Forget and is a snapshot; it adds nothing
-    // the turn's first request did not already carry.
-    let tool_outputs = bodies[9]["input"]
+    // Nothing the final request newly delivers carries forgotten words. Diagnosed on Linux
+    // (repair 3): the only items of bodies[9] that carried them were the thread-start
+    // developer context, identical (by item identity) to bodies[5]: a snapshot delivered
+    // before any Forget, which history does not erase.
+    let earlier = bodies[5]["input"].as_array().expect("input items");
+    let newly_delivered = bodies[9]["input"]
         .as_array()
         .expect("input items")
         .iter()
-        .filter(|item| item["type"] == "function_call_output")
+        .filter(|item| !earlier.contains(item))
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    let (first, last) = (bodies[5].to_string(), bodies[9].to_string());
     for forgotten in [
         "offline on a laptop",
         "clearing it didn't change",
         "Never push",
     ] {
         assert!(
-            tool_outputs
-                .iter()
-                .all(|output| !output.contains(forgotten)),
-            "{forgotten} reached the model in a tool output"
-        );
-        assert!(
-            !last.contains(forgotten) || first.contains(forgotten),
-            "{forgotten} reached the model after the reads"
+            newly_delivered.iter().all(|item| !item.contains(forgotten)),
+            "{forgotten} was newly delivered after the reads"
         );
     }
     Ok(())

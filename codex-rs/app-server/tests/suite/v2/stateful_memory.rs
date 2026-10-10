@@ -61,6 +61,9 @@ mod capture_journey_tests;
 #[path = "stateful_capture_boundaries_tests.rs"]
 mod capture_boundaries_tests;
 
+#[path = "stateful_publication_tests.rs"]
+mod publication_tests;
+
 #[tokio::test]
 async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
