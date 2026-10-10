@@ -12,6 +12,7 @@ use codex_stateful_runtime::NewStatefulRun;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
+use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -37,6 +38,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
+    fixture_for("Answer a lookup.").await
+}
+
+async fn fixture_for(goal: &str) -> Fixture {
     let state_home = TempDir::new().expect("temporary state home");
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
@@ -49,7 +54,7 @@ async fn fixture() -> Fixture {
             NewStatefulRun {
                 project_id: PROJECT_ID.to_string(),
                 thread_ids: vec![THREAD_ID.to_string()],
-                goal: "Answer a lookup.".to_string(),
+                goal: goal.to_string(),
                 mode: WorkflowMode::Collaborative,
                 budget: RunBudget {
                     max_continuations: 1,
@@ -224,4 +229,64 @@ async fn rejected_completions_name_the_field_and_show_a_valid_call() {
         "{messages:#?}"
     );
     assert_eq!(stored_run(&fixture).await, fixture.run);
+}
+
+/// E1d2 verification: a Collaborative run has no host-initiated route to Blocked, but the
+/// model's own `stateful_run_update` (rostered in every mode) reaches it three ways even when
+/// the run is a plain question: a direct blocked update, a completion declaring an open issue,
+/// and the host escalation after `MAX_STALLED_COMPLETIONS` refused completions.
+#[tokio::test]
+async fn a_collaborative_plain_question_can_still_end_blocked_through_run_update() {
+    const QUESTION: &str = "What is the capital of France?";
+    let mut statuses = Vec::new();
+
+    let direct = fixture_for(QUESTION).await;
+    let blocked = json!({
+        "expectedRevision": direct.run.revision,
+        "status": "blocked",
+        "result": "Paris.",
+    });
+    direct
+        .tool
+        .handle_guided(call(&blocked))
+        .await
+        .expect("a direct blocked update is accepted");
+    statuses.push(stored_run(&direct).await.status);
+
+    let open_issue = fixture_for(QUESTION).await;
+    let mut completion = lookup_completion(open_issue.run.revision);
+    completion["openIssues"] = json!(["The answer was not checked."]);
+    open_issue
+        .tool
+        .handle_guided(call(&completion))
+        .await
+        .expect("a completion with an open issue ends blocked");
+    statuses.push(stored_run(&open_issue).await.status);
+
+    let refused = fixture_for(QUESTION).await;
+    for attempt in 1..=super::run_acceptance::MAX_STALLED_COMPLETIONS {
+        let revision = stored_run(&refused).await.revision;
+        let outcome = refused
+            .tool
+            .handle_guided(call(&lookup_completion(revision)))
+            .await;
+        assert_eq!(
+            outcome.is_ok(),
+            attempt == super::run_acceptance::MAX_STALLED_COMPLETIONS,
+            "attempt {attempt}"
+        );
+    }
+    statuses.push(stored_run(&refused).await.status);
+
+    assert_eq!(
+        (refused.run.value.mode, statuses),
+        (
+            WorkflowMode::Collaborative,
+            vec![
+                StatefulRunStatus::Blocked,
+                StatefulRunStatus::Blocked,
+                StatefulRunStatus::Blocked,
+            ]
+        )
+    );
 }
