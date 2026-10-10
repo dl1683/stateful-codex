@@ -1,6 +1,5 @@
 //! C4-C6 repair 1-2 boundaries through the public app-server: multipart messages are never
-//! admitted; applied proposals stay out of model tool outputs (across a PostToolUse window);
-//! Apply settles only a whole cited message with no unresolved scope; receipts mark
+//! admitted; Apply settles only a whole cited message with no unresolved scope; receipts mark
 //! shortened text; a recorded Apply replays truthfully after Forget, Undo or restart.
 use super::*;
 use codex_app_server_protocol::StatefulMemoryApplyCategory;
@@ -26,19 +25,19 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
-const DECISION: &str =
+pub(super) const DECISION: &str =
     "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop.";
 
-type Script = Box<dyn Fn(usize, &Value) -> String + Send + Sync>;
+pub(super) type Script = Box<dyn Fn(usize, &Value) -> String + Send + Sync>;
 
-fn message(text: &str) -> String {
+pub(super) fn message(text: &str) -> String {
     responses::sse(vec![
         responses::ev_assistant_message("answer", text),
         responses::ev_completed("answer"),
     ])
 }
 
-fn call(id: &str, tool: &str, args: Value) -> String {
+pub(super) fn call(id: &str, tool: &str, args: Value) -> String {
     responses::sse(vec![
         responses::ev_function_call(id, tool, &args.to_string()),
         responses::ev_completed(id),
@@ -46,7 +45,7 @@ fn call(id: &str, tool: &str, args: Value) -> String {
 }
 
 /// A same-turn proposal citing `[0, end)` of the newest sealed part (`None`: the whole part).
-fn proposal(
+pub(super) fn proposal(
     body: &Value,
     category: &str,
     interpretation: &str,
@@ -71,7 +70,7 @@ fn proposal(
     )
 }
 
-async fn mount(server: &wiremock::MockServer, script: Script) -> Arc<Mutex<Vec<Value>>> {
+pub(super) async fn mount(server: &wiremock::MockServer, script: Script) -> Arc<Mutex<Vec<Value>>> {
     let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
     let captured = calls.clone();
     Mock::given(method("POST"))
@@ -90,7 +89,7 @@ async fn mount(server: &wiremock::MockServer, script: Script) -> Arc<Mutex<Vec<V
     calls
 }
 
-async fn turn(server: &mut TestAppServer, thread: &str, parts: &[&str]) -> Result<()> {
+pub(super) async fn turn(server: &mut TestAppServer, thread: &str, parts: &[&str]) -> Result<()> {
     server
         .start_turn_and_wait_for_completion(TurnStartParams {
             thread_id: thread.to_string(),
@@ -107,7 +106,7 @@ async fn turn(server: &mut TestAppServer, thread: &str, parts: &[&str]) -> Resul
     Ok(())
 }
 
-async fn kept(server: &mut TestAppServer) -> Result<StatefulMemoryReceipt> {
+pub(super) async fn kept(server: &mut TestAppServer) -> Result<StatefulMemoryReceipt> {
     let notification = server
         .read_stream_until_matching_notification("turn-driven memory receipt", |notification| {
             notification.method == "statefulMemory/captured"
@@ -127,7 +126,7 @@ async fn kept(server: &mut TestAppServer) -> Result<StatefulMemoryReceipt> {
     Ok(serde_json::from_value::<StatefulMemoryCapturedNotification>(params)?.receipt)
 }
 
-fn apply_request(
+pub(super) fn apply_request(
     project: &str,
     thread: &str,
     entry_id: &str,
@@ -181,7 +180,7 @@ async fn restart(mut server: TestAppServer, home: &TempDir) -> Result<TestAppSer
         .await
 }
 
-async fn root_contents(home: &TempDir, project: &str) -> Result<Vec<String>> {
+pub(super) async fn root_contents(home: &TempDir, project: &str) -> Result<Vec<String>> {
     let store = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs())).await?;
     Ok(store
         .root_projection(RootBlackboardQuery {
