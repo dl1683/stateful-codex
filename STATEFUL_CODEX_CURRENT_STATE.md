@@ -164,6 +164,22 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   Inherited, OPEN: a held read of an agent finding can still be delivered after
   another thread's model retires it.
 
+- **Checkpoint E1d, plain answers in Autonomous runs: LANDED AS THE FALLBACK**
+  (`ec7910a06`..`e009fa83f`): the host-ended Completed answer failed review
+  (10 blockers) and was removed. Instead, a final message that ends with the
+  four-line `[stateful-outcome]` block (disposition answer, no open issues) ends
+  the run **answered, not verified**. That is a terminal status, neither
+  Completed nor Blocked, and it satisfies no acceptance criterion. It shows as a
+  calm label in the TUI, exec and Web. An interrupt before the commit wins.
+  **OPEN:** the hands-on check fails. With gpt-6-luna, one of two trivial
+  questions still ended Blocked because the model took the completion-tool route.
+  The outcome block is shown raw, and no answered label appeared. A follow-up
+  that strengthens the guidance, the refusal hint and the rendering is next.
+  **OPEN debt:** an answered run is stored as `completed` plus a
+  `stateful_host_answers` record, which every in-repo reader projects to
+  answered. The journal and epoch foundation step replaces this with a
+  first-class status through an additive migration.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 

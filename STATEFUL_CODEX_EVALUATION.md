@@ -2962,3 +2962,11 @@ The model now sees them only through thread-start continuity and the root, which
 is a usefulness loss until the turn-boundary Forget contract restores those reads.
 The SC-EVAL-038 hands-on rows were run on pre-cut builds. The cold-recall row
 ("cache ruled out", from conversation history) would not reproduce after the cut.
+
+## SC-EVAL-039: plain answers in Autonomous runs, E1d fallback hands-on (2026-10-10)
+
+Build 0dcdbe1e2, gpt-6-luna high, real TUI, `--stateful autonomous`, fresh home, n=2 trivial questions. One run
+ended Blocked: the model called the completion tool, was refused for an unmet acceptance gate, and set the run
+blocked. The other ended answered, but only after ten unnecessary Code Mode cells, and the raw outcome block was
+visible in the answer. No calm "answered" label appeared in the TUI. The requirement "a plain question ends answered,
+never Blocked" is not met. Evidence: sc_dogfood/integrate/handson/e1dfb_journey.md.
