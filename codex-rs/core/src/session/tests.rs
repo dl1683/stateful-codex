@@ -11615,6 +11615,7 @@ async fn run_user_shell_command_does_not_set_reference_context_item() {
         "sub-id".to_string(),
         "echo shell".to_string(),
         /*timeout_ms*/ None,
+        /*reply*/ None,
     )
     .await;
 

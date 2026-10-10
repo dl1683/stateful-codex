@@ -58,6 +58,12 @@ pub(super) async fn suspend_turn_and_shutdown(
         if task.kind != TaskKind::Regular {
             return Ok(SuspendTurnOutcome::UnsupportedTask);
         }
+        if let Some(finished) = crate::host_answer::arbitrate_abort(task) {
+            // The task's terminal commit won; it ends on its own as a completed turn.
+            drop(active);
+            crate::host_answer::await_task_end(finished).await;
+            return Ok(SuspendTurnOutcome::NotActive);
+        }
         active.take().ok_or_else(|| {
             CodexErr::Fatal("accepted root turn suspension had no running turn".to_string())
         })?

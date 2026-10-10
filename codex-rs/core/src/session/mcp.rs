@@ -595,12 +595,22 @@ impl Session {
             };
         }
 
+        crate::host_answer::disqualify(
+            turn_context,
+            codex_extension_api::HostAnswerDisqualifier::Elicitation,
+        );
         let _elicitation = self.services.elicitations.register();
         let (tx_response, rx_response) = oneshot::channel();
         let prev_entry = {
             let mut active = self.active_turn.lock().await;
             match active.as_mut() {
                 Some(at) => {
+                    if let Some(task) = at.task.as_ref() {
+                        crate::host_answer::disqualify(
+                            &task.turn_context,
+                            codex_extension_api::HostAnswerDisqualifier::Elicitation,
+                        );
+                    }
                     let mut ts = at.turn_state.lock().await;
                     ts.insert_pending_elicitation(
                         server_name.clone(),

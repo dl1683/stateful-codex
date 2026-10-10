@@ -96,6 +96,8 @@ mod guardian;
 pub mod guardian_review;
 mod hook_mcp_executor;
 mod hook_runtime;
+mod hook_snapshot;
+mod host_answer;
 mod image_preparation;
 mod installation_id;
 pub(crate) mod mcp;

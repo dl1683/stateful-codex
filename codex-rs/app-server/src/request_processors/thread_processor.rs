@@ -2542,17 +2542,27 @@ impl ThreadRequestProcessor {
             return Err(internal_error("local environment is not configured"));
         }
 
+        // Core decides admission under the active turn's lock; wait for that decision so a
+        // refused command is reported to this caller instead of silently dropped.
+        let (reply, admission) = tokio::sync::oneshot::channel();
         self.submit_core_op(
             request_id,
             thread.as_ref(),
             Op::RunUserShellCommand {
                 command,
                 timeout_ms,
+                reply: Some(reply),
             },
         )
         .await
         .map_err(|err| internal_error(format!("failed to start shell command: {err}")))?;
-        Ok(ThreadShellCommandResponse {})
+        match admission.await {
+            Ok(Ok(())) => Ok(ThreadShellCommandResponse {}),
+            Ok(Err(err)) => Err(invalid_request(err.to_string())),
+            Err(_) => Err(internal_error(
+                "failed to start shell command: the thread stopped before admitting it",
+            )),
+        }
     }
 
     async fn thread_approve_guardian_denied_action_inner(

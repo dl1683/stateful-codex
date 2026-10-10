@@ -189,6 +189,12 @@ pub(crate) trait SessionTask: Send + Sync + 'static {
     /// Returns the tracing name for a spawned task span.
     fn span_name(&self) -> &'static str;
 
+    /// Whether the task answers the turn's input with model responses. Only such a task can
+    /// keep a host-ended answer reservation.
+    fn answers_with_model(&self) -> bool {
+        false
+    }
+
     /// Executes the task until completion or cancellation.
     ///
     /// Implementations typically stream protocol events using `session` and
@@ -228,6 +234,8 @@ pub(crate) trait AnySessionTask: Send + Sync + 'static {
 
     fn span_name(&self) -> &'static str;
 
+    fn answers_with_model(&self) -> bool;
+
     fn run(
         self: Arc<Self>,
         session: Arc<Session>,
@@ -251,6 +259,10 @@ where
         SessionTask::span_name(self)
     }
 
+    fn answers_with_model(&self) -> bool {
+        SessionTask::answers_with_model(self)
+    }
+
     fn run(
         self: Arc<Self>,
         session: Arc<Session>,
@@ -269,6 +281,15 @@ where
 
     fn abort<'a>(&'a self, session: Arc<Session>, ctx: Arc<TurnContext>) -> BoxFuture<'a, ()> {
         Box::pin(SessionTask::abort(self, session, ctx))
+    }
+}
+
+/// Marks a task's end when its future completes or is dropped.
+struct TaskFinishedSignal(tokio::sync::watch::Sender<bool>);
+
+impl Drop for TaskFinishedSignal {
+    fn drop(&mut self) {
+        self.0.send_replace(true);
     }
 }
 
@@ -295,6 +316,8 @@ impl Session {
         task: T,
     ) {
         self.activate_plugin_selection(&turn_context).await;
+        // The turn's hooks are fixed from here, after its plugin selection refreshed them.
+        crate::hook_snapshot::pin_turn_hooks(self, &turn_context);
         // Inherited or recovered roots are applied before task start. Otherwise this
         // task owns its turn, including background work. Later mail cannot change it.
         turn_context
@@ -351,10 +374,18 @@ impl Session {
             codex_extension_api::TurnStartPhase::BeforeTaskRegistration,
         )
         .await;
+        crate::host_answer::check_task_start(
+            self,
+            turn_context.as_ref(),
+            &crate::hook_snapshot::turn_hooks(self, &turn_context),
+            task.answers_with_model(),
+        )
+        .await;
 
         let mut active = self.active_turn.lock().await;
         let turn = active.get_or_insert_with(ActiveTurn::default);
         debug_assert!(turn.task.is_none());
+        let (finished_tx, finished) = tokio::sync::watch::channel(false);
         let agent_execution_guard = self.services.agent_control.admit_turn(
             turn_context.multi_agent_version,
             &turn_context.session_source,
@@ -385,6 +416,8 @@ impl Session {
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
         let task_future = async move {
+            // Signals the task's end even if this future is dropped.
+            let _finished = TaskFinishedSignal(finished_tx);
             let ctx_for_finish = Arc::clone(&ctx);
             let run_session = Arc::clone(&session);
             let run_cancellation_token = task_cancellation_token.child_token();
@@ -407,6 +440,11 @@ impl Session {
                 error!(%message, "turn task panicked; ending the turn");
                 Err(CodexErr::new(CodexErrorDetails::TaskPanicked(message)))
             });
+            // A task that ends without finalizing can no longer end its run.
+            crate::host_answer::disqualify(
+                &ctx_for_finish,
+                codex_extension_api::HostAnswerDisqualifier::TurnFailed,
+            );
             let sess = Arc::clone(&session);
             // Private reviewers save their transcript together with the terminal event.
             // Errors and cancellation retain their existing save path.
@@ -441,6 +479,7 @@ impl Session {
             .ok();
         let running_task = RunningTask {
             done,
+            finished,
             handle: AbortOnDropHandle::new(handle),
             kind: task_kind,
             task,
@@ -605,11 +644,18 @@ impl Session {
     ) -> bool {
         let active_turn = {
             let mut active = self.active_turn.lock().await;
-            if active
+            let task = active
                 .as_ref()
                 .and_then(|active_turn| active_turn.task.as_ref())
-                .is_some_and(|task| task.turn_context.sub_id == turn_id)
-            {
+                .filter(|task| task.turn_context.sub_id == turn_id);
+            let is_active = task.is_some();
+            if let Some(finished) = task.and_then(crate::host_answer::arbitrate_abort) {
+                // The task's terminal commit won; it ends on its own as a completed turn.
+                drop(active);
+                crate::host_answer::await_task_end(finished).await;
+                return false;
+            }
+            if is_active {
                 if matches!(
                     reason,
                     TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
@@ -914,7 +960,19 @@ impl Session {
     }
 
     async fn take_active_turn(&self, reason: &TurnAbortReason) -> Option<ActiveTurn> {
-        let mut active = self.active_turn.lock().await;
+        let mut active = loop {
+            let active = self.active_turn.lock().await;
+            let Some(finished) = active
+                .as_ref()
+                .and_then(|active_turn| active_turn.task.as_ref())
+                .and_then(crate::host_answer::arbitrate_abort)
+            else {
+                break active;
+            };
+            // The task's terminal commit won; let it end on its own as a completed turn.
+            drop(active);
+            crate::host_answer::await_task_end(finished).await;
+        };
         if matches!(
             reason,
             TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited

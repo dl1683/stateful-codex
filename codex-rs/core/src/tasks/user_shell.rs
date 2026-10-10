@@ -88,6 +88,7 @@ impl SessionTask for UserShellCommandTask {
         _input: Vec<TurnInput>,
         cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
+        let _admission = crate::host_answer::admit_user_shell(&session);
         execute_user_shell_command(
             session,
             turn_context,

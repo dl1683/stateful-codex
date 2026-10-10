@@ -24,6 +24,7 @@ use crate::tasks::UserShellCommandMode;
 use crate::tasks::UserShellCommandTask;
 use crate::tasks::execute_user_shell_command;
 use codex_protocol::error::CodexErr;
+use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
@@ -50,6 +51,7 @@ use codex_rmcp_client::ElicitationAction;
 use codex_rmcp_client::ElicitationResponse;
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -93,17 +95,56 @@ pub async fn inter_agent_communication(
     }
 }
 
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "auxiliary admission must be atomic with the active turn's host-answer reservation"
+)]
 pub async fn run_user_shell_command(
     sess: &Arc<Session>,
     sub_id: String,
     command: String,
     timeout_ms: Option<u64>,
+    reply: Option<oneshot::Sender<CodexResult<()>>>,
 ) {
-    if let Some((turn_context, cancellation_token)) =
-        sess.active_turn_context_and_cancellation_token().await
-    {
+    let auxiliary = {
+        let active = sess.active_turn.lock().await;
+        match active.as_ref().and_then(|turn| turn.task.as_ref()) {
+            Some(task) if crate::host_answer::refuses_auxiliary_work(task) => {
+                drop(active);
+                let message = crate::host_answer::AUXILIARY_WORK_REFUSED.to_string();
+                match reply {
+                    Some(reply) => {
+                        let _ = reply.send(Err(CodexErr::InvalidRequest(message)));
+                    }
+                    None => {
+                        sess.send_event_raw(Event {
+                            id: sub_id,
+                            msg: EventMsg::Error(ErrorEvent {
+                                message,
+                                codex_error_info: None,
+                                misalignment: None,
+                            }),
+                        })
+                        .await;
+                    }
+                }
+                return;
+            }
+            Some(task) => Some((
+                Arc::clone(&task.turn_context),
+                task.cancellation_token.child_token(),
+                crate::host_answer::admit_user_shell(sess),
+            )),
+            None => None,
+        }
+    };
+    if let Some(reply) = reply {
+        let _ = reply.send(Ok(()));
+    }
+    if let Some((turn_context, cancellation_token, admission)) = auxiliary {
         let session = Arc::clone(sess);
         tokio::spawn(async move {
+            let _admission = admission;
             execute_user_shell_command(
                 session,
                 turn_context,
@@ -611,8 +652,9 @@ pub(super) async fn submission_loop(
                 Op::RunUserShellCommand {
                     command,
                     timeout_ms,
+                    reply,
                 } => {
-                    run_user_shell_command(&sess, sub.id.clone(), command, timeout_ms).await;
+                    run_user_shell_command(&sess, sub.id.clone(), command, timeout_ms, reply).await;
                     false
                 }
                 Op::ResolveElicitation {

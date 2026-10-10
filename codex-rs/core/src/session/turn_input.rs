@@ -669,6 +669,10 @@ impl Session {
         let Some(active_task) = active_turn.task.as_ref() else {
             return Err(NotSubmittedReason::NoActiveTurn);
         };
+        // A task that closed its input is ending; new input belongs to a later turn.
+        if crate::host_answer::input_closed(active_task) {
+            return Err(NotSubmittedReason::NoActiveTurn);
+        }
         let active_turn_id = &active_task.turn_context.sub_id;
 
         if let Some(expected_turn_id) = expected_turn_id

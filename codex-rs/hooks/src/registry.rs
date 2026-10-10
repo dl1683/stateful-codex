@@ -109,6 +109,12 @@ impl Hooks {
             && self.plugin_hook_load_warnings.iter().eq(warnings)
     }
 
+    /// Whether no hook of any kind (configured, plugin, managed, executor or legacy notify)
+    /// can run from this set.
+    pub fn is_empty(&self) -> bool {
+        self.after_agent.is_empty() && self.engine.handlers.is_empty()
+    }
+
     pub fn with_executor_hooks(&self, executor_hooks: Vec<ExecutorPluginHookSource>) -> Self {
         let mut hooks = self.clone();
         hooks.engine.set_executor_hooks(executor_hooks);

@@ -2077,6 +2077,11 @@ impl Session {
         ) && state.active_disabled_plugin_ids == disabled_plugin_ids
         {
             let hooks = self.hooks().reconfigured(hooks_config);
+            if !hooks.is_empty() {
+                self.services
+                    .thread_extension_data
+                    .insert(crate::host_answer::ExecutableHooksSeen);
+            }
             self.services.hooks.store(Arc::new(hooks));
         }
     }
@@ -3893,6 +3898,10 @@ impl Session {
             selected_plugins,
         ) = prepared_tools??;
         turn_context.extension_data.insert(selected_plugins);
+        crate::hook_snapshot::pin_turn_executor_discovery(
+            turn_context.as_ref(),
+            executor_capability_discovery.as_ref(),
+        );
         Ok(Arc::new(StepContext {
             preempt: turn_context
                 .config
