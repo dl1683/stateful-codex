@@ -8,6 +8,7 @@ use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::user_input::UserInput;
 
 use crate::ExtensionData;
+use crate::HostAnswerReservation;
 
 /// Runs before task registration or during cancellable regular-task startup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,4 +74,36 @@ pub struct TurnErrorInput<'a> {
     pub thread_store: &'a ExtensionData,
     /// Store scoped to this turn runtime.
     pub turn_store: &'a ExtensionData,
+}
+
+/// Input supplied when a turn holding a [`HostAnswerReservation`] enters finalization.
+///
+/// The host calls this after the task's last model response, with the task's input closed
+/// and the task still registered: no tool call was observed and no auxiliary work was
+/// admitted for it. The callback runs inside the task, so an abort that wins before
+/// [`HostAnswerReservation::authorize_commit`] cancels it.
+pub struct TurnFinalizeInput<'a> {
+    /// The reservation in finalization; authorize and resolve the commit through it.
+    pub reservation: &'a HostAnswerReservation,
+    /// The task's final assistant message, exactly as the client received it.
+    pub last_agent_message: &'a str,
+    /// Store scoped to the host session runtime.
+    pub session_store: &'a ExtensionData,
+    /// Store scoped to this thread runtime.
+    pub thread_store: &'a ExtensionData,
+    /// Store scoped to this turn runtime.
+    pub turn_store: &'a ExtensionData,
+}
+
+/// What a finalizing contributor did with a reservation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnFinalizeOutcome {
+    /// The contributor does not own the reservation.
+    NotHandled,
+    /// The contributor declined to end the run; the task ends as an ordinary task.
+    Declined(String),
+    /// The terminal commit is durable.
+    Committed,
+    /// The contributor could not establish a durable outcome; the host reports it.
+    Failed(String),
 }
