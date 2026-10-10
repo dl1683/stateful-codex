@@ -2,6 +2,8 @@
 
 #[path = "tests/memory_results_tests.rs"]
 mod memory_results_tests;
+#[path = "tests/stateful_outcome_tests.rs"]
+mod stateful_outcome_tests;
 
 #[path = "tests/mcp_login_tests.rs"]
 mod mcp_login_tests;
