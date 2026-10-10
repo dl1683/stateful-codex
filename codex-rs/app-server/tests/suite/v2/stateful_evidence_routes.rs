@@ -14,14 +14,22 @@ use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::sync::Arc;
+use std::sync::Mutex;
 use tempfile::TempDir;
+use wiremock::Mock;
+use wiremock::Request;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
-/// A code-mode script selects a refreshed route programmatically and reads it, reads
-/// current ranges by path (choosing a root where the path is ambiguous), and gets
-/// truthful diagnostics for a wrapped route item, a mistyped fingerprint, an unrelated
-/// unknown field, conflicting selectors, an ambiguous path, and a foreign root.
+/// The model selects a refreshed route and reads it, reads current ranges by path (choosing
+/// a root where the path is ambiguous), and gets truthful diagnostics for a wrapped route
+/// item, a mistyped fingerprint, an unrelated unknown field, conflicting selectors, an
+/// ambiguous path, and a foreign root. Stateful tools stay direct model tools in a
+/// code-mode-only session: nested cells cannot reach them.
 #[tokio::test]
-async fn code_mode_reads_selected_routes_and_reports_route_mistakes_truthfully() -> Result<()> {
+async fn direct_calls_read_selected_routes_and_report_route_mistakes_truthfully() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
@@ -64,51 +72,32 @@ async fn code_mode_reads_selected_routes_and_reports_route_mistakes_truthfully()
             ..Default::default()
         })
         .await?;
-    let response_log = responses::mount_sse_sequence(
-        &responses_server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("routes-response"),
-                responses::ev_custom_tool_call(
-                    "routes-exec",
-                    "exec",
-                    r#"
-const refreshed = await tools.context_map_refresh({});
-const item = refreshed.routes.find(r => r.source.relativePath === "textkit/cli.py");
-const second = refreshed.routes.find(r => r.source.relativePath === "shared.txt" && r.source.projectRoot !== item.source.projectRoot);
-const routed = await tools.evidence_read({ evidenceRoute: item.evidenceRoute });
-const ranged = await tools.evidence_read({ relativePath: "textkit/cli.py", lineRange: { start: 3, end: 4 } });
-const attempt = async (args) => {
-  try { await tools.evidence_read(args); return "accepted"; }
-  catch (error) { return String((error && error.message) || error); }
-};
-const fingerprint = item.evidenceRoute.sourceFingerprint;
-const mistyped = fingerprint.slice(0, -1) + (fingerprint.endsWith("0") ? "1" : "0");
-text(JSON.stringify({
-  routed: routed.content,
-  routedIdentity: [routed.contextMapEntryId === item.evidenceRoute.contextMapEntryId, routed.sourceFingerprint === fingerprint],
-  routedReceipt: routed.blackboardEvidence.readReceiptId.startsWith("stateful-read-"),
-  ranged: ranged.content,
-  explicitRoot: (await tools.evidence_read({ relativePath: "shared.txt", projectRoot: second.source.projectRoot })).content,
-  bothSelectors: await attempt({ evidenceRoute: item.evidenceRoute, relativePath: "textkit/cli.py" }),
-  ambiguous: await attempt({ relativePath: "shared.txt" }),
-  foreignRoot: await attempt({ relativePath: "shared.txt", projectRoot: item.source.projectRoot + "-outside" }),
-  wrapper: await attempt({ name: "cli", evidenceRoute: item.evidenceRoute }),
-  wholeItem: await attempt({ evidenceRoute: item }),
-  mistyped: await attempt({ evidenceRoute: { ...item.evidenceRoute, sourceFingerprint: mistyped } }),
-  unknown: await attempt({ evidenceRoute: item.evidenceRoute, extra: 1 }),
-}));
-"#,
-                ),
-                responses::ev_completed("routes-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("done-message", "Done"),
-                responses::ev_completed("done-response"),
-            ]),
-        ],
-    )
-    .await;
+    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let log = requests.clone();
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).expect("JSON body");
+            let mut log = log.lock().expect("request log");
+            let response = match log.len() {
+                0 => responses::sse(vec![
+                    responses::ev_response_created("refresh-response"),
+                    responses::ev_function_call("refresh", "context_map_refresh", "{}"),
+                    responses::ev_completed("refresh-response"),
+                ]),
+                1 => route_reads(&body),
+                _ => responses::sse(vec![
+                    responses::ev_assistant_message("done-message", "Done"),
+                    responses::ev_completed("done-response"),
+                ]),
+            };
+            log.push(body);
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(response)
+        })
+        .mount(&responses_server)
+        .await;
 
     server
         .start_turn_and_wait_for_completion(TurnStartParams {
@@ -121,24 +110,25 @@ text(JSON.stringify({
         })
         .await?;
 
-    let requests = response_log.requests();
-    let output = requests[1].custom_tool_call_output("routes-exec");
-    let printed = output["output"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item["text"].as_str())
-        .find_map(|text| serde_json::from_str::<Value>(text).ok())
-        .unwrap_or_else(|| panic!("the script should print its results: {output}"));
-    let diagnosed =
-        |key: &str, text: &str| printed[key].as_str().unwrap_or_default().contains(text);
+    let requests = requests.lock().expect("request log").clone();
+    assert_eq!(requests.len(), 3);
+    let output = |call: &str| call_output(&requests[2], call);
+    let read = |call: &str| -> Value { serde_json::from_str(&output(call)).unwrap_or_default() };
+    let item = cli_route(&refresh_routes(&requests[1]));
+    let routed = read("routed");
+    let diagnosed = |call: &str, text: &str| output(call).contains(text);
     let wrapper_diagnostic = "rather than the whole route item or {name, evidenceRoute} wrapper";
     let observed = json!({
-        "routed": printed["routed"],
-        "routedIdentity": printed["routedIdentity"],
-        "routedReceipt": printed["routedReceipt"],
-        "ranged": printed["ranged"],
-        "explicitRoot": printed["explicitRoot"],
+        "routed": routed["content"],
+        "routedIdentity": [
+            routed["contextMapEntryId"] == item["evidenceRoute"]["contextMapEntryId"],
+            routed["sourceFingerprint"] == item["evidenceRoute"]["sourceFingerprint"],
+        ],
+        "routedReceipt": routed["blackboardEvidence"]["readReceiptId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("stateful-read-")),
+        "ranged": read("ranged")["content"],
+        "explicitRoot": read("explicitRoot")["content"],
         "bothSelectors": diagnosed("bothSelectors", "provide either evidenceRoute"),
         "ambiguous": diagnosed("ambiguous", "multiple project roots"),
         "foreignRoot": diagnosed("foreignRoot", "outside the selected project"),
@@ -165,7 +155,99 @@ text(JSON.stringify({
             "mistypedClaimsNotCurrent": false,
             "unknown": true,
         }),
-        "{printed}"
+        "{requests:?}"
     );
     Ok(())
+}
+
+/// The text delivered for `call_id` in a request body.
+fn call_output(body: &Value, call_id: &str) -> String {
+    let item = body["input"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|item| item["call_id"] == call_id && item["type"] == "function_call_output")
+        .unwrap_or_else(|| panic!("no output for {call_id}: {body}"));
+    match &item["output"] {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// The routes `context_map_refresh` returned, as the model received them.
+fn refresh_routes(body: &Value) -> Value {
+    let refreshed: Value =
+        serde_json::from_str(&call_output(body, "refresh")).expect("refresh output is JSON");
+    refreshed["routes"].clone()
+}
+
+fn cli_route(routes: &Value) -> Value {
+    routes
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|route| route["source"]["relativePath"] == "textkit/cli.py")
+        .cloned()
+        .expect("the CLI route")
+}
+
+/// One response of direct reads: the selected routes and every mistaken form.
+fn route_reads(body: &Value) -> String {
+    let routes = refresh_routes(body);
+    let item = cli_route(&routes);
+    let second = routes
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|route| {
+            route["source"]["relativePath"] == "shared.txt"
+                && route["source"]["projectRoot"] != item["source"]["projectRoot"]
+        })
+        .cloned()
+        .expect("the second root's shared.txt");
+    let route = item["evidenceRoute"].clone();
+    let fingerprint = route["sourceFingerprint"]
+        .as_str()
+        .expect("fingerprint")
+        .to_string();
+    let mut mistyped = route.clone();
+    mistyped["sourceFingerprint"] = json!(format!(
+        "{}{}",
+        &fingerprint[..fingerprint.len() - 1],
+        if fingerprint.ends_with('0') { "1" } else { "0" }
+    ));
+    let outside = format!(
+        "{}-outside",
+        item["source"]["projectRoot"].as_str().expect("root")
+    );
+    let calls = [
+        ("routed", json!({"evidenceRoute": route})),
+        (
+            "ranged",
+            json!({"relativePath": "textkit/cli.py", "lineRange": {"start": 3, "end": 4}}),
+        ),
+        (
+            "explicitRoot",
+            json!({"relativePath": "shared.txt", "projectRoot": second["source"]["projectRoot"]}),
+        ),
+        (
+            "bothSelectors",
+            json!({"evidenceRoute": route, "relativePath": "textkit/cli.py"}),
+        ),
+        ("ambiguous", json!({"relativePath": "shared.txt"})),
+        (
+            "foreignRoot",
+            json!({"relativePath": "shared.txt", "projectRoot": outside}),
+        ),
+        ("wrapper", json!({"name": "cli", "evidenceRoute": route})),
+        ("wholeItem", json!({"evidenceRoute": item})),
+        ("mistyped", json!({"evidenceRoute": mistyped})),
+        ("unknown", json!({"evidenceRoute": route, "extra": 1})),
+    ];
+    let mut events = vec![responses::ev_response_created("reads-response")];
+    events.extend(calls.iter().map(|(call, arguments)| {
+        responses::ev_function_call(call, "evidence_read", &arguments.to_string())
+    }));
+    events.push(responses::ev_completed("reads-response"));
+    responses::sse(events)
 }
