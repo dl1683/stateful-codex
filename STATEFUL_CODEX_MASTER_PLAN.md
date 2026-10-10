@@ -116,3 +116,18 @@ One final integrated-build acceptance gate remains.
 - **Dependable delivery beats voluntary tool use.** Surface adopted rules and a bounded, attributed decision digest at session start. Measure correct application and recovery effort, not query counts.
 - **Rejected-hypothesis capture is still open.** Capture goes through model proposal plus explicit adoption. Event time is kept separate from adoption time.
 - **Evaluation journeys** use conversation-only facts, deny the agent access to harness logs, and separate recovery from files from recovery from memory.
+
+### C4-C6 outcome and reorder (2026-10-10)
+
+Confirmation 3 returned STOP/CUT (sc_dogfood/integrate/reviews/c456_confirm3_review.md).
+- **Cut:** the automatic tool-result publication pipeline, automatic model-tool disclosure of user memory and conversation history, and Code Mode exposure of memory reads.
+- **Kept:** rules capture, receipts, the 240 B Apply bound, Forget, the TUI, and the thread-start root.
+- **Usefulness loss:** the model can no longer read past conversation except through thread-start continuity.
+
+New order:
+1. E1d, bounded: one design review, at most one repair.
+2. **Turn-boundary Forget contract plus restored model reads** of conversation history and user memory, with a session-start digest of adopted rules and decisions.
+3. Within-run continuity.
+4. File-level freshness.
+5. The narrow cross-app slice.
+6. Freeze, then acceptance.
