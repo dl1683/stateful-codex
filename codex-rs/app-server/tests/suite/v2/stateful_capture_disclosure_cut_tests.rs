@@ -30,7 +30,7 @@ const NOTES: &str = "Release checklist: bump the version.\n";
 const USER_WORDS: [&str; 4] = ["Never push", "offline on a laptop", "SQLite", "Postgres"];
 
 /// A project with one indexed source file and a durably bound thread.
-async fn project_with_notes(
+pub(super) async fn project_with_notes(
     home: &TempDir,
     root: &TempDir,
     responses_server: &wiremock::MockServer,
@@ -127,7 +127,7 @@ fn script(
     })
 }
 
-fn output(body: &Value, call_id: &str) -> String {
+pub(super) fn output(body: &Value, call_id: &str) -> String {
     body["input"]
         .as_array()
         .expect("input items")
