@@ -10448,6 +10448,13 @@ class StatefulMemoryItem(BaseModel):
     ]
     content_truncated: Annotated[bool, Field(alias="contentTruncated")]
     entry_id: Annotated[str, Field(alias="entryId")]
+    exceeds_apply_bound: Annotated[
+        bool | None,
+        Field(
+            alias="exceedsApplyBound",
+            description="Applied under an earlier, longer Apply bound (more than 240 bytes): its words are kept unchanged, but it is not applied to new work; the user can re-add them with an explicit add.",
+        ),
+    ] = False
     kind: BlackboardKind
     replaces: Annotated[
         list[StatefulMemoryReplaced],

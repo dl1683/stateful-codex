@@ -45,6 +45,12 @@ fn retained_scope_review_never_claims_current_application() {
         listing(&[scoped]),
         "Your retained rules\n  - Never push.\n    scoped@2\n    investigation: unsupported; held back\n\n"
     );
+    let mut long = item("long", StatefulMemorySection::Decision, "We chose SQLite.");
+    long.exceeds_apply_bound = true;
+    assert_eq!(
+        listing(&[long]),
+        "Decisions\n  - We chose SQLite.\n    long@2\n    not applied: longer than 240 bytes; re-add it with `memory add`\n\n"
+    );
 }
 
 fn item(entry_id: &str, section: StatefulMemorySection, content: &str) -> StatefulMemoryItem {
@@ -61,6 +67,7 @@ fn item(entry_id: &str, section: StatefulMemorySection, content: &str) -> Statef
         authority: None,
         scope_state: None,
         attributed_to: None,
+        exceeds_apply_bound: false,
     }
 }
 

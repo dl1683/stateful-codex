@@ -252,6 +252,12 @@ pub(crate) fn listing(items: &[StatefulMemoryItem]) -> String {
                     scope_state(Some(state))
                 ));
             }
+            if item.exceeds_apply_bound {
+                out.push_str(
+                    "    not applied: longer than 240 bytes; re-add it with `memory add`
+",
+                );
+            }
         }
         out.push('\n');
     }

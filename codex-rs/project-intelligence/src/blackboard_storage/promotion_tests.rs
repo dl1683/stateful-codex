@@ -668,3 +668,81 @@ async fn c456r1_apply_records_said_time_and_replays_truthfully_after_forget() {
         assert_eq!(snapshot(&store).await, before);
     }
 }
+
+#[tokio::test]
+async fn c456r3_entries_applied_under_the_earlier_long_bound_are_kept_but_not_applied() {
+    use codex_utils_absolute_path::test_support::PathExt;
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let admission = admission(&home).await;
+    let id = proposal(
+        &store,
+        &admission,
+        "decision",
+        DECISION,
+        ProposalCategory::Decision,
+    )
+    .await;
+    store
+        .promote_proposal(&admission, apply(&id, 1, "apply-legacy"))
+        .await
+        .unwrap();
+    assert_eq!(root_contents(&store).await, vec![DECISION.to_string()]);
+    let review = |store: &BlackboardStore| {
+        let store = store.clone();
+        let id = id.clone();
+        async move {
+            store
+                .review_context("project-1", &id)
+                .await
+                .unwrap()
+                .unwrap()
+                .exceeds_apply_bound
+        }
+    };
+    assert!(!review(&store).await);
+
+    // An earlier development build settled whole quotations of up to 4,096 bytes; write such
+    // an applied revision directly, as that build would have, and reopen the store.
+    let long = format!(
+        "{DECISION} {}",
+        "Every field laptop must keep working without a network connection. ".repeat(50)
+    )
+    .trim_end()
+    .to_string();
+    assert!(long.len() > 3_000);
+    sqlx::query(
+        "UPDATE blackboard_entry_revisions SET content = ? WHERE entry_id = ? AND revision = 2",
+    )
+    .bind(&long)
+    .bind(id.as_str())
+    .execute(&store.pool)
+    .await
+    .unwrap();
+    drop(store);
+    let store = BlackboardStore::open(&codex_state::SqliteConfig::new_for_testing(
+        home.path().abs(),
+    ))
+    .await
+    .unwrap();
+
+    // Not applied: absent from the root, the recorded Apply is no longer acknowledged, and
+    // review says why; the stored words are untouched.
+    assert_eq!(root_contents(&store).await, Vec::<String>::new());
+    let replay = store
+        .promote_proposal(&admission, apply(&id, 1, "apply-legacy"))
+        .await;
+    let Err(BlackboardStoreError::EntryNotActive(message)) = replay else {
+        panic!("replay must refuse: {replay:?}");
+    };
+    assert!(
+        message.contains("not applied: longer than 240 bytes"),
+        "{message}"
+    );
+    assert!(review(&store).await);
+    let kept = store.get_entry("project-1", &id).await.unwrap().unwrap();
+    assert_eq!(
+        (kept.revision, kept.state, kept.value.content),
+        (2, BlackboardEntryState::Active, long)
+    );
+}

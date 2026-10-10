@@ -68,7 +68,9 @@ const NOT_PROPOSAL: &str = "NOT EXISTS (
 
 /// Root delivery only (never a model tool output): the same eligibility, except that a
 /// proposal the user explicitly applied is admitted while its current revision carries the
-/// user's quoted words under a bounded HumanDirect promotion context. The root is rendered
+/// user's quoted words under a bounded HumanDirect promotion context, and those words are
+/// within the Apply bound (an entry applied under an earlier, longer bound is kept but not
+/// applied). The root is rendered
 /// at sampling time from a fresh snapshot, so an Undo or Forget removes it from the next
 /// request; there is no post-hook publication window as for tool outputs.
 pub(super) fn root_entry_eligibility() -> String {
@@ -79,8 +81,13 @@ pub(super) fn root_entry_eligibility() -> String {
           AND applied.authority = 'human_direct'
           AND octet_length(applied.payload) <= 8192 AND json_valid(applied.payload)
           AND json_type(applied.payload, '$.promotion') = 'object'
-          AND json_type(applied.payload, '$.proposal') IS NULL)
-        OR ({NOT_PROPOSAL}))"
+          AND json_type(applied.payload, '$.proposal') IS NULL
+          AND EXISTS (
+              SELECT 1 FROM blackboard_entry_revisions AS applied_words
+              WHERE applied_words.entry_id = entry.id AND applied_words.revision = entry.revision
+                AND octet_length(applied_words.content) <= {max_applied}))
+        OR ({NOT_PROPOSAL}))",
+        max_applied = super::promotion::MAX_APPLIED_BYTES
     )
 }
 

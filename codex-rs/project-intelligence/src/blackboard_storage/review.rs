@@ -95,6 +95,8 @@ impl BlackboardStore {
 pub struct ReviewContext {
     pub authority: crate::KnowledgeAuthority,
     pub has_recorded_scope: bool,
+    /// Applied under an earlier, longer Apply bound: its words are kept, but it is not applied.
+    pub exceeds_apply_bound: bool,
 }
 
 impl BlackboardStore {
@@ -104,25 +106,34 @@ impl BlackboardStore {
         project_id: &str,
         id: &BlackboardEntryId,
     ) -> Result<Option<ReviewContext>, BlackboardStoreError> {
-        let row = sqlx::query_as::<_, (String, bool)>(
+        let row = sqlx::query_as::<_, (String, bool, bool)>(sqlx::AssertSqlSafe(format!(
             "SELECT CASE WHEN octet_length(context.authority) > 32 THEN 'legacy_unknown'
                  WHEN context.authority IN ('human_direct','assistant_reported',
                  'reported_third_party','host_observed','legacy_unknown')
-                 THEN context.authority ELSE 'legacy_unknown' END, context.scope_id IS NOT NULL
+                 THEN context.authority ELSE 'legacy_unknown' END, context.scope_id IS NOT NULL,
+                 context.revision = entry.revision AND context.authority = 'human_direct'
+                 AND octet_length(context.payload) <= 8192 AND json_valid(context.payload)
+                 AND json_type(context.payload, '$.promotion') = 'object'
+                 AND json_type(context.payload, '$.proposal') IS NULL
+                 AND EXISTS (SELECT 1 FROM blackboard_entry_revisions AS words
+                     WHERE words.entry_id = entry.id AND words.revision = entry.revision
+                       AND octet_length(words.content) > {max_applied})
              FROM knowledge_context AS context
              JOIN blackboard_entries AS entry ON entry.id = context.entry_id
              WHERE context.project_id = ? AND context.entry_id = ?
                AND context.revision <= entry.revision
              ORDER BY context.revision DESC LIMIT 1",
-        )
+            max_applied = super::promotion::MAX_APPLIED_BYTES
+        )))
         .bind(project_id)
         .bind(id.as_str())
         .fetch_optional(&self.pool)
         .await?;
-        row.map(|(authority, has_recorded_scope)| {
+        row.map(|(authority, has_recorded_scope, exceeds_apply_bound)| {
             Ok(ReviewContext {
                 authority: super::knowledge::parse(&authority)?,
                 has_recorded_scope,
+                exceeds_apply_bound,
             })
         })
         .transpose()

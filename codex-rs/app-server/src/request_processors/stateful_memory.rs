@@ -341,6 +341,9 @@ async fn memory_item(
         .review_context(&entry.value.project_id, &entry.id)
         .await
         .map_err(blackboard_error)?;
+    let exceeds_apply_bound = context
+        .as_ref()
+        .is_some_and(|context| context.exceeds_apply_bound);
     let scope_state = context
         .as_ref()
         .filter(|context| context.has_recorded_scope)
@@ -369,6 +372,7 @@ async fn memory_item(
         authority,
         scope_state,
         attributed_to: None,
+        exceeds_apply_bound,
     })
 }
 

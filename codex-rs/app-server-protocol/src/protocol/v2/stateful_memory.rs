@@ -63,6 +63,11 @@ pub struct StatefulMemoryItem {
     pub scope_state: Option<StatefulMemoryScopeState>,
     /// Whose words a relayed note keeps, as the user named them.
     pub attributed_to: Option<String>,
+    /// Applied under an earlier, longer Apply bound (more than 240 bytes): its words are kept
+    /// unchanged, but it is not applied to new work; the user can re-add them with an
+    /// explicit add.
+    #[serde(default)]
+    pub exceeds_apply_bound: bool,
 }
 
 /// On whose authority a memory entry rests.

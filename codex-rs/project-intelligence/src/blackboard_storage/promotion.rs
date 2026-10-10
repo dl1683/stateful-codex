@@ -53,7 +53,7 @@ const MAX_SEALED_BYTES: u32 = 4096;
 /// (receipt text holds 240 bytes) and is delivered whole by every retained path (`/memory`
 /// review holds 2,000 bytes, a root entry line 3 KiB). Longer words stay proposals; the user
 /// can still save them with an explicit add.
-const MAX_APPLIED_BYTES: usize = 240;
+pub(super) const MAX_APPLIED_BYTES: usize = 240;
 
 impl BlackboardStore {
     /// Applies a retained proposal as the user's own rule, decision or ruled-out approach.
@@ -102,14 +102,19 @@ impl BlackboardStore {
                 // The shared storage/source policy also fences a sibling's forgotten source.
                 let eligible =
                     super::identity::entry_storage_eligible_on(&mut tx, project, &id).await?;
-                if !eligible
-                    || !current.is_some_and(|current| {
-                        current.revision == revision
-                            && current.state == BlackboardEntryState::Active
-                    })
-                {
+                let Some(current) = current.filter(|current| {
+                    eligible
+                        && current.revision == revision
+                        && current.state == BlackboardEntryState::Active
+                }) else {
                     return Err(BlackboardStoreError::EntryNotActive(format!(
                         "{id}@{revision}: this action applied it earlier, but it or its source has since been forgotten, undone or corrected; nothing was restored"
+                    )));
+                };
+                // Applied under an earlier, longer bound: kept whole, but no longer applied.
+                if current.value.content.len() > MAX_APPLIED_BYTES {
+                    return Err(BlackboardStoreError::EntryNotActive(format!(
+                        "{id}@{revision}: not applied: longer than {MAX_APPLIED_BYTES} bytes; its words are kept unchanged in /memory, re-add them with /memory add"
                     )));
                 }
             }

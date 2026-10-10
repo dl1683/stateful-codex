@@ -39,4 +39,10 @@ scopeState: StatefulMemoryScopeState | null,
 /**
  * Whose words a relayed note keeps, as the user named them.
  */
-attributedTo: string | null, };
+attributedTo: string | null,
+/**
+ * Applied under an earlier, longer Apply bound (more than 240 bytes): its words are kept
+ * unchanged, but it is not applied to new work; the user can re-add them with an
+ * explicit add.
+ */
+exceedsApplyBound: boolean, };

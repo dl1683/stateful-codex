@@ -33,6 +33,8 @@ fn memory_shortened_text_and_scope_states_are_explicit() {
         );
         item.content_truncated = true;
         item.scope_state = Some(state);
+        // Applied under an earlier, longer Apply bound: kept, not applied.
+        item.exceeds_apply_bound = index == 0;
         (index + 1, item)
     })
     .collect::<Vec<_>>();
@@ -69,6 +71,7 @@ fn item(
         authority: None,
         scope_state: None,
         attributed_to: None,
+        exceeds_apply_bound: false,
     }
 }
 
