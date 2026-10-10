@@ -787,6 +787,10 @@ impl ToolRegistry {
                         });
                     }
                 }
+                // Publication fence: after every hook, immediately before the model sees it.
+                result.result = tool
+                    .revalidate_for_publication(&invocation.call_id, result.result)
+                    .await;
                 tool.on_tool_result_accepted(&invocation, result.result.as_ref());
                 dispatch_trace.record_completed(
                     &invocation,

@@ -45,6 +45,7 @@ pub use codex_tools::ToolExposure;
 pub use codex_tools::ToolName;
 pub use codex_tools::ToolOutput;
 pub use codex_tools::ToolPayload;
+pub use codex_tools::ToolPublicationFuture;
 pub use codex_tools::ToolSpec;
 pub use codex_tools::TurnItemEmissionFuture;
 pub use codex_tools::TurnItemEmitter;

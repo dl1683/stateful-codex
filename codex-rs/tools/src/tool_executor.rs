@@ -11,6 +11,9 @@ use std::pin::Pin;
 pub type ToolExecutorFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Box<dyn ToolOutput>, FunctionCallError>> + Send + 'a>>;
 
+/// The boxed future returned by [`ToolExecutor::revalidate_for_publication`].
+pub type ToolPublicationFuture<'a> = Pin<Box<dyn Future<Output = Box<dyn ToolOutput>> + Send + 'a>>;
+
 bitflags::bitflags! {
     /// Independent model-facing surfaces supported by a tool.
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -127,4 +130,18 @@ pub trait ToolExecutor<Invocation>: Send + Sync {
     fn handle<'a>(&'a self, invocation: Invocation) -> ToolExecutorFuture<'a>
     where
         Invocation: 'a;
+
+    /// The last step before a successful output of call `call_id` reaches the model: the host
+    /// awaits it once, after every PostToolUse hook accepted the output and immediately before
+    /// returning it for recording, and publishes whatever it returns instead. A runtime whose
+    /// outputs reflect state that can change while a hook holds them (memory a user can forget)
+    /// revalidates here and returns a bounded replacement when the output is stale.
+    /// The default publishes the output unchanged.
+    fn revalidate_for_publication<'a>(
+        &'a self,
+        _call_id: &'a str,
+        output: Box<dyn ToolOutput>,
+    ) -> ToolPublicationFuture<'a> {
+        Box::pin(std::future::ready(output))
+    }
 }
