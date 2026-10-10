@@ -18,7 +18,8 @@ use crate::SteeringId;
 
 const THREAD: &str = "thread-1";
 const TURN: &str = "turn-1";
-const BLOCK: &str = "\n\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]";
+const BLOCK: &str =
+    "\n\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]";
 
 async fn open_store(home: &TempDir) -> StatefulRunStore {
     StatefulRunStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
@@ -168,7 +169,10 @@ async fn refused_authorization_rolls_back_everything() {
         AnsweredRunOutcome::NotAuthorized
     );
     assert!(asked.load(Ordering::SeqCst), "authorization was asked");
-    assert_eq!(store.get_run(&run.id).await.expect("run"), Some(run.clone()));
+    assert_eq!(
+        store.get_run(&run.id).await.expect("run"),
+        Some(run.clone())
+    );
     assert_eq!(store.host_answer(&run.id).await.expect("read"), None);
 }
 
@@ -190,7 +194,10 @@ async fn only_a_running_autonomous_run_of_the_thread_ends_answered() {
         thread_id: "thread-2".to_string(),
         ..commit_for(&foreign, "An answer.")
     };
-    assert_eq!(end(&store, &other_thread).await, AnsweredRunOutcome::NotEligible);
+    assert_eq!(
+        end(&store, &other_thread).await,
+        AnsweredRunOutcome::NotEligible
+    );
 
     let paused = new_run(&store, "paused", WorkflowMode::Autonomous).await;
     store
@@ -233,7 +240,12 @@ async fn only_a_running_autonomous_run_of_the_thread_ends_answered() {
     for run in [collaborative, foreign, steered] {
         assert_eq!(store.host_answer(&run.id).await.expect("read"), None);
         assert_ne!(
-            store.get_run(&run.id).await.expect("run").expect("run").status,
+            store
+                .get_run(&run.id)
+                .await
+                .expect("run")
+                .expect("run")
+                .status,
             StatefulRunStatus::Answered
         );
     }
@@ -250,7 +262,11 @@ async fn the_answer_bound_is_measured_on_the_serialized_record() {
 
     for (name, unit, encoded) in [("quotes", "\"", 2), ("multibyte", "é", 2)] {
         let room = MAX_RESULT_BYTES - serialized_answer_bytes(TURN, "") - block_bytes;
-        let fitting = format!("{}{}", "a".repeat(room % encoded), unit.repeat(room / encoded));
+        let fitting = format!(
+            "{}{}",
+            "a".repeat(room % encoded),
+            unit.repeat(room / encoded)
+        );
         let run = new_run(&store, &format!("fit-{name}"), WorkflowMode::Autonomous).await;
         let commit = commit_for(&run, &fitting);
         assert_eq!(

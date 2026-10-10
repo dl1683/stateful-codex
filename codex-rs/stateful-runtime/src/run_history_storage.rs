@@ -6,8 +6,8 @@ use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunStore;
 use crate::StatefulRunStoreError;
-use crate::storage::run_status_column;
 use crate::storage::parse_status;
+use crate::storage::run_status_column;
 use crate::storage::validate_list_limit;
 
 /// The run a finished turn was bound to, as recorded by the host when the turn ended.

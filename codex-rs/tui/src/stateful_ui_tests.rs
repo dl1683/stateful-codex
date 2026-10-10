@@ -89,29 +89,25 @@ fn semantic_obligation_cell_renders_a_compact_structured_update() {
 
 #[test]
 fn completed_run_cell_renders_the_durable_result() {
-    let cell = StatefulSemanticHistoryCell::for_run(
-        StatefulRun {
-            id: "run-1".to_string(),
-            project_id: "project-1".to_string(),
-            thread_ids: vec!["thread-1".to_string()],
-            goal: "Verify the public file count".to_string(),
-            mode: StatefulWorkflowMode::Collaborative,
-            status: StatefulRunStatus::Completed,
-            budget: StatefulRunBudget {
-                max_continuations: DEFAULT_MAX_CONTINUATIONS,
-                max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
-            },
-            continuations_used: 0,
-            strategy: Some(
-                "Reuse accumulated evidence and verify only changed sources.".to_string(),
-            ),
-            result: Some("Verified eight files without changing source files.".to_string()),
-            strategy_revision: 1,
-            revision: 2,
-            created_at: 1,
-            updated_at: 2,
+    let cell = StatefulSemanticHistoryCell::for_run(StatefulRun {
+        id: "run-1".to_string(),
+        project_id: "project-1".to_string(),
+        thread_ids: vec!["thread-1".to_string()],
+        goal: "Verify the public file count".to_string(),
+        mode: StatefulWorkflowMode::Collaborative,
+        status: StatefulRunStatus::Completed,
+        budget: StatefulRunBudget {
+            max_continuations: DEFAULT_MAX_CONTINUATIONS,
+            max_elapsed_seconds: DEFAULT_MAX_ELAPSED_SECONDS,
         },
-    );
+        continuations_used: 0,
+        strategy: Some("Reuse accumulated evidence and verify only changed sources.".to_string()),
+        result: Some("Verified eight files without changing source files.".to_string()),
+        strategy_revision: 1,
+        revision: 2,
+        created_at: 1,
+        updated_at: 2,
+    });
     let rendered = cell
         .display_lines(/*width*/ 56)
         .into_iter()
@@ -165,8 +161,10 @@ fn answered_run_cell_reads_as_a_calm_finished_answer() {
         .into_iter()
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
-        .join("
-");
+        .join(
+            "
+",
+        );
 
     insta::assert_snapshot!(rendered, @r"
     Stateful run · answered · not verified

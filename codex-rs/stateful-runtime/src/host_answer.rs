@@ -115,8 +115,7 @@ impl StatefulRunStore {
                 .ok_or_else(|| StatefulRunStoreError::RunNotFound(commit.run_id.to_string()))?;
             transaction.commit().await?;
             return Ok(
-                if existing.turn_id == commit.turn_id && run.status == StatefulRunStatus::Answered
-                {
+                if existing.turn_id == commit.turn_id && run.status == StatefulRunStatus::Answered {
                     AnsweredRunOutcome::Answered(Box::new(run))
                 } else {
                     AnsweredRunOutcome::NotEligible

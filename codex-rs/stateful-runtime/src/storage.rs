@@ -768,9 +768,9 @@ pub(crate) async fn load_run(
                 updated_at_ms, max_continuations, max_elapsed_seconds, continuations_used
          FROM stateful_runs AS run WHERE id = ?"
     ))
-        .bind(id.as_str())
-        .fetch_optional(&mut *connection)
-        .await?
+    .bind(id.as_str())
+    .fetch_optional(&mut *connection)
+    .await?
     else {
         return Ok(None);
     };

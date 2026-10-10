@@ -1468,7 +1468,9 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         }
                         Ok(_) => {}
                         Err(err) => {
-                            warn!("statefulRun/read failed while checking an Autonomous run update: {err}");
+                            warn!(
+                                "statefulRun/read failed while checking an Autonomous run update: {err}"
+                            );
                         }
                     }
                 }

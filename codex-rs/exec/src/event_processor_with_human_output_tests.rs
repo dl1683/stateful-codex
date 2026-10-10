@@ -560,7 +560,10 @@ fn answered_run_outcome_is_a_calm_stateful_line() {
     // The same cyan "stateful:" prefix as every other Stateful line; no warning colour.
     assert_eq!(
         processor.run_outcome_line(codex_app_server_protocol::StatefulRunStatus::Answered),
-        Some("\u{1b}[1m\u{1b}[36mstateful:\u{1b}[0m\u{1b}[0m run answered · not verified".to_string())
+        Some(
+            "\u{1b}[1m\u{1b}[36mstateful:\u{1b}[0m\u{1b}[0m run answered · not verified"
+                .to_string()
+        )
     );
     assert_eq!(
         processor.run_outcome_line(codex_app_server_protocol::StatefulRunStatus::Completed),
