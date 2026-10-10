@@ -12,10 +12,12 @@ expression: rendered
 ---
 • Kept for your review, not applied:
   decision: "Use SQLite, not Postgres: must run offline on a laptop." (assistant's reading)
-    Apply makes these your words: "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop."
+    Apply makes these your words: "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop, and the export stays in plain files that anyone can open without extra tools."
     Apply: /memory apply proposal-d@1 decision
+  decision: "Keep the ledger format." (assistant's reading)
+    Not applicable as kept (it must cite your whole message of at most 240 bytes, with no unresolved scope); /memory add saves your own words
   ruled-out approach: "For this task only, the cache is not the cause." (assistant's reading)
-    Not applicable as kept (it does not cite your whole message, or its scope is unresolved); /memory add saves your own words
+    Not applicable as kept (it must cite your whole message of at most 240 bytes, with no unresolved scope); /memory add saves your own words
   note: "Timing measured on the CI runner." (assistant's reading)
   Undo: /memory undo proposal-1
 ---

@@ -112,20 +112,21 @@ pub(crate) fn receipt_cell(receipt: &StatefulMemoryReceipt) -> Option<PlainHisto
                     ]
                     .into(),
                 );
-                // Apply settles the user's exact words, shown here; never the reading above.
+                // Apply settles the user's exact words, shown here whole; never the reading
+                // above. Words that cannot be shown whole are never offered for Apply.
                 match (apply_command(member), &member.applies_text) {
-                    (Some(command), Some(words)) => {
+                    (Some(command), Some(words)) if !member.applies_text_shortened => {
                         lines.push(
                             vec![
                                 "    Apply makes these your words: ".dim(),
-                                quote(words, member.applies_text_shortened).into(),
+                                whole(words).into(),
                             ]
                             .into(),
                         );
                         lines.push(format!("    Apply: {command}").cyan().into());
                     }
-                    (Some(_), None) => lines.push(
-                        "    Not applicable as kept (it does not cite your whole message, or its scope is unresolved); /memory add saves your own words"
+                    (Some(_), _) => lines.push(
+                        "    Not applicable as kept (it must cite your whole message of at most 240 bytes, with no unresolved scope); /memory add saves your own words"
                             .dim()
                             .into(),
                     ),
@@ -194,6 +195,11 @@ pub(crate) fn receipt_cell(receipt: &StatefulMemoryReceipt) -> Option<PlainHisto
         );
     }
     Some(PlainHistoryCell::new(lines))
+}
+
+/// The exact words, uncropped, on one line (a line break shows as `⏎`).
+fn whole(text: &str) -> String {
+    format!("\"{}\"", text.replace("\r\n", " ⏎ ").replace('\n', " ⏎ "))
 }
 
 /// A quoted preview, marked when the receipt text is shorter than the stored words.

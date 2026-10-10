@@ -105,7 +105,7 @@ fn memory_receipts_show_saved_kept_applied_refused_and_undone() {
         vec![
             StatefulMemoryReceiptMember {
                 applies_text: Some(
-                    "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop."
+                    "We'll use SQLite rather than Postgres, because the tool must run offline on a laptop, and the export stays in plain files that anyone can open without extra tools."
                         .to_string(),
                 ),
                 ..member(
@@ -113,6 +113,17 @@ fn memory_receipts_show_saved_kept_applied_refused_and_undone() {
                     Category::Decision,
                     Status::Proposed,
                     "Use SQLite, not Postgres: must run offline on a laptop.",
+                )
+            },
+            // Prospective words longer than the receipt can show whole: no Apply.
+            StatefulMemoryReceiptMember {
+                applies_text: Some(format!("We'll keep the {} ledger", "é".repeat(110))),
+                applies_text_shortened: true,
+                ..member(
+                    Some(("proposal-l", 1)),
+                    Category::Decision,
+                    Status::Proposed,
+                    "Keep the ledger format.",
                 )
             },
             // Scope unresolved (or a partial citation): kept, but no Apply is offered.
