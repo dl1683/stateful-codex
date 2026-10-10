@@ -217,7 +217,7 @@ impl MemoryReadTool {
                 .filter(|(count, _)| terms.is_empty() || *count > 0)
                 .collect::<Vec<_>>();
             // Stable: equal counts keep the newest-first order.
-            ranked.sort_by(|left, right| right.0.cmp(&left.0));
+            ranked.sort_by_key(|entry| std::cmp::Reverse(entry.0));
             // Matches beyond the hit cap are omitted too, not only unconsidered candidates.
             truncated = more || ranked.len() > MAX_SEARCH_HITS as usize;
             for (_, entry) in ranked.into_iter().take(MAX_SEARCH_HITS as usize) {
@@ -469,7 +469,7 @@ impl MemoryReadTool {
                 threads_with_more_turns += 1;
             }
         }
-        turns.sort_by(|left, right| right.0.cmp(&left.0));
+        turns.sort_by_key(|turn| std::cmp::Reverse(turn.0));
         let matched = turns.len();
         let turns = turns
             .into_iter()
