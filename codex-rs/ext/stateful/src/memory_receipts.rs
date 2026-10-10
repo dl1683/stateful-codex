@@ -250,7 +250,7 @@ fn refusal(error: BlackboardStoreError, action: &str) -> MemoryControlError {
             format!("the same words are already current as {id}")
         }
         BlackboardStoreError::InvalidSource => match action {
-            "apply" => "only a kept proposal that cites the user's whole message (at most 4,096 bytes), with no unresolved scope or other dependency, at its current revision, can be applied".to_string(),
+            "apply" => "only a kept proposal that cites the user's whole message (at most 240 bytes), with no unresolved scope or other dependency, at its current revision, can be applied".to_string(),
             _ => "this receipt has nothing left that its Undo can reverse".to_string(),
         },
         BlackboardStoreError::EntryNotActive(what) => format!("{what} is no longer current"),

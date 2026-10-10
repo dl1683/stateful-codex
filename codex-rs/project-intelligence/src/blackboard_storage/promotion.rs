@@ -46,8 +46,14 @@ pub struct PromotionRequest {
     pub action_id: String,
 }
 
-/// Largest sealed part an Apply can take whole; longer sources stay proposals.
-const MAX_APPLIED_BYTES: u32 = 4096;
+/// Largest sealed part an Apply reads.
+const MAX_SEALED_BYTES: u32 = 4096;
+
+/// Largest quotation an Apply settles: it is shown whole on the receipt that offers Apply
+/// (receipt text holds 240 bytes) and is delivered whole by every retained path (`/memory`
+/// review holds 2,000 bytes, a root entry line 3 KiB). Longer words stay proposals; the user
+/// can still save them with an explicit add.
+const MAX_APPLIED_BYTES: usize = 240;
 
 impl BlackboardStore {
     /// Applies a retained proposal as the user's own rule, decision or ruled-out approach.
@@ -93,11 +99,17 @@ impl BlackboardStore {
                 };
                 let id = BlackboardEntryId::parse(id.clone())?;
                 let current = super::load_entry(&mut tx, project, &id).await?;
-                if !current.is_some_and(|current| {
-                    current.revision == revision && current.state == BlackboardEntryState::Active
-                }) {
+                // The shared storage/source policy also fences a sibling's forgotten source.
+                let eligible =
+                    super::identity::entry_storage_eligible_on(&mut tx, project, &id).await?;
+                if !eligible
+                    || !current.is_some_and(|current| {
+                        current.revision == revision
+                            && current.state == BlackboardEntryState::Active
+                    })
+                {
                     return Err(BlackboardStoreError::EntryNotActive(format!(
-                        "{id}@{revision}: this action applied it earlier, but it has since been forgotten, undone or corrected; nothing was restored"
+                        "{id}@{revision}: this action applied it earlier, but it or its source has since been forgotten, undone or corrected; nothing was restored"
                     )));
                 }
             }
@@ -513,7 +525,7 @@ async fn applicable(
     if seal.digest != proposal.source.digest
         || seal.observation.source_revision != proposal.source.source_revision
         || !seal.observation.complete_envelope
-        || seal.original_utf8_length > MAX_APPLIED_BYTES
+        || seal.original_utf8_length > MAX_SEALED_BYTES
     {
         return Err(BlackboardStoreError::InvalidSource);
     }
@@ -541,6 +553,7 @@ async fn applicable(
         .min();
     let cited_end = proposal.source.spans.iter().map(|span| span.end_byte).max();
     if quoted.is_empty()
+        || quoted.len() > MAX_APPLIED_BYTES
         || cited_start.is_none_or(|start| start > quoted_start)
         || cited_end.is_none_or(|end| end < quoted_end)
     {
