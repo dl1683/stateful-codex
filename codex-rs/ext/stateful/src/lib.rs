@@ -625,6 +625,12 @@ impl ToolContributor for StatefulExtension {
         ) else {
             return Vec::new();
         };
+        // Tools are built per step, after the turn bound itself to the thread's open run.
+        let run_tools = if thread_store.get::<autonomy::ActiveRunTurn>().is_some() {
+            tools::RunTools::Offered
+        } else {
+            tools::RunTools::Hidden
+        };
         tools::project_intelligence_tools(
             selected.project_id().to_string(),
             thread.thread_id.clone(),
@@ -632,6 +638,7 @@ impl ToolContributor for StatefulExtension {
             self.projects.clone(),
             self.event_sink.clone(),
             self.visible_root.clone(),
+            run_tools,
         )
     }
 }

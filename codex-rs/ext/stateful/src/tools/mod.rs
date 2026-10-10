@@ -41,6 +41,15 @@ const MAX_RECEIPT_ERROR_BYTES: usize = 240;
 /// generic statement.
 const MAX_DECODE_ERROR_BYTES: usize = 640;
 
+/// Whether the run-bound tools (obligation, run update and read, acceptance, steering) are
+/// offered. A thread without an open run gets only the project tools, so nothing it does can
+/// move a run's lifecycle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RunTools {
+    Offered,
+    Hidden,
+}
+
 pub(super) fn project_intelligence_tools(
     project_id: String,
     thread_id: String,
@@ -48,6 +57,7 @@ pub(super) fn project_intelligence_tools(
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
+    run_tools: RunTools,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
         Arc::new(blackboard::BlackboardQueryTool::new(
@@ -98,6 +108,9 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
         )),
     ];
+    if run_tools == RunTools::Hidden {
+        return tools;
+    }
     tools.extend([
         Arc::new(obligation::ObligationUpdateTool::new(
             project_id.clone(),

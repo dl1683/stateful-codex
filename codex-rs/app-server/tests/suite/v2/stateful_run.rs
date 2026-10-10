@@ -1412,8 +1412,25 @@ async fn run_read_rejects_stale_and_tampered_cursors_at_the_handler() -> Result<
 
     let foreign_thread = server
         .start_thread(ThreadStartParams {
-            project_id: Some(project.project.id),
+            project_id: Some(project.project.id.clone()),
             ..Default::default()
+        })
+        .await?;
+    // Run tools exist only on a thread with an open run, so the foreign thread gets its own.
+    let _: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.project.id.clone(),
+                thread_id: foreign_thread.thread.id.clone(),
+                goal: "Foreign work.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 12,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "foreign-cursor-run".to_string(),
+            },
         })
         .await?;
     let output = run_model_tool(

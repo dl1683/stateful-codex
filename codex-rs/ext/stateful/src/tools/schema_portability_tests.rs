@@ -7,6 +7,7 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tempfile::TempDir;
 
+use super::RunTools;
 use super::project_intelligence_tools;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
@@ -124,6 +125,7 @@ fn every_stateful_tool_schema_uses_the_portable_subset() {
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
+        RunTools::Offered,
     );
     let mut violations = Vec::new();
     for tool in &tools {

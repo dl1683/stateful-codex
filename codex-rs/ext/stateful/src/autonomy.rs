@@ -87,8 +87,10 @@ pub struct AutonomousContinuation {
     pub(crate) admission: RunAdmissionFence,
 }
 
+/// The open run the thread's current turn was bound to when it started; absent on a thread
+/// without an open run.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ActiveRunTurn {
+pub(crate) struct ActiveRunTurn {
     run_id: StatefulRunId,
     turn_id: String,
 }

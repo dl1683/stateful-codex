@@ -5,6 +5,7 @@ use codex_thread_store::InMemoryThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
 use tempfile::TempDir;
 
+use super::RunTools;
 use super::project_intelligence_tools;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
@@ -34,6 +35,7 @@ fn stateful_tool_roster_stays_within_its_request_budget() {
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
+        RunTools::Offered,
     );
     let sizes = tools
         .iter()
