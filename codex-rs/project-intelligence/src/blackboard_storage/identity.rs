@@ -43,13 +43,25 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
               OR NOT EXISTS(SELECT 1 FROM knowledge_scopes AS scope WHERE scope.project_id = entry.project_id AND scope.scope_id = current_alias.scope_id AND octet_length(scope.scope_id) <= 512 AND octet_length(scope.title) <= 512 AND (scope.end_condition IS NULL OR octet_length(scope.end_condition) <= 2000) AND octet_length(scope.opened_source) <= 512))
         )))";
 
-/// Automatic proposal recall is unavailable until publication after hooks is fenced.
-/// Durable group membership covers proposals even when their context is unsupported.
-/// Bounded historical payload checks also cover linked copies of proposal context.
-/// This applies to every model tool output, including proposals the user applied.
+/// Every model tool output (search, exact reads, history and relation expansion, coverage
+/// counts, completion checklists) uses this eligibility. Tool results can be held (PostToolUse
+/// hooks, the rest of the response stream) after a user's Forget commits, so memory the user
+/// can forget never enters them: proposals (including those the user applied) and every entry
+/// with any user-authored revision or HumanDirect context (declared rules, `/memory add`,
+/// confirmations, corrections) are excluded. That memory reaches the model only through the
+/// root snapshot rendered at sampling time. Durable group membership covers proposals even
+/// when their context is unsupported; bounded historical payload checks also cover linked
+/// copies of proposal context.
 pub(super) fn automatic_entry_eligibility() -> String {
-    format!("{ENTRY_SOURCE_ELIGIBILITY} AND {NOT_PROPOSAL}")
+    format!("{ENTRY_SOURCE_ELIGIBILITY} AND {NOT_PROPOSAL} AND {NOT_USER_STATED}")
 }
+
+const NOT_USER_STATED: &str = "NOT EXISTS (
+        SELECT 1 FROM blackboard_entry_revisions AS stated
+        WHERE stated.entry_id = entry.id AND stated.provenance_kind = 'user')
+        AND NOT EXISTS (
+        SELECT 1 FROM knowledge_context AS stated_context
+        WHERE stated_context.entry_id = entry.id AND stated_context.authority = 'human_direct')";
 
 const NOT_PROPOSAL: &str = "NOT EXISTS (
         SELECT 1 FROM capture_group_members AS member

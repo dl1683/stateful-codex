@@ -665,7 +665,11 @@ async fn project_intelligence_tools_query_shared_state_and_exact_sources() -> Re
         .function_call_output("blackboard-call")
         .to_string();
     assert!(requests[0].body_contains_text("A decisive project fact survives every thread view."));
-    assert!(blackboard_output.contains(r#"\"rootAlias\":\"E1\""#));
+    // E2: the root lists the user-stated README fact first.
+    assert!(
+        blackboard_output.contains(r#"\"rootAlias\":\"E2\""#),
+        "{blackboard_output}"
+    );
     assert!(blackboard_output.contains(r#"\"contentInRoot\":true"#));
     assert!(!blackboard_output.contains("A decisive project fact survives every thread view."));
     assert!(blackboard_output.contains(&created.project.id));
@@ -1561,8 +1565,9 @@ pub(super) async fn promote_root_fact(
                 root_promotion: RootPromotion::Promoted,
                 evidence: Vec::new(),
                 premises: Vec::new(),
+                // An agent finding: model tools never return the user's own memory.
                 provenance: BlackboardProvenance {
-                    kind: BlackboardProvenanceKind::User,
+                    kind: BlackboardProvenanceKind::Agent,
                     source_id: "integration-fixture".to_string(),
                 },
             },

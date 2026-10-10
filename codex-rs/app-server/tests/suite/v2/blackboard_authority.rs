@@ -237,15 +237,25 @@ async fn generic_clients_cannot_mint_or_rewrite_user_authority() -> Result<()> {
             "blackboard revision conflict: expected 3, found 2".to_string(),
         )
     );
-    let unchanged = query_all(&mut server, &project_id).await?;
+    // The confirmed rule is unchanged (read from the store: blackboard/query, like every
+    // automatic consumer, never lists user-authored entries).
+    let unchanged = codex_project_intelligence::BlackboardStore::open(
+        &codex_state::SqliteConfig::new_for_testing(AbsolutePathBuf::try_from(
+            codex_home.path().to_path_buf(),
+        )?),
+    )
+    .await?
+    .get_entry(
+        &project_id,
+        &codex_project_intelligence::BlackboardEntryId::parse("rule-1")?,
+    )
+    .await?
+    .expect("confirmed rule");
     assert_eq!(
-        unchanged
-            .data
-            .into_iter()
-            .map(|hit| (hit.entry, hit.relations))
-            .collect::<Vec<_>>(),
-        vec![(confirmed.entry.clone(), Vec::new())]
+        (unchanged.revision, unchanged.value.content),
+        (confirmed.entry.revision, confirmed.entry.content.clone())
     );
+    assert_eq!(query_all(&mut server, &project_id).await?.data, Vec::new());
 
     // A meaning-preserving downgrade is allowed and is no longer presented as the user's.
     let downgraded: BlackboardUpsertResponse = server

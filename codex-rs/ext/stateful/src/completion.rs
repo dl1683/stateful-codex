@@ -314,9 +314,20 @@ async fn material_root_checklist(
                 && visible.alias_for(hit.entry.id.as_str(), hit.entry.revision)
                     == Some(reference.as_str())
         });
+        // Memory the user can forget (their own rules, decisions, confirmations) is shown only
+        // by the root snapshot, never quoted in a tool result.
+        let disclosable = store
+            .entry_source_eligible(project_id, &hit.entry.id)
+            .await
+            .map_err(respond)?;
+        let text = if disclosable {
+            format!("{labels} {}{sources}", hit.entry.value.content)
+        } else {
+            format!("{labels} (user-stated; content as shown in the root packet){sources}")
+        };
         material.items.push(ChecklistItem {
             category: "rootFinding",
-            text: bounded_item(&format!("{labels} {}{sources}", hit.entry.value.content)),
+            text: bounded_item(&text),
             compact_text: shown_in_root.then(|| {
                 bounded_item(&format!(
                     "{labels} (content as shown in the root packet){sources}"

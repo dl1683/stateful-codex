@@ -69,8 +69,8 @@ pub(crate) fn memory_lines(
                     .dim()
                     .into(),
             );
-            // An entry applied under the earlier, longer bound is no longer readable through
-            // model tools, so it never points there.
+            // The user's own memory is never readable through model tools, so no line points
+            // there.
             if item.exceeds_apply_bound {
                 let shown = if item.content_truncated {
                     " (only its first 2,000 bytes are shown)"
@@ -85,7 +85,11 @@ pub(crate) fn memory_lines(
                     .into(),
                 );
             } else if item.content_truncated {
-                lines.push(format!("     Shortened. Exact text: blackboard_query entryId=\"{}\" expectedEntryRevision={}", item.entry_id, item.revision).dim().into());
+                lines.push(
+                    "     Shortened: only its first 2,000 bytes are shown"
+                        .dim()
+                        .into(),
+                );
             }
             if let Some(replaced) = item.replaces.first() {
                 lines.push(vec!["     replaces: ".dim(), preview(&replaced.content).dim()].into());

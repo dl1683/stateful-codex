@@ -12,20 +12,32 @@ async fn exact_words_continue_within_serialized_budget_and_refuse_revision_drift
     let node = services.project_node_id("project-1").await.expect("node");
     let store = services.blackboard().await.expect("store");
     let words = "Whole reason: §3.2–§4 — α.\n\t".repeat(40);
-    let (entry, _) = crate::memory_add::add_entry(
-        store,
-        &crate::memory_controls::MemoryActor {
-            action_id: Some("exact".to_string()),
-            ..Default::default()
-        },
-        "project-1",
-        node,
-        crate::memory_add::MemoryAddition::Decision { reason: None },
-        &words,
-    )
-    .await
-    .expect("add");
     let words = words.trim();
+    // An agent finding: the user's own memory never reaches exact model reads.
+    let entry = store
+        .create_entry(
+            codex_project_intelligence::BlackboardEntryId::parse("exact").expect("id"),
+            codex_project_intelligence::NewBlackboardEntry {
+                project_id: "project-1".to_string(),
+                node_id: node,
+                kind: codex_project_intelligence::BlackboardKind::Decision,
+                content: words.to_string(),
+                structured_value: None,
+                confidence: codex_project_intelligence::ConfidenceScore::from_basis_points(9_000)
+                    .expect("confidence"),
+                verification: codex_project_intelligence::BlackboardVerification::Unverified,
+                importance: codex_project_intelligence::BlackboardImportance::High,
+                root_promotion: codex_project_intelligence::RootPromotion::Promoted,
+                evidence: Vec::new(),
+                premises: Vec::new(),
+                provenance: codex_project_intelligence::BlackboardProvenance {
+                    kind: codex_project_intelligence::BlackboardProvenanceKind::Agent,
+                    source_id: "turn-1".to_string(),
+                },
+            },
+        )
+        .await
+        .expect("record");
     for budget in [700, 1000, 2000] {
         let mut offset = 0;
         let mut recovered = String::new();

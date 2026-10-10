@@ -327,7 +327,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         append_line(
             output,
             &format!(
-                "- Partial coverage: {omitted} applicable root entries omitted by the context bound; this packet does not show all applicable rules. Use blackboard_query topic searches and exact entryId/expectedEntryRevision/contentOffset reads to recover stored words."
+                "- Partial coverage: {omitted} applicable root entries omitted by the context bound; this packet does not show all applicable rules. Use blackboard_query topic searches and exact entryId/expectedEntryRevision/contentOffset reads to recover recorded findings; tools never return the user's own rules or decisions, so ask the user when an omitted one matters."
             ),
         );
     }

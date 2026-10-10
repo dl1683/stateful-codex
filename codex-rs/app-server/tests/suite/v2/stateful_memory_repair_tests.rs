@@ -422,23 +422,12 @@ async fn large_scope_history_is_quarantined_and_retained_reads_stay_bounded() ->
     let packet = requests[0].body_json().to_string();
     assert!(packet.contains("300 historical scoped entries are held back"));
     assert!(!packet.contains("Scoped history marker"));
-    let exact: serde_json::Value = serde_json::from_str(
-        &requests[1]
-            .function_call_output_text("historical-exact")
-            .expect("exact output"),
-    )?;
-    assert_eq!(
-        (
-            exact["content"].clone(),
-            exact["complete"].clone(),
-            exact["revision"].clone()
-        ),
-        (
-            json!("Scoped history marker 299: preserve these exact historical words."),
-            json!(true),
-            json!(1)
-        )
-    );
+    // The user's own rules stay readable through /memory (above) but never through a model
+    // tool result.
+    let exact = requests[1]
+        .function_call_output_text("historical-exact")
+        .expect("exact output");
+    assert!(!exact.contains("Scoped history marker"), "{exact}");
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_scopes WHERE project_id=?")
         .bind(&project)
         .fetch_one(&pool)

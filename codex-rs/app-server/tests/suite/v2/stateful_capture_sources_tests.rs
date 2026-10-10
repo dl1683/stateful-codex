@@ -468,19 +468,6 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebui
             std::slice::from_ref(&span),
         )
         .await?;
-    let links = store
-        .entry_source_links(&project, &entry_id, /*after*/ None)
-        .await?;
-    assert!(links.complete);
-    assert_eq!(
-        links.links,
-        vec![codex_project_intelligence::SourceLink {
-            locator: seal.exact_source_locator.clone(),
-            digest: seal.digest.clone(),
-            source_revision: seal.observation.source_revision,
-            span: span.clone()
-        }]
-    );
     let entry = store.get_entry(&project, &entry_id).await?.unwrap();
     let copy_id = codex_project_intelligence::BlackboardEntryId::parse("linked-reported-copy")?;
     let mut copy = entry.value.clone();
@@ -498,6 +485,21 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebui
         )
         .await?;
     drop(admission);
+    // The agent copy's exact source links are listed (the user's own entry never is: user
+    // memory stays out of every model-facing consumer).
+    let links = store
+        .entry_source_links(&project, &copy_id, /*after*/ None)
+        .await?;
+    assert!(links.complete);
+    assert_eq!(
+        links.links,
+        vec![codex_project_intelligence::SourceLink {
+            locator: seal.exact_source_locator.clone(),
+            digest: seal.digest.clone(),
+            source_revision: seal.observation.source_revision,
+            span: span.clone()
+        }]
+    );
     assert!(
         !store
             .search_source_ranges(&project, "Mara Sol receipt", /*after*/ None)

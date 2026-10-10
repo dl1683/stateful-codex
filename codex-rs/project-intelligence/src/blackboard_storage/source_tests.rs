@@ -758,10 +758,10 @@ async fn c2_source_links_page_exact_ranges_and_omission_redelivery_stays_unknown
         .await
         .unwrap();
     let id = BlackboardEntryId::parse("linked-evidence").unwrap();
-    let entry = store
-        .create_entry(id.clone(), rule("Explicit independent entry."))
-        .await
-        .unwrap();
+    // An agent finding: user-authored entries are never automatic consumers' material.
+    let mut finding = rule("Explicit independent entry.");
+    finding.provenance.kind = BlackboardProvenanceKind::Agent;
+    let entry = store.create_entry(id.clone(), finding).await.unwrap();
     let spans = (0..9)
         .map(|start| SourceSpan {
             start_byte: start,
