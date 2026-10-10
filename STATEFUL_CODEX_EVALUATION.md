@@ -2933,3 +2933,23 @@ GPU tasks of TB4.0 and SWE-Marathon.
 Sources: `cloud/RESULTS.md`, `cloud/STATUS.md`, `cloud/RUN_LOG.md`, `campaign2/FINDINGS.md`, `deepseek/RUN_LOG.md`,
 `insights/MARKET_STUDY.md`. Per-benchmark summaries are in `gs://sc-bench-iqidis-artifacts/results/` and
 `.../deepseek/results/`.
+
+## SC-EVAL-038: capture-to-use hands-on journey, C4-C6 candidate builds (2026-10-09, 2026-10-10)
+
+A user journey in the real TUI (`--stateful collaborative`, Luna, high effort, fresh home, n=1 per build). Both
+builds are unlanded candidates of the C4-C6 capture slice: 5db119519 (repair 1, gpt-5.6-luna) and 57302f223 (repair 2,
+gpt-6-luna). Repair 2 is pre-repair-3 and unpushed. Its source review was STOP/CUT on publication-fence findings that this
+journey does not exercise.
+
+| Step | 5db119519 | 57302f223 |
+| --- | --- | --- |
+| Two stated project rules saved word for word, applied the same turn | PASS | PASS |
+| Conversation-only decision proposed with the user's exact words, then Applied | FAIL (model saved its own paraphrase) | PASS |
+| Rejected hypothesis captured as ruled out | FAIL | FAIL (never proposed) |
+| New session: decision, reason, who and when, cache ruled out, vendor edit refused | PASS (duplicate entries written) | PASS (no duplicates) |
+| Forget a rule: no longer applies, re-paste is not restored | PASS | PASS |
+
+Open product issues: the model never proposes a ruled-out item. After a re-paste of a forgotten rule, the model's
+reply contradicts the host's "Not restored" receipt. A one-line edit in a collaborative run took 2m29s of
+acceptance ceremony and left a temporary checker script in the user's repository. Evidence:
+sc_dogfood/integrate/handson/c456_journey.md and c456r2_journey.md.
