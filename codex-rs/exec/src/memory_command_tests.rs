@@ -4,6 +4,7 @@ use codex_app_server_protocol::StatefulMemoryItem;
 use codex_app_server_protocol::StatefulMemorySection;
 use pretty_assertions::assert_eq;
 
+use super::forget_receipt;
 use super::listing;
 use super::parse_target;
 
@@ -34,6 +35,17 @@ fn input_parser_preserves_unicode_after_valid_revision_targets() {
         ),
         action => panic!("unexpected action: {action:?}"),
     }
+}
+
+#[test]
+fn forget_receipt_says_when_it_takes_effect() {
+    assert_eq!(
+        forget_receipt(&codex_app_server_protocol::StatefulMemoryForgetResponse {
+            entry_id: "rule-1".to_string(),
+            revision: 3,
+        }),
+        "Forgot rule-1@3. It stays in history but no longer applies. This takes effect from the next turn; content already read this turn may still reach the model."
+    );
 }
 
 #[test]

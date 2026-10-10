@@ -42,6 +42,9 @@ use crate::stateful_memory::section_rank;
 
 /// Entries one page shows.
 const PAGE_SIZE: u32 = 50;
+/// A Forget cannot reach a tool result already read in a turn in flight on any thread of the
+/// project, and the TUI cannot see other threads' turns, so every receipt says so.
+const FORGET_TAKES_EFFECT: &str = "This takes effect from the next turn; content already read this turn may still reach the model.";
 const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory apply <ID@REV> <rule|decision|ruled-out>, /memory undo <receipt-id>, /memory help";
 
 /// What the user asked `/memory` to do.
@@ -588,10 +591,9 @@ async fn forget(request: &Requests<'_>, target: EntryTarget) -> Result<PlainHist
         .map_err(|error| format!("Nothing was forgotten: {error}"))?;
     Ok(new_info_event(
         format!("Forgot {}@{}", target.entry_id, target.revision),
-        Some(
-            "It stays in history but no longer applies. Run /memory refresh to update the list."
-                .to_string(),
-        ),
+        Some(format!(
+            "It stays in history but no longer applies. {FORGET_TAKES_EFFECT} Run /memory refresh to update the list."
+        )),
     ))
 }
 

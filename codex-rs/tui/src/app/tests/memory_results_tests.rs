@@ -160,19 +160,33 @@ async fn memory_application_fences_generations_binding_and_client() -> Result<()
     };
     let added: codex_app_server_protocol::StatefulMemoryAddResponse =
         handle.request_typed(request()).await?;
-    let _: codex_app_server_protocol::StatefulMemoryForgetResponse = handle
-        .request_typed(
-            codex_app_server_protocol::ClientRequest::StatefulMemoryForget {
-                request_id: AppServerRequestId::String("retire-rendering".to_string()),
-                params: codex_app_server_protocol::StatefulMemoryForgetParams {
-                    thread_id: thread.to_string(),
-                    expected_project_id: project.project.id.clone(),
-                    entry_id: added.item.entry_id,
-                    expected_revision: added.item.revision,
-                },
-            },
-        )
-        .await?;
+    // The user's Forget receipt says when it takes effect.
+    app.handle_event(
+        &mut tui,
+        &mut server,
+        submit(&format!(
+            "forget {}@{}",
+            added.item.entry_id, added.item.revision
+        )),
+    )
+    .await?;
+    let forgot = result(&mut events).await;
+    let AppEvent::StatefulMemoryResult { cell, .. } = &forgot else {
+        unreachable!("result() returns memory results");
+    };
+    insta::assert_snapshot!(
+        "memory_forget_receipt",
+        cell.display_lines(/*width*/ 200)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(
+                "
+"
+            )
+            .replace(added.item.entry_id.as_str(), "<entry>")
+    );
+    app.handle_event(&mut tui, &mut server, forgot).await?;
     let replay = handle
         .request_typed::<codex_app_server_protocol::StatefulMemoryAddResponse>(request())
         .await

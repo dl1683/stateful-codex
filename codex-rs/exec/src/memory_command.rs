@@ -197,13 +197,19 @@ pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> 
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!("nothing was forgotten: {error}"))?;
-            println!(
-                "Forgot {}@{}. It stays in history but no longer applies.",
-                response.entry_id, response.revision
-            );
+            println!("{}", forget_receipt(&response));
         }
     }
     Ok(())
+}
+
+/// A Forget cannot reach a tool result already read in a turn in flight on any thread of the
+/// project (this command cannot see those turns), so the receipt always says so.
+fn forget_receipt(response: &StatefulMemoryForgetResponse) -> String {
+    format!(
+        "Forgot {}@{}. It stays in history but no longer applies. This takes effect from the next turn; content already read this turn may still reach the model.",
+        response.entry_id, response.revision
+    )
 }
 
 /// The listing, grouped by section, each entry with the target to correct or forget it.
