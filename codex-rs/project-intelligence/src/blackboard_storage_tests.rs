@@ -5,6 +5,7 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
+use super::identity::EntryReader;
 use super::query::load_hit;
 use super::query::query_entry_ids;
 use super::*;
@@ -177,7 +178,7 @@ async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
         max_results: 10,
     };
     let mut reader = blackboard.pool.begin().await.expect("reader begins");
-    let entry_ids = query_entry_ids(&mut reader, &query, 11)
+    let entry_ids = query_entry_ids(&mut reader, &query, 11, EntryReader::ModelTool)
         .await
         .expect("candidate IDs load");
     assert_eq!(entry_ids, vec![entry.id.to_string()]);
@@ -195,9 +196,14 @@ async fn query_candidate_and_hit_materialization_share_one_read_snapshot() {
         .await
         .expect("concurrent source update commits");
 
-    let snapshot_hit = load_hit(&mut reader, "project-1", entry_ids[0].clone())
-        .await
-        .expect("candidate materializes from the reader snapshot");
+    let snapshot_hit = load_hit(
+        &mut reader,
+        "project-1",
+        entry_ids[0].clone(),
+        EntryReader::ModelTool,
+    )
+    .await
+    .expect("candidate materializes from the reader snapshot");
     assert_eq!(
         snapshot_hit.evidence_freshness,
         BlackboardEvidenceFreshness::Current

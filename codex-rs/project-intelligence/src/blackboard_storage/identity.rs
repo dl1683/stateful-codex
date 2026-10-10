@@ -56,6 +56,28 @@ pub(super) fn automatic_entry_eligibility() -> String {
     format!("{ENTRY_SOURCE_ELIGIBILITY} AND {NOT_PROPOSAL} AND {NOT_USER_STATED}")
 }
 
+/// Who reads entries through the shared query and hit loaders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EntryReader {
+    /// A model tool: its result can be held after a Forget, so it uses
+    /// [`automatic_entry_eligibility`].
+    ModelTool,
+    /// A trusted client inspecting the project for the user (`blackboard/query`). Its output
+    /// never enters model context, so the user's own entries (confirmed, declared, corrected)
+    /// and relations they recorded stay visible; proposals, exclusions and retirement still
+    /// apply.
+    TrustedClient,
+}
+
+impl EntryReader {
+    pub(super) fn entry_eligibility(self) -> String {
+        match self {
+            Self::ModelTool => automatic_entry_eligibility(),
+            Self::TrustedClient => format!("{ENTRY_SOURCE_ELIGIBILITY} AND {NOT_PROPOSAL}"),
+        }
+    }
+}
+
 const NOT_USER_STATED: &str = "NOT EXISTS (
         SELECT 1 FROM blackboard_entry_revisions AS stated
         WHERE stated.entry_id = entry.id AND stated.provenance_kind = 'user')

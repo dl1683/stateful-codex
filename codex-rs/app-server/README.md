@@ -101,6 +101,21 @@ discovery finds no project-root marker, Git checkout, or project-local `.codex`
 directory. Starting a task there does not preapprove project configuration added
 later. Existing trust decisions and permission checks for projects are unchanged.
 
+# Project knowledge inspection (experimental)
+
+`blackboard/query` is a trusted-client inspection of a project's knowledge. It
+lists the user's own entries, including entries confirmed with
+`blackboard/confirm` and relations the user recorded, so a client that confirms
+an entry keeps seeing it after refreshing or restarting. Retired, forgotten,
+excluded and proposal entries stay out.
+
+The model's Stateful memory tools (`blackboard_query`, `memory_read`,
+`evidence_read`, `context_map_query`) apply a narrower rule: they never return an
+entry that has ever had a user-authored revision or HumanDirect context, or a
+relation the user recorded. That memory reaches the model only through the
+thread-start root packet. `statefulMemory/read` remains the user's `/memory`
+view.
+
 # Thread removal
 
 `thread/archive` and `thread/delete` reject attempts to remove a live internal

@@ -373,7 +373,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
             },
         })
         .await?;
-    let _: BlackboardRelateResponse = server
+    let related: BlackboardRelateResponse = server
         .request(|request_id| ClientRequest::BlackboardRelate {
             request_id,
             params: BlackboardRelateParams {
@@ -408,9 +408,7 @@ async fn blackboard_api_guards_mutations_and_returns_connected_semantic_state() 
         BlackboardQueryResponse {
             data: vec![BlackboardQueryHit {
                 entry: updated.entry.clone(),
-                // The relation's other end was user-confirmed: the user's memory (and relations
-                // that would surface it) never appears in automatic reads.
-                relations: Vec::new(),
+                relations: vec![related.relation.clone()],
                 evidence_freshness: BlackboardEvidenceFreshness::NotApplicable,
                 premise_freshness: BlackboardPremiseFreshness::NotApplicable,
                 effective_verification: BlackboardVerification::Unverified,

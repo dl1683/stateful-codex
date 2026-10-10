@@ -368,7 +368,9 @@ impl BlackboardRequestProcessor {
         let result = self
             .store()
             .await?
-            .query(BlackboardQuery {
+            // Trusted-client inspection: the user's own entries stay listed (model tools use
+            // the narrower `query`).
+            .inspect(BlackboardQuery {
                 project_id: params.project_id,
                 text: params.text,
                 within_node: params

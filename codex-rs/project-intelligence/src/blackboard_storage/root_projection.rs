@@ -163,7 +163,15 @@ impl BlackboardStore {
             {
                 contexts.insert(raw_id.clone(), context);
             }
-            data.push(load_hit(&mut transaction, &query.project_id, raw_id).await?);
+            data.push(
+                load_hit(
+                    &mut transaction,
+                    &query.project_id,
+                    raw_id,
+                    super::identity::EntryReader::ModelTool,
+                )
+                .await?,
+            );
         }
         let revision = sqlx::query_scalar::<_, i64>(
             "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",

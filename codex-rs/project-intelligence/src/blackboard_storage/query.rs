@@ -22,6 +22,7 @@ use crate::storage::load_node;
 use super::BlackboardStore;
 use super::BlackboardStoreError;
 use super::StoredEvidenceLink;
+use super::identity::EntryReader;
 use super::load_entry;
 use super::parse_stored;
 use super::promotion_name;
@@ -45,7 +46,15 @@ impl BlackboardStore {
             if super::identity::entry_source_eligible_on(&mut transaction, project_id, entry_id)
                 .await?
             {
-                Some(load_hit(&mut transaction, project_id, entry_id.to_string()).await?)
+                Some(
+                    load_hit(
+                        &mut transaction,
+                        project_id,
+                        entry_id.to_string(),
+                        EntryReader::ModelTool,
+                    )
+                    .await?,
+                )
             } else {
                 None
             };
@@ -177,7 +186,15 @@ impl BlackboardStore {
         let entry_ids = entry_ids.into_iter().take(query.max_results as usize);
         let mut data = Vec::with_capacity(query.max_results as usize);
         for raw_id in entry_ids {
-            data.push(load_hit(&mut transaction, &query.project_id, raw_id).await?);
+            data.push(
+                load_hit(
+                    &mut transaction,
+                    &query.project_id,
+                    raw_id,
+                    EntryReader::ModelTool,
+                )
+                .await?,
+            );
         }
         transaction.commit().await?;
         Ok(BlackboardEvidenceDependentsResult {
@@ -283,9 +300,28 @@ impl BlackboardStore {
             .collect()
     }
 
+    /// Model tool search: excludes the user's own memory (see `automatic_entry_eligibility`).
     pub async fn query(
         &self,
         query: BlackboardQuery,
+    ) -> Result<BlackboardQueryResult, BlackboardStoreError> {
+        self.query_for(query, EntryReader::ModelTool).await
+    }
+
+    /// Trusted-client inspection (`blackboard/query`): the same search, but the user's own
+    /// entries and the relations they recorded stay visible. Its output never enters model
+    /// context; model tools must use [`BlackboardStore::query`].
+    pub async fn inspect(
+        &self,
+        query: BlackboardQuery,
+    ) -> Result<BlackboardQueryResult, BlackboardStoreError> {
+        self.query_for(query, EntryReader::TrustedClient).await
+    }
+
+    async fn query_for(
+        &self,
+        query: BlackboardQuery,
+        reader: EntryReader,
     ) -> Result<BlackboardQueryResult, BlackboardStoreError> {
         query.validate()?;
         let mut transaction = self.pool.begin().await?;
@@ -300,12 +336,12 @@ impl BlackboardStore {
             return Err(BlackboardStoreError::NodeNotFound(node_id.to_string()));
         }
         let limit = i64::from(query.max_results) + 1;
-        let entry_ids = query_entry_ids(&mut transaction, &query, limit).await?;
+        let entry_ids = query_entry_ids(&mut transaction, &query, limit, reader).await?;
         let truncated = entry_ids.len() > query.max_results as usize;
         let entry_ids = entry_ids.into_iter().take(query.max_results as usize);
         let mut data = Vec::with_capacity(query.max_results as usize);
         for raw_id in entry_ids {
-            data.push(load_hit(&mut transaction, &query.project_id, raw_id).await?);
+            data.push(load_hit(&mut transaction, &query.project_id, raw_id, reader).await?);
         }
         transaction.commit().await?;
         Ok(BlackboardQueryResult { data, truncated })
@@ -360,8 +396,9 @@ pub(super) async fn query_entry_ids(
     connection: &mut SqliteConnection,
     query: &BlackboardQuery,
     limit: i64,
+    reader: EntryReader,
 ) -> Result<Vec<String>, BlackboardStoreError> {
-    let eligibility = super::identity::automatic_entry_eligibility();
+    let eligibility = reader.entry_eligibility();
     let promotion_filter = query.root_promotion.map(promotion_name);
     let entry_scope = entry_scope_name(query.entry_scope);
     match (&query.text, &query.within_node) {
@@ -493,6 +530,7 @@ pub(super) async fn load_hit(
     connection: &mut SqliteConnection,
     project_id: &str,
     raw_id: String,
+    reader: EntryReader,
 ) -> Result<BlackboardHit, BlackboardStoreError> {
     let id = BlackboardEntryId::parse(&raw_id)
         .map_err(|_| BlackboardStoreError::CorruptEntry(raw_id.clone()))?;
@@ -503,7 +541,7 @@ pub(super) async fn load_hit(
     let premise_freshness = load_premise_freshness(connection, &entry).await?;
     let premise_evidence = load_premise_evidence(connection, &entry).await?;
     let relations = load_eligible_relations_for_entry(
-        connection, project_id, &entry.id, /*max_results*/ 256,
+        connection, project_id, &entry.id, /*max_results*/ 256, reader,
     )
     .await?;
     Ok(BlackboardHit::new(entry, freshness)
