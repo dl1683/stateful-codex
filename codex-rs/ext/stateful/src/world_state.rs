@@ -556,7 +556,7 @@ fn is_status_line(line: &str) -> bool {
     line.starts_with("Source-map refresh health:")
         || line.starts_with("Warning:")
         || line.starts_with("- No knowledge has been promoted")
-        || line.contains("active candidate entries await")
+        || line.contains(" candidate entries await promotion")
         || line.contains("root entries omitted by the context bound")
 }
 
