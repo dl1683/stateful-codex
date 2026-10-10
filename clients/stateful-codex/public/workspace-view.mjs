@@ -56,7 +56,7 @@ function renderHeader(state) {
   const run = state.run;
   return `<header class="workspace-header">
     <div><p class="eyebrow">Stateful Codex · ${escapeHtml(run?.mode ?? "preparing")}</p><h1>${escapeHtml(state.project?.name ?? "Project")}</h1><p class="path">${escapeHtml(state.project?.roots?.map((root) => root.path).join(" · ") ?? "")}</p></div>
-    <div class="run-summary"><span class="badge ${escapeHtml(run?.status ?? "pending")}">${escapeHtml(run?.status ?? "preparing")}</span><span>strategy r${run?.strategyRevision ?? 0}</span><span>${run?.continuationsUsed ?? 0}/${run?.budget?.maxContinuations ?? 0} continuations</span><button class="text-button" data-action="refresh">Refresh</button></div>
+    <div class="run-summary"><span class="badge ${escapeHtml(run?.status ?? "pending")}">${escapeHtml(run ? runStatusLabel(run.status) : "preparing")}</span><span>strategy r${run?.strategyRevision ?? 0}</span><span>${run?.continuationsUsed ?? 0}/${run?.budget?.maxContinuations ?? 0} continuations</span><button class="text-button" data-action="refresh">Refresh</button></div>
   </header>`;
 }
 
@@ -165,6 +165,12 @@ function renderStrategy(state) {
 
 function renderResult(state) {
   if (!state.run?.result) return "";
+  if (state.run.status === "answered") {
+    return panel(
+      "Answer",
+      `<p class="result-copy">${escapeHtml(state.run.result)}</p><p class="microcopy">The agent's answer, not verified by the host.</p>`,
+    );
+  }
   return panel(
     "Run result",
     `<p class="result-copy">${escapeHtml(state.run.result)}</p><p class="microcopy">A result is not automatically verified. Review its linked findings, uncertainty, and exact evidence.</p>`,
@@ -304,7 +310,12 @@ function renderInstructionForm(state) {
 }
 
 function isTerminalRun(run) {
-  return ["completed", "cancelled", "failed"].includes(run?.status);
+  return ["completed", "cancelled", "failed", "answered"].includes(run?.status);
+}
+
+// A run that ended with the agent's unverified answer reads as a finished answer.
+function runStatusLabel(status) {
+  return status === "answered" ? "answered · not verified" : status;
 }
 
 function newOutcomeLink() {

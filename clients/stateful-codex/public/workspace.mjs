@@ -70,7 +70,7 @@ async function ensureRun() {
     state.run = runResponse.run;
     if (
       state.run.mode !== selectedMode &&
-      !["completed", "cancelled", "failed"].includes(state.run.status)
+      !["completed", "cancelled", "failed", "answered"].includes(state.run.status)
     ) {
       const changed = await rpc("statefulRun/setMode", {
         runId: state.run.id,

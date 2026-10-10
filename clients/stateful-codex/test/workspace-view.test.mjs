@@ -88,6 +88,31 @@ test("terminal workspace preserves the record without accepting dead controls", 
   assert.match(actual, /Start another outcome/);
 });
 
+test("an answered run reads as a calm finished answer", () => {
+  const state = workspaceFixture();
+  state.run.status = "answered";
+  state.run.result = "parse_config returns the parsed Config.";
+
+  const actual = renderWorkspace(state);
+
+  assert.match(
+    actual,
+    /<span class="badge answered">answered · not verified<\/span>/,
+  );
+  assert.match(actual, /<h2>Answer<\/h2>/);
+  assert.match(actual, /The agent's answer, not verified by the host\./);
+  // The run's own status and answer carry no warning or error styling and no Blocked wording.
+  const summary = actual.match(/<div class="run-summary">.*?<\/div>/)[0];
+  const answer = actual.match(/<h2>Answer<\/h2>.*?<\/section>/)[0];
+  for (const part of [summary, answer]) {
+    assert.doesNotMatch(part, /blocked|failed|warn|error|danger/i);
+    assert.doesNotMatch(part, /class="badge (pending|unverified|stale)"/);
+  }
+  assert.doesNotMatch(actual, /id="steering-form"/);
+  assert.doesNotMatch(actual, /id="message-form"/);
+  assert.doesNotMatch(actual, /data-action="cancel"/);
+});
+
 function statefulFindingCount(state) {
   return state.blackboard.length;
 }
