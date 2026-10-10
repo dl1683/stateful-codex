@@ -216,6 +216,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ContextMapQueryTool {
         ToolName::plain(TOOL_NAME)
     }
 
+    fn exposure(&self) -> ToolExposure {
+        // Memory reads stay out of nested code mode, where a cell can hold a result before
+        // printing it.
+        ToolExposure::DirectModelOnly
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),

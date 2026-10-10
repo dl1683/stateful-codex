@@ -401,9 +401,9 @@ impl BlackboardQueryTool {
 
 impl<'call> ToolExecutor<ToolCall<'call>> for BlackboardQueryTool {
     fn exposure(&self) -> codex_extension_api::ToolExposure {
-        // memory_read is the first recall; this detailed query stays discoverable and
-        // callable from nested code mode.
-        codex_extension_api::ToolExposure::Deferred
+        // memory_read is the first recall; this detailed query stays discoverable. Memory
+        // reads stay out of nested code mode, where a cell can hold a result before printing it.
+        codex_extension_api::ToolExposure::DeferredModelOnly
     }
 
     fn tool_name(&self) -> ToolName {

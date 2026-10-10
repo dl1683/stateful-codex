@@ -128,23 +128,35 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
         "blackboard_relate",
         "blackboard_update_batch",
         "steering_reconcile",
-        "conversation_read",
+        "blackboard_query",
     ] {
         assert!(
             top_level.iter().any(|name| name == direct),
             "{direct} should be a direct model tool; saw {top_level:?}"
         );
     }
+    // Earlier conversation reaches the model only through the thread-start continuity record.
+    assert!(
+        !top_level.iter().any(|name| name == "conversation_read"),
+        "conversation_read must not be offered; saw {top_level:?}"
+    );
     let nested = tools
         .iter()
         .find(|tool| tool_name(tool) == "exec")
         .and_then(|tool| tool["description"].as_str())
         .unwrap_or_default()
         .to_string();
-    // Memory-bearing Stateful outputs are delivered only to direct calls, where the host
-    // checks them against Forget, Undo and correction as they are recorded.
-    assert!(!nested.contains("blackboard_query("));
-    assert!(!nested.contains("evidence_read("));
+    // Stateful memory reads are direct model calls only: a nested cell can hold a result
+    // before printing it.
+    for read in [
+        "blackboard_query(",
+        "memory_read(",
+        "evidence_read(",
+        "context_map_query(",
+        "stateful_run_read(",
+    ] {
+        assert!(!nested.contains(read), "{read} reachable from code mode");
+    }
     assert!(!nested.contains("obligation_update("));
     assert!(!nested.contains("blackboard_record("));
 
@@ -169,8 +181,8 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
     Ok(())
 }
 
-/// Nested Code Mode cells cannot call Stateful tools: a cell can hold a result before printing
-/// it, outside the recording where the host checks memory outputs. The tools stay direct.
+/// Nested Code Mode cells cannot call Stateful memory reads: a cell can hold a result before
+/// printing it. The tools stay direct model calls.
 #[tokio::test]
 async fn code_mode_cells_cannot_reach_stateful_memory_tools() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -224,7 +236,7 @@ async fn code_mode_cells_cannot_reach_stateful_memory_tools() -> Result<()> {
                     "evidence-exec",
                     "exec",
                     r#"
-text(JSON.stringify([typeof tools.evidence_read, typeof tools.blackboard_query, typeof tools.memory_read]));
+text(JSON.stringify([typeof tools.evidence_read, typeof tools.blackboard_query, typeof tools.memory_read, typeof tools.context_map_query, typeof tools.stateful_run_read]));
 "#,
                 ),
                 responses::ev_completed("evidence-response"),
@@ -258,7 +270,16 @@ text(JSON.stringify([typeof tools.evidence_read, typeof tools.blackboard_query, 
         .filter_map(|item| item["text"].as_str())
         .find_map(|text| serde_json::from_str::<Value>(text).ok())
         .unwrap_or_else(|| panic!("the script should print the evidence result: {output}"));
-    assert_eq!(printed, json!(["undefined", "undefined", "undefined"]));
+    assert_eq!(
+        printed,
+        json!([
+            "undefined",
+            "undefined",
+            "undefined",
+            "undefined",
+            "undefined"
+        ])
+    );
     let direct = requests[0].body_json()["tools"]
         .as_array()
         .cloned()
