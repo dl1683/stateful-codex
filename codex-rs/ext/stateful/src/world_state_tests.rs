@@ -172,7 +172,7 @@ fn renders_selected_project_as_bounded_typed_world_state() {
         "hard-won facts with exact values and scope",
         "Do not read sources only to obtain evidence receipts",
         "No knowledge has been promoted to the root blackboard yet",
-        "2 active candidate entries await promotion and are not shown",
+        "2 candidate entries await promotion (not shown)",
         "at most 8 E aliases directly material to the outcome",
         "rootRevision is not the run's expectedRevision",
     ] {
@@ -346,7 +346,7 @@ fn rewritten_status_line_replaces_the_status_block() {
     assert!(
         rendered
             .body()
-            .contains("3 active candidate entries await promotion and are not shown")
+            .contains("3 candidate entries await promotion (not shown)")
     );
 }
 
