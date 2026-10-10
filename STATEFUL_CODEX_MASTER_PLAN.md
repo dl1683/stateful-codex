@@ -103,3 +103,16 @@ Alternatives that stay live and are tested narrowly:
 - full root plus capsule against a separately authorised thinner-root experiment.
 
 One final integrated-build acceptance gate remains.
+
+### Step-back 2026-10-10 (Codex; sc_dogfood/council/council_20261010_stepback.md)
+
+- The order stands. C4-C6 no longer gates all memory progress: after repair 3, either it passes or the pre-agreed cut lands, followed by one hands-on check, then we advance.
+- **Successor candidate for Forget: a turn-boundary contract.**
+  - Forget first answers "pending" and later "effective".
+  - "Effective" is issued only after the affected in-flight turns have settled or been discarded. The transition is serialized across processes.
+  - The next root or capsule is rebuilt from the new retirement epoch.
+  - No SQLite guard is held across model or tool waits.
+  - It ships only as a bounded follow-on, never as a fourth repair.
+- **Dependable delivery beats voluntary tool use.** Surface adopted rules and a bounded, attributed decision digest at session start. Measure correct application and recovery effort, not query counts.
+- **Rejected-hypothesis capture is still open.** Capture goes through model proposal plus explicit adoption. Event time is kept separate from adoption time.
+- **Evaluation journeys** use conversation-only facts, deny the agent access to harness logs, and separate recovery from files from recovery from memory.
