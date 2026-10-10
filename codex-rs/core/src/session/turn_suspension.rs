@@ -47,7 +47,7 @@ pub(super) async fn suspend_turn_and_shutdown(
 
     // The flush can yield while the active turn completes or changes. Recheck its
     // kind under the same lock used to remove it.
-    let mut turn = {
+    let taken = {
         let mut active = session.active_turn.lock().await;
         let Some(active_turn) = active.as_ref() else {
             return Ok(SuspendTurnOutcome::NotActive);
@@ -58,15 +58,20 @@ pub(super) async fn suspend_turn_and_shutdown(
         if task.kind != TaskKind::Regular {
             return Ok(SuspendTurnOutcome::UnsupportedTask);
         }
-        if let Some(finished) = crate::host_answer::arbitrate_abort(task) {
+        match crate::host_answer::arbitrate_abort(task) {
             // The task's terminal commit won; it ends on its own as a completed turn.
-            drop(active);
+            Some(finished) => Err(finished),
+            None => Ok(active.take().ok_or_else(|| {
+                CodexErr::Fatal("accepted root turn suspension had no running turn".to_string())
+            })?),
+        }
+    };
+    let mut turn = match taken {
+        Ok(turn) => turn,
+        Err(finished) => {
             crate::host_answer::await_task_end(finished).await;
             return Ok(SuspendTurnOutcome::NotActive);
         }
-        active.take().ok_or_else(|| {
-            CodexErr::Fatal("accepted root turn suspension had no running turn".to_string())
-        })?
     };
 
     let task = turn.task.take().ok_or_else(|| {

@@ -289,9 +289,7 @@ pub(crate) async fn finalize(
         Ok(HostAnswerOutcome::NotAuthorized) => {
             TurnFinalizeOutcome::Declined("the turn was aborted before the commit".to_string())
         }
-        Err(error) => {
-            resolve_uncertain_commit(extension, &store, reservation, &run_id, error).await
-        }
+        Err(error) => resolve_uncertain_commit(extension, store, reservation, &run_id, error).await,
     }
 }
 

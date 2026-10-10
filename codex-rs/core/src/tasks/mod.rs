@@ -642,29 +642,33 @@ impl Session {
         reason: TurnAbortReason,
         error: Option<ErrorEvent>,
     ) -> bool {
-        let active_turn = {
+        let taken = {
             let mut active = self.active_turn.lock().await;
-            let task = active
+            let arbitration = active
                 .as_ref()
                 .and_then(|active_turn| active_turn.task.as_ref())
-                .filter(|task| task.turn_context.sub_id == turn_id);
-            let is_active = task.is_some();
-            if let Some(finished) = task.and_then(crate::host_answer::arbitrate_abort) {
+                .filter(|task| task.turn_context.sub_id == turn_id)
+                .map(crate::host_answer::arbitrate_abort);
+            match arbitration {
                 // The task's terminal commit won; it ends on its own as a completed turn.
-                drop(active);
+                Some(Some(finished)) => Err(finished),
+                Some(None) => {
+                    if matches!(
+                        reason,
+                        TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
+                    ) {
+                        self.mark_interrupted();
+                    }
+                    Ok(active.take())
+                }
+                None => Ok(None),
+            }
+        };
+        let active_turn = match taken {
+            Ok(active_turn) => active_turn,
+            Err(finished) => {
                 crate::host_answer::await_task_end(finished).await;
                 return false;
-            }
-            if is_active {
-                if matches!(
-                    reason,
-                    TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
-                ) {
-                    self.mark_interrupted();
-                }
-                active.take()
-            } else {
-                None
             }
         };
         let Some(active_turn) = active_turn else {
@@ -960,29 +964,32 @@ impl Session {
     }
 
     async fn take_active_turn(&self, reason: &TurnAbortReason) -> Option<ActiveTurn> {
-        let mut active = loop {
-            let active = self.active_turn.lock().await;
-            let Some(finished) = active
-                .as_ref()
-                .and_then(|active_turn| active_turn.task.as_ref())
-                .and_then(crate::host_answer::arbitrate_abort)
-            else {
-                break active;
+        loop {
+            let finished = {
+                let mut active = self.active_turn.lock().await;
+                match active
+                    .as_ref()
+                    .and_then(|active_turn| active_turn.task.as_ref())
+                    .and_then(crate::host_answer::arbitrate_abort)
+                {
+                    Some(finished) => finished,
+                    None => {
+                        if matches!(
+                            reason,
+                            TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
+                        ) && active
+                            .as_ref()
+                            .is_some_and(|active_turn| active_turn.task.is_some())
+                        {
+                            self.mark_interrupted();
+                        }
+                        return active.take();
+                    }
+                }
             };
             // The task's terminal commit won; let it end on its own as a completed turn.
-            drop(active);
             crate::host_answer::await_task_end(finished).await;
-        };
-        if matches!(
-            reason,
-            TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
-        ) && active
-            .as_ref()
-            .is_some_and(|active_turn| active_turn.task.is_some())
-        {
-            self.mark_interrupted();
         }
-        active.take()
     }
 
     pub(crate) async fn close_unified_exec_processes(&self) {
